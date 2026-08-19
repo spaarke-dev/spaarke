@@ -9,10 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Reconciliation UX **prototype-parity** pass. **Batch 1 = DONE+DEPLOYED**. **Card-layout fix = DONE+DEPLOYED** (2026-08-14). **Batch 2 / B2.1 attachment-text = DONE+DEPLOYED** (BFF + both clients, impersonated/secure). **B2.2 (undo) + B2.3 (progress badges) = REMAINING**. |
-| **Branch** | `work/email-communication-intelligence-r2` · **clean** · pushed (`1aabafb0a`) · synced to latest master (merged dotnet-10-upgrade close-out) · **master intentionally NOT merged** (operator: "do not /merge-to-master"). |
-| **Deployed (dev, from BRANCH)** | BFF `spaarke-bff-dev` (44.99 MB, hash-verified, healthy) + code page `sprk_communicationreconciliation` (`1e191e05-…`) + SpaarkeAi `sprk_spaarkeai` (`5206a442-…`) → all published to `spaarkedev1`. |
-| **Next Action** | Operator to UAT: (a) Related-to cards now stack vertically; (b) attachment text folds into the reader. Then decide **B2.2** (Fields/Tasks per-line undo — BFF reverse-apply + task-delete) and **B2.3** (progress badges — needs eager per-record proposal-count fetch, `headerActions` slot exists on SprkModal). |
+| **Phase** | Reconciliation UX **prototype-parity** pass — **ALL BATCHES DONE + DEPLOYED**. Batch 1 (visual parity), card-layout fix, B2.1 (attachment text), B2.2 (Fields+Tasks per-line undo), B2.3 (progress badges) — all shipped to dev, impersonated/secure. **Awaiting operator full UAT.** |
+| **Branch** | `work/email-communication-intelligence-r2` · **clean** · pushed (`0283f2e89`) · synced to master · **master intentionally NOT merged** (operator: "do not /merge-to-master"). |
+| **Deployed (dev, from BRANCH)** | BFF `spaarke-bff-dev` (44.96 MB, hash-verified, healthy) + `sprk_communicationreconciliation` (`1e191e05-…`) + `sprk_spaarkeai` (`5206a442-…`) → all published to `spaarkedev1`. |
+| **Next Action** | Operator full UAT of the reconciliation form (both surfaces). Remaining project items unrelated to parity: **064** (close index row), **044** (Outlook add-in deploy), **090** (wrap-up: test-diet + doc-drift). |
+
+### Batch 2 — DONE (B2.1 + B2.2 + B2.3)
+- **B2.1** `GET /communications/{id}/attachments/text` — re-extracts attachment text (impersonated reads + OBO SPE + shared cache-aware ITextExtractor); client folds into reader.
+- **B2.2** per-line undo: Fields `POST /proposals/{id}/undo` (reverse-apply to oldValue, impersonated + allow-list-gated, compensating audit row); Tasks `POST /communications/{commId}/tasks/{taskId}/undo` (impersonated soft-cancel `sprk_eventstatus`=Cancelled + compensating audit row — W1/W2 fix). Client: accepted/created rows retain an Undo button → terminal "Undone".
+- **B2.3** progress badges: `Related ✓ · Fields n/N · Tasks n/N` in SprkModal header (`headerBadges` passthrough); workspace eager-total + cumulative-resolved.
+- **Tests**: 12 undo seam tests + B2.1 (10) + client undo test — all pass. Two code-reviews (B2.1 security fix → impersonation; B2.2 W1/W2 → task-undo audit + provenance).
+- **Known minor UX** (documented, non-blocking): progress badge "resolved" does not decrement on undo (item stays counted); eager queue-feed total duplicates the tabs' own fetch (best-effort).
 
 ### Files Modified This Session (ALL COMMITTED — Batch 1, 3 commits e27cfa991 / a01e9c633 / b19fbf0b6)
 - `EmailAssociationsAndTracking/EmailConnectionsReview.tsx` + `.styles.ts` + `EmailConnectionsReviewRows.tsx` — `variant='reconcile'` compact single-row cards, `Select`→`Confirm` revert, per-line **Undo** on the Filed banner (`clearPrimaryRegarding`).

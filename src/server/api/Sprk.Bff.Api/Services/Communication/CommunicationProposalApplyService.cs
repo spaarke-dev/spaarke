@@ -69,6 +69,20 @@ public interface ICommunicationProposalApplyService
     /// ("leave Proposed" / Hold is a client-only no-op — it writes nothing and the proposal deliberately reappears).
     /// </summary>
     Task<DismissProposalResult> DismissAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct);
+
+    /// <summary>
+    /// UNDO a just-applied field proposal (email-communication-intelligence-r2 B2.2): re-writes the proposal's
+    /// stored <c>oldValue</c> back to the target field under the confirming caller's impersonation, reversing the
+    /// apply. Reuses the SAME impersonated write core + allow-list re-validation as apply (a caller who lacks write
+    /// access to the record cannot revert it — the impersonated write fails), and writes ONE append-only compensating
+    /// audit row (<c>Overriden</c>, name "Reverted update: …"). Deliberately SKIPS the still-open + citation guards
+    /// (those gate applying an AI suggestion; a revert is safe regardless and the proposal is already closed by its
+    /// Applied row). The revert restores the value captured at PROPOSE time (the only old value the system retains);
+    /// correct for the immediate accept-then-undo case. Throws <see cref="SdapProblemException"/> for an unresolved
+    /// caller (403), a missing/malformed proposal (404/422), a non-allow-listed field (403), a lookup field (422), or
+    /// a failed coercion/PATCH (422).
+    /// </summary>
+    Task<UndoProposalResult> UndoApplyAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct);
 }
 
 /// <summary>
@@ -93,6 +107,16 @@ public sealed record DismissProposalResult(
     Guid AuditLogId,
     string TargetEntity,
     string TargetField);
+
+/// <summary>Result of a successful <see cref="ICommunicationProposalApplyService.UndoApplyAsync"/> (B2.2). The target
+/// field was reverted to its stored <c>oldValue</c>; carries the compensating audit row id + the reverted fields.</summary>
+public sealed record UndoProposalResult(
+    Guid ReviewLogId,
+    Guid AuditLogId,
+    string TargetEntity,
+    Guid TargetRecordId,
+    string TargetField,
+    IReadOnlyList<string> FieldsUpdated);
 
 /// <inheritdoc />
 public sealed class CommunicationProposalApplyService : ICommunicationProposalApplyService
@@ -397,6 +421,145 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         return new DismissProposalResult(reviewLogId, auditLogId, targetEntity, targetField);
     }
 
+    /// <inheritdoc />
+    public async Task<UndoProposalResult> UndoApplyAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        // (1) Resolve the caller server-side; fail closed (403) — the reverting write must run under the caller's
+        //     identity so Dataverse gates it exactly as apply did (never app-only).
+        var resolution = await _callerResolver.ResolveAsync(caller, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved
+            || !Guid.TryParse(resolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "CALLER_NOT_RESOLVED",
+                title: "Caller Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; the undo is refused (fail closed — the revert must run under the caller's identity).",
+                statusCode: 403);
+        }
+
+        // (2) Load the proposal row (the same Proposed row the apply used; apply leaves it intact).
+        var row = await LoadReviewLogRowAsync(reviewLogId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            throw new SdapProblemException(
+                code: "PROPOSAL_NOT_FOUND",
+                title: "Proposal Not Found",
+                detail: $"No sprk_emailreviewlog proposal was found for id {reviewLogId}.",
+                statusCode: 404);
+        }
+
+        var communicationRef = row.GetAttributeValue<EntityReference>("sprk_communication");
+        var targetEntity = row.GetAttributeValue<string>("sprk_targetentity")?.Trim();
+        var targetField = row.GetAttributeValue<string>("sprk_targetfield")?.Trim();
+        var targetRecordIdRaw = row.GetAttributeValue<string>("sprk_targetrecordid")?.Trim();
+
+        if (communicationRef is null
+            || string.IsNullOrWhiteSpace(targetEntity)
+            || string.IsNullOrWhiteSpace(targetField)
+            || !Guid.TryParse(targetRecordIdRaw, out var targetRecordId))
+        {
+            throw new SdapProblemException(
+                code: "PROPOSAL_MALFORMED",
+                title: "Proposal Malformed",
+                detail: "The proposal row is missing a communication, target entity, target field, or a parseable target record id.",
+                statusCode: 422);
+        }
+
+        // (3) Allow-list re-validation (SOLE field gate; a revert may only write an enabled sprk_emailupdatefield —
+        //     the same fields apply may write). NOT the still-open/citation guards: those gate applying an AI
+        //     suggestion; a revert is safe regardless, and the proposal is already closed by its Applied row.
+        var allowedFieldType = await ResolveEnabledAllowListFieldTypeAsync(targetEntity, targetField, ct).ConfigureAwait(false);
+        if (allowedFieldType is null)
+        {
+            throw new SdapProblemException(
+                code: "FIELD_NOT_ALLOWED",
+                title: "Field Not Allow-Listed",
+                detail: $"'{targetField}' on '{targetEntity}' is not an enabled sprk_emailupdatefield allow-list entry; the undo is refused.",
+                statusCode: 403);
+        }
+        if (string.Equals(allowedFieldType, "Lookup", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SdapProblemException(
+                code: "LOOKUP_UNDO_UNSUPPORTED",
+                title: "Lookup Undo Unsupported",
+                detail: $"'{targetField}' is a Lookup field; automated revert of lookup proposals is not supported (apply refuses them too).",
+                statusCode: 422);
+        }
+
+        // (4) The value to restore = the proposal's stored oldValue (captured at propose time — the only prior value
+        //     retained). Empty/absent ⇒ the field was originally empty; clear it back to empty.
+        var suggestionJson = row.GetAttributeValue<string>("sprk_aisuggestion");
+        var suggestion = ParseSuggestion(suggestionJson);
+        var oldValue = suggestion?.OldValue;
+        string? coercedOld;
+        if (string.IsNullOrWhiteSpace(oldValue))
+        {
+            coercedOld = string.Empty; // restore-to-empty
+        }
+        else if (!EmailUpdateFieldCoercion.TryCoerce(allowedFieldType, oldValue, out coercedOld) || coercedOld is null)
+        {
+            throw new SdapProblemException(
+                code: "VALUE_COERCION_FAILED",
+                title: "Value Coercion Failed",
+                detail: $"The stored old value '{oldValue}' could not be coerced to field type '{allowedFieldType}'.",
+                statusCode: 422);
+        }
+
+        // (5) Write the old value back UNDER THE CALLER'S IMPERSONATION (same blessed core as apply).
+        var updateResult = await _actionSeam.UpdateRecordAsync(
+            new UpdateRecordRequest
+            {
+                EntityLogicalName = targetEntity,
+                RecordId = targetRecordId,
+                FieldMappings = new[]
+                {
+                    new ActionFieldMapping(targetField, ActionFieldType.String, coercedOld),
+                },
+                ImpersonateSystemUserId = callerSystemUserId,
+            },
+            ct).ConfigureAwait(false);
+
+        if (!updateResult.Success)
+        {
+            throw new SdapProblemException(
+                code: "UNDO_FAILED",
+                title: "Undo Failed",
+                detail: updateResult.Error ?? "The record revert failed.",
+                statusCode: 422);
+        }
+
+        // (6) Write EXACTLY ONE append-only compensating audit row (Overriden — the field was set to a value other
+        //     than the AI proposal, namely the prior value; name records it as a Revert). Mutate-without-audit does
+        //     not exist: if this fails after the revert PATCH we surface it loudly for reconciliation.
+        Guid auditLogId;
+        try
+        {
+            auditLogId = await WriteRevertedAuditRowAsync(
+                communicationRef.Id, targetEntity, targetRecordId, targetField,
+                suggestion, suggestionJson, callerSystemUserId, oldValue, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(
+                ex,
+                "Job B undo REVERTED {Entity}({RecordId}).{Field} for caller {Caller} from proposal {ReviewLogId} but the compensating audit row write FAILED. Manual audit reconciliation required. Suggestion: {Suggestion}",
+                targetEntity, targetRecordId, targetField, callerSystemUserId, reviewLogId, suggestionJson);
+            throw new SdapProblemException(
+                code: "AUDIT_WRITE_FAILED",
+                title: "Audit Write Failed",
+                detail: "The record was reverted but the audit row could not be written; this has been logged for reconciliation.",
+                statusCode: 500);
+        }
+
+        _logger.LogInformation(
+            "Job B undo: {Entity}({RecordId}).{Field} reverted to its prior value under caller {Caller} impersonation from proposal {ReviewLogId}; audit row {AuditLogId} written.",
+            targetEntity, targetRecordId, targetField, callerSystemUserId, reviewLogId, auditLogId);
+
+        return new UndoProposalResult(
+            reviewLogId, auditLogId, targetEntity, targetRecordId, targetField, updateResult.FieldsUpdated);
+    }
+
     private async Task<Entity?> LoadReviewLogRowAsync(Guid reviewLogId, CancellationToken ct)
     {
         try
@@ -602,6 +765,65 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
                     ?? new System.Text.Json.Nodes.JsonObject();
             node["appliedValue"] = appliedValue;
             node["overridden"] = true;
+            return node.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return suggestionJson ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Writes the single append-only compensating audit row for an UNDO (B2.2). Action <c>Overriden</c> (the field
+    /// was set to a value other than the AI proposal — the prior value), name "Reverted update: …", and the suggestion
+    /// JSON augmented with <c>reverted:true</c> + the restored value so the row is self-contained. Best-effort JSON
+    /// augmentation (never throws on the JSON); the row itself is always written.
+    /// </summary>
+    private async Task<Guid> WriteRevertedAuditRowAsync(
+        Guid communicationId, string targetEntity, Guid targetRecordId, string targetField,
+        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId, string? revertedToValue, CancellationToken ct)
+    {
+        var entity = new Entity(ReviewLogEntity)
+        {
+            ["sprk_name"] = Truncate($"Reverted update: {targetEntity}.{targetField}", 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeHuman),
+            ["sprk_action"] = new OptionSetValue(ReviewActionOverriden),
+            ["sprk_actor"] = Truncate(callerSystemUserId.ToString(), 200),
+            ["sprk_targetentity"] = Truncate(targetEntity, 100),
+            ["sprk_targetrecordid"] = Truncate(targetRecordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(targetField, 100),
+        };
+
+        if (suggestion is not null)
+        {
+            if (suggestion.Confidence.HasValue)
+                entity["sprk_confidence"] = (decimal)suggestion.Confidence.Value;
+
+            var sourceRef = suggestion.Citation?.Locator ?? suggestion.Citation?.Source;
+            if (!string.IsNullOrWhiteSpace(sourceRef))
+                entity["sprk_sourceref"] = Truncate(sourceRef, 1000);
+        }
+
+        var storedSuggestion = AugmentSuggestionWithRevert(suggestionJson, revertedToValue);
+        if (!string.IsNullOrWhiteSpace(storedSuggestion))
+            entity["sprk_aisuggestion"] = storedSuggestion;
+
+        return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Returns <paramref name="suggestionJson"/> with <c>reverted:true</c> + <c>revertedToValue</c> added.
+    /// Falls back to a minimal object when the original JSON is absent/unparseable (never throws).</summary>
+    private static string AugmentSuggestionWithRevert(string? suggestionJson, string? revertedToValue)
+    {
+        try
+        {
+            var node = string.IsNullOrWhiteSpace(suggestionJson)
+                ? new System.Text.Json.Nodes.JsonObject()
+                : System.Text.Json.Nodes.JsonNode.Parse(suggestionJson) as System.Text.Json.Nodes.JsonObject
+                    ?? new System.Text.Json.Nodes.JsonObject();
+            node["reverted"] = true;
+            node["revertedToValue"] = revertedToValue;
             return node.ToJsonString();
         }
         catch (JsonException)

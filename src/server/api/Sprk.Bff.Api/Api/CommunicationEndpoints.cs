@@ -354,6 +354,33 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
+        // POST /api/communications/proposals/{reviewLogId}/undo — Job B UNDO (email-communication-intelligence-r2 B2.2).
+        // The Fields reconcile tab POSTs a just-applied proposal's ReviewLogId here on Undo. The service re-writes the
+        // proposal's stored oldValue back to the target field under the caller's MSCRMCallerID impersonation (same
+        // blessed core + allow-list gate as apply), and writes one append-only compensating audit row. No body.
+        group.MapPost("/proposals/{reviewLogId:guid}/undo", UndoProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("UndoCommunicationProposal")
+            .WithDescription("Job B undo (B2.2): reverse a just-applied field-update proposal by writing its stored oldValue back to the target record under the caller's MSCRMCallerID impersonation, then write one append-only compensating audit row. Caller resolved server-side (403 fail-closed); missing/malformed proposal (404/422), non-allow-listed field (403), lookup field (422), or a failed coercion/PATCH (422) are refused.")
+            .Produces<UndoProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/{communicationId}/tasks/{taskId}/undo — Job C UNDO (email-communication-intelligence-r2
+        // B2.2). The Tasks reconcile tab POSTs a just-created task's CreatedTaskId here on Undo. The service SOFT-CANCELS
+        // the sprk_event (sprk_eventstatus = Cancelled) under the caller's MSCRMCallerID impersonation — impersonation
+        // gates the write to the caller (no app-only "delete any event by id"), reversible, preserves the audit trail —
+        // then writes ONE append-only compensating audit row tying the cancel to the communication (provenance + W1/W2).
+        group.MapPost("/{communicationId:guid}/tasks/{taskId:guid}/undo", UndoCreateTaskAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("UndoCommunicationCreateTask")
+            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. Caller resolved server-side (403 fail-closed); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
+            .Produces<UndoCreateTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -1069,6 +1096,32 @@ public static class CommunicationEndpoints
         }
 
         var result = await applyService.CreateAdHocAsync(communicationId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B undo (B2.2). Reverses a just-applied field proposal to its stored oldValue under the caller's MSCRMCallerID
+    // impersonation (fail-closed 403); failures surface as RFC 7807 ProblemDetails (403/404/422/500). No request body.
+    private static async Task<IResult> UndoProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.UndoApplyAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C undo (B2.2). Soft-cancels a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID
+    // impersonation (fail-closed 403) + writes one compensating audit row for the communication; failures surface as
+    // RFC 7807 ProblemDetails (403/422/500). No request body.
+    private static async Task<IResult> UndoCreateTaskAsync(
+        Guid communicationId,
+        Guid taskId,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.UndoCreateTaskAsync(communicationId, taskId, context.User, ct);
         return TypedResults.Ok(result);
     }
 

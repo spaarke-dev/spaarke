@@ -384,6 +384,112 @@ public sealed class CommunicationProposalApplySeamTests
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // B2.2 UNDO — reverts a just-applied proposal to its stored oldValue UNDER THE CALLER'S impersonation (never
+    // app-only), through the same allow-list gate + blessed write core as apply, and writes ONE append-only
+    // compensating (Overriden / reverted) audit row.
+    [Fact]
+    public async Task UndoApplyAsync_WhenAllowListedProposal_RevertsToOldValueUnderImpersonationAndWritesOneAuditRow()
+    {
+        var sut = BuildSut();
+        UpdateRecordRequest? reverted = null;
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<UpdateRecordRequest, CancellationToken>((r, _) => reverted = r)
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { TargetField }, null));
+
+        var result = await sut.UndoApplyAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        // The revert wrote the stored OLD value ("2026-01-01") back, still under the caller's impersonation.
+        reverted.Should().NotBeNull();
+        reverted!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
+        reverted.EntityLogicalName.Should().Be(TargetEntity);
+        reverted.RecordId.Should().Be(TargetRecordId);
+        reverted.FieldMappings.Should().ContainSingle(m =>
+            m.Field == TargetField && m.Type == ActionFieldType.String && m.Value == "2026-01-01");
+
+        // Exactly one append-only compensating audit row (Overriden, actor = the human) marked reverted.
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == "sprk_emailreviewlog"
+                && ((OptionSetValue)e["sprk_action"]).Value == ActionOverriden
+                && ((OptionSetValue)e["sprk_actortype"]).Value == ActorTypeHuman
+                && (string)e["sprk_actor"] == CallerSystemUserId.ToString()
+                && ((string)e["sprk_aisuggestion"]).Contains("\"reverted\":true")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        result.AuditLogId.Should().Be(AuditLogId);
+        result.TargetEntity.Should().Be(TargetEntity);
+        result.TargetField.Should().Be(TargetField);
+    }
+
+    // B2.2 UNDO — the distinguishing property: undo does NOT re-gate on still-open OR re-verify the citation (those
+    // gate applying an AI suggestion; a revert is safe regardless, and the proposal is already closed by its Applied
+    // row). Reverting after apply (terminal Applied row present) with the cited text gone STILL succeeds; the envelope
+    // reader is never even reached.
+    [Fact]
+    public async Task UndoApplyAsync_WhenProposalClosedAndCitationGone_StillReverts()
+    {
+        var terminal = new Entity("sprk_emailreviewlog") { Id = Guid.NewGuid() };
+        terminal["sprk_action"] = new OptionSetValue(ActionApplied);
+        terminal["sprk_targetentity"] = TargetEntity;
+        terminal["sprk_targetfield"] = TargetField;
+        _reviewLogWalk = new EntityCollection(new List<Entity> { ProposedRow(), terminal }); // proposal already closed
+        _bodyText = "This message no longer contains the quoted sentence at all.";           // cited text gone
+        var sut = BuildSut();
+
+        var result = await sut.UndoApplyAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        result.AuditLogId.Should().Be(AuditLogId);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _envelopeReader.Verify(r => r.ReconstructEnvelopeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // B2.2 UNDO NEGATIVE — auth: an unresolved caller fails closed (403); nothing is written (no app-only revert).
+    [Fact]
+    public async Task UndoApplyAsync_WhenCallerUnresolved_Returns403AndNeverWrites()
+    {
+        var sut = BuildSut();
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no oid"));
+
+        var act = () => sut.UndoApplyAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // B2.2 UNDO NEGATIVE — allow-list: a revert may only write an enabled sprk_emailupdatefield (the same fields apply
+    // may write); a non-allow-listed field is refused (403) and nothing is written.
+    [Fact]
+    public async Task UndoApplyAsync_WhenFieldNotAllowListed_Refuses403AndNeverWrites()
+    {
+        _allowListRows = new EntityCollection();
+        var sut = BuildSut();
+
+        var act = () => sut.UndoApplyAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // B2.2 UNDO NEGATIVE — audit integrity: if the compensating audit-row write fails AFTER the revert, surface 500
+    // (never a silent mutate-without-audit). The revert PATCH DID run (once) before the failure.
+    [Fact]
+    public async Task UndoApplyAsync_WhenAuditRowWriteFails_Returns500AfterRecordReverted()
+    {
+        _auditThrows = true;
+        var sut = BuildSut();
+
+        var act = () => sut.UndoApplyAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(500);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static Entity ProposedRow()
     {
         var row = new Entity("sprk_emailreviewlog") { Id = ReviewLogId };
