@@ -61,6 +61,7 @@ import {
   ClockRegular,
   Link16Regular,
   SearchRegular,
+  ArrowUndo16Regular,
 } from '@fluentui/react-icons';
 import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
@@ -258,8 +259,16 @@ export interface FieldUpdateReconcileTabProps {
    * passage (task 054). Omitted on the email-form mount (no reader pane).
    */
   onCitationClick?: (citation: EmailCitation) => void;
-  /** Fired after a proposal reaches an outcome — the host may refresh other surfaces. */
+  /**
+   * Fired after a proposal reaches an outcome — the host may refresh other surfaces AND tally progress
+   * counts (B2.3): 'applied'/'rejected' are resolved decisions, 'held' is deferred.
+   */
   onProposalResolved?: (reviewLogId: string, outcome: ProposalOutcome) => void;
+  /**
+   * Fired once per load with the total number of field proposals for THIS communication (B2.3 progress
+   * badges) so the host can show a total before the tab has been acted on.
+   */
+  onLoadedCount?: (total: number) => void;
   className?: string;
 }
 
@@ -342,6 +351,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   authenticatedFetch = defaultAuthenticatedFetch,
   onCitationClick,
   onProposalResolved,
+  onLoadedCount,
   className,
 }) => {
   const s = useStyles();
@@ -352,6 +362,9 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   const [edited, setEdited] = React.useState<Record<string, string>>({});
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [rowError, setRowError] = React.useState<Record<string, string>>({});
+  // B2.2 per-line undo: accepted rows STAY visible carrying their applied value + an Undo button, and flip to a
+  // terminal "Undone" state after a successful revert (the proposal is closed server-side, so it never re-arms).
+  const [applied, setApplied] = React.useState<Record<string, { value: string; undone?: boolean }>>({});
   // E2b (065): resolved attribute metadata per proposal (best-effort) + picked lookup display names.
   const [fieldMeta, setFieldMeta] = React.useState<Record<string, FieldMeta>>({});
   const [pickedNames, setPickedNames] = React.useState<Record<string, string>>({});
@@ -375,11 +388,13 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
       setProposals(mapped);
       setEdited({});
       setRowError({});
+      setApplied({});
+      onLoadedCount?.(mapped.length);
       setState('ready');
     } catch {
       setState('error');
     }
-  }, [scope, communicationId, authenticatedFetch]);
+  }, [scope, communicationId, authenticatedFetch, onLoadedCount]);
 
   React.useEffect(() => {
     void load();
@@ -471,7 +486,8 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ overrideValue }),
         });
-        removeRow(p.reviewLogId);
+        // B2.2: keep the row visible in an "Accepted" state carrying an Undo affordance (do NOT remove it).
+        setApplied(prev => ({ ...prev, [p.reviewLogId]: { value: overrideValue } }));
         onProposalResolved?.(p.reviewLogId, 'applied');
       } catch {
         setRowError(prev => ({ ...prev, [p.reviewLogId]: 'Apply failed — try again.' }));
@@ -479,7 +495,27 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
         setBusyId(null);
       }
     },
-    [edited, authenticatedFetch, removeRow, onProposalResolved]
+    [edited, authenticatedFetch, onProposalResolved]
+  );
+
+  // B2.2: undo a just-accepted field — reverse the write server-side (writes the stored oldValue back), then flip the
+  // row to a terminal "Undone" state (the proposal is closed server-side, so it does not re-arm this session).
+  const handleUndo = React.useCallback(
+    async (p: FieldUpdateProposal) => {
+      setBusyId(p.reviewLogId);
+      setRowError(prev => ({ ...prev, [p.reviewLogId]: '' }));
+      try {
+        await authenticatedFetch(`/communications/proposals/${encodeURIComponent(p.reviewLogId)}/undo`, {
+          method: 'POST',
+        });
+        setApplied(prev => ({ ...prev, [p.reviewLogId]: { value: prev[p.reviewLogId]?.value ?? '', undone: true } }));
+      } catch {
+        setRowError(prev => ({ ...prev, [p.reviewLogId]: 'Undo failed — try again.' }));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [authenticatedFetch]
   );
 
   const handleReject = React.useCallback(
@@ -679,38 +715,69 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
               </Caption1>
             ) : null}
 
-            <div className={s.actions}>
-              <Button
-                appearance="primary"
-                size="small"
-                icon={busy ? <Spinner size="tiny" /> : <CheckmarkRegular />}
-                disabled={busy}
-                data-testid="field-reconcile-accept"
-                onClick={() => void handleAccept(p)}
-              >
-                Accept
-              </Button>
-              <Button
-                appearance="secondary"
-                size="small"
-                icon={<DismissRegular />}
-                disabled={busy}
-                data-testid="field-reconcile-reject"
-                onClick={() => void handleReject(p)}
-              >
-                Reject
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ClockRegular />}
-                disabled={busy}
-                data-testid="field-reconcile-hold"
-                onClick={() => handleHold(p)}
-              >
-                Hold
-              </Button>
-            </div>
+            {applied[p.reviewLogId]?.undone ? (
+              // B2.2 terminal — the accept was reverted; the proposal is closed (no re-arm).
+              <div className={s.actions}>
+                <Badge appearance="tint" color="subtle" data-testid="field-reconcile-undone">
+                  Undone
+                </Badge>
+              </div>
+            ) : applied[p.reviewLogId] ? (
+              // B2.2 accepted — the write was applied; offer a per-line Undo (reverse-apply).
+              <div className={s.actions}>
+                <Badge
+                  appearance="tint"
+                  color="success"
+                  icon={<CheckmarkRegular />}
+                  data-testid="field-reconcile-accepted"
+                >
+                  Accepted
+                </Badge>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={busy ? <Spinner size="tiny" /> : <ArrowUndo16Regular />}
+                  disabled={busy}
+                  data-testid="field-reconcile-undo"
+                  onClick={() => void handleUndo(p)}
+                >
+                  Undo
+                </Button>
+              </div>
+            ) : (
+              <div className={s.actions}>
+                <Button
+                  appearance="primary"
+                  size="small"
+                  icon={busy ? <Spinner size="tiny" /> : <CheckmarkRegular />}
+                  disabled={busy}
+                  data-testid="field-reconcile-accept"
+                  onClick={() => void handleAccept(p)}
+                >
+                  Accept
+                </Button>
+                <Button
+                  appearance="secondary"
+                  size="small"
+                  icon={<DismissRegular />}
+                  disabled={busy}
+                  data-testid="field-reconcile-reject"
+                  onClick={() => void handleReject(p)}
+                >
+                  Reject
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<ClockRegular />}
+                  disabled={busy}
+                  data-testid="field-reconcile-hold"
+                  onClick={() => handleHold(p)}
+                >
+                  Hold
+                </Button>
+              </div>
+            )}
           </div>
         );
       })}

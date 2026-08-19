@@ -62,6 +62,7 @@ import {
   ClockRegular,
   Link16Regular,
   SearchRegular,
+  ArrowUndo16Regular,
 } from '@fluentui/react-icons';
 import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
@@ -147,8 +148,10 @@ export interface TaskReconcileTabProps {
   authenticatedFetch?: AuthenticatedFetchFn;
   /** Fired when a proposal's citation is clicked (host lifts to the reader's activeCitation, task 054). */
   onCitationClick?: (citation: EmailCitation) => void;
-  /** Fired after a task reaches an outcome — 'applied' (created), 'rejected', or 'held'. */
+  /** Fired after a task reaches an outcome — 'applied' (created), 'rejected', or 'held' — for progress tallying (B2.3). */
   onTaskResolved?: (reviewLogId: string | null, outcome: ProposalOutcome) => void;
+  /** Fired once per load with the total number of task proposals for THIS communication (B2.3 progress badges). */
+  onLoadedCount?: (total: number) => void;
   className?: string;
 }
 
@@ -263,6 +266,7 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
   authenticatedFetch = defaultAuthenticatedFetch,
   onCitationClick,
   onTaskResolved,
+  onLoadedCount,
   className,
 }) => {
   const s = useStyles();
@@ -275,6 +279,9 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
   const [adhoc, setAdhoc] = React.useState<TaskFormState | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [rowError, setRowError] = React.useState<Record<string, string>>({});
+  // B2.2 per-line undo: created rows STAY visible carrying the created task id + an Undo button, and flip to a
+  // terminal "Undone" state after a successful soft-cancel.
+  const [created, setCreated] = React.useState<Record<string, { taskId?: string; undone?: boolean }>>({});
   // Display names for a picked Assigned-to (UI-only; `form.assignedTo` keeps the id sent to the BFF).
   const [assignedNames, setAssignedNames] = React.useState<Record<string, string>>({});
 
@@ -295,11 +302,13 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
       setForms(Object.fromEntries(mapped.map(p => [p.reviewLogId, p.form])));
       setAdhoc(null);
       setRowError({});
+      setCreated({});
+      onLoadedCount?.(mapped.length);
       setState('ready');
     } catch {
       setState('error');
     }
-  }, [scope, communicationId, authenticatedFetch]);
+  }, [scope, communicationId, authenticatedFetch, onLoadedCount]);
 
   React.useEffect(() => {
     void load();
@@ -367,9 +376,10 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
       setBusyId(p.reviewLogId);
       setRowError(prev => ({ ...prev, [p.reviewLogId]: '' }));
       try {
+        let res: Response;
         if (identityEdited && regarding) {
           // The reviewer authored a different task → create ad-hoc, then close the original proposal.
-          await post(
+          res = await post(
             `/communications/${encodeURIComponent(communicationId)}/create-task`,
             buildAdHocBody(form, regarding)
           );
@@ -381,12 +391,20 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
             /* best-effort: the task was created; a failed dismiss just leaves the proposal to be rejected manually. */
           }
         } else {
-          await post(
+          res = await post(
             `/communications/proposals/${encodeURIComponent(p.reviewLogId)}/create-task/apply`,
             buildApplyBody(form)
           );
         }
-        removeProposal(p.reviewLogId);
+        // B2.2: capture the created task id so the row can offer a per-line Undo (soft-cancel).
+        let createdTaskId: string | undefined;
+        try {
+          createdTaskId = ((await res.json()) as { createdTaskId?: string })?.createdTaskId;
+        } catch {
+          /* the create succeeded even if the body can't be parsed — Undo just won't be offered for this row. */
+        }
+        // Keep the row visible in a "Created" state carrying an Undo affordance (do NOT remove it).
+        setCreated(prev => ({ ...prev, [p.reviewLogId]: { taskId: createdTaskId } }));
         onTaskResolved?.(p.reviewLogId, 'applied');
       } catch {
         setRowError(prev => ({ ...prev, [p.reviewLogId]: 'Create failed — try again.' }));
@@ -394,7 +412,30 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
         setBusyId(null);
       }
     },
-    [forms, regarding, communicationId, post, authenticatedFetch, removeProposal, onTaskResolved]
+    [forms, regarding, communicationId, post, authenticatedFetch, onTaskResolved]
+  );
+
+  // B2.2: undo a just-created task — soft-cancel it server-side (sprk_eventstatus=Cancelled), then flip the row to a
+  // terminal "Undone" state. Only available when the create returned a task id.
+  const handleUndoTask = React.useCallback(
+    async (p: CreateTaskProposal) => {
+      const taskId = created[p.reviewLogId]?.taskId;
+      if (!taskId) return;
+      setBusyId(p.reviewLogId);
+      setRowError(prev => ({ ...prev, [p.reviewLogId]: '' }));
+      try {
+        await authenticatedFetch(
+          `/communications/${encodeURIComponent(communicationId)}/tasks/${encodeURIComponent(taskId)}/undo`,
+          { method: 'POST' }
+        );
+        setCreated(prev => ({ ...prev, [p.reviewLogId]: { taskId, undone: true } }));
+      } catch {
+        setRowError(prev => ({ ...prev, [p.reviewLogId]: 'Undo failed — try again.' }));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [created, communicationId, authenticatedFetch]
   );
 
   const rejectProposal = React.useCallback(
@@ -682,38 +723,71 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
               </Caption1>
             ) : null}
 
-            <div className={s.actions}>
-              <Button
-                appearance="primary"
-                size="small"
-                icon={busy ? <Spinner size="tiny" /> : <CheckmarkRegular />}
-                disabled={busy}
-                data-testid="task-reconcile-accept"
-                onClick={() => void acceptProposal(p)}
-              >
-                Create
-              </Button>
-              <Button
-                appearance="secondary"
-                size="small"
-                icon={<DismissRegular />}
-                disabled={busy}
-                data-testid="task-reconcile-reject"
-                onClick={() => void rejectProposal(p)}
-              >
-                Reject
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ClockRegular />}
-                disabled={busy}
-                data-testid="task-reconcile-hold"
-                onClick={() => holdProposal(p)}
-              >
-                Hold
-              </Button>
-            </div>
+            {created[p.reviewLogId]?.undone ? (
+              // B2.2 terminal — the created task was cancelled.
+              <div className={s.actions}>
+                <Badge appearance="tint" color="subtle" data-testid="task-reconcile-undone">
+                  Undone
+                </Badge>
+              </div>
+            ) : created[p.reviewLogId] ? (
+              // B2.2 created — offer a per-line Undo (soft-cancel) when the create returned a task id.
+              <div className={s.actions}>
+                <Badge
+                  appearance="tint"
+                  color="success"
+                  icon={<CheckmarkRegular />}
+                  data-testid="task-reconcile-created"
+                >
+                  Created
+                </Badge>
+                {created[p.reviewLogId]?.taskId ? (
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={busy ? <Spinner size="tiny" /> : <ArrowUndo16Regular />}
+                    disabled={busy}
+                    data-testid="task-reconcile-undo"
+                    onClick={() => void handleUndoTask(p)}
+                  >
+                    Undo
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <div className={s.actions}>
+                <Button
+                  appearance="primary"
+                  size="small"
+                  icon={busy ? <Spinner size="tiny" /> : <CheckmarkRegular />}
+                  disabled={busy}
+                  data-testid="task-reconcile-accept"
+                  onClick={() => void acceptProposal(p)}
+                >
+                  Create
+                </Button>
+                <Button
+                  appearance="secondary"
+                  size="small"
+                  icon={<DismissRegular />}
+                  disabled={busy}
+                  data-testid="task-reconcile-reject"
+                  onClick={() => void rejectProposal(p)}
+                >
+                  Reject
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<ClockRegular />}
+                  disabled={busy}
+                  data-testid="task-reconcile-hold"
+                  onClick={() => holdProposal(p)}
+                >
+                  Hold
+                </Button>
+              </div>
+            )}
           </div>
         );
       })}
