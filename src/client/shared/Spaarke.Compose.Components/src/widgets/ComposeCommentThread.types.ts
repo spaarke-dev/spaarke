@@ -241,7 +241,10 @@ export function composeSessionCommentThreadsToAnchoredComments(
   // surface an honest "N comment(s) couldn't be saved" degradation warning. NOT called for the
   // `importedThreadIds` skip (that thread already rides the retained-original baseline — not a loss).
   // Optional so every existing 3-arg caller/test is unaffected.
-  onDropped?: (threadId: string, reason: 'anchor-mark-missing' | 'non-paragraph-anchor' | 'cross-paragraph-span') => void
+  onDropped?: (
+    threadId: string,
+    reason: 'anchor-mark-missing' | 'non-paragraph-anchor' | 'cross-paragraph-span'
+  ) => void
 ): ComposeAnchoredComment[] {
   const result: ComposeAnchoredComment[] = [];
   for (const thread of threads) {

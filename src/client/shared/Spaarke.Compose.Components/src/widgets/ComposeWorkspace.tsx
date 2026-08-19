@@ -2053,15 +2053,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // degradation codes so the user is told "a comment / an edit couldn't be saved" instead of
         // silently losing it. Gated to `!usedModelPath` — the model path captures the current text +
         // comments whole (buildImportedContentModel), so neither loss occurs there.
-        const clientSurfacedLossWarnings: Array<{ code: string; count: number }> =
-          !usedModelPath
-            ? [
-                ...(droppedCommentCount > 0
-                  ? [{ code: 'comment-anchor-unresolved', count: droppedCommentCount }]
-                  : []),
-                ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
-              ]
-            : [];
+        const clientSurfacedLossWarnings: Array<{ code: string; count: number }> = !usedModelPath
+          ? [
+              ...(droppedCommentCount > 0 ? [{ code: 'comment-anchor-unresolved', count: droppedCommentCount }] : []),
+              ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
+            ]
+          : [];
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
