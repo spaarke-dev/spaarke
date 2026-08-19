@@ -12,7 +12,7 @@
 **Purpose**: Ship one orchestrated pipeline for standing up a new Spaarke customer environment (Dataverse + Azure + SPE + BFF), replacing today's three-generation fragmented process (Gen 1 manual guide with 13 known issues; Gen 2 partial PowerShell; Gen 3 registry-only). Two deployment tiers (Model 2 dedicated + Model 1 shared trial) with unified state, tenant-isolation enforcement, and self-service Model 2 consent capture.
 
 **Scope**:
-- L1 = 19 idempotent `IJobHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) per ADR-004
+- L1 = 19 idempotent `IProvisioningHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) per ADR-004 (L2-local contract, ADR-004-shaped)
 - L2 = new .NET 10 App Service control plane with Cosmos DB serverless state, REST + AAD, fire-and-forget handler execution + state-reconciler
 - L3 = `/provision-environment` Claude Code operator skill (Phase D)
 - Data model = 12 new columns on `sprk_dataverseenvironment` + Cosmos DB `spaarke-provisioning` database
@@ -33,7 +33,7 @@
 
 **From ADRs** (per [spec.md § Applicable ADRs](./spec.md#applicable-adrs)):
 
-- **ADR-004**: All async work uses `IJobHandler` — L1 handlers implement; L2 orchestration is Path A exception (documented rationale §5.1 + §5.4)
+- **ADR-004**: ADR-004 job-contract shape (one message, one handler, one outcome) — L1 handlers implement the L2-local `IProvisioningHandler` contract; L2 orchestration is Path A exception (documented rationale §5.1 + §5.4)
 - **ADR-010**: BFF DI minimalism — provisioning handlers register in L2, NOT BFF. BFF adds strictly bounded to 3 touches
 - **ADR-013**: AI facade `PublicContracts/` — H0.5 endpoint MUST NOT inject `IActionResolver`/`IActionRunner` directly
 - **ADR-014**: Session isolation `tenantId + sessionId` dual-filter on `spaarke-session-files` (I2 strengthens)
@@ -87,7 +87,7 @@ Per [spec.md § Owner Clarifications](./spec.md#owner-clarifications) audit trai
 - `.claude/constraints/azure-deployment.md` — publish-size ≤60 MB (NFR-01)
 - `.claude/constraints/testing.md` — 7 KEEP paths + ADR-038 compliance
 - `.claude/constraints/auth.md` — H3, H4, H10 auth ceremony
-- `.claude/constraints/jobs.md` — L1 handler `IJobHandler` contract
+- `.claude/constraints/jobs.md` — L1 handler `IProvisioningHandler` contract (ADR-004-shaped; BFF `IJobHandler` reference-only)
 - `.claude/constraints/config.md` — canonical naming standard + fail-fast
 
 **Patterns** (per `.claude/patterns/`):
@@ -162,7 +162,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 **High-Risk Items**:
 - **Phase C UAMI migration** — structural refactor of App Service identity + RBAC + Graph roles + Dataverse App User. Blast radius: entire BFF startup path. Mitigation: `code-review` + `adr-check` at Step 9.5 FULL rigor; slot-swap smoke test as acceptance criteria; interim mitigation (dual-slot System-Assigned MI KV RBAC) stays in place until UAMI proven.
 - **Phase H canonical secret-catalog manifest** — single-source generation must produce 4 outputs identically. Manifest generator is Opus 4.8 or Fable 5 tier per model-tier rubric. Alias collapse has BINDING pre-check (§7.9) — never delete `Dataverse-ClientSecret` or `BFF-API-ClientSecret`.
-- **L2 control-plane scaffold** — 19 handlers implementing `IJobHandler`, Cosmos state store, REST + AAD, state-reconciler `BackgroundService`. Blast radius: net-new .NET 10 project. Mitigation: scaffold in dedicated `src/server/services/Sprk.Provisioning.ControlPlane/**`; separate DI/Program.cs from BFF; use existing 13 production handlers as pattern exemplars.
+- **L2 control-plane scaffold** — 19 handlers implementing `IProvisioningHandler`, Cosmos state store, REST + AAD, state-reconciler `BackgroundService`. Blast radius: net-new .NET 10 project. Mitigation: scaffold in dedicated `src/server/services/Sprk.Provisioning.ControlPlane/**`; separate DI/Program.cs from BFF; use existing 13 production handlers as pattern exemplars.
 - **`GraphAppRoles.cs` GUID completion** — 11 of 14 `AppRoleId` null. Wrong GUID → app-only Graph 403s silently → T3 fails. Mitigation: `az` enumeration of Graph resource SP; commit each GUID in a small isolated commit with `az` output cited.
 
 ---
@@ -262,7 +262,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 9. NEW `model1-shared.bicep` stack — first-class trial-tier composition
 10. NEW `platform-controlplane.bicep` — L2 orchestrator infra
 11. Scaffold `src/server/services/Sprk.Provisioning.ControlPlane/**` .NET 10 project
-12. Implement 19 `IJobHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) with 3-level idempotency
+12. Implement 19 `IProvisioningHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) with 3-level idempotency
 13. Implement L2 REST endpoints per §4.2 API surface + AAD bearer + `Operator`/`Reader` app-roles
 14. Implement state-reconciler `BackgroundService` (5s Cosmos polling + optimistic-concurrency guard)
 
@@ -561,7 +561,7 @@ Full list at [spec.md § Success Criteria (22 items)](./spec.md#success-criteria
 **Phase C** (biggest — sub-wave acceptance):
 - C1: 12 new columns on `sprk_dataverseenvironment`; Cosmos schema defined
 - C2: `uami.bicep` module exists; `app-service.bicep` binds UAMI both slots; T5 slot-swap smoke test produces no 503s
-- C3: L2 project scaffolds + builds + all `IJobHandler` handlers register in DI
+- C3: L2 project scaffolds + builds + all `IProvisioningHandler` handlers register in DI
 - C4: All 19 handlers idempotent (integration test: second run = no-op)
 - C5: L2 REST endpoints per §4.2 spec; 30-min handler completes without HTTP timeout under load test
 - C6: 5 new ArchTests I1–I5 pass in `dotnet test tests/Spaarke.ArchTests/`

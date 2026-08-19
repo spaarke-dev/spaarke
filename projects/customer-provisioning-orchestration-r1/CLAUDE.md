@@ -10,7 +10,7 @@
 
 Enterprise customer-provisioning platform for Spaarke. See [README.md](./README.md) overview + [design.md](./design.md) v3.3 (1,884 lines) for full context.
 
-**One-sentence contract**: An operator invokes `/provision-environment {customerId}`; Claude Code calls L2 REST API; L2 sequences 19 handlers (`IJobHandler`) via Service Bus + Cosmos state; customer environment reaches `Setup Status = Ready` end-to-end.
+**One-sentence contract**: An operator invokes `/provision-environment {customerId}`; Claude Code calls L2 REST API; L2 sequences 19 handlers (`IProvisioningHandler`) via Service Bus + Cosmos state; customer environment reaches `Setup Status = Ready` end-to-end.
 
 ## Load these first (per task)
 
@@ -29,7 +29,7 @@ Per [spec.md § Technical Constraints § Applicable ADRs](./spec.md#applicable-a
 
 | ADR | Concise | Why relevant |
 |---|---|---|
-| ADR-004 | `.claude/adr/ADR-004-job-contract.md` | L1 handlers implement `IJobHandler`; L2 orchestration is Path A exception (see spec.md ADR Tensions) |
+| ADR-004 | `.claude/adr/ADR-004-job-contract.md` | L1 handlers implement the L2-local `IProvisioningHandler` contract (ADR-004-shaped); L2 orchestration is Path A exception (see spec.md ADR Tensions) |
 | ADR-010 | `.claude/adr/ADR-010-di-minimalism.md` | Provisioning handlers register in L2 (not BFF); BFF DI additions strictly bounded |
 | ADR-013 | `.claude/adr/ADR-013-ai-architecture.md` | H0.5 endpoint MUST NOT inject `IActionResolver`/`IActionRunner`; use `Services/Ai/PublicContracts/` facade if AI needed |
 | ADR-014 | `.claude/adr/ADR-014-ai-caching.md` | `spaarke-session-files` tenantId + sessionId dual-filter invariant (§4D I2 strengthens) |
@@ -39,7 +39,7 @@ Per [spec.md § Technical Constraints § Applicable ADRs](./spec.md#applicable-a
 | ADR-028 | `.claude/adr/ADR-028-spaarke-auth-architecture.md` | H4 KV secrets + UAMI RBAC + `keyVaultReferenceIdentity` PATCH follow 21 MUSTs |
 | ADR-032 | `.claude/adr/ADR-032-bff-nullobject-kill-switch.md` | SignalR feature-gate follows P1/P2/P3 pattern |
 | ADR-034 | `.claude/adr/ADR-034-user-record-membership.md` | Optional SignalR per-customer aligns with realtime pattern |
-| ADR-036 | `.claude/adr/ADR-036-background-job-infrastructure.md` | Background-job infrastructure (Service Bus + `IJobHandler` + Redis idempotency) — L2 reuses this stack |
+| ADR-036 | `.claude/adr/ADR-036-background-job-infrastructure.md` | Background-job infrastructure pattern (Service Bus + `IJobHandler` + Redis idempotency) — L2's `ProvisioningHandlerDispatcher` follows the same shape (Redis idempotency reused directly; no compile reference to `IJobHandler`) |
 | ADR-038 (full) | `docs/adr/ADR-038-testing-strategy.md` | Integration-heavy pyramid; 5 new ArchTests I1–I5 sequence into r3 forcing-functions |
 | ADR-039 | `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md` | Single AI routing surface; H12a seeds `playbook consumers`; `spaarke-playbook-embeddings` retired |
 | ADR-044 | `.claude/adr/ADR-044-dataverse-guid-canonicalization.md` | Registry key patterns — `sprk_currentrunid`, `sprk_tenantid`, `sprk_bffversion`, `sprk_solutionversion` |
@@ -54,7 +54,7 @@ Per root CLAUDE.md §10 + §11 governance:
 | `.claude/constraints/azure-deployment.md` | H2a Bicep tasks — includes BFF publish-size ≤60 MB ceiling |
 | `.claude/constraints/testing.md` | Any tests-modifying task (unconditional code-review + adr-check per root §8) |
 | `.claude/constraints/auth.md` | H3, H4, H10 — auth ceremony, KV secrets, MI-Dataverse-App-User |
-| `.claude/constraints/jobs.md` | H0.5 endpoint, L1 handler tasks — `IJobHandler` contract |
+| `.claude/constraints/jobs.md` | H0.5 endpoint, L1 handler tasks — `IProvisioningHandler` contract (ADR-004-shaped; BFF `IJobHandler` reference-only) |
 | `.claude/constraints/data.md` | H5, H6, H7, H10, registry schema extension |
 | `.claude/constraints/api.md` | H0.5 endpoint, L2 REST API endpoint tasks |
 | `.claude/constraints/ai.md` | H12a AI seed chain |
@@ -120,7 +120,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--mandatory). 2 Path A (documented exception) + 5 Path C (comply). All rationale concrete. NO Path B (no ADR amendment needed).
 
 **Path A rows** — code-review at PR time expects PR description to cite these:
-- **ADR-004**: L2 orchestration is NEW component pattern (not Durable Functions / not single-shot). Rationale: ADR-004 applies at handler level; L2 orchestration reuses `IJobHandler` infrastructure + custom state machine over Cosmos (§5.4 rejected alts).
+- **ADR-004**: L2 orchestration is NEW component pattern (not Durable Functions / not single-shot). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
 - **ADR-027**: Model 1 shared-tier is documented exception. Rationale: D3 (v3) rewrites tenancy to include both tiers; §4D invariants enforce logical isolation.
 
 ## Sub-Agent Write Boundary (root CLAUDE.md §3)
