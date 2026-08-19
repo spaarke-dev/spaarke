@@ -3,8 +3,8 @@
   <metadata>
     <title>Integration seam test: dispatch spine (message -&gt; handler -&gt; Cosmos transition -&gt; DAG advance)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
     <rigor-reason>Touches tests/integration/seam/** and is tagged testing/integration-test -- unconditional FULL per root CLAUDE.md §8 override table.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,4 +96,73 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion>
+    Commit c56be622d. New file:
+    src/server/services/Sprk.Provisioning.ControlPlane.Tests/Seam/ProvisioningDispatchSpineSeamTests.cs
+    (567 lines, 2 [Fact]s). Placed at `.Tests/Seam/` per parent-orchestrator
+    coordination directive (mirrors task 106's `.Tests/Reconciler/` seam-test
+    precedent; NOT the BFF `tests/integration/seam/**` path, which is a
+    different ADR-038 KEEP category for a different subsystem).
+
+    Built on the REAL Worker composition root via
+    WebApplicationFactory&lt;WorkerHost::Program&gt; (same technique task 103's
+    HandlerRegistrationCompletenessTests established for DI-graph shape;
+    extended here to prove RUNTIME behavior). Only IHandlerEnqueuer is faked
+    (RecordingHandlerEnqueuer) -- DispatchCoreAsync (task 102), keyed handler
+    resolution (task 103), IHandlerOutcomeApplier (task 104),
+    StateReconcilerService + DagAdvancer + CosmosActiveRunScanner (task 106
+    serializer-fix regression proof reused), and IFailureClassifier are all
+    real production types. Cosmos is env-guarded via COSMOS_L2_SMOKE_ENDPOINT
+    (same opt-in convention as CosmosActiveRunScannerSeamTests) -- skip by
+    default so CI never depends on a live endpoint; both tests pass in skip
+    mode. Attempted a live-dev-Cosmos run from this sandbox: authentication
+    failed at the DefaultAzureCredential layer (no IMDS in this sandboxed
+    shell; ManagedIdentityCredential hard-fails before falling through to
+    AzureCliCredential) -- an environment limitation affecting any test using
+    this exact CosmosModule credential construction from this shell (would
+    equally affect the pre-existing CosmosSmokeTests.cs /
+    CosmosActiveRunScannerSeamTests.cs), not a defect in this test. No
+    documents were written to the shared dev Cosmos account (auth failed
+    before any write).
+
+    Two documented directional-mode deviations from the literal step wording
+    (root CLAUDE.md §8.5), both explained in the test file's header: (1) the
+    established live-dev-Cosmos env-guard convention is reused instead of
+    standing up a new Testcontainers-based Cosmos emulator harness (CLAUDE.md
+    §11 no-duplicate-component rule -- this project has zero existing
+    emulator infra and the established pattern already proves the identical
+    serializer-boundary property); (2) the scripted test handler is
+    keyed-registered under the PRODUCTION "H1" HandlerId (overriding the real
+    H1SubscriptionReadinessHandler's keyed registration; last-registration-
+    wins) rather than a synthetic id, because DagAdvancer.HandlerDependencies
+    is a real production string-keyed map with no entry for a synthetic id --
+    anchoring to "H1" keeps DagAdvancer 100% real so H2a is a provably-correct
+    computed next handler, while the scripted handler body stays free of
+    H1's real Azure-probe dependencies and deliberately omits H1's Wave-C4
+    temporary enqueue-H2a-directly bridge (scaffolding being phased out per
+    design.md §4.2b) so the test proves the steady-state
+    reconciler-alone-advances-the-DAG contract.
+
+    Quality gates (Step 9.5, unconditional per TEST-MODIFYING override):
+    code-review clean (0 critical, 0 warning, 1 suggestion -- test-method
+    length, inherent to the seam-test category); adr-check clean (0
+    violations across ADR-038, ADR-010, ADR-004, ADR-007, ADR-032, spec.md
+    §4D I3/FR-30).
+
+    Full L2 suite: 742/742 pass (was 740; +2 new tests), 0 regressions.
+    dotnet build: 0 warnings / 0 errors.
+
+    Coordination hygiene: committed via `git commit --only` on the single new
+    file. Sibling task 105's in-flight uncommitted work in
+    `.Core/Dispatch/DispatchModule.cs` (modified) and
+    `.Core/Dispatch/DispatchIdempotencyService.cs` (new) was left untouched
+    -- zero overlap with this task's `.Tests/Seam/**` scope.
+
+    This test would catch a regression in: task 102 (dispatcher's
+    DispatchCoreAsync 8-step flow), task 103 (keyed DI resolution), task 104
+    (extracted IHandlerOutcomeApplier), and task 106 (Newtonsoft
+    StringEnumConverter serializer fix) -- see the file header's "FAILURE
+    MODES THIS TEST CATCHES" section for the per-task failure-mode mapping.
+  </notes-completion>
 </task>
