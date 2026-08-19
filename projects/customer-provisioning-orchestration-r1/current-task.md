@@ -1,9 +1,15 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Wave G-2 100% COMPLETE + pushed; TWO customer.bicep gaps surfaced needing owner decision before Wave G-3 dispatch)
+> **Last Updated**: 2026-08-19 (Task 127 COMPLETE + pushed — customer.bicep now wires UAMI + BFF App Service (plan/prod-slot/staging-slot). Path 1 (owner decision): 128 next (OpenAI+AISearch), then 129 (kv-secrets.generated.bicep wiring), THEN Wave G-3 dispatch.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` — final commit `3eae3e799`, in sync with `origin/work/customer-provisioning-orchestration-r1`
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + two new customer.bicep authoring tasks needed)
+> **Branch**: `work/customer-provisioning-orchestration-r1` — final commit `8fdd0e2d0`, in sync with `origin/work/customer-provisioning-orchestration-r1`
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + tasks 128/129 (customer.bicep completion) remain)
+
+## Task 127 — COMPLETE (2026-08-19, commit `8fdd0e2d0`)
+
+Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modules/app-service.bicep` + `modules/app-service-slot.bicep` (task 029) into `infrastructure/bicep/customer.bicep`, all four modules used UNMODIFIED per CLAUDE.md §11. UAMI named `mi-spaarke-{customerId}-{env}` per design.md §7.1; both App Service prod + staging slots bound to the SAME UAMI (T5 fix); Key Vault RBAC wired via key-vault.bicep's existing `userAssignedIdentityPrincipalId` param; task 027's vestigial pass-through param removed; 4 new outputs added under the exact names `ArmDeploymentRunner.MapOutputs` (task 123) requires (`userAssignedIdentityObjectId`/`ClientId`, `appServiceName`, `appServiceStagingSlotName`) alongside the now-real `userAssignedIdentityResourceId`. `az bicep build` exits 0 (zero net-new warnings — 7 pre-existing warnings unchanged). Live `az deployment sub what-if` (subscription-scope, throwaway `customerId=t127wif`) confirmed clean Create-only plan with the UAMI correctly bound to both slots.
+
+**Remaining customer.bicep gaps** (per task 123/126 discovery, Path 1 plan): task 128 (OpenAI + AI Search modules — task 123's Gap 1 part 2/2) and task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2) are NOT done yet. Task 128 dispatches next (serial after 127 to avoid customer.bicep merge race). Wave G-3 (130/131/132) stays blocked on 127+128+129 landing per the owner's Path 1 sequencing decision.
 
 ## Quick Recovery (READ THIS FIRST)
 
