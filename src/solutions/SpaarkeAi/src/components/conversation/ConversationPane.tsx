@@ -2660,12 +2660,71 @@ export function ConversationPane(): React.JSX.Element {
   // adoptions below; those are excluded from the clear by WorkspacePane's
   // `composeAdoptionSessionRef` marker (they show the adopted document, not a full tab set).
   // External contract is unchanged: `HistoryMenu`'s `onSelectSession(sessionId: string)`.
+  // Best-effort file re-attach on History reopen (spaarkeai-compose-r7): the FR-D5 restore chip is
+  // keyed to the COLD-LOAD restoreCtx.sessionId and never updates on an in-app History reopen (the
+  // handler below only ADOPTS the id). Recall itself already works on reopen — the server scopes it by
+  // the persisted session manifest (RecallSessionFileHandler reads UploadedFiles[].SearchDocumentIdsCsv),
+  // so no client re-arm is needed. This state drives ONLY the CHIP + its best-effort 24h availability
+  // signal: we fetch /restore for the reopened session and stage its uploaded-files manifest here.
+  const [reopenRestore, setReopenRestore] = React.useState<{
+    sessionId: string;
+    files: AttachedFileSummary[];
+  } | null>(null);
+
   const handleSelectHistorySession = React.useCallback(
     (sessionId: string) => {
       setChatSessionId(sessionId);
       startNewSession();
+
+      // Fetch the reopened session's uploaded-files manifest so the attachment chip re-renders for THIS
+      // session (the cold-load restore path does not cover in-app reopen). Fire-and-forget + silent on
+      // failure — recall still works via the persisted server-side manifest; only the chip is affected.
+      setReopenRestore(null);
+      void (async () => {
+        try {
+          const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(
+            sessionId
+          )}/restore`;
+          const resp = await authenticatedFetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+          });
+          if (!resp.ok) return;
+          const spec = (await resp.json()) as {
+            uploadedFiles?: Array<{
+              fileId: string;
+              fileName: string;
+              contentType: string;
+              sizeBytes: number;
+              contentAvailable?: boolean;
+            }>;
+            recentMessages?: Array<{ timestamp?: string }>;
+          };
+          const rawFiles = Array.isArray(spec.uploadedFiles) ? spec.uploadedFiles : [];
+          if (rawFiles.length === 0) return;
+          // Availability (best-effort 24h): prefer a server signal (contentAvailable) if present;
+          // otherwise infer from the freshest message age vs the ~24h AI-Search eviction window
+          // (SessionFilesCleanupJob). Unknown age ⇒ assume available (never falsely disable).
+          const stamps = (spec.recentMessages ?? [])
+            .map((m) => (m.timestamp ? Date.parse(m.timestamp) : NaN))
+            .filter((n) => !Number.isNaN(n));
+          const lastTs = stamps.length ? Math.max(...stamps) : NaN;
+          const withinWindow = Number.isNaN(lastTs)
+            ? true
+            : Date.now() - lastTs < 24 * 60 * 60 * 1000;
+          const files: AttachedFileSummary[] = rawFiles.map((f) => ({
+            id: f.fileId,
+            filename: f.fileName,
+            status: "ready",
+            available: typeof f.contentAvailable === "boolean" ? f.contentAvailable : withinWindow,
+          }));
+          setReopenRestore({ sessionId, files });
+        } catch {
+          // silent — chip is best-effort; recall is unaffected.
+        }
+      })();
     },
-    [setChatSessionId, startNewSession]
+    [setChatSessionId, startNewSession, bffBaseUrl, authenticatedFetch]
   );
 
   // ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): a DIFFERENT pane (the
@@ -2910,11 +2969,17 @@ export function ConversationPane(): React.JSX.Element {
   // and clears them). Live attachments take precedence: once the user attaches a file this session,
   // `attachments.uploadedFileCount > 0` and the live indicator renders instead.
   const restoredAttachmentFiles = React.useMemo<AttachedFileSummary[]>(() => {
+    // Reopen path (spaarkeai-compose-r7): staged files for the CURRENTLY reopened session win, and
+    // carry their best-effort 24h availability flag (drives the dimmed "no longer available" chip).
+    if (reopenRestore && chatSessionId && chatSessionId === reopenRestore.sessionId) {
+      return reopenRestore.files;
+    }
+    // Cold-load path (FR-D5): the ThreePaneShell restore spec, gated to its own session.
     const files = restoreCtx?.uploadedFiles;
     if (!files || files.length === 0) return [];
     if (!chatSessionId || chatSessionId !== restoreCtx?.sessionId) return [];
     return files.map((f) => ({ id: f.fileId, filename: f.fileName, status: "ready" }));
-  }, [restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
+  }, [reopenRestore, restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
 
   // Prefer the LIVE attachment strip; fall back to the restored manifest only when there are no live
   // attachments yet (the reopened-session case FR-D5 targets).
