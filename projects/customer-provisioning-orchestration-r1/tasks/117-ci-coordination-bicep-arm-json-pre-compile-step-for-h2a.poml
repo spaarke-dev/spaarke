@@ -4,7 +4,7 @@
     <title>CI coordination: Bicep-&gt;ARM-JSON pre-compile step for H2a</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Single additive CI step (az bicep build as a workflow step, output as an artifact), no existing .cs modification. STANDARD per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -75,7 +75,9 @@
     <criterion testable="true">Local az bicep build against the identified template(s) succeeds with 0 errors as a pre-authoring sanity check (documented in this task's notes).</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- az bicep build already exists as a CLI capability; no new tooling to invent. Extension -- adding one CI step reusing an existing az CLI capability is strictly simpler than the rejected alternative (bundling the bicep binary into L2's runtime, which DS-1b's zero-shell constraint forbids). Cost-of-doing-nothing -- H2a's ARM SDK port (task 123) has no artifact to deploy; Azure.ResourceManager.Resources cannot accept raw .bicep source.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- az bicep build already exists as a CLI capability; no new tooling to invent. Extension -- adding one CI step reusing an existing az CLI capability is strictly simpler than the rejected alternative (bundling the bicep binary into L2's runtime, which DS-1b's zero-shell constraint forbids). Cost-of-doing-nothing -- H2a's ARM SDK port (task 123) has no artifact to deploy; Azure.ResourceManager.Resources cannot accept raw .bicep source.
+
+COMPLETION (2026-08-19): Governance deviation per CLAUDE.md §6.5 Path C (same as task 116) -- authored directly as a NEW workflow `.github/workflows/publish-provisioning-arm-artifacts.yml` + `.github/workflows/schemas/provisioning-arm-manifest.json`, rather than a coordination-note-only draft, per r1's 2026-08-19 direct-ownership governance (commit 8281045052). Template scope resolved from FileBicepTemplateInspector.ResolveTemplatePath (authoritative C# source): exactly customer.bicep (default) + stacks/model1-shared.bicep (Model1Shared). Escalation trigger checked and did NOT fire -- both templates compose only local relative-path module references (no template-spec-by-id), confirmed by local `az bicep build` (exit 0, 0 errors both templates) whose compiled output shows 7 and 16 nested Microsoft.Resources/deployments resources respectively. Reused task 116's exact provisioning-artifacts container + PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT repo variable + buildId versioning scheme. Storage-account live-ceremony gap re-flagged (not created) -- same gap task 116 already filed, not duplicated as a new ask. actionlint clean (both the new file and full workflow suite). Full rationale: notes/h2a-bicep-precompile-ci-coord-pr.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
