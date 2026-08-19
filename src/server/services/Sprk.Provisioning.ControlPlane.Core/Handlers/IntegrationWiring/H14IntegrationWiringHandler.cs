@@ -89,7 +89,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 public sealed class H14IntegrationWiringHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H14";
+    public const string HandlerIdentifier = HandlerIds.H14;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";

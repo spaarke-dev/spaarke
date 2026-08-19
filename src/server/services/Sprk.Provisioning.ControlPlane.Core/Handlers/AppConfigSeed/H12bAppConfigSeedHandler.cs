@@ -90,7 +90,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H12b";
+    public const string HandlerIdentifier = HandlerIds.H12b;
 
     /// <summary>
     /// Handler identifier of the downstream DAG-join point that consumes

@@ -47,6 +47,7 @@
 // requirement would otherwise cause an infinite ready-loop on every fresh run.
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Reconciler;
@@ -54,62 +55,66 @@ namespace Sprk.Provisioning.ControlPlane.Reconciler;
 /// <inheritdoc cref="IDagAdvancer"/>
 public sealed class DagAdvancer : IDagAdvancer
 {
+    // Task 103: these consts now re-point to the canonical HandlerIds
+    // catalog (Handlers/HandlerIds.cs) — mechanical refactor, values
+    // unchanged. Names kept for source-compat with existing consumers.
+
     /// <summary>Handler identifier for H0 preflight — entry point, never reconciler-dispatched.</summary>
-    public const string HandlerH0 = "H0";
+    public const string HandlerH0 = HandlerIds.H0;
 
     /// <summary>Handler identifier for H0.5 consent-capture — Model 2 entry, never reconciler-dispatched.</summary>
-    public const string HandlerH05 = "H0.5";
+    public const string HandlerH05 = HandlerIds.H05;
 
     /// <summary>Handler identifier for H1 subscription-readiness.</summary>
-    public const string HandlerH1 = "H1";
+    public const string HandlerH1 = HandlerIds.H1;
 
     /// <summary>Handler identifier for H2a Bicep infra deploy.</summary>
-    public const string HandlerH2a = "H2a";
+    public const string HandlerH2a = HandlerIds.H2a;
 
     /// <summary>Handler identifier for H2b AI Search index provisioning.</summary>
-    public const string HandlerH2b = "H2b";
+    public const string HandlerH2b = HandlerIds.H2b;
 
     /// <summary>Handler identifier for H3 Entra app-reg.</summary>
-    public const string HandlerH3 = "H3";
+    public const string HandlerH3 = HandlerIds.H3;
 
     /// <summary>Handler identifier for H4 KV secrets population + T1 patch.</summary>
-    public const string HandlerH4 = "H4";
+    public const string HandlerH4 = HandlerIds.H4;
 
     /// <summary>Handler identifier for H5 Dataverse env creation.</summary>
-    public const string HandlerH5 = "H5";
+    public const string HandlerH5 = HandlerIds.H5;
 
     /// <summary>Handler identifier for H6 solution import.</summary>
-    public const string HandlerH6 = "H6";
+    public const string HandlerH6 = HandlerIds.H6;
 
     /// <summary>Handler identifier for H7 Dataverse env-var values.</summary>
-    public const string HandlerH7 = "H7";
+    public const string HandlerH7 = HandlerIds.H7;
 
     /// <summary>Handler identifier for H8 SPE container-type.</summary>
-    public const string HandlerH8 = "H8";
+    public const string HandlerH8 = HandlerIds.H8;
 
     /// <summary>Handler identifier for H9 BFF deploy.</summary>
-    public const string HandlerH9 = "H9";
+    public const string HandlerH9 = HandlerIds.H9;
 
     /// <summary>Handler identifier for H10 Dataverse App User + Graph parity.</summary>
-    public const string HandlerH10 = "H10";
+    public const string HandlerH10 = HandlerIds.H10;
 
     /// <summary>Handler identifier for H11 user provisioning.</summary>
-    public const string HandlerH11 = "H11";
+    public const string HandlerH11 = HandlerIds.H11;
 
     /// <summary>Handler identifier for H12a AI seed chain.</summary>
-    public const string HandlerH12a = "H12a";
+    public const string HandlerH12a = HandlerIds.H12a;
 
     /// <summary>Handler identifier for H12b app-config seed.</summary>
-    public const string HandlerH12b = "H12b";
+    public const string HandlerH12b = HandlerIds.H12b;
 
     /// <summary>Handler identifier for H12c runtime references.</summary>
-    public const string HandlerH12c = "H12c";
+    public const string HandlerH12c = HandlerIds.H12c;
 
     /// <summary>Handler identifier for H13 E2E acceptance gate.</summary>
-    public const string HandlerH13 = "H13";
+    public const string HandlerH13 = HandlerIds.H13;
 
     /// <summary>Handler identifier for H14 post-deploy integration wiring.</summary>
-    public const string HandlerH14 = "H14";
+    public const string HandlerH14 = HandlerIds.H14;
 
     /// <summary>
     /// Handler-dependency map per design.md §4.1 DAG. Key = handler that

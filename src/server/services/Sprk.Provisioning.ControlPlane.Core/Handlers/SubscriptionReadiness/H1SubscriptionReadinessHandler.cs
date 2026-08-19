@@ -90,7 +90,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H1";
+    public const string HandlerIdentifier = HandlerIds.H1;
 
     /// <summary>
     /// Handler identifier of the downstream handler H1 chains to on success.

@@ -76,7 +76,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 public sealed class H05ConsentCaptureHandler : IProvisioningHandler
 {
     /// <summary>Design.md §4.1 handler-catalog identifier.</summary>
-    public const string HandlerIdConstant = "H0.5";
+    public const string HandlerIdConstant = HandlerIds.H05;
 
     /// <summary>Handler identifier for the downstream H0 enqueue.</summary>
     public const string NextHandlerId = "H0";

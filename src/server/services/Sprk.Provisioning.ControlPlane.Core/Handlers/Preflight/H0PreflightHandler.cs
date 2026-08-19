@@ -74,7 +74,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 public sealed class H0PreflightHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H0";
+    public const string HandlerIdentifier = HandlerIds.H0;
 
     /// <summary>Handler identifier of the downstream handler H0 chains to on success.</summary>
     public const string DownstreamHandlerId = "H0.5";

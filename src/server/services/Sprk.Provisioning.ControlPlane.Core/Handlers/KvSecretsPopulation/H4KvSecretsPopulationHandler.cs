@@ -134,7 +134,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H4";
+    public const string HandlerIdentifier = HandlerIds.H4;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";

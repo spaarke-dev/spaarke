@@ -85,10 +85,35 @@
     The .Api project transitively references .Core, so referencing both here
     is explicit intent (per POML: ".Core for the 41-file test project, .Api
     for the single WebApplicationFactory consumer").
+
+    Added by task 103 (Phase C'' Wave G-1):
+      - Sprk.Provisioning.ControlPlane.Worker: WebApplicationFactory
+        consumer Dispatch/HandlerRegistrationCompletenessTests.cs uses
+        `public partial class Program` from the .Worker project's
+        composition root — the REAL DI container all 19 dispatchable
+        handlers' concrete-type registrations live in (14 inline in
+        Program.cs, 4 via per-handler *Module.cs extension methods, 1 —
+        H0 — via HandlersModule.cs). Building the real container (rather
+        than duplicating its registration calls in the test) is the only
+        way the test proves task 103's keyed registrations actually
+        resolve against production wiring, not a test-only stand-in.
+
+        `Aliases="WorkerHost"` — BOTH .Api and .Worker generate an
+        implicit top-level-statement `Program` class in the GLOBAL
+        namespace (a RootNamespace/AssemblyName setting does NOT change
+        where that generated type lands); referencing both assemblies
+        unaliased makes every `WebApplicationFactory<Program>` usage in
+        the whole test project ambiguous (CS0433), including the
+        pre-existing Api/RunsEndpointsTests.cs usage. The Worker reference
+        is aliased so only Dispatch/HandlerRegistrationCompletenessTests.cs
+        (via `extern alias WorkerHost;` + `WorkerHost::Program`) resolves
+        it explicitly; every other file's bare `Program` keeps resolving
+        to .Api's unaliased reference unchanged.
   -->
   <ItemGroup>
     <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
     <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Worker\Sprk.Provisioning.ControlPlane.Worker.csproj" Aliases="WorkerHost" />
   </ItemGroup>
 
 </Project>

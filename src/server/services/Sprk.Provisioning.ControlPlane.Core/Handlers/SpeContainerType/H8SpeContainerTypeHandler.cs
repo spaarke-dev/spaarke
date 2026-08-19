@@ -122,7 +122,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
 public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H8";
+    public const string HandlerIdentifier = HandlerIds.H8;
 
     /// <summary>Non-secret parameter key carrying the customer Entra tenant id (§4D I1/I5).</summary>
     public const string TenantIdParameterKey = "tenantId";

@@ -46,7 +46,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H14b";
+    public const string HandlerIdentifier = HandlerIds.H14b;
 
     /// <summary>Sub-step token used in the idempotency key format h14-{customerId}-{subStep}-{hash}.</summary>
     public const string SubStep = "graph";

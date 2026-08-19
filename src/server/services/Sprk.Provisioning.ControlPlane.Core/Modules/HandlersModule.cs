@@ -29,13 +29,16 @@
 //   - Do NOT register any downstream handler (H0.5, H1, ...) — those tasks
 //     own their own registrations.
 //
-// FUTURE (wave C5):
-//   - Additional handler registrations (one line per new handler) go in
-//     this same module.
-//   - Registration MAY migrate to keyed-services (`AddKeyedScoped`) when
-//     the reconciler needs to resolve handlers by HandlerId string. For
-//     wave C4 that indirection is unwarranted — H0 is the only handler +
-//     unit tests construct it directly.
+// WAVE C5 UPDATE (task 103):
+//   H0's keyed + concrete registrations now live alongside the other 18
+//   dispatchable handlers' keyed registrations in
+//   Handlers/HandlerDispatchRegistrationModule.cs (AddProvisioningHandler-
+//   KeyedRegistrations, invoked below). H0's PREVIOUS non-keyed
+//   `AddScoped<IProvisioningHandler, H0PreflightHandler>()` line is
+//   replaced by a concrete-only `AddScoped<H0PreflightHandler>()` here (the
+//   factory-forwarding keyed registration needs the concrete type resolvable)
+//   — grep-verified nothing else consumed the non-keyed interface
+//   registration (DS-2 §3.2).
 // -----------------------------------------------------------------------------
 
 using Microsoft.Extensions.Logging;
@@ -99,8 +102,18 @@ public static class HandlersModule
             scriptFileName: "Test-SpeCertBootstrap.ps1");
 
         // H0 handler — Scoped per IProvisioningHandler contract + parity
-        // with IHandlerEnqueuer's Scoped registration.
-        services.AddScoped<IProvisioningHandler, H0PreflightHandler>();
+        // with IHandlerEnqueuer's Scoped registration. Concrete-only: the
+        // keyed IProvisioningHandler registration (below) factory-forwards
+        // to this same scoped instance (task 103).
+        services.AddScoped<H0PreflightHandler>();
+
+        // Keyed IProvisioningHandler resolution surface for all 19
+        // dispatchable handlers (task 103 / DS-2 §3.2). Task 102's
+        // ProvisioningHandlerDispatcher resolves by envelope HandlerId via
+        // GetKeyedService<IProvisioningHandler>(id) — see
+        // Handlers/HandlerDispatchRegistrationModule.cs for the full list +
+        // rationale for consolidating all 19 lines in one file.
+        services.AddProvisioningHandlerKeyedRegistrations();
 
         return services;
     }

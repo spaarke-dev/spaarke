@@ -3,8 +3,8 @@
   <metadata>
     <title>HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies registration for all 19 top-level handler classes across their owning modules; a missed registration silently breaks dispatch for that handler (NoHandler dead-letter). FULL per l2-controlplane default.</rigor-reason>
     <model-tier>sonnet</model-tier>

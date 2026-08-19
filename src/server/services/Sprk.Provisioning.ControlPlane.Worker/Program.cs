@@ -241,7 +241,17 @@ builder.Services.AddScoped<H3EntraAppRegHandler>();
 builder.Services.Configure<DataverseEnvCreationOptions>(
     builder.Configuration.GetSection(nameof(DataverseEnvCreationOptions)));
 builder.Services.AddSingleton<IDataverseEnvCreator, PacAdminDataverseEnvCreator>();
-builder.Services.AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
+// NAMED HttpClient (task 103 fix): DataverseWebApiHealthProbe takes
+// IHttpClientFactory + calls _httpClientFactory.CreateClient(HttpClientName)
+// itself — it is NOT a typed client (no HttpClient-accepting constructor).
+// The previous AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe>()
+// typed-client registration could never construct this type (ActivatorUtilities
+// requires an HttpClient ctor param for typed clients), so IDataverseHealthProbe
+// — and therefore H5DataverseEnvCreationHandler — was NOT resolvable via DI.
+// HandlerRegistrationCompletenessTests (task 103) surfaced this pre-existing
+// defect the first time anything actually built the real container down to H5.
+builder.Services.AddHttpClient(DataverseWebApiHealthProbe.HttpClientName);
+builder.Services.AddScoped<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
 builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 
 // Task 047: H4 KV secrets-population handler + FOUR collaborator seams
@@ -321,9 +331,19 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // the SAME identity + pattern H6 uses — the MI-Dataverse App User (H10) has
 // not yet been created at H7's point in the DAG (H10 runs AFTER H7 per
 // design.md §4.1: "H5 → H6 (solutions) → H7 → H10 (app-user) → H11").
+//
+// NAMED HttpClient (task 103 fix, applied 2026-08-19 per g1-task-103 report):
+// DataverseWebApiEnvVarValuesWriter takes IHttpClientFactory (not HttpClient)
+// and resolves its own named client via DataverseWebApiEnvVarValuesWriter.HttpClientName
+// — parity with DataverseWebApiHealthProbe's (H5) identical fix immediately
+// above. The previous AddHttpClient<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>()
+// typed-client registration failed DI resolution at runtime (Microsoft.Extensions.Http
+// requires an HttpClient ctor param for typed clients), so H7DataverseEnvVarValuesHandler
+// was NOT actually resolvable — surfaced by task 103's HandlerRegistrationCompletenessTests.
 builder.Services.Configure<EnvVarValuesOptions>(
     builder.Configuration.GetSection(nameof(EnvVarValuesOptions)));
-builder.Services.AddHttpClient<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
+builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName);
+builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 
 // Task 051 (Batch 3E): H8 SPE container-type + root-container handler + THREE

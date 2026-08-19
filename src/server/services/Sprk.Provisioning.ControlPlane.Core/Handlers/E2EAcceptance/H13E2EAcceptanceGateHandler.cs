@@ -121,7 +121,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H13";
+    public const string HandlerIdentifier = HandlerIds.H13;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";

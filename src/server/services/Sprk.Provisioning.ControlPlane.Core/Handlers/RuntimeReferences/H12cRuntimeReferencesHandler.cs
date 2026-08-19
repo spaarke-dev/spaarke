@@ -126,7 +126,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H12c";
+    public const string HandlerIdentifier = HandlerIds.H12c;
 
     /// <summary>
     /// Handler identifier of the downstream DAG successor H12c enqueues on

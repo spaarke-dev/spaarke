@@ -123,7 +123,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 public sealed class H3EntraAppRegHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H3";
+    public const string HandlerIdentifier = HandlerIds.H3;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";

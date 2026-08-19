@@ -105,7 +105,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 public sealed class H12aAiSeedChainHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H12a";
+    public const string HandlerIdentifier = HandlerIds.H12a;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";

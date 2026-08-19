@@ -104,7 +104,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
-    public const string HandlerIdentifier = "H10";
+    public const string HandlerIdentifier = HandlerIds.H10;
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
