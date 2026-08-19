@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15568952706032722846"
+      "templateHash": "952664173337325676"
     }
   },
   "parameters": {
@@ -52,14 +52,28 @@
       "type": "string",
       "defaultValue": "servicebus-connection-string",
       "metadata": {
-        "description": "Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace (per ADR-036 reuse - no new SB is created here). The App Service resolves this via @Microsoft.KeyVault reference at runtime."
+        "description": "Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace. DS-5 C5.1 fix: the .Api App Service (modules/controlplane-app-service.bicep) no longer consumes this -- it now wires MI-only ServiceBus__FullyQualifiedNamespace + ServiceBus__QueueName (ServiceBusModule.cs:53 documents the connection string is IGNORED). Still consumed by the .Worker App Service (modules/controlplane-worker-app-service.bicep, task 101) pending the same key-rename fix there (follow-on to this task -- DS-5 C5.1 scoped only the .Api module; the .Worker module was added by task 101 after DS-5 was authored and carries the identical drift)."
+      }
+    },
+    "serviceBusNamespaceName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the fleet-scoped Service Bus namespace that hosts the sprk-provisioning-jobs queue (task 108 / DS-5 C5.4). Empty defaults to spaarke-servicebus-{environmentName} (the legacy-but-canonical name per AZURE-RESOURCE-NAMING-CONVENTION.md; verified live value for dev is spaarke-servicebus-dev). This stack does NOT create the namespace - it only declares the queue as its child via an `existing` reference."
+      }
+    },
+    "serviceBusResourceGroupName": {
+      "type": "string",
+      "defaultValue": "SharePointEmbedded",
+      "metadata": {
+        "description": "Name of the resource group that hosts the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4). Defaults to SharePointEmbedded - the verified live dev value; this is a legacy pre-per-env-model resource group name, NOT the canonical rg-spaarke-{env} shape, so staging/prod deploys MUST override this parameter once the shared Service Bus resource group name for those environments is known."
       }
     },
     "dataverseClientSecretName": {
       "type": "string",
       "defaultValue": "Dataverse-ClientSecret",
       "metadata": {
-        "description": "Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings."
+        "description": "Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path (CustomerRunGuardOptions.cs:24-25 already anticipates this), this param + its appSettings are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule)."
       }
     },
     "jwtTenantId": {
@@ -95,12 +109,14 @@
     "controlPlaneUamiName": "[format('sprk-controlplane-{0}-uami', parameters('environmentName'))]",
     "appServicePlanName": "[format('spaarke-controlplane-{0}-plan', parameters('environmentName'))]",
     "appServiceName": "[format('spaarke-provisioning-controlplane-{0}', parameters('environmentName'))]",
-    "jwtAudience": "[format('api://spaarke-provisioning-controlplane-{0}', parameters('environmentName'))]",
+    "workerAppServiceName": "[format('spaarke-provisioning-controlplane-worker-{0}', parameters('environmentName'))]",
+    "jwtAudience": "[format('api://spaarke.com/provisioning-controlplane-{0}', parameters('environmentName'))]",
     "cosmosAccountName": "[format('cosmos-spaarke-platform-{0}', parameters('environmentName'))]",
     "keyVaultName": "[format('sprk-controlplane-{0}-kv', parameters('environmentName'))]",
     "appInsightsName": "[format('sprk-controlplane-{0}-insights', parameters('environmentName'))]",
     "logAnalyticsName": "[format('sprk-controlplane-{0}-logs', parameters('environmentName'))]",
-    "effectiveJwtTenantId": "[if(empty(parameters('jwtTenantId')), subscription().tenantId, parameters('jwtTenantId'))]"
+    "effectiveJwtTenantId": "[if(empty(parameters('jwtTenantId')), subscription().tenantId, parameters('jwtTenantId'))]",
+    "effectiveServiceBusNamespaceName": "[if(empty(parameters('serviceBusNamespaceName')), format('spaarke-servicebus-{0}', parameters('environmentName')), parameters('serviceBusNamespaceName'))]"
   },
   "resources": [
     {
@@ -393,7 +409,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "1891303817036034052"
+              "templateHash": "15519022507304554186"
             }
           },
           "parameters": {
@@ -481,7 +497,14 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the App Service managed identity (granted Key Vault Secrets User)"
+                "description": "Principal ID of the App Service managed identity (granted Key Vault Secrets User). HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep` and task 030 migrates every UAMI-consuming caller to `userAssignedIdentityPrincipalId` below. This param is retained for callers that still supply a legacy principal (interim per plan.md §3 — remove post-Phase F acceptance)."
+              }
+            },
+            "userAssignedIdentityPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Key Vault Secrets User (built-in role `4633458b-17de-408a-b874-0445c86b69e6`). Task 030 canonical target per ADR-028 (all outbound = DefaultAzureCredential over UAMI) + T5 structural fix (UAMI is stable across slot swaps). Empty default skips the assignment (caller-side wiring — see `customer.bicep` / `stacks/*.bicep`). Set principalType=ServicePrincipal on the emitted assignment."
               }
             },
             "adminPrincipalIds": {
@@ -571,6 +594,21 @@
               ]
             },
             {
+              "condition": "[not(empty(parameters('userAssignedIdentityPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), parameters('userAssignedIdentityPrincipalId'), variables('keyVaultSecretsUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultSecretsUserRoleId'))]",
+                "principalId": "[parameters('userAssignedIdentityPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
               "copy": {
                 "name": "adminRoleAssignments",
                 "count": "[length(parameters('adminPrincipalIds'))]"
@@ -599,29 +637,17 @@
                 "logs": [
                   {
                     "categoryGroup": "audit",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 90
-                    }
+                    "enabled": true
                   },
                   {
                     "categoryGroup": "allLogs",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ],
                 "metrics": [
                   {
                     "category": "AllMetrics",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ]
               },
@@ -1070,8 +1096,11 @@
           "keyVaultName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultName.value]"
           },
-          "serviceBusKeyVaultSecretName": {
-            "value": "[parameters('serviceBusKeyVaultSecretName')]"
+          "serviceBusNamespaceName": {
+            "value": "[variables('effectiveServiceBusNamespaceName')]"
+          },
+          "serviceBusQueueName": {
+            "value": "sprk-provisioning-jobs"
           },
           "dataverseClientSecretName": {
             "value": "[parameters('dataverseClientSecretName')]"
@@ -1090,7 +1119,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "3162801486435280577"
+              "templateHash": "8603298383239634648"
             }
           },
           "parameters": {
@@ -1122,7 +1151,7 @@
             "jwtAudience": {
               "type": "string",
               "metadata": {
-                "description": "AAD bearer audience for the L2 REST API - MUST equal api://spaarke-provisioning-controlplane-{env} per FR-20 acceptance."
+                "description": "AAD bearer audience for the L2 REST API - MUST equal api://spaarke.com/provisioning-controlplane-{env} per FR-20 acceptance (tenant-policy-forced verifier-domain form; DS-5 C5.2)."
               }
             },
             "jwtTenantId": {
@@ -1168,16 +1197,23 @@
                 "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings)."
               }
             },
-            "serviceBusKeyVaultSecretName": {
+            "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the KV secret holding the Service Bus connection string (ADR-036 reuse - no new SB created here)."
+                "description": "Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix -- MI-only send/receive, no connection string per ServiceBusModule.cs:53)."
+              }
+            },
+            "serviceBusQueueName": {
+              "type": "string",
+              "defaultValue": "sprk-provisioning-jobs",
+              "metadata": {
+                "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
               }
             },
             "dataverseClientSecretName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10."
+                "description": "Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path, this param + its appSetting are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule)."
               }
             },
             "appInsightsConnectionString": {
@@ -1244,20 +1280,24 @@
                       "value": "[parameters('aadLoginEndpoint')]"
                     },
                     {
-                      "name": "Cosmos__Endpoint",
+                      "name": "Cosmos__AccountEndpoint",
                       "value": "[parameters('cosmosAccountEndpoint')]"
                     },
                     {
-                      "name": "Cosmos__Database",
+                      "name": "Cosmos__DatabaseName",
                       "value": "[parameters('cosmosDatabaseName')]"
                     },
                     {
-                      "name": "Cosmos__RunsContainer",
+                      "name": "Cosmos__ContainerName",
                       "value": "[parameters('cosmosRunsContainerName')]"
                     },
                     {
-                      "name": "ServiceBus__ConnectionString",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('serviceBusKeyVaultSecretName'))]"
+                      "name": "ServiceBus__FullyQualifiedNamespace",
+                      "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
+                    },
+                    {
+                      "name": "ServiceBus__QueueName",
+                      "value": "[parameters('serviceBusQueueName')]"
                     },
                     {
                       "name": "Dataverse__ClientSecret",
@@ -1265,6 +1305,10 @@
                     },
                     {
                       "name": "AZURE_CLIENT_ID",
+                      "value": "[parameters('uamiClientId')]"
+                    },
+                    {
+                      "name": "ManagedIdentity__ClientId",
                       "value": "[parameters('uamiClientId')]"
                     },
                     {
@@ -1349,6 +1393,400 @@
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
       ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-worker-app-service",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "appServiceName": {
+            "value": "[variables('workerAppServiceName')]"
+          },
+          "appServicePlanId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-app-service-plan'), '2025-04-01').outputs.planId.value]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "userAssignedIdentityResourceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.id.value]"
+          },
+          "uamiClientId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.clientId.value]"
+          },
+          "cosmosAccountEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning'), '2025-04-01').outputs.accountEndpoint.value]"
+          },
+          "cosmosDatabaseName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning'), '2025-04-01').outputs.databaseName.value]"
+          },
+          "cosmosRunsContainerName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning'), '2025-04-01').outputs.containerName.value]"
+          },
+          "keyVaultName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultName.value]"
+          },
+          "keyVaultUri": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultUri.value]"
+          },
+          "serviceBusKeyVaultSecretName": {
+            "value": "[parameters('serviceBusKeyVaultSecretName')]"
+          },
+          "dataverseClientSecretName": {
+            "value": "[parameters('dataverseClientSecretName')]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "364096112967241423"
+            }
+          },
+          "parameters": {
+            "appServiceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the L2 control-plane Worker App Service (typically spaarke-provisioning-controlplane-worker-{env})."
+              }
+            },
+            "appServicePlanId": {
+              "type": "string",
+              "metadata": {
+                "description": "App Service Plan resource ID -- MUST be the SAME plan resource id .Api uses (DS-3 Section 3: $0 marginal cost, one plan hosts multiple apps). This module does NOT declare a new server-farm (App Service Plan) resource -- it only references an existing plan id via this parameter."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the App Service."
+              }
+            },
+            "userAssignedIdentityResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep). v1 ships on the SAME shared UAMI as .Api with the FULL grant set (Cosmos + SB Sender+Receiver + KV + AI Search + ARM + Graph + Path X Dataverse App User via task 111 script) -- DS-3 Section 3 notes the two-UAMI least-privilege split as the target shape, cheap to introduce later; not required for v1."
+              }
+            },
+            "uamiClientId": {
+              "type": "string",
+              "metadata": {
+                "description": "AZURE_CLIENT_ID pins DefaultAzureCredential to the bound UAMI (per ADR-028). Pass the UAMI clientId from uami.bicep outputs -- SAME value passed to the .Api module."
+              }
+            },
+            "cosmosAccountEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos DB account endpoint (from cosmos-provisioning.bicep outputs). Same Cosmos database as .Api -- the Worker reconciler + crash-recovery + all 20 handlers read/write ProvisioningRun docs here."
+              }
+            },
+            "cosmosDatabaseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos database name (spaarke-provisioning per task 024 spec)."
+              }
+            },
+            "cosmosRunsContainerName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos runs container name (runs per task 024 spec)."
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings + sitecontainer environmentVariables)."
+              }
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3)."
+              }
+            },
+            "serviceBusKeyVaultSecretName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the KV secret holding the Service Bus connection string (ADR-036 reuse -- no new SB created here)."
+              }
+            },
+            "dataverseClientSecretName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the KV secret holding the Dataverse S2S ClientSecret. Handlers H5/H6/H7/H10 (registry + solution-import + env-var writes) run in the WORKER post-split (task 100) -- this setting moved here from .Api, which no longer needs it (the .Api host has no handler DI; task 100 Program.cs header)."
+              }
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "metadata": {
+                "description": "App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note)."
+              }
+            },
+            "acrImageTag": {
+              "type": "string",
+              "defaultValue": "mcr.microsoft.com/appsvc/staticsite:latest",
+              "metadata": {
+                "description": "Container image reference for the DS-1b Exchange ApplicationAccessPolicy sidecar (task 114 built the Dockerfile; task 115 wires CI build+push to the platform ACR). Defaults to a public placeholder per this task POML escalation-trigger guidance -- REPLACE with the real ACR tag (e.g. {acrLoginServer}/sprk-provisioning-sidecar:{tag}) once task 115 lands; do not leave the placeholder in a live deploy."
+              }
+            },
+            "sidecarAuthType": {
+              "type": "string",
+              "defaultValue": "Anonymous",
+              "metadata": {
+                "description": "ACR authentication mode for the sitecontainer pull. Anonymous is correct ONLY for the public MCR placeholder default above. Switch to UserAssigned (with userManagedIdentityClientId = uamiClientId) once acrImageTag points at the platform ACR (task 115) -- the UAMI needs AcrPull RBAC on that registry, granted alongside task 110 and task 111 other RBAC grants."
+              }
+            },
+            "sidecarSharedSecretKvSecretName": {
+              "type": "string",
+              "defaultValue": "Sidecar-Shared-Secret",
+              "metadata": {
+                "description": "Name of the KV secret holding the per-boot shared secret the Worker site injects into the sidecar as SIDECAR_SHARED_SECRET (DS-1b Section 3 main-to-sidecar auth leg)."
+              }
+            },
+            "exchangeCertKvSecretName": {
+              "type": "string",
+              "defaultValue": "Exchange-Connect-Cert",
+              "metadata": {
+                "description": "Name of the KV secret holding the Exchange Online connect certificate (PFX) the sidecar fetches at call time via the App Service MSI endpoint. This is the SECRET NAME passed as EXCHANGE_CERT_SECRET_NAME -- not the certificate value itself (DS-1b Section 3 sidecar-to-Exchange auth leg)."
+              }
+            },
+            "exchangeConnectAppId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2023-01-01",
+              "name": "[parameters('appServiceName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "app,linux",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('userAssignedIdentityResourceId'))]": {}
+                }
+              },
+              "properties": {
+                "serverFarmId": "[parameters('appServicePlanId')]",
+                "httpsOnly": true,
+                "clientAffinityEnabled": false,
+                "siteConfig": {
+                  "linuxFxVersion": "DOTNETCORE|10.0",
+                  "alwaysOn": true,
+                  "http20Enabled": true,
+                  "minTlsVersion": "1.2",
+                  "ftpsState": "Disabled",
+                  "healthCheckPath": "/healthz",
+                  "appSettings": [
+                    {
+                      "name": "Cosmos__Endpoint",
+                      "value": "[parameters('cosmosAccountEndpoint')]"
+                    },
+                    {
+                      "name": "Cosmos__Database",
+                      "value": "[parameters('cosmosDatabaseName')]"
+                    },
+                    {
+                      "name": "Cosmos__RunsContainer",
+                      "value": "[parameters('cosmosRunsContainerName')]"
+                    },
+                    {
+                      "name": "ServiceBus__ConnectionString",
+                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('serviceBusKeyVaultSecretName'))]"
+                    },
+                    {
+                      "name": "Dataverse__ClientSecret",
+                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('dataverseClientSecretName'))]"
+                    },
+                    {
+                      "name": "AZURE_CLIENT_ID",
+                      "value": "[parameters('uamiClientId')]"
+                    },
+                    {
+                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                      "value": "[parameters('appInsightsConnectionString')]"
+                    },
+                    {
+                      "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+                      "value": "~3"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites/sitecontainers",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}/{1}', parameters('appServiceName'), 'exchange-policy-sidecar')]",
+              "properties": {
+                "image": "[parameters('acrImageTag')]",
+                "targetPort": "8091",
+                "isMain": false,
+                "authType": "[parameters('sidecarAuthType')]",
+                "environmentVariables": [
+                  {
+                    "name": "PLATFORM_KV_URI",
+                    "value": "[parameters('keyVaultUri')]"
+                  },
+                  {
+                    "name": "EXCHANGE_CERT_SECRET_NAME",
+                    "value": "[parameters('exchangeCertKvSecretName')]"
+                  },
+                  {
+                    "name": "EXCHANGE_CONNECT_APP_ID",
+                    "value": "[parameters('exchangeConnectAppId')]"
+                  },
+                  {
+                    "name": "SIDECAR_SHARED_SECRET",
+                    "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName'))]"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "appServiceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+            },
+            "appServiceName": {
+              "type": "string",
+              "value": "[parameters('appServiceName')]"
+            },
+            "appServiceDefaultHostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('appServiceName')), '2023-01-01').defaultHostName]"
+            },
+            "appServiceUrl": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('appServiceName')), '2023-01-01').defaultHostName)]"
+            },
+            "sidecarName": {
+              "type": "string",
+              "value": "exchange-policy-sidecar"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-app-service-plan')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-sb-queue",
+      "resourceGroup": "[parameters('serviceBusResourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "serviceBusNamespaceName": {
+            "value": "[variables('effectiveServiceBusNamespaceName')]"
+          },
+          "queueName": {
+            "value": "sprk-provisioning-jobs"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3371899416291360028"
+            }
+          },
+          "parameters": {
+            "serviceBusNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing fleet-scoped Service Bus namespace to attach the queue to. Not created by this module."
+              }
+            },
+            "queueName": {
+              "type": "string",
+              "defaultValue": "sprk-provisioning-jobs",
+              "metadata": {
+                "description": "Name of the queue. Defaults to the canonical fleet dispatch queue name (ServiceBusModule.cs DefaultQueueName)."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ServiceBus/namespaces/queues",
+              "apiVersion": "2022-10-01-preview",
+              "name": "[format('{0}/{1}', parameters('serviceBusNamespaceName'), parameters('queueName'))]",
+              "properties": {
+                "lockDuration": "PT5M",
+                "maxDeliveryCount": 10,
+                "deadLetteringOnMessageExpiration": true,
+                "requiresDuplicateDetection": true,
+                "duplicateDetectionHistoryTimeWindow": "PT1H",
+                "requiresSession": true
+              }
+            }
+          ],
+          "outputs": {
+            "namespaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]"
+            },
+            "namespaceName": {
+              "type": "string",
+              "value": "[parameters('serviceBusNamespaceName')]"
+            },
+            "queueId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('queueName'))]"
+            },
+            "queueName": {
+              "type": "string",
+              "value": "[parameters('queueName')]"
+            }
+          }
+        }
+      }
     }
   ],
   "outputs": {
@@ -1412,6 +1850,26 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-app-service-plan'), '2025-04-01').outputs.planId.value]"
     },
+    "workerAppServiceName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-worker-app-service'), '2025-04-01').outputs.appServiceName.value]"
+    },
+    "workerAppServiceId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-worker-app-service'), '2025-04-01').outputs.appServiceId.value]"
+    },
+    "workerAppServiceDefaultHostName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-worker-app-service'), '2025-04-01').outputs.appServiceDefaultHostName.value]"
+    },
+    "workerAppServiceUrl": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-worker-app-service'), '2025-04-01').outputs.appServiceUrl.value]"
+    },
+    "workerExchangeSidecarName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-worker-app-service'), '2025-04-01').outputs.sidecarName.value]"
+    },
     "jwtAudience": {
       "type": "string",
       "value": "[variables('jwtAudience')]"
@@ -1463,6 +1921,26 @@
     "logAnalyticsWorkspaceId": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.logAnalyticsId.value]"
+    },
+    "fleetServiceBusNamespaceId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-queue'), '2025-04-01').outputs.namespaceId.value]"
+    },
+    "fleetServiceBusNamespaceName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-queue'), '2025-04-01').outputs.namespaceName.value]"
+    },
+    "fleetServiceBusResourceGroupName": {
+      "type": "string",
+      "value": "[parameters('serviceBusResourceGroupName')]"
+    },
+    "provisioningJobsQueueId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-queue'), '2025-04-01').outputs.queueId.value]"
+    },
+    "provisioningJobsQueueName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-queue'), '2025-04-01').outputs.queueName.value]"
     }
   }
 }

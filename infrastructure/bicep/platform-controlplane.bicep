@@ -11,7 +11,8 @@
 //
 // SPEC REFERENCES (customer-provisioning-orchestration-r1)
 //   - spec.md FR-20:  L2 hosted on .NET 10 App Service in rg-spaarke-platform-{env};
-//                     audience api://spaarke-provisioning-controlplane-{env};
+//                     audience api://spaarke.com/provisioning-controlplane-{env}
+//                     (tenant-policy-forced verifier-domain form; DS-5 C5.2);
 //                     Operator/Reader app-roles.
 //   - spec.md § "New Components" row 6:  NEW platform-controlplane.bicep.
 //   - design.md §4.2 (v3):  App Service hosting (B2), REST + AAD (B1),
@@ -123,7 +124,7 @@ param appServicePlanSku string = 'P1v3'
 @maxValue(730)
 param logRetentionDays int = 180
 
-@description('Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace (per ADR-036 reuse - no new SB is created here). The App Service resolves this via @Microsoft.KeyVault reference at runtime.')
+@description('Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace. DS-5 C5.1 fix: the .Api App Service (modules/controlplane-app-service.bicep) no longer consumes this -- it now wires MI-only ServiceBus__FullyQualifiedNamespace + ServiceBus__QueueName (ServiceBusModule.cs:53 documents the connection string is IGNORED). Still consumed by the .Worker App Service (modules/controlplane-worker-app-service.bicep, task 101) pending the same key-rename fix there (follow-on to this task -- DS-5 C5.1 scoped only the .Api module; the .Worker module was added by task 101 after DS-5 was authored and carries the identical drift).')
 param serviceBusKeyVaultSecretName string = 'servicebus-connection-string'
 
 @description('Name of the fleet-scoped Service Bus namespace that hosts the sprk-provisioning-jobs queue (task 108 / DS-5 C5.4). Empty defaults to spaarke-servicebus-{environmentName} (the legacy-but-canonical name per AZURE-RESOURCE-NAMING-CONVENTION.md; verified live value for dev is spaarke-servicebus-dev). This stack does NOT create the namespace - it only declares the queue as its child via an `existing` reference.')
@@ -132,7 +133,7 @@ param serviceBusNamespaceName string = ''
 @description('Name of the resource group that hosts the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4). Defaults to SharePointEmbedded - the verified live dev value; this is a legacy pre-per-env-model resource group name, NOT the canonical rg-spaarke-{env} shape, so staging/prod deploys MUST override this parameter once the shared Service Bus resource group name for those environments is known.')
 param serviceBusResourceGroupName string = 'SharePointEmbedded'
 
-@description('Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings.')
+@description('Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path (CustomerRunGuardOptions.cs:24-25 already anticipates this), this param + its appSettings are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule).')
 param dataverseClientSecretName string = 'Dataverse-ClientSecret'
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
@@ -171,10 +172,13 @@ var controlPlaneUamiName = 'sprk-controlplane-${environmentName}-uami'
 // key off this name.
 var appServicePlanName = 'spaarke-controlplane-${environmentName}-plan'
 
-// App Service NAME must match the FR-20 audience shape - the resource name is
-// the deterministic default hostname; keeping it aligned with the audience
-// (api://spaarke-provisioning-controlplane-{env}) reduces operator cognitive
-// load + makes tenant-config sanity checks trivial.
+// App Service NAME mirrors the FR-20 audience's meaningful segment - the
+// resource name is the deterministic default hostname; keeping it aligned
+// with the audience's provisioning-controlplane-{env} segment (full audience
+// per DS-5 C5.2 is api://spaarke.com/provisioning-controlplane-{env} - the
+// spaarke.com/ prefix is the tenant-policy-forced verified-domain segment,
+// not part of the resource name) reduces operator cognitive load + makes
+// tenant-config sanity checks trivial.
 var appServiceName = 'spaarke-provisioning-controlplane-${environmentName}'
 
 // .Worker App Service NAME (task 101 / DS-3 Section 3 Option 2). No audience
@@ -183,9 +187,13 @@ var appServiceName = 'spaarke-provisioning-controlplane-${environmentName}'
 // .Api site on the SAME plan.
 var workerAppServiceName = 'spaarke-provisioning-controlplane-worker-${environmentName}'
 
-// FR-20 acceptance: audience MUST be api://spaarke-provisioning-controlplane-{env}.
-// The `api://` scheme is Azure AD's canonical audience URI form.
-var jwtAudience = 'api://spaarke-provisioning-controlplane-${environmentName}'
+// FR-20 acceptance: audience MUST be api://spaarke.com/provisioning-controlplane-{env}
+// (DS-5 C5.2) -- the tenant's AAD verified-domain policy forces the
+// `api://{verified-domain}/...` audience shape; the prior form (scheme +
+// resource segment only, no verified-domain segment) does not satisfy that
+// policy. This matches the live L2 app-reg's identifier URI and the
+// already-corrected SKILL.md.
+var jwtAudience = 'api://spaarke.com/provisioning-controlplane-${environmentName}'
 
 // Cosmos DB account name. Convention: cosmos-{purpose}-{env}. Cosmos account
 // names are globally unique + max 44 chars + lowercase alphanumeric+hyphens;
@@ -346,7 +354,10 @@ module appService 'modules/controlplane-app-service.bicep' = {
     cosmosDatabaseName: cosmos.outputs.databaseName
     cosmosRunsContainerName: cosmos.outputs.containerName
     keyVaultName: keyVault.outputs.keyVaultName
-    serviceBusKeyVaultSecretName: serviceBusKeyVaultSecretName
+    // DS-5 C5.1: MI-only FQNS + queue name, NOT the KV-ref connection
+    // string (see serviceBusKeyVaultSecretName param description above).
+    serviceBusNamespaceName: effectiveServiceBusNamespaceName
+    serviceBusQueueName: 'sprk-provisioning-jobs'
     dataverseClientSecretName: dataverseClientSecretName
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags

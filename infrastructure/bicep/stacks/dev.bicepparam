@@ -8,8 +8,10 @@ param environment = 'dev'
 param location = 'westus2'
 param dataverseUrl = 'https://spaarkedev1.crm.dynamics.com'
 
-// Dev: B1 is sufficient for 1-3 developers
-param appServiceSku = 'B1'
+// Dev: P1v3 (matches live dev App Service SKU; slot availability requires
+// Standard-tier-or-above -- B1 does not support deployment slots).
+// Per auth-v4 §8 item 4 / DS-5 IaC-alignment sweep (task 109).
+param appServiceSku = 'P1v3'
 
 // Dev: basic search is sufficient for low-volume testing
 param aiSearchSku = 'basic'

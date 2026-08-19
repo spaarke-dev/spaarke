@@ -10,7 +10,8 @@
 //   is BFF-oriented + still uses SystemAssigned; task 029 refactor deferred).
 //
 // SPEC REFERENCES (customer-provisioning-orchestration-r1)
-//   - spec.md FR-20:  audience api://spaarke-provisioning-controlplane-{env};
+//   - spec.md FR-20:  audience api://spaarke.com/provisioning-controlplane-{env}
+//                     (tenant-policy-forced verifier-domain form; DS-5 C5.2);
 //                     .NET 10 App Service; JWT bearer.
 //   - design.md §4.2 B2:  App Service parity with BFF.
 //   - design.md T1/T5:  UAMI binds BOTH slots; keyVaultReferenceIdentity PATCH
@@ -42,7 +43,7 @@ param location string = resourceGroup().location
 @description('Resource ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep). Bound to BOTH prod + staging slots (T1/T5 structural fix).')
 param userAssignedIdentityResourceId string
 
-@description('AAD bearer audience for the L2 REST API - MUST equal api://spaarke-provisioning-controlplane-{env} per FR-20 acceptance.')
+@description('AAD bearer audience for the L2 REST API - MUST equal api://spaarke.com/provisioning-controlplane-{env} per FR-20 acceptance (tenant-policy-forced verifier-domain form; DS-5 C5.2).')
 param jwtAudience string
 
 @description('AAD tenant ID for JWT bearer authority validation. Single-issuer per spec.md §4.2.')
@@ -66,10 +67,13 @@ param cosmosRunsContainerName string
 @description('Key Vault name (for @Microsoft.KeyVault references in appSettings).')
 param keyVaultName string
 
-@description('Name of the KV secret holding the Service Bus connection string (ADR-036 reuse - no new SB created here).')
-param serviceBusKeyVaultSecretName string
+@description('Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix -- MI-only send/receive, no connection string per ServiceBusModule.cs:53).')
+param serviceBusNamespaceName string
 
-@description('Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10.')
+@description('Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108.')
+param serviceBusQueueName string = 'sprk-provisioning-jobs'
+
+@description('Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path, this param + its appSetting are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule).')
 param dataverseClientSecretName string
 
 @description('App Insights connection string (from monitoring.bicep outputs).')
@@ -117,22 +121,33 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'AzureAd__Instance', value: aadLoginEndpoint }
 
         // ---------------------------------------------------------------
-        // Cosmos (task 024 wiring - endpoint only; MI resolves credentials)
+        // Cosmos (task 024 wiring - endpoint only; MI resolves credentials).
+        // Keys renamed per DS-5 C5.1 to match CosmosModule.cs:98-110
+        // (Cosmos:AccountEndpoint / :DatabaseName / :ContainerName) - the
+        // OLD keys (Cosmos__Endpoint/__Database/__RunsContainer) were never
+        // read by the code; the live dev stamp only worked via manual
+        // app-setting aliases layered on top of this wrong Bicep output.
         // ---------------------------------------------------------------
-        { name: 'Cosmos__Endpoint', value: cosmosAccountEndpoint }
-        { name: 'Cosmos__Database', value: cosmosDatabaseName }
-        { name: 'Cosmos__RunsContainer', value: cosmosRunsContainerName }
+        { name: 'Cosmos__AccountEndpoint', value: cosmosAccountEndpoint }
+        { name: 'Cosmos__DatabaseName', value: cosmosDatabaseName }
+        { name: 'Cosmos__ContainerName', value: cosmosRunsContainerName }
 
         // ---------------------------------------------------------------
-        // Service Bus (ADR-036 reuse - KV reference; NS not created here)
+        // Service Bus (DS-5 C5.1 fix): MI-only FQNS + queue name, NOT a
+        // connection string. ServiceBusModule.cs:53 documents that any
+        // connection-string setting is IGNORED -- the code always resolves
+        // ServiceBus:FullyQualifiedNamespace + uses the bound UAMI's token
+        // credential (ADR-028). The old KV-ref connection-string app-setting
+        // this replaces (removed) was dead code from this App Service's
+        // perspective -- the code never read it.
         // ---------------------------------------------------------------
-        {
-          name: 'ServiceBus__ConnectionString'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${serviceBusKeyVaultSecretName})'
-        }
+        { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
+        { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
 
         // ---------------------------------------------------------------
-        // Dataverse S2S (H5/H6/H10 registry writes)
+        // Dataverse S2S (H5/H6/H10 registry writes). DEPRECATED pending
+        // C1.4 (DS-5 C5.3) -- see dataverseClientSecretName param
+        // description. Kept as dummy KV binding until C1.4 lands.
         // ---------------------------------------------------------------
         {
           name: 'Dataverse__ClientSecret'
@@ -140,9 +155,17 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
 
         // ---------------------------------------------------------------
-        // Managed-identity discovery (pin DefaultAzureCredential to bound UAMI)
+        // Managed-identity discovery (pin DefaultAzureCredential to bound
+        // UAMI). AZURE_CLIENT_ID is the Azure-native env var
+        // DefaultAzureCredential honors natively; ManagedIdentity__ClientId
+        // is ADDED per DS-5 C5.1 because CosmosModule.cs:125 and
+        // ServiceBusModule.cs:157 read the app's own ManagedIdentity:ClientId
+        // config key (not the Azure env-var convention) to pin their
+        // per-module TokenCredential to the bound UAMI. Both kept
+        // (belt-and-braces; harmless duplication).
         // ---------------------------------------------------------------
         { name: 'AZURE_CLIENT_ID', value: uamiClientId }
+        { name: 'ManagedIdentity__ClientId', value: uamiClientId }
 
         // ---------------------------------------------------------------
         // App Insights (connection string is not a secret per Azure guidance)
