@@ -147,8 +147,26 @@ that supplies the confidential credential (and cached MSAL clients) to every BFF
   (`Program.cs:44-47`) — the existing seam, already documented as the extension point by
   `ContentSafetyTokenProvider.cs:15-22`.
 - **Reuses** the process-wide static CCA cache pattern already proven in `DataverseUserClient.cs:55-56,91`.
-- Selection is **config-driven and ordered** (MI-FIC → KV certificate → dev secret), per E4 — the same mechanism
-  serves production, the fallback option, and local dev.
+- Selection is **config-driven and ordered** (MI-FIC → KV certificate → dev secret) — the same mechanism serves
+  production, the fallback option, and local dev. **This must be built, not inherited** (E4′).
+
+**Seam shape — corrected 2026-08-19 (owner decision).** "One provider that every site injects" is not literally
+implementable as first drafted: **2 of the sites live in `Spaarke.Dataverse`, which cannot reference the BFF**.
+The layer graph is CI-enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs:43` (FR-14):
+
+```
+Spaarke.Dataverse   ← BASE, references no other Spaarke project
+Spaarke.Core        → Spaarke.Dataverse        (Spaarke.Core.csproj:32)
+Sprk.Bff.Api        → both
+```
+
+Placing the provider in `Spaarke.Core` would be **circular and a CI failure**. The adopted seam is therefore
+**dependency inversion**: a one-method `IClientAssertionProvider` is **declared in `Spaarke.Dataverse`**, while
+the implementation and the `Microsoft.Identity.Web.Certificateless` package live **in the BFF only**. This mirrors
+a pattern already in the very constructor being changed — `DataverseAccessDataSource.cs:32` takes
+`TokenCredential? credential = null`, supplied by `Program.cs:46-48` — so the nullable default keeps all 46 test
+fixtures compiling and behaving as today. A dedicated new project below `Spaarke.Dataverse` was rejected: it fails
+the §11 "can you extend instead?" test and would drag Identity.Web into the base shared layer.
 
 **Component justification (root CLAUDE.md §11)**
 
@@ -176,10 +194,19 @@ Both are pre-existing defects worth fixing regardless of the credential decision
 
 ### 5.3 Migration surface
 
-Seven BFF-identity confidential clients move to the provider: `GraphClientFactory` (OBO),
-`DataverseAccessDataSource` (OBO + app-only), `DataverseUserClient` (OBO), `AgentTokenService` (OBO),
-`ReportingEmbedService` + `ReportingProfileManager` (Power BI app-only), and the residual
-`ClientSecretCredential` fallbacks in `DataverseServiceClientImpl` / `DataverseWebApiService`.
+**Six** BFF-identity confidential clients move to the provider: `GraphClientFactory` (OBO),
+`DataverseAccessDataSource` (OBO + app-only), `DataverseUserClient` (OBO), `AgentTokenService` (OBO), and the
+residual `ClientSecretCredential` fallbacks in `DataverseServiceClientImpl` / `DataverseWebApiService` /
+`DataverseWebApiClient`.
+
+**Power BI is no longer on this list — owner decision 2026-08-19.** `ReportingEmbedService` +
+`ReportingProfileManager` adopt Microsoft's documented **UAMI-as-principal** model instead of MI-FIC on the
+existing service principal (*"we recommend that you use a user-assigned managed identity"*). That replaces the
+service principal outright rather than swapping its credential, so Power BI does **not** consume the provider
+seam and becomes its own workstream: tenant setting + workspace grants + rework of both services + removal of
+`PowerBi:ClientSecret`. ⚠ **Open**: whether Power BI **service principal profiles** (used by
+`ReportingProfileManager`) are supported under a managed-identity principal is unverified — see `spec.md`
+Unresolved Questions.
 
 `SpeAdminTokenProvider` and `SpeAdminGraphService` are **out of scope** — they authenticate per-customer *owning
 applications*, not the BFF identity (ADR-028 E-1). `CiamGraphClientFactory` already meets the bar.
@@ -249,8 +276,12 @@ seam), not to DI-registration tests.
 
 ## 6. Rollout and rollback
 
-Staged, per environment, **slot-based** — dev is P1v3 so slots are available (E9), though none exist yet and must
-be created.
+**Dev only** (owner decision 2026-08-19). `spaarke-bff-prod` is **Stopped** and prod/demo are decommissioned per
+the r3 handoff, so dev is the sole live target and §6.1 runs once. Artifacts (FIC provisioning, config, slot
+procedure, runbook) stay environment-parameterised so prod adoption is a follow-on if it is revived — but prod is
+**not executed** here. Note prod's plan is B1 (no slots), so reviving it needs a plan upgrade or a non-slot path.
+
+Staged and **slot-based** — dev is P1v3 so slots are available (E9), though none exist yet and must be created.
 
 | Phase | Content | Gate |
 |---|---|---|
