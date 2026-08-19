@@ -1,6 +1,14 @@
 // -----------------------------------------------------------------------------
 // AzCliAppServiceIdentityPatcher.cs
 //
+// RETIRED (task 125, Wave G-2, 2026-08-19): superseded by
+// <see cref="ArmAppServiceIdentityPatcher"/> (Azure.ResourceManager.AppService
+// SDK port). No longer registered in Worker/Program.cs's
+// IAppServiceIdentityPatcher DI slot. Retained on disk (NOT deleted); see
+// ProvisionCustomerScriptBicepDeployRunner.cs's retirement banner for the
+// full rationale.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IAppServiceIdentityPatcher"/> — shells out to
 // `az webapp update --set keyVaultReferenceIdentity=<UAMI-RID>` and
 // `az webapp deployment slot update --slot <staging> --set

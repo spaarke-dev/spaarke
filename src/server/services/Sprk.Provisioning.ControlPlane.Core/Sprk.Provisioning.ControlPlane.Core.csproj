@@ -147,6 +147,20 @@
          by CosmosModule — no second credential built). -->
     <PackageReference Include="Azure.ResourceManager" Version="1.14.0" />
     <PackageReference Include="Azure.ResourceManager.ManagedServices" Version="1.1.2" />
+
+    <!-- Azure.ResourceManager.Authorization — task 125 (Wave G-2) SDK port of
+         H4's T5 interim mitigation (ArmSlotIdentityRoleGranter, replacing the
+         retired AzCliSlotIdentityRoleGranter's `az role assignment create`
+         shell-out). Gives RoleAssignmentCollection.CreateOrUpdateAsync for
+         the KV Secrets User grant against a slot's System-Assigned MI
+         principal. Version 1.1.4 verified to resolve cleanly alongside this
+         project's existing Azure.ResourceManager 1.14.0 / Azure.ResourceManager
+         .AppService 1.5.0 pins (scratch-project build, zero NU1605 warnings)
+         BEFORE adding it here. DefaultAzureCredential pinned to the L2 UAMI
+         per ADR-028 MI-outbound (reuses the shared TokenCredential singleton
+         via a probe-local ArmClient — no second credential chain, parity
+         with the other Wave-G-2 ARM collaborators). -->
+    <PackageReference Include="Azure.ResourceManager.Authorization" Version="1.1.4" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
 
     <!-- Azure.Search.Documents — task 124 (Wave G-2) SDK port of H2b's Model-2

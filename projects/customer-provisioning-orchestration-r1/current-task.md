@@ -1,9 +1,14 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Phase C'' Wave G-1 build 100% COMPLETE + pushed; ready for live ceremony OR Wave G-2 dispatch)
+> **Last Updated**: 2026-08-19 (Batch G-2C task 125 H4 SDK port COMPLETE + pushed; task 126 H4 real-values next, SEQUENTIAL)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` — final commit `89f2d60fa`, in sync with `origin/work/customer-provisioning-orchestration-r1`
+> **Branch**: `work/customer-provisioning-orchestration-r1` — in sync with `origin/work/customer-provisioning-orchestration-r1` (see git log for latest commit)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-2..G-7 remain)
+
+## Batch G-2C progress (2026-08-19)
+
+- **Task 125 (H4 SDK port) ✅ COMPLETE**: `SecretClientKvWriter` / `ArmAppServiceIdentityPatcher` / `ArmSlotIdentityRoleGranter` replace the 3 retired AzCli* collaborators. T1 both-slots PATCH unconditional (completeness-tested). T1 VERIFY reuses task 123's `ArmKeyVaultRefProbe` unmodified. T5 idempotency redesigned (deterministic role-assignment name). New `Azure.ResourceManager.Authorization` 1.1.4 package. FR-39 pluggability satisfied (no BFF-API-ClientSecret special-casing — test-verified). 16 new tests; L2 suite 867 → 883, zero regressions. Zero code-review/adr-check findings. Full detail in the POML's `<notes>` COMPLETION NOTES block.
+- **Task 126 (H4 real-values correctness gate) — NEXT, SEQUENTIAL**: replaces `ResolveValueForEntry`'s literal `{name}-interim-placeholder-{customerId}` (left INTACT by task 125, as directed) with real secret generation. Both tasks touch the same H4 handler + KV writer file family, so no parallelism.
 
 ---
 

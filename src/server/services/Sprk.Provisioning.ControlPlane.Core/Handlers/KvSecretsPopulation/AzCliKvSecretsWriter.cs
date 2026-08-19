@@ -1,6 +1,14 @@
 // -----------------------------------------------------------------------------
 // AzCliKvSecretsWriter.cs
 //
+// RETIRED (task 125, Wave G-2, 2026-08-19): superseded by
+// <see cref="SecretClientKvWriter"/> (Azure.Security.KeyVault.Secrets SDK
+// port). No longer registered in Worker/Program.cs's IKvSecretsWriter DI
+// slot. Retained on disk (NOT deleted); see
+// ProvisionCustomerScriptBicepDeployRunner.cs's retirement banner for the
+// full rationale.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IKvSecretsWriter"/> — shells out to
 // `az keyvault secret set/show/delete` under the operator's `az` auth chain
 // (DefaultAzureCredential inside az CLI via `az login`). Parity with H2a's

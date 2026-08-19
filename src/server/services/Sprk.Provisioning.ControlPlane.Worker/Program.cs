@@ -353,31 +353,75 @@ builder.Services.AddHttpClient(DataverseWebApiHealthProbe.HttpClientName);
 builder.Services.AddScoped<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
 builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 
-// Task 047: H4 KV secrets-population handler + FOUR collaborator seams
-// (IKvSecretManifest = interim StaticKvSecretManifest pending Phase H
-// task 084's canonical secret-catalog manifest generator; IKvSecretsWriter =
-// az CLI shell-out to `az keyvault secret set/show/delete`;
-// IAppServiceIdentityPatcher = az CLI shell-out to `az webapp update --set
-// keyVaultReferenceIdentity=<UAMI-RID>` on BOTH slots — T1 trap owner;
-// ISlotIdentityRoleGranter = az CLI shell-out to `az role assignment create`
-// against slot System-Assigned MIs — T5 interim trap owner). H4 also REUSES
-// IArmKeyVaultRefProbe from H2a (task 044) for T1 post-condition verify —
+// Task 047 / task 125: H4 KV secrets-population handler + FOUR collaborator
+// seams. Task 125 (Wave G-2, Option D hybrid) replaced the three shell-out
+// collaborators (AzCliKvSecretsWriter / AzCliAppServiceIdentityPatcher /
+// AzCliSlotIdentityRoleGranter — all RETIRED, kept on disk unregistered per
+// the retirement banners in their file headers) with pure Azure SDK ports:
+// SecretClientKvWriter (Azure.Security.KeyVault.Secrets.SecretClient —
+// SetSecretAsync/GetSecretAsync/StartDeleteSecretAsync; the "az account show"
+// prerequisite probe becomes ArmClient.GetDefaultSubscriptionAsync()),
+// ArmAppServiceIdentityPatcher (Azure.ResourceManager.AppService —
+// WebSiteResource/WebSiteSlotResource.UpdateAsync(SitePatchInfo) on BOTH
+// slots — T1 trap owner), and ArmSlotIdentityRoleGranter
+// (Azure.ResourceManager.Authorization — RoleAssignmentCollection
+// .CreateOrUpdateAsync against slot System-Assigned MIs — T5 interim trap
+// owner). IKvSecretManifest = interim StaticKvSecretManifest pending Phase H
+// task 084's canonical secret-catalog manifest generator (UNCHANGED by task
+// 125 — manifest reading is a separate seam from KV writing). H4 also REUSES
+// IArmKeyVaultRefProbe from H2a (task 044/123) for T1 post-condition verify —
 // single source of truth for the T1 trap. All registrations UNCONDITIONAL
 // per ADR-032 — no feature-gate branches. The T5 granter's
 // NoSlotSystemAssignedIdentity outcome is a domain SUCCESS (post-Phase-C
 // UAMI-only steady state), NOT a null-object kill-switch.
+//
+// ArmClient instances are constructed via factory lambdas that reuse the
+// shared UAMI-pinned TokenCredential singleton already registered by
+// AddCosmosModule (ADR-028 MI-outbound) — NO shared ArmClient DI singleton
+// registration, parity with task 121/123's registration-comment precedent.
+// SecretClientKvWriter additionally takes the raw TokenCredential (SecretClient
+// is constructed per-vault-per-call, matching KeyVaultCertBootstrapProbe's
+// posture from task 120).
 //
 // spec.md MUST rule (BINDING pre-check per r3 handoff): H4
 // BindingNeverDeleteSecrets = { Dataverse-ClientSecret, BFF-API-ClientSecret };
 // handler refuses any manifest with a Delete op on those two names + fails
 // QuarantineRequired BEFORE any external write. Full ADR-tension citations
 // preserved in H4KvSecretsPopulationHandler.cs file header.
+//
+// FR-39 pluggability (auth-v4 MI-FIC coordination, spec.md FR-39): none of
+// the three new collaborators special-case `BFF-API-ClientSecret` by name —
+// every manifest entry (including that one) flows through the SAME generic
+// Upsert/Delete/rotation-safe path, so the writer stays agnostic to whichever
+// credential-creation path (secret vs FIC) produced the value it is asked to
+// persist. Task 126 (H4 real-values correctness gate) owns the
+// value-provenance branching, not this registration.
 builder.Services.Configure<KvSecretsPopulationOptions>(
     builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
 builder.Services.AddSingleton<IKvSecretManifest, StaticKvSecretManifest>();
-builder.Services.AddSingleton<IKvSecretsWriter, AzCliKvSecretsWriter>();
-builder.Services.AddSingleton<IAppServiceIdentityPatcher, AzCliAppServiceIdentityPatcher>();
-builder.Services.AddSingleton<ISlotIdentityRoleGranter, AzCliSlotIdentityRoleGranter>();
+builder.Services.AddSingleton<IKvSecretsWriter>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<KvSecretsPopulationOptions>>();
+    var logger = sp.GetRequiredService<ILogger<SecretClientKvWriter>>();
+    return new SecretClientKvWriter(credential, armClient, options, logger);
+});
+builder.Services.AddSingleton<IAppServiceIdentityPatcher>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<KvSecretsPopulationOptions>>();
+    var logger = sp.GetRequiredService<ILogger<ArmAppServiceIdentityPatcher>>();
+    return new ArmAppServiceIdentityPatcher(armClient, options, logger);
+});
+builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmSlotIdentityRoleGranter>>();
+    return new ArmSlotIdentityRoleGranter(armClient, logger);
+});
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
 // Task 070: H12a AI seed chain handler + two collaborator seams
