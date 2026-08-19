@@ -95,7 +95,7 @@ Owner call at session start.
 1. Peek queue: `az servicebus queue show -n sprk-provisioning-jobs --namespace-name spaarke-servicebus-dev -g SharePointEmbedded --query "{active:countDetails.activeMessageCount,dlq:countDetails.deadLetterMessageCount}"`
 2. Task 108 verified 0/0 on 2026-08-19. If non-zero when you run, drain first per runbook §3.
 3. Delete: `az servicebus queue delete -n sprk-provisioning-jobs --namespace-name spaarke-servicebus-dev -g SharePointEmbedded`
-4. Recreate via Bicep: `az deployment group create -g rg-spaarke-platform-dev --template-file infrastructure/bicep/platform-controlplane.bicep --parameters infrastructure/bicep/stacks/dev.bicepparam`
+4. Recreate via Bicep (**note**: `platform-controlplane.bicep` has `targetScope='subscription'`, so use `az deployment sub create`, NOT `group create`; use the new `parameters/platform-controlplane-dev.bicepparam` file created 2026-08-19 fix-at-discovery — NOT `stacks/dev.bicepparam` which targets `model2-full.bicep`): `az deployment sub create --location westus2 --template-file infrastructure/bicep/platform-controlplane.bicep --parameters infrastructure/bicep/parameters/platform-controlplane-dev.bicepparam`
 5. Verify: `az servicebus queue show ... --query "{sess:requiresSession,dup:requiresDuplicateDetection}"` → both `true`
 6. Flip TASK-INDEX row 108 🟡 → ✅
 
