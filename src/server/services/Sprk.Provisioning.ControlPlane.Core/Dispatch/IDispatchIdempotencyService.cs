@@ -28,25 +28,25 @@
 //   cache availability -- matches BFF <c>IdempotencyService.cs:43,96</c>
 //   fail-open convention.
 //
-// PLACEHOLDER PENDING TASK 105:
-//   Wave G-1 ships <see cref="NoOpDispatchIdempotencyService"/> (permissive
-//   default -- IsProcessed=false, TryAcquireLock=true always) as the DI-
-//   registered implementation. Task 105 replaces the registration with the
-//   real Redis-backed <c>DispatchIdempotencyService</c> that consumes
-//   <c>IDistributedCache</c> transitively from the
-//   <c>Microsoft.Extensions.Caching.StackExchangeRedis</c> package this
-//   task adds to <c>Sprk.Provisioning.ControlPlane.Core.csproj</c>. The
-//   dispatcher's dispatch flow is UNCHANGED across that swap -- only the
-//   registration line in <see cref="DispatchModule.AddDispatchModule"/>
-//   moves from <see cref="NoOpDispatchIdempotencyService"/> to the Redis
-//   impl.
+// REDIS IMPL LANDED (task 105):
+//   <see cref="DispatchModule.AddDispatchModule"/> registers the real
+//   Redis-backed <c>DispatchIdempotencyService</c> that consumes
+//   <c>IDistributedCache</c> (Redis via <c>Redis:ConnectionString</c>, or an
+//   in-memory fallback when unset) transitively from the
+//   <c>Microsoft.Extensions.Caching.StackExchangeRedis</c> package task 102
+//   added to <c>Sprk.Provisioning.ControlPlane.Core.csproj</c>. The
+//   dispatcher's dispatch flow is UNCHANGED by the swap.
+//   <see cref="NoOpDispatchIdempotencyService"/> remains in the codebase as
+//   a permissive test double (see its own file header "NOT DEAD CODE AFTER
+//   SWAP" section) -- it is no longer the DI-registered default.
 //
-//   Under the no-op default, Level-2 is effectively OFF; L1 + L3 backstop
-//   idempotency. This is a deliberate degraded state that matches the
-//   Wave-C4 handler shipping posture ("Level 2 gate is currently a no-op
-//   for this project's Wave-C4 handler set" -- see
-//   IProvisioningHandler.cs:38-40 preamble). Task 105 restores the full
-//   3-level guarantee before Phase F E2E acceptance.
+//   Deployments where the per-env Redis connection string has not yet been
+//   wired into App Service config fall back to an in-memory cache (Level 2
+//   degrades to same-instance-only); L1 + L3 backstop idempotency in that
+//   state, matching the Wave-C4 handler shipping posture ("Level 2 gate is
+//   currently a no-op for this project's Wave-C4 handler set" -- see
+//   IProvisioningHandler.cs:38-40 preamble) until an operator sets the
+//   connection string.
 //
 // DESIGN REF:
 //   - design-study-ds2-dispatcher-design.md §4 (three-level idempotency

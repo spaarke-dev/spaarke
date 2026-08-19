@@ -3,8 +3,8 @@
   <metadata>
     <title>Dispatcher decision + idempotency test suite (DispatchCoreAsync table-driven, DispatchIdempotencyService, envelope round-trip)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING task per root CLAUDE.md §8 override table -- unconditional FULL (code-review + adr-check at Step 9.5) regardless of default STANDARD for new-file-only tasks.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,4 +95,33 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-08-19. DispatchIdempotencyService.cs authored (Redis-backed via IDistributedCache,
+    fail-open per DS-2 §4-L2, key format + TTL contract verbatim). DispatchModule.AddDispatchModule
+    swapped from NoOpDispatchIdempotencyService to the real impl.
+
+    Self-review (code-review + adr-check skills, Step 9.5) found + fixed 2 Critical ADR-038 violations
+    in the first draft: (1) B4 banned constructor null-check tests -- removed; (2) B8 banned
+    private-method/private-field reflection tests (HandlerEnvelopeRoundTripTests reflecting
+    ServiceBusHandlerEnqueuer.BodySerializerOptions / ProvisioningHandlerDispatcher's
+    BodyDeserializerOptions + TryDeserializeEnvelope) -- rewrote to test HandlerEnvelope's own public
+    JSON contract instead; DS-2 §6.1 table row 1 ("bad JSON") is consequently NOT unit-tested at this
+    layer (documented rationale in DispatchCoreDecisionTests.cs header) -- the class still exceeds the
+    >=11 acceptance criterion via 11 real DispatchCoreAsync-exercised test methods (13 executed cases
+    incl. Theory expansion) with zero reflection into private members.
+
+    adr-check pass also surfaced a genuine design gap (not just a compliance nit): the original
+    DispatchModule Redis-fallback silently degraded to same-instance-only in-memory cache in EVERY
+    environment, including deployed multi-instance ones -- itself a silent-fail trap of the exact
+    class this project exists to eliminate. Fixed by adding an IHostEnvironment parameter and gating
+    the fallback to Development/Testing only (mirrors BFF CacheModule's isLocalLike carve-out);
+    throws InvalidOperationException at startup in any other environment. AddDispatchModule's public
+    signature changed (added IHostEnvironment param); Worker/Program.cs call site updated; new
+    DispatchModuleTests.cs added to cover the gate.
+
+    Final state: 787/787 L2 tests pass (0 regressions). Redis service registration confirmed via
+    DispatchModuleTests.AddDispatchModule_RegistersIDispatchIdempotencyService_AsDispatchIdempotencyService.
+    All 4 task-102 invariant tests still pass unmodified.
+  </notes>
 </task>

@@ -561,7 +561,7 @@ builder.Services.AddRollbackModule();
 //     state finding of the 2026-08-18 Fable gap analysis).
 //   Owner sign-off (DS-2 §7.1 + DS-2b §9): session-serialized execution
 //     adopted as designed.
-builder.Services.AddDispatchModule(builder.Configuration);
+builder.Services.AddDispatchModule(builder.Configuration, builder.Environment);
 builder.Services.AddHostedService<ProvisioningHandlerDispatcher>();
 
 var app = builder.Build();

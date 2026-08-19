@@ -2,8 +2,10 @@
 // NoOpDispatchIdempotencyService.cs
 //
 // L2 CONTROL-PLANE placeholder Level-2 idempotency service (task 102, Phase C''
-// Wave G-1). REPLACED by task 105's Redis-backed DispatchIdempotencyService in
-// the same wave.
+// Wave G-1). REPLACED as the DI-registered default by task 105's Redis-backed
+// DispatchIdempotencyService (see DispatchModule.AddDispatchModule) -- this
+// class is RETAINED (not dead code) as a permissive test double; see the
+// "NOT DEAD CODE AFTER SWAP" section below.
 //
 // PURPOSE:
 //   Ships the DispatchModule default so the dispatcher (task 102) can boot
@@ -24,14 +26,14 @@
 //   key) do the idempotency work. This is the same guarantee level the
 //   Wave-C4 handler suite already expects.
 //
-// SWAP-OUT PATH (task 105):
-//   DispatchModule.AddDispatchModule() default registration line changes
-//   from:
-//     services.AddSingleton<IDispatchIdempotencyService, NoOpDispatchIdempotencyService>();
-//   to:
-//     services.AddSingleton<IDispatchIdempotencyService, DispatchIdempotencyService>();
-//   plus the Redis:ConnectionString app-setting binding. The dispatcher's
-//   consumption of IDispatchIdempotencyService is UNCHANGED.
+// SWAP-OUT PATH (task 105 -- LANDED):
+//   DispatchModule.AddDispatchModule()'s default registration now reads:
+//     services.TryAddSingleton<IDispatchIdempotencyService, DispatchIdempotencyService>();
+//   with the Redis:ConnectionString (or ConnectionStrings:Redis) app-setting
+//   binding IDistributedCache alongside it (falls back to
+//   AddDistributedMemoryCache() when unset -- see DispatchModule's file
+//   header). The dispatcher's consumption of IDispatchIdempotencyService is
+//   UNCHANGED.
 //
 // NOT DEAD CODE AFTER SWAP:
 //   This class remains useful for unit tests where a table-driven
