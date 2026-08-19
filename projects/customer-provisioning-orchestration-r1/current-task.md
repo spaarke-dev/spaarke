@@ -1,27 +1,38 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Batch G-2C task 125 H4 SDK port COMPLETE + pushed; task 126 H4 real-values next, SEQUENTIAL)
+> **Last Updated**: 2026-08-19 (Wave G-2 100% COMPLETE + pushed; TWO customer.bicep gaps surfaced needing owner decision before Wave G-3 dispatch)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` — in sync with `origin/work/customer-provisioning-orchestration-r1` (see git log for latest commit)
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-2..G-7 remain)
-
-## Batch G-2C progress (2026-08-19)
-
-- **Task 125 (H4 SDK port) ✅ COMPLETE**: `SecretClientKvWriter` / `ArmAppServiceIdentityPatcher` / `ArmSlotIdentityRoleGranter` replace the 3 retired AzCli* collaborators. T1 both-slots PATCH unconditional (completeness-tested). T1 VERIFY reuses task 123's `ArmKeyVaultRefProbe` unmodified. T5 idempotency redesigned (deterministic role-assignment name). New `Azure.ResourceManager.Authorization` 1.1.4 package. FR-39 pluggability satisfied (no BFF-API-ClientSecret special-casing — test-verified). 16 new tests; L2 suite 867 → 883, zero regressions. Zero code-review/adr-check findings. Full detail in the POML's `<notes>` COMPLETION NOTES block.
-- **Task 126 (H4 real-values correctness gate) — NEXT, SEQUENTIAL**: replaces `ResolveValueForEntry`'s literal `{name}-interim-placeholder-{customerId}` (left INTACT by task 125, as directed) with real secret generation. Both tasks touch the same H4 handler + KV writer file family, so no parallelism.
-
----
+> **Branch**: `work/customer-provisioning-orchestration-r1` — final commit `3eae3e799`, in sync with `origin/work/customer-provisioning-orchestration-r1`
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + two new customer.bicep authoring tasks needed)
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Phase** | Phase C'' — Execution-Engine Build (delivers r1's stated goal: E2E provisioning per FR-18 / SC #5) |
-| **Wave G-1 status** | ✅ 100% COMPLETE — 17 tasks + governance + auth-v4 coord = 20 substantive commits landed and pushed |
-| **Next decision** | **Owner call**: (A) run Wave G-1 LIVE CEREMONY first (owner-in-the-loop, ~5 discrete Azure operations), then Wave G-2; OR (B) start Wave G-2 dispatch in parallel with live ceremony (independent tracks); OR (C) Wave G-2 now, ceremony later |
-| **Live-ceremony backlog** | 7 items — see § Live Ceremony Backlog below |
-| **Wave G-2 dispatch plan** | 7 POMLs (120-126); H0/H1/H0.5/H2a/H2b SDK ports + H4 split (125 SDK-port + 126 real-values-correctness-gate). Tasks 125/126/130/142 amended for auth-v4 FIC pluggability per commit `8edc72d66` |
+| **Wave G-1 status** | ✅ 100% COMPLETE — 17 tasks + governance + auth-v4 coord = 20 substantive commits |
+| **Wave G-2 status** | ✅ 100% COMPLETE — 7 tasks + 1 fix-at-discovery = 8 commits (120/121/122/123/124/125/126 + bicepparam fix). L2 tests: 787 → **903/903** (+116 new, zero regressions). Zero Step 9.5 findings across the wave. |
+| **Next decision** | 🚨 **Owner call required BEFORE Wave G-3 dispatch**: (A) Author customer.bicep completion tasks first (blocks E2E either way); (B) Continue Wave G-3 handler ports + queue customer.bicep as a parallel wave; (C) Author customer.bicep first + defer Wave G-3 until it's done (cleanest sequencing). ALSO: task 130 needs auth-v4 phase-5 rollout state check. |
+| **Live-ceremony backlog** | 8 items now (originally 7 + BAP admin REST verification from task 120) |
+| **NEW work items surfaced** | 2 customer.bicep gaps (see § New Work Items below) |
 | **Status** | Fully clean checkpoint — working tree empty, all commits pushed |
+
+---
+
+## Wave G-2 tally
+
+| Commit | Task | Content | Δ tests |
+|---|---|---|---|
+| `f83cc74e2` | 122 | H0.5 registry DI-swap (Path X verified in-code + completeness ArchTest + bonus Bicep `adminDataverseEnvironmentUrl` wiring same-PR) | +1 → 788 |
+| `637658eab` | 121 | H1 real ARM subscription-reachability + Lighthouse probe (bonus tenant-mismatch guard; `NullSubscriptionReadinessProbe` DELETED) | +10 → 798 |
+| `d33e06a75` | 120 | H0 SDK-port 4 preflight probes (ARM.CognitiveServices TPM · BAP-REST env-rate · ARM.Compute vCPU · KV cert-bootstrap; adopted 121's `ArmSdkTestFakes` pattern mid-flight) | +33 → 831 |
+| `17f74cd46` | (fix) | `parameters/platform-controlplane-dev.bicepparam` + 2 runbook bugs (wrong bicepparam target file + `az deployment group create` vs required `sub create` for subscription-scope template) | — |
+| `ad36052f0` + `abdc8d83e` | 124 | H2b SearchIndexClient port + REAL AI Search tenant-filter template provisioner (both Stubs deleted; SearchIndexClient uses low-level PUT with raw JSON from `infrastructure/ai-search/*.json` canonical source; demoed parallel-file surgical-hunk staging pattern) | +20 → 851 |
+| `225fb4192` + `85d7fec84` | 123 | H2a ARM.Resources deployment port (xhigh; caught `WhatIfOperationResult.Changes` `properties`-wrap SDK gotcha via reflection; ARM JSON consumed via blob-download-at-runtime from task 117 manifest) | +16 → 867 |
+| `7cade7200` | 125 | H4 SecretClient + ARM.AppService KeyVaultReferenceIdentity PATCH (T1 BOTH slots + completeness ArchTest) + ARM.Authorization role assignment (T5 KV Secrets User `4633458b-17de-408a-b874-0445c86b69e6`) + 3 reflection bonus catches (`UpdateAsync` uses PATCH not PUT · slot id needs `/slots/{name}` segment · `PrincipalId` is Guid not string). Auth-v4 pluggability satisfied manifest-structurally (deviated from `IBffCredentialCreator` seam suggestion — no code-level special-casing; seam belongs to H3/task 130) | +16 → 883 |
+| `3eae3e799` | 126 | H4 real value-sourcing (`RandomNumberGenerator` 256-bit lower-hex generate + real `SecretClient` copy for FromExistingKvSecret/FromRunParameters + skip-or-honest-fail for FromBicepOutput) + `FileKvSecretManifest` (task 084 never shipped a .NET reader — built fresh); `AzCliKvSecretsWriter` retired unregistered. YamlDotNet 18.1.0 new dep, clean CVE scan. Zero cleartext logging (verified) | +20 → **903** |
+
+**Zero code-review criticals, zero ADR violations across all 8 commits.** Auth-v4 FIC pluggability satisfied structurally (manifest-driven) rather than via interface seam — accepted deviation.
 
 ---
 
@@ -73,18 +84,73 @@
 
 ## 🎯 CRITICAL FRAMING FOR NEXT SESSION
 
-Phase C'' delivers r1's stated E2E goal. Wave G-1 (foundation + execution engine) is now done. Two things remain:
+Phase C'' delivers r1's stated E2E goal. Wave G-1 (foundation) and Wave G-2 (SDK ports for H0/H1/H0.5/H2a/H2b/H4) are now done. **THREE independent tracks remain**:
 
-1. **Wave G-1 LIVE CEREMONY** — 7 owner-in-the-loop operations against live Azure/Dataverse that Wave G-1 tasks correctly refused to execute unilaterally. Enumerated below.
-2. **Waves G-2 through G-7** — 39 tasks remaining. Wave G-2 is 7 tasks (SDK ports for H0/H1/H0.5/H2a/H2b + H4 split). See `notes/design-study-ds4-handler-audit.md` §4 for full wave sequencing.
+1. **Wave G-1 LIVE CEREMONY** — 8 owner-in-the-loop operations against live Azure/Dataverse (originally 7 + BAP admin REST verification from task 120). Enumerated in § Live Ceremony Backlog below.
+2. **Waves G-3 through G-7** — 32 tasks remaining across 5 waves. See § Remaining Waves below.
+3. **🚨 NEW WORK ITEMS surfaced this session — TWO customer.bicep completeness gaps blocking E2E acceptance** (§ New Work Items below). Not on the DS-4 wave plan; need to be scoped + inserted.
 
-**These two tracks are LARGELY INDEPENDENT**. Wave G-2's handler SDK-port work doesn't require the live ceremony to have completed — the ports author + test code against SDK contracts, not live Azure. So next session can:
+**Owner decision required BEFORE Wave G-3 dispatch** — three sequencing options:
 
-- **Path A (safest)**: Live ceremony first, then Wave G-2
-- **Path B (parallel-friendly)**: Dispatch Wave G-2 in parallel with owner running the live ceremony
-- **Path C (recommended if owner isn't ready to babysit)**: Dispatch Wave G-2 now; queue the live ceremony for when owner is available
+- **Path 1 (recommended — cleanest E2E path)**: Author customer.bicep completion tasks FIRST (as a new mini-wave, probably 2-3 POMLs). Then dispatch Wave G-3 (handler ports for H3/H8/H9). Then G-4..G-7. Reason: Wave G-7's live acceptance depends on customer.bicep being complete anyway; getting it in first avoids late-cycle re-work.
+- **Path 2 (parallel-friendly)**: Dispatch Wave G-3 as normal AND author customer.bicep completion in parallel. Requires main-session bandwidth for the Bicep work while subagents do handler ports.
+- **Path 3 (defer)**: Dispatch Wave G-3..G-6 as normal; hold customer.bicep completion until pre-Wave-G-7. Risk: G-7 discovers additional gaps that ripple back to earlier waves.
 
-Owner call at session start.
+**ALSO**: Wave G-3 task 130 (H3 heavy Graph port) requires auth-v4 phase-5 rollout state check before dispatch — task 130 amends for FIC pluggability per commit `8edc72d66`; if auth-v4 has landed the FIC creation seam in `Register-EntraAppRegistrations.ps1`, task 130 invokes it rather than duplicating logic.
+
+---
+
+## 🚨 New Work Items surfaced during Wave G-2 (not on original plan)
+
+### 1. customer.bicep completeness — missing per-customer stack resources (task 123's flag)
+
+**Symptom**: `infrastructure/bicep/customer.bicep` (350 lines, the Model2Dedicated template that H2a actually deploys) declares RG + KV + Storage + ServiceBus + Cosmos + MembershipTopic (+ optional ACS + SignalR). It does **NOT** declare:
+- UAMI (per-customer User-Assigned Managed Identity)
+- App Service (per-customer BFF App Service Plan + slots)
+- Azure OpenAI
+- AI Search
+
+**Impact**: H2a can report `Success` after deploying customer.bicep, but the resulting RG has no compute + no AI resources. Every downstream handler (H4 KV writes, H5 Dataverse env-var writes, H6/H7 config writers, H10 role assignments, H11 storage init) either has nothing to configure OR wires against non-existent resource IDs.
+
+**Discovered**: 2026-08-19 by task 123 (H2a agent) via real ARM calls against a live subscription. Not introduced by task 123 — pre-existing gap made visible.
+
+**Fix scope**: Author the missing modules + wire them into customer.bicep. Estimate: 4-6 new modules + customer.bicep amendments ≈ 500-800 LOC of Bicep. Needs its own POML(s), probably 2-3 tasks (one per resource family: `customer-uami.bicep`, `customer-appservice.bicep`, `customer-openai.bicep`, `customer-aisearch.bicep`).
+
+**Cross-references**: task 123 flagged in POML `<notes>` COMPLETION section + `ArmDeploymentRunner.cs` header comment.
+
+### 2. customer.bicep KV-secrets seed wiring — `kv-secrets.generated.bicep` never invoked (task 126's flag)
+
+**Symptom**: H4's `KvSecretsPopulationManifest` has ~26 secret entries; ~15 of them declare `value_source: FromBicepOutput`, meaning their value must be produced by an upstream Bicep deployment (task 086's `kv-secrets.generated.bicep`) and read from that deployment's outputs. Task 086 authored the module but **never wired it into customer.bicep**.
+
+**Impact**: Fresh customer runs invoke H4 → H4 resolves those ~15 entries → resolver can't find their upstream output → H4 emits honest `Failed` → run enters `QuarantineRequired` state (correct fail-loud per DS-4's mandate, but blocks E2E).
+
+**Discovered**: 2026-08-19 by task 126 (H4 real-values agent) during real value-resolution implementation. Documented in `notes/task-126-deviations.md` Deviation #3.
+
+**Fix scope**: One authoring task — invoke `modules/kv-secrets.generated.bicep` from customer.bicep, thread its outputs into ARM deployment outputs, verify H4 can now resolve. Estimate: ~100-200 LOC of Bicep + verification.
+
+**Cross-references**: task 126's POML `<notes>` + `notes/task-126-deviations.md`.
+
+### 3. BAP admin REST response-shape verification (task 120's flag)
+
+**Symptom**: `BapRestEnvironmentRateProbe` assumes the BAP admin REST returns `properties.createdTime` on environment lookups. Task 120's sandbox had no live BAP credentials; assumption unverified.
+
+**Fix scope**: Live-only. Operator invokes the probe against a real BAP admin session, verifies shape, adjusts probe if wrong. Adds one item to the live-ceremony backlog before H0 gates a production customer run.
+
+**Cross-references**: `BapRestEnvironmentRateProbe.cs` header + task 120 POML `<notes>`.
+
+---
+
+## Remaining Waves (32 tasks across G-3..G-7)
+
+| Wave | Tasks | Scope | Notes |
+|---|---|---|---|
+| G-3 | 130, 131, 132 (3) | H3 / H8 / H9 (Graph app-roles + SPE containers + workflows) | 130 needs auth-v4 phase-5 rollout state check before dispatch |
+| G-4 | 140-144 (5) | H5 / H6 / H7 / H10 / H11 (Dataverse env-var writers · KV writers · config writers · Storage init · etc.) | H5/H7 depend on customer.bicep gap 1 being closed for meaningful E2E |
+| G-5 | 150-153 (4) | H12a/b/c seed chain | |
+| G-6 | 160-162 (3) | H14 + sidecar client + live verify | |
+| G-7 | 170-186 (17) | H13 probes + Ready writer + real Phase F E2E acceptance | **The E2E gate** — depends on customer.bicep gaps 1+2 being closed |
+
+**Batching guidance for Wave G-3** (per DS-4 §4): 130 (H3) is heavy + needs auth-v4 coord check (dispatch alone first). 131 (H8) + 132 (H9) can parallel after 130 completes.
 
 ---
 
