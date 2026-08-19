@@ -1,6 +1,15 @@
 // -----------------------------------------------------------------------------
 // AzCliArmKeyVaultRefProbe.cs
 //
+// RETIRED (task 123, Wave G-2, 2026-08-19): superseded by
+// <see cref="ArmKeyVaultRefProbe"/> (Azure.ResourceManager.AppService SDK
+// port). No longer registered in Worker/Program.cs's IArmKeyVaultRefProbe DI
+// slot (that registration — reused by H4/task 125 too — now points at the
+// new class). Retained on disk (NOT deleted); see
+// ProvisionCustomerScriptBicepDeployRunner.cs's retirement banner for the
+// full rationale.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IArmKeyVaultRefProbe"/> — reads
 // <c>keyVaultReferenceIdentity</c> on the customer's BFF App Service prod +
 // staging slots via `az webapp show` / `az webapp deployment slot show`.

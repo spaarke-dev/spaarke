@@ -181,8 +181,13 @@ public sealed class ArmSubscriptionReadinessProbeTests
 /// own marshaling runs unmodified while only the HTTP boundary is faked.
 /// Internal (not private) so both test classes in this namespace can reuse
 /// one fake-transport implementation (CLAUDE.md §11 — extend, don't duplicate).
+/// <c>partial</c> (added task 123, Wave G-2) so H2a's ARM-deployment /
+/// KeyVault-ref / what-if test files extend this SAME class with their own
+/// body-builder helpers (ArmDeploymentRunnerTests.cs /
+/// ArmKeyVaultRefProbeTests.cs / ArmWhatIfDriftDetectorTests.cs) instead of
+/// duplicating the fake-transport plumbing.
 /// </summary>
-internal static class ArmSdkTestFakes
+internal static partial class ArmSdkTestFakes
 {
     public static ArmClient NewArmClient(FakeArmHttpMessageHandler handler)
     {

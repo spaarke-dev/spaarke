@@ -113,6 +113,7 @@
          Service Bus, Graph, Dataverse) per ADR-028 MI-outbound MUST rule.
          Same 1.21.0 as pre-split. -->
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.ResourceManager.AppService" Version="1.5.0" />
 
     <!-- Azure.ResourceManager.CognitiveServices + .Compute — task 120 (Wave
          G-2, Option D hybrid per DS-1b) SDK ports of two of H0's four
@@ -122,6 +123,7 @@
          ADR-028 MI-outbound. -->
     <PackageReference Include="Azure.ResourceManager.CognitiveServices" Version="1.5.2" />
     <PackageReference Include="Azure.ResourceManager.Compute" Version="1.16.0" />
+    <PackageReference Include="Azure.ResourceManager.Resources" Version="1.11.2" />
 
     <!-- Azure.Security.KeyVault.Secrets — task 120 SDK port of H0's
          cert-bootstrap probe (KeyVaultCertBootstrapProbe), replacing
@@ -145,6 +147,7 @@
          by CosmosModule — no second credential built). -->
     <PackageReference Include="Azure.ResourceManager" Version="1.14.0" />
     <PackageReference Include="Azure.ResourceManager.ManagedServices" Version="1.1.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
 
     <!-- Azure.Search.Documents — task 124 (Wave G-2) SDK port of H2b's Model-2
          index provisioner (SearchIndexClientProvisioner, replacing
@@ -186,6 +189,23 @@
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.9" />
   </ItemGroup>
 
+  <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
+       embedded verbatim (byte-identical, checksum-verified at copy time)
+       from infrastructure/ai-search/*.json so the L2 App Service publish
+       output is self-contained (no repo-checkout dependency at runtime,
+       unlike the retired DeployAllIndexesScriptProvisioner's local-path
+       script read). Explicit <LogicalName> (rather than relying on the SDK's
+       implicit RootNamespace-derived convention) because RootNamespace here
+       is "Sprk.Provisioning.ControlPlane" while AssemblyName is
+       "Sprk.Provisioning.ControlPlane.Core" (deliberately different per the
+       project-header comment above) — SearchIndexClientProvisioner.LoadAndStripSchema
+       reads by this exact logical name. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Handlers\AiSearchIndex\IndexSchemas\*.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- Expose internal seams to the L2 test project (parity with the pre-split
        csproj) and to the .Api + .Worker host projects. Post-split, the
        composition-root Program.cs files in .Api and .Worker call internal
@@ -202,23 +222,6 @@
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane" />
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Worker" />
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
-  </ItemGroup>
-
-  <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
-       embedded verbatim (byte-identical, checksum-verified at copy time)
-       from infrastructure/ai-search/*.json so the L2 App Service publish
-       output is self-contained (no repo-checkout dependency at runtime,
-       unlike the retired DeployAllIndexesScriptProvisioner's local-path
-       script read). Explicit <LogicalName> (rather than relying on the SDK's
-       implicit RootNamespace-derived convention) because RootNamespace here
-       is "Sprk.Provisioning.ControlPlane" while AssemblyName is
-       "Sprk.Provisioning.ControlPlane.Core" (deliberately different per the
-       project-header comment above) — SearchIndexClientProvisioner.LoadAndStripSchema
-       reads by this exact logical name. -->
-  <ItemGroup>
-    <EmbeddedResource Include="Handlers\AiSearchIndex\IndexSchemas\*.json">
-      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

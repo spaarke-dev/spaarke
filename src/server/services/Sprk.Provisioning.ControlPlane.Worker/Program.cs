@@ -37,6 +37,7 @@
 // -----------------------------------------------------------------------------
 
 using Azure.Core;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Dispatch;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
@@ -159,37 +160,83 @@ builder.Services.AddSingleton<ISubscriptionReadinessProbe>(sp =>
 });
 builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 
-// Task 044: H2a Bicep infra-deploy handler + four collaborator seams
-// (IBicepDeployRunner shells out to scripts/Provision-Customer.ps1;
-// IArmKeyVaultRefProbe + IUpgradeDriftDetector shell out to `az` CLI;
-// IBicepTemplateInspector reads infrastructure/bicep/ on disk). All
-// registrations UNCONDITIONAL per ADR-032 — SignalR is the feature-gated
-// resource, not the handler; the handler passes through the SignalREnabled
-// parameter to the runner unconditionally (Null-Object kill-switch applies
-// to the RESOURCE, not the DI branch — spec MUST rule + design.md §7.2 row 13).
+// Task 044 / task 123: H2a Bicep infra-deploy handler + four collaborator
+// seams. Task 123 (Wave G-2, Option D hybrid) replaced the three shell-out
+// collaborators (ProvisionCustomerScriptBicepDeployRunner /
+// AzCliArmKeyVaultRefProbe / AzCliUpgradeDriftDetector — all RETIRED, kept
+// on disk unregistered per the retirement banners in their file headers)
+// with pure Azure.ResourceManager SDK ports: ArmDeploymentRunner
+// (SubscriptionResource.GetArmDeployments().CreateOrUpdateAsync() against
+// the CI-precompiled ARM JSON artifact task 117 publishes),
+// ArmKeyVaultRefProbe (WebSiteResource/WebSiteSlotResource.Data.KeyVaultReferenceIdentity),
+// and ArmWhatIfDriftDetector (ArmDeploymentResource.WhatIfAsync() — typed
+// WhatIfChange[] results, not stdout-parsed JSON). IBicepTemplateInspector
+// (on-disk infrastructure/bicep/ structural pre-flight) is UNCHANGED —
+// out of task 123's scope (it does not shell out; it reads local files
+// shipped in the publish output). All registrations UNCONDITIONAL per
+// ADR-032 — SignalR is the feature-gated resource, not the handler; the
+// handler passes through the SignalREnabled parameter to the runner
+// unconditionally (Null-Object kill-switch applies to the RESOURCE, not the
+// DI branch — spec MUST rule + design.md §7.2 row 13).
+//
+// ArmClient + BlobContainerClient are constructed via factory lambdas that
+// reuse the shared UAMI-pinned TokenCredential singleton already registered
+// by AddCosmosModule (ADR-028 MI-outbound) — NO shared ArmClient/
+// BlobContainerClient DI singleton registration, so this stays
+// self-contained against sibling Wave-G-2 handler ports that construct
+// their OWN ArmClient/Blob clients for other resource types (parity with
+// task 121's ArmSubscriptionReadinessProbe registration comment above).
 //
 // Placement Justification (CLAUDE.md §10): H2a lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013
 // forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
 // IPlaybookService injection). H2a owns silent-fail trap T1 verification
 // per POML acceptance §4B — this is the sole reason H2a exists as a handler
-// wrapping the PS script (script alone leaves T1 as a runtime null-KV-ref
+// wrapping the deploy (deploy alone leaves T1 as a runtime null-KV-ref
 // timebomb; handler adds ARM read post-condition).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-027 Path A: Model 1 shared-tier is documented exception —
 //     TenancyModel drives stack selection (Model1Shared → stacks/model1-shared.bicep;
 //     Model2Dedicated → customer.bicep). Full rationale: project spec.md § ADR Tensions.
-//   - ADR-028 UAMI outbound: all four collaborators use `az` CLI's operator
-//     auth chain (DefaultAzureCredential via `az login`); no account keys.
+//   - ADR-028 UAMI outbound: ArmDeploymentRunner / ArmKeyVaultRefProbe /
+//     ArmWhatIfDriftDetector all use DefaultAzureCredential pinned to the L2
+//     UAMI (via the shared TokenCredential singleton) — no account keys, no
+//     operator `az login` chain (task 123 REMOVES the last three `az` CLI
+//     shell-outs from H2a's collaborator set).
 //   - §4C rollback: partial Bicep deploys are QuarantineRequired (orphaned
 //     resources per design.md §4C example); §4C classification is inline in
 //     H2aBicepInfraDeployHandler file header + the FailAsync helper.
 builder.Services.Configure<BicepInfraDeployOptions>(
     builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)));
-builder.Services.AddSingleton<IBicepDeployRunner, ProvisionCustomerScriptBicepDeployRunner>();
-builder.Services.AddSingleton<IArmKeyVaultRefProbe, AzCliArmKeyVaultRefProbe>();
-builder.Services.AddSingleton<IUpgradeDriftDetector, AzCliUpgradeDriftDetector>();
+builder.Services.PostConfigure<BicepInfraDeployOptions>(o => o.Validate());
+builder.Services.AddSingleton<IBicepDeployRunner>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
+    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
+        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var logger = sp.GetRequiredService<ILogger<ArmDeploymentRunner>>();
+    return new ArmDeploymentRunner(armClient, artifactsContainer, options, logger);
+});
+builder.Services.AddSingleton<IArmKeyVaultRefProbe>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmKeyVaultRefProbe>>();
+    return new ArmKeyVaultRefProbe(armClient, logger);
+});
+builder.Services.AddSingleton<IUpgradeDriftDetector>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
+    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
+        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var logger = sp.GetRequiredService<ILogger<ArmWhatIfDriftDetector>>();
+    return new ArmWhatIfDriftDetector(armClient, artifactsContainer, options, logger);
+});
 builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 

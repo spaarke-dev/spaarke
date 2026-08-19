@@ -186,6 +186,14 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // constructor-graph resolution is exercised).
         builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com/");
 
+        // Task 123 — ArmDeploymentRunner / ArmWhatIfDriftDetector's
+        // BicepInfraDeployOptions.Validate() fails fast at boot on a missing
+        // ProvisioningArtifactsContainerUri (NFR-05), same convention as the
+        // Cosmos / ServiceBus / DataverseEnvironmentRegistry settings above —
+        // syntactically-valid-but-unreachable value; the blob client itself
+        // is never invoked here, only constructor-graph resolution.
+        builder.UseSetting("BicepInfraDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
+
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs
         // (parity with Api/RunsEndpointsTests.cs L2WebApplicationFactory).

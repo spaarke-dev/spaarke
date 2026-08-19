@@ -1,6 +1,15 @@
 // -----------------------------------------------------------------------------
 // AzCliUpgradeDriftDetector.cs
 //
+// RETIRED (task 123, Wave G-2, 2026-08-19): superseded by
+// <see cref="ArmWhatIfDriftDetector"/> (Azure.ResourceManager.Resources
+// WhatIfAsync SDK port — typed WhatIfChange[] results, not stdout-parsed
+// JSON). No longer registered in Worker/Program.cs's IUpgradeDriftDetector
+// DI slot. Retained on disk (NOT deleted); see
+// ProvisionCustomerScriptBicepDeployRunner.cs's retirement banner for the
+// full rationale.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IUpgradeDriftDetector"/> — invokes
 // `az deployment sub what-if` (subscription-scope, matching customer.bicep +
 // stacks/model1-shared.bicep both being targetScope='subscription') and

@@ -1,6 +1,16 @@
 // -----------------------------------------------------------------------------
 // ProvisionCustomerScriptBicepDeployRunner.cs
 //
+// RETIRED (task 123, Wave G-2, 2026-08-19): superseded by
+// <see cref="ArmDeploymentRunner"/> (Azure.ResourceManager.Resources SDK
+// port). No longer registered in Worker/Program.cs's IBicepDeployRunner DI
+// slot. Retained on disk (NOT deleted) — no test references the concrete
+// type directly, and CLAUDE.md §3/§11 favor a documented retirement over a
+// cross-file deletion sweep of ~10 doc-comment `<see cref>` mentions in
+// sibling handler files. Do not resurrect this shell-out path; Option D's
+// zero-shell constraint (design.md §4.2a) is why it was replaced.
+// -----------------------------------------------------------------------------
+//
 // Production <see cref="IBicepDeployRunner"/> implementation — shells out to
 // the hardened <c>scripts/Provision-Customer.ps1</c> with the H2a envelope's
 // parameters and deserializes the script's JSON output block into
