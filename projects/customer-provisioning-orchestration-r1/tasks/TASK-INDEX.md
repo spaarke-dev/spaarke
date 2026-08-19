@@ -194,7 +194,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | 113 | 🔲 | Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7) | STANDARD | sonnet / high | none | 100, 101, 108, 109 |
 | 114 | ✅ | Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port) | FULL | opus / high | waveG1-parallel | none |
 | 115 | ✅ | GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1; drafted YAML + escalation (closed coord window, stale worktree) in notes/sidecar-ci-workflow-coord-pr.md; NOT committed to .github/workflows/** | STANDARD | sonnet / high | waveG1-parallel | 114 |
-| 116 | 🔲 | CI coordination PR: BFF artifact publish workflow extension for H9 (blob store + latest.json manifest) | STANDARD | sonnet / high | waveG1-parallel | none |
+| 116 | ✅ | BFF artifact publish workflow extension for H9 (blob store + latest.json manifest) -- committed DIRECTLY to .github/workflows/deploy-bff-api.yml (Path C deviation from "coord-note only" per r1's 2026-08-19 direct-ownership governance; see notes/h9-artifact-publish-ci-coord-pr.md); new .github/workflows/schemas/bff-artifact-manifest.json; storage account escalation documented (not created) | STANDARD | sonnet / high | waveG1-parallel | none |
 | 117 | 🔲 | CI coordination: Bicep->ARM-JSON pre-compile step for H2a | STANDARD | sonnet / high | waveG1-parallel | none |
 | 118 | 🔲 | Integration seam test: dispatch spine (message -> handler -> Cosmos transition -> DAG advance) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 102, 104, 106, 108 |
 

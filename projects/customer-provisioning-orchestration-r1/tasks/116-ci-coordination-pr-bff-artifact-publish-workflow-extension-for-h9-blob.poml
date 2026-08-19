@@ -4,7 +4,7 @@
     <title>CI coordination PR: BFF artifact publish workflow extension for H9 (blob store + latest.json manifest)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Workflow-content authoring + coordination note, no BFF source .cs modification (the artifact-publish step is additive to the EXISTING deploy-bff-api.yml build job). STANDARD per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,4 +85,17 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <completion-notes date="2026-08-19">
+    <deviation path="C">POML's literal acceptance criteria describe a "coordination note + drafted YAML diff" for a separate coord-PR owner (the discipline task 115 followed). By execution time, r1's CLAUDE.md (commit 8281045052) had formally taken DIRECT-COMMIT ownership of .github/workflows/** for Phase C'' scope -- the same governance shift under which tasks 067/088/115's queued coord-notes were applied directly on 2026-08-19. Per CLAUDE.md §6.5 Path C, this task pivoted to comply with the current (already-adopted) direct-commit posture: the extension was authored DIRECTLY into .github/workflows/deploy-bff-api.yml + a new .github/workflows/schemas/bff-artifact-manifest.json, rather than producing a draft-only note. Full rationale: notes/h9-artifact-publish-ci-coord-pr.md § 0.</deviation>
+    <output-actual>
+      Committed: .github/workflows/deploy-bff-api.yml (extended build job, 11 new steps: buildId/sha compute, 3 r3 gates, gate-status translation, zip, OIDC login, 2 blob pushes, red-gate job-fail check).
+      Committed: .github/workflows/schemas/bff-artifact-manifest.json (new -- draft-07 JSON Schema for latest.json).
+      Committed: notes/h9-artifact-publish-ci-coord-pr.md (rewritten as design-rationale + escalation record, not a pending diff).
+    </output-actual>
+    <escalation-fired>Yes -- platform storage account for the provisioning-artifacts container does not exist in infrastructure/bicep/platform-controlplane.bicep. Documented as a live-ceremony item (NOT created by this task) in notes/h9-artifact-publish-ci-coord-pr.md § 3. The new workflow steps fail cleanly (missing account name) until it lands; the rest of the existing deploy-bff-api.yml pipeline is unaffected.</escalation-fired>
+    <design-note>graphAppRoleParity manifest key is always recorded "Skipped" by design (not computed in this job) -- it is a deployment-target property (per-customer UAMI vs GraphAppRoles.cs), not an artifact property; nightly-health.yml's own job-level continue-on-error masks its conclusion so scraping it would be a fragile, wrong-layer signal. Documented in notes/h9-artifact-publish-ci-coord-pr.md § 2.3 and in the schema's field description so task 132 (H9 handler) is not surprised.</design-note>
+    <version-source>buildId = {UTC yyyy.MM.dd}-{github.run_number} (matches build-provisioning-sidecar.yml's semver_tag convention); sha = github.sha carried separately. Deterministic + monotonic + git-anchored -- the POML's escalation trigger (unstable/timestamp-only version source) did NOT fire.</version-source>
+    <validation>YAML + JSON parsed cleanly via python3 -c "import yaml/json" (actionlint unavailable in this environment, consistent with tasks 088/115's documented environment limitation).</validation>
+  </completion-notes>
 </task>
