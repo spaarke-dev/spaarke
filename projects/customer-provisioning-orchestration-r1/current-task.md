@@ -7,6 +7,28 @@
 
 ---
 
+## Active task: 102 — ✅ COMPLETE (2026-08-19)
+
+| Field | Value |
+|-------|-------|
+| **Task** | 102 — Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker |
+| **Rigor** | FULL (opus @ xhigh, POML-declared) |
+| **Status** | ✅ completed |
+| **Phase** | C'' Wave G-1 — Foundation |
+| **Consumers already committed** | task 103 keyed DI `a0b1f9d26` · task 104 IHandlerOutcomeApplier extract `66b1911e8` · task 107 HandlerEnvelope.Attempt `29e9e2396` |
+| **Files authored** | `.Core/Dispatch/{DispatcherOptions,DispatchDecision,DispatchModule,IDispatchIdempotencyService,NoOpDispatchIdempotencyService}.cs` (5) · `.Worker/Dispatch/ProvisioningHandlerDispatcher.cs` · `.Worker/Program.cs` (+2 lines block) · `.Core.csproj` (+Redis NuGet) · `.Worker.csproj` (+InternalsVisibleTo) · `.Tests/Dispatch/ProvisioningHandlerDispatcherInvariantTests.cs` |
+| **New NuGet** | `Microsoft.Extensions.Caching.StackExchangeRedis` 10.0.9 on `.Core.csproj` — Wave G-1 sole new dep |
+| **Freeze test 1 (MaxConcurrentCallsPerSession == 1)** | ✅ PASS — `built.MaxConcurrentCallsPerSession.Should().Be(1)` at test line 101 |
+| **Contract test (zero .Core/.Worker → BFF ref)** | ✅ PASS — reflection on `assembly.GetReferencedAssemblies()` for both assemblies |
+| **Build state** | dotnet build 0 warnings / 0 errors · dotnet format compliant on task-102 files |
+| **Test state** | 740/740 L2 tests pass · 4/4 new invariant tests pass · 0 regressions |
+| **Quality Gates (Step 9.5)** | code-review ✅ (0 critical, 0 warn, 3 non-blocking suggestions) · adr-check ✅ (0 violations) |
+| **TASK-INDEX row 102** | ✅ (flipped from 🔲) |
+| **Push status** | NOT PUSHED per parent instructions |
+| **Next action** | Commit + report to parent |
+
+---
+
 ## 🎯 CRITICAL FRAMING FOR NEXT SESSION (READ THIS BEFORE ANY WORK)
 
 **The r1 project's stated goal is E2E customer provisioning (spec FR-18, SC #5, design.md §15 north-star). Today's Phase F acceptance attempt REVEALED THAT THIS GOAL IS NOT MET.** ~75/78 tasks are ✅ by task count but a load-bearing runtime component is missing.

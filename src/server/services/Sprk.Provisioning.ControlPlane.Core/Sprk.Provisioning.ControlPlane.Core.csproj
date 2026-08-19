@@ -130,6 +130,19 @@
          TelemetryModule.AddTelemetryModule. Both .Api and .Worker call
          AddTelemetryModule during composition, so the reference lives here. -->
     <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
+
+    <!-- StackExchange.Redis cache — Level-2 dispatcher idempotency (task 102
+         Phase C'' Wave G-1 sole new dep; task 105's DispatchIdempotencyService
+         Redis impl consumes IDistributedCache transitively from this package).
+         Reference lives on .Core so both .Api (future in-process integration
+         tests) and .Worker (production dispatcher host) can compose against
+         IDistributedCache without either project pinning its own version.
+         Cache is per-environment (Deploy-RedisCache.ps1); NEVER
+         per-customer per spec MUST rule (FR-12 rejects per-customer Redis).
+         Pinned to 10.0.9 for parity with Microsoft.Extensions.Logging
+         .Abstractions 10.0.9 already floored by Azure.Core 1.60.0 in the
+         test-project (prevents NU1605 warnings-as-errors on downgrades). -->
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.9" />
   </ItemGroup>
 
   <!-- Expose internal seams to the L2 test project (parity with the pre-split

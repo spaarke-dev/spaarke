@@ -56,4 +56,16 @@
     <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
   </ItemGroup>
 
+  <!-- Added by task 102 (Phase C'' Wave G-1): expose internal seams to the
+       L2 test project so ProvisioningHandlerDispatcherInvariantTests can
+       assert on ProvisioningHandlerDispatcher.BuildSessionProcessorOptions
+       (the DS-2b R3 forcing-function test surface) + the
+       MaxConcurrentCallsPerSessionInvariant const without promoting either
+       to public API. Parity with the InternalsVisibleTo already on the .Core
+       csproj (which exposes ServiceBusHandlerEnqueuer.ComputeMessageId to
+       the same test project for level-1 idempotency verification). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
 </Project>

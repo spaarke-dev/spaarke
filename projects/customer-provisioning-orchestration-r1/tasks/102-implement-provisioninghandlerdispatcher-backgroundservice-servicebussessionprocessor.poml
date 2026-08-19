@@ -4,7 +4,7 @@
     <title>Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Load-bearing execution-engine class per task instructions; modifies .cs in the L2 Worker project; concurrency-critical (session dispatch invariant). FULL per root CLAUDE.md §8 + this project's l2-controlplane rigor default.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -106,7 +106,17 @@
     <criterion testable="true">dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/ exits 0; dotnet test (Dispatch/* tests) exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- BFF's ServiceBusJobProcessor is BFF-scoped (ADR-010 forbids L2 handlers registering in BFF) and is NOT session-aware, so it cannot be reused as-is. Extension -- cannot extend a non-session processor into a session processor without rewriting its core loop; DS-2 §1.5 documents every divergence point explicitly. Cost-of-doing-nothing -- without this class, zero handlers ever execute end-to-end; this is THE load-bearing gap FR-18/SC#5 identifies. Owner sign-off item (DS-2 §7.1, reaffirmed DS-2b §9): session-serialized execution is adopted as designed.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- BFF's ServiceBusJobProcessor is BFF-scoped (ADR-010 forbids L2 handlers registering in BFF) and is NOT session-aware, so it cannot be reused as-is. Extension -- cannot extend a non-session processor into a session processor without rewriting its core loop; DS-2 §1.5 documents every divergence point explicitly. Cost-of-doing-nothing -- without this class, zero handlers ever execute end-to-end; this is THE load-bearing gap FR-18/SC#5 identifies. Owner sign-off item (DS-2 §7.1, reaffirmed DS-2b §9): session-serialized execution is adopted as designed.
+
+**COMPLETION NOTES (2026-08-19)**: All 5 acceptance criteria satisfied. Freeze test 1 (MaxConcurrentCallsPerSession == 1) + freeze test 2 (zero .Core/.Worker assembly reference to Sprk.Bff.Api) both pass. Full L2 suite = 740/740 passing. dotnet build 0 warnings / 0 errors. dotnet format compliance on all task-102 files.
+
+Files authored: .Core/Dispatch/{DispatcherOptions, DispatchDecision, DispatchModule, IDispatchIdempotencyService, NoOpDispatchIdempotencyService}.cs (5 files) + .Worker/Dispatch/ProvisioningHandlerDispatcher.cs (748 lines including doc comments; ~450 code LOC per DS-2 §2 estimate) + .Tests/Dispatch/ProvisioningHandlerDispatcherInvariantTests.cs (4 tests). Modified: .Worker/Program.cs (added AddDispatchModule + AddHostedService lines with full Placement Justification comment); .Core.csproj (added Microsoft.Extensions.Caching.StackExchangeRedis 10.0.9 — Wave G-1 sole new NuGet); .Worker.csproj (added InternalsVisibleTo for the freeze-test's internal access to BuildSessionProcessorOptions helper).
+
+Necessary implication added beyond strict POML output list: IDispatchIdempotencyService + NoOpDispatchIdempotencyService (in .Core/Dispatch/) — required to satisfy acceptance criterion 3 (lock-held → Abandon; processed-marker hit → Complete-without-invoke). Task 105 will (a) add the Redis-backed DispatchIdempotencyService concrete impl using the transitive IDistributedCache and (b) swap the DI registration in DispatchModule. The dispatcher's consumption of the seam is unchanged across that swap.
+
+Design divergences from POML step 3 (DS-2 §2.2 ctor shape) accommodated to project boundaries: DispatchModule.cs (in .Core) registers ONLY the shared-infra pieces (DispatcherOptions + IDispatchIdempotencyService); the AddHostedService<ProvisioningHandlerDispatcher>() line moved to .Worker/Program.cs directly next to the AddDispatchModule call — because .Core cannot compile-reference the .Worker-hosted dispatcher class. Exact parity with how CrashRecoveryStartupService (in .Core/Reconciler/) is registered from Program.cs today; NOT a weakening of ADR-010's god-class-ratchet posture.
+
+Quality gates (Step 9.5): code-review PASS (0 critical, 0 warnings, 3 non-blocking style suggestions — S1 extract 8-step sub-steps, S2 use UnreachableException, S3 CustomerId log hashing consistency); adr-check PASS (17 ADRs reviewed — 13 N/A, 4 actively verified; 0 violations, 0 warnings). BFF Hygiene NOT triggered (files in L2, not BFF). CLAUDE.md §11 justification concrete.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

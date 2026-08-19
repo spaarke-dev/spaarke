@@ -37,6 +37,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Dispatch;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
@@ -59,6 +60,7 @@ using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Reconciler;
 using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Rollback;
+using Sprk.Provisioning.ControlPlane.Worker.Dispatch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -525,6 +527,42 @@ builder.Services.AddHostedService<CrashRecoveryStartupService>();
 // ADR-032 — no feature-gate branches; §4C is domain-authoritative (not a
 // feature flag).
 builder.Services.AddRollbackModule();
+
+// Task 102 (Phase C'' Wave G-1): THE load-bearing execution engine --
+// ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor
+// against sprk-provisioning-jobs). Mirror-and-diverge of the BFF's
+// ServiceBusJobProcessor per DS-2 §1.5 (session-aware; keyed-DI resolution;
+// 65-min lock renewal; §4C retry authority via IHandlerOutcomeApplier instead
+// of SB Abandon-loop). Resolves handlers via GetKeyedService<IProvisioningHandler>
+// (task 103), applies outcomes via IHandlerOutcomeApplier (task 104), and
+// gates the dequeue path via IDispatchIdempotencyService (Level 2 -- NoOp
+// placeholder today, Redis-backed impl in task 105). The
+// AddHostedService<ProvisioningHandlerDispatcher> line is registered
+// DIRECTLY here (not inside AddDispatchModule) because the dispatcher lives
+// in the .Worker project and .Core's DispatchModule extension cannot
+// reference a .Worker type -- exact parity with CrashRecoveryStartupService's
+// two-line registration above.
+//
+// spec.md MUST rule (DS-2b R3 forcing function):
+// ServiceBusSessionProcessorOptions.MaxConcurrentCallsPerSession is HARD-CODED
+// to 1 inside the dispatcher (not surfaced on DispatcherOptions), and
+// ProvisioningHandlerDispatcherInvariantTests protects the invariant from
+// config drift + a static contract test asserts .Core + .Worker have ZERO
+// compile references to Sprk.Bff.Api's IJobHandler.
+//
+// Placement Justification (CLAUDE.md §10 / §11):
+//   Existing -- BFF's ServiceBusJobProcessor is BFF-scoped (ADR-010 forbids
+//     L2 handlers registering in BFF) and NOT session-aware.
+//   Extension -- cannot extend a non-session processor into a session
+//     processor without rewriting the core loop; DS-2 §1.5 documents every
+//     divergence explicitly.
+//   Cost-of-doing-nothing -- without this class, zero handlers execute
+//     end-to-end (THE load-bearing gap FR-18/SC#5 identifies + the current-
+//     state finding of the 2026-08-18 Fable gap analysis).
+//   Owner sign-off (DS-2 §7.1 + DS-2b §9): session-serialized execution
+//     adopted as designed.
+builder.Services.AddDispatchModule(builder.Configuration);
+builder.Services.AddHostedService<ProvisioningHandlerDispatcher>();
 
 var app = builder.Build();
 
