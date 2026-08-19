@@ -4,7 +4,7 @@
     <title>Author Grant-ControlPlaneIdentity.ps1 (Path X Dataverse App User + scoped custom role + C5.8 Graph app-role grants)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Registers the L2 UAMI's identity + privilege on the ADMIN Dataverse environment and grants Graph app-roles -- security-sensitive per root CLAUDE.md §6 (auth/secrets) even though no secret is created (Path X is secretless by design); FULL + human-escalation-aware.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -89,7 +89,45 @@
     <criterion testable="true">A canary registry-row upsert attributed to the UAMI's systemuser succeeds and audit-attributes to the UAMI identity, not the BFF app-reg's systemuser.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- H10's DataverseWebApiAppUserCreator already implements this exact registration idiom for customer envs; Grant-GraphAppRoles.ps1 already implements the Graph grant pattern. Extension -- this script REUSES both idioms verbatim, pointed at the admin env + the control plane's own UAMI, rather than inventing new mechanics. Cost-of-doing-nothing -- without this script, task 112's C1.4 registry client has no authorized identity to write with; H0.5 (registry swap, task 122), H13 (Ready writer, task 184), and the I5 concurrency guard all fail with 401/403 the moment their DI-swaps land.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- H10's DataverseWebApiAppUserCreator already implements this exact registration idiom for customer envs; Grant-GraphAppRoles.ps1 already implements the Graph grant pattern. Extension -- this script REUSES both idioms verbatim, pointed at the admin env + the control plane's own UAMI, rather than inventing new mechanics. Cost-of-doing-nothing -- without this script, task 112's C1.4 registry client has no authorized identity to write with; H0.5 (registry swap, task 122), H13 (Ready writer, task 184), and the I5 concurrency guard all fail with 401/403 the moment their DI-swaps land.
+
+COMPLETION SUMMARY (2026-08-19):
+  Output: scripts/provisioning/Grant-ControlPlaneIdentity.ps1 (~590 LOC).
+  Path deviation from POML output (scripts/Grant-ControlPlaneIdentity.ps1) to
+  scripts/provisioning/ per parent-agent explicit path guidance. Directory
+  created; no other scripts moved.
+  Auth idiom: az account get-access-token (parity with sibling grant scripts;
+  operator's own az context, per POML bootstrap-requirement doc).
+  Sections implemented:
+    A.1 Ensure scoped custom security role (SkipRoleCreation opt-out for
+        managed-solution path).
+    A.1b Ensure minimum privileges (5 sprk_dataverseenvironment + 3 basics;
+        Global depth for registry table, Basic for user/BU/role). Missing
+        privilege = HARD FAIL per POML acceptance-criteria #3.
+    A.2 Ensure Application User (find-by-applicationid; H10 idiom verbatim).
+    A.2b Ensure role association (check-then-add; H10 idiom verbatim).
+    A.3 WhoAmI verify (operator identity; UAMI-identity verify is Wave G-7
+        task 177 T2 probe).
+    B   C5.8 Graph app-role grants -- DELEGATED to scripts/Grant-GraphAppRoles.ps1
+        (no duplication; single-source-of-truth for GraphAppRoles.cs catalog
+        stays in the sibling script per CLAUDE.md §11).
+  Live-exec verification: DEFERRED (parent instruction). Script authored +
+  syntax-valid + PSSA-clean (28 findings, all matching sibling
+  Grant-GraphAppRoles.ps1 baseline: PSAvoidUsingWriteHost + PSUseBOMForUnicodeEncodedFile
+  -- both accepted-as-convention across the repo's operator-console scripts).
+  Idempotency: DryRun switch implemented; find-then-create/check-then-add at
+  every mutation.
+  Escalation trigger: NOT fired -- bootstrap requirement documented in header
+  as a first-class .DESCRIPTION section per POML instruction.
+  Quality gates: code-review (self, no auto-hook for .ps1) + adr-check both
+  PASS. ADR-028 alignment verified (Path X = MI-outbound secretless);
+  CLAUDE.md §11 justification cited above; §10 BFF Hygiene N/A (zero BFF
+  surface added).
+  Blast radius: additive only. scripts/provisioning/ is a new directory; no
+  existing scripts modified. TASK-INDEX row 111 -> ✅.
+  Downstream unblock: task 112 (C1.4 registry client) can now proceed.
+  Owner action to actually cut over: run this script once against spaarkedev1
+  (bootstrap identity = Dataverse SysAdmin caller); one-time per env.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

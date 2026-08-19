@@ -189,7 +189,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | 108 | 🔲 | Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook | FULL | sonnet / high | none | none |
 | 109 | 🔲 | Bicep: fix config-key/audience/secret-name source drift (C5.1-C5.3) | FULL | sonnet / high | none | none |
 | 110 | 🔲 | Bicep: SB Data Receiver (+Sender) RBAC role assignments for L2 UAMI(s) (C5.5) | FULL | sonnet / high | none | 100, 101 |
-| 111 | 🔲 | Author Grant-ControlPlaneIdentity.ps1 (Path X Dataverse App User + scoped custom role + C5.8 Graph app-role grants) | FULL | opus / high | waveG1-parallel | none |
+| 111 | ✅ | Author Grant-ControlPlaneIdentity.ps1 (Path X Dataverse App User + scoped custom role + C5.8 Graph app-role grants) | FULL | opus / high | waveG1-parallel | none |
 | 112 | 🔲 | Implement C1.4 L2 Dataverse registry client (MI-native, DefaultAzureCredential) | FULL | opus / high | none | 111 |
 | 113 | 🔲 | Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7) | STANDARD | sonnet / high | none | 100, 101, 108, 109 |
 | 114 | 🔲 | Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port) | FULL | opus / high | waveG1-parallel | none |
