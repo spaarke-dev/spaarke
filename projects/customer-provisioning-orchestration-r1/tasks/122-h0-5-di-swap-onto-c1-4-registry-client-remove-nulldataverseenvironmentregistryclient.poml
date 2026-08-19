@@ -4,7 +4,7 @@
     <title>H0.5: DI-swap onto C1.4 registry client (remove NullDataverseEnvironmentRegistryClient)</title>
     <phase>C'' Wave G-2 -- Entry + resources</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Re-activates FR-02 re-consent semantics that are currently inert (PARTIAL per DS-4) -- correctness-relevant for the H0.5 consent-capture path; touches BFF-adjacent onboarding semantics (though the swap is L2-side).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -75,7 +75,18 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- H0.5's branch logic is already correct; only the data source is fictional. Extension -- swapping the DI registration is the direct, minimal fix; no redesign needed. Cost-of-doing-nothing -- FR-02 re-consent semantics stay permanently inert regardless of how correct the branch logic is.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- H0.5's branch logic is already correct; only the data source is fictional. Extension -- swapping the DI registration is the direct, minimal fix; no redesign needed. Cost-of-doing-nothing -- FR-02 re-consent semantics stay permanently inert regardless of how correct the branch logic is.
+
+COMPLETION SUMMARY (2026-08-19):
+- Worker/Program.cs: single-line DI swap -- `AddSingleton&lt;IDataverseEnvironmentRegistryClient, NullDataverseEnvironmentRegistryClient&gt;()` replaced by `AddDataverseEnvironmentRegistry(builder.Configuration)` (task 112's module; registers the real client Scoped). This is a GLOBAL swap -- also activates H13's idempotency-short-circuit registry read (H13's WRITE path via IRegistrySetupStatusUpdater remains task 184's separate seam).
+- NullDataverseEnvironmentRegistryClient disposition: KEPT (not deleted) -- unregistered from the composition root only. Its own 4 unit tests in DataverseEnvironmentRegistryClientTests.cs continue to exercise its ADR-032 P2 contract. No environment-based kill-switch was introduced (none existed for this seam; DS-8 mandates Path X real from day one, matching task 112's own unconditional-validation design).
+  grep 'NullDataverseEnvironmentRegistryClient' Worker/Program.cs -&gt; 0 matches (acceptance criterion #1 satisfied).
+- FIX-AT-DISCOVERY (per CLAUDE.md §11 / operator memory rule): task 112's DataverseEnvironmentRegistryOptions.Validate() unconditionally requires AdminEnvironmentUrl (NFR-05 fail-fast, no Enabled kill-switch). No Bicep app-setting existed for it -- a live deploy of this swap would have crash-looped the Worker at boot. Closed the gap in the SAME PR: added `adminDataverseEnvironmentUrl` param to platform-controlplane.bicep + controlplane-worker-app-service.bicep (-&gt; DataverseEnvironmentRegistry__AdminEnvironmentUrl app-setting), regenerated platform-controlplane.json (`az bicep build`, 0 errors/warnings). Required param, no default (deliberate -- dev/staging/prod each target a distinct admin Dataverse org). Also added the matching UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", ...) to the two WebApplicationFactory&lt;WorkerProgram&gt; test factories (WorkerTestFactory in HandlerRegistrationCompletenessTests.cs, SeamTestFactory in ProvisioningDispatchSpineSeamTests.cs) -- both would otherwise have thrown OptionsValidationException at test-host boot.
+- New completeness ArchTest (reuses task 103's WorkerTestFactory pattern): `IDataverseEnvironmentRegistryClient_ResolvesRealClient_NotNullObject` resolves the REAL Worker composition root and asserts the concrete resolved type is DataverseEnvironmentRegistryClient, not NullDataverseEnvironmentRegistryClient -- catches a future silent regression (Null-Object satisfies the interface; every other test would still pass).
+- Path X verified: DataverseEnvironmentRegistryClient.AcquireTokenAsync uses `DefaultAzureCredential` with `DefaultAzureCredentialOptions.ManagedIdentityClientId` set from `DataverseEnvironmentRegistryOptions.ManagedIdentityClientId` (falls back to `ManagedIdentity:ClientId` app-setting via the module's PostConfigure, same as CosmosModule) -- NO ClientSecretCredential anywhere in this seam. Confirmed by reading DataverseEnvironmentRegistryClient.cs:312-328 (pre-existing task-112 code, unchanged by this task) + the new Bicep appSetting supplies only the URL, no secret.
+- Existing H05ConsentCaptureHandlerTests.cs re-consent no-op/restart branch tests already used a data-populated `StubRegistry` fake (not the Null-Object) -- acceptance criterion #2 was already satisfied pre-task; no test changes needed there.
+- Verification: `dotnet build` (Worker + Tests) 0 errors/0 warnings; `dotnet test` 788/788 green (787 baseline + 1 new ArchTest); `az bicep build` on both edited .bicep files 0 errors/0 warnings.
+- Live-invocation smoke (acceptance criterion #3, dev spaarkedev1 real registry read) is NOT executable from this sandbox (no live Azure/Dataverse reachability) -- deferred to the Wave G-1 live-ceremony step 5 (Deploy-ControlPlane.ps1 + Bicep deploy), which now has the required app-setting wired.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

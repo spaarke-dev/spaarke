@@ -117,6 +117,9 @@ param serviceBusQueueName string = 'sprk-provisioning-jobs'
 @description('Name of the KV secret holding the Dataverse S2S ClientSecret. Handlers H5/H6/H7/H10 (registry + solution-import + env-var writes) run in the WORKER post-split (task 100) -- this setting moved here from .Api, which no longer needs it (the .Api host has no handler DI; task 100 Program.cs header).')
 param dataverseClientSecretName string
 
+@description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table. Consumed by DataverseEnvironmentRegistryOptions.AdminEnvironmentUrl (Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs, task 112 -- Path X MI-native, DefaultAzureCredential pinned to this module\'s UAMI via ManagedIdentity__ClientId below; NO client secret). REQUIRED as of task 122 (Wave G-2): the Worker\'s composition root now registers the REAL client unconditionally (NullDataverseEnvironmentRegistryClient placeholder removed from DI) and DataverseEnvironmentRegistryOptions.Validate() fails fast at boot if this is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (DS-8 mandates Path X real from day one).')
+param adminDataverseEnvironmentUrl string
+
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
@@ -206,6 +209,17 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
           name: 'Dataverse__ClientSecret'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${dataverseClientSecretName})'
         }
+
+        // ---------------------------------------------------------------
+        // Task 122 (Wave G-2): DataverseEnvironmentRegistry -- Path X
+        // MI-native admin-env registry client (task 112). REQUIRED --
+        // DataverseEnvironmentRegistryOptions.Validate() fails fast at boot
+        // (NFR-05) if this is missing; no ClientSecret needed (auth is via
+        // ManagedIdentity__ClientId below, pinning DefaultAzureCredential to
+        // this site's UAMI, which task 111's Grant-ControlPlaneIdentity.ps1
+        // registers as a Dataverse Application User on this same admin env).
+        // ---------------------------------------------------------------
+        { name: 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', value: adminDataverseEnvironmentUrl }
 
         // ---------------------------------------------------------------
         // Managed-identity discovery (pin DefaultAzureCredential to bound

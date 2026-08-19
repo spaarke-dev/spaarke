@@ -36,6 +36,7 @@
 // Sprk.Bff.Api assemblies from here).
 // -----------------------------------------------------------------------------
 
+using Azure.Core;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Dispatch;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
@@ -100,28 +101,62 @@ builder.Services.AddTelemetryModule(builder.Configuration, builder.Environment.E
 // bridge documented in H0PreflightHandler.
 builder.Services.AddProvisioningHandlers(builder.Configuration);
 
-// Task 042: H0.5 consent-capture handler + registry lookup placeholder.
-// Wave C5 replaces NullDataverseEnvironmentRegistryClient with a real
-// Dataverse-backed impl once the L2 Dataverse client wiring lands.
-// Both registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// Task 042: H0.5 consent-capture handler. Task 112 (Wave G-1 C1.4) built
+// the real Path X (MI-native) DataverseEnvironmentRegistryClient; task 122
+// (Wave G-2, THIS registration) swaps the NullDataverseEnvironmentRegistryClient
+// placeholder for it via DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry.
+// This is a GLOBAL swap — the same IDataverseEnvironmentRegistryClient
+// registration also serves H13's idempotency-short-circuit registry
+// Ready-check READ (AddH13E2EAcceptanceGateHandler below); H13's WRITE path
+// (IRegistrySetupStatusUpdater) is a SEPARATE seam swapped independently by
+// task 184. NullDataverseEnvironmentRegistryClient is NOT deleted — it
+// remains in Sprk.Provisioning.ControlPlane.Core/Registry/ as the documented
+// ADR-032 P2 Null-Object shape (its own unit tests in
+// DataverseEnvironmentRegistryClientTests.cs continue to exercise its
+// contract) but is no longer registered anywhere in this composition root.
+// Registration UNCONDITIONAL — no feature-gate branch; DS-8 mandates Path X
+// be real from day one (no environment-based kill-switch for this seam).
+// NFR-05: DataverseEnvironmentRegistryOptions.Validate() fails fast at boot
+// if DataverseEnvironmentRegistry:AdminEnvironmentUrl is unset — see
+// infrastructure/bicep/modules/controlplane-worker-app-service.bicep for the
+// corresponding app-setting (added alongside this swap so a live deploy
+// does not crash-loop on the newly-unconditional requirement).
 // Placement Justification (CLAUDE.md §10): the handler lives in L2 (not
 // BFF) per spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types
 // (ADR-013 forcing-function rule — no IActionResolver, IActionRunner,
 // IOpenAiClient, IPlaybookService injection).
-builder.Services.AddSingleton<IDataverseEnvironmentRegistryClient, NullDataverseEnvironmentRegistryClient>();
+builder.Services.AddDataverseEnvironmentRegistry(builder.Configuration);
 builder.Services.AddScoped<H05ConsentCaptureHandler>();
 
-// Task 043: H1 subscription-readiness handler + ARM readiness probe
-// placeholder. Wave C5 replaces NullSubscriptionReadinessProbe with a real
-// ARM-backed impl (Azure.ResourceManager SDK OR `az` shell-out) once the L2
-// App Service UAMI has Reader RBAC granted on each customer subscription.
+// Task 043 / task 121: H1 subscription-readiness handler + real ARM readiness
+// probe. Task 121 (Wave G-2) replaced the Wave-C4 NullSubscriptionReadinessProbe
+// placeholder (which returned Passed=true unconditionally, no ARM call — DS-4
+// §3's classified PLACEHOLDER) with ArmSubscriptionReadinessProbe — a real
+// Azure.ResourceManager-SDK-backed impl performing two ARM calls:
+//   (1) ArmClient.GetSubscriptionResource(...).GetAsync() for reachability
+//       (equivalent to `az account show`).
+//   (2) ArmClient.GetManagedServicesRegistrationAssignments(...).GetAllAsync()
+//       for Lighthouse delegation (CustomerOwned tenancy branch only, gated
+//       by the H1 handler — not this probe).
+// The probe is constructed via a factory lambda that wraps the TokenCredential
+// singleton already registered by AddCosmosModule (UAMI-pinned via
+// ManagedIdentity:ClientId, ADR-028 MI-outbound) in a probe-local ArmClient —
+// no second credential chain, no shared ArmClient DI registration (keeps this
+// registration self-contained against sibling Wave-G-2 handler ports that may
+// also construct their own ArmClient instances for other resource types).
 // Both registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
 // Placement Justification (CLAUDE.md §10): H1 lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013).
 // H1 uses IProvisioningRunRepository (task 037) + IHandlerEnqueuer (task
 // 038); no BFF-facade dependencies. Downstream H2a is owned by sibling
 // task 044.
-builder.Services.AddSingleton<ISubscriptionReadinessProbe, NullSubscriptionReadinessProbe>();
+builder.Services.AddSingleton<ISubscriptionReadinessProbe>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmSubscriptionReadinessProbe>>();
+    return new ArmSubscriptionReadinessProbe(armClient, logger);
+});
 builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 
 // Task 044: H2a Bicep infra-deploy handler + four collaborator seams

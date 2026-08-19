@@ -100,7 +100,8 @@
 //     --location westus2 \
 //     --template-file infrastructure/bicep/platform-controlplane.bicep \
 //     --parameters environmentName=dev \
-//                  serviceBusNamespaceName=spaarke-servicebus-dev serviceBusResourceGroupName=SharePointEmbedded
+//                  serviceBusNamespaceName=spaarke-servicebus-dev serviceBusResourceGroupName=SharePointEmbedded \
+//                  adminDataverseEnvironmentUrl=https://spaarkedev1.crm.dynamics.com
 
 targetScope = 'subscription'
 
@@ -132,6 +133,9 @@ param serviceBusResourceGroupName string = 'SharePointEmbedded'
 
 @description('Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path (CustomerRunGuardOptions.cs:24-25 already anticipates this), this param + its appSettings are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule).')
 param dataverseClientSecretName string = 'Dataverse-ClientSecret'
+
+@description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table -- passed through to modules/controlplane-worker-app-service.bicep as DataverseEnvironmentRegistry__AdminEnvironmentUrl (task 122 / task 112 Path X MI-native client). REQUIRED: DataverseEnvironmentRegistryOptions.Validate() fails fast at Worker boot (NFR-05) if this is missing -- no default is supplied here deliberately (dev/staging/prod each target a distinct admin Dataverse environment; a default would risk silently pointing a non-dev deploy at the dev org).')
+param adminDataverseEnvironmentUrl string
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -394,6 +398,7 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
     dataverseClientSecretName: dataverseClientSecretName
+    adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }

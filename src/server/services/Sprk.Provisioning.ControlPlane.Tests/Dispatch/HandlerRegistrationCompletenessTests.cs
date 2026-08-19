@@ -60,6 +60,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Xunit;
 using WorkerProgram = WorkerHost::Program;
 
@@ -131,6 +132,31 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
 
         return data;
     }
+
+    // -------------------------------------------------------------------------
+    // Task 122 forcing-function — the exact category of regression this test
+    // exists to catch: if a future PR flips the composition root back to
+    // NullDataverseEnvironmentRegistryClient (or introduces a second,
+    // divergent registration), H0.5's re-consent semantics (spec.md FR-02)
+    // silently go inert again with a still-green build (the Null-Object
+    // satisfies the interface; nothing else fails). Asserting the CONCRETE
+    // resolved type (not just "non-null") is load-bearing — reuses task 103's
+    // WorkerTestFactory pattern (the REAL Worker composition root, not a
+    // duplicated hand-rolled container).
+    // -------------------------------------------------------------------------
+    [Fact]
+    public void IDataverseEnvironmentRegistryClient_ResolvesRealClient_NotNullObject()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var registryClient = scope.ServiceProvider.GetRequiredService<IDataverseEnvironmentRegistryClient>();
+
+        registryClient.Should().BeOfType<DataverseEnvironmentRegistryClient>(
+            "task 122 DI-swaps H0.5's (and H13's read-path) registry-client dependency onto the real " +
+            "Path X client (task 112); NullDataverseEnvironmentRegistryClient must never be the active " +
+            "composition-root registration again — a regression here silently re-inerts FR-02 re-consent " +
+            "semantics while every other test still passes (the Null-Object satisfies the interface).");
+    }
 }
 
 /// <summary>
@@ -150,6 +176,15 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
     {
         builder.UseSetting("Cosmos:AccountEndpoint", "https://l2-test.documents.azure.com:443/");
         builder.UseSetting("ServiceBus:FullyQualifiedNamespace", "l2-test.servicebus.windows.net");
+
+        // Task 122 — DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry
+        // now the active IDataverseEnvironmentRegistryClient registration (replacing
+        // NullDataverseEnvironmentRegistryClient); its Options.Validate() fails fast
+        // at boot on a missing AdminEnvironmentUrl (NFR-05), so the test host needs a
+        // syntactically-valid-but-unreachable value — same convention as the Cosmos /
+        // Service Bus settings above (the client itself is never invoked here, only
+        // constructor-graph resolution is exercised).
+        builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com/");
 
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs

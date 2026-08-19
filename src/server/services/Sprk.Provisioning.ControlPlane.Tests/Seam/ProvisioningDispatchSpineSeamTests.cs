@@ -525,6 +525,16 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
             // WorkerTestFactory already uses.
             builder.UseSetting("ServiceBus:FullyQualifiedNamespace", "l2-test.servicebus.windows.net");
 
+            // Task 122 -- DataverseEnvironmentRegistryModule's real client is
+            // now the active IDataverseEnvironmentRegistryClient registration
+            // (replacing NullDataverseEnvironmentRegistryClient); its
+            // Options.Validate() fails fast at boot on a missing
+            // AdminEnvironmentUrl (NFR-05). This test's canary H1 handler
+            // never touches the registry client, so a syntactically-valid-
+            // but-unreachable value is sufficient -- same convention as
+            // Dispatch/HandlerRegistrationCompletenessTests.cs's WorkerTestFactory.
+            builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com/");
+
             // Testing environment -- TelemetryModule's AzureMonitorGuard skips
             // exporter wiring silently on non-Development/Production envs.
             builder.UseEnvironment("Testing");
