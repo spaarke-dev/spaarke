@@ -3,7 +3,7 @@
 > **Status**: Ready for Implementation
 > **Created**: 2026-08-19
 > **Source**: [`design.md`](design.md)
-> **Epic**: Auth / Code Quality (#427) · **Risk**: HIGH (OBO = all delegated user auth; fails closed)
+> **Epic**: AUTH & SSO (#426) · **Risk**: HIGH (OBO = all delegated user auth; fails closed)
 > **Supporting evidence**: [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md) ·
 > [`notes/CREDENTIAL-INVENTORY.md`](notes/CREDENTIAL-INVENTORY.md) ·
 > [`notes/RESEARCH-FINDINGS.md`](notes/RESEARCH-FINDINGS.md) ·
@@ -103,6 +103,14 @@ token cache. Client assertions require shared/cached clients.
 `DataverseUserClient.cs:55-56,91`. Resolving each type twice from DI yields the same underlying CCA instance.
 No behaviour change beyond token-cache reuse; existing tests stay green.
 
+⚠️ **ADR-009 interaction — state the decision, don't inherit it** (`/adr-check` 2026-08-19). MSAL's token cache
+inside a singleton CCA is **in-process and per-instance**, while `Services/GraphTokenCache.cs:21` already
+implements a Redis (`IDistributedCache`) OBO token cache per ADR-009's Redis-first rule. On a multi-instance App
+Service the in-process cache is not shared, so OBO tokens are re-acquired per instance — the exact cost the Redis
+cache exists to avoid. Dev is single-instance, so this does not bite in scope, but the choice must be explicit.
+*Acceptance*: the task records whether MSAL's cache is serialized into `IDistributedCache` or whether
+`GraphTokenCache` remains the sole cross-request cache, with the reason. Silence is not an acceptable outcome.
+
 ### Workstream B — The credential seam
 
 **FR-B1** — Introduce `IClientAssertionProvider` and its managed-identity implementation.
@@ -111,9 +119,24 @@ The contract is **declared in `Spaarke.Dataverse`**; the implementation and the
 `TokenCredential? credential = null` parameter at `DataverseAccessDataSource.cs:32`, supplied by
 `Program.cs:46-48`.
 *Acceptance*: one-method interface; singleton implementation registered in the BFF; assertion cached until
-expiry and reused; shared-lib constructors take `IClientAssertionProvider? assertion = null` with a null default.
-`Spaarke.Dataverse.csproj` gains **no** ProjectReference and **no** new package.
-`tests/Spaarke.ArchTests/LayerDependencyTests.cs` FR-14 still passes unmodified.
+expiry and reused (ADR-028 A4 line 172 — *"reuse the instance"*); shared-lib constructors take
+`IClientAssertionProvider? assertion = null` with a null default. `Spaarke.Dataverse.csproj` gains **no**
+ProjectReference and **no** new package. `tests/Spaarke.ArchTests/LayerDependencyTests.cs` FR-14 still passes
+unmodified.
+
+⚠️ **Two ADR-010 obligations, both discovered by `/adr-check` 2026-08-19 — do not let these surface as CI failures:**
+
+1. **Raise the 1:1-interface ceiling in the same PR.** `IClientAssertionProvider` → `ManagedIdentityAssertionProvider`
+   is a new 1:1 interface→implementation mapping. `tests/Spaarke.ArchTests/ADR010_DITests.cs:164` asserts
+   `knownOneToOneCeiling = 153`; this makes 154 and **fails the build**. The seam is genuinely justified —
+   cross-assembly dependency inversion where `Spaarke.Dataverse` structurally cannot reference the implementation
+   (FR-14) — which is exactly the exception ADR-010 carves out. Raise 153 → 154 **with a comment citing this
+   project and the FR-14 rationale**, per the maintenance procedure documented at `ADR010_DITests.cs:144-146`.
+   *Acceptance*: `dotnet test tests/Spaarke.ArchTests/` passes; the ceiling comment names the justification.
+2. **Register via a feature module, not inline in `Program.cs`.** ADR-010 MUST NOT: *"inline registrations (use
+   feature modules)"*. The `TokenCredential` precedent at `Program.cs:46-48` is itself inline and should not be
+   mirrored. *Acceptance*: the registration lives in an existing DI feature module; `Program.cs` gains no new
+   inline `AddSingleton`.
 
 **FR-B2** — Build ordered credential selection into the provider.
 Order is **MI-FIC → Key Vault certificate → dev secret**, config-driven. **This must be built, not inherited** —
@@ -172,6 +195,22 @@ by the Office add-in deploy. Reconcile the **11 PowerShell scripts** that refere
 *Acceptance*: no BFF-identity path resolves a secret; the Office add-in deploy still succeeds; every listed script
 either no longer references the secret or documents why it still does; `.claude/constraints/auth.md`,
 `Sprk.Bff.Api/CLAUDE.md:110,221` and the deployment guides reflect the end state.
+
+**FR-C4** — Extend `scripts/Register-EntraAppRegistrations.ps1` with federated-credential creation.
+**Added 2026-08-19 in response to [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md).**
+`customer-provisioning-orchestration-r1` accepted the change request and assigned this script as auth-v4's to own;
+their **task 130** (H3 heavy port, Wave G-3) will *invoke* it rather than duplicate FIC-creation logic. **If it is
+not landed before their Wave G-3 dispatches, task 130 builds its own implementation** from the §3.1 recipe, which
+then has to be reconciled.
+
+Note this is the one piece of scope that is **not** dev-only: it is shared provisioning automation. It is included
+because a sibling project is now soft-blocked on it, and because the dev FIC was created by hand (2026-08-19) —
+nothing in the repo can currently create one.
+*Acceptance*: the script creates a FIC idempotently given (tenant, app registration, UAMI principalId); issuer is
+the hosting tenant's `/v2.0` OIDC endpoint, subject is the UAMI **principalId** (not clientId), audience is exactly
+`api://AzureADTokenExchange`; **retries on `AADSTS70021`** (propagation delay); **verifies by performing a token
+exchange**, not by checking that creation returned success — misconfiguration creates cleanly and fails only at
+exchange. Re-running against an existing FIC is a no-op.
 
 ### Workstream D — Power BI (UAMI-as-principal)
 
@@ -237,8 +276,22 @@ entries each carry a written reason; the test's negative control proves the dete
 
 **FR-F2** — Credential census test. Assert that the number of confidential-client construction sites equals a
 checked-in census with a per-site reason.
+**MUST be implemented as source / assembly analysis, NOT as a DI-resolution test.** ADR-038 ban **B3** prohibits
+`Assert.NotNull(services.GetRequiredService<X>())`; a census that resolves services from a container is a banned
+DI-registration test. Analyse the source tree or the compiled assembly for construction sites.
 *Acceptance*: adding a ninth CCA site fails until the census is updated. *This is what would have caught
 `SpeAdminTokenProvider` and `SpeAdminGraphService`, both absent from the origin seed's inventory.*
+
+**FR-F0** — Declare the forcing functions MAINTAIN-class before wrap-up.
+FR-F1 and FR-F2 live in `tests/Spaarke.ArchTests/`, which is **not one of the 7 KEEP paths** in
+[`tests/CLAUDE.md`](../../tests/CLAUDE.md). That file states tests outside those paths are *"anti-pattern by
+construction"*, and does not carve out the ArchTests project — despite it being pre-existing, sanctioned, and home
+to `GodClassGuardTests` and `LayerDependencyTests`. **Risk**: `/test-diet` at the `090-wrapup-*` task (a mandatory
+gate per root CLAUDE.md §7) classifies them as scaffolding and proposes deletion — destroying the anti-recurrence
+mechanism that is this project's entire purpose, and invalidating success criterion 12.
+*Acceptance*: the `/test-diet` report classifies FR-F1 and FR-F2 as **MAINTAIN**, citing that structural fitness
+functions are a distinct category from build-class scaffolding. If `/test-diet` cannot express that, escalate to a
+`tests/CLAUDE.md` amendment adding `tests/Spaarke.ArchTests/**` as an eighth KEEP path rather than deleting them.
 
 **FR-F3** — Startup assertion. Outside `Development`, fail fast if any BFF-identity credential resolves to a
 secret once FR-C3 has completed, rather than silently degrading.
@@ -447,16 +500,29 @@ base shared layer, widening publish size and CVE surface for every downstream co
       SP profiles; whether profiles are supported when the principal is a managed identity is **unverified**.
       *Blocks*: sizing FR-D2. *If unsupported*: fall back to MI-FIC-on-existing-SP, or retain the Power BI secret
       under a documented ADR-028 exception. **Verify before committing Workstream D's task set.**
-- [ ] **ADR-010 DI-registration headroom.** Count non-framework registrations before FR-B1; declare path A or C.
-      *Blocks*: nothing, but must not surface first at code review.
+- [x] ~~**ADR-010 DI-registration headroom.**~~ **RESOLVED 2026-08-19 by `/adr-check`.** Not a blocker: ADR-010
+      itself records **265 registrations** at the 2026-05-26 baseline against the "≤15 non-framework lines"
+      principle, explicitly *"a known violation accepted by the project"*, with reduction out of scope. FR-B1 adds
+      one to an already-accepted overage. The live obligations are instead the two under FR-B1 — raise the
+      `ADR010_DITests` 1:1 ceiling 153 → 154, and register via a feature module rather than inline.
 - [ ] **`Analysis:PromptFlowKey` — still in use?** *Blocks*: FR-E6 disposition (migrate / delete / retain).
-- [ ] **Which app registration the shared Model 1 BFF authenticates as** — one shared multitenant app (Reading 1,
-      the working assumption, supported by the live `AzureADMultipleOrgs` value) vs one per customer (Reading 2).
-      **Provisioning's call**, `notes/PROVISIONING-CHANGE-REQUEST.md` §5.1. *Blocks*: nothing in dev-only scope;
-      determines whether customer onboarding gains a per-customer FIC step.
-- [ ] **Invariant I6** (Model 1 only) — under MI-FIC the shared BFF UAMI can mint an assertion for any app
-      registration that trusts it, moving part of the isolation boundary from resource-level to code-level.
-      Raised with provisioning; not adopted unilaterally.
+- [x] ~~**Which app registration the shared Model 1 BFF authenticates as**~~ — **ANSWERED 2026-08-19 by
+      provisioning** ([`notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md)).
+      The answer is a **split, not a single reading**: **Model 1** = Reading 1, one shared multitenant app
+      registration (matches the live `AzureADMultipleOrgs`), per-customer trust via the existing D18
+      consent-callback, **no per-customer FIC**. **Model 2** = Reading 2, per-customer app registration with its
+      own FIC, created by their H3. Their spec.md FR-39; R23 closed.
+- [x] ~~**Invariant I6**~~ — **ADOPTED 2026-08-19**, verbatim, scoped to **Model 1 only** (structurally true by
+      construction under Model 2's per-customer app registration). ArchTest
+      `Spaarke.ArchTests.TenantIsolation.I6_ObApp*`; enforcement carried by their task 130. Their spec.md FR-40.
+- [ ] ⚠️ **Raised back to provisioning — Model 2 same-tenant check.** Their reply states Model 2 uses a
+      per-customer app registration *"+ a FIC trusting **the shared BFF UAMI**"*. For **Model 2 in the Spaarke
+      tenant** that is intra-tenant and fine. For **Model 2 in a customer's tenant** — where
+      [`TENANCY-AND-CREDENTIALS.md`](notes/TENANCY-AND-CREDENTIALS.md) §3 has the app registration *and* a stamp
+      UAMI both customer-side — trusting a Spaarke-tenant shared UAMI would be **cross-tenant, which MI-FIC does
+      not support** (ADR-028 A4 line 179 and the Entra same-tenant prerequisite). Either the customer-tenant shape
+      uses its **own stamp UAMI** as the FIC issuer, or that shape cannot use MI-FIC at all and needs the KV
+      certificate. *Blocks*: nothing in dev-only scope. **Must be settled before their Wave G-3 task 130 executes.**
 
 ---
 

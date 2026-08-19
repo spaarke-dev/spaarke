@@ -1,7 +1,7 @@
 # Design — Spaarke Auth v4: Zero-Secret BFF Confidential Credential
 
 > **Status**: DESIGN DRAFT (research complete; ready for `/design-to-spec`) · **Date**: 2026-08-17
-> **Epic**: Auth / Code Quality (#427) · **Risk**: HIGH (OBO = all delegated user auth)
+> **Epic**: AUTH & SSO (#426) · **Risk**: HIGH (OBO = all delegated user auth)
 > **Origin**: `code-quality-and-assurance-r3` task 011 / #3b (app-only Dataverse → MI, live on dev)
 > **Evidence base**: [`notes/RESEARCH-FINDINGS.md`](notes/RESEARCH-FINDINGS.md) · [`notes/CREDENTIAL-INVENTORY.md`](notes/CREDENTIAL-INVENTORY.md) · [`notes/ASSESSMENT.md`](notes/ASSESSMENT.md) (origin seed)
 > **Live state + Phase 0 prerequisites**: [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md) (2026-08-19 — **prerequisites resolved; dev MI-FIC created**)

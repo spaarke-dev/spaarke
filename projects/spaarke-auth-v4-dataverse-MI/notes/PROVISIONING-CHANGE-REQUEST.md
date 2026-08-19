@@ -2,7 +2,9 @@
 
 ## The BFF confidential credential is moving off client secrets
 
-> **From**: `spaarke-auth-v4-dataverse-MI` · **Date**: 2026-08-19 · **Status**: FOR REVIEW BY PROVISIONING
+> **From**: `spaarke-auth-v4-dataverse-MI` · **Date**: 2026-08-19 · **Status**: ✅ **ACCEPTED + APPLIED by
+> provisioning 2026-08-19** — see [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](AUTH-V4-CHANGE-REQUEST-RESPONSE.md).
+> **auth-v4's replies to their open items are in §9 below.**
 > **Type**: change request against **shipped** handlers on PR #779 (~68% executed), not input to a design
 > **Decision authority**: ADR-028 **Amendment A4** + exception **E-3**, applied 2026-08-17
 > **Evidence**: [`PHASE-0-LIVE-VERIFICATION.md`](PHASE-0-LIVE-VERIFICATION.md) ·
@@ -276,3 +278,77 @@ and `Configure-ProductionAppSettings.ps1`. Let's agree who edits those and when.
 | 4 | `stacks/dev.bicepparam:12` declares `B1`; live is **P1v3**. IaC drift — and it is the difference between "slots impossible" and "slots available". | shared |
 | 5 | A duplicate lowercase KV alias **`bff-api-client-secret`** is used by the Office add-in deploy. Any removal ignoring it breaks the add-in. | auth-v4 |
 | 6 | Master IaC creates a **system-assigned** identity while live uses a UAMI; the UAMI Bicep lives on *your* branch. | provisioning |
+
+---
+
+## 9. auth-v4 replies to provisioning's response (2026-08-19)
+
+Answering [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](AUTH-V4-CHANGE-REQUEST-RESPONSE.md). Their split (Model 1 =
+Reading 1, Model 2 = Reading 2), invariant **I6** adoption, **R23** closure, **FR-39** pluggability contract and
+the §5.2 doc fix are all accepted as applied — no further ask from us on any of those.
+
+### 9.1 Answer to their judgment call #3 — the "already-migrated-to-FIC" KV sentinel contract
+
+**Omit the secret entirely. Do not write a sentinel value.**
+
+The BFF-side provider (spec FR-B2) performs **ordered credential selection** — MI-FIC → Key Vault certificate →
+dev secret — and falls through when a higher-priority credential is absent. That makes absence the well-defined,
+already-implemented signal:
+
+- **Omit** → the selector finds no secret at the lowest tier and uses the FIC. Clean, and it is the same code path
+  local development and post-Phase-5 production take.
+- **Sentinel** → strictly worse. The selector cannot distinguish a sentinel string from a real secret, so if MI-FIC
+  ever fails to resolve, it will attempt a token acquisition **with the sentinel** and fail at Entra with an opaque
+  `AADSTS7000215` (invalid client secret) instead of falling through or failing fast with an actionable message.
+  A sentinel converts a clean fallback into a confusing runtime error.
+
+So: **H4 should skip secret creation for a FIC-migrated customer rather than writing a placeholder.** If you need a
+positive marker that migration happened, put it somewhere that is not the credential slot — a provisioning-state
+field or a KV tag — never a value in the secret the credential selector reads.
+
+### 9.2 ⚠️ Raised back — Model 2's FIC issuer may break the same-tenant rule
+
+Your TL;DR states Model 2 uses a per-customer BFF app registration **"+ a FIC trusting the shared BFF UAMI."**
+
+For **Model 2 in the Spaarke tenant** that is intra-tenant and correct. For **Model 2 in a customer's tenant** it
+is not: the app registration is customer-side while the shared BFF UAMI is in the Spaarke tenant, and **Entra
+requires the app registration and the UAMI to be in the same tenant** — it is the single hard platform constraint
+(ADR-028 A4; [`TENANCY-AND-CREDENTIALS.md`](TENANCY-AND-CREDENTIALS.md) §1). Cross-tenant *resource* access is
+supported; a cross-tenant *FIC issuer* is not.
+
+`TENANCY-AND-CREDENTIALS.md` §3 row 3 assumed the customer-tenant stamp issues from **its own stamp UAMI**, which
+is what makes all three shapes intra-tenant. Either:
+
+- **(a)** the customer-tenant shape uses its **own stamp UAMI** as the FIC issuer — our assumption, and the only
+  reading under which MI-FIC covers every shape; or
+- **(b)** it genuinely must trust the shared Spaarke UAMI, in which case **MI-FIC is structurally impossible for
+  that shape** and it needs the ADR-028 A4 sanctioned alternative — a Key Vault certificate. That would reopen the
+  certificate-provisioning work we recorded as *dropped, not deferred*.
+
+We believe (a) is what you mean and the sentence is just compressed. **Please confirm before Wave G-3 task 130
+executes**, because the failure mode is silent: a cross-tenant FIC **creates successfully** and fails only at
+token exchange.
+
+### 9.3 `Register-EntraAppRegistrations.ps1` FIC extension — accepted, with a caveat
+
+Accepted as ours. It is now **spec FR-C4** with acceptance criteria covering idempotency, `AADSTS70021` retry, and
+**verification by performing an actual token exchange** rather than trusting a successful create.
+
+Caveat on timing: auth-v4's own rollout is scoped **dev-only**, so FR-C4 is the one item in our spec that exists
+purely to serve your Wave G-3 dependency. We will sequence it early, but if your Wave G-3 dispatches first, take
+the task-130 fallback path and we will reconcile — do not block on us. Please give us as much notice of the G-3
+dispatch date as you can.
+
+### 9.4 Accepted with no action
+
+- **Your item 2** (Bicep phantom-name cross-check in Wave G-1 wrap-up) — agreed. Note our own finding softened on
+  review: `config/spaarke-resources.yaml` correctly records the 2026-05-24 migration and marks the old app
+  `status: legacy`. The genuine residue is one line — `STAGING_APP_NAME: spe-api-dev-67e2xz` (`:558`), a live
+  GitHub Actions repo-secret mapping to a decommissioned resource. That is CI estate, not yours or ours.
+- **Your item 6** — accepted: r1 Phase C is authoritative for UAMI Bicep and supersedes master IaC. We have
+  removed it from our follow-up list.
+- **Your judgment calls #1, #2, #4** (doc-location drift, FR renumbering, §9A consistency sweep) — all fine, no
+  objection.
+- **Your MI-FIC cap-inversion note** — appreciated. For the record the same inversion is what made "OBO requires a
+  secret" survive three prior audits here; the failure mode is a plausible mechanism reasoned about from the wrong
+  end, not missing evidence.
