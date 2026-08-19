@@ -44,6 +44,25 @@
 //   T6  A single entry's SetSecretAsync 500s -> that entry's result is Failed,
 //       but the OVERALL outcome is still Success (per-entry isolation
 //       preserved — matches KvSecretsWriteOutcome's contract).
+//
+// TASK 126 ADDITIONS (H4 real-values correctness gate — value resolution is
+// now delegated to IKvSecretValueResolver; this file uses a canned FakeValueResolver
+// test double so these tests stay focused on the WRITER's control flow —
+// existence checks, rotation-safety, the FIC omit-list, and the
+// FromBicepOutput skip-if-already-provisioned guard. IKvSecretValueResolver's
+// OWN SDK-calling behavior — real GetSecretAsync copy-sourcing, generated
+// crypto-random values — is ground-truthed separately in
+// KvSecretValueResolverTests.cs):
+//   T7  A FromBicepOutput entry that ALREADY EXISTS on the target vault is
+//       skipped WITHOUT invoking the resolver and WITHOUT any PUT call
+//       (satisfies task 126 AC4's "no value-copy call made" — the writer
+//       never asks the resolver for a value at all for this case).
+//   T8  An entry listed in OmitCanonicalNames (FR-39 FIC pluggability) is
+//       omitted entirely — no GET, no PUT, no resolver call — regardless of
+//       whether it is BFF-API-ClientSecret or any other name (manifest/run-
+//       parameter driven, not a hardcoded identity check).
+//   T9  The resolver returning Failed for an entry propagates as a per-entry
+//       Failed result (no fabricated value written).
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -67,15 +86,20 @@ public sealed class SecretClientKvWriterTests
 
     private static KvSecretsPopulationOptions NewOptions() => new();
 
-    private static KvSecretWriteRequest NewRequest(IReadOnlyList<KvSecretEntry> entries, bool upgradeMode = false, bool rotate = false) => new(
+    private static KvSecretWriteRequest NewRequest(
+        IReadOnlyList<KvSecretEntry> entries,
+        bool upgradeMode = false,
+        bool rotate = false,
+        IReadOnlySet<string>? omitCanonicalNames = null) => new(
         CustomerId: CustomerId,
         TargetKeyVaultName: VaultName,
         SubscriptionId: SubscriptionId,
         Entries: entries,
         UpgradeMode: upgradeMode,
-        RotateExisting: rotate);
+        RotateExisting: rotate,
+        OmitCanonicalNames: omitCanonicalNames);
 
-    private static SecretClientKvWriter NewWriter(FakeSecretsHandler handler)
+    private static SecretClientKvWriter NewWriter(FakeSecretsHandler handler, IKvSecretValueResolver? resolver = null)
     {
         // Both the ArmClient (preflight probe) and the SecretClient (KV ops)
         // are built against the SAME fake HttpMessageHandler instance so a
@@ -91,6 +115,7 @@ public sealed class SecretClientKvWriterTests
             new FakeCredential(),
             armClient,
             secretClientOptions,
+            resolver ?? new FakeValueResolver(),
             Options.Create(NewOptions()),
             NullLogger<SecretClientKvWriter>.Instance);
     }
@@ -221,6 +246,103 @@ public sealed class SecretClientKvWriterTests
         success.Results.Should().HaveCount(2);
         success.Results.Single(r => r.CanonicalName == "AiSearch--AdminKey").Action.Should().Be(KvSecretWriteAction.Failed);
         success.Results.Single(r => r.CanonicalName == "Dataverse-ServiceUrl").Action.Should().Be(KvSecretWriteAction.Wrote);
+    }
+
+    // ---------- T7 FromBicepOutput already-exists skip (no resolver call) ----------
+
+    [Fact]
+    public async Task WriteAsync_FromBicepOutputEntryAlreadyExists_SkipsWithoutInvokingResolverOrPut()
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId) { SecretExists = true };
+        var resolver = new FakeValueResolver();
+        var writer = NewWriter(handler, resolver);
+        var entries = new List<KvSecretEntry>
+        {
+            new("AiSearch--AdminKey", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+        };
+
+        var outcome = await writer.WriteAsync(NewRequest(entries), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<KvSecretsWriteOutcome.Success>().Subject;
+        success.Results.Single().Action.Should().Be(KvSecretWriteAction.SkippedRotationSafe);
+        handler.PutMethods.Should().BeEmpty(
+            "FromBicepOutput entries that already exist must never be overwritten with a resolver guess");
+        resolver.ResolvedNames.Should().BeEmpty(
+            "task 126 AC4: no value-copy/resolution call should be made when the ARM-deployed value is already present");
+    }
+
+    // ---------- T8 FIC omit-list (FR-39 pluggability, manifest/run-parameter driven) ----------
+
+    [Theory]
+    [InlineData("BFF-API-ClientSecret")]
+    [InlineData("AiSearch--AdminKey")]
+    public async Task WriteAsync_EntryInOmitCanonicalNames_OmitsEntirelyWithoutAnyKvOrResolverCall(string canonicalName)
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId);
+        var resolver = new FakeValueResolver();
+        var writer = NewWriter(handler, resolver);
+        var entries = new List<KvSecretEntry>
+        {
+            new(canonicalName, KvSecretOperation.Upsert, KvSecretValueSource.FromExistingKvSecret),
+        };
+
+        var outcome = await writer.WriteAsync(
+            NewRequest(entries, omitCanonicalNames: new HashSet<string>(StringComparer.Ordinal) { canonicalName }),
+            CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<KvSecretsWriteOutcome.Success>().Subject;
+        success.Results.Single().Action.Should().Be(KvSecretWriteAction.Omitted);
+        handler.RequestedUris.Should().NotContain(u => u.AbsolutePath.Contains(canonicalName),
+            "an omitted entry must generate ZERO KV calls — not even an existence probe");
+        resolver.ResolvedNames.Should().BeEmpty("an omitted entry must never reach value resolution");
+    }
+
+    // ---------- T9 resolver failure propagates as per-entry Failed ----------
+
+    [Fact]
+    public async Task WriteAsync_ResolverFailsForEntry_ReturnsFailedWithoutPut()
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId);
+        var resolver = new FakeValueResolver { FailForName = "AiSearch--AdminKey" };
+        var writer = NewWriter(handler, resolver);
+        var entries = new List<KvSecretEntry>
+        {
+            new("AiSearch--AdminKey", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+        };
+
+        var outcome = await writer.WriteAsync(NewRequest(entries), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<KvSecretsWriteOutcome.Success>().Subject;
+        var result = success.Results.Single();
+        result.Action.Should().Be(KvSecretWriteAction.Failed);
+        result.ErrorMessage.Should().Contain("fake resolver failure");
+        handler.PutMethods.Should().BeEmpty("a resolution failure must never fall through to a fabricated write");
+    }
+
+    /// <summary>
+    /// Canned-outcome <see cref="IKvSecretValueResolver"/> test double. Real
+    /// SDK-calling resolution behavior (GetSecretAsync copy-sourcing,
+    /// RandomNumberGenerator generation) is ground-truthed separately in
+    /// KvSecretValueResolverTests.cs — this file's tests focus on the
+    /// WRITER's control flow, not the resolver's internals.
+    /// </summary>
+    private sealed class FakeValueResolver : IKvSecretValueResolver
+    {
+        public string? FailForName { get; init; }
+        public List<string> ResolvedNames { get; } = new();
+
+        public Task<KvSecretValueResolution> ResolveAsync(
+            KvSecretEntry entry, KvSecretWriteRequest request, CancellationToken cancellationToken)
+        {
+            ResolvedNames.Add(entry.CanonicalName);
+            if (string.Equals(entry.CanonicalName, FailForName, StringComparison.Ordinal))
+            {
+                return Task.FromResult<KvSecretValueResolution>(
+                    new KvSecretValueResolution.Failed($"fake resolver failure for '{entry.CanonicalName}'"));
+            }
+            return Task.FromResult<KvSecretValueResolution>(
+                new KvSecretValueResolution.Resolved($"{entry.CanonicalName}-fake-resolved-value"));
+        }
     }
 
     /// <summary>Minimal fake <see cref="TokenCredential"/> — this file's own copy per KeyVaultCertBootstrapProbeTests.cs's convention.</summary>

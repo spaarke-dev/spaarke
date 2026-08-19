@@ -32,14 +32,21 @@
 // working" check). A RequestFailedException here fails BEFORE any KV write —
 // same Resumable-no-partial-state guarantee as the retired probe.
 //
-// VALUE RESOLUTION SCOPE NOTE (UNCHANGED from the retired writer — task 126's
-// scope, not this task's): <see cref="ResolveValueForEntry"/> still returns
-// the deterministic `{name}-interim-placeholder-{customerId}` value. Task 126
-// (H4 real-values correctness gate) replaces this method's body with real
-// branches per <see cref="KvSecretValueSource"/>; this port does not touch it.
-// No entry in this writer special-cases `BFF-API-ClientSecret` — per spec.md
-// FR-39's pluggability contract, every manifest entry (including that one)
-// flows through the SAME generic Upsert/Delete/rotation-safe path.
+// VALUE RESOLUTION (task 126, Wave G-2 Batch G-2C — H4 real-values
+// correctness gate): value resolution is now DELEGATED to
+// <see cref="IKvSecretValueResolver"/> (KvSecretValueResolver.cs) — the
+// deterministic non-functional placeholder string this file previously
+// always returned (see KvSecretValueResolver.cs's file header for the exact
+// retired format) is gone. This writer still owns ALL
+// control-flow decisions (existence checks, rotation-safety, the FIC
+// omit-list, and the FromBicepOutput skip-if-already-provisioned guard);
+// the resolver ONLY answers "what value should I write" or "I cannot,
+// here's why" for a single entry. No entry in this writer special-cases
+// `BFF-API-ClientSecret` by name — per spec.md FR-39's pluggability
+// contract, every manifest entry (including that one) flows through the
+// SAME generic Upsert/Delete/rotation-safe path; the FIC-omit mechanism is
+// driven entirely by <see cref="KvSecretWriteRequest.OmitCanonicalNames"/>
+// (a run-parameter-supplied SET, i.e. DATA), never a hardcoded name check.
 // -----------------------------------------------------------------------------
 
 using Azure;
@@ -68,6 +75,7 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
     private readonly TokenCredential _credential;
     private readonly ArmClient _armClient;
     private readonly SecretClientOptions? _clientOptions;
+    private readonly IKvSecretValueResolver _resolver;
     private readonly KvSecretsPopulationOptions _options;
     private readonly ILogger<SecretClientKvWriter> _logger;
 
@@ -75,9 +83,10 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
     public SecretClientKvWriter(
         TokenCredential credential,
         ArmClient armClient,
+        IKvSecretValueResolver resolver,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<SecretClientKvWriter> logger)
-        : this(credential, armClient, clientOptions: null, options, logger)
+        : this(credential, armClient, clientOptions: null, resolver, options, logger)
     {
     }
 
@@ -86,16 +95,19 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
         TokenCredential credential,
         ArmClient armClient,
         SecretClientOptions? clientOptions,
+        IKvSecretValueResolver resolver,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<SecretClientKvWriter> logger)
     {
         ArgumentNullException.ThrowIfNull(credential);
         ArgumentNullException.ThrowIfNull(armClient);
+        ArgumentNullException.ThrowIfNull(resolver);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         _credential = credential;
         _armClient = armClient;
         _clientOptions = clientOptions;
+        _resolver = resolver;
         _options = options.Value;
         _logger = logger;
     }
@@ -182,6 +194,19 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
             }
 
             // Upsert branch — rotation-safe by default.
+
+            // FIC-omit seam (task 126, spec.md FR-39). Manifest/run-parameter
+            // driven — NEVER a hardcoded canonical-name check. Fires BEFORE
+            // any KV call at all (no existence probe, no resolver call).
+            if (request.OmitCanonicalNames.Contains(entry.CanonicalName))
+            {
+                _logger.LogInformation(
+                    "H4 KV writer: OMIT {SecretName} on vault {Vault} " +
+                    "(auth-v4 FIC-covered per run parameter; customer={CustomerId})",
+                    entry.CanonicalName, request.TargetKeyVaultName, request.CustomerId);
+                return new KvSecretWriteResult(entry.CanonicalName, KvSecretWriteAction.Omitted, null);
+            }
+
             var exists = await SecretExistsAsync(client, entry.CanonicalName, _options.KvOperationTimeout, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -195,7 +220,31 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
                     entry.CanonicalName, KvSecretWriteAction.SkippedRotationSafe, null);
             }
 
-            var value = ResolveValueForEntry(entry, request);
+            // FromBicepOutput entries are expected to already be provisioned
+            // by the customer.bicep ARM deployment (H2a) — see
+            // KvSecretValueResolver.cs's file-header mapping note. If the
+            // secret already exists here (Bicep already wrote it, or a prior
+            // run did), do NOT overwrite it with a resolver guess — skip,
+            // even outside upgrade mode (a FRESH run's H2a step runs BEFORE
+            // H4 in the same DAG, so "exists" here means "Bicep already
+            // wrote it this run").
+            if (entry.ValueSource == KvSecretValueSource.FromBicepOutput && exists)
+            {
+                _logger.LogInformation(
+                    "H4 KV writer: SKIP (already provisioned by ARM deployment) {SecretName} on vault {Vault} " +
+                    "(customer={CustomerId})",
+                    entry.CanonicalName, request.TargetKeyVaultName, request.CustomerId);
+                return new KvSecretWriteResult(
+                    entry.CanonicalName, KvSecretWriteAction.SkippedRotationSafe, null);
+            }
+
+            var resolution = await _resolver.ResolveAsync(entry, request, cancellationToken).ConfigureAwait(false);
+            if (resolution is KvSecretValueResolution.Failed resolutionFailure)
+            {
+                return new KvSecretWriteResult(
+                    entry.CanonicalName, KvSecretWriteAction.Failed, resolutionFailure.Diagnostic);
+            }
+            var value = ((KvSecretValueResolution.Resolved)resolution).Value;
 
             // The cleartext value ONLY passes through SetSecretAsync's request
             // body here. It is not logged, not returned in the result record,
@@ -240,24 +289,6 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
         {
             throw new TimeoutException($"SecretClient.GetSecretAsync invocation timed out after {timeout}.");
         }
-    }
-
-    /// <summary>
-    /// Interim value resolver — Phase H task 084 will replace this with real
-    /// branches per <see cref="KvSecretValueSource"/>. Deterministic placeholder
-    /// suffices for wave-C4/G-2 tests + dev provisioning. UNCHANGED from the
-    /// retired AzCliKvSecretsWriter (task 126's exclusive scope — this port
-    /// does not touch value resolution). No entry is special-cased here — per
-    /// spec.md FR-39, the `BFF-API-ClientSecret` name flows through the SAME
-    /// generic path as every other manifest entry.
-    /// </summary>
-    private static string ResolveValueForEntry(KvSecretEntry entry, KvSecretWriteRequest request)
-    {
-        // Deterministic non-secret placeholder. Format is intentionally NOT
-        // secret-shaped (short, hyphenated, includes "placeholder") so if it
-        // ever reaches production it fails loudly at the first consumer
-        // rather than silently persisting.
-        return $"{entry.CanonicalName}-interim-placeholder-{request.CustomerId}";
     }
 
     private static async Task WithTimeoutAsync(

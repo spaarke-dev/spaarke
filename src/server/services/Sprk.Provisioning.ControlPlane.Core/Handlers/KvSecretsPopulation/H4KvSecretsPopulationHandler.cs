@@ -167,6 +167,18 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     public const string RotateExistingParameterKey = "rotate";
 
     /// <summary>
+    /// Non-secret parameter key (task 126, spec.md FR-39 auth-v4 FIC
+    /// pluggability) carrying a comma-separated list of manifest canonical
+    /// names the writer MUST omit entirely — a coordinated run parameter
+    /// indicates the corresponding OBO credential has already migrated to
+    /// FIC. Absent OR empty = no omissions (default; matches today's live
+    /// state — auth-v4 Phase 5 secret retirement has NOT landed). This key
+    /// is DATA, not a hardcoded canonical-name check — parity with task
+    /// 125's FR-39 "no special-casing" commitment.
+    /// </summary>
+    public const string FicOmitSecretNamesParameterKey = "ficOmitSecretNames";
+
+    /// <summary>
     /// Non-secret parameter key carrying an ISO-8601 timestamp for
     /// <c>sprk_dataverseenvironment.sprk_provisionedon</c>. When present +
     /// non-empty, H4 runs in upgrade mode (spec.md FR-34 rotation-safe
@@ -351,6 +363,11 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             : BuildKvResourceId(subscriptionId, resourceGroupName, keyVaultName);
         var upgradeMode = TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out var provisionedOnRaw)
             && !string.IsNullOrWhiteSpace(provisionedOnRaw);
+        var omitCanonicalNames = TryGetNonEmpty(parameters, FicOmitSecretNamesParameterKey, out var ficOmitRaw)
+            ? new HashSet<string>(
+                ficOmitRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
 
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, secretsVer);
 
@@ -433,7 +450,9 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 SubscriptionId: subscriptionId,
                 Entries: entries,
                 UpgradeMode: upgradeMode,
-                RotateExisting: rotateExisting);
+                RotateExisting: rotateExisting,
+                SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
+                OmitCanonicalNames: omitCanonicalNames);
             writeOutcome = await _writer.WriteAsync(writeRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

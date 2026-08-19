@@ -210,7 +210,7 @@ _H0/H1/H0.5/H2a/H2b/H4 SDK ports incl. H4 real-value-sourcing correctness gate_
 | 123 | ✅ | H2a: ARM.Resources deployment port (ArmDeployment.CreateOrUpdateAsync + WhatIfAtSubscriptionScopeAsync) + T1 KV-ref probe port | FULL | sonnet / xhigh | waveG2-parallel | 102, 103, 117 |
 | 124 | ✅ | H2b: SearchIndexClient port + REAL AI Search tenant-filter template provisioner (replace Stub) | FULL | sonnet / high | waveG2-parallel | 102, 103, 123 |
 | 125 | ✅ | H4: SecretClient family port + ARM.AppService KeyVaultReferenceIdentity PATCH (T1) both slots + ARM.Authorization role assignment (T5) | FULL | sonnet / high | none | 102, 103, 123 |
-| 126 | 🔲 | H4: real value-sourcing per KvSecretValueSource (generate/copy/reference) + task-084 canonical manifest DI-swap (C2.2) | FULL | sonnet / xhigh | none | 125 |
+| 126 | ✅ | H4: real value-sourcing per KvSecretValueSource (generate/copy/reference) + task-084 canonical manifest DI-swap (C2.2) | FULL | sonnet / xhigh | none | 125 |
 
 ### Phase C'' Wave G-3 -- Identity + deploy (3 tasks)
 

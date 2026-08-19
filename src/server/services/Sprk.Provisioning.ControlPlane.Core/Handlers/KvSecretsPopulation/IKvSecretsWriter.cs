@@ -36,6 +36,8 @@
 //   a live `Dataverse-ClientSecret` breaks OBO fleet-wide (§7.9 pre-check).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Models;
+
 namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 
 /// <summary>
@@ -70,13 +72,44 @@ public interface IKvSecretsWriter
 /// <param name="Entries">Manifest entries in canonical order.</param>
 /// <param name="UpgradeMode">True when the customer's <c>sprk_provisionedon</c> is non-null (spec.md FR-34).</param>
 /// <param name="RotateExisting">When true (H4-rotate variant), overwrite existing secret values on Upsert. Default false = rotation-safe (§7.9 pre-check).</param>
+/// <param name="SecretParameters">
+/// Task 126 addition. Keyed by manifest <see cref="KvSecretEntry.CanonicalName"/> — a
+/// new, minimal, additive convention on top of the existing
+/// <see cref="Models.RunParameters.Secrets"/> contract (see
+/// notes/task-126-deviations.md). Consumed by
+/// <see cref="IKvSecretValueResolver"/> for
+/// <see cref="KvSecretValueSource.FromExistingKvSecret"/> +
+/// <see cref="KvSecretValueSource.FromRunParameters"/> entries. Defaults to an
+/// empty dictionary so existing call sites/tests need no change.
+/// </param>
+/// <param name="OmitCanonicalNames">
+/// Task 126 addition (spec.md FR-39 auth-v4 FIC pluggability). Canonical
+/// names the writer MUST omit entirely — NO KV read/write call at all —
+/// because a coordinated run parameter indicates the corresponding OBO
+/// credential has already migrated to FIC. Manifest-driven / run-parameter-
+/// driven, NEVER a hardcoded canonical-name check in writer code (parity
+/// with task 125's FR-39 "no special-casing" commitment — this set is DATA
+/// supplied per-run, not a code branch on identity). Defaults to an empty
+/// set so existing call sites/tests need no change.
+/// </param>
 public sealed record KvSecretWriteRequest(
     string CustomerId,
     string TargetKeyVaultName,
     string SubscriptionId,
     IReadOnlyList<KvSecretEntry> Entries,
     bool UpgradeMode,
-    bool RotateExisting);
+    bool RotateExisting,
+    IReadOnlyDictionary<string, Models.KeyVaultSecretRef>? SecretParameters = null,
+    IReadOnlySet<string>? OmitCanonicalNames = null)
+{
+    /// <summary>Effective secret-parameter map — never null (empty when the caller passes none).</summary>
+    public IReadOnlyDictionary<string, Models.KeyVaultSecretRef> SecretParameters { get; init; } =
+        SecretParameters ?? new Dictionary<string, Models.KeyVaultSecretRef>(StringComparer.Ordinal);
+
+    /// <summary>Effective FIC-omit set — never null (empty when the caller passes none).</summary>
+    public IReadOnlySet<string> OmitCanonicalNames { get; init; } =
+        OmitCanonicalNames ?? new HashSet<string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// Outcome of a single manifest entry's write attempt. Fields capture enough
@@ -105,6 +138,15 @@ public enum KvSecretWriteAction
 
     /// <summary>Per-entry write / delete failed. See <see cref="KvSecretWriteResult.ErrorMessage"/> for detail.</summary>
     Failed = 4,
+
+    /// <summary>
+    /// Task 126 addition (spec.md FR-39). Entry intentionally NOT written —
+    /// <see cref="KvSecretWriteRequest.OmitCanonicalNames"/> lists this entry's
+    /// canonical name because a coordinated run parameter indicates the
+    /// corresponding OBO credential has already migrated to FIC. NO KV
+    /// read/write call was made for this entry.
+    /// </summary>
+    Omitted = 5,
 }
 
 /// <summary>

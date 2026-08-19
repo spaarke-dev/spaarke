@@ -366,9 +366,10 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // slots — T1 trap owner), and ArmSlotIdentityRoleGranter
 // (Azure.ResourceManager.Authorization — RoleAssignmentCollection
 // .CreateOrUpdateAsync against slot System-Assigned MIs — T5 interim trap
-// owner). IKvSecretManifest = interim StaticKvSecretManifest pending Phase H
-// task 084's canonical secret-catalog manifest generator (UNCHANGED by task
-// 125 — manifest reading is a separate seam from KV writing). H4 also REUSES
+// owner). IKvSecretManifest reads task 084's real canonical secret-catalog
+// manifest (task 126 C2.2 DI-swap — see the registration comment below;
+// UNCHANGED by task 125 — manifest reading was always a separate seam from
+// KV writing). H4 also REUSES
 // IArmKeyVaultRefProbe from H2a (task 044/123) for T1 post-condition verify —
 // single source of truth for the T1 trap. All registrations UNCONDITIONAL
 // per ADR-032 — no feature-gate branches. The T5 granter's
@@ -395,17 +396,31 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // Upsert/Delete/rotation-safe path, so the writer stays agnostic to whichever
 // credential-creation path (secret vs FIC) produced the value it is asked to
 // persist. Task 126 (H4 real-values correctness gate) owns the
-// value-provenance branching, not this registration.
+// value-provenance branching (IKvSecretValueResolver, registered below), not
+// this registration.
+//
+// Task 126 (Wave G-2 Batch G-2C) C2.2 manifest DI-swap: the interim 7-entry
+// placeholder reader is replaced by FileKvSecretManifest (task 084's real
+// 26-entry canonical manifest, embedded from scripts/canonical-secret-catalog/
+// manifest.yaml). H4 handler + tests are UNCHANGED by this swap (parity with
+// H1's Null-probe -> real-ARM-probe transition) — only the DI registration
+// target changed.
 builder.Services.Configure<KvSecretsPopulationOptions>(
     builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
-builder.Services.AddSingleton<IKvSecretManifest, StaticKvSecretManifest>();
+builder.Services.AddSingleton<IKvSecretManifest, FileKvSecretManifest>();
+builder.Services.AddSingleton<IKvSecretValueResolver>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    return new KvSecretValueResolver(credential);
+});
 builder.Services.AddSingleton<IKvSecretsWriter>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var resolver = sp.GetRequiredService<IKvSecretValueResolver>();
     var options = sp.GetRequiredService<IOptions<KvSecretsPopulationOptions>>();
     var logger = sp.GetRequiredService<ILogger<SecretClientKvWriter>>();
-    return new SecretClientKvWriter(credential, armClient, options, logger);
+    return new SecretClientKvWriter(credential, armClient, resolver, options, logger);
 });
 builder.Services.AddSingleton<IAppServiceIdentityPatcher>(sp =>
 {

@@ -201,6 +201,16 @@
          .Abstractions 10.0.9 already floored by Azure.Core 1.60.0 in the
          test-project (prevents NU1605 warnings-as-errors on downgrades). -->
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.9" />
+
+    <!-- YamlDotNet — task 126 (Wave G-2 Batch G-2C) H4 real-values correctness
+         gate. FileKvSecretManifest.cs parses scripts/canonical-secret-catalog/
+         manifest.yaml (task 084's canonical secret-catalog manifest, embedded
+         below) at runtime — the de-facto standard .NET YAML library (537M+
+         NuGet downloads, MIT license), same file task 084's own PowerShell
+         generator (Invoke-CatalogGenerator.ps1) parses via powershell-yaml.
+         No transitive conflicts with any existing package in this project
+         (verified: `dotnet add package` resolved cleanly, zero NU1605s). -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
   <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
@@ -217,6 +227,18 @@
   <ItemGroup>
     <EmbeddedResource Include="Handlers\AiSearchIndex\IndexSchemas\*.json">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 126 (Wave G-2 Batch G-2C): task 084's canonical secret-catalog
+         manifest.yaml is the SINGLE source of truth (scripts/canonical-
+         secret-catalog/manifest.yaml at repo root — NOT duplicated into this
+         project's folder, which would reintroduce the exact drift problem
+         task 084 exists to close). Embedded directly from its canonical repo
+         location so FileKvSecretManifest.cs's read is self-contained at
+         runtime (parity with the IndexSchemas embedding above — task 124). -->
+    <EmbeddedResource Include="..\..\..\..\scripts\canonical-secret-catalog\manifest.yaml"
+                       Link="Handlers\KvSecretsPopulation\CanonicalManifest\manifest.yaml">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
