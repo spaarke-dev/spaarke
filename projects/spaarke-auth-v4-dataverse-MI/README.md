@@ -1,5 +1,9 @@
 # Spaarke Auth v4 — Zero-Secret BFF Confidential Credential (OBO → MI Federated Credentials)
 
+> **Portfolio**: [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Parent Epic [#426 — AUTH & SSO](https://github.com/spaarke-dev/spaarke/issues/426) · [Board](https://github.com/users/spaarke-dev/projects/2)
+> Registered 2026-08-19 · Type Infrastructure · Status Active (Planning) · Start 2026-08-17 · 0/29 tasks
+> Related backlog: [#791](https://github.com/spaarke-dev/spaarke/issues/791) — items 1–2 are now in scope as FR-A1/FR-A2 (tasks 010/011)
+
 > **Status**: **SPEC COMPLETE** — `spec.md` generated + ADR-checked 2026-08-19 · **ready for `/project-pipeline`** · **Epic**: AUTH & SSO (#426)
 > **Origin**: surfaced during `code-quality-and-assurance-r3` task 011 / #3b (app-only Dataverse → MI, done + live)
 > **Type**: auth architecture (**ADR-028 amendment — §6.5 path B**) · **Surface**: BFF confidential clients + `Spaarke.Dataverse`
