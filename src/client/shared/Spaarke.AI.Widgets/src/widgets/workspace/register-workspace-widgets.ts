@@ -1070,6 +1070,14 @@ safeRegisterWidget(
     // FR-B1/FR-C3 (task 020): the reconciliation widget embeds a DataGrid over
     // communication records — the entity-grid bucket is the closest honest fit.
     contextType: 'matter-grid',
+    // FR-15 (task 050) makes assistantContract REQUIRED; this registration
+    // (task 061) predated enforcement reaching it and shipped without one,
+    // breaking the AI.Widgets tsc gate. Mirrors the sibling 'communications-list'
+    // (defaultOrder 240) exactly: same category/contextType, same "DataGrid over
+    // communication records" surface — an overview-only grid with ONE
+    // parameterized tool and NO per-item cards. Per-item email actions live on
+    // the 'email' direct widget (FR-09/FR-10), not on a reconciliation list.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   () =>
     import('./ReconciliationWorkspaceWidget').then(m => ({
