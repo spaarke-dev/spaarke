@@ -3,8 +3,8 @@
   <metadata>
     <title>customer.bicep: wire UAMI + BFF App Service (plan + prod/staging slots) -- closes task 123's Gap 1 (part 1/2)</title>
     <phase>Phase C'' Wave G-2.5 -- customer.bicep completion (Path 1 owner decision, post-Wave-G-2 discovery)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Owner-directed FULL (explicit dispatch instruction). Also independently justified: customer.bicep is the LIVE production ARM template task 123's ArmDeploymentRunner deploys via the real Azure SDK (not a scaffold) -- a mistake here is deploy-blast-radius, and this task is a hard prerequisite for Wave G-7's real E2E acceptance (task 186). Matches the project's own FULL criteria for "deploy"-tagged / high-blast-radius Bicep work despite the STANDARD default for ordinary Bicep-module authoring.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -115,4 +115,22 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+COMPLETION (2026-08-19): Wired all four existing modules into customer.bicep unmodified, per CLAUDE.md §11 reuse mandate.
+
+- **UAMI**: `module uami 'modules/uami.bicep'` inserted between the RG block and the Key Vault module, named `mi-spaarke-${customerId}-${environmentName}` per design.md §7.1 (NOT uami.bicep's stale inline-comment pattern).
+- **Key Vault RBAC**: added one-line `userAssignedIdentityPrincipalId: uami.outputs.principalId` to the existing `keyVault` module invocation (key-vault.bicep's pre-existing param, task 030's wiring point).
+- **App Service Plan + App Service + Slot**: new section after SignalR, before OUTPUTS. `appServicePlan` (`sprk-${customerId}-${environmentName}-plan`, new `appServiceSku` param default `'S1'`), `bffApi` (`sprk-${customerId}-${environmentName}-api`, `userAssignedIdentityResourceId: uami.outputs.id`, no invented appSettings), `bffApiSlot` (`slotName: 'staging'`, SAME `uami.outputs.id`). Both slots verified bound to the identical UAMI resource id (grep-confirmed, 2 occurrences).
+- **Vestigial param removed**: task 027's dead `userAssignedIdentityResourceId` input param + docstring deleted; the output of the same name now echoes `uami.outputs.id` (real value, same output name — no breaking change to consumers).
+- **New outputs** (exact names, load-bearing per ArmDeploymentRunner.MapOutputs / BicepDeployOutputs.cs): `userAssignedIdentityObjectId = uami.outputs.principalId`, `userAssignedIdentityClientId = uami.outputs.clientId`, `appServiceName = bffApi.outputs.appServiceName`, `appServiceStagingSlotName = bffApiSlot.outputs.slotName`.
+
+**Validation**: `az bicep build` exits 0; the 7 warnings present are byte-identical to the pre-task file (verified via diff against `git show HEAD:...`) — zero net-new warnings. All 11 testable acceptance criteria grep-verified clean. `az deployment sub what-if` run live (az CLI authenticated) against a throwaway `customerId=t127wif environmentName=dev` at subscription scope: status `Succeeded`, 28/29 changes = `Create` (full fresh-stack simulation — RG doesn't exist yet, so every module shows Create, not just this task's 4), 1 `Unsupported` = the well-known ARM what-if limitation for a conditional nested role-assignment resource whose `principalId` is only resolvable mid-deployment (not an error; same pattern exists in the pre-existing `role-assignment-keyvault.bicep` pattern elsewhere in the repo). No `Delete`/unexpected `Modify` anywhere. Criterion #11 (`testable=false`) is therefore satisfied live, not deferred.
+
+**Deviations from POML step sequence**: none — directional mode, steps 0-7 executed in order as written. One self-correction: initial comment text in the new App Service section literally contained the string "SystemAssigned" (in a "no co-emitted SystemAssigned" explanatory comment), which would have false-failed acceptance criterion #5's literal grep; reworded to "SA-MI" before final build/commit.
+
+**Parallel-safety with task 128**: confirmed zero touches to the Cosmos DB / Membership Topic / ACS section (task 128's insertion zone) — verified by reading the full original file before editing and constraining all edits to (a) the param block, (b) RG→KeyVault gap, (c) post-SignalR→pre-OUTPUTS gap, (d) OUTPUTS block.
+
+**Escalations NOT fired**: neither escalation trigger applies to this task's actual scope (OpenAI/AI Search/DocIntel/AppInsights gap is task 128/129's declared territory, not touched here; no live UAMI-naming collision detected — `t127wif` throwaway what-if customerId used, no live resource of that name exists).
+  </notes>
 </task>

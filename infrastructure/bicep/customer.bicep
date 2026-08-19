@@ -62,11 +62,6 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
-// --- User-Assigned Managed Identity (Phase C — customer-provisioning-orchestration-r1) ---
-
-@description('Resource ID of the customer User-Assigned Managed Identity (from modules/uami.bicep — authored in task 028). Phase C parameter accepted here as a PASS-THROUGH ONLY: this task (027) declares the parameter for downstream consumers (task 029 refactors app-service.bicep to bind slots + `keyVaultReferenceIdentity` PATCH to this UAMI per T1/T5). Leave empty in the current customer.bicep composition — no resource in THIS module binds to it yet. Default empty preserves the pre-Phase-C System-Assigned MI behavior on the deployed BFF app-service.')
-param userAssignedIdentityResourceId string = ''
-
 // --- Optional SignalR (per ADR-032 Null-Object Kill-Switch pattern; ADR-034 realtime spine) ---
 
 @description('Deploy the per-customer Azure SignalR Service resource for the notifications spine (ADR-034). Default false — no resource + downstream BFF resolves the Null-Object variant per ADR-032. Set true to provision the resource; requires the BFF Notifications:SignalRSpine:Enabled flag to be true in the same environment for end-to-end enablement.')
@@ -86,6 +81,12 @@ param acsDataLocation string = 'UnitedStates'
 
 @description('BFF inbound webhook URL the Event Grid chat-event subscription delivers to (task 030 ingress). Required when deployAcsMessaging is true.')
 param acsWebhookEndpointUrl string = ''
+
+// --- App Service options (Phase C — customer-provisioning-orchestration-r1, task 127) ---
+
+@description('SKU for the BFF App Service Plan. Default S1 (Standard) per design.md §7.2 Resource Catalog row 7.')
+@allowed(['B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
+param appServiceSku string = 'S1'
 
 // --- Tags ---
 
@@ -153,6 +154,26 @@ resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
 }
 
 // ============================================================================
+// USER-ASSIGNED MANAGED IDENTITY (Phase C — customer-provisioning-orchestration-r1,
+// task 127; module authored by task 028)
+// ONE stable per-customer identity bound to BOTH the production App Service and
+// its staging slot (below), so a slot-swap does not rotate downstream KV/Storage/
+// Cosmos/Graph/Dataverse App-User grants (T5 structural fix). Declared before Key
+// Vault + App Service per design.md §7.6 Deployment Order steps 2/4/9/14 — both
+// consume `uami.outputs.principalId` / `uami.outputs.id` for RBAC + identity binding.
+// ============================================================================
+
+module uami 'modules/uami.bicep' = {
+  scope: rg
+  name: 'uami-${baseName}'
+  params: {
+    name: 'mi-spaarke-${customerId}-${environmentName}'
+    location: location
+    tags: tags
+  }
+}
+
+// ============================================================================
 // KEY VAULT (Deploy first - other resources store secrets here)
 // ============================================================================
 
@@ -163,6 +184,10 @@ module keyVault 'modules/key-vault.bicep' = {
     keyVaultName: keyVaultName
     location: location
     sku: keyVaultSku
+    // T5 structural fix (task 127): grant Key Vault Secrets User to the stable
+    // per-customer UAMI (uami.bicep, task 028) via key-vault.bicep's existing
+    // `userAssignedIdentityPrincipalId` param (task 030 wiring point).
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -290,6 +315,56 @@ module signalr 'modules/signalr.bicep' = if (signalrEnabled) {
 }
 
 // ============================================================================
+// APP SERVICE PLAN + APP SERVICE (BFF) + STAGING SLOT
+// (Phase C — customer-provisioning-orchestration-r1, task 127; modules authored
+// by tasks 029/028). UAMI-only identity (ADR-028 — no co-emitted SA-MI per the
+// anti-pattern app-service.bicep's header eliminates) bound to BOTH the
+// production App Service and its staging slot via the SAME
+// `uami.outputs.id`, so a slot-swap does not rotate the effective identity
+// (T5 structural fix). `keyVaultReferenceIdentity` PATCH on both slots is H4's
+// post-deploy job (ArmAppServiceIdentityPatcher, task 125, already shipped) —
+// this Bicep section only binds the UAMI to `identity.userAssignedIdentities`.
+// Per design.md §7.6 Deployment Order steps 9 (plan) / 14 (App Service).
+// ============================================================================
+
+module appServicePlan 'modules/app-service-plan.bicep' = {
+  scope: rg
+  name: 'appServicePlan-${baseName}'
+  params: {
+    planName: 'sprk-${customerId}-${environmentName}-plan'
+    location: location
+    sku: appServiceSku
+    os: 'Linux'
+    tags: tags
+  }
+}
+
+module bffApi 'modules/app-service.bicep' = {
+  scope: rg
+  name: 'bffApi-${baseName}'
+  params: {
+    appServiceName: 'sprk-${customerId}-${environmentName}-api'
+    appServicePlanId: appServicePlan.outputs.planId
+    location: location
+    userAssignedIdentityResourceId: uami.outputs.id
+    tags: tags
+  }
+}
+
+module bffApiSlot 'modules/app-service-slot.bicep' = {
+  scope: rg
+  name: 'bffApiSlot-${baseName}'
+  params: {
+    appServiceName: bffApi.outputs.appServiceName
+    slotName: 'staging'
+    location: location
+    appServicePlanId: appServicePlan.outputs.planId
+    userAssignedIdentityResourceId: uami.outputs.id
+    tags: tags
+  }
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 
@@ -340,11 +415,17 @@ output signalrResourceId string = signalr.?outputs.signalrId ?? ''
 output signalrHostName string = signalr.?outputs.signalrHostName ?? ''
 output signalrSkuDeployed string = signalr.?outputs.signalrSku ?? ''
 
-// --- UAMI pass-through (task 027 / Phase C) — echoes the input for downstream module composers ---
-// Task 029 will bind this to app-service.bicep (`identity.userAssignedIdentities` + `keyVaultReferenceIdentity`
-// PATCH); this task only accepts + exposes the parameter so callers can wire it uniformly across the
-// customer stamp without touching every downstream module signature at once.
-output userAssignedIdentityResourceId string = userAssignedIdentityResourceId
+// --- User-Assigned Managed Identity (task 127 / Phase C) — real values, not a pass-through.
+// Output names are LOAD-BEARING: ArmDeploymentRunner.MapOutputs (task 123) reads these exact
+// names to populate BicepDeployOutputs.UserAssignedIdentity{ResourceId,ObjectId,ClientId}. ---
+output userAssignedIdentityResourceId string = uami.outputs.id
+output userAssignedIdentityObjectId string = uami.outputs.principalId
+output userAssignedIdentityClientId string = uami.outputs.clientId
+
+// --- App Service (BFF) — task 127 / Phase C. Output names are LOAD-BEARING: ArmDeploymentRunner.MapOutputs
+// (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---
+output appServiceName string = bffApi.outputs.appServiceName
+output appServiceStagingSlotName string = bffApiSlot.outputs.slotName
 
 // --- Platform cross-reference ---
 output platformKeyVaultName string = platformKeyVaultName

@@ -218,7 +218,7 @@ _Task 123's + task 126's discovery notes both flagged that customer.bicep (the o
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 127 | 🔲 | customer.bicep: wire UAMI + BFF App Service (plan + prod/staging slots) -- reuses existing modules/uami.bicep + app-service*.bicep (tasks 028/029), currently orphaned | FULL | sonnet / high | waveG2point5-parallel | 102, 103, 123 |
+| 127 | ✅ | customer.bicep: wire UAMI + BFF App Service (plan + prod/staging slots) -- reuses existing modules/uami.bicep + app-service*.bicep (tasks 028/029), currently orphaned | FULL | sonnet / high | waveG2point5-parallel | 102, 103, 123 |
 | 128 | 🔲 | customer.bicep: wire Azure OpenAI + AI Search modules -- reuses existing modules/openai.bicep + ai-search.bicep, currently orphaned | FULL | sonnet / high | waveG2point5-parallel | 102, 103, 123, 124 |
 | 129 | 🔲 | customer.bicep: invoke kv-secrets.generated.bicep (task 084) with real values from sibling-module outputs -- closes 6 of 15 FromBicepOutput gaps flagged by task 126 Deviation #3; 9 residual gaps escalated (Redis per-env conflict, BFF-API-Client* manifest-classification concern, DocIntel/AppInsights out-of-scope, SPE-* runtime-only) | FULL | sonnet / high | none | 102, 103, 123, 127, 128 |
 
