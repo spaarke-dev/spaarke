@@ -4,7 +4,7 @@
     <title>Fix C4.5: dual Newtonsoft StringEnumConverter on RunStatus/GateState/QuarantineState + serializer-contract test + Cosmos seam test</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
     <rigor-reason>Touches tests/** and is tagged testing/integration-test -- root CLAUDE.md §8 override table forces unconditional FULL (code-review + adr-check) regardless of the change's small LOC size.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,4 +97,52 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-08-19. Actual file paths differed from this POML's authored
+    paths (POML said `Sprk.Provisioning.ControlPlane.Core` for source files
+    before that project existed on disk; task 100's project split — running
+    concurrently in the same worktree — completed the Core/Api/Worker split
+    mid-task, landing my earlier edits safely via its git-mv rename). Final
+    real paths:
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProvisioningRun.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/GateState.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/CosmosModule.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/CosmosActiveRunScanner.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/ProvisioningRunSerializerContractTests.cs (new)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/CosmosActiveRunScannerSeamTests.cs (new)
+
+    Seam-test location deviation (documented per CLAUDE.md §6.5 Path C): the
+    dispatch instructions named `tests/integration/seam/**` (root-level) as
+    the target. Verified against docs/adr/ADR-038-testing-strategy.md line 61
+    + tests/integration/seam/README.md that this category is scoped
+    specifically to the BFF AI dispatch-spine vertical slice
+    (SessionDispatchOrchestrator/OutputRouter/ContextBinder/ChatSessionManager,
+    compiled into Sprk.Bff.Api.Tests) — structurally incompatible with the L2
+    control-plane project. Placed the seam test instead at the L2 project's
+    own already-adjudicated integration-test location (mirroring
+    CosmosSmokeTests.cs, task 037's precedent, self-documented as the
+    "ADR-038 KEEP category equivalent, project-owned integration path").
+
+    Verification: dotnet build 0/0 across Core+Api+Tests; dotnet test 8/8
+    new tests pass (5 serializer-contract unit tests + 3 env-guarded seam
+    tests, skip-pass without COSMOS_L2_SMOKE_ENDPOINT set, matching the
+    CosmosSmokeTests.cs pattern). Regression-proof manually verified: reverted
+    the Newtonsoft attribute on RunStatus, confirmed
+    Serialize_ViaNewtonsoftCosmosDefaultEquivalent_StatusIsJsonStringNotNumber
+    fails with the exact DS-5 §C4.5 symptom (JTokenType.Integer instead of
+    String), then restored the fix and reconfirmed green.
+
+    Runbook note for the stale live Cosmos doc (runs/65109e91-...):
+    projects/customer-provisioning-orchestration-r1/notes/task-106-c4-5-serializer-fix-runbook.md
+
+    Concurrency note: task 100 (project split) executed in the SAME working
+    directory concurrently with this task, moving/renaming my 4 target files
+    mid-edit and temporarily breaking the Core.csproj build (194 pre-existing
+    CS0246 errors, unrelated to this task's changes — missing implicit usings
+    after the Sdk.Web → Sdk split, root-caused and reported to task 100's
+    agent, who landed the fix independently). No data loss; all edits
+    survived the git-mv. Full solution build was blocked for a period during
+    execution; resolved before task completion.
+  </notes>
 </task>
