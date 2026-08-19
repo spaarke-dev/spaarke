@@ -4,7 +4,7 @@
     <title>GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New workflow file authoring, no existing .cs/Bicep modification; STANDARD per root CLAUDE.md §8, but coordination-flagged because it touches .github/workflows/**.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,9 @@
     <criterion testable="true">The coordination note explicitly cites this project's CLAUDE.md Coordination table entry for ci-cd-unit-test-remediation-r1.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- the repo already has Trivy-gated container build workflows for other images; this reuses that exact shape. Extension -- extending an existing workflow file to also build the sidecar was considered and rejected because the sidecar's trigger path (Dockerfile changes under Sprk.Provisioning.ControlPlane.Sidecar/) and cadence (monthly, low-noise) differ from the BFF's per-push publish workflow. Cost-of-doing-nothing -- without CI-built+pushed images, task 101's sitecontainer resource has no image to reference beyond a manual docker push, which is exactly the ad-hoc-deploy drift this project exists to eliminate.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- the repo already has Trivy-gated container build workflows for other images; this reuses that exact shape. Extension -- extending an existing workflow file to also build the sidecar was considered and rejected because the sidecar's trigger path (Dockerfile changes under Sprk.Provisioning.ControlPlane.Sidecar/) and cadence (monthly, low-noise) differ from the BFF's per-push publish workflow. Cost-of-doing-nothing -- without CI-built+pushed images, task 101's sitecontainer resource has no image to reference beyond a manual docker push, which is exactly the ad-hoc-deploy drift this project exists to eliminate.
+
+Completion summary (2026-08-19): Escalation trigger FIRED. Verified ci-cd-unit-test-remediation-r1 (nominal 28-day owner of .github/workflows/**) started 2026-06-25 (window closed ~2026-07-23) and its worktree HEAD is dated 2026-06-28 -- dormant ~52 days, no activity reclaiming the window. Per the POML's binding escalation instruction, did NOT commit .github/workflows/build-provisioning-sidecar.yml directly. Instead drafted the full workflow YAML (OIDC-to-ACR via azure/login@v2 reusing deploy-bff-api.yml's secrets, docker buildx build -> Trivy image scan HARD gate severity HIGH,CRITICAL ignore-unfixed:false exit-code:1 matching nightly-health.yml's severity value -> push with SHA + date-versioned semver tags, never latest -> compressed-size sanity check) into notes/sidecar-ci-workflow-coord-pr.md, validated via python-yaml parse (actionlint unavailable in this environment), and flagged the closed-window finding for owner decision (3 r1 coord-notes -- 067, 088, 115 -- now queued unapplied against the same dormant worktree). Noted ACR resource itself does not exist yet (task 101, running in parallel, owns that Bicep); workflow uses placeholder vars.SIDECAR_ACR_LOGIN_SERVER. All 4 POML acceptance criteria met via the coord-note artifact. TASK-INDEX.md row 115 + Coordination Signals section updated.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
