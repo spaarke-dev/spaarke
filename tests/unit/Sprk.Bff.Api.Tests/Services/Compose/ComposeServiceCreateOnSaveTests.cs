@@ -96,7 +96,7 @@ public sealed class ComposeServiceCreateOnSaveTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         documentProfileAi: _documentProfile.Object);
 
@@ -719,7 +719,7 @@ public sealed class ComposeServiceCreateOnSaveTests
     private ComposeService CreateSutWithMemoryCapture(IComposeMemoryCapture? memoryCapture) => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         documentProfileAi: _documentProfile.Object,
         memoryCapture: memoryCapture);

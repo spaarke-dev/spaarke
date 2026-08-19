@@ -277,7 +277,11 @@ public sealed class ComposeShadowPatchEngineTests
         var range = new ComposeRunRange(new ComposeRunPoint(0, 0), new ComposeRunPoint(0, 6)); // "delete"
         var comment = new ComposeAnchoredComment
         {
-            ParaId = "ED010001", Range = range, CommentText = "why?", Author = "Bob", Date = When,
+            ParaId = "ED010001",
+            Range = range,
+            CommentText = "why?",
+            Author = "Bob",
+            Date = When,
         };
         var log = Log(new DeleteRangeOperation { ParaId = "ED010001", Range = range });
 
