@@ -2,26 +2,26 @@
 // IAiSearchIndexProvisioner.cs
 //
 // L2 abstraction over the Model-2 AI Search index provisioning invocation. The
-// production implementation (<see cref="DeployAllIndexesScriptProvisioner"/>)
-// shells out to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c> — the FR-05 /
-// FR-07 catalog authority per task 002 audit. Unit tests inject stubs to
-// avoid pwsh + real AI Search round-trips.
+// production implementation (<see cref="SearchIndexClientProvisioner"/>) uses
+// Azure.Search.Documents.Indexes.SearchIndexClient under UAMI RBAC — zero
+// admin-key handling, zero ProcessStartInfo/shell-out (task 124, Wave G-2,
+// REPLACING the retired <c>DeployAllIndexesScriptProvisioner</c>, which
+// shelled out to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c>). The 7
+// canonical index JSON schemas — the FR-05 / FR-07 catalog authority per task
+// 002 audit — are still the SAME source files (embedded verbatim from
+// <c>infrastructure/ai-search/*.json</c>; see SearchIndexClientProvisioner.cs's
+// header for why they are PUT as raw JSON via the client's own HttpPipeline
+// rather than re-typed into C# SearchIndex object graphs). Unit tests inject
+// stubs (this interface) or a fake-transport-backed SearchIndexClient (the
+// concrete provisioner) to avoid real AI Search round-trips.
 //
 // SEAM JUSTIFICATION (ADR-010 / CLAUDE.md §11 extension test):
 //   ≥2 implementations exist from day 1:
-//     - Production: <see cref="DeployAllIndexesScriptProvisioner"/> shells to
-//       the PS script with DefaultAzureCredential-driven auth.
+//     - Production: <see cref="SearchIndexClientProvisioner"/> — real SDK
+//       client, UAMI RBAC auth.
 //     - Test: stubs injected per unit test that construct outcomes directly
 //       (see H2bAiSearchIndexHandlerTests).
 //   Interface earns its keep — no NIH.
-//
-// DESIGN CHOICE (shell-out vs SDK):
-//   Same trade-off as H2a's IBicepDeployRunner: the PS script IS the FR-05 /
-//   FR-07 catalog source-of-truth (audit § 1). Re-implementing in C# via
-//   Azure.Search.Documents SDK would fork the catalog + require duplicate
-//   invariant-verifier maintenance. H2b therefore WRAPS the script (adding
-//   Model 1 branching + retired-name rejection + Cosmos state advancement the
-//   script does not perform) rather than replacing it.
 //
 // MODEL 1 vs MODEL 2 SCOPE:
 //   This provisioner runs ONLY for Model 2 (dedicated). The Model 1 branch of

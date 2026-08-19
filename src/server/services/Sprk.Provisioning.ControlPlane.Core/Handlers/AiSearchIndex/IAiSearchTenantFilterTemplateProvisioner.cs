@@ -24,25 +24,26 @@
 //     the canonical tenantId + sessionId dual-filter — H2b's template MUST
 //     strengthen this, never weaken).
 //
-// PRODUCTION IMPL SCOPE (wave C4):
-//   The concrete template-store implementation (Cosmos document /
-//   Search-Service scoring-profile / BFF-owned template catalog) is deferred
-//   per POML step 3 — this task defines the seam + a stub production impl
-//   that logs the intended template contents and returns Success. The seam
-//   contract is: given (SearchEndpoint, TenantId, CustomerId, IndexNames),
-//   provision a per-tenant artifact whose contents include the literal
-//   filter predicate `tenantId eq '{TenantId}'` for each index in the list.
-//   Second call with same inputs = idempotent no-op (PUT semantics).
-//
-//   Wave C5+ will replace <see cref="StubAiSearchTenantFilterTemplateProvisioner"/>
-//   with a real impl once the template-store target is decided (candidates:
-//   Cosmos per-tenant document, Search-Service scoring profile, BFF-owned
-//   template catalog). The handler + tests are unchanged by that swap.
+// PRODUCTION IMPL (task 124, Wave G-2):
+//   <see cref="AiSearchTenantFilterTemplateProvisioner"/> REPLACES the
+//   wave-C4 <c>StubAiSearchTenantFilterTemplateProvisioner</c> (which only
+//   logged the intended template + returned Success — DS-4 §2 "I2
+//   provisioning half not real"). The template-store target is Cosmos (a
+//   NEW per-tenant document in a NEW, TTL-less `tenantFilterTemplates`
+//   container on the SAME shared platform Cosmos account L2 already owns —
+//   see AiSearchTenantFilterTemplateProvisioner.cs's header for the full
+//   candidate-comparison rationale). The seam contract is unchanged: given
+//   (SearchEndpoint, TenantId, CustomerId, IndexNames), provision a
+//   per-tenant artifact whose contents include the literal filter predicate
+//   `tenantId eq '{TenantId}'` for each index in the list. Second call with
+//   same inputs = idempotent no-op (verified by content-comparison, not
+//   merely PUT-safe overwrite). The handler + its tests are UNCHANGED by
+//   this swap — proof the seam was designed correctly in wave C4.
 //
 // SEAM JUSTIFICATION (ADR-010 / CLAUDE.md §11 extension test):
-//   ≥2 impls: production stub (logs + Success) + test stubs (per-test canned
-//   outcomes). Interface earns its keep — the stub is intentionally minimal
-//   so the real impl can land in a focused later PR without disturbing H2b.
+//   ≥2 impls: production (<see cref="AiSearchTenantFilterTemplateProvisioner"/>,
+//   Cosmos-backed) + test stubs (per-test canned outcomes, see
+//   H2bAiSearchIndexHandlerTests). Interface earns its keep.
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;

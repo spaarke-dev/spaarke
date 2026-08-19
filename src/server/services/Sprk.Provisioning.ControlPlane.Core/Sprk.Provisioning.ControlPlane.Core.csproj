@@ -146,7 +146,16 @@
     <PackageReference Include="Azure.ResourceManager" Version="1.14.0" />
     <PackageReference Include="Azure.ResourceManager.ManagedServices" Version="1.1.2" />
 
-    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs). -->
+    <!-- Azure.Search.Documents — task 124 (Wave G-2) SDK port of H2b's Model-2
+         index provisioner (SearchIndexClientProvisioner, replacing
+         DeployAllIndexesScriptProvisioner's shell-out to
+         scripts/ai-search/Deploy-AllIndexes.ps1). Same 11.6.0 pin as
+         Sprk.Bff.Api for cross-service version parity. UAMI RBAC auth via
+         the shared TokenCredential singleton — zero admin-key handling. -->
+    <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
+
+    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs +,
+         since task 124, the sibling tenantFilterTemplates container). -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
 
     <!-- Azure Service Bus SDK — L2 handler-enqueue path + (task 102)
@@ -193,6 +202,23 @@
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane" />
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Worker" />
     <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+  <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
+       embedded verbatim (byte-identical, checksum-verified at copy time)
+       from infrastructure/ai-search/*.json so the L2 App Service publish
+       output is self-contained (no repo-checkout dependency at runtime,
+       unlike the retired DeployAllIndexesScriptProvisioner's local-path
+       script read). Explicit <LogicalName> (rather than relying on the SDK's
+       implicit RootNamespace-derived convention) because RootNamespace here
+       is "Sprk.Provisioning.ControlPlane" while AssemblyName is
+       "Sprk.Provisioning.ControlPlane.Core" (deliberately different per the
+       project-header comment above) — SearchIndexClientProvisioner.LoadAndStripSchema
+       reads by this exact logical name. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Handlers\AiSearchIndex\IndexSchemas\*.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

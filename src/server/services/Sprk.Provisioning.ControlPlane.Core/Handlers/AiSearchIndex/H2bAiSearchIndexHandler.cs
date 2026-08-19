@@ -5,11 +5,15 @@
 //
 // PURPOSE:
 //   Provisions (Model 2) or verifies + templates (Model 1) the 7 canonical
-//   Spaarke AI Search indexes per FR-05 / §11.2 catalog. Model 2 wraps
-//   scripts/ai-search/Deploy-AllIndexes.ps1 (FR-07 catalog authority per
-//   task 002 audit § 1). Model 1 verifies presence on the shared platform
-//   AI Search + provisions a per-tenant tenantId-filter query template
-//   (§4D I2 / FR-29 enforcement at onboarding).
+//   Spaarke AI Search indexes per FR-05 / §11.2 catalog. Model 2 uses
+//   SearchIndexClientProvisioner (Azure.Search.Documents.Indexes.SearchIndexClient
+//   under UAMI RBAC, task 124 — REPLACES the retired script-shelling
+//   DeployAllIndexesScriptProvisioner; the embedded JSON schemas remain the
+//   FR-07 catalog authority per task 002 audit § 1). Model 1 verifies
+//   presence on the shared platform AI Search + provisions a REAL per-tenant
+//   tenantId-filter query template via AiSearchTenantFilterTemplateProvisioner
+//   (§4D I2 / FR-29 enforcement at onboarding — task 124 replaced the
+//   wave-C4 logging-only Stub with a Cosmos-backed real provisioner).
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-05 (H2b):
@@ -31,10 +35,12 @@
 //   - projects/customer-provisioning-orchestration-r1/notes/
 //       ai-search-catalog-audit-2026-08.md — canonical 7 + retired lineage.
 //   - ADR-013: MUST use PublicContracts/ facade if AI needed; H2b consumes
-//       NO AI-internal types (only AI Search REST / PS script wrappers).
-//   - ADR-028: DefaultAzureCredential + UAMI outbound (verifier + real
-//       template store impl use it; script wrapper delegates to operator
-//       `az` chain).
+//       NO AI-internal types (only AI Search REST/SDK collaborators).
+//   - ADR-028: DefaultAzureCredential + UAMI outbound — verifier,
+//       SearchIndexClientProvisioner, and the tenant-filter template
+//       provisioner's Cosmos store ALL use the shared UAMI-pinned credential;
+//       zero admin-key / zero operator `az` chain anywhere in this handler's
+//       collaborator graph (task 124, Wave G-2).
 //   - ADR-032: SignalR feature-gate does NOT apply to H2b DI — unconditional
 //       registration parity with H2a.
 //   - ADR-036: fire-and-forget via Service Bus; reconciler owns DAG
@@ -494,11 +500,11 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         if (verifyResult is AiSearchIndexVerifyResult.Missing missing)
         {
             // Model 2 provisioner returned success but verifier says an
-            // expected index is absent — script drift.
+            // expected index is absent — SDK PUT drift.
             var diagnostic =
                 $"Model 2 provisioner returned Success but verifier found missing indexes at '{endpoint}': " +
                 $"[{string.Join(", ", missing.MissingIndexNames)}]. " +
-                "Deploy-AllIndexes.ps1 exited 0 but drift is present — investigate script vs deployed state.";
+                "SearchIndexClientProvisioner reported all PUTs succeeded but drift is present — investigate provisioner vs deployed state.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 AiSearchIndexRejectionCodes.IndexProvisioningFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }

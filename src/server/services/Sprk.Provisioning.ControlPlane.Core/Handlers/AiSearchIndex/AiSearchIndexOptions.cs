@@ -1,11 +1,17 @@
 // -----------------------------------------------------------------------------
 // AiSearchIndexOptions.cs
 //
-// Bound options for the H2b handler's collaborators (script provisioner +
-// REST-API verifier + tenant-filter template provisioner). Loaded from the
-// "AiSearchIndex" configuration section by Program.cs — runtime-configurable
-// so the linux-x64 App Service publish layout can be honored without
-// recompiling (parity with BicepInfraDeployOptions).
+// Bound options for the H2b handler's collaborators (SearchIndexClient
+// provisioner + REST-API verifier + tenant-filter template provisioner).
+// Loaded from the "AiSearchIndex" configuration section by Program.cs.
+//
+// SHELL-OUT OPTIONS REMOVED (task 124, Wave G-2): PwshExecutable +
+// DeployAllIndexesScriptPath + DeployTimeout were retired alongside
+// DeployAllIndexesScriptProvisioner.cs's deletion — SearchIndexClientProvisioner
+// (its replacement) is a pure SDK client with zero ProcessStartInfo/shell-out
+// (spec.md MUST rule post-line-254 block; design.md §4.1b Class A). Per-PUT
+// timeout now uses RestCallTimeout (shared with the verifier + template
+// provisioner) instead of a separate whole-script budget.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
@@ -17,23 +23,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 public sealed class AiSearchIndexOptions
 {
     /// <summary>
-    /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
-    /// PATH). Parity with <see cref="BicepInfraDeploy.BicepInfraDeployOptions.PwshExecutable"/>.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Absolute path to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c>. Defaults
-    /// to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c> relative to
-    /// <see cref="AppContext.BaseDirectory"/>; production deployments should
-    /// override via app-setting so the linux-x64 publish layout is honored.
-    /// </summary>
-    public string DeployAllIndexesScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "ai-search", "Deploy-AllIndexes.ps1");
-
-    /// <summary>
     /// AI Search REST API version. Defaults to the version pinned in
-    /// <c>Deploy-AllIndexes.ps1</c> as of 2026-08-17.
+    /// <c>infrastructure/ai-search/*.json</c>'s deploy history as of 2026-08-17.
     /// </summary>
     public string SearchApiVersion { get; set; } = "2024-07-01";
 
@@ -48,14 +39,10 @@ public sealed class AiSearchIndexOptions
     public string? SharedPlatformSearchEndpoint { get; set; }
 
     /// <summary>
-    /// Maximum time to wait for a single <c>Deploy-AllIndexes.ps1</c> invocation.
-    /// Defaults to 30 minutes per NFR-12 (full 7-index deploy target &lt; 30 min).
-    /// </summary>
-    public TimeSpan DeployTimeout { get; set; } = TimeSpan.FromMinutes(30);
-
-    /// <summary>
-    /// Maximum time to wait for a single AI Search REST call (verifier /
-    /// tenant-filter template PUT). Defaults to 60 seconds.
+    /// Maximum time to wait for a single AI Search REST call (index PUT via
+    /// SearchIndexClientProvisioner / verifier GET / tenant-filter template
+    /// write). Defaults to 60 seconds; a full 7-index pass therefore has an
+    /// effective outer bound well under NFR-12's 30-minute target.
     /// </summary>
     public TimeSpan RestCallTimeout { get; set; } = TimeSpan.FromSeconds(60);
 }
