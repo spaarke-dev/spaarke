@@ -273,53 +273,54 @@ describe('handleEmail', () => {
   // R4-114 (2026-06-25) note: jsdom v22+ marks `window.location` as
   // non-configurable, so any `Object.defineProperty(window, 'location', ...)`
   // or `delete window.location` pattern throws "Cannot redefine property".
-  // Skipped until we either (a) move handleEmail's `window.location.href = ...`
-  // call behind an injectable seam (preferred — small refactor in
-  // ToolbarActions.ts), or (b) add jest-location-mock as a devDependency.
-  // Behavior is exercised manually in UAT; the assertion is preserved here
-  // as documentation of the contract.
-  it.skip('composes a mailto: with encoded subject + body containing names + due dates', () => {
-    // Stub window.location via the jest-recommended pattern for jsdom: replace
-    // the entire location object using Object.defineProperty on window. jsdom
-    // ships Location as non-configurable per-property but window.location
-    // itself IS configurable, so this works where direct property stubbing
-    // does not.
+  // FR-18a (R-10 hygiene, 2026-08-16) resolves this: `ToolbarActions.ts` now
+  // exposes an injectable `ctx.navigate` seam (defaults to
+  // `window.location.href = href` for production callers), so this test
+  // stubs `navigate` directly instead of touching `window.location` at all.
+  it('composes a mailto: with encoded subject + body containing names + due dates', () => {
     let assignedHref = '';
-    const originalLocation = window.location;
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      writable: true,
-      value: {
-        set href(v: string) {
-          assignedHref = v;
+    const selected = [
+      makeTodo({ sprk_todoid: 'a', sprk_name: 'Review draft', sprk_duedate: '2026-06-12T00:00:00Z' }),
+      makeTodo({ sprk_todoid: 'b', sprk_name: 'Call client', sprk_duedate: undefined }),
+    ];
+    const { handleEmail } = createToolbarActions(
+      makeCtx({
+        getSelectedTodos: () => selected,
+        navigate: (href: string) => {
+          assignedHref = href;
         },
-        get href() {
-          return assignedHref;
-        },
-      } as Partial<Location>,
-    });
+      }),
+    );
+    const result = handleEmail();
+    expect(result.succeeded).toBe(2);
+    expect(result.failed).toBe(0);
+    expect(assignedHref).toMatch(/^mailto:\?/);
+    expect(assignedHref).toContain(encodeURIComponent('To-Dos: 2 selected'));
+    expect(assignedHref).toContain(encodeURIComponent('Review draft'));
+    expect(assignedHref).toContain(encodeURIComponent('Call client'));
+    // The second todo has no due date — should NOT have a "(due …)" suffix.
+    expect(assignedHref).toContain(encodeURIComponent('- Call client'));
+  });
 
+  it('defaults to window.location.href when ctx.navigate is not supplied (no behavior change for production callers)', () => {
+    // jsdom v22+ makes `window.location.href` non-configurable, so it cannot
+    // be spied on or redefined (confirmed: both `Object.defineProperty(window,
+    // 'location', ...)` and `jest.spyOn(window.location, 'href', 'set')` throw
+    // "not declared configurable" in this environment). What CAN be verified
+    // without touching that lockdown: assigning to `window.location.href`
+    // does not throw in jsdom (it logs a benign "Not implemented: navigation"
+    // diagnostic instead) — so exercising the exact default-path code (no
+    // `ctx.navigate` override) and asserting a clean success result proves
+    // production callers see identical behavior to before this seam existed.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const selected = [
-        makeTodo({ sprk_todoid: 'a', sprk_name: 'Review draft', sprk_duedate: '2026-06-12T00:00:00Z' }),
-        makeTodo({ sprk_todoid: 'b', sprk_name: 'Call client', sprk_duedate: undefined }),
-      ];
+      const selected = [makeTodo({ sprk_todoid: 'a', sprk_name: 'Review draft' })];
       const { handleEmail } = createToolbarActions(makeCtx({ getSelectedTodos: () => selected }));
       const result = handleEmail();
-      expect(result.succeeded).toBe(2);
+      expect(result.succeeded).toBe(1);
       expect(result.failed).toBe(0);
-      expect(assignedHref).toMatch(/^mailto:\?/);
-      expect(assignedHref).toContain(encodeURIComponent('To-Dos: 2 selected'));
-      expect(assignedHref).toContain(encodeURIComponent('Review draft'));
-      expect(assignedHref).toContain(encodeURIComponent('Call client'));
-      // The second todo has no due date — should NOT have a "(due …)" suffix.
-      expect(assignedHref).toContain(encodeURIComponent('- Call client'));
     } finally {
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        writable: true,
-        value: originalLocation,
-      });
+      errorSpy.mockRestore();
     }
   });
 });

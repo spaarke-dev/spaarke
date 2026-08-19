@@ -481,6 +481,32 @@ public class MemoryItemStoreTests
     }
 
     [Fact]
+    public void BuildPromptFragment_IncludesPreferences_WhenPreferenceFactPresent()
+    {
+        // FR-07 (task 030): a Preference memory item MUST recall into the prompt fragment. The same
+        // shared renderer backs the User-scope "About You" fragment (ToUserPromptFragmentAsync) and
+        // the record fragment (ToRecordPromptFragmentAsync) via BuildBudgetedFragment — because the
+        // renderer emits ONE explicit section per fact type, a Preference fact would be stored but
+        // silently dropped from recall without its own AppendSection.
+        var facts = new List<MemoryFact>
+        {
+            new() { Type = MemoryFactType.KeyFact, Key = "Jurisdiction", Value = "SDNY", ConfirmedByUser = true },
+            new() { Type = MemoryFactType.Preference, Key = "Task view", Value = "Always summarize my tasks first", ConfirmedByUser = true },
+        };
+
+        var fragment = MemoryItemStore.BuildPromptFragment(facts, "matter");
+
+        fragment.Should().Contain("**Preferences**:",
+            because: "a Preference fact must be recalled into the fragment (FR-07)");
+        fragment.Should().Contain("Task view — Always summarize my tasks first");
+
+        // Rendered AFTER the record-fact sections — the pre-existing section order is unperturbed.
+        var factsIndex = fragment.IndexOf("**Key Facts**:", StringComparison.Ordinal);
+        var prefsIndex = fragment.IndexOf("**Preferences**:", StringComparison.Ordinal);
+        prefsIndex.Should().BeGreaterThan(factsIndex);
+    }
+
+    [Fact]
     public void BuildPromptFragment_ExcludesLowConfidenceUnconfirmedFacts()
     {
         var facts = new List<MemoryFact>

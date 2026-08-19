@@ -165,6 +165,9 @@ public class PromoteDurableFkVisibilityTests
             });
         }
 
+        public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+            => (await CreateAsync(entity, ct), true); // compose-r7 task 013: interface member; fake delegates to create
+
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
         {
             var id = entity.Id == Guid.Empty ? Guid.NewGuid() : entity.Id;

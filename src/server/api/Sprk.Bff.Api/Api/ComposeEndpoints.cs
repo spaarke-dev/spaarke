@@ -1033,7 +1033,10 @@ public static class ComposeEndpoints
             // upload (e.g. a retained .pdf/.txt) or an unreadable source yields Status=Failed/
             // CanEdit=false + a null model (never throws); the client keys off Status/CanEdit, not
             // Html.Length, so this never fails the upload-mount itself (mirrors Load's own contract).
-            var mount = composeService.ProjectForMount(binary, ct);
+            // Task 050 (spaarkeai-compose-r7, FR-06): pass the sidecar fileName so a PDF upload forks onto
+            // the intake leg (bytes-first detection also catches a mis-named .pdf); await the now-async
+            // ProjectForMount (the docx path stays synchronous-fast — the PDF branch is the only awaited I/O).
+            var mount = await composeService.ProjectForMount(binary, fileName, ct);
             var projection = mount.Projection;
             binary = mount.Content.ToArray();
             if (projection.Status == ComposeProjectionStatus.Failed)
@@ -1063,7 +1066,25 @@ public static class ComposeEndpoints
                 // LoadComposeDocumentResponse.ContentModel). Built from the SAME minted Content above.
                 ContentModel: mount.ContentModel,
                 // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
-                ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
+                ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings),
+                // Task 050 (FR-06): the PDF-source marker (task 051 keys the honest-lossiness UX + the
+                // save-as-docx flow off it). Null for a native docx upload.
+                SourceFormat: mount.SourceFormat));
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 050 (FR-06): the now-async ProjectForMount forks a PDF upload onto the intake leg,
+            // so intake unavailability/failure surfaces here too — the SAME honest ProblemDetails the
+            // Load door maps (503 retryable-unavailable vs 422 not-projectable), never a generic 500.
+            // MUST precede the general Exception catch (ComposePdfIntakeException derives from
+            // InvalidOperationException).
+            logger.LogWarning(ex,
+                "Compose upload-mount: PDF intake refused (unavailable={Unavailable}) tenant={TenantId} session={SessionId} document={DocumentId}. TraceId={TraceId}",
+                ex.Unavailable, tenantId, body.SessionId, body.DocumentId, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Not Editable",
+                detail: ex.Message);
         }
         catch (Exception ex)
         {
@@ -1089,7 +1110,7 @@ public static class ComposeEndpoints
     /// unreadable bytes yield <c>Status=Failed</c>/<c>CanEdit=false</c> in the 200 response body,
     /// never a 500 (a malformed/non-.docx upload is a normal, expected input, not a server error).
     /// </summary>
-    private static IResult Project(
+    private static async Task<IResult> Project(
         [FromBody] ComposeProjectRequest? body,
         IComposeService composeService,
         ILoggerFactory loggerFactory,
@@ -1102,38 +1123,68 @@ public static class ComposeEndpoints
         if (body.Content is null || body.Content.Length == 0)
             return BadRequest("content (the document's raw bytes) is required.");
 
-        // Pure, synchronous, no I/O (ADR-007/ADR-013) — the SAME builder instance LoadAsync/Upload
-        // use, so Browse renders through the one reader (F-2), not a forked projection path.
+        // The SAME builder instance LoadAsync/Upload use, so Browse renders through the one reader (F-2),
+        // not a forked projection path. Task 050 (FR-06): the DOCX render stays pure/synchronous/no-I/O
+        // (ADR-007/ADR-013); a PDF source (bytes-first detection via body.FileName + magic bytes) forks
+        // onto the ONE ProjectPdfToDocxAsync intake leg — the single reason this handler is now async, and
+        // reached ONLY on the PDF branch. This door still persists NOTHING either way.
         // Task 012 (the client cutover): upgraded ProjectDocument → ProjectForMount — mint paraIds
         // FIRST (in-memory; this door still persists NOTHING), then build the HTML projection AND the
         // canonical content model from the same minted bytes so their ids agree. When minting mutated
         // the bytes, the response echoes them (`content`) so the client adopts the id-carrying copy as
         // its retained mount baseline; when nothing needed minting the echo is omitted (the caller's
         // own bytes are already identical — no payload growth).
-        var mount = composeService.ProjectForMount(body.Content, ct);
-        var projection = mount.Projection;
-        if (projection.Status == ComposeProjectionStatus.Failed)
+        try
         {
-            logger.LogWarning(
-                "Compose project: DOCX projection failed for file={FileName} (code={Code}); client will fail closed (read-only / Open in Word) TraceId={TraceId}",
-                body.FileName, projection.Warnings.FirstOrDefault()?.Code, httpContext.TraceIdentifier);
-        }
-        else if (projection.Warnings.Count > 0)
-        {
-            logger.LogInformation(
-                "Compose project: DOCX projection partial for file={FileName}; warnings={Warnings}",
-                body.FileName, string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
-        }
+            var mount = await composeService.ProjectForMount(body.Content, body.FileName, ct);
+            var projection = mount.Projection;
+            if (projection.Status == ComposeProjectionStatus.Failed)
+            {
+                logger.LogWarning(
+                    "Compose project: DOCX projection failed for file={FileName} (code={Code}); client will fail closed (read-only / Open in Word) TraceId={TraceId}",
+                    body.FileName, projection.Warnings.FirstOrDefault()?.Code, httpContext.TraceIdentifier);
+            }
+            else if (projection.Warnings.Count > 0)
+            {
+                logger.LogInformation(
+                    "Compose project: DOCX projection partial for file={FileName}; warnings={Warnings}",
+                    body.FileName, string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+            }
 
-        return Results.Ok(new ComposeProjectResponse(
-            Projection: MapProjectionResponse(projection),
-            CorrelationId: httpContext.TraceIdentifier,
-            // Task 012: the retained canonical model + (only when minting mutated the bytes) the
-            // minted content echo — see the handler comment above. Still stateless: nothing persisted.
-            ContentModel: mount.ContentModel,
-            Content: mount.Minted ? mount.Content.ToArray() : null,
-            // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
-            ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
+            return Results.Ok(new ComposeProjectResponse(
+                Projection: MapProjectionResponse(projection),
+                CorrelationId: httpContext.TraceIdentifier,
+                // Task 012: the retained canonical model + (only when minting mutated the bytes) the
+                // minted content echo — see the handler comment above. Still stateless: nothing persisted.
+                ContentModel: mount.ContentModel,
+                // Echo the mount bytes when they DIFFER from what the caller sent: either paraId minting
+                // mutated them (Minted) OR — Task 050 (FR-06) — the source was a PDF that projected into a
+                // SYNTHESIZED docx (SourceFormat != null), which the caller does NOT already hold. Without
+                // the SourceFormat clause a PDF browse would return a docx projection but no docx bytes
+                // (the renderer already mints paraIds, so MintAndPersist is a no-op → Minted=false),
+                // leaving the client unable to save the PDF-sourced doc as a docx (the 051 flow).
+                Content: (mount.Minted || mount.SourceFormat is not null) ? mount.Content.ToArray() : null,
+                // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+                ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings),
+                // Task 050 (FR-06): the PDF-source marker (task 051 keys the honest-lossiness UX + the
+                // save-as-docx flow off it). Null for a native docx browse.
+                SourceFormat: mount.SourceFormat));
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 050 (FR-06): the now-async ProjectForMount forks a Browse-local PDF onto the intake
+            // leg, so intake unavailability/failure surfaces here — the SAME honest ProblemDetails the
+            // Load door maps (503 retryable-unavailable vs 422 not-projectable), never a generic 500.
+            // (A malformed DOCX still fails CLOSED inside the projection — Status=failed/200 — this
+            // catch is only reached on the PDF intake throw path.)
+            logger.LogWarning(ex,
+                "Compose project: PDF intake refused (unavailable={Unavailable}) file={FileName}. TraceId={TraceId}",
+                ex.Unavailable, body.FileName, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Not Editable",
+                detail: ex.Message);
+        }
     }
 
     /// <summary>
@@ -1296,6 +1347,9 @@ public static class ComposeEndpoints
                 ParaIdMap: result.ParaIdMap,
                 ImportedRevisions: result.ImportedRevisions,
                 ImportedComments: result.ImportedComments,
+                // UAT-12 (2026-08-18): honest signal that the annotation read FAILED (so the empty
+                // revisions/comments above are a fallback, NOT proof the document is clean).
+                AnnotationReadFailed: result.AnnotationReadFailed,
                 // Phase-1 mammoth removal: the server-side projection (paraId-tagged HTML + fail-closed status).
                 // FR-01 (task 010): mapping extracted to the shared MapProjectionResponse helper so the
                 // Upload endpoint (below) reuses the IDENTICAL wire-shape mapping instead of forking it
@@ -1421,6 +1475,8 @@ public static class ComposeEndpoints
             DisplayName = body.DisplayName,
             // R4 FR-06 (task 032): the op-log's base version + the ordered op-log the engine applies onto it.
             BaselineVersionId = body.BaselineVersionId,
+            // UAT-25/26 (2026-08-18): the load-time ETag for honest stale-base detection on the save path.
+            BaselineETag = body.BaselineETag,
             OperationLog = body.OperationLog,
             Comments = body.Comments,
             ContentModel = body.ContentModel,
@@ -1628,6 +1684,40 @@ public static class ComposeEndpoints
             // SPE write in ComposeService.SaveAsync.
             logger.LogWarning(ex, "Compose save: patch-engine refusal ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
             return MapPatchException(ex, httpContext);
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("Found multiple records", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+            || (ex.Message.Contains("sprk_graphitemid", StringComparison.OrdinalIgnoreCase)
+                && ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase)))
+        {
+            // Prod-safety hardening (post-R7 #1): the FR-07(d) atomic upsert on the sprk_graphitemid_uk
+            // alternate key fails in two environment-integrity conditions the code cannot self-heal:
+            //   (a) the key index is not Active (build Failed) -> "not defined as keys" / "(Not Active)"
+            //   (b) the environment carries duplicate sprk_document rows for one graphitemid -> resolve
+            //       finds "Found multiple records".
+            // Both previously fell through to the opaque 500 below ("Save failed: InvalidOperationException:
+            // ..."). Map to an HONEST, actionable ProblemDetails instead. The SPE version already persisted
+            // (only the sprk_document row upsert failed) so edits are NOT lost -- the user can retry once an
+            // administrator reconciles the data / reactivates the key.
+            var keyInactive = ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase);
+            logger.LogError(ex,
+                "Compose save: sprk_document identity-key fault (keyInactive={KeyInactive}). TraceId={TraceId}",
+                keyInactive, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: keyInactive ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status409Conflict,
+                title: "Document identity unavailable",
+                detail: keyInactive
+                    ? "This document couldn't be saved because the document-identity index (sprk_graphitemid_uk) " +
+                      "is not active in this environment. An administrator needs to reactivate it. Your edits " +
+                      "were not lost — retry once it's resolved."
+                    : "This document couldn't be saved because it has duplicate identity records in this " +
+                      "environment. An administrator needs to reconcile the duplicate documents. Your edits " +
+                      "were not lost — retry once it's resolved.",
+                type: keyInactive
+                    ? "https://tools.ietf.org/html/rfc7231#section-6.6.4"
+                    : "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
         catch (Exception ex)
         {
@@ -2273,7 +2363,10 @@ public sealed record ComposeUploadResponse(
     // from the SAME minted Content this response returns. Null when the canonical projection failed.
     [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
     // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
-    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
+    // Task 050 (FR-06 — PDF import parity): "pdf" when the uploaded source was a PDF (Content is the
+    // synthesized docx); null for a native docx upload. Mirrors LoadComposeDocumentResponse.SourceFormat.
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2307,7 +2400,10 @@ public sealed record ComposeProjectResponse(
     [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
     [property: JsonPropertyName("content")] byte[]? Content = null,
     // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
-    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
+    // Task 050 (FR-06 — PDF import parity): "pdf" when the browsed source was a PDF (Content is the
+    // synthesized docx); null for a native docx browse. Mirrors LoadComposeDocumentResponse.SourceFormat.
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
@@ -2379,6 +2475,11 @@ public sealed record SaveComposeDocumentBody(
     /// BASE VERSION. Sent on a dirty-loaded save when the client no longer holds the retained
     /// <see cref="Content"/> bytes so the server re-fetches the load-time version as the patch baseline.</summary>
     [property: JsonPropertyName("baselineVersionId")] string? BaselineVersionId = null,
+    /// <summary>UAT-25/26 (2026-08-18): the LOAD-TIME SPE ETag the client's edits are based on. SaveAsync
+    /// compares the live ETag against the effective baseline (Compose save-stamp, else this) and refuses the
+    /// whole-body ContentModel re-author with a 412 on a mismatch instead of silently overwriting an external
+    /// writer. Optional — an older client that omits it keeps the stamp-only check.</summary>
+    [property: JsonPropertyName("baselineETag")] string? BaselineETag = null,
     /// <summary>R4 FR-06 (task 032, the write-path cutover): the client's ordered, rebased task-003 OPERATION
     /// LOG for a dirty save. <see cref="IComposeService.SaveAsync"/> applies it via the single
     /// <c>ComposeShadowPatchEngine</c> onto the resolved baseline (ID-anchored, no write-path text-search) —
@@ -2451,6 +2552,9 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ParaIdMapEntry> ParaIdMap,
     [property: JsonPropertyName("importedRevisions")] IReadOnlyList<ImportedRevision> ImportedRevisions,
     [property: JsonPropertyName("importedComments")] IReadOnlyList<ImportedComment> ImportedComments,
+    // UAT-12 (2026-08-18): honest signal that the annotation read FAILED (fallback empties above are NOT
+    // proof the doc is clean). Optional — defaults false so an older client ignores it harmlessly.
+    [property: JsonPropertyName("annotationReadFailed")] bool AnnotationReadFailed,
     // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
     // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
     // mammoth. The client keys off Projection.status/canEdit, NOT html length.

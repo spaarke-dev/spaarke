@@ -5,8 +5,10 @@
  * Fields:
  *   - Title         (required, sprk_name)
  *   - Due Date      (optional, sprk_duedate)
- *   - Priority Score (0-100 slider, sprk_priorityscore)
- *   - Effort Score   (0-100 slider, sprk_effortscore)
+ *   - Priority      (Dropdown choice; drives `sprk_priorityscore` via the shared
+ *                    mapping — smart-todo-r5 task 011 / FR-02)
+ *   - Effort        (Dropdown choice; drives `sprk_effortscore` via the shared
+ *                    mapping, Option B quick-wins-first — smart-todo-r5 task 011 / FR-03)
  *   - Assignee      (optional, OOB contact lookup → sprk_assignedto)
  *                   UAT 2026-06-21: migrated from systemuser to contact
  *   - Notes         (optional, multi-line, sprk_notes)
@@ -14,16 +16,38 @@
  * Per smart-todo-decoupling-r3 spec FR-15: This form writes to `sprk_todo`,
  * not to `sprk_event` with `todoflag=true`.
  *
+ * Per smart-todo-r5 task 011 (FR-02/FR-03): the raw 0-100 Priority/Effort
+ * SLIDERS were replaced with Priority/Effort CHOICE dropdowns — "choosing a
+ * priority sets the score" is the default path. The dropdowns resolve to
+ * `sprk_priorityscore`/`sprk_effortscore` through the SAME shared mapping
+ * module the `sprk_todo` form OnChange webresource and the SmartTodo Code
+ * Page quick-add flow use (`todoScoreMappings.ts` — single source of truth).
+ * The composite score formula in `todoScoring.ts` is untouched by this step;
+ * only the choice→score INPUT is supplied here.
+ *
  * @see formTypes.ts for the form-state shape
  * @see todoService.ts for the create handler
+ * @see ../../utils/todoScoreMappings.ts for the shared choice→score mapping
  */
 import * as React from 'react';
-import { Text, Input, Textarea, Slider, Field, makeStyles, tokens } from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import type { ICreateTodoFormState } from './formTypes';
 import { EMPTY_TODO_FORM } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
+import {
+  TODO_PRIORITY_CHOICES,
+  TODO_EFFORT_CHOICES,
+  DEFAULT_PRIORITY_CHOICE,
+  DEFAULT_EFFORT_CHOICE,
+  priorityChoiceToScore,
+  effortChoiceToScore,
+  scoreToPriorityChoice,
+  scoreToEffortChoice,
+  type TodoPriorityChoice,
+  type TodoEffortChoice,
+} from '../../utils/todoScoreMappings';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -66,16 +90,6 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
-  scoreRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  scoreLabel: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    color: tokens.colorNeutralForeground2,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -93,6 +107,19 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
 
   const [formValues, setFormValues] = React.useState<ICreateTodoFormState>(initialFormValues ?? EMPTY_TODO_FORM);
 
+  // Priority/Effort are choice-driven (FR-02/FR-03, task 011) — the wizard
+  // does not persist the raw choice today (only the derived score fields
+  // that `todoService.ts` already writes; see notes/task-011-scoring.md for
+  // the documented decision), so the SELECTED CHOICE is local UI state,
+  // reverse-mapped from `initialFormValues`' numeric score when present so an
+  // edit/re-open flow pre-selects the matching option.
+  const [priorityChoice, setPriorityChoice] = React.useState<TodoPriorityChoice>(() =>
+    scoreToPriorityChoice(initialFormValues?.priorityScore)
+  );
+  const [effortChoice, setEffortChoice] = React.useState<TodoEffortChoice>(() =>
+    scoreToEffortChoice(initialFormValues?.effortScore)
+  );
+
   React.useEffect(() => {
     const isValid = formValues.title.trim().length > 0;
     onValidChange(isValid);
@@ -107,12 +134,19 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
     setFormValues(prev => ({ ...prev, dueDate: e.target.value }));
   }, []);
 
-  const handlePriorityChange = React.useCallback((_e: unknown, data: { value: number }) => {
-    setFormValues(prev => ({ ...prev, priorityScore: data.value }));
+  // Selecting a Priority/Effort choice sets the score via the SHARED mapping
+  // module (todoScoreMappings.ts) — the same table the `sprk_todo` form
+  // OnChange webresource and the SmartTodo quick-add flow resolve through.
+  const handlePriorityChange = React.useCallback((choice: TodoPriorityChoice | undefined) => {
+    const resolved = choice ?? DEFAULT_PRIORITY_CHOICE;
+    setPriorityChoice(resolved);
+    setFormValues(prev => ({ ...prev, priorityScore: priorityChoiceToScore(resolved) }));
   }, []);
 
-  const handleEffortChange = React.useCallback((_e: unknown, data: { value: number }) => {
-    setFormValues(prev => ({ ...prev, effortScore: data.value }));
+  const handleEffortChange = React.useCallback((choice: TodoEffortChoice | undefined) => {
+    const resolved = choice ?? DEFAULT_EFFORT_CHOICE;
+    setEffortChoice(resolved);
+    setFormValues(prev => ({ ...prev, effortScore: effortChoiceToScore(resolved) }));
   }, []);
 
   const handleNotesChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -165,25 +199,31 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
       </div>
 
       <div className={styles.row}>
-        <Field label="Priority Score">
-          <div className={styles.scoreRow}>
-            <Slider min={0} max={100} step={1} value={formValues.priorityScore} onChange={handlePriorityChange} />
-            <div className={styles.scoreLabel}>
-              <Text size={200}>0</Text>
-              <Text size={200}>{formValues.priorityScore}</Text>
-              <Text size={200}>100</Text>
-            </div>
-          </div>
+        <Field label="Priority" hint={`Score: ${formValues.priorityScore}`}>
+          <Dropdown
+            value={priorityChoice}
+            selectedOptions={[priorityChoice]}
+            onOptionSelect={(_e, data) => handlePriorityChange(data.optionValue as TodoPriorityChoice | undefined)}
+          >
+            {TODO_PRIORITY_CHOICES.map(choice => (
+              <Option key={choice} value={choice}>
+                {choice}
+              </Option>
+            ))}
+          </Dropdown>
         </Field>
-        <Field label="Effort Score">
-          <div className={styles.scoreRow}>
-            <Slider min={0} max={100} step={1} value={formValues.effortScore} onChange={handleEffortChange} />
-            <div className={styles.scoreLabel}>
-              <Text size={200}>0</Text>
-              <Text size={200}>{formValues.effortScore}</Text>
-              <Text size={200}>100</Text>
-            </div>
-          </div>
+        <Field label="Effort" hint={`Score: ${formValues.effortScore}`}>
+          <Dropdown
+            value={effortChoice}
+            selectedOptions={[effortChoice]}
+            onOptionSelect={(_e, data) => handleEffortChange(data.optionValue as TodoEffortChoice | undefined)}
+          >
+            {TODO_EFFORT_CHOICES.map(choice => (
+              <Option key={choice} value={choice}>
+                {choice}
+              </Option>
+            ))}
+          </Dropdown>
         </Field>
       </div>
 

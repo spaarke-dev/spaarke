@@ -54,6 +54,24 @@ Verified clean (not chased): `Mock<HttpMessageHandler>` = 0, CS1998 = 0.
 | 11 | **Test-suite reduction 10,415 → ADR-038 target ≤3,500** — large mock-scaffolding body remains | 1,922 `Mock<` in `tests/unit` vs 603 in integration; ~70/30 integration-heavy target unmet. Nominally `ci-cd-unit-test-remediation-r1` (CICD-083..085) but **not achieved** (~7,000-test gap). A `/test-diet` sweep of B7/B9/B15 classes is the action. | L · Med |
 | 12 | **NG1 scoping note**: the two Dataverse god-services are larger than the NG1 framing implies | `DataverseServiceClientImpl.cs` 2,864 + `DataverseWebApiService.cs` 2,822 — unify as **decomposition**, not lift-and-shift, or it produces one ~5,600-LOC class. | L · Med |
 
+## Seeded follow-on projects (initialize-only — folder + assessment/design, execution owner-gated)
+
+| Project folder | From | What | Status |
+|---|---|---|---|
+| `projects/speadmin-decomposition-r1/` | RED-1 | Decompose `SpeAdminGraphService` (4,911 LOC god-class) | Seed (folder + design) |
+| `projects/chatendpoints-decomposition-r1/` | RED-2 | Split `ChatEndpoints.cs` (4,066 LOC) | Seed (folder + design) |
+| `projects/dataverse-access-unification-r1/` | RED-4 C | Converge the two Dataverse impls to one (MI-only) + decompose | Seed (folder + design) |
+| **`projects/spaarke-auth-v4-dataverse-MI/`** | **#3b / task 011** | **Eliminate the BFF client secret entirely — migrate OBO off the secret (MI Federated Identity Credentials or certificate). RESEARCH-FIRST.** | **Seed (folder + [`ASSESSMENT.md`](../../spaarke-auth-v4-dataverse-MI/notes/ASSESSMENT.md))** |
+
+> **`spaarke-auth-v4-dataverse-MI`** (added 2026-08-17): #3b migrated the **app-only** Dataverse paths to Managed
+> Identity (live), but the client secret can't be removed — it's the **same `BFF-API-ClientSecret`** used by **OBO**
+> (delegated user auth) across Graph + Dataverse, plus `DataverseAccessDataSource` / `DataverseUserClient` /
+> `DataverseWebApiClient`, and it's `[Required]` at startup. OBO **can** be secret-free via **MI-as-FIC** (or a
+> certificate), but that's a different, higher-risk surface (OBO breakage = all delegated auth) + per-env
+> app-registration work. **Research-first**: confirm the problem (is zero-secret required?) and the solution
+> (MI-FIC vs certificate) before touching OBO. Likely an ADR-028 amendment. Full writeup + "why prior auth audits
+> didn't raise this" in the project's `notes/ASSESSMENT.md`.
+
 ## Trivial cleanup
 
 - Stale comments referencing deleted types (`SafetyPipelineMiddleware` in ~8 handler comments; `OwnershipValidator` at `PlaybookEndpoints.cs:411`). Cosmetic doc-drift; types are gone from code.

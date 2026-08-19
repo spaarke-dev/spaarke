@@ -1,6 +1,6 @@
 # TASK-INDEX — spaarke-side-pane-navigation-history-r1
 
-> **Generated**: 2026-08-13 by `/project-pipeline` Step 3 · **Tasks**: 21 · **Status**: INITIALIZED (execution owner-gated)
+> **Generated**: 2026-08-13 by `/project-pipeline` Step 3 · **Tasks**: 21 · **Status**: ✅ COMPLETE 2026-08-15 (21/21 done; deployed + owner-UAT-passed)
 > Legend: 🔲 not-started · 🔄 needs-retry · ✅ completed · ⛔ blocked/deferred
 > Rigor: FULL = code-review + adr-check at Step 9.5. Tier/effort dispatched by `task-execute` Step 0.5 from each POML.
 
@@ -12,7 +12,7 @@
 | 010 | Widen `xrmContext.ts` typings (getPane/select, 3-frame, webresourceName) | 1 Framework | FULL | sonnet/high | 001 | A | ✅ | ✅ |
 | 011 | `SprkSidePaneHost` + `sidePaneRegistry` (wrap shell + generalize orchestrator) | 1 Framework | FULL | sonnet/high | 010 | B | ✅ | ✅ |
 | 020 | `sprk_navitem` schema authoring (entity-schema.md + deploy script) | 2 Entity | STANDARD | sonnet/high | 001 | A | ✅ | ✅ |
-| 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | ✅ deploy* |
+| 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | ✅ deploy + 2-user isolation verified (non-admin) |
 | 030 | Capture (Viewed) — re-adopt `contextService` poll → history upsert | 3 Capture | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
 | 031 | Retention — prune-on-write, 30-day age | 3 Capture | FULL | sonnet/high | 030 | E | ✅ | ✅ |
 | 040 | `NavigatorPane` code page (Vite webresource pane + tab scaffold) | 4 Navigator | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
@@ -20,15 +20,15 @@
 | 042 | Recent (Edited) toggle — N per-entity `modifiedby=me` | 4 Navigator | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ |
 | 050 | Pin gesture (per-user pin; never writes `sprk_monitor`) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ |
 | 051 | Bookmarks (Pin this page + Add bookmark URL parse) | 5 Pinned | FULL | sonnet/high | 050 | E | ✅ | ✅ |
-| 052 | Monitored lens (shared `sprk_monitor`, scoped to me) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ owner-only* |
+| 052 | Monitored lens (shared `sprk_monitor`, scoped to me) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ access-based (post-UAT: platform security trim, no owner filter) |
 | 060 | Views tab (reuse `ViewService.ts`; `userquery` grouped) | 6 Views | FULL | sonnet/high | 040 | D | ✅ own file | ✅ |
 | 070 | Search / quick-switcher (local fuzzy + live escalation + kbd) | 7 Search | FULL | sonnet/high | 041,050,060 | F | ✅ | ✅ |
 | 080 | Read-time security trimming | 8 Security | FULL | sonnet/high | 041,050 | F | ✅ | ✅ |
 | 081 | Retention verification | 8 Security | STANDARD | sonnet/high | 031 | F | ✅ | ✅ |
 | 085 | Stub contributor (framework-proof, FR-13) | 9 Proof | STANDARD | sonnet/high | 011 | F | ✅ | ✅ |
 | 086 | Deploy `NavigatorPane` + wire bootstrap | 9 Deploy | STANDARD | sonnet/high | 040,041,042,050,051,052,060,070,080 | Deploy | ❌ env | ✅ deployed* |
-| 087 | UI-test pass (`ui-test`, light+dark) | 9 Deploy | STANDARD | sonnet/high | 086 | Deploy | ❌ | 🔲 |
-| 090 | Project wrap-up (test-diet, lessons-learned, archive) | Wrap | MINIMAL | sonnet/high | 087 | Wrap | ❌ | 🔲 |
+| 087 | UI-test pass (`ui-test`, light+dark) | 9 Deploy | STANDARD | sonnet/high | 086 | Deploy | ❌ | ✅ owner-UAT light+dark |
+| 090 | Project wrap-up (test-diet, lessons-learned, archive) | Wrap | MINIMAL | sonnet/high | 087 | Wrap | ❌ | ✅ |
 
 ## Parallel execution groups (waves)
 

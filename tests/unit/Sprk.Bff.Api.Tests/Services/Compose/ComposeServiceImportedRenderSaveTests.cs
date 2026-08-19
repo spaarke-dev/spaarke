@@ -156,15 +156,15 @@ public sealed class ComposeServiceImportedRenderSaveTests
         ComposeContentModel model,
         ReadOnlyMemory<byte> content = default,
         string? baselineVersionId = null) => new()
-    {
-        DocumentSpeId = ExistingSpeItemId,
-        DriveId = ExistingDriveId,
-        Content = content,
-        BaselineVersionId = baselineVersionId,
-        ContentModel = model,
-        SessionId = Guid.NewGuid().ToString(),
-        TenantId = Tenant,
-    };
+        {
+            DocumentSpeId = ExistingSpeItemId,
+            DriveId = ExistingDriveId,
+            Content = content,
+            BaselineVersionId = baselineVersionId,
+            ContentModel = model,
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 1. The cutover: ContentModel + retained bytes → RenderIntoCarrier. The persisted bytes carry the

@@ -27,6 +27,8 @@ import type { IWebApi } from '../types/xrm';
 // DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
 // filter (R4 FR-34 consumer wiring).
 import type { ITodoRegardingFilter } from '../services/queryHelpers';
+// task 021's Filter-pane predicate (`ITodoFilterState` + friends) import —
+// REMOVED smart-todo-r5 UAT 2026-08-17. See queryHelpers.ts module doc.
 
 // ---------------------------------------------------------------------------
 // Sort helper
@@ -107,6 +109,11 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
   // broken by parent components passing a new object identity per render.
   const regardingFilterEntity = regardingFilter?.entityType ?? null;
   const regardingFilterRecordId = regardingFilter?.recordId ?? null;
+
+  // task 021's Filter-pane predicate destructuring (`filter` →
+  // `todoFilterForFetch` / `filterRef`) — REMOVED smart-todo-r5 UAT
+  // 2026-08-17. The replacement free-text search is applied client-side in
+  // `SmartToDo.tsx`'s `displayItems` memo, not threaded into the fetch.
 
   const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -191,7 +198,13 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     return () => {
       cancelled = true;
     };
-  }, [userId, mockItems, fetchKey, regardingFilterEntity, regardingFilterRecordId]);
+  }, [
+    userId,
+    mockItems,
+    fetchKey,
+    regardingFilterEntity,
+    regardingFilterRecordId,
+  ]);
 
   // -------------------------------------------------------------------------
   // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
@@ -219,7 +232,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
         if (!userId) return;
 
         try {
-          const result = await serviceRef.current.getActiveTodos(userId);
+          const result = await serviceRef.current.getActiveTodos(userId, undefined);
           if (!result.success) return;
 
           // Find the newly active todo in the refreshed list

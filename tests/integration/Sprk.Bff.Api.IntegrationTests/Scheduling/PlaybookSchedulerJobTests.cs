@@ -478,6 +478,8 @@ internal sealed class FakeGenericEntityService : IGenericEntityService
         throw new NotImplementedException();
     public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) =>
         throw new NotImplementedException();
+    public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) =>
+        throw new NotImplementedException();
     public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) =>
         throw new NotImplementedException();
     public Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default) =>

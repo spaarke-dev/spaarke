@@ -70,6 +70,12 @@ jest.mock('@spaarke/ui-components', () => ({
   // without it, `SprkModal` resolves to `undefined` under this mock and React throws
   // "Element type is invalid" the moment `ComposeConflictDialog` renders.
   SprkModal: () => null,
+  // Task 075 (FR-13) flake/breakage fix — ComposeWorkspace also mounts
+  // <RichFilePreviewDialog/> once a document is promoted (`canPreviewDocument`), same
+  // unconditional-mount-under-its-own-`open`-prop pattern as SendEmailDialog/SprkModal
+  // above. A missing stub here resolved to `undefined` and threw the identical "Element
+  // type is invalid" error the moment a promoted-document scenario rendered it.
+  RichFilePreviewDialog: () => null,
 }));
 
 // ── PaneEventBus (no-op in this test) ───────────────────────────────────────

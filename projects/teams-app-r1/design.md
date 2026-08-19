@@ -261,7 +261,7 @@ Register in `projects/INDEX.md` at project start; run `/conflict-check` before B
 - Membership/authz: `.claude/adr/ADR-034-user-record-membership.md`; `Services/Ai/Membership/`; `Infrastructure/ExternalAccess/`; `Spaarke.Core/Auth/AuthorizationService.cs`
 - Host contract: `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`
 - Enterprise Teams requirements: researcher MEMORY + `reference_teams-integration-options-2026-08` (auto-memory)
-- Unified access (design-only): `projects/unified-access-control/`
+- Unified access (design-only): `projects/unified-access-control-r1/`
 
 ---
 

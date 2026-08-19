@@ -180,6 +180,24 @@ function resolveColumn(todo: IKanbanTodoLike, todayThreshold: number, tomorrowTh
 /**
  * Build the three-column structure from a flat item list. Pure function —
  * safe for the widget's render path. Preserves item order (callers pre-sort).
+ *
+ * FR-07 (F-2) Show-Completed toggle (smart-todo-r5 task 022, 2026-08-16) —
+ * verified: this function (and `resolveColumn`/`assignColumnByDate` above)
+ * bucket purely on `sprk_duedate` + pin state. There is NO statuscode or
+ * statecode special-casing anywhere in this file, so a Completed
+ * (statuscode=2) item that the caller's query now includes (see
+ * `buildTodoItemsQuery`'s `includeCompleted` param in
+ * `src/solutions/SmartTodo/src/services/queryHelpers.ts`) flows through and
+ * lands in its normal Today/Tomorrow/Future bucket exactly like an Open/
+ * In-Progress item — there is no 4th "Completed" column, satisfying the
+ * spec's "kanban renders Completed without layout breakage" acceptance
+ * wording. The completed visual treatment (dimmed/strikethrough) is applied
+ * downstream by `KanbanCard`'s `isCompleted` derivation
+ * (`todo.statuscode === 2 || todo.statecode === 1`) — this hook does not
+ * need to know about it. Completed items also remain draggable/pinnable via
+ * `moveItem`/`togglePin` like any other item (no special-case guard added —
+ * product intent was ambiguous, so the decision is to keep them fully
+ * interactive; see `projects/smart-todo-r5/notes/task-022-completed-toggle.md`).
  */
 export function bucketTodoItems<T extends IKanbanTodoLike>(
   items: ReadonlyArray<T>,
@@ -202,11 +220,25 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
   //   Tomorrow → light yellow tint (tokens.colorPaletteYellowBackground1)
   //   Future   → light green tint  (tokens.colorPaletteGreenBackground1)
   //
+  // smart-todo-r5 task 023 (FR-08 / U-1 + F-1, 2026-08-16) — UAT feedback: the
+  // full-column wash (this `tintColor` applied as the ENTIRE column body's
+  // `backgroundColor`) read as too heavy/saturated. `KanbanBoard.tsx` now
+  // scopes `tintColor` to the column HEADER strip only (title + subtitle +
+  // count pill row) instead of the whole card-list body — a "lightly tinted
+  // header" per spec FR-08's named options ("thin accent bar OR lightly
+  // tinted header"). The token values themselves are UNCHANGED (still the
+  // lightest `Background1` tier) — only the render-side application area
+  // shrank. This keeps the change additive/backward-compatible: any other
+  // `IKanbanColumn` consumer that doesn't set `tintColor` is unaffected, and
+  // consumers still reading `column.tintColor` for their own purposes see
+  // the same token values as before.
+  //
   // ADR-021 binding: semantic tokens only (no hex). The `Background1` variants
   // are the LIGHTEST in the Fluent v9 palette and read as gentle wash backgrounds
   // — not competing with card content while still cueing column identity.
-  // The existing top-border `accentColor` (Border2 variants) stays in place as a
-  // sharper accent rail; the tint sits behind it for visual reinforcement.
+  // The existing top-border `accentColor` (Border2 variants) stays in place as
+  // the PRIMARY urgency cue (full-height 3px top-border rail); the header tint
+  // is now a secondary reinforcement, not a base layer under every card.
   //
   // Capital Case labels ('Today'/'Tomorrow'/'Future') are already passed as
   // column.title strings; the `KanbanBoard` columnTitle style does NOT apply

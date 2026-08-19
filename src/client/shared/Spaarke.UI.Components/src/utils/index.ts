@@ -10,3 +10,4 @@ export * from './themeStorage';
 export * from './xrmContext';
 export * from './relationshipColors';
 export * from './adapters';
+export * from './todoScoreMappings';

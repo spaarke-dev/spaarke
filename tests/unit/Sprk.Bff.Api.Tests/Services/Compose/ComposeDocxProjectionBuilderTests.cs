@@ -442,7 +442,7 @@ public sealed class ComposeDocxProjectionBuilderTests
         var para = new Paragraph(
             new Run(new Text("before ") { Space = SpaceProcessingModeValues.Preserve }),
             new SdtRun(new SdtProperties(new SdtContentGroup()), new SdtContentRun(new Run(new Text("grouped")))),
-            new Run(new Text(" after") ))
+            new Run(new Text(" after")))
         { ParagraphId = new HexBinaryValue("22220001") };
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));

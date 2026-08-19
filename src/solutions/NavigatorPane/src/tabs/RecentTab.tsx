@@ -68,6 +68,7 @@ import {
   type NavItemRecord,
 } from '@spaarke/ui-components/services/navigator/navItemRepository';
 import { classifyTargets, trimTargetFromRow } from '../services/securityTrimService';
+import { openEntityRecord } from '../services/recordNavigation';
 import { rowIconFor } from '../rowIcon';
 import {
   setRecentSearchEntries,
@@ -142,11 +143,10 @@ function navigateToRow(xrm: XrmContext, row: NavItemRecord): void {
     case NavItemPageType.EntityRecord:
     default:
       if (row.sprk_targetlogicalname && row.sprk_targetid) {
-        void navigation.navigateTo({
-          pageType: 'entityrecord',
-          entityName: row.sprk_targetlogicalname,
-          entityId: row.sprk_targetid,
-        });
+        // sprk_communication (Email) routes to the Email code page; all other
+        // records open the OOB form — the routing rule lives in one shared
+        // helper (see recordNavigation.ts).
+        openEntityRecord(xrm, row.sprk_targetlogicalname, row.sprk_targetid);
       }
       return;
   }

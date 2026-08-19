@@ -33,4 +33,19 @@ public interface IComposePdfIntakeSource
         byte[] pdfBytes,
         string fileName,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 073 / 050 (spaarkeai-compose-r7, FR-11) — the discriminated twin of <see cref="ParseAsync"/>:
+    /// the SAME parse attempt and the SAME never-throws-except-cancellation contract, but on failure
+    /// returns a classified <see cref="PdfIntakeFailureCause"/> + cause-specific message
+    /// (circuit-open / timeout / corrupt / unknown) instead of collapsing to null. The Compose PDF-intake
+    /// path (<c>ComposeService.ProjectPdfToDocxAsync</c>) consumes this so a PDF that cannot be opened
+    /// surfaces the SPECIFIC reason to the user, not one generic "corrupt or unavailable". On success
+    /// <see cref="PdfIntakeParseResult.Layout"/> is populated; on failure
+    /// <see cref="PdfIntakeParseResult.FailureCause"/> + <see cref="PdfIntakeParseResult.FailureMessage"/> are.
+    /// </summary>
+    Task<PdfIntakeParseResult> ParseWithDiagnosticsAsync(
+        byte[] pdfBytes,
+        string fileName,
+        CancellationToken cancellationToken);
 }

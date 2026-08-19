@@ -53,15 +53,19 @@ export const MEMO_NO_MEMO_MESSAGE =
 
 /**
  * Banner shown when the Compose session is NOT bound to an Analysis (400 / `session-not-bound`) —
- * the direct-Compose door (agreements-r1 UAT round-1 #2). This is DISTINCT from "no completed
- * review": a review may well have completed; the memo simply has nowhere durable to be saved until
- * the session is promoted. Guides the user to the EXISTING promote affordance (Assistant → History →
- * "Promote to Analysis…", which binds the session durably) — no silent Analysis creation (ADR-041).
+ * the direct-Compose door. This is DISTINCT from "no completed review": a review may well have
+ * completed; the memo simply has nowhere durable to be saved until the document is saved.
+ *
+ * UAT (2026-08-18, owner): the Document + Analysis are created when the user **Saves** — NOT when a
+ * file is uploaded or a review runs (the user may not want to persist it). So the guidance is simply
+ * "Save the document" (which creates its Analysis); the memo is available afterward. The Assistant
+ * History / "Promote to Analysis…" path is deliberately REMOVED from this flow — the user does not go
+ * to conversation History to link an Analysis.
  */
 export const MEMO_SESSION_NOT_BOUND_MESSAGE =
-  'This document isn’t linked to an Analysis yet, so there’s nowhere to save the summary memo. ' +
-  'In the Assistant, open History and choose “Promote to Analysis…” to link this session, ' +
-  'then create the summary memo again. Any completed review is preserved — promoting keeps it.';
+  'This document isn’t saved yet, so there’s nowhere to save the summary memo. ' +
+  'Save the document first — that creates its Analysis — then generate the summary memo again. ' +
+  'Any completed review is preserved.';
 
 /**
  * Selects the honest banner message for a non-OK memo response from its HTTP status + ProblemDetails

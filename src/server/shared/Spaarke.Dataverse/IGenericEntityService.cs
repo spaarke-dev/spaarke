@@ -11,6 +11,26 @@ public interface IGenericEntityService
 {
     Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default);
     Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically creates-or-updates a record keyed by its ALTERNATE KEY (Dataverse
+    /// <c>UpsertRequest</c>) in a single server-side round-trip. The <paramref name="entity"/> MUST
+    /// carry a <see cref="Entity.KeyAttributes"/> alternate key (or a primary <see cref="Entity.Id"/>);
+    /// Dataverse resolves the target atomically, so two concurrent first-writes for the same key yield
+    /// exactly ONE row (the second UPDATES the first's row) — there is no read-then-create TOCTOU window.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-08-16 (spaarkeai-compose-r7 task 013, FR-07d) to close the compose promote
+    /// duplicate-<c>sprk_document</c> race: <c>ComposeService.PromoteIfEphemeralAsync</c> replaces its
+    /// read-then-<see cref="CreateAsync"/>-then-catch sequence with this atomic upsert on the
+    /// <c>sprk_graphitemid_uk</c> alternate key. Implemented by <c>DataverseServiceClientImpl</c> via
+    /// <c>Microsoft.Xrm.Sdk.Messages.UpsertRequest</c>; the Web-API impl throws
+    /// <see cref="NotImplementedException"/> (existing pattern — the BFF runtime always resolves the
+    /// ServiceClient impl).
+    /// </remarks>
+    /// <returns>The resolved record id and whether Dataverse CREATED it (<c>false</c> = the row already
+    /// existed and was updated).</returns>
+    Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default);
     /// <summary>
     /// Updates the provided fields on an existing record. A <c>fields</c> value of C# <c>null</c> SKIPS that key
     /// (only the fields you supply are written — the default convenience). A value of <see cref="DBNull.Value"/>

@@ -80,7 +80,7 @@ public sealed class ComposeServiceUploadFidelityTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
@@ -174,8 +174,9 @@ public sealed class ComposeServiceUploadFidelityTests
         _dataverse.Setup(d => d.RetrieveByAlternateKeyAsync(
                 "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(newId);
+        // task 013 (FR-07d): promote now writes via the atomic UpsertAsync (was CreateAsync).
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((newId, true));
     }
 
     private void ArrangeIndexingSubmitted() =>

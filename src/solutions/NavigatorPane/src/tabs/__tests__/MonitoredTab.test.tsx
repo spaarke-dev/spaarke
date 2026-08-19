@@ -5,8 +5,8 @@
  * the UAT-driven redesign, which promoted Monitored to its own top-level tab.)
  *
  * Verifies the closed acceptance-criteria set:
- *   - Lists the user's OWNED, `sprk_monitor=true` records.
- *   - A `sprk_monitor=true` record NOT owned by the user is excluded.
+ *   - Lists the `sprk_monitor=true` records the user can access.
+ *   - A `sprk_monitor=true` record the user cannot access is excluded.
  *   - The tab surfaces shared-flag semantics copy (affects everyone,
  *     last-writer-wins).
  *   - Renders correctly in light AND dark themes (ADR-021).
@@ -40,12 +40,14 @@ import { MonitoredTab } from '../MonitoredTab';
 const CURRENT_USER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
 /** Rows "in the org" for a Monitored-source entity — the fake server applies
- * the `sprk_monitor eq true AND _ownerid_value eq {userId}` filter itself so
- * tests assert real filtering, not just mock plumbing. */
+ * the `sprk_monitor eq true` filter + a security trim (access-based) itself so
+ * tests assert real behavior, not just mock plumbing. */
 interface MonitoredFakeRecord {
   id: string;
   name: string;
-  ownerId: string;
+  /** Whether the current user can read this row — models Dataverse's server-
+   * side security trim (owner ∪ BU ∪ team ∪ shared). Defaults to true. */
+  accessible?: boolean;
 }
 
 const MONITORED_NAME_FIELD: Record<string, string> = {
@@ -71,9 +73,9 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   const monitoredRecordsByEntity = options.monitoredRecordsByEntity ?? {};
 
   const retrieveMultipleRecords = jest.fn(async (entity: string, query?: string) => {
-    if (query?.includes('sprk_monitor eq true') && query.includes('_ownerid_value eq')) {
+    if (query?.includes('sprk_monitor eq true') && !query.includes('_ownerid_value')) {
       const rows = monitoredRecordsByEntity[entity] ?? [];
-      const matched = rows.filter(r => r.ownerId === CURRENT_USER_ID);
+      const matched = rows.filter(r => r.accessible !== false);
       const idField = `${entity}id`;
       const nameField = MONITORED_NAME_FIELD[entity];
       return {
@@ -159,7 +161,7 @@ describe('MonitoredTab', () => {
   it('renders the user\'s monitored records with a far-left icon (replaces the removed chip)', async () => {
     installMockXrm({
       monitoredRecordsByEntity: {
-        sprk_matter: [{ id: 'monitored-matter', name: 'MTR-777', ownerId: CURRENT_USER_ID }],
+        sprk_matter: [{ id: 'monitored-matter', name: 'MTR-777' }],
       },
     });
     renderMonitoredTab('light');
@@ -180,7 +182,7 @@ describe('MonitoredTab', () => {
   it('renders correctly in dark theme (ADR-021)', async () => {
     installMockXrm({
       monitoredRecordsByEntity: {
-        sprk_document: [{ id: 'monitored-doc', name: 'Monitored.docx', ownerId: CURRENT_USER_ID }],
+        sprk_document: [{ id: 'monitored-doc', name: 'Monitored.docx' }],
       },
     });
     expect(() => renderMonitoredTab('dark')).not.toThrow();
@@ -202,12 +204,12 @@ describe('MonitoredTab', () => {
     expect(note).toHaveTextContent(/last change wins/i);
   });
 
-  it('negative: a monitor=true record NOT owned by the current user is excluded', async () => {
+  it('negative: a monitor=true record the current user CANNOT access is excluded', async () => {
     installMockXrm({
       monitoredRecordsByEntity: {
         sprk_matter: [
-          { id: 'mine', name: 'MTR-MINE', ownerId: CURRENT_USER_ID },
-          { id: 'not-mine', name: 'MTR-OTHER', ownerId: 'ffffffff-ffff-ffff-ffff-ffffffffffff' },
+          { id: 'mine', name: 'MTR-MINE' },
+          { id: 'not-mine', name: 'MTR-OTHER', accessible: false },
         ],
       },
     });
@@ -231,7 +233,7 @@ describe('MonitoredTab', () => {
   it('has NO star/pin affordance anywhere (read-only lens)', async () => {
     installMockXrm({
       monitoredRecordsByEntity: {
-        sprk_event: [{ id: 'monitored-event', name: 'Hearing', ownerId: CURRENT_USER_ID }],
+        sprk_event: [{ id: 'monitored-event', name: 'Hearing' }],
       },
     });
     renderMonitoredTab('light');
@@ -246,7 +248,7 @@ describe('MonitoredTab', () => {
   it('clicking a monitored row navigates via Xrm.Navigation.navigateTo (entityrecord)', async () => {
     const fakeXrm = installMockXrm({
       monitoredRecordsByEntity: {
-        sprk_invoice: [{ id: 'monitored-invoice', name: 'INV-100', ownerId: CURRENT_USER_ID }],
+        sprk_invoice: [{ id: 'monitored-invoice', name: 'INV-100' }],
       },
     });
     renderMonitoredTab('light');
@@ -269,7 +271,7 @@ describe('MonitoredTab', () => {
   it('keydown Enter on a row also navigates', async () => {
     const fakeXrm = installMockXrm({
       monitoredRecordsByEntity: {
-        sprk_todo: [{ id: 'monitored-todo', name: 'Follow up', ownerId: CURRENT_USER_ID }],
+        sprk_todo: [{ id: 'monitored-todo', name: 'Follow up' }],
       },
     });
     renderMonitoredTab('light');

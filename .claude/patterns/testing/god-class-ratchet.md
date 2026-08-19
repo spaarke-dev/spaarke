@@ -26,12 +26,13 @@ This is a CI/ArchTest gate — read this BEFORE growing a large server file so i
    waiver number** to the new LOC in `GodClassGuardTests.cs` **with a one-line reason in the PR**. This is
    a visible, reviewed decision — never a silent bump.
 3. **Never** raise `NewFileCeilingLines` or add a waiver for a brand-new file without a documented reason.
-4. Frozen files (2026-08-15): `SpeAdminGraphService` (4,911, RED-1), `ChatEndpoints` (4,066, RED-2),
+4. Frozen files (13, as of 2026-08-16): `SpeAdminGraphService` (4,911, RED-1), `ChatEndpoints` (4,066, RED-2),
    `ComposeService` (3,573), `ComposeDocxProjectionBuilder` (3,085), `ComposeShadowPatchEngine` (2,999),
-   `DataverseServiceClientImpl` (2,864, RED-4), `DataverseWebApiService` (2,822, RED-4),
-   `CommunicationService` (2,676), `ComposeEndpoints` (2,651), `PlaybookOrchestrationService` (2,528),
-   `SprkChatAgentFactory` (2,380), `ComposeDocumentRenderer` (2,304), `CommunicationEnrichmentService`
-   (2,087), `OfficeService` (2,038).
+   `DataverseServiceClientImpl` (2,864, RED-4), `CommunicationService` (2,676), `ComposeEndpoints` (2,651),
+   `PlaybookOrchestrationService` (2,528), `SprkChatAgentFactory` (2,380), `ComposeDocumentRenderer` (2,304),
+   `CommunicationEnrichmentService` (2,087), `OfficeService` (2,038).
+   `DataverseWebApiService` GRADUATED off the list 2026-08-16 (RED-4 B dead-code deletion: 2,822 → 1,409, below
+   the 2,000 ceiling; waiver removed).
 
 Regenerate the waiver numbers with:
 `find src/server -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' -exec wc -l {} \; | awk '$1>2000'`

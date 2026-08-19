@@ -177,7 +177,7 @@ public sealed class GridOverviewHandler : IToolHandler
             // 1) Resolve the surface's saved query DEFINITION by configId — over OBO (a config
             //    the user cannot read 404s here, which is the correct fail-closed behavior).
             var configResponse = await _dataverse.GetAsync(
-                $"{GridConfigEntitySet}({configId:D})?$select=sprk_entitylogicalname,sprk_fetchxml,sprk_name",
+                $"{GridConfigEntitySet}({configId:D})?$select=sprk_entitylogicalname,sprk_configjson,sprk_name",
                 cancellationToken).ConfigureAwait(false);
             if (!configResponse.IsSuccess)
             {
@@ -185,14 +185,27 @@ public sealed class GridOverviewHandler : IToolHandler
             }
 
             var config = configResponse.Body!.Value;
-            var savedFetchXml = GetString(config, "sprk_fetchxml");
             var viewName = GetString(config, "sprk_name") ?? "overview";
             var entityLogicalName = GetString(config, "sprk_entitylogicalname");
 
+            // Resolve the query DEFINITION from the config's `sprk_configjson` `source` block (the
+            // DataGrid framework SourceConfig: savedquery | inline | savedquery-set). R4 UAT 2026-08-18
+            // ROOT CAUSE: this handler previously $select'd + read a `sprk_fetchxml` column that does
+            // NOT exist on sprk_gridconfiguration (the table stores the query in sprk_configjson), so
+            // every grid_overview call errored and the advisory task-agenda answer had ZERO grounded
+            // data — the P1 "you have no tasks" defect despite the grid widget showing them. Read the
+            // real column + resolve the referenced savedquery's FetchXML over the caller's OBO token.
+            var configJson = GetString(config, "sprk_configjson");
+            var (savedFetchXml, resolveError) = await ResolveFetchXmlFromConfigAsync(
+                configJson, configId, cancellationToken).ConfigureAwait(false);
+            if (resolveError is not null)
+            {
+                return Error(tool, resolveError, ToolErrorCodes.ValidationFailed, startedAt);
+            }
             if (string.IsNullOrWhiteSpace(savedFetchXml))
             {
                 return Error(tool,
-                    $"Grid configuration '{configId:D}' has no saved query (sprk_fetchxml is empty); there is nothing to run.",
+                    $"Grid configuration '{configId:D}' has no runnable saved query; there is nothing to run.",
                     ToolErrorCodes.ValidationFailed, startedAt);
             }
 
@@ -384,6 +397,113 @@ public sealed class GridOverviewHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves the FetchXML to run from a grid config's <c>sprk_configjson</c> <c>source</c> block
+    /// (DataGrid framework <c>SourceConfig</c>). <c>savedquery</c> → the referenced savedquery's
+    /// FetchXML (read over OBO from the <c>savedqueries</c> set); <c>inline</c> → the config's own
+    /// <c>fetchXml</c>. Returns <c>(fetchXml, error)</c> with exactly one non-null. <c>savedquery-set</c>
+    /// (auto-discover multiple sibling views) is ambiguous for a single overview run and is reported as
+    /// an unsupported source. Added R4 UAT 2026-08-18 — see the ROOT CAUSE note at the call site.
+    /// </summary>
+    private async Task<(string? FetchXml, string? Error)> ResolveFetchXmlFromConfigAsync(
+        string? configJson, Guid configId, CancellationToken cancellationToken)
+    {
+        var parsed = ParseGridSource(configJson, configId);
+        if (parsed.Error is not null)
+        {
+            return (null, parsed.Error);
+        }
+
+        // inline source carries its own FetchXML — no Dataverse hop.
+        if (parsed.InlineFetchXml is not null)
+        {
+            return (parsed.InlineFetchXml, null);
+        }
+
+        // savedquery source — read the referenced savedquery's FetchXML over the caller's OBO token
+        // (a savedquery the user cannot read 404s here — same fail-closed grounding as the config read).
+        var sqResponse = await _dataverse.GetAsync(
+            $"savedqueries({parsed.SavedQueryId})?$select=fetchxml,name",
+            cancellationToken).ConfigureAwait(false);
+        if (!sqResponse.IsSuccess)
+        {
+            return (null, $"Grid configuration '{configId:D}' references savedquery '{parsed.SavedQueryId}', which could not be read.");
+        }
+
+        var sqFetch = GetString(sqResponse.Body!.Value, "fetchxml");
+        return string.IsNullOrWhiteSpace(sqFetch)
+            ? (null, $"Savedquery '{parsed.SavedQueryId}' has no FetchXML.")
+            : (sqFetch, null);
+    }
+
+    /// <summary>
+    /// Pure parse of a grid config's <c>sprk_configjson</c> <c>source</c> block (no I/O). Returns the
+    /// resolved shape: for an <c>inline</c> source, <see cref="GridSourceParse.InlineFetchXml"/> is set;
+    /// for a <c>savedquery</c> source, <see cref="GridSourceParse.SavedQueryId"/> is set (the caller does
+    /// the OBO read); otherwise <see cref="GridSourceParse.Error"/> explains why. Exactly one of the three
+    /// is non-null. Testable without a Dataverse double — the regression guard for the R4 UAT root cause.
+    /// </summary>
+    internal static GridSourceParse ParseGridSource(string? configJson, Guid configId)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+        {
+            return GridSourceParse.Fail($"Grid configuration '{configId:D}' has no configuration JSON (sprk_configjson is empty).");
+        }
+
+        JsonElement source;
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (!doc.RootElement.TryGetProperty("source", out var sourceEl)
+                || sourceEl.ValueKind != JsonValueKind.Object)
+            {
+                return GridSourceParse.Fail($"Grid configuration '{configId:D}' configuration JSON has no 'source' block.");
+            }
+
+            source = sourceEl.Clone();
+        }
+        catch (JsonException)
+        {
+            return GridSourceParse.Fail($"Grid configuration '{configId:D}' configuration JSON is malformed.");
+        }
+
+        var sourceType = source.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String
+            ? typeEl.GetString()
+            : null;
+
+        switch (sourceType)
+        {
+            case "inline":
+                var inlineFetch = source.TryGetProperty("fetchXml", out var fx) && fx.ValueKind == JsonValueKind.String
+                    ? fx.GetString()
+                    : null;
+                return string.IsNullOrWhiteSpace(inlineFetch)
+                    ? GridSourceParse.Fail($"Grid configuration '{configId:D}' inline source has no fetchXml.")
+                    : GridSourceParse.Inline(inlineFetch!);
+
+            case "savedquery":
+                var savedQueryId = source.TryGetProperty("savedQueryId", out var sq) && sq.ValueKind == JsonValueKind.String
+                    ? sq.GetString()
+                    : null;
+                return string.IsNullOrWhiteSpace(savedQueryId)
+                    ? GridSourceParse.Fail($"Grid configuration '{configId:D}' savedquery source has no savedQueryId.")
+                    : GridSourceParse.SavedQuery(savedQueryId!);
+
+            default:
+                return GridSourceParse.Fail(
+                    $"Grid configuration '{configId:D}' source type '{sourceType ?? "(none)"}' is not supported by the overview tool " +
+                    "(expected 'savedquery' or 'inline').");
+        }
+    }
+
+    /// <summary>Result of <see cref="ParseGridSource"/>: exactly one of the three fields is non-null.</summary>
+    internal readonly record struct GridSourceParse(string? InlineFetchXml, string? SavedQueryId, string? Error)
+    {
+        internal static GridSourceParse Inline(string fetchXml) => new(fetchXml, null, null);
+        internal static GridSourceParse SavedQuery(string savedQueryId) => new(null, savedQueryId, null);
+        internal static GridSourceParse Fail(string error) => new(null, null, error);
+    }
 
     /// <summary>
     /// Substitutes the server date into the saved FetchXML's <c>{{today}}</c> / <c>{{today+N}}</c> /

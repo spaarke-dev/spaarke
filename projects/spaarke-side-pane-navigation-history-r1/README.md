@@ -1,6 +1,6 @@
 # Side-Pane Navigation & Quick-Access (Navigation History) — r1
 
-> **Status**: INITIALIZED 2026-08-13 via `/project-pipeline` (INITIALIZE-ONLY — planning artifacts + tasks + branch; **execution owner-gated, NOT started**)
+> **Status**: ✅ COMPLETE 2026-08-15 — all 21 tasks done; Navigator deployed + owner-UAT-passed (light+dark) on spaarkedev1; auto-load live on Matter/Document/Project/Event/Communication/Todo entity ribbons + SpaarkeAi/Email/Reconciliation code pages. (Initialized 2026-08-13 via `/project-pipeline`.)
 > **Portfolio**: [Project #764](https://github.com/spaarke-dev/spaarke/issues/764) · Epic [#430 Insights/Widgets/Search](https://github.com/spaarke-dev/spaarke/issues/430) · [Board — Project #2](https://github.com/users/spaarke-dev/projects/2)
 > **Branch**: `work/side-pane-navigation-history-r1`
 > **Slug**: `spaarke-side-pane-navigation-history-r1`

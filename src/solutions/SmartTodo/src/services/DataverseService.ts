@@ -35,6 +35,8 @@ import {
 // DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
 // filter (R4 FR-34 consumer wiring).
 import type { ITodoRegardingFilter } from './queryHelpers';
+// task 021's Filter-pane predicate (`ITodoFilterState`) import — REMOVED
+// smart-todo-r5 UAT 2026-08-17. See queryHelpers.ts module doc.
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants for sprk_todo (per task 009 customization)
@@ -106,6 +108,8 @@ function mapTodoFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     ...e,
     assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
     statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+    // Formatted due date (locale short date) for the blended date text-search (UAT 2026-08-17).
+    dueDateFormatted: (e[`sprk_duedate${FV}`] as string) ?? '',
   }));
 }
 
@@ -437,6 +441,11 @@ export class DataverseService {
    * FR-34 openTodos contract (e.g., from MatterHeader's checkmark), scope
    * results to the specified parent record. See `buildTodoItemsQuery` for the
    * exact OData shape.
+   *
+   * task 021's `filter` param (Filter-pane predicate) — REMOVED smart-todo-r5
+   * UAT 2026-08-17. The query is back to its pre-task-021 shape (contactId +
+   * regardingFilter only); the replacement free-text search is applied
+   * client-side in `SmartToDo.tsx`, not threaded into this Dataverse query.
    */
   async getActiveTodos(
     contactId: string,

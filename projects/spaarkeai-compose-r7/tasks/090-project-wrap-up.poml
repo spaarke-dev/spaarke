@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Project wrap-up — anti-clobber deploy, test-diet, docs, fidelity-widener home, archive</title>
+    <phase>8 Wrap-up</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <!-- 090 COMPLETE 2026-08-17: quality gates (holistic code-review+adr-check fixed 1 CRITICAL CS0535 build
+         break + 1 focus-steal Warning) · /test-diet CLEAN (0 scaffolding) · docs (COMPOSE-EDITOR-UX.md) ·
+         fidelity-wideners home DEF-002/#777 · /conflict-check CLEAN · BFF (44.95 MB net10, hash-verified,
+         healthy, Compose routes 401) + sprk_spaarkeai (published, R7 markers verified) DEPLOYED TOGETHER to
+         dev · README->Complete · TASK-INDEX 090->✅. Documented exceptions cited: 074 §6.5, 041 invariant
+         flip, 050 async, DEF-002. See notes/lessons-learned.md + notes/test-diet-report.md. -->
+
+    <rigor>FULL</rigor>
+    <rigor-reason>Final quality gates (code-review + adr-check), an irreversible anti-clobber deploy, /test-diet reconciliation, and project closure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestrates existing wrap-up skills (code-review, adr-check, test-diet, repo-cleanup, deploy); procedural, not novel reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — depends on every other task; irreversible deploy.</parallel-reason>
+    <deps>010, 011, 012, 013, 020, 030, 040, 041, 050, 051, 060, 061, 070, 071, 072, 073, 074, 075</deps>
+    <tags>deploy, ci-cd, testing, devops</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out spaarkeai-compose-r7: run final quality gates, reconcile tests via /test-diet, deploy BFF + sprk_spaarkeai TOGETHER
+    (anti-clobber), name a concrete home for the deferred fidelity wideners (carrying the R6 defer-register §C evidence), update
+    docs + README, capture lessons-learned, and archive.
+  </prompt>
+
+  <role>SPAARKE platform developer. Familiar with the anti-clobber deploy window, /test-diet, /repo-cleanup, and portfolio archival. Follow ADRs strictly.</role>
+
+  <goal>
+    R7 is fully closed: quality gates green, tests reconciled, BFF + sprk_spaarkeai deployed together, the fidelity-widener home
+    named as a GitHub Idea/fast-follow project, docs + README updated to Complete, lessons-learned captured, project archived.
+  </goal>
+
+  <context>
+    <background>
+      plan.md Phase 8 + spec.md Owner Clarifications (fidelity-wideners home = decide at wrap-up). Deploy BFF + sprk_spaarkeai
+      together (NFR-05 anti-clobber). The deferred wideners (indentation ×84 / paragraph-style ×85 / section-break) MUST get a
+      concrete home so they don't rot as ledger entries — carry R6 defer-register §C evidence.
+    </background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-compose-r7/README.md</file>
+      <file role="modify">projects/spaarkeai-compose-r7/plan.md</file>
+      <file role="doc-output">projects/spaarkeai-compose-r7/notes/lessons-learned.md</file>
+      <file role="doc-output">projects/spaarkeai-compose-r7/notes/test-diet-report.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md (§C fidelity-widener evidence to carry forward)</file>
+      <file role="canonical-reference">docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md (docs to refresh for editor UX + PDF import + autosave/draft model)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="075" status="pending">All implementation + hardening tasks complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy BFF + sprk_spaarkeai TOGETHER in one window (anti-clobber verify) — NFR-05. Run /conflict-check before the deploy.</constraint>
+    <constraint source="project">Run /test-diet BEFORE marking the project complete (CLAUDE.md §7 project-close gate); output projects/spaarkeai-compose-r7/notes/test-diet-report.md; the wrap-up PR description MUST cite it.</constraint>
+    <constraint source="project">Name a CONCRETE home for the deferred fidelity wideners (GitHub Idea via /devops-idea-create OR a named fast-follow project) carrying R6 defer-register §C evidence — file via /project-defer-issue-tracking (writes notes + GitHub Issue). CLAUDE.md §11: each entry names a concrete failing behavior; "future flexibility" is refused.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project wrap-up, anti-clobber deploy, test-diet</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; confirm all tasks 010–075 are ✅ in TASK-INDEX.md.</step>
+    <step order="1">Run /code-review + /adr-check across all R7 code; fix any Critical issues before proceeding.</step>
+    <step order="2">Run /test-diet; write projects/spaarkeai-compose-r7/notes/test-diet-report.md; apply the reviewer-approved git rm/mv.</step>
+    <step order="3">Run /repo-cleanup projects/spaarkeai-compose-r7; approve removals; archive handoffs.</step>
+    <step order="4">Refresh docs (Compose editor UX + PDF import + autosave/draft model) in the Compose architecture docs.</step>
+    <step order="5">File the fidelity-widener home via /project-defer-issue-tracking (GitHub Idea or fast-follow project) carrying R6 defer-register §C evidence.</step>
+    <step order="6">Run /conflict-check, then deploy BFF + sprk_spaarkeai TOGETHER (anti-clobber); verify no clobber.</step>
+    <step order="7">Update README.md → Complete (100%, completed date, graduation criteria checked, changelog); update plan.md milestones → ✅.</step>
+    <step order="8">Append lessons-learned to notes/lessons-learned.md (corrections + confirmed non-obvious approaches).</step>
+    <step order="9">Update TASK-INDEX.md: set 090 status to ✅; confirm all tasks complete.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the anti-clobber deploy detects that BFF or sprk_spaarkeai would clobber a sibling worktree's deployment, STOP and escalate (root §6 / NFR-05) rather than deploying one half alone.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish/deploy the BFF</tool>
+    <tool name="terminal">/test-diet, /repo-cleanup, /conflict-check, deploy, gh</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r7/README.md (Complete)</output>
+    <output type="docs">projects/spaarkeai-compose-r7/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarkeai-compose-r7/notes/lessons-learned.md</output>
+    <output type="docs">Fidelity-widener home (GitHub Idea / fast-follow project) + notes/defer-issues.md entry</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/code-review + /adr-check run; no Critical issues remain.</criterion>
+    <criterion testable="true">/test-diet run; notes/test-diet-report.md exists and is cited in the wrap-up PR.</criterion>
+    <criterion testable="true">BFF + sprk_spaarkeai deployed together; anti-clobber verified; /conflict-check clean.</criterion>
+    <criterion testable="true">The deferred fidelity wideners have a named home (GitHub Idea or fast-follow project) carrying R6 defer-register §C evidence, filed via /project-defer-issue-tracking (notes + GitHub Issue).</criterion>
+    <criterion testable="true">README → Complete (100%); plan.md milestones ✅; lessons-learned captured; all tasks ✅ in TASK-INDEX.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>plan.md Phase 8, spec.md Owner Clarifications + Unresolved Questions (both resolved). This is the CLAUDE.md §7 project-close gate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

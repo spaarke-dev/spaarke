@@ -381,6 +381,20 @@ public class SprkChatAgentFactory
         string? activeContextTabId = null,
         IReadOnlyList<WorkspaceTab>? liveTabs = null,
         WorkspaceActiveItemHandle? activeItem = null,
+        // ── FR-01/FR-02 (task 012) advisory nested-turn overload ────────────────────────────────
+        // When set (non-null), this call builds the NESTED bounded agent turn for an ADVISORY
+        // grounded-recommend capability (AdvisoryCapabilityRunner). advisoryToolAllowList is the
+        // resolved Action's groundedToolAllowList (task 010) — threaded into the AgentToolFilterContext
+        // so the task-011 PreFilter keeps ONLY those grounded READ handler tools and drops EVERY
+        // BindingCapabilityTool + RefusalCapabilityTool (the nested turn structurally cannot dispatch a
+        // second capability; ADR-039 — the ONE probabilistic decider stays the top-level Text-path turn,
+        // which already selected THIS Action by binding id). advisorySystemPrompt is the Action's
+        // advisory prompt (grounded-tool advisor instructions + ADVISORY GROUNDING RULES); it REPLACES
+        // the playbook-derived system prompt for the nested turn so the advisor instructions are
+        // authoritative. BOTH default null → every existing call site is byte-identical (the filter
+        // context's AdvisoryToolAllowList stays null = inert projection; no prompt override).
+        IReadOnlyCollection<string>? advisoryToolAllowList = null,
+        string? advisorySystemPrompt = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -922,7 +936,11 @@ public class SprkChatAgentFactory
             // known type). Feeds the requires-no-attached-record PreFilter predicate (e.g. hides
             // "Create matter" when already inside a matter). Threaded here, never fetched inside PreFilter.
             HasAttachedRecord: hostContext?.IsValid() == true,
-            OpenTabContextTypes: openTabContextTypes);
+            OpenTabContextTypes: openTabContextTypes,
+            // FR-02 advisory narrowing (task 012): non-null ONLY on an advisory capability's nested turn
+            // (AdvisoryCapabilityRunner) → the task-011 PreFilter keeps ONLY these allow-listed grounded
+            // READ tools and drops every capability/refusal tool. Null (every other call) = inert.
+            AdvisoryToolAllowList: advisoryToolAllowList);
         var finalTools = AgentToolProjection.Finalize(
             tools, filterContext, turnContract, citationContext, _logger);
 
@@ -1057,6 +1075,18 @@ public class SprkChatAgentFactory
             playbookId, finalTools.Count, context.DocumentSummary != null);
 
         var agentLogger = scope.ServiceProvider.GetRequiredService<ILogger<SprkChatAgent>>();
+
+        // ── FR-01/FR-02 (task 012): advisory nested-turn system-prompt override ─────────────────
+        // For an advisory capability's nested bounded turn, the Action's advisory prompt is
+        // authoritative — it REPLACES the playbook/enriched prompt accumulated above so the nested turn
+        // follows ONLY the grounded-tool advisor instructions + the ADR-039 ADVISORY GROUNDING RULES
+        // (cite every fact, no fabrication, no identity-ask). Applied at the SINGLE agent-construction
+        // point (after all enrichment) so the override is total + deterministic; null on every
+        // non-advisory call leaves the accumulated prompt untouched (byte-identical).
+        if (advisorySystemPrompt is not null)
+        {
+            context = context with { SystemPrompt = advisorySystemPrompt };
+        }
 
         ISprkChatAgent agent = new SprkChatAgent(
             _chatClient,

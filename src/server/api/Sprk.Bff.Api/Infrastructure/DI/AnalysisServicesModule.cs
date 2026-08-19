@@ -965,6 +965,18 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");
 
+        // IAdvisoryCapabilityRunner — the E1 advisory grounded-recommend tier runner (task 012,
+        // FR-01/FR-02). Consumed ONLY by the concrete SessionDispatchOrchestrator (an OPTIONAL ctor dep)
+        // in THIS compound-ON block; the compound-OFF path resolves NullSessionDispatchOrchestrator
+        // (logger-only ctor) which never touches it → transitively conditional, no ADR-032 Null peer
+        // needed (same rationale as IOutputRouter below). Depends on the REAL SprkChatAgentFactory
+        // (registered in this block, overriding the B2 NullSprkChatAgentFactory default) to build the
+        // nested bounded advisory turn. Singleton: no per-request state (the factory owns per-turn
+        // scoping); resolved fine by the Scoped orchestrator.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Chat.IAdvisoryCapabilityRunner,
+                              Sprk.Bff.Api.Services.Ai.Chat.AdvisoryCapabilityRunner>();
+        Console.WriteLine("✓ AdvisoryCapabilityRunner registered (task 012 FR-01/FR-02; advisory nested-turn grounded-recommend tier)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
         Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
 

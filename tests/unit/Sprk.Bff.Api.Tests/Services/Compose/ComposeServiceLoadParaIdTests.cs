@@ -89,7 +89,7 @@ public sealed class ComposeServiceLoadParaIdTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     // 3 body paragraphs: one with an existing id, one without, one inside a table cell.

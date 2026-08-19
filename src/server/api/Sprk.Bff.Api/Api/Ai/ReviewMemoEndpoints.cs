@@ -263,14 +263,16 @@ public static class ReviewMemoEndpoints
             // wizard door binds durably). It is NOT "there is no completed review": the memo endpoint
             // cannot see review-completion state here (per task 050, disposition lives client-side), so
             // claiming "no completed review" was inaccurate — a review may well have completed. The memo
-            // is unusable only because there is nowhere durable to persist it. Guide the user to the
-            // EXISTING promote affordance (Assistant → History → "Promote to Analysis…", tasks 023/033),
-            // which binds the session durably; NO silent auto-creation (ADR-041). The distinct `code`
-            // lets the client surface a promote-first affordance instead of a dead-end error.
+            // is unusable only because there is nowhere durable to persist it.
+            // UAT (2026-08-18, owner): the Document + Analysis are created when the user **Saves** — NOT
+            // by a run/upload, and NOT via Assistant conversation History. So guide the user to SAVE the
+            // document (which creates its Analysis); the memo is available afterward. The old "Assistant →
+            // History → Promote to Analysis…" instruction is REMOVED (that menu label no longer exists and
+            // the user does not go to conversation History to link an Analysis).
             return (Guid.Empty, Problem(
                 StatusCodes.Status400BadRequest,
-                "Session Not Bound To Analysis",
-                "This session isn't linked to an Analysis, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — promote this session to an Analysis first (in the Assistant, open History and choose \"Promote to Analysis…\"), then generate the memo.",
+                "Save The Document First",
+                "This document isn't saved yet, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — save the document first (that creates its Analysis), then generate the memo.",
                 code: "session-not-bound"));
         }
 
