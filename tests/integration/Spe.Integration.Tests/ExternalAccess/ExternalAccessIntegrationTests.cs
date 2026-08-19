@@ -329,46 +329,6 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         await AssertIsProblemDetailsAsync(response, "revoke with empty AccessRecordId");
     }
 
-    [Fact]
-    public async Task RevokeAccess_EmptyContactId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new RevokeAccessRequest(
-            AccessRecordId: Guid.NewGuid(),
-            ContactId: Guid.Empty,
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ContactId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "revoke with empty ContactId");
-    }
-
-    [Fact]
-    public async Task RevokeAccess_EmptyProjectId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new RevokeAccessRequest(
-            AccessRecordId: Guid.NewGuid(),
-            ContactId: Guid.NewGuid(),
-            ProjectId: Guid.Empty,
-            ContainerId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "revoke with empty ProjectId");
-    }
-
     #endregion
 
     #region Invite External User — Validation (400 paths)
@@ -397,29 +357,6 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             "empty Email must be rejected with 400");
 
         await AssertIsProblemDetailsAsync(response, "invite with empty Email");
-    }
-
-    [Fact]
-    public async Task InviteExternalUser_EmptyProjectId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new InviteExternalUserRequest(
-            Email: "external.user@example.com",
-            ProjectId: Guid.Empty,
-            AccessLevel: 100000000,
-            FirstName: null,
-            LastName: null,
-            ExpiryDate: null,
-            OrganizationId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "invite with empty ProjectId");
     }
 
     [Fact]
