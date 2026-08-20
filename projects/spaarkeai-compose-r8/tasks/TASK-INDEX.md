@@ -52,7 +52,13 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 014 | **Engine-side integrity** — re-anchor download failure must never persist the stale baseline *(the ONE Half-A defect in Track S)* | FR-S07 | FULL | opus/xhigh | ❌ | — | 🔲 |
 | 015 | **Document size ceilings** — route to the existing chunked upload; remove the ~22 MB body ceiling; honest oversize pre-flight | FR-S08 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
 | 016 | **Honest-failure set** — silent guard drops · name-modal gate · tenant precondition · checkout force-close · promote-after-write · 429 mapping · filesize/filepath refresh · per-document draft slot | FR-S09 | FULL | opus/xhigh | ❌ | 010, 013 | 🔲 |
-| 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016 | 🔲 |
+| 018 | **Track S enforcement** — run the Compose client suite in CI as a self-contained gate (the Half-B counterpart to `compose-fidelity-gate`); fix sibling-resolution + non-determinism | — | FULL | opus/xhigh | ❌ | 010 | 🔲 |
+| 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016, **018** | 🔲 |
+
+> **Ordering note**: 018 runs **before** 017 — the deps column is authoritative, not the number. 018 was added
+> 2026-08-20 after task 010 found that `Spaarke.Compose.Components` (88 suites / 786 tests) is not in CI at
+> all, which is the mechanism by which a test validating unreachable code passed for three releases. Track S
+> ships with a gate on the client save contract, not a promise of one. Owner decision, 2026-08-20.
 
 ## Phase 2 — Oracle & corpus (build the measurement BEFORE the fix)
 

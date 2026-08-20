@@ -24,7 +24,10 @@
   `AuthError` (401 budget exhausted) carries `code`, not `status`; a `fetch` rejection never reaches an
   HTTP status. FR-S06's outcome contract needs a transport-failure member that is not a status code.
 - **`Spaarke.Compose.Components` is not in CI** and ~39 of its 88 jest suites cannot run without a prior
-  SharedLibs `dist/` build; the suite is also flaky under parallel workers. Task 017 / wrap-up material.
+  SharedLibs `dist/` build; the suite is also flaky under parallel workers (2 / 3 / 14 failures across
+  identical runs). → **task 018**, added 2026-08-20 by owner decision; runs BEFORE 017 so Track S ships
+  with a gate on the client save contract. Only two CI jobs are actually blocking today (`eval-gate`,
+  `compose-fidelity-gate`) and both cover the server half.
 - New save-path tests must drive the **thrown** `ApiError` — never a resolved `{ok:false}`.
 
 ---
@@ -36,7 +39,7 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 | Phase | Track | Status |
 |---|---|---|
 | 0 (001–002) | Coordination + PR #690 dependency | 🔲 |
-| 1 (010–017) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011–017 🔲 |
+| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011–016, **018**, then 017 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |

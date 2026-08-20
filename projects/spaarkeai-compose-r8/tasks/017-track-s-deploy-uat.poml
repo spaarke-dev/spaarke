@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deploys shared environments; must not run concurrently with another deploy.</parallel-reason>
-    <deps>010, 011, 012, 013, 014, 015, 016</deps>
+    <deps>010, 011, 012, 013, 014, 015, 016, 018</deps>
     <tags>devops, deployment, compose, testing</tags>
     <estimated-effort>3 hours</estimated-effort>
   </metadata>

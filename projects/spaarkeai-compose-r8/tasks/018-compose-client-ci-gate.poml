@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Track S enforcement — run the Compose client test suite in CI as a self-contained blocking gate (the Half-B counterpart to compose-fidelity-gate)</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.github/workflows/sdap-ci.yml` (a hot-path surface), fixes failing `.tsx` tests, and creates a merge-blocking gate. A wrong gate is worse than no gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the judgment is distinguishing a genuinely flaky suite from an environment artifact, and deciding whether the gate has earned the right to block. Getting that wrong ships either a red-by-default gate that gets disabled within a release, or a green-looking gate that enforces nothing — and both failures are silent for months. That is the exact failure mode this task exists to close, so it must not be reproduced by the fix.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `sdap-ci.yml`, a shared hot-path file — `/conflict-check` first (13 of 17 active worktrees touch CI or BFF).</parallel-reason>
+    <deps>010</deps>
+    <tags>ci-workflows, testing, frontend, compose</tags>
+    <estimated-effort>5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    **`Spaarke.Compose.Components` is not in CI.** No workflow installs it, builds it, or runs its 88 jest
+    suites (786 tests). Found 2026-08-20 during task 010.
+
+    This is not an incidental gap — it is the mechanism behind the defect class R8 exists to fix. Task 010
+    found a test that had passed for three releases while validating **unreachable code**: it mocked
+    `authenticatedFetch` to RESOLVE `{ok:false}`, a shape the real transport cannot emit. Nothing caught it,
+    because nothing ran it.
+
+    Look at what CI actually enforces. Every general job — `build-test`, `code-quality`, `client-quality`,
+    `integration-readiness` — carries `continue-on-error: true` (the 2026-06-24 informational posture). Only
+    TWO jobs can turn a run red: `eval-gate` and `compose-fidelity-gate`. The fidelity gate drives `.docx`
+    bytes through load → edit → save → reopen: that is **Half A**. The client save contract — did the
+    request arrive, and did we tell the user the truth — has no gate at all.
+
+    That asymmetry is this project's thesis written in YAML: seven releases of enforcement on the engine,
+    zero on the contract. Close it.
+
+    Build `compose-client-gate` as a THIRD self-contained job, copying `compose-fidelity-gate`'s structure
+    and rationale verbatim (a separate job precisely because the existing ones would swallow the failure).
+
+    **The gate only earns the right to block once it is deterministic.** The suite currently is not: task
+    010 measured 2, 3, and 14 failures across identical parallel runs, and ~39 of 88 suites cannot resolve
+    their sibling `@spaarke/*` imports without a prior SharedLibs `dist/` build. A flaky blocking gate is
+    WORSE than no gate — it gets ignored, then disabled, and the surface silently reverts to today's state.
+    Fix determinism first, prove it, then set the gate.
+  </prompt>
+
+  <role>SPAARKE DevOps + frontend engineer. Expert in `sdap-ci.yml`'s job topology (which jobs gate and which are advisory), jest module resolution across the `@spaarke/*` file: dependencies, and the SharedLibs build order. Follow ADR-038 and root CLAUDE.md §10 (hot-path coordination).</role>
+
+  <goal>
+    Every push runs the Compose client test suite, deterministically, and a failure is visible in the
+    workflow-run conclusion — so the next release cannot silently re-break the client save contract the way
+    R5 did. If determinism cannot be reached, the job still runs and the residual flakiness is reported
+    honestly rather than papered over with a green check.
+  </goal>
+
+  <context>
+    <background>
+      `compose-fidelity-gate` ([`.github/workflows/sdap-ci.yml`](.github/workflows/sdap-ci.yml), ~line 788)
+      is the reference implementation AND the rationale: its own comment states that an advisory gate would
+      defeat spec FR-08, and that it is deliberately separate because `build-test`'s job-level
+      `continue-on-error: true` would swallow a failing step placed inside it. With branch protection
+      currently disabled on this repo, the workflow-run conclusion is the only mechanical merge signal.
+
+      The SharedLibs `dist/` build recipe already exists in `client-quality`, which does exactly this for
+      `Spaarke.AI.Outputs`, `Spaarke.Communication.Components` and `Spaarke.AI.Widgets` (install →
+      `npx tsc`, in dependency order). Do not invent a new mechanism — copy that one.
+
+      Node installs in this repo use `npm install --legacy-peer-deps --no-audit --no-fund`, NOT `npm ci`
+      (root CLAUDE.md §12 — lockfiles drift and `npm ci` fails on ~14 of 16 solutions).
+
+      `package.json` already ships `test:ci` = `jest --ci --coverage --maxWorkers=2`. Whether that alone
+      resolves the non-determinism is the first thing to measure, not assume.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">.github/workflows/sdap-ci.yml</file>
+      <file role="reference-impl">.github/workflows/sdap-ci.yml (compose-fidelity-gate job — copy its structure AND its comment rationale)</file>
+      <file role="reference-impl">.github/workflows/sdap-ci.yml (client-quality job — the SharedLibs dist build recipe)</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.renderOnSave.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/jest.config.js</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The job MUST be a SEPARATE, self-contained job. MUST NOT be a step inside `build-test` or `client-quality` — their job-level `continue-on-error: true` would swallow the failure, which is the precise trap `compose-fidelity-gate`'s comment documents.</constraint>
+    <constraint source="project">MUST NOT modify `build-test`, `code-quality`, `client-quality` or `integration-readiness` — those jobs are owned by `ci-cd-unit-test-remediation-r1`. Same ownership boundary `compose-fidelity-gate` respected.</constraint>
+    <constraint source="project">The gate goes BLOCKING (no `continue-on-error`) only after **three consecutive green runs** on unchanged code. Until then it runs with `continue-on-error: true` and the reason is recorded. Do not set a blocking gate on a suite you have not proven deterministic.</constraint>
+    <constraint source="project">MUST NOT reach determinism by deleting, skipping or `.skip`-ing tests. A suite made green by removing coverage enforces nothing — that is the failure this task exists to close, reproduced. If a test must be quarantined, it needs a named reason and a follow-up issue.</constraint>
+    <constraint source="ADR-038">The 2 pre-existing `renderOnSave.test.tsx` create-on-save failures MUST be root-caused, not quarantined by default. They fail on a clean HEAD checkout (verified 2026-08-20) — this is a real defect or a real test bug, and either answer is worth knowing before Track S deploys.</constraint>
+    <constraint source="root CLAUDE.md §12">Node installs use `npm install --legacy-peer-deps --no-audit --no-fund`. MUST NOT introduce `npm ci`.</constraint>
+    <constraint source="project">Sibling `dist/` builds MUST follow the `client-quality` recipe and its dependency ORDER. Building them out of order produces the ~20 TS2307/TS2875 cascade documented in that job's comments.</constraint>
+    <constraint source="project">`/conflict-check` BEFORE the PR — `sdap-ci.yml` is a hot-path file and the active-worktree registry shows heavy CI overlap. Update this project's row in `projects/INDEX.md` to declare `ci-workflows: Y`.</constraint>
+    <constraint source="project">Scope is the CI gate + determinism. The package's missing ESLint config is explicitly OUT of scope — root Prettier already covers these files. File it as a GitHub issue instead.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI job topology, jest module resolution, SharedLibs build order</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/tasks/010-client-save-error-routing.poml</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; run `/conflict-check` (hot-path: ci-workflows); load spec.md, CLAUDE.md, ADR-038, and task 010's notes.</step>
+    <step order="1">Reproduce the baseline: run the suite locally with no sibling `dist/` present, then with them built, then under `--runInBand` and `--maxWorkers=2`. Record the pass/fail counts for each. This tells you how much of the "39 unrunnable suites" is resolution and how much is real.</step>
+    <step order="2">Fix resolution. Decide between building sibling `dist/` in CI (the `client-quality` recipe) and `moduleNameMapper` entries to `src` (the precedent already in `jest.config.js` for `@spaarke/ai-widgets`, whose comment says it exists so no dist build is required in CI). State which and why — they have different blast radii.</step>
+    <step order="3">Root-cause the 2 `renderOnSave.test.tsx` create-on-save failures. Both reproduce on clean HEAD; neither is caused by task 010.</step>
+    <step order="4">Establish determinism: three consecutive identical-input runs with identical results at the concurrency CI will use.</step>
+    <step order="5">Add the `compose-client-gate` job, mirroring `compose-fidelity-gate`'s structure and its explanatory comment block (say what it gates and WHY it is separate). Upload the jest results as an artifact on failure — the breakdown matters most when the gate is red.</step>
+    <step order="6">Set blocking or advisory per the three-green-runs rule, and record which and why in the job comment.</step>
+    <step order="7">Update `projects/INDEX.md` (`ci-workflows: Y`); file the ESLint gap as a GitHub issue.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the suite cannot be made deterministic within the task's effort — genuine race conditions in the tests rather than an environment artifact — STOP before setting the gate blocking. Land it advisory, report the specific flaky tests, and let the owner decide whether to fund the fix or accept an advisory gate. Shipping a flaky blocking gate is the one outcome worse than today's.</trigger>
+    <trigger>If root-causing the 2 `renderOnSave` failures uncovers a real create-on-save defect (rather than a test bug), that is a Track S save-reliability finding, not CI work. Surface it — it may warrant its own task ahead of the 017 deploy.</trigger>
+    <trigger>If `/conflict-check` reports another active worktree editing `sdap-ci.yml`, coordinate before pushing. Concurrent workflow edits merge badly and silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="ci">.github/workflows/sdap-ci.yml (new `compose-client-gate` job)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.renderOnSave.test.tsx</output>
+    <output type="config">src/client/shared/Spaarke.Compose.Components/jest.config.js (only if step 2 chooses the mapper route)</output>
+    <output type="doc">projects/INDEX.md</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/compose-client-ci-gate.md (baseline measurements + the blocking/advisory decision)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A `compose-client-gate` job exists in `sdap-ci.yml` and runs the `Spaarke.Compose.Components` jest suite on every push and PR.</criterion>
+    <criterion>It is a SEPARATE self-contained job — not a step inside `build-test` or `client-quality`.</criterion>
+    <criterion>Its comment block states what it gates, why it is separate, and whether it is blocking or advisory WITH the reason.</criterion>
+    <criterion>Every suite that can run, runs: the sibling-resolution failures are fixed, and the count of runnable suites is reported before and after.</criterion>
+    <criterion>The 2 pre-existing `renderOnSave.test.tsx` failures are root-caused; each is fixed, or quarantined with a named reason and a filed issue.</criterion>
+    <criterion>Determinism is demonstrated by three consecutive runs with identical results at CI's concurrency, and the results are recorded in the notes file.</criterion>
+    <criterion>The blocking/advisory decision follows the three-green-runs rule and is recorded.</criterion>
+    <criterion>Jest results upload as an artifact on failure.</criterion>
+    <criterion>`projects/INDEX.md` declares `ci-workflows: Y` for this project; `/conflict-check` was run before the PR.</criterion>
+    <criterion>NEGATIVE: no test was deleted, skipped, or `.skip`-ed to reach green.</criterion>
+    <criterion>NEGATIVE: `build-test`, `code-quality`, `client-quality` and `integration-readiness` are unmodified.</criterion>
+    <criterion>NEGATIVE: no `npm ci` introduced.</criterion>
+    <criterion>NEGATIVE: the gate is not marked blocking on a suite whose determinism was not demonstrated.</criterion>
+  </acceptance-criteria>
+</task>
