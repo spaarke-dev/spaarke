@@ -10,6 +10,12 @@
 // DO NOT hand-edit a GUID here without a fresh live re-enumeration AND the
 // matching edit to the BFF source (see IGraphAppRolesRegistry.cs file header
 // for the drift-guard rationale + task 067 forward-reference).
+//
+// CORRECTION (2026-08-20, task 143 -- H10 live verification): GroupMember.
+// ReadWrite.All's AppRoleId was WRONG (last 4 hex chars "6571" instead of
+// "6695"), mirrored verbatim from the then-wrong BFF source. Live-verified
+// against the real Microsoft Graph resource SP appRoles collection -- see
+// GraphAppRoles.cs's matching correction comment for full evidence trail.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
@@ -44,7 +50,7 @@ public sealed class L2GraphAppRolesRegistry : IGraphAppRolesRegistry
 
         // Self-Service Registration subsystem
         new GraphAppRoleEntry("User.ReadWrite.All", "741f803b-c850-494e-b5df-cde7c675a1ca"),
-        new GraphAppRoleEntry("GroupMember.ReadWrite.All", "dbaae8cf-10b5-4b86-a4a1-f871c94c6571"),
+        new GraphAppRoleEntry("GroupMember.ReadWrite.All", "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"),
         new GraphAppRoleEntry("Directory.ReadWrite.All", "19dbc75e-c2e2-444c-a770-ec69d8559fc7"),
     };
 

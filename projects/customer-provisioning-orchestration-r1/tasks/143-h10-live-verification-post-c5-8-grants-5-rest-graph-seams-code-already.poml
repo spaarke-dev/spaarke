@@ -4,7 +4,7 @@
     <title>H10: live verification post C5.8 grants (5 REST/Graph seams, code already real)</title>
     <phase>C'' Wave G-4 -- Dataverse chain</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H10 blocks H11 and is a T2/T3 trap owner -- although code is already real per DS-4, live verification under the newly-granted UAMI is correctness-critical before Wave G-7's T2/T3 probes can trust it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,56 @@
     <criterion testable="true">H10's existing test suite (per DS-4, already passing) continues to pass unmodified.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- H10's 5 seams are ALREADY fully implemented and correct per DS-4's audit; this task does not build anything new. Extension -- N/A, this is verification, not extension. Cost-of-doing-nothing -- without live verification post-grant, Wave G-7's T2/T3 probes (tasks 177/178) would be the FIRST time H10's real-world behavior under the new grants is observed, too late to catch a grant-scoping mistake cheaply.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- H10's 5 seams are ALREADY fully implemented and correct per DS-4's audit; this task does not build anything new. Extension -- N/A, this is verification, not extension. Cost-of-doing-nothing -- without live verification post-grant, Wave G-7's T2/T3 probes (tasks 177/178) would be the FIRST time H10's real-world behavior under the new grants is observed, too late to catch a grant-scoping mistake cheaply.
+
+COMPLETION SUMMARY (2026-08-20):
+  Live-verified 3 of 5 seams fully end-to-end (both T2/T3 traps, read-only by
+  design: DataverseWebApiAppUserVerifier + GraphRestAppRoleParityVerifier);
+  live-verified the READ components of the remaining 2 (DataverseWebApiAppUserCreator,
+  GraphRestAppRoleGranter) via direct REST calls against spaarkedev1 + real
+  Microsoft Graph; WRITE components deferred to live-ceremony (C5.8/task 111
+  not yet live-executed; no live customer-shaped target env yet from H5/140).
+  Full evidence + per-seam status: notes/h10-live-verification-2026-08.md.
+
+  BONUS CATCH (genuine defect, fixed same commit): GraphAppRoles.cs's
+  GroupMember.ReadWrite.All AppRoleId was WRONG (dbaae8cf-...-c6571, should be
+  dbaae8cf-...-c6695) -- confirmed by cross-checking all 14 catalog entries
+  against the REAL Microsoft Graph resource SP's own appRoles collection.
+  Fixed in GraphAppRoles.cs + its L2GraphAppRolesRegistry.cs mirror; new
+  regression-guard test added (GraphAppRolesCatalog_AppRoleIds_MatchRealMicrosoftGraphAppRoleDefinitions,
+  NightlyTests project) so this class of wrong-but-non-null-GUID defect cannot
+  silently recur. 2 out-of-scope occurrences of the same wrong GUID flagged
+  (not fixed) in docs/guides/AZURE-SETUP-SELF-SERVICE-REGISTRATION.md +
+  scripts/Setup-EntraInfrastructure.ps1 -- pre-r1 Self-Service Registration
+  subsystem, different owner, recommend follow-up.
+
+  DEVIATION: POML assumed "11 of 14" GraphAppRoles.cs GUIDs populated; actual
+  codebase state is 14-of-14 (r1 task 005 landed all 14 on 2026-08-17, three
+  days before this task ran). Documented as Path C (comply with acceptance
+  criterion 3's intent against the codebase's real, better state) -- see
+  verification report §8.
+
+  Tests: Sprk.Provisioning.ControlPlane.Tests (L2, CI-gated) 965 -> 968/968
+  (+3, H10SeamsSmokeTests.cs -- zero regressions). NightlyTests project (not
+  CI-gated) +1 regression test (compiles clean; live execution hits a
+  sandbox-only DefaultAzureCredential/IMDS limitation documented in the
+  report -- not an H10 defect).
+
+  Step 9.5 (code-review + adr-check, self-conducted, test-modifying
+  unconditional override): 0 Critical, 0 Warnings, 2 Suggestions (both
+  non-blocking: file-size note on a test file, future-split idea). ADR-028
+  confirmed compliant (DefaultAzureCredential, explicit tenant, zero
+  ClientSecretCredential). 0 ADR violations.
+
+  Coordination: sibling task 141 (H6) was live-editing
+  Handlers/SolutionImport/** in the SAME working tree throughout this task.
+  Isolated via targeted git stash (2 cycles) to validate build/tests without
+  touching their in-flight files; both cycles restored their exact live state
+  byte-for-byte, including a mid-session file divergence (their own newer
+  edit superseding what I'd stashed) handled via selective per-file restore
+  rather than a blanket stash pop. Zero content of theirs read, edited, or
+  committed. No SendMessage coordination needed (zero file overlap; their
+  domain is SolutionImport, mine is DataverseAppUserGraphParity).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

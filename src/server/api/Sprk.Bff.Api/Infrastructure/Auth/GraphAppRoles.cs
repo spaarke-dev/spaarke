@@ -112,8 +112,21 @@ public static class GraphAppRoles
 
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
+    //
+    // CORRECTION (2026-08-20, customer-provisioning-orchestration-r1 task 143 —
+    // H10 live verification): IdGroupMemberReadWriteAll was WRONG since the
+    // pre-r1 source (last 4 hex chars "6571" instead of "6695"). Live-verified
+    // by GET /v1.0/servicePrincipals/{graphResourceSpId}?$select=appRoles
+    // against the real Microsoft Graph resource SP in tenant
+    // a221a95e-6abc-4434-aecc-e48338a1b2f2: the appRoles entry with id
+    // "...6571" does not exist; the entry with value "GroupMember.ReadWrite.All"
+    // has id "...6695". This GUID had never actually been exercised live
+    // (task 067's GraphAppRoleParityTest was authored compile-clean-only per
+    // its own <notes-completion> D4; no UAMI has ever attempted this specific
+    // grant). A grant attempt using the WRONG guid would have failed Graph's
+    // POST appRoleAssignments validation for every customer needing this role.
     private const string IdUserReadWriteAll = "741f803b-c850-494e-b5df-cde7c675a1ca";
-    private const string IdGroupMemberReadWriteAll = "dbaae8cf-10b5-4b86-a4a1-f871c94c6571";
+    private const string IdGroupMemberReadWriteAll = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695";
     private const string IdDirectoryReadWriteAll = "19dbc75e-c2e2-444c-a770-ec69d8559fc7";
 
     /// <summary>

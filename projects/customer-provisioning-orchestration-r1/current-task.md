@@ -1,8 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 140 COMPLETE — H5 BAP-REST env-create + async-operation-polling port. `BapRestEnvironmentCreator.cs` [pure HttpClient + DefaultAzureCredential] replaces the retired `PacAdminDataverseEnvCreator` shell-out, porting Provision-Customer.ps1 STEP 5/6's create+poll sequence exactly. Ground-truthed a real discrepancy between the script and this project's OWN task-120 BAP-REST precedent [provider namespace + token audience] via live WebSearch — resolved in favor of task 120's already-verified values. Bonus correctness catch: added an idempotent existing-environment check the original pac-CLI creator never had, closing a resume-after-partial-success domain-conflict trap. Two new failure classifications (DomainAlreadyExists, ProvisioningFailed) threaded through the full failure-mapping chain. L2 tests: 938 -> **965/965** [+19 this task, +8 concurrent sibling task 142, zero regressions]. Batch G-4A now fully complete pending sibling 142's own landing; Batch G-4B [141+143] unblocked.)
+> **Last Updated**: 2026-08-20 (Task 143 COMPLETE — H10 live verification post C5.8 grants. Live-verified 3 of 5 REST/Graph seams fully end-to-end [T2 DataverseWebApiAppUserVerifier + T3 GraphRestAppRoleParityVerifier, both fully read-only]; live-verified the READ components of the remaining 2 [DataverseWebApiAppUserCreator, GraphRestAppRoleGranter] via direct REST against spaarkedev1 + real Microsoft Graph; WRITE components deferred to live-ceremony [C5.8/task 111 not yet live-executed]. **BONUS CATCH**: found + fixed a genuine wrong-but-non-null AppRoleId GUID in GraphAppRoles.cs [GroupMember.ReadWrite.All — last 4 hex chars `6571` should be `6695`] by cross-checking all 14 catalog entries against the REAL Microsoft Graph resource SP's own appRoles collection — the exact failure class the T3 trap's own diagnostic warns about, undetectable by the pre-existing null-GUID escalation gate or by task 067's own (never-live-run) parity test. Fixed in GraphAppRoles.cs + L2GraphAppRolesRegistry.cs mirror; new regression-guard test added to NightlyTests project. Also self-caught + fixed a vacuous-pass risk in my OWN new smoke tests mid-authoring: DefaultAzureCredential fails via ManagedIdentityCredential's IMDS-unreachable AuthenticationFailedException in this sandbox [confirmed: throws before reaching AzureCliCredential, ~27s], and the production T2/T3 collaborators swallow that exception internally, returning a business-shaped-but-fake result with only a LogWarning as the tell — added a CapturingLogger<T> helper so the tests soft-skip on credential-only failures instead of silently passing on a swallowed exception. L2 tests: 965 -> **968/968** [+3, zero regressions]. Full evidence: notes/h10-live-verification-2026-08.md. Batch G-4B: 143 done, 141 [H6, xhigh] still in flight from sibling agent at task-completion time.)
 >
-> **Previous** (2026-08-20, Task 131 COMPLETE — H8 Graph containerTypes port. GraphContainerTypeProvisioner + GraphAppOnlyContainerVerifier + SecretClientSpeContainerIdKvWriter (+ shared SpeConfidentialClientGraphFactory helper) replace the retired shell-out scaffold, all under ClientCertificateCredential (T6, cert-from-KV). Biggest catch: the retired script's separate SharePoint-REST applicationPermissions PUT (different token audience) has a native Graph GA replacement — POST /storage/fileStorage/containerTypeRegistrations — so the ENTIRE flow now runs under ONE Graph client + ONE T6 credential. New RunStatus.WaitingOnGate outcome for the documented 24h SPE replication-lag case (verify-GET 404), never Resumable/QuarantineRequired. Self-caught + fixed a real bug during Step 9.5 (BuildEvidence hardcoded verifiedViaAppOnlyToken=true — would have mislabeled WaitingOnGate evidence). L2 tests: 930 → **938/938** (+8, zero regressions). Wave G-3 now FULLY COMPLETE — 130 (H3) + 131 (H8) + 132 (H9) all done. Note: this task's Worker/Program.cs DI edit landed inside sibling task 132's commit `ccaf1cad2` via a git-index race — content verified correct, cited for audit trail.)
+> **Previous** (2026-08-20, Task 140 COMPLETE — H5 BAP-REST env-create + async-operation-polling port. `BapRestEnvironmentCreator.cs` [pure HttpClient + DefaultAzureCredential] replaces the retired `PacAdminDataverseEnvCreator` shell-out, porting Provision-Customer.ps1 STEP 5/6's create+poll sequence exactly. Ground-truthed a real discrepancy between the script and this project's OWN task-120 BAP-REST precedent [provider namespace + token audience] via live WebSearch — resolved in favor of task 120's already-verified values. Bonus correctness catch: added an idempotent existing-environment check the original pac-CLI creator never had, closing a resume-after-partial-success domain-conflict trap. Two new failure classifications (DomainAlreadyExists, ProvisioningFailed) threaded through the full failure-mapping chain. L2 tests: 938 -> **965/965** [+19 this task, +8 concurrent sibling task 142, zero regressions]. Batch G-4A now fully complete pending sibling 142's own landing; Batch G-4B [141+143] unblocked.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-4..G-7 remain. Wave G-2.5 (customer.bicep completion) is fully closed. Wave G-3 (130/131/132) is now FULLY COMPLETE.)
@@ -22,15 +22,85 @@
 - 142: ✅ COMPLETE — H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done). See "Task 142 — COMPLETE" section below.
 
 **Batch G-4B** (after 140 lands): 141 + 143 — parallel
-- 141: H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging (xhigh — needs deep SDK ground-truthing)
-- 143: H10 live verification post C5.8 grants (5 REST/Graph seams; code already real — verification-focused task)
+- 141: H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging (xhigh — needs deep SDK ground-truthing) — in flight (sibling agent) at the time task 143 completed
+- 143: ✅ COMPLETE — H10 live verification post C5.8 grants (5 REST/Graph seams; code already real — verification-focused task). See "Task 143 — COMPLETE" section below.
 
-**Batch G-4C** (after 143 lands): 144 alone
+**Batch G-4C** (after 143 lands): 144 alone — now unblocked (143 done)
 - 144: H11 live verification (Graph REST + B2B invitation + consent verifier; code already real)
 
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
 
 ---
+
+## Task 143 — COMPLETE (2026-08-20)
+
+H10 live verification post C5.8 grants. DS-4 §2 classified all 5 of H10's REST/Graph seams as "already
+real" with C5.8 (task 111's grant script) as the only blocker — this task performed the live-verification
+pass DS-4 called for, not a re-implementation.
+
+**Live verification results** (full detail: `notes/h10-live-verification-2026-08.md`): seams 3 (T2
+`DataverseWebApiAppUserVerifier`) and 5 (T3 `GraphRestAppRoleParityVerifier`) — both fully read-only by
+design — are **fully live-verified end-to-end**, both branches each (Verified/CountMismatch,
+Verified/Partial), via direct REST calls made during authoring AND via new durable xUnit smoke tests.
+Seams 1/2 (`DataverseWebApiAppUserCreator`, BFF + UAMI App User creation) and seam 4
+(`GraphRestAppRoleGranter`) have their READ components live-verified the same way; their WRITE components
+(POST systemusers / POST role-association / POST appRoleAssignments) are deferred to live-ceremony —
+`spaarkedev1` is a shared dev env H10 doesn't even target (H10 targets CUSTOMER envs, which don't exist
+live yet since H5/140 hasn't live-ceremony-executed), and task 111's C5.8 grants for the L2 UAMI have not
+themselves been live-executed yet (its own `<notes-completion>`: "Live-exec verification: DEFERRED").
+
+**BONUS CATCH** (genuine defect, fixed same commit): cross-checking all 14 `GraphAppRoles.cs` catalog
+entries against the REAL Microsoft Graph resource SP's own `appRoles` collection found
+`GroupMember.ReadWrite.All`'s `AppRoleId` was WRONG — `dbaae8cf-10b5-4b86-a4a1-f871c94c6571` does not exist
+on the real Graph resource SP at all; the correct id is `...c6695` (only the last 4 hex chars differ). This
+is precisely the failure class the T3 trap's own diagnostic text warns about ("a still-partial result...
+most often means a GraphAppRoles.cs GUID value is WRONG, not just null") — a non-null-but-incorrect GUID
+that neither the existing null-GUID escalation gate NOR task 067's own live parity test (never actually
+run live per its own D4 note) could have caught. Fixed in `GraphAppRoles.cs` +
+`L2GraphAppRolesRegistry.cs` (mirror re-verified byte-identical post-fix via task 067's unconditional
+`L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant` test); new regression-guard test
+(`GraphAppRolesCatalog_AppRoleIds_MatchRealMicrosoftGraphAppRoleDefinitions`, `NightlyTests` project,
+`[SkippableFact]` on `AZURE_TENANT_ID` only) added so this defect class cannot silently recur. Root cause
+pre-dates r1 (`scripts/Setup-EntraInfrastructure.ps1`'s own pre-r1 list, transcribed forward into
+`GraphAppRoles.cs` by r3 task 062, then mirrored by task 053) — 2 out-of-scope occurrences of the SAME
+wrong GUID flagged (not fixed) in `docs/guides/AZURE-SETUP-SELF-SERVICE-REGISTRATION.md` +
+`scripts/Setup-EntraInfrastructure.ps1` (different subsystem/owner — recommend follow-up, not applied
+here to avoid unreviewed scope creep into a live-consumed provisioning script).
+
+**Self-caught mid-authoring** (own test design flaw, fixed before landing): the first version of the new
+smoke tests asserted only on RETURN TYPE — but `DataverseWebApiAppUserVerifier`/`GraphRestAppRoleParityVerifier`
+both swallow a `DefaultAzureCredential` failure internally and return a business-shaped-but-fake result
+with only a `LogWarning` as the tell. In this sandbox, `DefaultAzureCredential` genuinely fails (confirmed
+via a throwaway diagnostic test): `ManagedIdentityCredential`'s IMDS probe against the unreachable
+169.254.169.254 throws `AuthenticationFailedException` (not `CredentialUnavailableException`) after ~27s,
+and Azure.Identity does NOT fall through to `AzureCliCredential` after that class of failure — even though
+the operator IS logged in via `az login` (confirmed: `AzureCliCredential` alone resolves in ~1.3s). This
+made the first test version pass VACUOUSLY (never touching the wire). Fixed by adding a `CapturingLogger<T>`
+that soft-skips when the ONLY captured warning is the collaborator's own "token acquisition failed"
+diagnostic (sandbox limitation, not a seam defect) and fails loud on anything else. This is expected,
+correct PRODUCTION behavior (a real Azure host's managed identity resolves immediately, chain never walks
+further) — not an H10 defect — but is a genuine sandbox testability gap, documented in the verification
+report §4 for future live-ceremony/CI-nightly awareness.
+
+**Deviation**: POML assumed GraphAppRoles.cs was at "11 of 14" populated GUIDs (step 4 / AC-3). Actual
+state is 14-of-14 — r1 task 005 landed all 14 GUIDs on 2026-08-17, three days before this task ran.
+Documented as Path C (comply with the criterion's intent against the codebase's real, better state) —
+verification report §8.
+
+Tests: `Sprk.Provisioning.ControlPlane.Tests` (L2, CI-gated) 965 → **968/968** (+3, `H10SeamsSmokeTests.cs`
+— zero regressions). `NightlyTests` project (not CI-gated) +1 test (compiles clean; live execution hits
+the same sandbox-only `DefaultAzureCredential`/IMDS limitation via the Graph SDK's own credential path —
+not an H10 defect, documented). Step 9.5 (code-review + adr-check, self-conducted, test-modifying
+unconditional override): 0 Critical, 0 Warnings, 2 non-blocking Suggestions; 0 ADR violations (ADR-028
+confirmed — `DefaultAzureCredential` throughout, explicit tenant, zero `ClientSecretCredential`).
+
+**Coordination with sibling task 141 (H6)**: ran live-editing `Handlers/SolutionImport/**` in the SAME
+working tree throughout this task. Isolated via targeted `git stash` (2 cycles, path-scoped) to validate
+build/tests without touching their in-flight files — including a mid-session divergence where their own
+newer edit to one file superseded what had been stashed, handled via selective per-file `git checkout
+stash@{0} -- <path>` rather than a blanket pop, so their live edit was never clobbered. Both cycles fully
+restored their exact state; zero content of theirs read, edited, or committed. No `SendMessage`
+coordination needed — zero file overlap (`SolutionImport/**` vs `DataverseAppUserGraphParity/**`).
 
 ## Task 142 — COMPLETE (2026-08-20)
 
@@ -232,8 +302,8 @@ Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modu
 | **Wave G-1 status** | ✅ 100% COMPLETE — 17 tasks + governance + auth-v4 coord = 20 substantive commits |
 | **Wave G-2 status** | ✅ 100% COMPLETE — 7 tasks + 1 fix-at-discovery = 8 commits (120/121/122/123/124/125/126 + bicepparam fix). L2 tests: 787 → **903/903** (+116 new, zero regressions). Zero Step 9.5 findings across the wave. |
 | **Wave G-3 status** | ✅ 100% COMPLETE — task 130 (H3) + task 131 (H8) + task 132 (H9) all landed. L2 tests at 938/938. |
-| **Wave G-4 status** | Batch G-4A ✅ COMPLETE — task 140 (H5) + task 142 (H7) both landed. L2 tests at 965/965. Batch G-4B (141 H6 + 143 H10 verify) now unblocked. |
-| **Next decision** | Dispatch Wave G-4 Batch G-4B (141: H6 Web-API import xhigh + 143: H10 live verification — parallel). |
+| **Wave G-4 status** | Batch G-4A ✅ COMPLETE (140 H5 + 142 H7). Batch G-4B: 143 (H10 verify) ✅ COMPLETE; 141 (H6) in flight (sibling agent). L2 tests at 968/968. Batch G-4C (144, H11 verify) now unblocked pending 141. |
+| **Next decision** | Await 141 (H6) landing, then dispatch 144 (H11 live verification, Batch G-4C). |
 | **Live-ceremony backlog** | 8 items now (originally 7 + BAP admin REST verification from task 120); item #4 (provisioning-artifacts storage account) is now ALSO a hard dependency for task 132's H9 to run live, not just tasks 116/117's CI publish. |
 | **NEW work items surfaced** | 2 customer.bicep gaps (see § New Work Items below) — both now resolved (see task 128/128b/129 entries) |
 | **Status** | Fully clean checkpoint — working tree empty, all commits pushed |

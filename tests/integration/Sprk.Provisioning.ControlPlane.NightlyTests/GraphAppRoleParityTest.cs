@@ -212,6 +212,101 @@ public sealed class GraphAppRoleParityTest
     }
 
     // ----------------------------------------------------------------------
+    // Test 1b (live, skippable, task 143 addition): catalog GUID VALIDITY —
+    // does each GraphAppRoles.cs (Value, AppRoleId) pair actually correspond
+    // to a REAL Microsoft Graph app-only role definition on the Graph
+    // resource SP? Test 1 (above) only checks whether a target SP HOLDS the
+    // catalog's GUIDs as assignments; it never validates that the GUIDs
+    // themselves are correct, so a wrong-but-populated GUID (a typo,
+    // distinct from a null AppRoleId which the H10 escalation gate already
+    // catches) would sail through Test 1 silently — the missing role would
+    // just never be assignable, surfacing only much later as a repeated T3
+    // Partial/RetryableWithCleanup failure with no obvious root cause.
+    //
+    // DISCOVERED LIVE (2026-08-20, task 143 H10 verification): exactly this
+    // defect existed for GroupMember.ReadWrite.All — GraphAppRoles.cs (and
+    // its L2GraphAppRolesRegistry mirror) carried AppRoleId
+    // "...f871c94c6571", but the real Microsoft Graph resource SP's appRoles
+    // collection defines that value at "...f871c94c6695" (last 4 hex chars
+    // differ; the "6571" id does not exist on the SP at all). Fixed in the
+    // SAME commit as this test; this test is the regression guard so the
+    // class of defect cannot silently recur.
+    //
+    // Only needs AZURE_TENANT_ID (NOT UAMI_SP_OBJECT_ID — no target SP
+    // required, only the tenant-invariant Graph resource SP itself), so it
+    // has a LOWER bar to run than Test 1 and will exercise even before any
+    // UAMI exists in a given environment.
+    // ----------------------------------------------------------------------
+
+    [SkippableFact]
+    public async Task GraphAppRolesCatalog_AppRoleIds_MatchRealMicrosoftGraphAppRoleDefinitions()
+    {
+        var tenantId = Environment.GetEnvironmentVariable(TenantIdEnvVar);
+        Skip.If(
+            string.IsNullOrWhiteSpace(tenantId),
+            $"Skipping live catalog-validity test: {TenantIdEnvVar} not set.");
+
+        var expectedRoles = ReadExpectedRolesReflectively();
+        var graphResourceAppId = GetGraphResourceAppIdReflectively();
+
+        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
+        var graph = new GraphServiceClient(credential, GraphDefaultScope);
+
+        Dictionary<string, string> realAppRolesByGuid;
+        try
+        {
+            var graphSps = await graph.ServicePrincipals.GetAsync(rc =>
+            {
+                rc.QueryParameters.Filter = $"appId eq '{graphResourceAppId}'";
+                rc.QueryParameters.Select = new[] { "id", "appRoles" };
+            });
+            var graphSp = graphSps?.Value?.FirstOrDefault();
+            if (graphSp is null)
+            {
+                throw new InvalidOperationException(
+                    $"Microsoft Graph resource service principal (appId={graphResourceAppId}) " +
+                    $"was not found in tenant '{tenantId}'.");
+            }
+
+            realAppRolesByGuid = (graphSp.AppRoles ?? new List<Microsoft.Graph.Models.AppRole>())
+                .Where(r => r.Id.HasValue && r.Value is not null)
+                .ToDictionary(r => r.Id!.Value.ToString(), r => r.Value!, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (ODataError ex)
+        {
+            throw new InvalidOperationException(
+                $"Graph SDK v6 query failed resolving the Graph resource SP's appRoles in tenant '{tenantId}'. " +
+                $"ResponseStatusCode={ex.ResponseStatusCode} Message={ex.Error?.Message ?? "(none)"}.",
+                ex);
+        }
+
+        var mismatches = new List<string>();
+        foreach (var role in expectedRoles)
+        {
+            if (string.IsNullOrWhiteSpace(role.AppRoleId))
+            {
+                continue; // null AppRoleId is the H10 escalation gate's concern, not this test's
+            }
+            if (!realAppRolesByGuid.TryGetValue(role.AppRoleId, out var realValue))
+            {
+                mismatches.Add($"{role.Value}: catalog AppRoleId '{role.AppRoleId}' does NOT exist on the " +
+                    "Microsoft Graph resource SP at all (wrong GUID — check for a transcription error).");
+            }
+            else if (!string.Equals(realValue, role.Value, StringComparison.Ordinal))
+            {
+                mismatches.Add($"{role.Value}: catalog AppRoleId '{role.AppRoleId}' actually maps to " +
+                    $"'{realValue}' on Microsoft Graph, not '{role.Value}' — catalog entry names the wrong role.");
+            }
+        }
+
+        mismatches.Should().BeEmpty(
+            "every populated AppRoleId in GraphAppRoles.cs must byte-match a REAL Microsoft Graph app-only " +
+            "role definition (id -> value) on the well-known Graph resource SP; a wrong-but-non-null GUID " +
+            "silently breaks every future grant attempt for that role. Mismatches:\n" +
+            string.Join("\n", mismatches));
+    }
+
+    // ----------------------------------------------------------------------
     // Test 2 (unconditional): BFF GraphAppRoles.cs ↔ L2GraphAppRolesRegistry
     // mirror parity. Runs on every nightly invocation regardless of Graph
     // creds — this is a pure compile-time-referenced structural check that
