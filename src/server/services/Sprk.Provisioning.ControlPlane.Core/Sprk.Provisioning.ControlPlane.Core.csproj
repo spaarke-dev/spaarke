@@ -175,6 +175,16 @@
          since task 124, the sibling tenantFilterTemplates container). -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
 
+    <!-- Azure.ResourceManager.CosmosDB — task 174 (Wave G-7) MANAGEMENT-plane
+         SDK for the H13 §4D I3 CosmosPartitionKeyInvariantProbe. Partition-key
+         DEFINITION verification lives on Microsoft.DocumentDB/databaseAccounts/
+         sqlDatabases/containers; the data-plane Microsoft.Azure.Cosmos SDK
+         above is not fake-transport-friendly, whereas this ARM package rides
+         the same ArmClientOptions.Transport pattern task 123's ArmSdkTestFakes
+         helpers already establish. Version 1.3.2 verified to resolve cleanly
+         alongside this project's Azure.ResourceManager 1.14.0 pin. -->
+    <PackageReference Include="Azure.ResourceManager.CosmosDB" Version="1.3.2" />
+
     <!-- Azure Service Bus SDK — L2 handler-enqueue path + (task 102)
          session-processor dispatcher. -->
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />

@@ -56,23 +56,42 @@ public static class E2EAcceptanceModule
 
         services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
 
-        // Production seam registrations. Placeholder impls for TrapVerifier /
-        // RegistrySetupStatusUpdater surface "not yet wired" as Resumable per
-        // POML deferral note (real Wave-G7 sibling probes swap via DI change
-        // only — the H13 handler + tests are unchanged).
+        // Production seam registrations. PlaceholderTrapVerifier surfaces
+        // "not yet wired" as Resumable per POML deferral note.
         //
-        // I1 branch (task 170, Wave G-7 Batch G-7A1): swapped from
-        // PlaceholderInvariantVerifier to PackagedScriptTenantLiteralInvariantVerifier.
-        // The real class returns real Pass/Fail for I1 (packaged-scripts on-disk
-        // grep for tenant-shaped GUID defaults on [string]$*Tenant* Params) and
-        // preserves InfraFault for I2-I5 (their own sibling tasks 173/174/176/179
-        // land those one-by-one). The placeholder file is retained on disk
-        // (unregistered) as reversibility scaffolding — see
-        // PlaceholderInvariantVerifier.cs retirement banner.
+        // IE2EInvariantVerifier — Wave G-7 Batch G-7A1 composite migration
+        // (task 174 coordinated with task 173). CompositeInvariantVerifier
+        // dispatches per-InvariantKind to registered IInvariantProbe impls;
+        // un-registered kinds fall back to
+        // InvariantProbeDeferralMessages.DeferralDiagnostic InfraFault,
+        // preserving PlaceholderInvariantVerifier's Resumable semantics for
+        // un-wired kinds. Sibling wave-G-7 tasks each add ONE
+        // AddSingleton<IInvariantProbe, TProbe>() line here:
+        //   - task 170 (I1) — currently ships PackagedScriptTenantLiteralInvariantVerifier
+        //                     as a whole-IE2EInvariantVerifier hybrid; task 185
+        //                     is expected to refactor its ProbeI1 internal
+        //                     static into a proper IInvariantProbe adapter so
+        //                     it composes here. Until then, I1 returns the
+        //                     deferral-diagnostic InfraFault (called out
+        //                     explicitly here rather than silently).
+        //   - task 173 (I2)  — sibling I2 AI Search tenant-filter probe.
+        //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe (THIS task).
+        //   - task 176 (I4)  — sibling I4 SPE container resolver probe.
+        //   - task 179 (I5)  — sibling I5 Graph token tenant probe.
+        // PlaceholderInvariantVerifier.cs is retained on disk unregistered
+        // per the Wave G-6 retirement convention.
         services.AddSingleton<IE2EValidationRunner, ValidateDeployedEnvironmentScriptRunner>();
         services.AddSingleton<IE2ETrapVerifier, PlaceholderTrapVerifier>();
-        services.AddSingleton<IE2EInvariantVerifier, PackagedScriptTenantLiteralInvariantVerifier>();
-        services.AddSingleton<INamingConformanceChecker, NamingConformanceScriptRunner>();
+        services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
+        services.AddSingleton<IInvariantProbe, CosmosPartitionKeyInvariantProbe>();     // I3 (task 174)
+        services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)
+        // Task 182 (Phase C'' Wave G-7 Batch G-7A1): pure-C# port replaces the
+        // NamingConformanceScriptRunner shell-out per DS-4 section 6 (this script
+        // has 0 az/REST calls -- pure convention checks, so the port is a trivial
+        // mechanical translation). NamingConformanceScriptRunner is retained on
+        // disk UNREGISTERED per this project's retirement convention (see its
+        // retirement banner). Registration remains UNCONDITIONAL (ADR-032).
+        services.AddSingleton<INamingConformanceChecker, NamingConformanceChecker>();
         services.AddSingleton<ICostEnvelopeChecker, AzCliCostEnvelopeChecker>();
         services.AddSingleton<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();
 
