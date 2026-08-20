@@ -136,20 +136,20 @@ if ($SeedPlaceholders) {
 
 # ---- BFF-API-Audience (identity) ----
 # Purpose: BFF API audience URI (api://{clientId}).
-# Value source: from-bicep-output
+# Value source: from-run-parameter
 if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-Audience' -Value 'placeholder-from-bicep-output' -Description 'BFF API audience URI (api://{clientId}).' -Category 'identity'
+    Set-VaultSecret -Name 'BFF-API-Audience' -Value 'placeholder-from-run-parameter' -Description 'BFF API audience URI (api://{clientId}).' -Category 'identity'
 } else {
-    Write-Host '  SKIP: BFF-API-Audience (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
+    Write-Host '  SKIP: BFF-API-Audience (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
 }
 
 # ---- BFF-API-ClientId (identity) ----
 # Purpose: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
-# Value source: from-bicep-output
+# Value source: from-run-parameter
 if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-ClientId' -Value 'placeholder-from-bicep-output' -Description 'BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.' -Category 'identity'
+    Set-VaultSecret -Name 'BFF-API-ClientId' -Value 'placeholder-from-run-parameter' -Description 'BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.' -Category 'identity'
 } else {
-    Write-Host '  SKIP: BFF-API-ClientId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
+    Write-Host '  SKIP: BFF-API-ClientId (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
 }
 
 # ---- BFF-API-ClientSecret (auth) ----

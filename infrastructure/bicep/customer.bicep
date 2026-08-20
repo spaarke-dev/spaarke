@@ -541,6 +541,65 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
 }
 
 // ============================================================================
+// KEY VAULT SECRETS (canonical secret catalog) — Phase C — customer-provisioning-
+// orchestration-r1, task 129. Invokes scripts/canonical-secret-catalog/generated/
+// kv-secrets.generated.bicep (task 084 -- DO NOT EDIT BY HAND; generated from
+// scripts/canonical-secret-catalog/manifest.yaml) to WRITE REAL VALUES onto the
+// customer Key Vault for every canonical secret this Bicep composition can
+// genuinely resolve from its own sibling-module outputs. Per task-126-deviations.md
+// Deviation #3: H4's SecretClientKvWriter checks secret EXISTENCE on the vault
+// (not ARM deployment outputs) for FromBicepOutput entries -- this module call is
+// therefore the actual value-writer H4 depends on to no-op/succeed on these
+// entries instead of failing QuarantineRequired on a fresh customer.
+//
+// Resolvable (10) -- direct sibling-module output references:
+//   AiSearch--AdminKey, AiSearch-Endpoint, AppInsights-ConnectionString,
+//   AzureOpenAI-Endpoint, Communication-WebhookUrl, DocumentIntelligence-ApiKey,
+//   DocumentIntelligence-Endpoint, Redis-ConnectionString,
+//   ServiceBus-ConnectionString, Storage-ConnectionString
+//
+// Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
+// recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
+//   SPE-ContainerTypeId, SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
+//     -> H8/H9 RUNTIME outputs (SPE container-type creation + 24h replication);
+//        no ARM-deploy-time value exists. Resolved at runtime via H4's
+//        FromRunParameters path after H8/H9 execute (expected, not a failure).
+//        Recommended owner: H8/H9 handler authors (Wave G-3, tasks 131/132).
+//   BFF-API-ClientId, BFF-API-Audience
+//     -> H3 (task 130) creates the per-customer BFF app-registration at RUNTIME
+//        and writes ClientId/Audience to RunParameters.Secrets. manifest.yaml
+//        reclassified these from FromBicepOutput to FromRunParameters (task 129
+//        step 6, owner E3 2026-08-19) -- no Bicep resource produces these
+//        values; this Bicep composition correctly has nothing to contribute
+//        here. Recommended owner: H3 handler author (Wave G-3, task 130).
+// ============================================================================
+
+var kvSecretValues = {
+  'AiSearch--AdminKey': aiSearch.outputs.searchServiceAdminKey
+  'AiSearch-Endpoint': aiSearch.outputs.searchServiceEndpoint
+  'AppInsights-ConnectionString': monitoring.outputs.connectionString
+  'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
+  'Communication-WebhookUrl': '${bffApi.outputs.appServiceUrl}/api/communications/incoming-webhook'
+  'DocumentIntelligence-ApiKey': docIntelligence.outputs.docIntelligenceKey
+  'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
+  'Redis-ConnectionString': redisCache.outputs.redisConnectionString
+  'ServiceBus-ConnectionString': serviceBus.outputs.serviceBusConnectionString
+  'Storage-ConnectionString': storage.outputs.connectionString
+}
+
+module kvSecrets '../../scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep' = {
+  scope: rg
+  name: 'kvSecrets-${baseName}'
+  params: {
+    keyVaultName: keyVaultName
+    secretValues: kvSecretValues
+  }
+  dependsOn: [
+    keyVault
+  ]
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 

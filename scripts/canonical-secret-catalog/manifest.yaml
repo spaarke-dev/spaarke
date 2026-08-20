@@ -170,9 +170,15 @@ secrets:
       - "BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId"
     rotation_cadence: "N/A"
     never_delete: false
-    exception_note: ""
+    exception_note: >-
+      Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129,
+      owner E3 confirmation) from from-bicep-output to from-run-parameter. H3
+      (task 130) is the value producer -- it creates the per-customer BFF Entra
+      app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and
+      writes ClientId to RunParameters.Secrets. The DAG runs H3 before H4, so H4
+      resolves this value from RunParameters, not from a Bicep deployment output.
     aliases: []
-    value_source: "from-bicep-output"
+    value_source: "from-run-parameter"
     app_settings:
       - "API_APP_ID"
       - "AzureAd__ClientId"
@@ -188,9 +194,15 @@ secrets:
       - "BFF: AzureAd:Audience"
     rotation_cadence: "N/A"
     never_delete: false
-    exception_note: ""
+    exception_note: >-
+      Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129,
+      owner E3 confirmation) from from-bicep-output to from-run-parameter. H3
+      (task 130) is the value producer -- it creates the per-customer BFF Entra
+      app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and
+      writes Audience to RunParameters.Secrets. The DAG runs H3 before H4, so H4
+      resolves this value from RunParameters, not from a Bicep deployment output.
     aliases: []
-    value_source: "from-bicep-output"
+    value_source: "from-run-parameter"
     app_settings:
       - "AzureAd__Audience"
     tags: ["identity", "bff", "public"]

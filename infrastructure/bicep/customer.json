@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "18396644307033558595"
+      "templateHash": "3499815538792193307"
     }
   },
   "parameters": {
@@ -3350,6 +3350,731 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('kvSecrets-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "keyVaultName": {
+            "value": "[parameters('keyVaultName')]"
+          },
+          "secretValues": {
+            "value": {
+              "AiSearch--AdminKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceAdminKey.value]",
+              "AiSearch-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
+              "AppInsights-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
+              "AzureOpenAI-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
+              "Communication-WebhookUrl": "[format('{0}/api/communications/incoming-webhook', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceUrl.value)]",
+              "DocumentIntelligence-ApiKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceKey.value]",
+              "DocumentIntelligence-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
+              "Redis-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value]",
+              "ServiceBus-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]",
+              "Storage-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]"
+            }
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "4839189845163144654"
+            }
+          },
+          "parameters": {
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Target Key Vault name (canonical sprk-{env}-kv per §7.9 R3; dev exception spaarke-spekvcert)."
+              }
+            },
+            "secretValues": {
+              "type": "secureObject",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Optional per-secret value map (secret name -> value). Absent secrets get a placeholder marker."
+              }
+            },
+            "placeholderValue": {
+              "type": "string",
+              "defaultValue": "placeholder-populate-out-of-band",
+              "metadata": {
+                "description": "Placeholder value written for slots not populated via secretValues. Do NOT rely on this in production."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AiSearch--AdminKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'AiSearch--AdminKey'), parameters('secretValues')['AiSearch--AdminKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "AiSearch--AdminKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AiSearch-Endpoint')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'AiSearch-Endpoint'), parameters('secretValues')['AiSearch-Endpoint'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "AiSearch-Endpoint",
+                "category": "ai",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AppInsights-ConnectionString')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'AppInsights-ConnectionString'), parameters('secretValues')['AppInsights-ConnectionString'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "AppInsights-ConnectionString",
+                "category": "monitoring",
+                "rotation": "on-instrumentation-key-rotation",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AzureOpenAI-ApiKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'AzureOpenAI-ApiKey'), parameters('secretValues')['AzureOpenAI-ApiKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "AzureOpenAI-ApiKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AzureOpenAI-Endpoint')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'AzureOpenAI-Endpoint'), parameters('secretValues')['AzureOpenAI-Endpoint'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "AzureOpenAI-Endpoint",
+                "category": "ai",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-Audience')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'BFF-API-Audience'), parameters('secretValues')['BFF-API-Audience'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "BFF-API-Audience",
+                "category": "identity",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-ClientId')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'BFF-API-ClientId'), parameters('secretValues')['BFF-API-ClientId'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "BFF-API-ClientId",
+                "category": "identity",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-ClientSecret')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'BFF-API-ClientSecret'), parameters('secretValues')['BFF-API-ClientSecret'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-existing-kv"
+              },
+              "tags": {
+                "canonicalName": "BFF-API-ClientSecret",
+                "category": "auth",
+                "rotation": "90-days",
+                "neverDelete": "true",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BingSearch-ApiKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'BingSearch-ApiKey'), parameters('secretValues')['BingSearch-ApiKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "BingSearch-ApiKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-DefaultMailbox')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Communication-DefaultMailbox'), parameters('secretValues')['Communication-DefaultMailbox'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "Communication-DefaultMailbox",
+                "category": "communication",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-Webhook-SigningKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Communication-Webhook-SigningKey'), parameters('secretValues')['Communication-Webhook-SigningKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Communication-Webhook-SigningKey",
+                "category": "communication",
+                "rotation": "90-days-or-on-incident",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-WebhookClientState')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Communication-WebhookClientState'), parameters('secretValues')['Communication-WebhookClientState'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Communication-WebhookClientState",
+                "category": "communication",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-WebhookUrl')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Communication-WebhookUrl'), parameters('secretValues')['Communication-WebhookUrl'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "Communication-WebhookUrl",
+                "category": "communication",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Compose-Webhook-ClientState')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Compose-Webhook-ClientState'), parameters('secretValues')['Compose-Webhook-ClientState'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Compose-Webhook-ClientState",
+                "category": "compose",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Compose-Webhook-SigningKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Compose-Webhook-SigningKey'), parameters('secretValues')['Compose-Webhook-SigningKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Compose-Webhook-SigningKey",
+                "category": "compose",
+                "rotation": "90-days-or-on-incident",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ContentSafety-ApiKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'ContentSafety-ApiKey'), parameters('secretValues')['ContentSafety-ApiKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "ContentSafety-ApiKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ClientSecret')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Dataverse-ClientSecret'), parameters('secretValues')['Dataverse-ClientSecret'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-existing-kv"
+              },
+              "tags": {
+                "canonicalName": "Dataverse-ClientSecret",
+                "category": "auth",
+                "rotation": "manual-on-incident",
+                "neverDelete": "true",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ServiceUrl')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Dataverse-ServiceUrl'), parameters('secretValues')['Dataverse-ServiceUrl'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "Dataverse-ServiceUrl",
+                "category": "dataverse",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-ApiKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey'), parameters('secretValues')['DocumentIntelligence-ApiKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "DocumentIntelligence-ApiKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-Endpoint')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint'), parameters('secretValues')['DocumentIntelligence-Endpoint'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "DocumentIntelligence-Endpoint",
+                "category": "ai",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Email-WebhookSecret')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Email-WebhookSecret'), parameters('secretValues')['Email-WebhookSecret'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Email-WebhookSecret",
+                "category": "email",
+                "rotation": "manual-on-incident",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Email-WebhookSigningKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Email-WebhookSigningKey'), parameters('secretValues')['Email-WebhookSigningKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "generated"
+              },
+              "tags": {
+                "canonicalName": "Email-WebhookSigningKey",
+                "category": "email",
+                "rotation": "90-days-or-on-incident",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'LlamaParse-ApiKey')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'LlamaParse-ApiKey'), parameters('secretValues')['LlamaParse-ApiKey'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "LlamaParse-ApiKey",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Endpoint')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'PromptFlow-Endpoint'), parameters('secretValues')['PromptFlow-Endpoint'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "PromptFlow-Endpoint",
+                "category": "ai",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Key')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'PromptFlow-Key'), parameters('secretValues')['PromptFlow-Key'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "PromptFlow-Key",
+                "category": "ai",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Redis-ConnectionString')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Redis-ConnectionString'), parameters('secretValues')['Redis-ConnectionString'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "Redis-ConnectionString",
+                "category": "data-services",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ServiceBus-ConnectionString')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'ServiceBus-ConnectionString'), parameters('secretValues')['ServiceBus-ConnectionString'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "ServiceBus-ConnectionString",
+                "category": "data-services",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-CommunicationArchiveContainerId')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'SPE-CommunicationArchiveContainerId'), parameters('secretValues')['SPE-CommunicationArchiveContainerId'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "SPE-CommunicationArchiveContainerId",
+                "category": "spe",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-ContainerTypeId')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'SPE-ContainerTypeId'), parameters('secretValues')['SPE-ContainerTypeId'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "SPE-ContainerTypeId",
+                "category": "spe",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-DefaultContainerId')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'SPE-DefaultContainerId'), parameters('secretValues')['SPE-DefaultContainerId'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "SPE-DefaultContainerId",
+                "category": "spe",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Storage-ConnectionString')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'Storage-ConnectionString'), parameters('secretValues')['Storage-ConnectionString'], parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-bicep-output"
+              },
+              "tags": {
+                "canonicalName": "Storage-ConnectionString",
+                "category": "data-services",
+                "rotation": "90-days",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'TenantId')]",
+              "properties": {
+                "value": "[if(contains(parameters('secretValues'), 'TenantId'), parameters('secretValues').TenantId, parameters('placeholderValue'))]",
+                "attributes": {
+                  "enabled": true
+                },
+                "contentType": "from-run-parameter"
+              },
+              "tags": {
+                "canonicalName": "TenantId",
+                "category": "identity",
+                "rotation": "N/A",
+                "neverDelete": "false",
+                "managedBy": "canonical-secret-catalog-generator"
+              }
+            }
+          ],
+          "outputs": {
+            "canonicalSecretNames": {
+              "type": "array",
+              "value": [
+                "AiSearch--AdminKey",
+                "AiSearch-Endpoint",
+                "AppInsights-ConnectionString",
+                "AzureOpenAI-ApiKey",
+                "AzureOpenAI-Endpoint",
+                "BFF-API-Audience",
+                "BFF-API-ClientId",
+                "BFF-API-ClientSecret",
+                "BingSearch-ApiKey",
+                "Communication-DefaultMailbox",
+                "Communication-Webhook-SigningKey",
+                "Communication-WebhookClientState",
+                "Communication-WebhookUrl",
+                "Compose-Webhook-ClientState",
+                "Compose-Webhook-SigningKey",
+                "ContentSafety-ApiKey",
+                "Dataverse-ClientSecret",
+                "Dataverse-ServiceUrl",
+                "DocumentIntelligence-ApiKey",
+                "DocumentIntelligence-Endpoint",
+                "Email-WebhookSecret",
+                "Email-WebhookSigningKey",
+                "LlamaParse-ApiKey",
+                "PromptFlow-Endpoint",
+                "PromptFlow-Key",
+                "Redis-ConnectionString",
+                "ServiceBus-ConnectionString",
+                "SPE-CommunicationArchiveContainerId",
+                "SPE-ContainerTypeId",
+                "SPE-DefaultContainerId",
+                "Storage-ConnectionString",
+                "TenantId"
+              ]
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName')))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName')))]"
       ]
     }
   ],

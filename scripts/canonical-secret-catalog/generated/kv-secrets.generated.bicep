@@ -146,7 +146,7 @@ resource kv_bFF_API_Audience 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-run-parameter'
   }
   tags: {
     canonicalName: 'BFF-API-Audience'
@@ -166,7 +166,7 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-run-parameter'
   }
   tags: {
     canonicalName: 'BFF-API-ClientId'

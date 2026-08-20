@@ -1,9 +1,17 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Task 128b COMPLETE — customer.bicep now wires Document Intelligence + App Insights + Log Analytics + Redis (modules/doc-intelligence.bicep + modules/monitoring.bicep + modules/redis.bicep, all unmodified). Redis is now per-customer for Model 2 (dedicated) only — spec.md/design.md/CLAUDE.md amended to **v3.6** (not v3.3 — that number was already taken; see design.md §20 CHANGELOG for the correction). customer.bicep completion is now FULLY DONE except task 129 (kv-secrets.generated.bicep wiring) — re-verify 129's triage against 128b's landed state before dispatching it, per 128b's own escalation trigger 3. THEN Wave G-3 dispatch.)
+> **Last Updated**: 2026-08-19 (Task 129 COMPLETE — customer.bicep now invokes kv-secrets.generated.bicep with real values for 10 of 15 previously-gap-flagged FromBicepOutput entries. manifest.yaml reclassified BFF-API-ClientId/Audience to FromRunParameters (owner E3), kv-secrets.generated.bicep regenerated via its own generator. Only 3 permanent SPE-* runtime-only entries remain (expected — H8/H9 resolve at runtime). **Wave G-2.5 customer.bicep completion is now FULLY DONE — all 4 tasks (127/128/128b/129) complete.** Wave G-3 (130/131/132) is next: 130 (H3) needs auth-v4 phase-5 rollout state check before dispatch.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + task 129 (customer.bicep kv-secrets wiring) remains)
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain. Wave G-2.5 (customer.bicep completion, tasks 127/128/128b/129) is now fully closed.)
+
+## Task 129 — COMPLETE (2026-08-19)
+
+Wired `scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep` (task 084, never hand-edited — only regenerated via its own generator) into `infrastructure/bicep/customer.bicep` as the final module in the composition, invoked with a `kvSecretValues` object populated from 10 resolvable sibling-module outputs: `AiSearch--AdminKey`, `AiSearch-Endpoint`, `AppInsights-ConnectionString` (128b), `AzureOpenAI-Endpoint`, `Communication-WebhookUrl` (constructed to match `stacks/model2-full.bicep:243`'s precedent), `DocumentIntelligence-ApiKey`/`Endpoint` (128b), `Redis-ConnectionString` (128b/E2), `ServiceBus-ConnectionString`, `Storage-ConnectionString`. Explicit `dependsOn: [keyVault]` added (needed — `keyVaultName` is a plain param, not an implicit dependency edge). **Step 6 manifest fix (owner E3)**: `scripts/canonical-secret-catalog/manifest.yaml` reclassified `BFF-API-ClientId` + `BFF-API-Audience` from `FromBicepOutput` to `FromRunParameters` (H3/task 130 is the actual runtime value producer); regenerated all 4 canonical-catalog artifacts via `Invoke-CatalogGenerator.ps1`, verified deterministic via `-Verify`. Only 3 SPE-* entries (H8/H9 runtime-only) remain permanently omitted from Bicep — expected, not a failure; they resolve via H4's FromRunParameters path after H8/H9 execute.
+
+`az bicep build` exits 0 (0 errors); 40 total warnings, but **0 net-new** — 33 are pre-existing in `kv-secrets.generated.bicep`'s own body (verified via standalone build of that file alone: exactly 33), out of scope to fix (binding DO-NOT-EDIT-BY-HAND); 7 are customer.bicep's pre-existing baseline (unchanged since 128b). Live `az deployment sub what-if` (customerId=t129wif) returned exit 0, "Resource changes: 30 to create", with the same pre-existing ARM what-if short-circuit limitation (task 128 first documented it) now naturally extending to `docIntelligence` + the new `kvSecrets` nested deployment. Quality gates self-conducted (Bicep/YAML/PS1/MD, outside the code-review skill's C#/TS checklists) — 0 Critical, 0 Warnings beyond the two documented AC-wording deviations (see task POML `<notes-completion>` for full detail).
+
+**Net effect**: combined with task 128b, reduces task-126-deviations' "QuarantineRequired on fresh customer" risk from ~15 failing FromBicepOutput entries to **0 permanent Bicep-side failures**. All 15 originally-flagged entries now resolve via either Bicep (10) or H4's runtime FromRunParameters path (5: 3 SPE-* from H8/H9 + BFF-ClientId/Audience from H3) — all expected-post-handler resolutions per the DAG order, not silent failures.
 
 ## Task 128b — COMPLETE (2026-08-19)
 
@@ -153,17 +161,17 @@ Phase C'' delivers r1's stated E2E goal. Wave G-1 (foundation) and Wave G-2 (SDK
 
 **Cross-references**: task 123 flagged in POML `<notes>` COMPLETION section + `ArmDeploymentRunner.cs` header comment.
 
-### 2. customer.bicep KV-secrets seed wiring — `kv-secrets.generated.bicep` never invoked (task 126's flag)
+### 2. customer.bicep KV-secrets seed wiring — `kv-secrets.generated.bicep` never invoked (task 126's flag) — ✅ RESOLVED 2026-08-19 by task 129
 
-**Symptom**: H4's `KvSecretsPopulationManifest` has ~26 secret entries; ~15 of them declare `value_source: FromBicepOutput`, meaning their value must be produced by an upstream Bicep deployment (task 086's `kv-secrets.generated.bicep`) and read from that deployment's outputs. Task 086 authored the module but **never wired it into customer.bicep**.
+**Symptom (historical)**: H4's `KvSecretsPopulationManifest` has ~26 secret entries; ~15 of them declare `value_source: FromBicepOutput`, meaning their value must be produced by an upstream Bicep deployment (task 086's `kv-secrets.generated.bicep`) and read from that deployment's outputs. Task 086 authored the module but **never wired it into customer.bicep**.
 
-**Impact**: Fresh customer runs invoke H4 → H4 resolves those ~15 entries → resolver can't find their upstream output → H4 emits honest `Failed` → run enters `QuarantineRequired` state (correct fail-loud per DS-4's mandate, but blocks E2E).
+**Impact (historical)**: Fresh customer runs invoke H4 → H4 resolves those ~15 entries → resolver can't find their upstream output → H4 emits honest `Failed` → run enters `QuarantineRequired` state (correct fail-loud per DS-4's mandate, but blocks E2E).
 
 **Discovered**: 2026-08-19 by task 126 (H4 real-values agent) during real value-resolution implementation. Documented in `notes/task-126-deviations.md` Deviation #3.
 
-**Fix scope**: One authoring task — invoke `modules/kv-secrets.generated.bicep` from customer.bicep, thread its outputs into ARM deployment outputs, verify H4 can now resolve. Estimate: ~100-200 LOC of Bicep + verification.
+**Resolution (task 129, 2026-08-19)**: `kv-secrets.generated.bicep` now invoked from `customer.bicep` with a `kvSecretValues` object covering 10 of the 15 entries from sibling-module outputs. The remaining 5 (BFF-API-ClientId/Audience + 3 SPE-*) are correctly NOT Bicep-resolvable — reclassified to `FromRunParameters` (BFF-API-*) or expected to resolve via H4's `FromRunParameters` path after H8/H9 run (SPE-*). **0 permanent Bicep-side failures remain** — see task 129's completion notes in `tasks/129-*.poml` `<notes-completion>` for the full final triage.
 
-**Cross-references**: task 126's POML `<notes>` + `notes/task-126-deviations.md`.
+**Cross-references**: task 126's POML `<notes>` + `notes/task-126-deviations.md` + task 129's POML `<notes-completion>`.
 
 ### 3. BAP admin REST response-shape verification (task 120's flag)
 

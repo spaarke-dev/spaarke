@@ -26,8 +26,8 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `AppInsights-ConnectionString` | monitoring | on-instrumentation-key-rotation | - | from-bicep-output |
 | `AzureOpenAI-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `AzureOpenAI-Endpoint` | ai | N/A | - | from-bicep-output |
-| `BFF-API-Audience` | identity | N/A | - | from-bicep-output |
-| `BFF-API-ClientId` | identity | N/A | - | from-bicep-output |
+| `BFF-API-Audience` | identity | N/A | - | from-run-parameter |
+| `BFF-API-ClientId` | identity | N/A | - | from-run-parameter |
 | `BFF-API-ClientSecret` | auth | 90-days | YES | from-existing-kv |
 | `BingSearch-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Communication-DefaultMailbox` | communication | N/A | - | from-run-parameter |
@@ -147,8 +147,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API audience URI (api://{clientId}).
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-run-parameter
 - **Tags**: bff, identity, public
+- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes Audience to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
 - **Consumers**:
   - BFF: AzureAd:Audience
 - **App-setting keys**:
@@ -160,8 +161,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-run-parameter
 - **Tags**: bff, identity, public
+- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes ClientId to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
 - **Consumers**:
   - BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId
 - **App-setting keys**:
