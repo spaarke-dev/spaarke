@@ -17,7 +17,7 @@
 
 **Batch G-4A** (parallel-safe now, dispatch immediately): 140 + 142
 - 140: H5 BAP-REST env-create + async-operation-polling port (deps 102/103/123 — all done)
-- 142: H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done)
+- 142: ✅ COMPLETE — H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done). See "Task 142 — COMPLETE" section below.
 
 **Batch G-4B** (after 140 lands): 141 + 143 — parallel
 - 141: H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging (xhigh — needs deep SDK ground-truthing)
@@ -29,6 +29,47 @@
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
 
 ---
+
+## Task 142 — COMPLETE (2026-08-20)
+
+H7 credential provisioning (`EnvVarValues:ClientSecret` KV ref) + NFR-05 boot-time fail-fast validation. Config-only
+per DS-4 — H7's handler logic was already real (task 050); this closed the last unprovisioned credential + added a
+startup guard on top of the handler's existing runtime guard.
+
+Ground-truthed the KV target via manifest.yaml cross-reference (not guessed): H7 authenticates using the SAME shared
+multitenant BFF app-reg H6 uses (spec.md §9.1 v3), so `EnvVarValues__ClientSecret` resolves to the platform KV's
+canonical `BFF-API-ClientSecret` secret — the same secret `.Api` already resolves as `AzureAd__ClientSecret`/
+`Graph__ClientSecret`. Escalation trigger (FIC-retirement) checked first and does NOT fire — manifest.yaml still
+classifies `BFF-API-ClientSecret` as `never_delete:true`, `value_source:"from-existing-kv"` (real, live secret);
+auth-v4 has not started per owner directive.
+
+**Changes**: `EnvVarValuesOptions.cs` (Core) — added `SectionName = "EnvVarValues"` const (renamed off the old bare
+`nameof(EnvVarValuesOptions)` binding so the Bicep app-setting key matches the POML's literal acceptance criterion)
++ `internal void Validate()` (parity with task 112/122's `DataverseEnvironmentRegistryOptions.Validate()`). `Program.cs`
+(Worker) — swapped `Configure<T>()` for `AddOptions<T>().Bind(...).Validate(...).ValidateOnStart()` (same pattern as
+`DataverseEnvironmentRegistryModule`); the handler's existing runtime `MissingClientSecret` guard stays as
+defense-in-depth. Bicep — new `bffApiClientSecretName` param (default `'BFF-API-ClientSecret'`) threaded through
+`platform-controlplane.bicep` → `modules/controlplane-worker-app-service.bicep`, which now emits the
+`EnvVarValues__ClientSecret` KV-reference app setting. `az bicep build` 0 errors/0 warnings; regenerated
+`platform-controlplane.json`; live `az deployment sub what-if` (dev sub) returned `Succeeded` (Worker site shows as a
+fresh Create since the live-ceremony `Deploy-ControlPlane.ps1` run, backlog item #5, hasn't executed against this env
+yet — expected, not a regression).
+
+**Bonus catch**: the new `ValidateOnStart()` would have silently broken `HandlerRegistrationCompletenessTests.cs`'s
+`WorkerTestFactory` (task 103's all-19-handlers-resolve DI sweep constructs H7, which now eagerly validates
+`IOptions<EnvVarValuesOptions>` at ctor time) the next time that test ran. Caught by cross-referencing the exact 2
+sites that needed the equivalent fix after task 122's `AdminEnvironmentUrl` precedent; fixed the one that actually
+resolves H7 (`HandlerRegistrationCompletenessTests.cs`), confirmed the other (`ProvisioningDispatchSpineSeamTests.cs`)
+never touches H7/EnvVarValuesOptions so no change was needed there.
+
+Tests: 938 → **946/946** (+8 new NFR-05 tests: null/whitespace ClientSecret throws, RequestTimeout bounds, happy-path
+passes, a `SectionName=="EnvVarValues"` regression guard against Bicep-key drift; all 23 pre-existing H7 test methods
+unmodified). `dotnet build` 0 errors/0 warnings. No new NuGet packages. Step 9.5 (code-review + adr-check,
+test-modifying override — mandatory): 0 Critical, 0 Warnings, 0 ADR violations; no interfaces added (ADR-010), no
+hardcoded secrets (grep-verified), BFF-hygiene not triggered (L2 control-plane only). Acceptance criterion 5 (FIC
+sentinel accommodation) is N/A per the escalation-trigger check above — not implemented since no sentinel contract
+exists yet. No coordination needed with sibling task 140 (H5 BAP-REST) — zero file overlap, different handler
+folders.
 
 ## Wave G-3 Tally (100% COMPLETE 2026-08-20)
 

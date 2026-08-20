@@ -530,8 +530,26 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // typed-client registration failed DI resolution at runtime (Microsoft.Extensions.Http
 // requires an HttpClient ctor param for typed clients), so H7DataverseEnvVarValuesHandler
 // was NOT actually resolvable — surfaced by task 103's HandlerRegistrationCompletenessTests.
-builder.Services.Configure<EnvVarValuesOptions>(
-    builder.Configuration.GetSection(nameof(EnvVarValuesOptions)));
+//
+// Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret is now UNCONDITIONALLY
+// wired via modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
+// KV-reference app setting (sourced from the platform KV's canonical
+// BFF-API-ClientSecret, the shared multitenant BFF app-reg secret — same
+// identity H7 authenticates to customer Dataverse envs with). AddOptions +
+// Validate + ValidateOnStart fails fast at Worker boot (NFR-05 parity with
+// DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry, task 122)
+// if a deployed Worker is missing this setting — replaces the plain
+// Configure<T>() call so a config-gap fails loud at startup instead of only
+// surfacing on H7's first dispatch (the handler's own runtime
+// MissingClientSecret guard stays as defense-in-depth).
+builder.Services.AddOptions<EnvVarValuesOptions>()
+    .Bind(builder.Configuration.GetSection(EnvVarValuesOptions.SectionName))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "EnvVarValues options failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
 builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName);
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();

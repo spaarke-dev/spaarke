@@ -120,6 +120,9 @@ param dataverseClientSecretName string
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table. Consumed by DataverseEnvironmentRegistryOptions.AdminEnvironmentUrl (Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs, task 112 -- Path X MI-native, DefaultAzureCredential pinned to this module\'s UAMI via ManagedIdentity__ClientId below; NO client secret). REQUIRED as of task 122 (Wave G-2): the Worker\'s composition root now registers the REAL client unconditionally (NullDataverseEnvironmentRegistryClient placeholder removed from DI) and DataverseEnvironmentRegistryOptions.Validate() fails fast at boot if this is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (DS-8 mandates Path X real from day one).')
 param adminDataverseEnvironmentUrl string
 
+@description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer\'s target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above).')
+param bffApiClientSecretName string = 'BFF-API-ClientSecret'
+
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
@@ -220,6 +223,23 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // registers as a Dataverse Application User on this same admin env).
         // ---------------------------------------------------------------
         { name: 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', value: adminDataverseEnvironmentUrl }
+
+        // ---------------------------------------------------------------
+        // Task 142 (Wave G-4): EnvVarValues -- H7's Dataverse Web API
+        // writer collaborator authenticates to each customer's Dataverse
+        // env using the SAME shared multitenant BFF app-reg credential H6
+        // uses for solution import (the MI-Dataverse App User from H10 does
+        // not exist yet at H7's point in the DAG). REQUIRED --
+        // EnvVarValuesOptions.Validate() fails fast at boot (NFR-05) if
+        // this is missing; sourced from the platform KV's canonical
+        // never-delete BFF-API-ClientSecret secret (task 126 real-value
+        // population; same secret the .Api site resolves as
+        // AzureAd__ClientSecret / Graph__ClientSecret).
+        // ---------------------------------------------------------------
+        {
+          name: 'EnvVarValues__ClientSecret'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+        }
 
         // ---------------------------------------------------------------
         // Managed-identity discovery (pin DefaultAzureCredential to bound

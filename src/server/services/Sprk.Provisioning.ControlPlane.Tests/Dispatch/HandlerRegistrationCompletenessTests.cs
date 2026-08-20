@@ -203,6 +203,13 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // unreachable value, the blob client itself is never invoked here.
         builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
 
+        // Task 142 — EnvVarValuesOptions.Validate() (H7) fails fast at boot on
+        // a missing ClientSecret (NFR-05), same convention as the other
+        // AddOptions<T>().ValidateOnStart() registrations above — syntactically
+        // valid placeholder value; H7's writer is never invoked here, only
+        // constructor-graph resolution.
+        builder.UseSetting("EnvVarValues:ClientSecret", "l2-test-envvarvalues-client-secret-placeholder");
+
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs
         // (parity with Api/RunsEndpointsTests.cs L2WebApplicationFactory).

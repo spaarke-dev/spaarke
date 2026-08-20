@@ -137,6 +137,9 @@ param dataverseClientSecretName string = 'Dataverse-ClientSecret'
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table -- passed through to modules/controlplane-worker-app-service.bicep as DataverseEnvironmentRegistry__AdminEnvironmentUrl (task 122 / task 112 Path X MI-native client). REQUIRED: DataverseEnvironmentRegistryOptions.Validate() fails fast at Worker boot (NFR-05) if this is missing -- no default is supplied here deliberately (dev/staging/prod each target a distinct admin Dataverse environment; a default would risk silently pointing a non-dev deploy at the dev org).')
 param adminDataverseEnvironmentUrl string
 
+@description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
+param bffApiClientSecretName string = 'BFF-API-ClientSecret'
+
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
 
@@ -399,6 +402,7 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     serviceBusQueueName: 'sprk-provisioning-jobs'
     dataverseClientSecretName: dataverseClientSecretName
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
+    bffApiClientSecretName: bffApiClientSecretName
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }

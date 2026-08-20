@@ -232,6 +232,90 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         writer.CallCount.Should().Be(0);
     }
 
+    // ---------- NFR-05 (task 142): EnvVarValuesOptions.Validate() boot-time fail-fast ----------
+    //
+    // Parity with DataverseEnvironmentRegistryClientTests's "Options.Validate"
+    // region (task 112/122) — these tests call the internal Validate() method
+    // directly (InternalsVisibleTo covers this test project) rather than
+    // spinning up a full WebApplicationFactory/Program.cs host, since the
+    // Validate() logic itself is what AddOptions<T>().ValidateOnStart() invokes
+    // at boot (see Program.cs's AddOptions<EnvVarValuesOptions>() registration).
+    // These are DISTINCT from T8 above: T8 proves the handler's own RUNTIME
+    // guard (defense-in-depth, still present); these prove the BOOT-TIME guard
+    // this task adds on top of it.
+
+    [Fact]
+    public void OptionsValidate_Throws_When_ClientSecret_Null()
+    {
+        var options = new EnvVarValuesOptions { ClientSecret = null };
+
+        FluentActions.Invoking(() => options.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:ClientSecret*required*");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void OptionsValidate_Throws_When_ClientSecret_Empty_Or_Whitespace(string clientSecret)
+    {
+        var options = new EnvVarValuesOptions { ClientSecret = clientSecret };
+
+        FluentActions.Invoking(() => options.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:ClientSecret*required*");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void OptionsValidate_Throws_When_RequestTimeout_TooSmall(int seconds)
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            RequestTimeout = TimeSpan.FromSeconds(seconds),
+        };
+
+        FluentActions.Invoking(() => options.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:RequestTimeout*");
+    }
+
+    [Fact]
+    public void OptionsValidate_Throws_When_RequestTimeout_TooLarge()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            RequestTimeout = TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1),
+        };
+
+        FluentActions.Invoking(() => options.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:RequestTimeout*");
+    }
+
+    [Fact]
+    public void OptionsValidate_Passes_With_ClientSecret_And_Default_Timeout()
+    {
+        var options = new EnvVarValuesOptions { ClientSecret = ClientSecret };
+
+        FluentActions.Invoking(() => options.Validate()).Should().NotThrow();
+    }
+
+    [Fact]
+    public void OptionsValidate_SectionName_Is_EnvVarValues()
+    {
+        // Ground-truths the literal Bicep app-setting key contract: the KV-ref
+        // app setting in modules/controlplane-worker-app-service.bicep is
+        // named "EnvVarValues__ClientSecret" (double-underscore hierarchical
+        // delimiter over section "EnvVarValues" + property "ClientSecret").
+        // A drift here would silently break the KV-ref binding in every
+        // deployed environment without any build-time signal.
+        EnvVarValuesOptions.SectionName.Should().Be("EnvVarValues");
+    }
+
     // ---------- T9 canonical name enumeration ----------
 
     [Fact]
