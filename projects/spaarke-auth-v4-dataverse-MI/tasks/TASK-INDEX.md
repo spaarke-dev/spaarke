@@ -88,12 +88,30 @@ boundary. A dispatched agent will fail with "Edit denied"; that is the boundary 
 | **Interlock** | `dataverse-access-unification-r1` | 4 files; `DataverseServiceClientImpl.cs` needs real sequencing (tasks 010, 011, 022) |
 | **Watch** | Open PR #293 | `Azure.Identity` 1.17.1→1.21.0 affects `ClientAssertionCredential` |
 
-## POML Generation Status
+## POML Generation Status — ✅ COMPLETE
 
-| Range | State |
-|---|---|
-| 001 | ✅ written |
-| 002–090 (28 files) | 🔲 **not yet written** — decomposition above is complete and authoritative; generation is mechanical from this index + `spec.md` |
+All **29 POMLs written** and validated 2026-08-19:
 
-⚠️ Per `project-pipeline` Step 3's Completeness Lint, **do not dispatch execution until all 29 POMLs exist and
-pass** `pwsh scripts/Validate-TaskPoml.ps1 projects/spaarke-auth-v4-dataverse-MI/tasks`.
+```
+Scanned 29 POML(s): 23 clean, 0 error(s), 6 warning(s)
+PASS - all task POMLs carry the required canonical field set.
+```
+
+### The 6 warnings are linter over-fire, deliberately not silenced
+
+`Validate-TaskPoml.ps1` warns when a task has any `relevant-files role="new"` but no `<justification>`. It fires
+on **010, 021, 023, 060, 061, 090** — every one of which declares a new **test file** or **decision document**,
+not new production surface.
+
+CLAUDE.md §11's three-question gate targets *new services / abstractions / interfaces / endpoints / DI
+registrations / packages / Dataverse columns*. A new seam test is mandated by ADR-038 (every new auth path gets
+`tests/integration/auth/**` or `seam/**` coverage), and a decision record is a project artifact. Neither is
+architectural surface.
+
+**Task 020 — the only task creating genuinely new production surface — does carry a full `<justification>`**
+and passes clean.
+
+Adding boilerplate justification blocks to the other six to silence the linter would be exactly the hollow
+rationale `project-pipeline` Step 1.7 warns against, so they are left flagged and explained here instead.
+Consider tightening the linter's heuristic to exclude `tests/**` and `notes/**` paths — that is a
+`task-create` improvement, not a change to this project.

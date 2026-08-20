@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Determine the disposition of Analysis:PromptFlowKey (FR-E6)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Investigation with a possible small config deletion; no significant code surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Straightforward usage investigation.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,config,cleanup,api-key</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Analysis:PromptFlowKey appears at appsettings.json:118 and was not in the original seed inventory. Determine whether it is still consumed, then migrate it, delete it as dead configuration, or document why it is retained.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>A decided, recorded disposition — migrated, deleted, or retained with a reason. No third state.</goal>
+
+  <context>
+    <background>Found during the independent credential sweep, not in the seed. Its consumer is not established, which is itself the finding: an unexplained credential in configuration is the pattern this project exists to eliminate.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: establish the consumer FIRST by grep. Do not delete configuration whose consumer is unknown.</constraint>
+    <constraint source="project">Scope: if dead, delete it from appsettings and any Key Vault entry. If live, migrate to MI where the target supports Entra, else document the retention.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Configuration hygiene, credential inventory</topic>
+    <files>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Grep the solution for PromptFlowKey and any Prompt Flow client.</step>
+    <step>If no consumer exists, delete from appsettings and Key Vault.</step>
+    <step>If a consumer exists, determine whether the target supports Entra auth; migrate or document.</step>
+    <step>Record the disposition.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The consumer is outside this repository — STOP; deleting a credential another system depends on is not recoverable from here.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/055-promptflow-key-disposition.md</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/appsettings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The consumer is identified, or its absence is proven by grep evidence.</criterion>
+    <criterion>The disposition is one of migrated, deleted, or retained-with-reason — recorded, not left open.</criterion>
+    <criterion>Negative case: nothing is deleted while its consumer is unknown.</criterion>
+  </acceptance-criteria>
+</task>

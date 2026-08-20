@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>9 Wrap-up</phase>
+    <gate>all tasks complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation, reporting and gate execution; no production code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist execution and synthesis.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/ and projects/INDEX.md; main-session only.</parallel-reason>
+    <deps>033,042,050,051,052,053,054,055,056,060,061,062,063,030</deps>
+    <tags>documentation,wrapup,test-diet</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: run the mandatory /test-diet gate, report publish size against the baseline, verify the graduation criteria, write lessons-learned, and update the portfolio and registries.</prompt>
+  <role>SPAARKE platform developer closing a project per root CLAUDE.md §7.</role>
+  <goal>Every graduation criterion in spec.md verified or explicitly waived, with the project's records left accurate for the next reader.</goal>
+
+  <context>
+    <background>Root CLAUDE.md §7 makes /test-diet a mandatory gate at 090. The distinguishing graduation criterion is #12: introduce a deliberate ninth secret-bearing confidential client on a scratch branch and confirm the build FAILS. Everything else is table stakes; that one is what makes this project different from the three that preceded it.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-auth-v4-dataverse-MI/README.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="new">projects/spaarke-auth-v4-dataverse-MI/notes/lessons-learned.md</file>
+    </relevant-files>
+    <dependencies><dependency task="all" status="pending">All workstreams complete</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: /test-diet is MANDATORY and read-only — it emits git rm / git mv commands for the reviewer, it does not auto-execute.</constraint>
+    <constraint source="project">Scope: graduation criterion 12 must be EXERCISED, not asserted. Seed a violation on a scratch branch and confirm the build fails.</constraint>
+    <constraint source="project">Scope: report publish size against the 44.96 MB incl. PDBs net10 baseline, stating the PDB convention.</constraint>
+    <constraint source="project">Scope: close out the cross-project items — confirm task 030 landed for provisioning, and record whether the Model 2 tenancy question was answered.</constraint>
+    <constraint source="project">Scope: .claude/ and projects/INDEX.md edits are main-session only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project closure, test diet, portfolio</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/context-handoff/SKILL.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/spec.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Run /test-diet; produce notes/test-diet-report.md.</step>
+    <step>Exercise graduation criterion 12 on a scratch branch; record the build failure as evidence.</step>
+    <step>Measure and report publish size + delta vs 44.96 MB; run the CVE scan.</step>
+    <step>Walk every graduation criterion in spec.md; mark verified or explicitly waived with a reason.</step>
+    <step>Write lessons-learned, centring the false-premise root cause and whether the forcing functions actually hold.</step>
+    <step>Update README status, projects/INDEX.md, and the portfolio Issue #800 (Status, Tasks Completed, Closed Date).</step>
+    <step>Confirm cross-project close-out with both sibling projects.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Graduation criterion 12 does NOT fail the build — STOP. The project's central deliverable has not been achieved and the wrap-up cannot proceed.</trigger>
+    <trigger>/test-diet proposes deleting the forcing functions despite task 063 — STOP and resolve; that is the exact regression 063 exists to prevent.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="new">projects/spaarke-auth-v4-dataverse-MI/notes/lessons-learned.md</output>
+    <output type="new">projects/spaarke-auth-v4-dataverse-MI/notes/test-diet-report.md</output>
+    <output type="modify">projects/spaarke-auth-v4-dataverse-MI/README.md</output>
+    <output type="modify">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>/test-diet run; report committed; the forcing functions classified MAINTAIN.</criterion>
+    <criterion>Graduation criterion 12 EXERCISED — a seeded ninth secret-bearing client fails the build, with evidence.</criterion>
+    <criterion>Publish size + delta reported against 44.96 MB with the PDB convention stated; no new HIGH CVE.</criterion>
+    <criterion>Every spec.md graduation criterion is marked verified or explicitly waived with a reason.</criterion>
+    <criterion>lessons-learned.md written.</criterion>
+    <criterion>README, projects/INDEX.md and portfolio Issue #800 updated.</criterion>
+    <criterion>Negative case: no graduation criterion is marked complete without evidence.</criterion>
+    <criterion>Cross-project close-out confirmed with customer-provisioning-orchestration-r1 and dataverse-access-unification-r1.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Bing Search key: resolve from Key Vault by name (FR-E7)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs; changes how a live credential is resolved.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified hygiene change with a named reference implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,ai,api-key,hygiene</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Bing Search is genuinely third-party, so the key stays — but WebSearchHandler reads it straight from configuration. Make it Key-Vault-by-name the way LlamaParseClient already does, so the value is never bound into config.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>The Bing key is resolved from Key Vault at runtime by secret name; the value never appears in configuration.</goal>
+
+  <context>
+    <background>This is the Group 1 carve-out: a key is the only mechanism Bing offers, so the credential stays. The defect is the resolution style — _configuration["BingSearch:ApiKey"] at WebSearchHandler.cs:283 and :504 binds the value into config, whereas LlamaParseClient.cs:117-126 resolves by secret NAME at runtime. Copy the latter.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WebSearchHandler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/LlamaParseClient.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: do NOT attempt to eliminate the Bing key — it is Group 1, genuinely third-party. This is a resolution-style fix only.</constraint>
+    <constraint source="project">Scope: copy the LlamaParseClient KV-by-name pattern; do not invent a third resolution style.</constraint>
+    <constraint source="project">Scope: LlamaParse itself needs no change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Key Vault secret resolution, third-party API keys</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read LlamaParseClient.cs:117-126 for the KV-by-name pattern.</step>
+    <step>Add a BingSearch secret-name option and resolve at runtime.</step>
+    <step>Remove the raw config read at WebSearchHandler.cs:283 and :504.</step>
+    <step>Verify web search still works; move the value into Key Vault.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Runtime KV resolution adds unacceptable latency to the web-search path — report with measurements rather than reverting silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WebSearchHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The Bing key value is never bound into configuration; only its secret name is.</criterion>
+    <criterion>Web search still returns results.</criterion>
+    <criterion>Negative case: a missing secret produces an actionable error, not a silent empty result set.</criterion>
+    <criterion>LlamaParse is unchanged.</criterion>
+  </acceptance-criteria>
+</task>

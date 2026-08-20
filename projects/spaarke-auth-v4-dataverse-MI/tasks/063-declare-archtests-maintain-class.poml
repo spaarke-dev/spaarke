@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Pre-declare the forcing functions MAINTAIN-class for /test-diet (FR-F0)</title>
+    <phase>6 Forcing Functions</phase>
+    <gate>060 and 061 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Directive/documentation change; no production code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded documentation change.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches tests/CLAUDE.md and possibly .claude/ — main-session only.</parallel-reason>
+    <deps>060,061</deps>
+    <tags>testing,documentation,skill-directives,forcing-function</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>tests/Spaarke.ArchTests/ is not one of the 7 KEEP paths, and tests/CLAUDE.md says tests outside those paths are anti-pattern by construction. Pre-declare the forcing functions MAINTAIN-class so /test-diet at wrap-up does not delete the exact mechanism this project exists to leave behind.</prompt>
+  <role>SPAARKE platform developer applying the ADR-038 build-vs-maintain classifier.</role>
+  <goal>The forcing functions survive the mandatory /test-diet gate, with the reasoning recorded rather than relying on a reviewer noticing.</goal>
+
+  <context>
+    <background>/test-diet runs at the 090 wrap-up as a mandatory gate (root CLAUDE.md §7) and classifies tests as scaffolding or maintain. ArchTests are structural fitness functions, a distinct category from build-class scaffolding, but the 7-KEEP-path list does not carve out tests/Spaarke.ArchTests/ — despite it being pre-existing and home to GodClassGuardTests and LayerDependencyTests. Losing FR-F1/F2 at wrap-up would invalidate success criterion 12.</background>
+    <relevant-files>
+      <file role="modify">tests/CLAUDE.md</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="060" status="pending">The ArchTest ban exists</dependency><dependency task="061" status="pending">The census exists</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: do NOT weaken the 7 KEEP paths or the 17 bans. The argument is that structural fitness functions are a DISTINCT category, not an exception to the classifier.</constraint>
+    <constraint source="project">Scope: prefer amending tests/CLAUDE.md to name tests/Spaarke.ArchTests/** as an eighth KEEP path over a project-scoped carve-out — the gap is general, not specific to auth-v4. GodClassGuardTests and LayerDependencyTests have the same exposure today.</constraint>
+    <constraint source="project">Scope: main-session only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-038 build-vs-maintain classifier, test diet</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Confirm /test-diet's classifier would in fact flag ArchTests — do not assume the risk is real.</step>
+    <step>If real, amend tests/CLAUDE.md to name tests/Spaarke.ArchTests/** as a KEEP path for structural fitness functions.</step>
+    <step>Record the reasoning, noting the existing sibling tests share the exposure.</step>
+    <step>Verify by running /test-diet in report mode against the current tree.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Amending the KEEP-path list requires an ADR-038 amendment rather than a directive edit — escalate as a §6.5 path B rather than editing the ADR unilaterally.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">tests/CLAUDE.md</output>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/063-archtest-keep-path.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>/test-diet in report mode classifies the forcing functions as MAINTAIN, not scaffolding.</criterion>
+    <criterion>The rationale is recorded, not left to reviewer memory.</criterion>
+    <criterion>Negative case: the 7 existing KEEP paths and the 17 bans are unchanged — no weakening of ADR-038.</criterion>
+    <criterion>Negative case: if the risk proves not to exist, that is recorded and no directive is changed.</criterion>
+  </acceptance-criteria>
+</task>
