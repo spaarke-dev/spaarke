@@ -33,6 +33,43 @@ All of Wave G-4 (140, 141, 142, 143, 144) has landed. L2 tests: 903 (Wave G-3 ba
 across the full wave. Zero code-review criticals, zero unresolved ADR violations across all 5 commits.
 Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 
+## 🎯 Wave G-5 Dispatch Plan (unblocked 2026-08-20 after Wave G-4 close)
+
+**Dependency DAG for Wave G-5 (4 tasks 150-153)**:
+```
+150 (H12a YamlDotNet + DV-REST seeds, FULL/high, waveG5-parallel) ─┐
+                                                                     ├─→ 153 (H12c credential config, STANDARD, needs 150+151+152)
+151 (H12b DataGrid+workspace-layout ports, STANDARD, parallel) ─→ 152 (H12b field-mapping+chart-def seeders, FULL, needs 151) ─┘
+```
+
+**Batch G-5A** (parallel-safe now, dispatch immediately): 150 + 151
+- 150: H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done)
+- 151: H12b 2 DV-REST ports (DataGrid + workspace-layout seeders) (deps 141 done)
+
+**Batch G-5B** (after 151 lands): 152 alone
+- 152: H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151)
+
+**Batch G-5C** (after 150 + 151 + 152 all land): 153 alone
+- 153: H12c credential config only (no code delta) (deps 123, 150, 151, 152)
+
+---
+
+## Wave G-4 Tally (100% COMPLETE 2026-08-20)
+
+| Task | Commit | Handler | Δ tests | Notable |
+|---|---|---|---|---|
+| 140 | `d974ed461` | H5 BAP-REST env-create + async polling | +19 → 965 | Live WebSearch resolved BAP endpoint discrepancy; idempotent existing-env check added |
+| 142 | `0ba095c58` | H7 credential provisioning + NFR-05 | +8 → 946 | Silent-fail-trap fix (`SectionName` mismatch with Bicep key) + `ValidateOnStart` proactive fix |
+| 143 | `7623527f2` | H10 verify + wrong GUID fix | +3 → 968 | **Major defect fix**: wrong `AppRoleId` for `GroupMember.ReadWrite.All` (would 403 silently at runtime) |
+| 141 | `bcb1e3f0f` | H6 Web-API import + ZIP packaging | +35 → 1003 | Microsoft Learn WebFetch ground-truthed polling; XML `data` failure-parsing; ImportJob directly-polled |
+| 144 | `ffeacb934` | H11 verify + missing role fix | +2 → 1005 | **Major defect fix**: missing `User.Invite.All` role (would 403 silently on B2B invites); added 15th role mirrored across 7 files + spec + customer guide |
+
+L2 tests: **938 → 1005/1005** (+67 across Wave G-4). Zero code-review criticals, zero ADR violations, **2 major silent-fail-at-runtime defects caught + fixed** by verification-focused tasks 143 + 144.
+
+**Verification tasks caught what SDK-port tasks missed** — validating the "verify code-that-looks-real" pattern is high-value.
+
+---
+
 ## 🎯 Wave G-4 Dispatch Plan (unblocked 2026-08-20 after Wave G-3 close)
 
 **Dependency DAG for Wave G-4 (5 tasks 140-144)**:
