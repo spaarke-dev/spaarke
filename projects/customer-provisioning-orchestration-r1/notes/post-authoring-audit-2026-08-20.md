@@ -80,7 +80,7 @@ Numbered for traceability. Ordered by failure-sequence (each blocks the next in 
 
 | # | Gap | Source | Impact | Fix effort |
 |---|---|---|---|---|
-| 21 | **SC #5 sample-workload checks permanently skipped** in `E2EValidationRunner.cs:304-316` (AI analysis, doc upload+index, layout render, wizard field-map) | D, E | The stated E2E goal's OWN measurement is incomplete | Medium (implement 4 probes) |
+| 21 | **SC #5 sample-workload checks permanently skipped** in `E2EValidationRunner.cs:304-316` (AI analysis, doc upload+index, layout render, wizard field-map) | D, E | The stated E2E goal's OWN measurement is incomplete | Medium (implement 4 probes) — ✅ **CLOSED 2026-08-20 by Wave G-8 Batch 11**: 4 authenticated live checks implemented inside `E2EValidationRunner` (agent `/api/agent/message` full-workflow; `/api/ai/search/count` capability-diagnostic; `/api/workspace/layouts` full-workflow; `/api/v1/field-mappings/profiles` capability-diagnostic). Bearer via shared UAMI TokenCredential scope `{bff}/.default` (I4-probe parity); 60s per-check timeout + 1 transient retry; 404/401/403/token-failure → explicit reason-suffixed ChecksSkipped (not false Pass, not spurious Fail). Static skip list shrank 7→3. |
 | 22 | SC #11 dev-leakage + env-var presence checks skipped (L2 lacks Dataverse identity on H13 envelope) | D, E | Env-var closure unmeasured | Medium |
 
 ### Requirement completions

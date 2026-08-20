@@ -104,9 +104,15 @@ public static class E2EAcceptanceModule
         // ZERO ProcessStartInfo / pwsh dependency; the port issues live HttpClient
         // effect probes (BFF /healthz, /ping, CORS preflight) against the customer's
         // deployed BFF and surfaces the .ps1's Dataverse-env-vars + dev-leakage
-        // checks + Phase-B extended set (sample analysis / doc upload+index /
-        // layout render / wizard field-map) as an explicit ChecksSkipped list per
-        // the interim posture -- see E2EValidationRunner.cs file header for the
+        // checks as an explicit ChecksSkipped list per the interim posture.
+        // G-8 Batch 11 (2026-08-20, audit Defect #21 / SC #5): the Phase-B
+        // extended set (sample analysis / doc upload+index / layout render /
+        // wizard field-map) GRADUATED to four real authenticated sample-workload
+        // checks inside the same runner (bearer token from the shared UAMI-pinned
+        // TokenCredential singleton, scope {bffAuthority}/.default -- parity with
+        // the I4 probe). The runner therefore now ALSO injects TokenCredential +
+        // IOptions<H13AcceptanceOptions> (both pre-registered; no new lines
+        // needed here) -- see E2EValidationRunner.cs file header for the
         // silent-fail audit (POML premise mismatch: the .ps1 shipped 5 DIFFERENT
         // checks than the POML prompt claimed; ported what actually exists +
         // surfaced the gaps rather than silently mis-implementing the POML's

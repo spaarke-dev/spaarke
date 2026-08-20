@@ -84,6 +84,14 @@ public sealed class H13AcceptanceOptions
     public TimeSpan InvariantVerifierTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
+    /// Maximum time to wait for a single SC #5 sample-workload check inside
+    /// <see cref="E2EValidationRunner"/> (sample AI analysis / doc-index query /
+    /// layout render / wizard field-map — G-8 Batch 11). Defaults to 60 seconds;
+    /// the sample AI analysis in particular can be slow (live LLM round-trip).
+    /// </summary>
+    public TimeSpan SampleWorkloadCheckTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Maximum time to wait for a single Azure Cost Management query. Defaults
     /// to 3 minutes — Cost Management APIs are often the slowest ARM surface.
     /// </summary>

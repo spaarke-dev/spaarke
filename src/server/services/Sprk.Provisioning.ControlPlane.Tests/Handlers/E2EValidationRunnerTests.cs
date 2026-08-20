@@ -2,10 +2,12 @@
 // E2EValidationRunnerTests.cs
 //
 // L2 CONTROL-PLANE unit tests for E2EValidationRunner (task 181, Phase C''
-// Wave G-7 Batch G-7B). Proves the REAL HttpClient probe path -- not a
-// hardcoded verdict -- via a hand-rolled FakeHttpMessageHandler (never
-// Mock<HttpMessageHandler>; ADR-038 path #1 + KEEP-path rules per
-// .claude/constraints/testing.md section MUST NOT B1).
+// Wave G-7 Batch G-7B; extended by G-8 Batch 11 which graduated the four SC #5
+// sample-workload checks from permanently-Skipped to real authenticated
+// checks). Proves the REAL HttpClient probe path -- not a hardcoded verdict --
+// via a hand-rolled FakeHttpMessageHandler (never Mock<HttpMessageHandler>;
+// ADR-038 path #1 + KEEP-path rules per .claude/constraints/testing.md section
+// MUST NOT B1).
 //
 // PATH: tests/CLAUDE.md 7 KEEP paths -- this file is a component-scoped unit
 // test of the runner class (a pure L2 seam with no BFF wiring). It exercises
@@ -16,34 +18,33 @@
 // under tests/integration/** because the runner is not itself an integration
 // boundary -- the LIVE-run integration lands in Phase F rerun (task 186).
 //
-// COVERAGE (maps to POML acceptance criteria):
+// COVERAGE (task 181 POML acceptance criteria + G-8 Batch 11 dispatch brief):
 //   AC-1 (grep 0 ProcessStartInfo | pac auth):
 //        SourceFile_ContainsNoProcessStartInfoOrShellOutInCode.
-//   AC-2 (all 5 effect probes independently testable against fakes):
+//   AC-2 (all effect probes independently testable against fakes):
 //        Health/ping/CORS probes each have Pass + fail-status + timeout +
-//        transport-throw coverage; the 2 Dataverse-auth-gated probes + 4
-//        Phase-B extended probes are surfaced as Skipped and pinned by
-//        RunAsync_HappyPath_EmitsInterimSkippedListVerbatim. This proves
-//        each of the 5-check .ps1 surface is REPRESENTED (real or Skipped)
-//        rather than silently dropped -- the POML premise-mismatch defense.
+//        transport-throw coverage; the 4 SC #5 sample-workload checks (G-8
+//        Batch 11) each have Pass + graceful-skip (404 / 401 / 403 / token
+//        failure) + Fail (bad payload / empty payload / timeout) coverage;
+//        the 2 Dataverse-auth-gated probes remain surfaced as Skipped and
+//        pinned by RunAsync_HappyPath_EmitsInterimSkippedListVerbatim.
 //   AC-3 (no duplicate HTTP-probing helper):
-//        SourceFile_ReusesIHttpClientFactoryConventionOfSiblingProbes --
-//        asserts named-client + IHttpClientFactory idiom present + no
-//        parallel helper class shape.
+//        SourceFile_ReusesIHttpClientFactoryConventionOfSiblingProbes.
 //   AC-4 (build + test green): covered by CI.
 //
 // CONVERGENCE-BONUS DEFENSE:
-//   Tests ALSO pin the ChecksSkipped list verbatim so a future task that
-//   graduates one of the Skipped rows to a real check MUST also update the
-//   test -- prevents silent drift back to "we don't know what H13 verified"
-//   when task 186 lands.
+//   Tests pin the ALWAYS-skipped ChecksSkipped list verbatim (now 3 names --
+//   the four sample rows GRADUATED in G-8 Batch 11) so a future task that
+//   graduates a remaining Skipped row MUST also update the test.
 // -----------------------------------------------------------------------------
 
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Xunit;
 
@@ -57,48 +58,65 @@ public sealed class E2EValidationRunnerTests
     private const string BffApiUrl = "https://bff-acme.azurewebsites.net";
     private const string TargetSlot = "production";
 
+    private static readonly string[] AllSevenCheckNames =
+    {
+        E2EValidationRunner.CheckBffHealthz,
+        E2EValidationRunner.CheckBffPing,
+        E2EValidationRunner.CheckCorsDataverseOrigin,
+        E2EValidationRunner.CheckSampleAiAnalysis,
+        E2EValidationRunner.CheckSampleDocUploadIndex,
+        E2EValidationRunner.CheckSampleWorkspaceLayoutRender,
+        E2EValidationRunner.CheckSampleWizardFieldMap,
+    };
+
     // -----------------------------------------------------------------------
-    // AC-2: happy path -- all three real probes Pass, Skipped list stable.
+    // AC-2: happy path -- all seven real checks Pass, Skipped list stable.
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task RunAsync_HappyPath_ReturnsSuccessWithAllThreeChecksPassed()
+    public async Task RunAsync_HappyPath_ReturnsSuccessWithAllSevenChecksPassed()
     {
-        var handler = new FakeBffHttpMessageHandler(req =>
-        {
-            if (req.Method == HttpMethod.Options)
-            {
-                return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("ok", Encoding.UTF8, "text/plain"),
-            };
-        });
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
         var runner = BuildRunner(handler);
 
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
         var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
-        success.ChecksPassed.Should().BeEquivalentTo(new[]
-        {
-            E2EValidationRunner.CheckBffHealthz,
-            E2EValidationRunner.CheckBffPing,
-            E2EValidationRunner.CheckCorsDataverseOrigin,
-        });
+        success.ChecksPassed.Should().BeEquivalentTo(AllSevenCheckNames);
         handler.RequestedUrls.Should().Contain(u => u.EndsWith("/healthz", StringComparison.Ordinal));
         handler.RequestedUrls.Should().Contain(u => u.EndsWith("/ping", StringComparison.Ordinal));
+        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.AgentMessagePath, StringComparison.Ordinal));
+        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.SemanticSearchCountPath, StringComparison.Ordinal));
+        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.WorkspaceLayoutsPath, StringComparison.Ordinal));
+        handler.RequestedUrls.Should().Contain(u => u.EndsWith(E2EValidationRunner.FieldMappingProfilesPath, StringComparison.Ordinal));
         handler.RequestedMethods.Should().Contain(HttpMethod.Options);
+    }
+
+    [Fact]
+    public async Task RunAsync_HappyPath_SampleChecksCarryBearerToken()
+    {
+        // G-8 Batch 11: the four sample checks MUST be authenticated (live
+        // token against the customer BFF authority) -- never anonymous.
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
+        var runner = BuildRunner(handler);
+
+        await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var sampleRequests = handler.Requests
+            .Where(r => r.Url.Contains("/api/", StringComparison.Ordinal))
+            .ToList();
+        sampleRequests.Should().HaveCount(4);
+        sampleRequests.Should().OnlyContain(r => r.AuthorizationScheme == "Bearer" && r.AuthorizationParameter == FakeTokenCredential.TokenValue);
     }
 
     [Fact]
     public async Task RunAsync_HappyPath_EmitsInterimSkippedListVerbatim()
     {
-        // Convergence-bonus defense: the ChecksSkipped list is pinned exactly
-        // so a future task graduating a Skipped row to a real check MUST
-        // update this test. Prevents silent drift.
-        var handler = new FakeBffHttpMessageHandler(_ =>
-            OkOrCors(HttpStatusCode.OK, DataverseUrl));
+        // Convergence-bonus defense: the ALWAYS-skipped ChecksSkipped list is
+        // pinned exactly so a future task graduating a Skipped row to a real
+        // check MUST update this test. Prevents silent drift. G-8 Batch 11
+        // shrank this from 7 to 3 (the four sample rows are now real checks).
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
         var runner = BuildRunner(handler);
 
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
@@ -109,10 +127,6 @@ public sealed class E2EValidationRunnerTests
             E2EValidationRunner.SkippedDataverseEnvVarsPresent,
             E2EValidationRunner.SkippedDataverseEnvVarsDevLeakage,
             E2EValidationRunner.SkippedNamingConformance,
-            E2EValidationRunner.SkippedSampleAiAnalysis,
-            E2EValidationRunner.SkippedSampleDocUploadIndex,
-            E2EValidationRunner.SkippedSampleWorkspaceLayoutRender,
-            E2EValidationRunner.SkippedSampleWizardFieldMap,
         });
     }
 
@@ -126,7 +140,7 @@ public sealed class E2EValidationRunnerTests
             {
                 return CorsPreflightResponse(HttpStatusCode.OK, "*");
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -145,22 +159,19 @@ public sealed class E2EValidationRunnerTests
     {
         var handler = new FakeBffHttpMessageHandler(req =>
         {
-            if (req.Method == HttpMethod.Options)
-            {
-                return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
-            }
-            if ((req.RequestUri?.AbsolutePath ?? string.Empty).EndsWith("/healthz", StringComparison.Ordinal))
+            if ((req.RequestUri?.AbsolutePath ?? string.Empty).EndsWith("/healthz", StringComparison.Ordinal)
+                && req.Method == HttpMethod.Get)
             {
                 return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
         var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffHealthz);
+        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckBffHealthz);
         failure.Diagnostic.Should().Contain("503");
         failure.Diagnostic.Should().Contain("expected 200");
     }
@@ -170,15 +181,11 @@ public sealed class E2EValidationRunnerTests
     {
         var handler = new FakeBffHttpMessageHandler(req =>
         {
-            if (req.Method == HttpMethod.Options)
-            {
-                return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
-            }
             if ((req.RequestUri?.AbsolutePath ?? string.Empty).EndsWith("/ping", StringComparison.Ordinal))
             {
                 return new HttpResponseMessage(HttpStatusCode.InternalServerError);
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -199,7 +206,7 @@ public sealed class E2EValidationRunnerTests
                 // 200 OK but NO Access-Control-Allow-Origin header at all.
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -220,7 +227,7 @@ public sealed class E2EValidationRunnerTests
             {
                 return CorsPreflightResponse(HttpStatusCode.OK, "https://foreign.example.com");
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -236,15 +243,12 @@ public sealed class E2EValidationRunnerTests
     {
         var handler = new FakeBffHttpMessageHandler(req =>
         {
-            if (req.Method == HttpMethod.Options)
-            {
-                return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
-            }
-            if ((req.RequestUri?.AbsolutePath ?? string.Empty).EndsWith("/healthz", StringComparison.Ordinal))
+            if ((req.RequestUri?.AbsolutePath ?? string.Empty).EndsWith("/healthz", StringComparison.Ordinal)
+                && req.Method == HttpMethod.Get)
             {
                 throw new HttpRequestException("connection refused");
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -253,6 +257,221 @@ public sealed class E2EValidationRunnerTests
         var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
         failure.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffHealthz);
         failure.Diagnostic.Should().Contain("connection refused");
+    }
+
+    // -----------------------------------------------------------------------
+    // G-8 Batch 11: SC #5 sample-workload checks -- pass paths.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunAsync_WizardProfilesEmptyItemsArray_StillPasses()
+    {
+        // Capability-diagnostic contract: an EMPTY items array passes -- the
+        // profile-resolution path is deployed + wired; seeding mapping profiles
+        // is customer configuration, not a provisioning invariant.
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.FieldMappingProfilesPath))
+            {
+                return Json("{\"items\":[],\"totalCount\":0}");
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
+        success.ChecksPassed.Should().Contain(E2EValidationRunner.CheckSampleWizardFieldMap);
+    }
+
+    [Fact]
+    public async Task RunAsync_SearchCountTransient503ThenOk_RetriesOnceAndPasses()
+    {
+        var countCalls = 0;
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
+            {
+                countCalls++;
+                return countCalls == 1
+                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    : Json("{\"count\":0}");
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        countCalls.Should().Be(2, "a single transient 503 must be retried once");
+        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
+        success.ChecksPassed.Should().Contain(E2EValidationRunner.CheckSampleDocUploadIndex);
+    }
+
+    // -----------------------------------------------------------------------
+    // G-8 Batch 11: graceful-degradation contract -- 404 / 401 / 403 / token
+    // failure land in ChecksSkipped with an explicit reason suffix, NOT in
+    // ChecksFailed (endpoint-not-deployed / RBAC gaps are infra postures,
+    // parity with the I4 probe's InfraFault discipline).
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunAsync_AgentMessageReturns404_SkipsWithEndpointNotDeployedReason()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
+        success.ChecksPassed.Should().NotContain(E2EValidationRunner.CheckSampleAiAnalysis);
+        success.ChecksSkipped.Should().Contain(
+            E2EValidationRunner.CheckSampleAiAnalysis + "-skipped-endpoint-not-deployed-http-404");
+    }
+
+    [Fact]
+    public async Task RunAsync_LayoutsReturns403_SkipsWithAuthNotGrantedReason()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
+        success.ChecksSkipped.Should().Contain(
+            E2EValidationRunner.CheckSampleWorkspaceLayoutRender
+            + "-skipped-auth-http-403-l2-identity-not-granted-on-bff");
+    }
+
+    [Fact]
+    public async Task RunAsync_TokenAcquisitionThrows_SkipsAllFourSampleChecks()
+    {
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
+        var runner = BuildRunner(handler, new ThrowingTokenCredential(
+            new InvalidOperationException("no managed identity endpoint")));
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<E2EValidationOutcome.Success>().Subject;
+        success.ChecksPassed.Should().BeEquivalentTo(new[]
+        {
+            E2EValidationRunner.CheckBffHealthz,
+            E2EValidationRunner.CheckBffPing,
+            E2EValidationRunner.CheckCorsDataverseOrigin,
+        });
+        success.ChecksSkipped.Should().Contain(new[]
+        {
+            E2EValidationRunner.CheckSampleAiAnalysis + "-skipped-token-acquisition-failed",
+            E2EValidationRunner.CheckSampleDocUploadIndex + "-skipped-token-acquisition-failed",
+            E2EValidationRunner.CheckSampleWorkspaceLayoutRender + "-skipped-token-acquisition-failed",
+            E2EValidationRunner.CheckSampleWizardFieldMap + "-skipped-token-acquisition-failed",
+        });
+        // No authenticated call may be attempted without a token.
+        handler.RequestedUrls.Should().NotContain(u => u.Contains("/api/", StringComparison.Ordinal));
+    }
+
+    // -----------------------------------------------------------------------
+    // G-8 Batch 11: sample-workload failure paths.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunAsync_AgentMessageEmptyResponseText_ReturnsFailureCitingSampleAiAnalysis()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+            {
+                return Json("{\"responseText\":\"\"}");
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleAiAnalysis);
+        failure.Diagnostic.Should().Contain("responseText");
+    }
+
+    [Fact]
+    public async Task RunAsync_LayoutsEmptyArray_ReturnsFailureCitingH12bSeeding()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
+            {
+                return Json("[]");
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleWorkspaceLayoutRender);
+        failure.Diagnostic.Should().Contain("H12b");
+    }
+
+    [Fact]
+    public async Task RunAsync_SearchCountReturnsNonJson_ReturnsFailure()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html>gateway error</html>", Encoding.UTF8, "text/html"),
+                };
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleDocUploadIndex);
+        failure.Diagnostic.Should().Contain("not parseable JSON");
+    }
+
+    [Fact]
+    public async Task RunAsync_SampleCheckTimesOut_ReturnsFailureCitingTimeout()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+            {
+                // Simulates the linked-CTS timeout firing mid-call.
+                throw new OperationCanceledException("simulated per-check timeout");
+            }
+            return HappyResponder(req);
+        });
+        var runner = BuildRunner(handler);
+
+        var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
+        failure.ChecksFailed.Should().ContainSingle().Which.Should().Be(E2EValidationRunner.CheckSampleAiAnalysis);
+        failure.Diagnostic.Should().Contain("timed out");
+        failure.Diagnostic.Should().Contain("SampleWorkloadCheckTimeout");
     }
 
     // -----------------------------------------------------------------------
@@ -271,19 +490,14 @@ public sealed class E2EValidationRunnerTests
             {
                 return new HttpResponseMessage(HttpStatusCode.BadRequest); // no CORS header
             }
-            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
         });
         var runner = BuildRunner(handler);
 
         var outcome = await runner.RunAsync(BuildRequest(), CancellationToken.None);
 
         var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().BeEquivalentTo(new[]
-        {
-            E2EValidationRunner.CheckBffHealthz,
-            E2EValidationRunner.CheckBffPing,
-            E2EValidationRunner.CheckCorsDataverseOrigin,
-        });
+        failure.ChecksFailed.Should().BeEquivalentTo(AllSevenCheckNames);
     }
 
     // -----------------------------------------------------------------------
@@ -301,9 +515,7 @@ public sealed class E2EValidationRunnerTests
         var outcome = await runner.RunAsync(BuildRequest(bffApiUrl: ""), CancellationToken.None);
 
         var failure = outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Subject;
-        failure.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffHealthz);
-        failure.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffPing);
-        failure.ChecksFailed.Should().Contain(E2EValidationRunner.CheckCorsDataverseOrigin);
+        failure.ChecksFailed.Should().BeEquivalentTo(AllSevenCheckNames);
         failure.Diagnostic.Should().Contain("BffApiUrl parameter is empty");
     }
 
@@ -336,15 +548,15 @@ public sealed class E2EValidationRunnerTests
     [Fact]
     public async Task RunAsync_BlankDataverseUrl_ReturnsFailureCitingCorsOnly()
     {
-        // Health + Ping still run against the BFF; CORS is Failed because we
-        // won't send an ambiguous Origin header.
+        // Health + Ping + the four sample checks still run against the BFF;
+        // CORS is Failed because we won't send an ambiguous Origin header.
         var handler = new FakeBffHttpMessageHandler(req =>
         {
             if (req.Method == HttpMethod.Options)
             {
                 throw new InvalidOperationException("CORS probe must NOT run when DataverseUrl is blank");
             }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return HappyResponder(req);
         });
         var runner = BuildRunner(handler);
 
@@ -363,8 +575,7 @@ public sealed class E2EValidationRunnerTests
     [Fact]
     public async Task RunAsync_CancellationBeforeHttp_Throws()
     {
-        var handler = new FakeBffHttpMessageHandler(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK));
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
         var runner = BuildRunner(handler);
 
         using var cts = new CancellationTokenSource();
@@ -393,23 +604,26 @@ public sealed class E2EValidationRunnerTests
     }
 
     // -----------------------------------------------------------------------
-    // BuildInterimSkippedList (internal helper) -- freezes the exact 7-name
-    // set so a future graduation MUST update the test in tandem.
+    // BuildInterimSkippedList (internal helper) -- freezes the exact 3-name
+    // set so a future graduation MUST update the test in tandem. G-8 Batch 11
+    // shrank this from 7 (four sample rows graduated to real checks).
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void BuildInterimSkippedList_ContainsSevenPinnedNames()
+    public void BuildInterimSkippedList_ContainsThreePinnedNames()
     {
         E2EValidationRunner.BuildInterimSkippedList().Should().BeEquivalentTo(new[]
         {
             E2EValidationRunner.SkippedDataverseEnvVarsPresent,
             E2EValidationRunner.SkippedDataverseEnvVarsDevLeakage,
             E2EValidationRunner.SkippedNamingConformance,
-            E2EValidationRunner.SkippedSampleAiAnalysis,
-            E2EValidationRunner.SkippedSampleDocUploadIndex,
-            E2EValidationRunner.SkippedSampleWorkspaceLayoutRender,
-            E2EValidationRunner.SkippedSampleWizardFieldMap,
         });
+    }
+
+    [Fact]
+    public void AllBffDependentCheckNames_ContainsSevenPinnedNames()
+    {
+        E2EValidationRunner.AllBffDependentCheckNames().Should().BeEquivalentTo(AllSevenCheckNames);
     }
 
     // -----------------------------------------------------------------------
@@ -498,13 +712,22 @@ public sealed class E2EValidationRunnerTests
     // Helpers
     // -----------------------------------------------------------------------
 
-    private static E2EValidationRunner BuildRunner(FakeBffHttpMessageHandler? handler = null)
+    private static E2EValidationRunner BuildRunner(
+        FakeBffHttpMessageHandler? handler = null,
+        TokenCredential? credential = null)
     {
         handler ??= new FakeBffHttpMessageHandler(_ =>
             throw new InvalidOperationException("default handler must not be exercised"));
-        return new E2EValidationRunner(
+        var runner = new E2EValidationRunner(
             new FakeHttpClientFactory(handler),
+            credential ?? new FakeTokenCredential(),
+            Options.Create(new H13AcceptanceOptions
+            {
+                SampleWorkloadCheckTimeout = TimeSpan.FromSeconds(30),
+            }),
             NullLogger<E2EValidationRunner>.Instance);
+        runner.TransientRetryDelay = TimeSpan.Zero; // no real sleeping in unit tests
+        return runner;
     }
 
     private static E2EValidationRequest BuildRequest(
@@ -517,14 +740,50 @@ public sealed class E2EValidationRunnerTests
             BffApiUrl: bffApiUrl,
             TargetSlotName: TargetSlot);
 
-    private static HttpResponseMessage CorsPreflightResponse(HttpStatusCode status, string allowOrigin)
+    private static bool PathIs(HttpRequestMessage req, string path)
+        => string.Equals(req.RequestUri?.AbsolutePath, path, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Canned "fully deployed + seeded customer BFF" responder: every check's
+    /// endpoint answers with a valid happy-path payload. Individual tests
+    /// override one path and delegate the rest here.
+    /// </summary>
+    private static HttpResponseMessage HappyResponder(HttpRequestMessage req)
     {
-        var response = new HttpResponseMessage(status);
-        response.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", allowOrigin);
-        return response;
+        if (req.Method == HttpMethod.Options)
+        {
+            return CorsPreflightResponse(HttpStatusCode.OK, DataverseUrl);
+        }
+        if (PathIs(req, E2EValidationRunner.AgentMessagePath))
+        {
+            return Json("{\"responseText\":\"The assistant for this project is operational.\"}");
+        }
+        if (PathIs(req, E2EValidationRunner.SemanticSearchCountPath))
+        {
+            return Json("{\"count\":0,\"appliedFilters\":null}");
+        }
+        if (PathIs(req, E2EValidationRunner.WorkspaceLayoutsPath))
+        {
+            return Json("[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"Daily Briefing\",\"isSystem\":true}]");
+        }
+        if (PathIs(req, E2EValidationRunner.FieldMappingProfilesPath))
+        {
+            return Json("{\"items\":[{\"name\":\"matter-to-todo\"}],\"totalCount\":1}");
+        }
+        // /healthz + /ping (and any other anonymous probe target).
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("ok", Encoding.UTF8, "text/plain"),
+        };
     }
 
-    private static HttpResponseMessage OkOrCors(HttpStatusCode status, string allowOrigin)
+    private static HttpResponseMessage Json(string body)
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+
+    private static HttpResponseMessage CorsPreflightResponse(HttpStatusCode status, string allowOrigin)
     {
         var response = new HttpResponseMessage(status);
         response.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", allowOrigin);
@@ -581,16 +840,39 @@ public sealed class E2EValidationRunnerTests
         public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
     }
 
+    private sealed class FakeTokenCredential : TokenCredential
+    {
+        public const string TokenValue = "fake-sc5-sample-check-token";
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(TokenValue, DateTimeOffset.UtcNow.AddHours(1));
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
+
+    private sealed class ThrowingTokenCredential : TokenCredential
+    {
+        private readonly Exception _toThrow;
+        public ThrowingTokenCredential(Exception toThrow) { _toThrow = toThrow; }
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw _toThrow;
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw _toThrow;
+    }
+
     /// <summary>
-    /// Hand-rolled <see cref="HttpMessageHandler"/> -- records requested URLs
-    /// + methods so tests can assert the runner issued real requests with
-    /// correct method + path shape. Never Mock&lt;T&gt;.
+    /// Hand-rolled <see cref="HttpMessageHandler"/> -- records requested URLs,
+    /// methods, and Authorization headers so tests can assert the runner
+    /// issued real requests with the correct method + path + auth shape.
+    /// Never Mock&lt;T&gt;.
     /// </summary>
     private sealed class FakeBffHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
         public List<string> RequestedUrls { get; } = new();
         public List<HttpMethod> RequestedMethods { get; } = new();
+        public List<(string Url, HttpMethod Method, string? AuthorizationScheme, string? AuthorizationParameter)> Requests { get; } = new();
 
         public FakeBffHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
         {
@@ -603,6 +885,11 @@ public sealed class E2EValidationRunnerTests
             cancellationToken.ThrowIfCancellationRequested();
             RequestedUrls.Add(request.RequestUri?.ToString() ?? string.Empty);
             RequestedMethods.Add(request.Method);
+            Requests.Add((
+                request.RequestUri?.ToString() ?? string.Empty,
+                request.Method,
+                request.Headers.Authorization?.Scheme,
+                request.Headers.Authorization?.Parameter));
             return Task.FromResult(_responder(request));
         }
     }
