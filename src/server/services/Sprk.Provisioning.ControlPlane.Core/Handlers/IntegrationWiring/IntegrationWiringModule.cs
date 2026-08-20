@@ -8,7 +8,9 @@
 //   - Bind IntegrationWiring:{PwshExecutable, ExchangePolicyScriptPath,
 //     ExchangeScriptTimeout, ExchangePolicyDescriptionPrefix,
 //     GraphRequestTimeout, GraphSubscriptionExpirationMinutes,
-//     DataverseRequestTimeout, ServiceEndpoint*} options.
+//     DataverseRequestTimeout, ServiceEndpoint*, KvReadTimeout,
+//     SidecarBaseUrl, SidecarRequestTimeout, SidecarTransientRetryDelay,
+//     SidecarSharedSecret*} options.
 //   - Register the 7 collaborator seams (IExchangePolicyApplier,
 //     IKvSecretReader, IGraphSubscriptionCreator, IServiceEndpointWebhookRegistrar)
 //     + the 4 handler types (H14a/b/c sub-handlers + H14 parent).
@@ -39,6 +41,19 @@
 // (NFR-05 fail-fast parity with task 153's RuntimeReferencesModule / task
 // 151's AppConfigSeedModule) so a misconfigured KvReadTimeout fails the
 // Worker at boot instead of surfacing only on H14b/H14c's first dispatch.
+//
+// TASK 161 (Wave G-6): IExchangePolicyApplier swapped from
+// ExchangePolicyScriptApplier (pwsh + Set-ExchangeApplicationAccessPolicy.ps1
+// shell-out, RETIRED — kept on disk unregistered, see that file's retirement
+// banner) to ExchangePolicySidecarClient (typed HttpClient posting to task
+// 114's Listener.ps1 sitecontainer sidecar on
+// http://127.0.0.1:8091/apply-policy, per DS-1b §3). Registered via
+// AddHttpClient&lt;TInterface, TImpl&gt;() — parity with GraphRestSubscriptionCreator
+// / DataverseWebApiServiceEndpointWebhookRegistrar's own typed-HttpClient
+// registrations — so IHttpClientFactory manages the underlying handler pool.
+// The client depends on IKvSecretReader (task 160) for the per-boot
+// X-Sidecar-Auth shared-secret read from platform KV; that seam is already
+// registered above and needs no wiring change here.
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md §10):
 //   H14 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
@@ -92,7 +107,13 @@ public static class IntegrationWiringModule
 
         // Collaborator seams — one production impl each (ADR-010 ≥2-impl
         // justification: the 2nd impl is the per-unit-test fake).
-        services.AddSingleton<IExchangePolicyApplier, ExchangePolicyScriptApplier>();
+        //
+        // Task 161 (Wave G-6): IExchangePolicyApplier bound to the new
+        // ExchangePolicySidecarClient (typed HttpClient) — replaces the
+        // retired ExchangePolicyScriptApplier's pwsh shell-out. Underlying
+        // HttpClient is IHttpClientFactory-managed (handler pool) — parity
+        // with GraphRestSubscriptionCreator's own AddHttpClient<> below.
+        services.AddHttpClient<IExchangePolicyApplier, ExchangePolicySidecarClient>();
 
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —

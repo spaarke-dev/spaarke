@@ -1,6 +1,71 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 160 COMPLETE — H14 KV-reader swap, AzCliKvSecretReader ->
+> **Last Updated**: 2026-08-20 (Task 161 COMPLETE — H14a sidecar client wiring, Wave G-6 Batch G-6B
+> [ran alone this dispatch, OPUS tier — Opus subagent under Opus 4.7 main-session]. New
+> `ExchangePolicySidecarClient.cs` (typed HttpClient posting to task 114's sitecontainer-private
+> sidecar on `http://127.0.0.1:8091/apply-policy`) replaces the retired `ExchangePolicyScriptApplier`
+> pwsh shell-out — the sole EXO shell-out now lives in a non-routable sidecar container per DS-1b §3's
+> "quarantine the shell into a non-routable container" posture. **Ground-truthed Listener.ps1's actual
+> 4-outcome wire contract** and honored it (POML said 3-outcome shorthand; Listener.ps1 lines 30-54
+> authoritatively documents 4 wire outcomes: `Success | AlreadyCompliant | Drift | Failure` — the 4th
+> (Drift) is DELIBERATE to close the T4 silent-fail regression). Client maps 4-outcome wire onto the
+> existing 3-case C# `ExchangePolicyApplyOutcome` (wire `Success` + `AlreadyCompliant` both collapse
+> to `Applied` differentiated by CreatedCount; wire `Drift` → `Drift(expected, observed)`; wire
+> `Failure` → RetryEligible, retries once with 5s backoff per DS-1b §3, then surfaces `Failure`).
+> **Shared-secret bootstrap**: `IKvSecretReader.ReadSecretAsync(vault, subscription, "Sidecar-Shared-Secret", ct)`
+> (task 160's SecretClientKvReader) reads the per-boot secret from platform KV at each call time
+> (per-call read = correct + safe for H14a's 1-2 dispatches per run; no cross-call caching state — cleaner
+> under typed-Transient HttpClient DI lifetime). Sent as `X-Sidecar-Auth` header on every request
+> (Listener.ps1's `Test-SecretEqual` constant-time compare against `$env:SIDECAR_SHARED_SECRET`).
+> **Silent-fail-audit-driven LOUD-FAIL discipline** (parity with Waves G-4/G-5's 4 major silent-fail
+> catches): (1) empty/whitespace shared-secret config → terminal `Failure` BEFORE any HTTP call
+> (never proceed with empty X-Sidecar-Auth); (2) KV NotFound → terminal `Failure` naming the specific
+> secret + vault; (3) KV Failure → terminal `Failure` passing through KV diagnostic; (4) transport
+> exception (connection-refused / timeout) → terminal `Failure` with "InfraFault — reconciler will
+> re-enqueue" — DS-1b §3 explicit rule, NO in-client retry per that rule; (5) HTTP 401 → terminal
+> `Failure` naming BOTH the KV secret name AND vault to check; (6) HTTP 200 + malformed JSON →
+> terminal `Failure` with parse error (never silent-null-return); (7) HTTP 200 + unknown outcome value
+> → terminal `Failure` naming the expected outcome set (never silent-Success-fall-through);
+> (8) empty CorrelationId on request → terminal `Failure` BEFORE HTTP (contract-violation guard).
+> **Retry discipline**: retry ONCE with `SidecarTransientRetryDelay` (default 5s) backoff on
+> {HTTP 5xx, HTTP 200 + outcome=Failure} — NEVER on {HTTP 4xx, HTTP 200 + Success/AlreadyCompliant/Drift,
+> transport exception}. **ExchangePolicyApplyRequest extended** with `CorrelationId = ""` (default,
+> backward-compat with retired script applier + existing tests that don't construct requests directly);
+> H14a subhandler now passes `envelope.RunId` as CorrelationId so the sidecar's stdout logs interleave
+> with Worker logs by RunId in Log Analytics (Listener.ps1 .OBSERVABILITY note). `IntegrationWiringOptions`
+> extended with 5 sidecar fields (SidecarBaseUrl / SidecarRequestTimeout / SidecarTransientRetryDelay
+> / SidecarSharedSecret{VaultName,SubscriptionId,Name}); NFR-05 `Validate()` widened to bounds-check
+> the URL + two timeouts + a delay-fits-under-timeout invariant, deliberately leaves the 3
+> shared-secret strings unvalidated at boot (empty is legit in CI/dev where H14a is never dispatched
+> — runtime failure surfaces at first ApplyAsync with an explicit fail-loud diagnostic, never
+> silent-empty-header). `IntegrationWiringModule` registration swap: `AddSingleton<TInterface,
+> ExchangePolicyScriptApplier>()` → `AddHttpClient<TInterface, ExchangePolicySidecarClient>()`
+> (typed-HttpClient parity with `GraphRestSubscriptionCreator` + `DataverseWebApiServiceEndpointWebhookRegistrar`).
+> `ExchangePolicyScriptApplier.cs` retired: **kept on disk unregistered with retirement banner** —
+> uniform "keep on disk" reversibility posture per task 125's AzCliKvSecretsWriter precedent + task
+> 160's AzCliKvSecretReader precedent. **Sidecar cold-start timeout**: 6 minutes (accommodates ~10s
+> cold-start + Listener.ps1's 300s advisory script timeout + 50s margin). **19 new tests**
+> (`ExchangePolicySidecarClientContractTests.cs` — envelope round-trip contract test — hand-rolled
+> `HttpMessageHandler` fake + `FakeKvSecretReader`, never `Mock<HttpMessageHandler>` per ADR-038 path
+> #1): AC-1 request envelope shape (every Listener.ps1-parsed field present at expected JSON path +
+> type); AC-1b descriptionPrefix omitted-when-empty (server-side default takes effect); AC-2
+> X-Sidecar-Auth on every outbound request (both attempts under retry); AC-3 correlationId equals
+> RunId; AC-4/5/6/7/7b wire response mapping — all 4 outcomes + wire-Failure-then-Success recovery;
+> AC-8 connection-refused → Failure with NO retry (DS-1b InfraFault rule); AC-9 HttpClient.Timeout
+> → Failure with NO retry; AC-10 HTTP 401 names secret + vault; AC-11 HTTP 400 passes through
+> sidecar diagnostic; AC-12 HTTP 5xx retries once then Failure; AC-13 malformed JSON → Failure
+> (never silent-null); AC-14 unknown outcome → Failure naming expected set (never silent-continue);
+> AC-15 empty CorrelationId → Failure BEFORE HTTP; AC-16 empty shared-secret config → Failure BEFORE
+> HTTP (silent-fail-audit trap closed); AC-17 KV NotFound → Failure naming secret + vault; AC-18 KV
+> Failure → Failure passing through diagnostic; AC-19 source-text grep (0 matches of
+> `ProcessStartInfo` / `Set-ExchangeApplicationAccessPolicy` in the new production file — literal
+> POML acceptance criterion #1). H14a's existing 8 subhandler tests + H14 parent's 30 tests +
+> retired-script parity tests all pass **UNMODIFIED** (envelope-mapping change is
+> backward-compatible: CorrelationId defaulted to `""` at record level; H14a subhandler passes
+> `envelope.RunId` at the ONE call site). L2 tests: 1074 → **1095/1095** [+21, zero regressions].
+> **Task 162 (sidecar live verification) now unblocked** — Wave G-6 Batch G-6C can dispatch.)
+>
+> **Previous** (2026-08-20, Task 160 COMPLETE — H14 KV-reader swap, AzCliKvSecretReader ->
 > SecretClient, Wave G-6 Batch G-6A [ran alone, no siblings]. New `SecretClientKvReader.cs`
 > (`Azure.Security.KeyVault.Secrets` `SecretClient.GetSecretAsync` — same `Success(value) |
 > NotFound() | Failure(diagnostic)` return contract AzCliKvSecretReader.cs used, closing "the

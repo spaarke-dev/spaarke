@@ -10,12 +10,28 @@
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 implementations exist from day 1:
-//     - Production: <see cref="ExchangePolicyScriptApplier"/> — shells out to
-//       the new scripts/Set-ExchangeApplicationAccessPolicy.ps1 (Exchange
-//       Online has no REST equivalent for ApplicationAccessPolicy management;
-//       the ExchangeOnlineManagement PS module is the only supported surface,
-//       parity with H2a/H3's script-wrapping posture for surfaces without a
-//       clean REST API).
+//     - Production (task 161, Wave G-6): <see cref="ExchangePolicySidecarClient"/>
+//       — HttpClient POSTing to the sitecontainer-private sidecar (task 114's
+//       `Listener.ps1` on http://127.0.0.1:8091/apply-policy) with the
+//       per-boot X-Sidecar-Auth shared-secret header sourced from platform KV
+//       via <see cref="IKvSecretReader"/> (task 160's SecretClientKvReader).
+//       The sidecar owns the EXO module + Connect-ExchangeOnline; the client
+//       maps the sidecar's 4-outcome wire envelope
+//       (Success|AlreadyCompliant|Drift|Failure — see task 114's Listener.ps1
+//       .DESCRIPTION envelope-mapping rules; the 4th outcome is deliberate,
+//       preserving Drift as a distinct state to close the T4 silent-fail
+//       regression this seam exists to close) onto the same 3-case
+//       <see cref="ExchangePolicyApplyOutcome"/> the retired script applier
+//       mapped exit codes onto — wire Success/AlreadyCompliant collapse to
+//       <see cref="ExchangePolicyApplyOutcome.Applied"/> (differentiated by
+//       CreatedCount).
+//     - Retired (task 073, kept on disk unregistered): <see cref="ExchangePolicyScriptApplier"/>
+//       — shelled out to scripts/Set-ExchangeApplicationAccessPolicy.ps1.
+//       Superseded by the sidecar client for security-and-supply-chain reasons
+//       per DS-1b §3 (defense-in-depth: the sole EXO shell-out lives in a
+//       non-routable sidecar container, one localhost route, one signed
+//       Microsoft module — instead of the main Worker process carrying pwsh +
+//       ExchangeOnlineManagement + an ambient auth session).
 //     - Test: per-unit-test fakes returning canned outcomes.
 // -----------------------------------------------------------------------------
 
@@ -47,11 +63,22 @@ public interface IExchangePolicyApplier
 /// <param name="ExpectedAppIds">The exactly-2-entry expected AppId set: [BFF app-reg id, UAMI client id].</param>
 /// <param name="PolicyScopeGroupId">Mail-enabled security group id scoping the ApplicationAccessPolicy (New-ApplicationAccessPolicy -PolicyScopeGroupId — customer-tenant-specific, run-parameter supplied).</param>
 /// <param name="DescriptionPrefix">Description prefix applied to newly created policies (greppability).</param>
+/// <param name="CorrelationId">
+/// ProvisioningRun id (invoking handler's <c>envelope.RunId</c>) — placed on the
+/// sidecar's <c>correlationId</c> wire field so its structured stdout log lines
+/// interleave with the main Worker's own <c>correlationId=RunId</c> logs in the
+/// shared Log Analytics workspace (task 114's Listener.ps1 .OBSERVABILITY note).
+/// Defaulted to <c>""</c> so the retired <see cref="ExchangePolicyScriptApplier"/>
+/// remains constructible without ceremony; production callers (H14a sub-handler)
+/// MUST pass the RunId — the sidecar client's own validation returns a
+/// <see cref="ExchangePolicyApplyOutcome.Failure"/> if CorrelationId is empty.
+/// </param>
 public sealed record ExchangePolicyApplyRequest(
     string TenantId,
     IReadOnlyList<string> ExpectedAppIds,
     string PolicyScopeGroupId,
-    string DescriptionPrefix);
+    string DescriptionPrefix,
+    string CorrelationId = "");
 
 /// <summary>
 /// Discriminated outcome of <see cref="IExchangePolicyApplier.ApplyAsync"/>.

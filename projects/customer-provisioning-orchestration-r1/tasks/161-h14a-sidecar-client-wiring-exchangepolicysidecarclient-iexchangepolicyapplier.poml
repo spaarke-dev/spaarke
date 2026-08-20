@@ -3,8 +3,8 @@
   <metadata>
     <title>H14a: sidecar client wiring (ExchangePolicySidecarClient : IExchangePolicyApplier) + envelope round-trip contract test</title>
     <phase>C'' Wave G-6 -- Integration wiring</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Wires the ONLY Class-C residual in the whole handler fleet -- the sidecar client is the seam through which H14a's real functionality (T4 trap) flows; a contract mismatch here silently breaks Exchange policy application.</rigor-reason>
     <model-tier>opus</model-tier>

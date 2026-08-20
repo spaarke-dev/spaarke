@@ -1,7 +1,31 @@
 // -----------------------------------------------------------------------------
 // ExchangePolicyScriptApplier.cs
 //
-// Production IExchangePolicyApplier — shells out to the new
+// RETIRED (task 161, Wave G-6, 2026-08-20): superseded by
+// <see cref="ExchangePolicySidecarClient"/> — the sitecontainer-private
+// sidecar HTTP client (task 114's Listener.ps1 on
+// http://127.0.0.1:8091/apply-policy) that quarantines the sole EXO shell-out
+// into a non-routable container per DS-1b §3. No longer registered in
+// IntegrationWiringModule's IExchangePolicyApplier DI slot. Retained on disk
+// (NOT deleted); see AzCliKvSecretReader.cs's retirement banner (task 160) for
+// the full "keep on disk unregistered" rationale this project applies
+// uniformly to every retired shell-out collaborator — reversibility + audit
+// trail over silent deletion, same posture regardless of whether the retired
+// type has its own dedicated test file (this one never did; H14a's own unit
+// tests always faked IExchangePolicyApplier directly, never
+// ExchangePolicyScriptApplier).
+//
+// This retirement closes Option D's zero-shell-out target state for the main
+// Worker process (the last ProcessStartInfo in H14's own collaborator set;
+// H14b/H14c already REST via HttpClient + DefaultAzureCredential, task 160
+// retired the KV-reader shell-out). The pwsh EXO shell-out itself does NOT go
+// away — it moves into the sidecar container where it belongs; the wire
+// contract between Worker and sidecar is the JSON envelope
+// ExchangePolicySidecarClient serializes (task 114's Listener.ps1 documents
+// the authoritative shape).
+//
+// ORIGINAL PURPOSE (retained for audit trail):
+// Production IExchangePolicyApplier — shelled out to the
 // scripts/Set-ExchangeApplicationAccessPolicy.ps1, which owns the
 // ExchangeOnlineManagement PS module connect + Get/New-ApplicationAccessPolicy
 // action-and-verify sequence (spec.md T4). Exchange Online has no REST

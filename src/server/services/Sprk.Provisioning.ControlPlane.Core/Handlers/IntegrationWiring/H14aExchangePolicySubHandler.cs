@@ -128,9 +128,14 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
         var expectedAppIds = new[] { parameters.BffAppRegId, parameters.UamiClientId };
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, expectedAppIds);
 
+        // Task 161 (Wave G-6): CorrelationId = envelope.RunId — placed on the
+        // sidecar's `correlationId` wire field so its stdout log lines
+        // interleave with this Worker's own correlationId=RunId logs in the
+        // shared Log Analytics workspace (Listener.ps1 .OBSERVABILITY note).
         var outcome = await _applier.ApplyAsync(
             new ExchangePolicyApplyRequest(
-                parameters.TenantId, expectedAppIds, parameters.PolicyScopeGroupId, parameters.DescriptionPrefix),
+                parameters.TenantId, expectedAppIds, parameters.PolicyScopeGroupId, parameters.DescriptionPrefix,
+                CorrelationId: envelope.RunId),
             cancellationToken).ConfigureAwait(false);
 
         switch (outcome)

@@ -25,6 +25,24 @@
 // which this task's constraint explicitly leaves UNCHANGED; widening the
 // boot-time gate to fields this task doesn't own would be unreviewed scope
 // creep, not a KV-reader swap.
+//
+// TASK 161 (Wave G-6): added 5 sidecar-client fields for the new
+// ExchangePolicySidecarClient collaborator (replaces ExchangePolicyScriptApplier's
+// pwsh + Set-ExchangeApplicationAccessPolicy.ps1 shell-out — see that file's
+// retirement banner): SidecarBaseUrl, SidecarRequestTimeout,
+// SidecarTransientRetryDelay, SidecarSharedSecret{VaultName,SubscriptionId,Name}.
+// Validate() extended in the SAME scoped-to-this-task's-own-fields posture
+// task 160 established: bounds-checks the URL + two timeouts + a
+// delay-fits-under-timeout invariant, deliberately leaves the 3 shared-secret
+// strings unvalidated at boot (empty is legit in CI/dev where H14a is never
+// dispatched; the runtime failure surfaces at first ApplyAsync with an
+// explicit fail-loud diagnostic — never silent-empty-header). The retired
+// ExchangePolicyScriptApplier's own 3 pwsh/script fields
+// (PwshExecutable / ExchangePolicyScriptPath / ExchangeScriptTimeout) are now
+// dead code — retained on this options class for the same "keep-on-disk"
+// reversibility posture the retired collaborator gets. Removing them is out
+// of scope for this task; task 162's follow-on can prune once the sidecar
+// is live-verified end-to-end.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
@@ -142,16 +160,98 @@ public sealed class IntegrationWiringOptions
     /// </summary>
     public TimeSpan KvReadTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
+    // ---------- Sidecar client (task 161, ExchangePolicySidecarClient) ----------
+
+    /// <summary>
+    /// Base URI of the H14a Exchange ApplicationAccessPolicy sidecar
+    /// (task 114's Listener.ps1). Sitecontainer-private on the App Service's
+    /// localhost namespace; the port is NOT exposed on the App Service's
+    /// public front end per DS-1b §3 topology. Defaults to
+    /// <c>http://127.0.0.1:8091/</c> matching Listener.ps1's own
+    /// <c>SIDECAR_LISTEN_PREFIX</c> default. MUST be an absolute URI — enforced
+    /// by <see cref="Validate"/>.
+    /// </summary>
+    public string SidecarBaseUrl { get; set; } = "http://127.0.0.1:8091/";
+
+    /// <summary>
+    /// Maximum wall-clock time for a single sidecar
+    /// <c>POST /apply-policy</c> HTTP call. Encompasses sidecar cold-start
+    /// (~5-10 s), the <c>Set-ExchangeApplicationAccessPolicy.ps1</c> execution
+    /// (Exchange Online connect + Get-/New-ApplicationAccessPolicy — the
+    /// script's own upper bound is 5 minutes, matched by Listener.ps1's
+    /// <c>timeoutSeconds</c> default of 300), and margin. Defaults to 6
+    /// minutes. Sidecar-side enforcement is currently caller-side per
+    /// Listener.ps1's Invoke-ExchangePolicyScript comment (<c>timeoutSeconds</c>
+    /// on the wire is ADVISORY; the HTTP client's <c>Timeout</c> is the real
+    /// bound). Validated in <c>[30 s, 30 min]</c>.
+    /// </summary>
+    public TimeSpan SidecarRequestTimeout { get; set; } = TimeSpan.FromMinutes(6);
+
+    /// <summary>
+    /// Backoff delay between the initial sidecar call and the one retry
+    /// permitted by <see cref="ExchangePolicySidecarClient"/> (DS-1b §3:
+    /// "One retry with backoff inside the client for transient EXO
+    /// throttling; everything else defers to the run-level §4C retry
+    /// machinery"). Deliberately short — the whole point is that everything
+    /// non-transient falls through to the reconciler. Defaults to 5 seconds.
+    /// Validated in <c>[100 ms, 1 min]</c>.
+    /// </summary>
+    public TimeSpan SidecarTransientRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Platform Key Vault name (bare, e.g. <c>sprk-controlplane-dev-kv</c>)
+    /// holding the per-boot sidecar shared secret. Listener.ps1 reads the
+    /// same value from its own <c>SIDECAR_SHARED_SECRET</c> env var
+    /// (App-Service-resolved KeyVault reference to the same secret) so both
+    /// sides agree without either trusting the other's env exposure. Empty by
+    /// default — a missing/whitespace value is NOT a boot-time failure (Worker
+    /// still boots), but any H14a dispatch will return a
+    /// <see cref="ExchangePolicyApplyOutcome.Failure"/> with an explicit
+    /// "sidecar shared secret config missing" diagnostic (fail-loud at
+    /// first-call, never a silent empty-header 401).
+    /// </summary>
+    public string SidecarSharedSecretVaultName { get; set; } = "";
+
+    /// <summary>
+    /// Azure subscription id scoping the platform Key Vault read for the
+    /// sidecar shared secret. Same empty-default fail-loud posture as
+    /// <see cref="SidecarSharedSecretVaultName"/>.
+    /// </summary>
+    public string SidecarSharedSecretSubscriptionId { get; set; } = "";
+
+    /// <summary>
+    /// Platform KV secret name holding the per-boot sidecar shared secret.
+    /// Defaults to <c>Sidecar-Shared-Secret</c>. MUST match the App-Service
+    /// KeyVault reference that populates the sidecar's
+    /// <c>SIDECAR_SHARED_SECRET</c> env var — see Listener.ps1's
+    /// <c>Test-SecretEqual</c> constant-time compare against
+    /// <c>$env:SIDECAR_SHARED_SECRET</c>.
+    /// </summary>
+    public string SidecarSharedSecretName { get; set; } = "Sidecar-Shared-Secret";
+
     /// <summary>
     /// Startup validation applied by <see cref="IntegrationWiringModule.AddH14IntegrationWiringHandler"/>'s
     /// <c>AddOptions&lt;IntegrationWiringOptions&gt;().ValidateOnStart()</c>
     /// registration (task 160, NFR-05 parity with
     /// <c>RuntimeReferencesOptions.Validate</c> / <c>AppConfigSeedOptions.Validate</c>).
     /// Throws <see cref="InvalidOperationException"/> on an invalid value so
-    /// a misconfigured Worker fails fast at boot rather than on H14b/H14c's
-    /// first dispatch. Scoped to ONLY <see cref="KvReadTimeout"/> — see this
-    /// file's header for why the 7 pre-existing H14a/b/c fields are
-    /// deliberately left out of this task's validation surface.
+    /// a misconfigured Worker fails fast at boot rather than on H14b/H14c/H14a's
+    /// first dispatch.
+    ///
+    /// Scoped to: <see cref="KvReadTimeout"/> (task 160) + the four bounded
+    /// sidecar fields (task 161: <see cref="SidecarBaseUrl"/> absolute-URI,
+    /// <see cref="SidecarRequestTimeout"/> + <see cref="SidecarTransientRetryDelay"/>
+    /// numeric bounds, and the delay-must-fit-under-timeout invariant).
+    /// Deliberately does NOT retroactively validate the 7 pre-existing
+    /// H14a/b/c script-shell / Graph / Dataverse fields — same rationale as
+    /// task 160's file-header note (widening the boot-time gate to fields
+    /// this wave's tasks don't own would be unreviewed scope creep). Also
+    /// deliberately leaves <see cref="SidecarSharedSecretVaultName"/> /
+    /// <see cref="SidecarSharedSecretSubscriptionId"/> /
+    /// <see cref="SidecarSharedSecretName"/> unvalidated at boot — empty
+    /// values are legitimate in CI/dev where H14a is never dispatched; the
+    /// runtime failure surfaces at the first ApplyAsync with an explicit
+    /// diagnostic (fail-loud, never silent-empty-header).
     /// </summary>
     internal void Validate()
     {
@@ -160,6 +260,65 @@ public sealed class IntegrationWiringOptions
             throw new InvalidOperationException(
                 $"Configuration '{IntegrationWiringModule.ConfigSection}:KvReadTimeout' must be between " +
                 $"1 second and 5 minutes (actual: {KvReadTimeout}).");
+        }
+
+        if (!Uri.TryCreate(SidecarBaseUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:SidecarBaseUrl' must be an absolute URI " +
+                $"(actual: '{SidecarBaseUrl}').");
+        }
+
+        if (SidecarRequestTimeout < TimeSpan.FromSeconds(30) || SidecarRequestTimeout > TimeSpan.FromMinutes(30))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:SidecarRequestTimeout' must be between " +
+                $"30 seconds and 30 minutes (actual: {SidecarRequestTimeout}).");
+        }
+
+        if (SidecarTransientRetryDelay < TimeSpan.FromMilliseconds(100) || SidecarTransientRetryDelay > TimeSpan.FromMinutes(1))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:SidecarTransientRetryDelay' must be between " +
+                $"100 milliseconds and 1 minute (actual: {SidecarTransientRetryDelay}).");
+        }
+
+        if (SidecarTransientRetryDelay >= SidecarRequestTimeout)
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:SidecarTransientRetryDelay' " +
+                $"({SidecarTransientRetryDelay}) must be strictly less than SidecarRequestTimeout " +
+                $"({SidecarRequestTimeout}) — otherwise the retry cannot complete within the request budget.");
+        }
+
+        // ALL-OR-NONE shared-secret config drift check (task 161 code-review W1).
+        // A partial config-layer T1 trap: if only ONE of the 3 shared-secret
+        // fields is set (e.g. an operator rotates SidecarSharedSecretName but
+        // forgets to update SidecarSharedSecretVaultName / SubscriptionId),
+        // the client would fail at first ApplyAsync with a confusing
+        // half-configured diagnostic. Boot-time detection of partial
+        // configuration is safe (never fires for the empty-triple CI/dev case
+        // — that's the whole-empty branch, not partial) and catches rotation
+        // drift immediately at Worker startup.
+        var vaultSet = !string.IsNullOrWhiteSpace(SidecarSharedSecretVaultName);
+        var subscriptionSet = !string.IsNullOrWhiteSpace(SidecarSharedSecretSubscriptionId);
+        var nameSet = !string.IsNullOrWhiteSpace(SidecarSharedSecretName)
+            && !string.Equals(SidecarSharedSecretName, "Sidecar-Shared-Secret", StringComparison.Ordinal);
+        var explicitlySet = vaultSet || subscriptionSet || nameSet;
+        var allSet = vaultSet && subscriptionSet
+            && !string.IsNullOrWhiteSpace(SidecarSharedSecretName);   // the default is a valid populated name
+        if (explicitlySet && !allSet)
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:SidecarSharedSecret*' partial " +
+                "configuration detected — some of {VaultName, SubscriptionId, Name} are populated but " +
+                "others are empty. Either bind ALL THREE (production posture) or leave ALL THREE empty " +
+                "(CI/dev where H14a is never dispatched). Partial configuration is a T1 silent-fail " +
+                "trap — a config-rotation half-update would surface only at first ApplyAsync with a " +
+                "confusing diagnostic. Current values: " +
+                $"VaultName='{SidecarSharedSecretVaultName}', " +
+                $"SubscriptionId='{SidecarSharedSecretSubscriptionId}', " +
+                $"Name='{SidecarSharedSecretName}'.");
         }
     }
 }

@@ -263,7 +263,7 @@ _H14 KV-reader swap, H14a sidecar client wiring, sidecar live verification_
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 160 | ✅ | H14: KV-reader swap (AzCliKvSecretReader -> SecretClient) | FULL | sonnet / high | waveG6-parallel | 125, 153 |
-| 161 | 🔲 | H14a: sidecar client wiring (ExchangePolicySidecarClient : IExchangePolicyApplier) + envelope round-trip contract test | FULL | opus / high | none | 114, 160 |
+| 161 | ✅ | H14a: sidecar client wiring (ExchangePolicySidecarClient : IExchangePolicyApplier) + envelope round-trip contract test | FULL | opus / high | none | 114, 160 |
 | 162 | 🔲 | Sidecar live verification against dev L2 Worker App Service (localhost sitecontainer binding + per-boot shared-secret header) | FULL | opus / high | none | 101, 113, 114, 161 |
 
 ### Phase C'' Wave G-7 -- Acceptance (17 tasks)
