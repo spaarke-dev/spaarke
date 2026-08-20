@@ -1,8 +1,8 @@
 # TASK-INDEX — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Wave G-2.5 -- tasks 127/128/129 authored, closing customer.bicep gaps flagged by tasks 123 + 126; Path 1 owner decision -- see notes/)
+> **Last Updated**: 2026-08-19 (Wave G-2.5 -- tasks 127/128/129 authored, closing customer.bicep gaps flagged by tasks 123 + 126; Path 1 owner decision -- see notes/. Task 128b added same day during task 128's authoring, closing the DocIntel/AppInsights/LogAnalytics/Redis gap per E1/E2 escalation.)
 > **Status**: Ready for `task-execute` (Phase A first); Phase C'' (100-186) is the execution-engine build phase delivering FR-18/SC#5 E2E provisioning
-> **Task count**: 139 POMLs (78 original across 10 phases + 61 Phase C'' across 8 waves, incl. Wave G-2.5)
+> **Task count**: 140 POMLs (78 original across 10 phases + 62 Phase C'' across 8 waves, incl. Wave G-2.5's 4 tasks 127/128/128b/129)
 > **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Design**: [`../design.md`](../design.md) v3.3
 > **Legend**: 🔲 not-started · 🟡 in-progress · ✅ completed · 🔄 needs-retry · ⏸ blocked · ⏭️ deferred
 
@@ -212,15 +212,16 @@ _H0/H1/H0.5/H2a/H2b/H4 SDK ports incl. H4 real-value-sourcing correctness gate_
 | 125 | ✅ | H4: SecretClient family port + ARM.AppService KeyVaultReferenceIdentity PATCH (T1) both slots + ARM.Authorization role assignment (T5) | FULL | sonnet / high | none | 102, 103, 123 |
 | 126 | ✅ | H4: real value-sourcing per KvSecretValueSource (generate/copy/reference) + task-084 canonical manifest DI-swap (C2.2) | FULL | sonnet / xhigh | none | 125 |
 
-### Phase C'' Wave G-2.5 -- customer.bicep completion (3 tasks, Path 1 owner decision post-Wave-G-2)
+### Phase C'' Wave G-2.5 -- customer.bicep completion (4 tasks, Path 1 owner decision post-Wave-G-2; 128b added 2026-08-19 during task 128's authoring per E1/E2 escalation)
 
-_Task 123's + task 126's discovery notes both flagged that customer.bicep (the only Bicep template task 123's ArmDeploymentRunner deploys in production) is missing resources every downstream Wave G-3/G-4 handler assumes exist. Owner chose Path 1: close these gaps BEFORE dispatching Wave G-3's H3/H8/H9 handler ports. 127+128 are parallel-safe against each other (disjoint insertion zones in customer.bicep); 129 is sequential after both (needs 127's App Service + 128's OpenAI/AI Search outputs)._
+_Task 123's + task 126's discovery notes both flagged that customer.bicep (the only Bicep template task 123's ArmDeploymentRunner deploys in production) is missing resources every downstream Wave G-3/G-4 handler assumes exist. Owner chose Path 1: close these gaps BEFORE dispatching Wave G-3's H3/H8/H9 handler ports. 127+128 are parallel-safe against each other (disjoint insertion zones in customer.bicep). 128b is sequential after 127+128 (needs 127's UAMI output + 128's AI-Search-adjacency zone) and was authored mid-wave when 127's and 128's own escalation triggers (E1: DocIntel/AppInsights out of both tasks' declared scope) and 129's escalation trigger (E2: Redis per-env-vs-per-customer conflict, owner-reconciled for Model2Dedicated only) surfaced a third gap. 129 is sequential after 127+128 (and, per 128b's own escalation trigger 3, should ideally be re-verified against 128b's landed state before executing, since 128b resolves 3-4 of 129's originally-omitted kv-secrets entries)._
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 127 | ✅ | customer.bicep: wire UAMI + BFF App Service (plan + prod/staging slots) -- reuses existing modules/uami.bicep + app-service*.bicep (tasks 028/029), currently orphaned | FULL | sonnet / high | waveG2point5-parallel | 102, 103, 123 |
 | 128 | ✅ | customer.bicep: wire Azure OpenAI + AI Search modules -- reuses existing modules/openai.bicep + ai-search.bicep, currently orphaned | FULL | sonnet / high | waveG2point5-parallel | 102, 103, 123, 124 |
-| 129 | 🔲 | customer.bicep: invoke kv-secrets.generated.bicep (task 084) with real values from sibling-module outputs -- closes 6 of 15 FromBicepOutput gaps flagged by task 126 Deviation #3; 9 residual gaps escalated (Redis per-env conflict, BFF-API-Client* manifest-classification concern, DocIntel/AppInsights out-of-scope, SPE-* runtime-only) | FULL | sonnet / high | none | 102, 103, 123, 127, 128 |
+| 128b | 🔲 | customer.bicep: wire Document Intelligence + App Insights + Log Analytics + Redis -- reuses existing modules/doc-intelligence.bicep + monitoring.bicep + redis.bicep, currently orphaned; Redis wiring reverses a v3.2 documented decision per owner E2 reconciliation (escalation trigger flags this for a spec.md/design.md v3.3 amendment) | FULL | sonnet / high | none | 102, 103, 123, 127, 128 |
+| 129 | 🔲 | customer.bicep: invoke kv-secrets.generated.bicep (task 084) with real values from sibling-module outputs -- closes 6 of 15 FromBicepOutput gaps flagged by task 126 Deviation #3; 9 residual gaps escalated (Redis per-env conflict, BFF-API-Client* manifest-classification concern, DocIntel/AppInsights out-of-scope, SPE-* runtime-only) -- **NOTE (2026-08-19)**: 3-4 of these 9 omissions may now be resolvable once 128b lands; re-verify 129's triage before executing if 128b landed after 129 was authored | FULL | sonnet / high | none | 102, 103, 123, 127, 128 |
 
 ### Phase C'' Wave G-3 -- Identity + deploy (3 tasks)
 

@@ -1,15 +1,28 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 128 COMPLETE — customer.bicep now also wires Azure OpenAI + AI Search (modules/openai.bicep + modules/ai-search.bicep, both unmodified). Path 1 (owner decision): 129 next (kv-secrets.generated.bicep wiring), THEN Wave G-3 dispatch. 128.5 (Doc Intelligence + App Insights + Log Analytics + Redis) authored in parallel by a sibling agent — separate task, not landed by this commit.)
+> **Last Updated**: 2026-08-20 (Task 128 COMPLETE — customer.bicep now also wires Azure OpenAI + AI Search (modules/openai.bicep + modules/ai-search.bicep, both unmodified). Task 128b AUTHORED (not executed) — closes the DocIntel/AppInsights/LogAnalytics/Redis gap both 127's and 128's escalation triggers flagged (E1), plus the Redis per-env-vs-per-customer conflict 129's escalation trigger flagged (E2, owner-reconciled for Model2Dedicated). Path 1 (owner decision) dispatch order: 128b next, THEN 129 (kv-secrets.generated.bicep wiring — re-verify its triage against 128b's landed state first, per 128b's own escalation trigger), THEN Wave G-3 dispatch.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + task 129 (customer.bicep kv-secrets wiring) + 128.5 remain)
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + task 128b (authored, not executed) + task 129 (customer.bicep kv-secrets wiring) remain)
+
+## Task 128b — AUTHORED, NOT EXECUTED (2026-08-19/20)
+
+New POML [`tasks/128b-customer-bicep-docintel-appinsights-loganalytics-redis-wiring.poml`](./tasks/128b-customer-bicep-docintel-appinsights-loganalytics-redis-wiring.poml) authored during task 128's own authoring pass, closing two separate escalation findings:
+
+- **E1** (task 127's + task 128's escalation triggers): spec.md FR-04 / design.md §7.2 rows 11-12 require Document Intelligence + App Insights/Log Analytics wired into customer.bicep; both tasks flagged it out-of-scope rather than silently expanding. `modules/doc-intelligence.bicep` and `modules/monitoring.bicep` (single module = App Insights + Log Analytics) already exist, grep-verified orphaned as far as customer.bicep is concerned.
+- **E2** (task 129's escalation trigger): manifest.yaml's `Redis-ConnectionString` `FromBicepOutput` classification conflicts with the documented per-environment Redis architecture (Q-E FR-12). Owner reconciliation: since customer.bicep is confirmed to be the sole template deployed for the Model2Dedicated branch only, "per-environment" and "per-customer" are the same unit for THIS template — `modules/redis.bicep` (already exists, FR-09 hardened) is wired unconditionally.
+
+**IMPORTANT — this reverses a versioned (v3.2) documented decision.** spec.md item 19/FR-04/§MUST-Rules and design.md §7.2's Resource Catalog (struck row 6) + shared-vs-dedicated disposition table (Redis marked "shared" for BOTH Model 1 and Model 2) and §7.6/§7.7 ALL currently assert Redis is per-environment, NOT per-customer, with no exception carved out for Model 2 dedicated. Task 128b's own `<escalation>` block requires this be confirmed with the project owner BEFORE dispatch, and — if confirmed — treated as a **Path B (ADR/spec amendment)** per root CLAUDE.md §6.5: a spec.md/design.md v3.3 amendment should land before or alongside 128b's execution so the documents stop contradicting the code. **This is a genuine open item for the next session/owner — not silently resolved by authoring 128b.**
+
+Task 128b also flags (escalation trigger 3): once it lands, 3-4 of task 129's 9 documented "not resolvable" kv-secrets entries (DocumentIntelligence-ApiKey, DocumentIntelligence-Endpoint, AppInsights-ConnectionString, and pending E1/E2's resolution, Redis-ConnectionString) become potentially resolvable. Task 129's triage should be re-verified against 128b's actual landed state before 129 executes.
+
+**Not executed** — authoring only, per the dispatch instruction that produced this POML. `infrastructure/bicep/customer.bicep` is untouched by this entry.
 
 ## Task 128 — COMPLETE (2026-08-20)
 
 Wired `modules/openai.bicep` + `modules/ai-search.bicep` (task 046, both UNMODIFIED per CLAUDE.md §11) into `infrastructure/bicep/customer.bicep`, inserted immediately after the Cosmos DB section / before Membership Topic (task 128's declared insertion zone, disjoint from task 127's UAMI/App Service zones). OpenAI named `sprk-{customerId}-{env}-openai`, AI Search named `sprk-{customerId}-{env}-search` per design.md §7.1. NO `deployments` override passed to openai.bicep — module default array (150/200/30/350 TPM) is verified byte-for-byte identical to design.md §7.4 + spec.md NFR-12. AI Search uses module defaults throughout (task 124's completion notes confirm SearchIndexClientProvisioner needs only the service endpoint via UAMI-pinned TokenCredential — zero admin-key handling, no additional infra shape). Both modules granted Cognitive Services User RBAC via `uami.outputs.principalId` (task 127's uami module). Two new outputs added under the exact required names: `openAiEndpoint`, `aiSearchEndpoint` (ArmDeploymentRunner.MapOutputs contract, task 123). No raw `openAiKey`/`searchServiceAdminKey` echoed (task 129's scope). `az bicep build` exits 0 with 7 pre-existing warnings (verified zero net-new against baseline). Live `az deployment sub what-if` (throwaway `customerId=t128wif`) returned `status: Succeeded`, 27 resources `Create` — the 2 new AI resources (plus the pre-existing `keyVault`) were short-circuited from per-resource what-if detail by a confirmed PRE-EXISTING ARM limitation (nested deployment consuming a sibling module's not-yet-resolved output), not introduced by this task. Quality gates (code-review + adr-check) both passed clean — 0 critical, 0 warnings, 0 ADR violations.
 
-**Remaining customer.bicep gap**: task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2) is NOT done yet. Task 128.5 (Doc Intelligence + App Insights + Log Analytics + Redis) is out of this task's scope (being authored in parallel by a sibling agent as of this write).
+**Remaining customer.bicep gaps**: task 128b (Doc Intelligence + App Insights + Log Analytics + Redis — authored, not yet executed, see above) and task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2, not done yet).
 
 ## Task 127 — COMPLETE (2026-08-19, commit `8fdd0e2d0`)
 
@@ -127,6 +140,8 @@ Phase C'' delivers r1's stated E2E goal. Wave G-1 (foundation) and Wave G-2 (SDK
 **Discovered**: 2026-08-19 by task 123 (H2a agent) via real ARM calls against a live subscription. Not introduced by task 123 — pre-existing gap made visible.
 
 **Fix scope**: Author the missing modules + wire them into customer.bicep. Estimate: 4-6 new modules + customer.bicep amendments ≈ 500-800 LOC of Bicep. Needs its own POML(s), probably 2-3 tasks (one per resource family: `customer-uami.bicep`, `customer-appservice.bicep`, `customer-openai.bicep`, `customer-aisearch.bicep`).
+
+**Status (2026-08-19/20)**: UAMI + App Service closed by task 127 (✅). OpenAI + AI Search closed by task 128 (✅). Document Intelligence + App Insights + Log Analytics + Redis (the residual slice of this item, plus the E2 Redis-per-customer reconciliation) closed by **task 128b** — POML authored, not yet executed. See "Task 128b — AUTHORED, NOT EXECUTED" above for the full escalation context (E1/E2), including the still-open spec.md/design.md v3.3 amendment question this reconciliation raises.
 
 **Cross-references**: task 123 flagged in POML `<notes>` COMPLETION section + `ArmDeploymentRunner.cs` header comment.
 
