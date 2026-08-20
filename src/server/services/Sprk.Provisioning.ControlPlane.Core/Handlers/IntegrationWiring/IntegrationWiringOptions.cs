@@ -19,12 +19,11 @@
 // IntegrationWiringModule's AddOptions&lt;T&gt;().Bind().Validate().ValidateOnStart()
 // (parity with task 153's RuntimeReferencesOptions / task 151's
 // AppConfigSeedOptions precedent). Deliberately does NOT retroactively
-// validate the 7 pre-existing fields below (PwshExecutable,
-// ExchangePolicyScriptPath, ExchangeScriptTimeout, GraphRequestTimeout,
-// DataverseRequestTimeout, ServiceEndpoint*) — those belong to H14a/H14b/H14c,
-// which this task's constraint explicitly leaves UNCHANGED; widening the
-// boot-time gate to fields this task doesn't own would be unreviewed scope
-// creep, not a KV-reader swap.
+// validate the pre-existing H14a/b/c fields (ExchangePolicyDescriptionPrefix,
+// GraphRequestTimeout, DataverseRequestTimeout, ServiceEndpoint*) — those
+// belong to H14a/H14b/H14c, which this task's constraint explicitly leaves
+// UNCHANGED; widening the boot-time gate to fields this task doesn't own
+// would be unreviewed scope creep, not a KV-reader swap.
 //
 // TASK 161 (Wave G-6): added 5 sidecar-client fields for the new
 // ExchangePolicySidecarClient collaborator (replaces ExchangePolicyScriptApplier's
@@ -36,13 +35,21 @@
 // delay-fits-under-timeout invariant, deliberately leaves the 3 shared-secret
 // strings unvalidated at boot (empty is legit in CI/dev where H14a is never
 // dispatched; the runtime failure surfaces at first ApplyAsync with an
-// explicit fail-loud diagnostic — never silent-empty-header). The retired
-// ExchangePolicyScriptApplier's own 3 pwsh/script fields
-// (PwshExecutable / ExchangePolicyScriptPath / ExchangeScriptTimeout) are now
-// dead code — retained on this options class for the same "keep-on-disk"
-// reversibility posture the retired collaborator gets. Removing them is out
-// of scope for this task; task 162's follow-on can prune once the sidecar
-// is live-verified end-to-end.
+// explicit fail-loud diagnostic — never silent-empty-header).
+//
+// TASK 162 (Wave G-6 Batch G-6C): W3 CLEANUP — removed the 3 fossilized
+// script-shell fields (PwshExecutable / ExchangePolicyScriptPath /
+// ExchangeScriptTimeout) that task 161 deliberately deferred. They were only
+// ever consumed by the retired ExchangePolicyScriptApplier (task 161 kept it
+// on disk unregistered per the uniform "keep on disk with retirement banner"
+// convention); their default values are now inlined as `private static
+// readonly` constants inside that retired file itself — parity with task
+// 160's AzCliKvSecretReader own KvSecretReadTimeout inline. The live options
+// class therefore no longer exposes any configuration surface tied to the
+// retired shell-out path, which prevents configuration authors from
+// accidentally binding values that will silently do nothing. Note: the sidecar
+// client STILL uses ExchangePolicyDescriptionPrefix below (sent as
+// descriptionPrefix on the wire — Listener.ps1 line 23), so it is NOT dead.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
@@ -53,37 +60,18 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 /// </summary>
 public sealed class IntegrationWiringOptions
 {
-    // ---------- H14a Exchange (script shell-out) ----------
-
-    /// <summary>
-    /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
-    /// PATH). Parity with <see cref="EntraAppReg.EntraAppRegOptions.PwshExecutable"/>.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Absolute path to <c>scripts/Set-ExchangeApplicationAccessPolicy.ps1</c>.
-    /// Defaults to <c>scripts/Set-ExchangeApplicationAccessPolicy.ps1</c>
-    /// relative to <see cref="AppContext.BaseDirectory"/>; production
-    /// deployments should override via app-setting so the linux-x64 publish
-    /// layout is honored.
-    /// </summary>
-    public string ExchangePolicyScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "Set-ExchangeApplicationAccessPolicy.ps1");
-
-    /// <summary>
-    /// Maximum time to wait for a single Set-ExchangeApplicationAccessPolicy.ps1
-    /// invocation. Defaults to 5 minutes — Exchange Online connect + policy
-    /// list/create typically completes in under a minute, but EXO throttling
-    /// can extend it.
-    /// </summary>
-    public TimeSpan ExchangeScriptTimeout { get; set; } = TimeSpan.FromMinutes(5);
+    // ---------- H14a Exchange policy naming (sidecar wire) ----------
 
     /// <summary>
     /// Description prefix applied to every <c>New-ApplicationAccessPolicy</c>
-    /// call so policies created by H14 are greppable in
+    /// call inside the sidecar so policies created by H14 are greppable in
     /// <c>Get-ApplicationAccessPolicy</c> output. Full description is
-    /// <c>{prefix}-{appId}</c>.
+    /// <c>{prefix}-{appId}</c>. Sent to the sidecar on the wire as
+    /// <c>descriptionPrefix</c> (Listener.ps1 line 23). Empty value causes
+    /// the sidecar to fall back to its own server-side default
+    /// (<c>Spaarke-Provisioning-AppAccessPolicy</c>); see
+    /// <see cref="ExchangePolicySidecarClient.BuildWireRequest"/> for the
+    /// omit-when-empty envelope behavior.
     /// </summary>
     public string ExchangePolicyDescriptionPrefix { get; set; } = "Spaarke-Provisioning-AppAccessPolicy";
 
@@ -242,10 +230,11 @@ public sealed class IntegrationWiringOptions
     /// sidecar fields (task 161: <see cref="SidecarBaseUrl"/> absolute-URI,
     /// <see cref="SidecarRequestTimeout"/> + <see cref="SidecarTransientRetryDelay"/>
     /// numeric bounds, and the delay-must-fit-under-timeout invariant).
-    /// Deliberately does NOT retroactively validate the 7 pre-existing
-    /// H14a/b/c script-shell / Graph / Dataverse fields — same rationale as
-    /// task 160's file-header note (widening the boot-time gate to fields
-    /// this wave's tasks don't own would be unreviewed scope creep). Also
+    /// Deliberately does NOT retroactively validate the pre-existing
+    /// H14a/b/c fields (ExchangePolicyDescriptionPrefix / Graph* /
+    /// Dataverse* / ServiceEndpoint*) — same rationale as task 160's
+    /// file-header note (widening the boot-time gate to fields this wave's
+    /// tasks don't own would be unreviewed scope creep). Also
     /// deliberately leaves <see cref="SidecarSharedSecretVaultName"/> /
     /// <see cref="SidecarSharedSecretSubscriptionId"/> /
     /// <see cref="SidecarSharedSecretName"/> unvalidated at boot — empty

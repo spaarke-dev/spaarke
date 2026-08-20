@@ -5,12 +5,13 @@
 // handler + its 3 DAG-parallel sub-handlers (task 073).
 //
 // SCOPE:
-//   - Bind IntegrationWiring:{PwshExecutable, ExchangePolicyScriptPath,
-//     ExchangeScriptTimeout, ExchangePolicyDescriptionPrefix,
+//   - Bind IntegrationWiring:{ExchangePolicyDescriptionPrefix,
 //     GraphRequestTimeout, GraphSubscriptionExpirationMinutes,
 //     DataverseRequestTimeout, ServiceEndpoint*, KvReadTimeout,
 //     SidecarBaseUrl, SidecarRequestTimeout, SidecarTransientRetryDelay,
-//     SidecarSharedSecret*} options.
+//     SidecarSharedSecret*} options. (Task 162 W3 cleanup: removed
+//     PwshExecutable / ExchangePolicyScriptPath / ExchangeScriptTimeout —
+//     see IntegrationWiringOptions.cs file header for rationale.)
 //   - Register the 7 collaborator seams (IExchangePolicyApplier,
 //     IKvSecretReader, IGraphSubscriptionCreator, IServiceEndpointWebhookRegistrar)
 //     + the 4 handler types (H14a/b/c sub-handlers + H14 parent).

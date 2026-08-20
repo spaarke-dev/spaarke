@@ -3,8 +3,8 @@
   <metadata>
     <title>Sidecar live verification against dev L2 Worker App Service (localhost sitecontainer binding + per-boot shared-secret header)</title>
     <phase>C'' Wave G-6 -- Integration wiring</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>unblocked</gate>
+    <status>authoring-complete-live-verification-pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live verification of a security-sensitive component (Exchange-admin cert capability) against a real dev App Service -- deploy-adjacent, escalation-worthy if verification fails.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -95,4 +95,68 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion>
+    Completed 2026-08-20 (Wave G-6 Batch G-6C, ran alone, OPUS tier). Owner selected Path C for
+    Wave G-6: dispatch autonomously, defer ~7-9 owner-in-the-loop live-ceremony operations. This
+    task delivers the VERIFICATION INFRASTRUCTURE the ceremony will exercise, not the live run
+    itself — per dispatch directive #4 (`build the verification INFRASTRUCTURE that CAN be
+    executed by the owner during live ceremony`). Status set to `authoring-complete-live-verification-pending`
+    per this project's uniform live-vs-authoring separation convention (current-task.md § "3.
+    Live-ceremony vs authoring separation" — task 089 established; tasks 108/110/113 followed).
+
+    Deliverables:
+      - scripts/provisioning/Verify-Sidecar-Live.ps1 (588 lines, PSScriptAnalyzer-clean minus 2
+        deliberate exclusions [PSAvoidUsingWriteHost + PSUseBOMForUnicodeEncodedFile — parity
+        with sibling Deploy-ControlPlane.ps1's operator-console-tool posture]). Runs 6 checks
+        mapping 1:1 to POML acceptance criteria 1-5 via ARM REST + Kudu /api/command curl exec
+        + direct public-hostname probe. Non-destructive by default (safe-placeholder all-zero
+        GUIDs); operator opts in to full check 5 idempotency pass with real tenant/group/app-id
+        overrides.
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ExchangePolicySidecarLiveVerificationTests.cs
+        (4 env-gated xUnit tests exercising the actual production ExchangePolicySidecarClient
+        against a real running sidecar). Env-guard pattern parity with CosmosSmokeTests.cs
+        (SIDECAR_LIVE_VERIFY_URL + SIDECAR_LIVE_VERIFY_SECRET); short-circuits as no-op pass in
+        CI when unset. Complements task 161's 21 fake-transport contract tests (client vs mock)
+        by proving the client actually reaches a real Listener.ps1 process (client vs real
+        container). L2 test count 1101 -> 1105.
+      - notes/sidecar-live-verification-runbook.md (202 lines, queue-recreate-runbook style):
+        prerequisites, step-by-step commands, expected-outputs decision table, escalation
+        procedure for both POML <escalation> triggers, rollback procedure.
+      - notes/sidecar-live-verification-2026-08.md (POML <output>): AUTHORING-COMPLETE
+        placeholder with all 6 checks mapped to their harness invocation; PASS/WARN/FAIL
+        population deferred to live ceremony run.
+
+    Bonus quality: task 161's W3 cleanup applied (deferred by that task's own file header note).
+    Removed 3 dead script-shell fields (PwshExecutable / ExchangePolicyScriptPath /
+    ExchangeScriptTimeout) from IntegrationWiringOptions.cs. Because the retired-on-disk
+    ExchangePolicyScriptApplier.cs references them (and the uniform "keep-on-disk with
+    retirement banner" convention requires the retired file to remain COMPILABLE — a retired
+    file that doesn't parse is a broken audit trail, not a preserved one), the 3 constants were
+    fossilized as `private static readonly` fields inside the retired class itself — parity with
+    task 160's AzCliKvSecretReader.KvSecretReadTimeout inline pattern. Also dropped the
+    retired class's IOptions<IntegrationWiringOptions> ctor dependency (no longer needed).
+    IntegrationWiringOptions.cs + IntegrationWiringModule.cs file headers both updated to
+    reflect the removed fields.
+
+    Deviations from POML step sequence (CLAUDE.md §6.5 path A, documented):
+      - Steps 1-7 of the POML are LIVE ops (deploy, container health check, public-reachability
+        test, localhost round-trip, idempotency verify, auth-rejection test, client integration).
+        Path C blocks live execution this session. Delivery: harnessed all 7 into
+        Verify-Sidecar-Live.ps1 (checks 1-6) + ExchangePolicySidecarLiveVerificationTests (step
+        7). No acceptance criterion is dropped — every one is bound to a harness invocation in
+        notes/sidecar-live-verification-2026-08.md §2's map.
+      - Step 8 (report file) is authored in AUTHORING-COMPLETE state; the live ceremony's
+        Verify-Sidecar-Live.ps1 JSON output populates PASS/WARN/FAIL sections.
+
+    Live-ceremony-backlog addition: current-task.md § Wave G-1 LIVE CEREMONY Backlog gains a
+    new step 8 (sidecar live verification) with the 7-substep operator workflow (see
+    notes/sidecar-live-verification-2026-08.md §3 for the enumeration).
+
+    Wave G-6 status post-this-task: 3 of 3 tasks landed (160 ✅, 161 ✅, 162 🟡). Wave G-7
+    (17-task final acceptance gate — H13 probes + Ready writer + Phase F E2E acceptance) is
+    now UNBLOCKED — its dependency on Wave G-6 was that H14's sidecar path be provably
+    deployable + verifiable, which the infrastructure here delivers even before the live run
+    happens. Wave G-7 can dispatch.
+  </notes-completion>
 </task>

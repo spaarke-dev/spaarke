@@ -1,6 +1,66 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 161 COMPLETE — H14a sidecar client wiring, Wave G-6 Batch G-6B
+> **Last Updated**: 2026-08-20 (Task 162 COMPLETE — Sidecar live verification INFRASTRUCTURE,
+> Wave G-6 Batch G-6C [ran alone this dispatch, OPUS tier — Opus subagent under Opus 4.7 main-session].
+> Owner selected Path C for Wave G-6 (dispatch autonomously, defer live ceremony) — this task
+> delivers the VERIFICATION INFRASTRUCTURE the ceremony will exercise, not the live run itself
+> (per dispatch directive #4). New `scripts/provisioning/Verify-Sidecar-Live.ps1` (588 lines,
+> PSScriptAnalyzer-clean minus 2 deliberate exclusions PSAvoidUsingWriteHost +
+> PSUseBOMForUnicodeEncodedFile — parity with sibling Deploy-ControlPlane.ps1's operator-console
+> posture): runs 6 non-destructive checks mapping 1:1 to POML acceptance criteria 1-5 via ARM REST
+> + Kudu /api/command curl exec + direct public-hostname probe. Safe-default (all-zero GUIDs
+> reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline
+> before any real Exchange mutation); operator opts in to full check 5 idempotency pass with
+> real tenant/group/app-id overrides. Includes structured JSON report output (`-ReportPath`).
+> **Both POML `<escalation>` triggers wired explicitly**: PUBLIC_ISOLATION FAIL with 2xx → HIGH-
+> severity security finding (Exchange-admin-capability publicly reachable); AUTH_REJECTION FAIL
+> with non-401 → HIGH-severity security finding (unauthenticated requests accepted).
+> **New env-gated xUnit test file** `ExchangePolicySidecarLiveVerificationTests.cs` (4 tests
+> exercising the actual production `ExchangePolicySidecarClient` against a real running sidecar,
+> env-guard pattern parity with `CosmosSmokeTests.cs`'s `SIDECAR_LIVE_VERIFY_URL` +
+> `SIDECAR_LIVE_VERIFY_SECRET` — short-circuits as no-op passes in CI when unset). Complements
+> task 161's 21 fake-transport contract tests (client vs mock) by proving the client actually
+> reaches a real `Listener.ps1` process at the process/container level (client vs real container).
+> Coverage: AC-CLIENT-1 (structured envelope returned), AC-CLIENT-2 (valid X-Sidecar-Auth
+> accepted), AC-CLIENT-3 (wrong secret → HTTP 401 → terminal Failure — SECURITY-CRITICAL, throws
+> if Applied), AC-CLIENT-3b (empty config short-circuits BEFORE HTTP call, KV reader never
+> invoked — defense-in-depth silent-fail-audit), AC-CLIENT-4 (GET /healthz returns 200 "ok").
+> **New runbook** `notes/sidecar-live-verification-runbook.md` (202 lines, queue-recreate-runbook
+> style): prerequisites, step-by-step commands, expected-outputs decision table for every check,
+> escalation procedure for both `<escalation>` triggers, rollback procedure (comment out
+> sitecontainer resource + redeploy → H14a dispatches surface Resumable → run stays in-progress,
+> deliberate fail-closed shape). **New verification report** `notes/sidecar-live-verification-2026-08.md`
+> (POML `<output>`): AUTHORING-COMPLETE placeholder with all 6 checks mapped to their harness
+> invocation; PASS/WARN/FAIL population deferred to live-ceremony run. **W3 CLEANUP** (task 161's
+> file-header explicitly deferred to this task): removed 3 dead script-shell fields
+> (PwshExecutable / ExchangePolicyScriptPath / ExchangeScriptTimeout) from `IntegrationWiringOptions.cs`.
+> Because the retired-on-disk `ExchangePolicyScriptApplier.cs` references them AND the uniform
+> "keep-on-disk with retirement banner" convention requires the retired file to remain COMPILABLE
+> (a retired file that doesn't parse is a broken audit trail, not a preserved one), the 3
+> constants were fossilized as `private static readonly` fields inside the retired class itself
+> — parity with task 160's `AzCliKvSecretReader.KvSecretReadTimeout` inline pattern. Also
+> dropped the retired class's `IOptions<IntegrationWiringOptions>` ctor dependency (no longer
+> needed). `IntegrationWiringOptions.cs` + `IntegrationWiringModule.cs` file headers both updated
+> to reflect the removed fields. Options bind surface for H14 shrinks by 3 fields — makers can
+> no longer accidentally bind values that will silently do nothing. **Deviations from POML step
+> sequence (CLAUDE.md §6.5 path A documented)**: steps 1-7 are LIVE ops (deploy + 6 checks +
+> client integration) that Path C blocks in this session; delivery harnesses all 7 into the
+> Verify-Sidecar-Live.ps1 script (checks 1-6) + ExchangePolicySidecarLiveVerificationTests
+> (step 7). No acceptance criterion is dropped — every one is bound to a harness invocation in
+> the acceptance-criteria map (notes/sidecar-live-verification-2026-08.md §2). Step 8 (report
+> file) is authored in the intended AUTHORING-COMPLETE state per this project's uniform
+> live-vs-authoring separation convention. **Live-ceremony backlog addition**: new step 8
+> (sidecar live verification, 7-substep operator workflow) appended to Wave G-1 LIVE CEREMONY
+> Backlog below — sequentially depends on live ceremony step 5 (Deploy-ControlPlane.ps1 executed)
+> AND task 115's CI-sidecar-image-push OR a manual `az acr build` + Bicep re-deploy landing the
+> real sitecontainer image. L2 tests: 1101 → **1105/1105** [+4 env-gated live-verification tests,
+> all short-circuit-passing in CI when env vars unset, zero regressions]. **Wave G-6 status
+> post-this-task: 3 of 3 tasks landed (160 ✅, 161 ✅, 162 🟡)** — Wave G-7 (17-task final
+> acceptance gate: H13 probes + Ready writer + real Phase F E2E acceptance) is now UNBLOCKED
+> for dispatch; its dependency on Wave G-6 was that H14's sidecar path be provably deployable +
+> verifiable, which the infrastructure here delivers even before the live run happens.)
+>
+> **Previous** (2026-08-20, Task 161 COMPLETE — H14a sidecar client wiring, Wave G-6 Batch G-6B
 > [ran alone this dispatch, OPUS tier — Opus subagent under Opus 4.7 main-session]. New
 > `ExchangePolicySidecarClient.cs` (typed HttpClient posting to task 114's sitecontainer-private
 > sidecar on `http://127.0.0.1:8091/apply-policy`) replaces the retired `ExchangePolicyScriptApplier`
@@ -1080,6 +1140,25 @@ Once step 5 completes cleanly:
 ### 7. auth-v4 phase-5 secret retirement coordination (deferred, ongoing)
 
 auth-v4 owns the schedule. r1's obligation: honor the pluggability contract (POMLs 125/126/130/142 amended per commit `8edc72d66`). Not a live ceremony action this session — reminder for Wave-G-3 dispatch: check auth-v4's rollout state before starting task 130 (H3 heavy Graph port with FIC branch).
+
+### 8. Sidecar live verification (task 162 — added 2026-08-20)
+
+**Prerequisite**: live ceremony steps 1-7 complete AND sidecar image pushed to platform ACR (sitecontainer's `acrImageTag` no longer the `mcr.microsoft.com/appsvc/staticsite:latest` placeholder — either via task 115's CI workflow landing or a manual `az acr build` + Bicep re-deploy).
+
+**Harness**: [`scripts/provisioning/Verify-Sidecar-Live.ps1`](../../scripts/provisioning/Verify-Sidecar-Live.ps1) (6 non-destructive checks) + [`ExchangePolicySidecarLiveVerificationTests.cs`](../../src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ExchangePolicySidecarLiveVerificationTests.cs) (4 env-gated xUnit tests exercising the real production client).
+
+**Runbook**: [`notes/sidecar-live-verification-runbook.md`](sidecar-live-verification-runbook.md) — prerequisites, expected outputs, escalation procedures for both POML `<escalation>` triggers, rollback procedure.
+
+**Steps**:
+1. Confirm the sitecontainer's `acrImageTag` is a real ACR image, not the placeholder — `az resource show --resource-group rg-spaarke-platform-dev --name spaarke-provisioning-controlplane-worker-dev/exchange-policy-sidecar --resource-type "Microsoft.Web/sites/sitecontainers" --query "properties.image" -o tsv`.
+2. Run the harness in safe-default mode: `./scripts/provisioning/Verify-Sidecar-Live.ps1 -Environment dev -ReportPath notes/sidecar-live-verification-{yyyy-mm-dd}.json`. Expected: 5 PASS + 1 WARN (check 5 idempotency, safe-default mode).
+3. Read the JSON report; confirm every FAIL is understood + fixable. Any `SECURITY-CRITICAL` diagnostic (PUBLIC_ISOLATION or AUTH_REJECTION FAIL) → STOP + escalate per POML `<escalation>` triggers.
+4. (Optional) Full check 5 pass against a safely-scoped test tenant: re-run with `-TenantId`, `-PolicyScopeGroupId`, `-ExpectedAppIds` overrides.
+5. (Optional) C# client end-to-end: from a workstation with reach to the sidecar (local docker or Kudu SSH tunnel), set `SIDECAR_LIVE_VERIFY_URL` + `SIDECAR_LIVE_VERIFY_SECRET`, run `dotnet test --filter FullyQualifiedName~ExchangePolicySidecarLiveVerificationTests`.
+6. Copy the JSON report content into `notes/sidecar-live-verification-{yyyy-mm-dd}.md` (h10-live-verification-2026-08.md precedent). Flip TASK-INDEX row 162 🟡 → ✅.
+7. Wave G-7 (17-task final acceptance gate, includes T4 probe task 180 + Phase F E2E acceptance task 186) is now clearable-to-dispatch — its dependency on Wave G-6 was that H14's sidecar be provably deployable + verifiable, which is now proven.
+
+**Estimated duration**: 15-30 minutes for safe-default run; +10-20 minutes for the full-tenant opt-in check 5 if operator has a safely-scoped test Exchange tenant.
 
 ---
 

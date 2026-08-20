@@ -24,6 +24,21 @@
 // ExchangePolicySidecarClient serializes (task 114's Listener.ps1 documents
 // the authoritative shape).
 //
+// TASK 162 (Wave G-6 Batch G-6C, 2026-08-20): FOSSILIZED — the 3 script-shell
+// configuration fields (PwshExecutable / ExchangePolicyScriptPath /
+// ExchangeScriptTimeout) formerly bound on IntegrationWiringOptions were
+// removed from that live options class (they were only ever consumed by this
+// retired file; deferred from task 161's W3 backlog per its file header note).
+// Their DEFAULTS are inlined below as `private static readonly` constants so
+// the retired class remains COMPILABLE (preserving the audit-trail body — the
+// "keep on disk" convention is meaningful only if the file still parses) but
+// no longer occupies runtime configuration surface on the live Worker. Parity
+// with task 160's AzCliKvSecretReader retirement, which used the same inline-
+// constant fossilization for its own KvSecretReadTimeout. Ctor's
+// IOptions&lt;IntegrationWiringOptions&gt; dependency was ALSO dropped — the retired
+// class no longer needs any options at all, only ILogger for parity with the
+// retired reader.
+//
 // ORIGINAL PURPOSE (retained for audit trail):
 // Production IExchangePolicyApplier — shelled out to the
 // scripts/Set-ExchangeApplicationAccessPolicy.ps1, which owns the
@@ -56,30 +71,37 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
 /// <summary>
 /// Shells out to <c>scripts/Set-ExchangeApplicationAccessPolicy.ps1</c> and
 /// translates its structured JSON result line into
-/// <see cref="ExchangePolicyApplyOutcome"/>.
+/// <see cref="ExchangePolicyApplyOutcome"/>. RETIRED — see file header.
 /// </summary>
 public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
 {
     private const string ResultLinePrefix = "SPAARKE-H14A-RESULT-JSON:";
 
-    private readonly IntegrationWiringOptions _options;
+    // ---------------------------------------------------------------------
+    // FOSSILIZED CONFIGURATION (task 162, W3 cleanup) — inline defaults
+    // formerly bound on IntegrationWiringOptions.{PwshExecutable,
+    // ExchangePolicyScriptPath, ExchangeScriptTimeout}. Values preserved
+    // verbatim from the retired options-field defaults so the audit-trail
+    // body's behavior remains unchanged (this retired class no longer
+    // participates in DI — see file header for rationale).
+    // ---------------------------------------------------------------------
+    private static readonly string PwshExecutable = "pwsh";
+    private static readonly string DefaultExchangePolicyScriptPath =
+        Path.Combine(AppContext.BaseDirectory, "scripts", "Set-ExchangeApplicationAccessPolicy.ps1");
+    private static readonly TimeSpan ExchangeScriptTimeout = TimeSpan.FromMinutes(5);
+
     private readonly ILogger<ExchangePolicyScriptApplier> _logger;
 
-    /// <summary>Constructs the applier bound to the on-disk PS script + pwsh executable.</summary>
-    public ExchangePolicyScriptApplier(
-        IOptions<IntegrationWiringOptions> options,
-        ILogger<ExchangePolicyScriptApplier> logger)
+    /// <summary>Constructs the retired applier. Kept on disk for audit-trail preservation only.</summary>
+    public ExchangePolicyScriptApplier(ILogger<ExchangePolicyScriptApplier> logger)
     {
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -97,7 +119,7 @@ public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
                 $"ExpectedAppIds must contain exactly 2 entries (BFF app-reg + UAMI); got {request.ExpectedAppIds?.Count ?? 0}.");
         }
 
-        var scriptPath = _options.ExchangePolicyScriptPath;
+        var scriptPath = DefaultExchangePolicyScriptPath;
         if (!File.Exists(scriptPath))
         {
             return new ExchangePolicyApplyOutcome.Failure(
@@ -107,7 +129,7 @@ public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
 
         var psi = new ProcessStartInfo
         {
-            FileName = _options.PwshExecutable,
+            FileName = PwshExecutable,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -144,7 +166,7 @@ public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
             process.BeginErrorReadLine();
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_options.ExchangeScriptTimeout);
+            timeout.CancelAfter(ExchangeScriptTimeout);
 
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
         }
@@ -152,7 +174,7 @@ public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
         {
             TryKill(process);
             return new ExchangePolicyApplyOutcome.Failure(
-                $"Set-ExchangeApplicationAccessPolicy.ps1 timed out after {_options.ExchangeScriptTimeout} " +
+                $"Set-ExchangeApplicationAccessPolicy.ps1 timed out after {ExchangeScriptTimeout} " +
                 $"for tenantId '{request.TenantId}'.");
         }
 
