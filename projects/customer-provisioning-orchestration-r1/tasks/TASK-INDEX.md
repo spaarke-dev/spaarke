@@ -274,7 +274,7 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 |---|---|---|---|---|---|---|
 | 170 | ✅ | I1: naming/tenant-literal invariant probe (pure C#, no live deps -- easiest first) | FULL | sonnet / high | waveG7-parallel | none |
 | 171 | 🔲 | T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4) | FULL | sonnet / high | waveG7-parallel | 123, 125 |
-| 172 | 🔲 | T5: slot-MI KV RBAC role-assignment probe (pipelined with H4) | FULL | sonnet / high | waveG7-parallel | 125 |
+| 172 | ✅ | T5: slot-MI KV RBAC role-assignment probe (pipelined with H4) | FULL | sonnet / high | waveG7-parallel | 125 |
 | 173 | ✅ | I2: AI Search tenant filter probe (pipelined with H2b) | FULL | sonnet / high | waveG7-parallel | 124 |
 | 174 | ✅ | I3: Cosmos partition-key probe (pipelined with H2a) + CompositeInvariantVerifier + IInvariantProbe seam (extended by tasks 170/173/179 adapters) | FULL | sonnet / high | waveG7-parallel | 123 |
 | 175 | ✅ | T6: SPE confidential-client trap probe (pipelined with H8) | FULL | sonnet / high | waveG7-parallel | 131 |
