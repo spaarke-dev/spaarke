@@ -247,10 +247,18 @@ not worked around per task.
   logged MI-FIC as risk **R23** with the 20-FIC cap. **Minimum ask**: keep the "configure BFF confidential
   credential" step pluggable, and contribute Model-1/Model-2 constraints as first-class Phase 0 input. Auth-v4's
   outcome will land as a change request against shipped handlers.
-- **`dataverse-access-unification-r1` (RED-4 C)** — let it land first where possible: it **deletes**
-  `DataverseWebApiService` + `DataverseWebApiClient` (a secret consumer) for free and collapses stacks auth-v4
-  would otherwise touch twice. It does not touch `GraphClientFactory`. If it stalls, proceed independently but
-  serialize PRs and run `/conflict-check` on each.
+- **`dataverse-access-unification-r1` (RED-4 C)** — prefer letting it land first, but **it is not a dependency**
+  (corrected 2026-08-19). It deletes `DataverseWebApiService` + `DataverseWebApiClient`, both of which read the
+  secret — but **both already degrade to Managed Identity when the secret is absent** (`DataverseWebApiService`
+  is flag-gated and never reads it with MI on; `DataverseWebApiClient` falls through to `DefaultAzureCredential`
+  at `:50-52`). **Neither blocks removal of `BFF-API-ClientSecret`.** The real blockers are the no-fallback paths:
+  `DataverseOptions.ClientSecret` `[Required]`+ValidateOnStart (startup crash), `GraphClientFactory`,
+  `DataverseAccessDataSource`, `DataverseUserClient`, `AgentTokenService`.
+  The genuine reasons to sequence unification first are narrower: **contention** on `Spaarke.Dataverse`, avoiding
+  pointless churn tidying fallback branches in classes about to be deleted, and halving the scope of the T3 gating
+  fix. It does not touch `GraphClientFactory` (it does repoint `GraphModule.cs`). If it stalls, proceed
+  independently — serialize PRs and run `/conflict-check` on each.
+  Full analysis: `projects/dataverse-access-unification-r1/notes/auth-v4-coordination-memo.md` §4.
 - **Open PR #293** (`Azure.Identity` 1.17.1→1.21.0) is directly relevant — newer `ClientAssertionCredential` /
   `ManagedIdentityCredential` behavior. Coordinate rather than conflict.
 - **`speadmin-decomposition-r1`** decomposes `SpeAdminGraphService` — out of auth-v4's scope but adjacent; confirm

@@ -246,10 +246,16 @@ The decision should still gate on the §5 spike, because the one thing documenta
 ## 6. Sequencing and coordination
 
 1. **Now (zero conflict)**: research spike + ADR-028 amendment decision — read-only.
-2. **Let `dataverse-access-unification-r1` land first** where possible: it **deletes** `DataverseWebApiService` +
-   `DataverseWebApiClient` (a secret consumer) for free and collapses the Dataverse stacks auth-v4 would otherwise
-   touch twice. It does not touch `GraphClientFactory`. If it stalls, auth-v4 can proceed — serialize PRs and run
-   `/conflict-check` on each.
+2. **Prefer letting `dataverse-access-unification-r1` land first — but it is NOT a dependency**
+   (corrected 2026-08-19). It deletes `DataverseWebApiService` + `DataverseWebApiClient`, both of which read the
+   secret, but **both already degrade to MI when it is absent** (`DataverseWebApiService` is flag-gated and never
+   reads it with MI on; `DataverseWebApiClient` falls through to `DefaultAzureCredential` at `:50-52`).
+   **Neither blocks removal of `BFF-API-ClientSecret`** — the real blockers are the no-fallback paths listed in
+   §5/§0 (`DataverseOptions` `[Required]` startup crash, `GraphClientFactory`, `DataverseAccessDataSource`,
+   `DataverseUserClient`, `AgentTokenService`). The genuine sequencing reasons are narrower: contention on
+   `Spaarke.Dataverse`, avoiding churn on classes about to be deleted, and halving the T3 gating-fix scope.
+   It does not touch `GraphClientFactory` (it does repoint `GraphModule.cs`). If it stalls, auth-v4 proceeds —
+   serialize PRs and run `/conflict-check` on each.
 3. **Coordinate with `customer-provisioning-orchestration-r1` immediately, not later** — H3/H4 are shipped on
    PR #779. Minimum ask: keep the "configure BFF confidential credential" step **pluggable**, and pull provisioning's
    Model-1/Model-2 constraints and risk R23 into the spike as first-class input.
