@@ -116,6 +116,19 @@ public static class IntegrationWiringModule
         // with GraphRestSubscriptionCreator's own AddHttpClient<> below.
         services.AddHttpClient<IExchangePolicyApplier, ExchangePolicySidecarClient>();
 
+        // Task 180 (Wave G-7): IExchangePolicyReadClient bound to the new
+        // ExchangePolicySidecarReadClient (typed HttpClient) -- the sibling
+        // READ-ONLY client for the H13 T4 acceptance-gate probe. Same
+        // sidecar (task 114's Listener.ps1), same auth model + shared
+        // secret KV read, disjoint GET /policies route (task 180's route
+        // extension). Registered here (not in E2EAcceptanceModule) because
+        // the sidecar transport + KV secret plumbing lives in this module;
+        // the T4 probe (ExchangePolicyCountT4Probe) will consume this
+        // interface once assembly task 185 wires it into the aggregate
+        // IE2ETrapVerifier composition, per the sibling standalone-probe
+        // convention (T1/T5/T6 file headers).
+        services.AddHttpClient<IExchangePolicyReadClient, ExchangePolicySidecarReadClient>();
+
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —
         // factory-lambda registration, parity with SecretClientKvWriter's own

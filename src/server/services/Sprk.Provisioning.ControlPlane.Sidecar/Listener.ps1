@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Binds localhost:8091 (sitecontainer-private; not publicly routed by App
-    Service's front end). Serves two endpoints:
+    Service's front end). Serves three endpoints:
 
       GET  /healthz     -> 200 OK plain-text "ok" (App Service sitecontainer
                           health probe target; unauthenticated by design —
@@ -36,6 +36,37 @@
             "policiesApplied": [<string>, ...],  // subset newly created this call
             "diagnostic":      <string>
           }
+
+      GET  /policies      (task 180, Wave G-7 -- H13 T4 acceptance-gate probe
+                          read route. The ONE H13 probe that cannot be pure
+                          .NET, per DS-4 s6 T4 row "extend the H14a sidecar
+                          with a read-only GET /policies route wrapping
+                          Get-ApplicationAccessPolicy". Read-only: never
+                          creates, modifies, or deletes any policy — a
+                          silent-fail-audit-grade parity check for the T4
+                          post-condition H14a wrote.)
+        Headers:
+          X-Sidecar-Auth: <per-boot shared secret from platform KV>
+        Query string (all optional -- probe filters client-side):
+          tenantId       = <string, Entra tenant id; logged for audit>
+          correlationId  = <string, ProvisioningRun id; logged>
+          timeoutSeconds = <int, optional; default 300; advisory>
+        Response body (JSON):
+          {
+            "outcome":         "Success" | "Failure",
+            "observedAppIds":  [<string>, ...],   // distinct AppIds across all policies
+            "observedCount":   <int>,             // distinct AppId count
+            "policies": [
+              {
+                "appId":              <string>,
+                "description":        <string>,
+                "policyScopeGroupId": <string>
+              }, ...
+            ],
+            "diagnostic":      <string>
+          }
+        On outcome=Success the payload reflects live Exchange state; on
+        Failure "policies" is [] and "observedAppIds" is [] (never partial).
 
     Envelope-mapping rules (script Write-ResultJson -> HTTP response):
       script Applied  + createdCount > 0  ->  wire Success           (policiesApplied = new appIds)
@@ -266,6 +297,117 @@ function Invoke-ExchangePolicyScript {
     }
 }
 
+# ---- READ-ONLY policies enumeration (task 180 -- H13 T4 probe read route) ----
+
+function Get-PoliciesReadOnly {
+    <#
+    .SYNOPSIS
+        Read-only enumeration of Exchange ApplicationAccessPolicy entries.
+        NEVER creates, modifies, or deletes any policy.
+    .DESCRIPTION
+        Wraps a single Get-ApplicationAccessPolicy call under an app-only EXO
+        session (same connect path as Invoke-ExchangePolicyScript's cert-based
+        Connect-ExchangeOnline) and projects each row to a minimal record the
+        C# T4 probe consumes (AppId + Description + PolicyScopeGroupId).
+
+        Returns a hashtable with:
+            outcome         : "Success" | "Failure"
+            observedAppIds  : distinct AppIds across all policies
+            observedCount   : count of distinct AppIds
+            policies        : per-policy projection (see above)
+            diagnostic      : operator-facing message
+
+        This is deliberately DIFFERENT from Invoke-ExchangePolicyScript --
+        that function is action-and-verify (may create policies); this one is
+        pure read (never mutates). Keeping them separate keeps the T4 probe's
+        code path provably non-mutating (H13's R7 "assert EFFECTS not
+        intentions" principle: the verifier MUST NOT alter what it is verifying).
+    #>
+    param(
+        [string]$CorrelationId,
+        [string]$TenantId
+    )
+
+    # Fetch cert (per-call, short-lived in-memory X509 object; no disk write)
+    # -- same pattern as POST /apply-policy.
+    try {
+        $cert = Get-ExchangeCertificate -CorrelationId $CorrelationId
+    } catch {
+        return @{
+            outcome        = "Failure"
+            observedAppIds = @()
+            observedCount  = 0
+            policies       = @()
+            diagnostic     = "Failed to fetch Exchange cert from platform KV: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        # Connect app-only via the fetched X509Certificate2 (Linux sidecar
+        # path -- same connect surface Set-ExchangeApplicationAccessPolicy.ps1
+        # uses when invoked with -Certificate).
+        $orgHint = if ($TenantId) { $TenantId } else { "" }
+        try {
+            if ($orgHint) {
+                Connect-ExchangeOnline `
+                    -AppId $ExchangeAppId `
+                    -Certificate $cert `
+                    -Organization $orgHint `
+                    -ShowBanner:$false `
+                    -ErrorAction Stop
+            }
+            else {
+                Connect-ExchangeOnline `
+                    -AppId $ExchangeAppId `
+                    -Certificate $cert `
+                    -ShowBanner:$false `
+                    -ErrorAction Stop
+            }
+        } catch {
+            return @{
+                outcome        = "Failure"
+                observedAppIds = @()
+                observedCount  = 0
+                policies       = @()
+                diagnostic     = "Connect-ExchangeOnline failed: $($_.Exception.Message)"
+            }
+        }
+
+        try {
+            $allPolicies = @(Get-ApplicationAccessPolicy -ErrorAction Stop)
+            $projected   = @()
+            foreach ($p in $allPolicies) {
+                $projected += @{
+                    appId              = [string]$p.AppId
+                    description        = [string]$p.Description
+                    policyScopeGroupId = [string]$p.PolicyScopeGroupId
+                }
+            }
+            $distinctAppIds = @($projected | ForEach-Object { $_.appId } | Where-Object { $_ } | Sort-Object -Unique)
+
+            return @{
+                outcome        = "Success"
+                observedAppIds = $distinctAppIds
+                observedCount  = $distinctAppIds.Count
+                policies       = $projected
+                diagnostic     = "Enumerated $($projected.Count) ApplicationAccessPolic$(if ($projected.Count -eq 1) { 'y' } else { 'ies' }) covering $($distinctAppIds.Count) distinct AppId$(if ($distinctAppIds.Count -eq 1) { '' } else { 's' })."
+            }
+        } catch {
+            return @{
+                outcome        = "Failure"
+                observedAppIds = @()
+                observedCount  = 0
+                policies       = @()
+                diagnostic     = "Get-ApplicationAccessPolicy failed: $($_.Exception.Message)"
+            }
+        }
+    }
+    finally {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        if ($cert) { $cert.Dispose() }
+    }
+}
+
 # ---- Response helper ---------------------------------------------------------
 
 function Write-JsonResponse {
@@ -333,10 +475,60 @@ while ($listener.IsListening) {
         continue
     }
 
+    # GET /policies (task 180 -- H13 T4 acceptance-gate probe read route).
+    # Read-only; requires the SAME X-Sidecar-Auth as POST /apply-policy.
+    # Path match is exact-or-prefix ("/policies" or "/policies?...") so query
+    # string is honored.
+    if ($method -eq "GET" -and ($rawUrl -eq "/policies" -or $rawUrl.StartsWith("/policies?"))) {
+        # Auth: same shared-secret header as the write route -- defense-in-depth
+        # against unauthenticated reads of the ApplicationAccessPolicy list
+        # (still low sensitivity but not something to expose without a check).
+        $providedSecret = $request.Headers["X-Sidecar-Auth"]
+        if (-not (Test-SecretEqual -Provided $providedSecret -Expected $SharedSecret)) {
+            Write-JsonLog -Level WARN -Message "Rejected /policies: missing or mismatched X-Sidecar-Auth header"
+            Write-JsonResponse -Response $response -StatusCode 401 -BodyObject @{
+                outcome = "Failure"; observedAppIds = @(); observedCount = 0; policies = @();
+                diagnostic = "Missing or invalid X-Sidecar-Auth header."
+            }
+            continue
+        }
+
+        # Parse optional query-string params via System.Web.HttpUtility
+        # (available on PowerShell 7 / net10 by default; falls back to
+        # ParseQueryString via UriBuilder if System.Web is not loaded).
+        $tenantId       = ""
+        $correlationId  = ""
+        try {
+            Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue | Out-Null
+            $qs = [System.Web.HttpUtility]::ParseQueryString($request.Url.Query)
+            $tenantId       = if ($qs["tenantId"])      { [string]$qs["tenantId"] }      else { "" }
+            $correlationId  = if ($qs["correlationId"]) { [string]$qs["correlationId"] } else { "" }
+        } catch {
+            # Query-string parsing is best-effort; missing/malformed query is
+            # not a probe failure -- Get-PoliciesReadOnly does not require any
+            # of these to run.
+            $tenantId      = ""
+            $correlationId = ""
+        }
+
+        Write-JsonLog -Level INFO -CorrelationId $correlationId -Message "Received /policies (read-only enumeration)" -Fields @{
+            tenantId = $tenantId
+        }
+
+        $result = Get-PoliciesReadOnly -CorrelationId $correlationId -TenantId $tenantId
+
+        Write-JsonLog -Level INFO -CorrelationId $correlationId -Message "Completed /policies" -Fields @{
+            outcome       = $result.outcome
+            observedCount = $result.observedCount
+        }
+        Write-JsonResponse -Response $response -StatusCode 200 -CorrelationId $correlationId -BodyObject $result
+        continue
+    }
+
     # POST /apply-policy is the only other route we accept.
     if ($method -ne "POST" -or $rawUrl -ne "/apply-policy") {
         Write-JsonResponse -Response $response -StatusCode 404 -BodyObject @{
-            outcome = "Failure"; diagnostic = "Unknown route: $method $rawUrl. Only GET /healthz and POST /apply-policy are served."
+            outcome = "Failure"; diagnostic = "Unknown route: $method $rawUrl. Only GET /healthz, GET /policies, and POST /apply-policy are served."
         }
         continue
     }
