@@ -4,10 +4,14 @@
 // L2 CONTROL-PLANE H5 Dataverse env-creation handler (task 048, wave C4).
 //
 // PURPOSE:
-//   Provisions the per-customer Dataverse environment by wrapping the
-//   interim `pac admin create-environment` shell-out (design.md § 4.1 H5
-//   row + M-10 deferral — TF Power Platform provider adoption is Phase D
-//   backlog for r2 first-customer engagement). After creation, verifies
+//   Provisions the per-customer Dataverse environment via the
+//   IDataverseEnvCreator seam. Task 140 (Wave G-4, Option D hybrid) replaced
+//   the interim `pac admin create-environment` shell-out
+//   (PacAdminDataverseEnvCreator — retired, kept on disk unregistered) with
+//   BapRestEnvironmentCreator: a pure HttpClient + DefaultAzureCredential
+//   port of Provision-Customer.ps1 STEP 5/6's BAP admin REST create +
+//   async-operation-polling sequence (design.md § 4.1 H5 row). After
+//   creation, verifies
 //   Web API reachability via `GET /api/data/v9.2/WhoAmI` and writes the
 //   env URL to `ProvisioningRun.InterStepState.DataverseEnvUrl` so H6
 //   (managed solution import), H7 (env-var values), and H10 (app user)
@@ -410,6 +414,10 @@ public sealed class H5DataverseEnvCreationHandler : IProvisioningHandler
                 (DataverseEnvCreationRejectionCodes.EnvCreationTimeout, FailureClass.Resumable),
             DataverseEnvCreationFailureKind.UnknownInvocationFailure =>
                 (DataverseEnvCreationRejectionCodes.PacInvocationFailed, FailureClass.Resumable),
+            DataverseEnvCreationFailureKind.DomainAlreadyExists =>
+                (DataverseEnvCreationRejectionCodes.DomainAlreadyExists, FailureClass.Resumable),
+            DataverseEnvCreationFailureKind.ProvisioningFailed =>
+                (DataverseEnvCreationRejectionCodes.EnvProvisioningFailed, FailureClass.Resumable),
             _ =>
                 (DataverseEnvCreationRejectionCodes.PacInvocationFailed, FailureClass.Resumable),
         };

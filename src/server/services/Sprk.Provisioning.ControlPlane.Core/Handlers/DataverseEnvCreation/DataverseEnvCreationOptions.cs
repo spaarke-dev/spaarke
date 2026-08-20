@@ -24,15 +24,31 @@ public sealed class DataverseEnvCreationOptions
     public string PacCliExecutable { get; set; } = "pac";
 
     /// <summary>
-    /// Maximum wall-clock time to wait for a single <c>pac admin create-environment</c>
-    /// invocation. Defaults to 45 minutes — env creation is documented at
-    /// 15–30 min per design.md § 4.2; the ceiling absorbs slower tenants
-    /// without truncating a slow-but-progressing operation. If exceeded, the
-    /// creator returns <see cref="DataverseEnvCreationFailureKind.Timeout"/>
-    /// which the handler maps to
-    /// <see cref="DataverseEnvCreationRejectionCodes.EnvCreationTimeout"/>.
+    /// Maximum wall-clock time to wait for Dataverse environment creation to
+    /// reach a terminal <c>provisioningState</c> (<c>Succeeded</c> /
+    /// <c>Failed</c> / <c>Deleted</c>). Defaults to 45 minutes — env creation
+    /// is documented at 15–30 min per design.md § 4.2; the ceiling absorbs
+    /// slower tenants without truncating a slow-but-progressing operation.
+    /// Task 140 (BAP-REST port): this bounds the ENTIRE create+poll sequence
+    /// (the initial creation POST plus every subsequent async-operation-status
+    /// GET against <see cref="AsyncOperationPollInterval"/>) — the pac CLI's
+    /// blocking single invocation is now an explicit polling loop inside
+    /// <c>BapRestEnvironmentCreator</c>. If the deadline elapses before a
+    /// terminal state is observed, the creator returns
+    /// <see cref="DataverseEnvCreationFailureKind.Timeout"/> which the handler
+    /// maps to <see cref="DataverseEnvCreationRejectionCodes.EnvCreationTimeout"/>.
     /// </summary>
     public TimeSpan CreationTimeout { get; set; } = TimeSpan.FromMinutes(45);
+
+    /// <summary>
+    /// Interval between BAP admin REST async-operation-status polls (<c>GET
+    /// .../environments/{envId}</c>) while waiting for
+    /// <c>provisioningState</c> to reach a terminal value. Defaults to 30
+    /// seconds — ported verbatim from Provision-Customer.ps1 STEP 6's
+    /// <c>$pollIntervalSeconds</c>. Task 140 (BAP-REST env-create +
+    /// async-operation-polling port).
+    /// </summary>
+    public TimeSpan AsyncOperationPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Interval between Dataverse Web API health probes after

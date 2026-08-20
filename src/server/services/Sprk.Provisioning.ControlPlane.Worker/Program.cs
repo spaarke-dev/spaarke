@@ -363,15 +363,21 @@ builder.Services.AddSingleton<IEntraAppRegProvisioner>(sp =>
 builder.Services.AddSingleton<IAdminConsentVerifier, GraphAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
 
-// Task 048: H5 Dataverse env creation handler + 2 collaborator seams
-// (IDataverseEnvCreator wraps `pac admin create-environment` interim per
-// design.md § 4.1 H5 row + M-10 TF Power Platform deferral;
+// Task 048 / task 140: H5 Dataverse env creation handler + 2 collaborator
+// seams (IDataverseEnvCreator creates + polls via the BAP admin REST API —
+// see BapRestEnvironmentCreator.cs file header for the ground-truthed
+// endpoint/audience port of Provision-Customer.ps1 STEP 5/6, replacing the
+// retired `pac admin create-environment` shell-out (PacAdminDataverseEnvCreator
+// — kept on disk unregistered per Wave G-2/G-3 retirement convention);
 // IDataverseHealthProbe polls Web API `WhoAmI` via DefaultAzureCredential
 // until Reachable — implements the Pending→Verified gate for the long-
 // running Dataverse env-creation flow).
 builder.Services.Configure<DataverseEnvCreationOptions>(
     builder.Configuration.GetSection(nameof(DataverseEnvCreationOptions)));
-builder.Services.AddSingleton<IDataverseEnvCreator, PacAdminDataverseEnvCreator>();
+// Typed HttpClient (BapRestEnvironmentCreator's public ctor takes HttpClient
+// directly, matching BapRestEnvironmentRateProbe's established pattern —
+// parity with the other raw-HttpClient BAP-REST collaborator in Handlers/**).
+builder.Services.AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>();
 // NAMED HttpClient (task 103 fix): DataverseWebApiHealthProbe takes
 // IHttpClientFactory + calls _httpClientFactory.CreateClient(HttpClientName)
 // itself — it is NOT a typed client (no HttpClient-accepting constructor).

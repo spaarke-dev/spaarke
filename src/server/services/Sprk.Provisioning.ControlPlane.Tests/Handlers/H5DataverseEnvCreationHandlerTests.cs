@@ -472,6 +472,8 @@ public sealed class H5DataverseEnvCreationHandlerTests
     [InlineData(DataverseEnvCreationFailureKind.PartialProvisioning, DataverseEnvCreationRejectionCodes.PartialProvisioning, FailureClass.QuarantineRequired)]
     [InlineData(DataverseEnvCreationFailureKind.Timeout, DataverseEnvCreationRejectionCodes.EnvCreationTimeout, FailureClass.Resumable)]
     [InlineData(DataverseEnvCreationFailureKind.UnknownInvocationFailure, DataverseEnvCreationRejectionCodes.PacInvocationFailed, FailureClass.Resumable)]
+    [InlineData(DataverseEnvCreationFailureKind.DomainAlreadyExists, DataverseEnvCreationRejectionCodes.DomainAlreadyExists, FailureClass.Resumable)]
+    [InlineData(DataverseEnvCreationFailureKind.ProvisioningFailed, DataverseEnvCreationRejectionCodes.EnvProvisioningFailed, FailureClass.Resumable)]
     public void MapCreatorFailure_ProducesExpectedRejectionAndClass(
         DataverseEnvCreationFailureKind kind,
         string expectedRejection,

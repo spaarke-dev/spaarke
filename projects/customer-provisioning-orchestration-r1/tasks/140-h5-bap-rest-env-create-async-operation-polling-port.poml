@@ -3,8 +3,8 @@
   <metadata>
     <title>H5: BAP-REST env-create + async-operation-polling port</title>
     <phase>C'' Wave G-4 -- Dataverse chain</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H5 gates the entire Dataverse chain (H6-&gt;H7-&gt;H10-&gt;H11-&gt;H12x) per DS-4 -- a mistake blocks the widest downstream surface remaining in the build. FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,6 +88,20 @@
   </acceptance-criteria>
 
   <notes>Justification (CLAUDE.md §11): Existing -- Provision-Customer.ps1's STEP 5 already implements the exact REST sequence this task needs, in-repo, proven. Extension -- porting a proven in-repo REST sequence to a typed HttpClient collaborator behind the existing handler interface is the minimal-risk correct move. Cost-of-doing-nothing -- H5 gates the ENTIRE Dataverse chain (H6-&gt;H7-&gt;H10-&gt;H11-&gt;H12x per DS-4 §4); without it, nothing in Wave G-4/G-5 can be exercised end-to-end.</notes>
+
+  <notes-completion>
+Ported PacAdminDataverseEnvCreator (pac admin create-environment shell-out, RETIRED — kept on disk unregistered) to BapRestEnvironmentCreator.cs: pure HttpClient + DefaultAzureCredential collaborator implementing IDataverseEnvCreator unchanged, wired via `builder.Services.AddHttpClient&lt;IDataverseEnvCreator, BapRestEnvironmentCreator&gt;()` in Worker/Program.cs. Ported Provision-Customer.ps1 STEP 5 ("Creating Dataverse environment via Power Platform Admin API") + STEP 6 ("Waiting for Dataverse environment provisioning") sequence: idempotent existing-environment list-check -&gt; POST create -&gt; GET-poll the environment resource until provisioningState is terminal (Succeeded/Failed/Deleted) or CreationTimeout elapses. The existing health-probe collaborator (IDataverseHealthProbe / DataverseWebApiHealthProbe) is UNCHANGED, satisfying the "preserve unchanged" constraint literally (0 lines touched).
+
+GROUND-TRUTHED GOTCHA (via WebSearch against Microsoft Learn / MicrosoftDocs/power-platform, since no live BAP credentials were available in-sandbox): the script and this project's OWN task-120 precedent (BapRestEnvironmentRateProbe.cs) DISAGREED on two details — resource-provider namespace ("Microsoft.BusinessAppsPlatform" plural in the script vs "Microsoft.BusinessAppPlatform" singular in task 120) and token audience ("https://api.bap.microsoft.com/.default" in the script vs "https://service.powerapps.com/.default" in task 120). Live-web verification confirmed task 120's values are correct on both counts (the script's spellings are latent typos); BapRestEnvironmentCreator follows task 120's ground-truthed values, documented in the file header. Also ground-truthed: env creation is genuinely a direct-poll-the-resource pattern (v2.8-era BAP semantics), NOT a Location-header 202 pattern — the dispatch context's generic async-op framing did not apply to this specific endpoint family; documented as an explicit deviation rather than a silent mismatch.
+
+BONUS CORRECTNESS CATCH: added an idempotent existing-environment check (ports the script's own Step 5 "already exists" branch) that the original PacAdminDataverseEnvCreator did NOT have. Without it, a resume after a crash between "BAP acknowledged create" and "Cosmos CompletedPhase durably written" would re-POST the SAME deterministic domain (=customerId) and hit an unrecoverable create-conflict loop. Also added a NEW distinct failure classification, DomainAlreadyExists (vs the pre-existing PartialProvisioning), plus ProvisioningFailed (BAP-reported terminal Failed/Deleted, distinct from Timeout) — both required by the POML's own acceptance criteria and both threaded through DataverseEnvCreationFailureKind / DataverseEnvCreationRejectionCodes / H5DataverseEnvCreationHandler.MapCreatorFailure.
+
+Tests: 17 new BapRestEnvironmentCreatorTests (request-body shape, poll-Succeeded, poll-Failed distinct from Timeout, poll-Timeout via real tiny wall-clock TimeSpans per H5's own T13 convention, duplicate-domain classification, existing-env-already-succeeded short-circuit, existing-env-still-provisioning skip-create-and-poll, ClassifyHttpFailure theory ×7, token-failure-&gt;AuthFailure, source-grep defense-in-depth) + 2 new MapCreatorFailure InlineData rows on H5DataverseEnvCreationHandlerTests. PacAdminDataverseEnvCreator.cs retired (retirement banner added, ClassifyStderr + its T20 test preserved as historical reference per Wave G-2/G-3 convention — not reachable from any DI path).
+
+Self-caught during authoring: my own file-header doc comment initially contained the literal phrase "pac admin" (describing what was replaced) — would have failed the POML's own literal `grep 'pac admin\|ProcessStartInfo'` acceptance criterion against the production file. Reworded to "the pac CLI's `admin create-environment` command" before the grep was run; verified 0 matches post-fix (same anti-pattern task 131 caught for `ClientSecretCredential` doc-comment references).
+
+L2 tests: 938 -&gt; 965/965 (+19 from this task + 8 from sibling task 142 landing concurrently in the same window; 0 regressions). Step 9.5 (code-review + adr-check, self-conducted): 0 Critical, 0 new Warnings, 0 ADR violations. `dotnet build` 0 errors across Core/Worker/Tests. `grep 'pac admin\|ProcessStartInfo'` in BapRestEnvironmentCreator.cs: 0 matches (verified).
+  </notes-completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

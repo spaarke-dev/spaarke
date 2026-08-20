@@ -1,6 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 131 COMPLETE — H8 Graph containerTypes port. GraphContainerTypeProvisioner + GraphAppOnlyContainerVerifier + SecretClientSpeContainerIdKvWriter (+ shared SpeConfidentialClientGraphFactory helper) replace the retired shell-out scaffold, all under ClientCertificateCredential (T6, cert-from-KV). Biggest catch: the retired script's separate SharePoint-REST applicationPermissions PUT (different token audience) has a native Graph GA replacement — POST /storage/fileStorage/containerTypeRegistrations — so the ENTIRE flow now runs under ONE Graph client + ONE T6 credential. New RunStatus.WaitingOnGate outcome for the documented 24h SPE replication-lag case (verify-GET 404), never Resumable/QuarantineRequired. Self-caught + fixed a real bug during Step 9.5 (BuildEvidence hardcoded verifiedViaAppOnlyToken=true — would have mislabeled WaitingOnGate evidence). L2 tests: 930 → **938/938** (+8, zero regressions). Wave G-3 now FULLY COMPLETE — 130 (H3) + 131 (H8) + 132 (H9) all done. Note: this task's Worker/Program.cs DI edit landed inside sibling task 132's commit `ccaf1cad2` via a git-index race — content verified correct, cited for audit trail.)
+> **Last Updated**: 2026-08-20 (Task 140 COMPLETE — H5 BAP-REST env-create + async-operation-polling port. `BapRestEnvironmentCreator.cs` [pure HttpClient + DefaultAzureCredential] replaces the retired `PacAdminDataverseEnvCreator` shell-out, porting Provision-Customer.ps1 STEP 5/6's create+poll sequence exactly. Ground-truthed a real discrepancy between the script and this project's OWN task-120 BAP-REST precedent [provider namespace + token audience] via live WebSearch — resolved in favor of task 120's already-verified values. Bonus correctness catch: added an idempotent existing-environment check the original pac-CLI creator never had, closing a resume-after-partial-success domain-conflict trap. Two new failure classifications (DomainAlreadyExists, ProvisioningFailed) threaded through the full failure-mapping chain. L2 tests: 938 -> **965/965** [+19 this task, +8 concurrent sibling task 142, zero regressions]. Batch G-4A now fully complete pending sibling 142's own landing; Batch G-4B [141+143] unblocked.)
+>
+> **Previous** (2026-08-20, Task 131 COMPLETE — H8 Graph containerTypes port. GraphContainerTypeProvisioner + GraphAppOnlyContainerVerifier + SecretClientSpeContainerIdKvWriter (+ shared SpeConfidentialClientGraphFactory helper) replace the retired shell-out scaffold, all under ClientCertificateCredential (T6, cert-from-KV). Biggest catch: the retired script's separate SharePoint-REST applicationPermissions PUT (different token audience) has a native Graph GA replacement — POST /storage/fileStorage/containerTypeRegistrations — so the ENTIRE flow now runs under ONE Graph client + ONE T6 credential. New RunStatus.WaitingOnGate outcome for the documented 24h SPE replication-lag case (verify-GET 404), never Resumable/QuarantineRequired. Self-caught + fixed a real bug during Step 9.5 (BuildEvidence hardcoded verifiedViaAppOnlyToken=true — would have mislabeled WaitingOnGate evidence). L2 tests: 930 → **938/938** (+8, zero regressions). Wave G-3 now FULLY COMPLETE — 130 (H3) + 131 (H8) + 132 (H9) all done. Note: this task's Worker/Program.cs DI edit landed inside sibling task 132's commit `ccaf1cad2` via a git-index race — content verified correct, cited for audit trail.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-4..G-7 remain. Wave G-2.5 (customer.bicep completion) is fully closed. Wave G-3 (130/131/132) is now FULLY COMPLETE.)
@@ -15,8 +17,8 @@
 142 (H7 STANDARD, high) [independent — dep 126 only]
 ```
 
-**Batch G-4A** (parallel-safe now, dispatch immediately): 140 + 142
-- 140: H5 BAP-REST env-create + async-operation-polling port (deps 102/103/123 — all done)
+**Batch G-4A** (parallel-safe now, dispatch immediately): 140 + 142 — BOTH COMPLETE, Batch G-4A closed
+- 140: ✅ COMPLETE — H5 BAP-REST env-create + async-operation-polling port (deps 102/103/123 — all done). See "Task 140 — COMPLETE" section below.
 - 142: ✅ COMPLETE — H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done). See "Task 142 — COMPLETE" section below.
 
 **Batch G-4B** (after 140 lands): 141 + 143 — parallel
@@ -70,6 +72,61 @@ hardcoded secrets (grep-verified), BFF-hygiene not triggered (L2 control-plane o
 sentinel accommodation) is N/A per the escalation-trigger check above — not implemented since no sentinel contract
 exists yet. No coordination needed with sibling task 140 (H5 BAP-REST) — zero file overlap, different handler
 folders.
+
+## Task 140 — COMPLETE (2026-08-20)
+
+H5 BAP-REST env-create + async-operation-polling port. `BapRestEnvironmentCreator.cs` (new,
+`Handlers/DataverseEnvCreation/`) replaces `PacAdminDataverseEnvCreator` (retired — retirement banner added, kept on
+disk unregistered per Wave G-2/G-3 convention; `ClassifyStderr` + its test preserved as historical reference) as the
+`IDataverseEnvCreator` implementation, wired via `builder.Services.AddHttpClient<IDataverseEnvCreator,
+BapRestEnvironmentCreator>()`. Ports Provision-Customer.ps1 STEP 5 ("Creating Dataverse environment via Power
+Platform Admin API") + STEP 6 ("Waiting for Dataverse environment provisioning") exactly: idempotent
+existing-environment list-check → POST create → GET-poll the environment resource until `provisioningState` is
+terminal or `CreationTimeout` elapses. The existing health-probe collaborator (`IDataverseHealthProbe` /
+`DataverseWebApiHealthProbe`) is byte-for-byte UNCHANGED per the POML's explicit preserve constraint.
+
+**Ground-truthed a real in-repo discrepancy** (via WebSearch against Microsoft Learn / MicrosoftDocs/power-platform —
+no live BAP credentials available in-sandbox): the script and this project's OWN task-120 BAP-REST precedent
+(`BapRestEnvironmentRateProbe.cs`) disagreed on two details — resource-provider namespace
+(`Microsoft.BusinessAppsPlatform` plural in the script vs `Microsoft.BusinessAppPlatform` singular in task 120) and
+token audience (`https://api.bap.microsoft.com/.default` in the script vs `https://service.powerapps.com/.default`
+in task 120). Live-web verification confirmed task 120's values are correct on both counts (the script's spellings
+are latent typos) — `BapRestEnvironmentCreator` follows task 120's ground-truthed values, documented in the file
+header for future auditors. Also confirmed the actual async-operation semantics are a direct-poll-the-resource
+pattern (BAP's documented "API v2.8 and earlier" behavior), NOT the generic 202+`Location`-header pattern the
+dispatch context assumed — an explicit, cited deviation rather than a silent mismatch.
+
+**Bonus correctness catch**: added an idempotent existing-environment check (ports the script's own Step 5
+"already exists" branch) that the original `PacAdminDataverseEnvCreator` never had. Without it, a resume after a
+crash between "BAP acknowledged the create request" and "Cosmos `CompletedPhase` durably written" would re-POST the
+SAME deterministic domain (= customerId) and hit an unrecoverable create-conflict loop. Two new failure
+classifications thread through the full chain (`DataverseEnvCreationFailureKind` → `DataverseEnvCreationRejectionCodes`
+→ `H5DataverseEnvCreationHandler.MapCreatorFailure`): `DomainAlreadyExists` (create rejected — nothing created by
+this attempt, distinct from `PartialProvisioning`) and `ProvisioningFailed` (BAP-reported terminal Failed/Deleted,
+distinct from `Timeout` — required by the POML's own acceptance criteria).
+
+**Self-caught during authoring**: my own file-header doc comment initially contained the literal phrase "pac admin"
+(describing what was replaced) — would have failed the POML's own literal `grep 'pac admin\|ProcessStartInfo'`
+acceptance criterion against the production file. Reworded to "the pac CLI's `admin create-environment` command"
+before the grep was re-run; verified 0 matches post-fix (same anti-pattern class task 131 caught for
+`ClientSecretCredential` doc-comment references).
+
+Tests: 17 new `BapRestEnvironmentCreatorTests` (request-body shape assertion, poll-loop-detects-Succeeded after
+intermediate states, poll-loop-detects-Failed distinct from Timeout, poll-loop-Timeout via real tiny wall-clock
+TimeSpans — same convention as H5's own T13 test — duplicate-domain classification, existing-env-already-succeeded
+short-circuit [no create/poll calls made], existing-env-still-provisioning skip-create-and-poll-existing,
+`ClassifyHttpFailure` theory ×7 cases, token-acquisition-failure→AuthFailure, source-grep defense-in-depth) + 2 new
+`MapCreatorFailure` `InlineData` rows on `H5DataverseEnvCreationHandlerTests`. `dotnet build` 0 errors across
+Core/Worker/Tests. Step 9.5 (code-review + adr-check, self-conducted — FULL rigor mandatory): 0 Critical, 0 new
+Warnings (the pre-existing `IDataverseEnvCreator` single-impl ADR-010 note is unchanged, not newly introduced), 0
+ADR violations (ADR-028 `DefaultAzureCredential(TenantId=...)` per-call confirmed, no `ClientSecretCredential`
+anywhere in scope). No `Mock<HttpMessageHandler>` (ADR-038). File is 614 lines, well under the 2,000-line god-class
+ceiling.
+
+Tests: 946 → **965/965** (+19 this task, zero regressions; combined with sibling task 142's own +8 landing in the
+same window, 938 baseline → 965 total). No coordination message needed with sibling task 142 (H7 credential
+provisioning) — zero file overlap confirmed by both tasks independently (different handler folders, disjoint
+Worker/Program.cs insertion points).
 
 ## Wave G-3 Tally (100% COMPLETE 2026-08-20)
 
@@ -175,7 +232,8 @@ Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modu
 | **Wave G-1 status** | ✅ 100% COMPLETE — 17 tasks + governance + auth-v4 coord = 20 substantive commits |
 | **Wave G-2 status** | ✅ 100% COMPLETE — 7 tasks + 1 fix-at-discovery = 8 commits (120/121/122/123/124/125/126 + bicepparam fix). L2 tests: 787 → **903/903** (+116 new, zero regressions). Zero Step 9.5 findings across the wave. |
 | **Wave G-3 status** | ✅ 100% COMPLETE — task 130 (H3) + task 131 (H8) + task 132 (H9) all landed. L2 tests at 938/938. |
-| **Next decision** | Dispatch Wave G-4 (140-144: H5/H6/H7/H10/H11). |
+| **Wave G-4 status** | Batch G-4A ✅ COMPLETE — task 140 (H5) + task 142 (H7) both landed. L2 tests at 965/965. Batch G-4B (141 H6 + 143 H10 verify) now unblocked. |
+| **Next decision** | Dispatch Wave G-4 Batch G-4B (141: H6 Web-API import xhigh + 143: H10 live verification — parallel). |
 | **Live-ceremony backlog** | 8 items now (originally 7 + BAP admin REST verification from task 120); item #4 (provisioning-artifacts storage account) is now ALSO a hard dependency for task 132's H9 to run live, not just tasks 116/117's CI publish. |
 | **NEW work items surfaced** | 2 customer.bicep gaps (see § New Work Items below) — both now resolved (see task 128/128b/129 entries) |
 | **Status** | Fully clean checkpoint — working tree empty, all commits pushed |

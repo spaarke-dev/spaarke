@@ -115,4 +115,24 @@ public static class DataverseEnvCreationRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H5 was in flight. Resumable — operator recreates run + resumes.</summary>
     public const string RunDeletedDuringCreation = "run-deleted-during-creation";
+
+    /// <summary>
+    /// BAP admin REST create call rejected because the requested domain
+    /// (subdomain) is already taken — no resource was created by this
+    /// attempt. Classified Resumable, but a naive retry with the SAME
+    /// domain/customerId will repeat the failure; the operator MUST supply a
+    /// different domain before resuming. Distinct from
+    /// <see cref="PartialProvisioning"/>. Added task 140 (BAP-REST port).
+    /// </summary>
+    public const string DomainAlreadyExists = "domain-already-exists";
+
+    /// <summary>
+    /// BAP admin REST async-operation-status poll observed a terminal
+    /// <c>provisioningState</c> of <c>Failed</c> or <c>Deleted</c>. Distinct
+    /// from <see cref="EnvCreationTimeout"/> (which fires when the poll
+    /// simply outlasted the configured window without a terminal signal).
+    /// Classified Resumable — operator inspects Power Platform Admin Center.
+    /// Added task 140 (BAP-REST port).
+    /// </summary>
+    public const string EnvProvisioningFailed = "env-provisioning-failed";
 }

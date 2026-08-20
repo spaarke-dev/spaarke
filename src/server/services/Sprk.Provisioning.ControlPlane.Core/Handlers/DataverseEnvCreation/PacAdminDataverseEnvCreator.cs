@@ -1,6 +1,19 @@
 // -----------------------------------------------------------------------------
 // PacAdminDataverseEnvCreator.cs
 //
+// *** RETIRED (task 140, Wave G-4, Option D hybrid, 2026-08-20) ***
+// No longer registered in Worker/Program.cs — superseded by
+// BapRestEnvironmentCreator.cs (pure HttpClient + DefaultAzureCredential port
+// of Provision-Customer.ps1 STEP 5/6's BAP admin REST create +
+// async-operation-polling sequence). Kept on disk UNREGISTERED per the
+// Wave G-2/G-3 retirement convention (parity with AzCliKvSecretsWriter,
+// DotnetR3GateVerifier, etc.) — this class is a shell-out (`pac admin
+// create-environment`) and Option D's entire point is deleting the
+// pwsh/az/pac dependency from the L2 runtime. `ClassifyStderr` remains
+// unit-tested (H5DataverseEnvCreationHandlerTests T20) as a historical
+// reference for the pac-CLI-era failure taxonomy this class implemented; it
+// is NOT reachable from any production code path.
+//
 // Production <see cref="IDataverseEnvCreator"/> implementation — shells out to
 // `pac admin create-environment` (interim per design.md § 4.1 H5 row + M-10
 // deferral of TF Power Platform provider adoption) with the H5 envelope's

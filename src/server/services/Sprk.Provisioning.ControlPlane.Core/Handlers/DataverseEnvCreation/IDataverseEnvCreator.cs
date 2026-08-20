@@ -170,4 +170,33 @@ public enum DataverseEnvCreationFailureKind
     /// (§4C Resumable — operator inspects stderr).
     /// </summary>
     UnknownInvocationFailure = 6,
+
+    /// <summary>
+    /// The requested domain name (subdomain) is already taken — either the
+    /// BAP admin REST create call returned an HTTP 409/400 whose body
+    /// signals a domain conflict, before any resource was created by THIS
+    /// invocation. Distinct from <see cref="PartialProvisioning"/> (which
+    /// implies OUR own create call left an inconsistent artifact): here
+    /// nothing was created by this attempt. Handler maps to
+    /// <see cref="DataverseEnvCreationRejectionCodes.DomainAlreadyExists"/>
+    /// (§4C Resumable — operator supplies a different domain/customerId and
+    /// resumes; retrying with the SAME domain will repeat this failure).
+    /// Added task 140 (BAP-REST env-create + async-operation-polling port) —
+    /// POML acceptance criterion: "A test confirms a duplicate-domain
+    /// response is classified distinctly from a generic failure."
+    /// </summary>
+    DomainAlreadyExists = 7,
+
+    /// <summary>
+    /// The BAP admin REST async-operation-status poll observed a terminal
+    /// <c>provisioningState</c> of <c>Failed</c> or <c>Deleted</c> (as
+    /// opposed to the poll simply running out of time — see
+    /// <see cref="Timeout"/>). Handler maps to
+    /// <see cref="DataverseEnvCreationRejectionCodes.EnvProvisioningFailed"/>
+    /// (§4C Resumable — operator inspects Power Platform Admin Center; the
+    /// env row may exist in a Failed state). Distinct code so operator
+    /// dashboards can branch on "BAP explicitly said Failed" vs "we gave up
+    /// waiting". Added task 140.
+    /// </summary>
+    ProvisioningFailed = 8,
 }
