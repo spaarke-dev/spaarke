@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches .claude/ and projects/INDEX.md; main-session only.</parallel-reason>
-    <deps>033,042,050,051,052,053,054,055,056,060,061,062,063,030</deps>
+    <deps>033,050,051,052,053,054,055,056,060,061,062,063,030</deps>
     <tags>documentation,wrapup,test-diet</tags>
     <estimated-effort>4 hours</estimated-effort>
   </metadata>

@@ -4,7 +4,7 @@
     <title>Verify Power BI service-principal profiles work under a managed identity</title>
     <phase>4 Power BI</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag; gates the whole of Phase 4 and its answer changes the task set.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -68,4 +68,19 @@
     <criterion>No production Power BI configuration was changed.</criterion>
     <criterion>Tasks 041 and 042 are re-sized or re-scoped based on the answer.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <deferred date="2026-08-19" by="owner">
+      Power BI is NOT yet in use at Spaarke. The owner deferred Workstream D out of this project on 2026-08-19:
+      "we can ignore Power BI if it is not readily available and defined -- we are not yet using Power BI
+      (it will be in the future but we can address the MI at that time)."
+      Consequence: PowerBi:ClientSecret REMAINS in place. It is a genuinely separate secret from
+      BFF-API-ClientSecret, so it does not block FR-C3 (task 033) and does not weaken the OBO migration.
+      Re-open this task when Power BI is actually adopted. Unresolved question #1 (do Power BI
+      service-principal PROFILES work under a managed-identity principal?) travels with it and MUST be
+      answered before 041/042 are attempted.
+      NOTE: the Phase 6 forcing functions (tasks 060/061) must therefore carry Power BI as an explicit,
+      named allowlist entry with this deferral as the reason -- not as an unexplained exemption.
+    </deferred>
+  </notes>
 </task>

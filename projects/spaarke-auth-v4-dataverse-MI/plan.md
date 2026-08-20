@@ -60,7 +60,7 @@ App Service `spaarke-bff-dev` / `rg-spaarke-dev` · **UserAssigned only** `mi-bf
 | **1** | Prerequisites — defects that block the migration | 010–011 | Tests green, no behaviour change |
 | **2** | Credential provider seam | 020–024 | Both credentials work; ordered fallback proven |
 | **3** | Rollout, removal, FIC automation (dev only) | 030–033 | §6.1 OBO checklist green; soak before removal |
-| **4** | Power BI — UAMI-as-principal | 040–042 | Embed tokens issue; payloads unchanged |
+| ~~**4**~~ | ⏭️ ~~Power BI — UAMI-as-principal~~ **DEFERRED 2026-08-19 (owner)** | 040–042 | *Parked — Power BI not yet in use at Spaarke* |
 | **5** | Group 2 non-Entra credentials (parallel) | 050–056 | Per-credential migration or documented reason |
 | **6** | Forcing functions (anti-recurrence) | 060–063 | Build fails on a deliberately-introduced violation |
 | **9** | Wrap-up | 090 | `/test-diet`, publish size, lessons-learned |
@@ -100,9 +100,20 @@ Both are pre-existing defects, independently correct, and both de-risk the migra
 - **032** Flip via slot swap; soak (FR-C2). **No in-session flips.**
 - **033** Remove the secret — app settings, Key Vault, the lowercase alias, 11 scripts, ~25 docs (FR-C3).
 
-### Phase 4 — Power BI (040–042)
+### Phase 4 — Power BI (040–042) — ⏭️ **DEFERRED (owner, 2026-08-19)**
 
-- **040** ⚠️ **Verify service-principal *profiles* work under a managed identity** — the gating unknown.
+> *"we can ignore Power BI if it is not readily available and defined — we are not yet using Power BI (it will
+> be in the future but we can address the MI at that time)."*
+
+`PowerBi:ClientSecret` stays. It is a separate credential from `BFF-API-ClientSecret` and no OBO path reads it,
+so this does not weaken FR-C3 or the fail-closed surface. The deferral is made **visible** rather than silent:
+task 060 allowlists Power BI *with this reason*, task 061 keeps both sites in the census as still-secret-backed,
+and success criterion 10 is waived-with-reason at wrap-up.
+
+Re-open specification (unchanged, still correct):
+
+- **040** ⚠️ **Verify service-principal *profiles* work under a managed identity** — the gating unknown. **Still
+  unanswered — deferral does not resolve it.**
 - **041** Tenant setting + workspace grants (FR-D1); rework both services (FR-D2).
 - **042** Remove `PowerBi:ClientSecret` (FR-D3).
 
@@ -144,7 +155,7 @@ Longest dependency chain. Phase 4 (Power BI), Phase 5 (Group 2), Phase 6 (forcin
 | **B** | 020 | 011 | Serial — everything downstream depends on the seam |
 | **C** | 021, 023, 024 | 020 | Independent surfaces of the provider |
 | **D** | 022 | 021 | Serial — the migration itself; highest blast radius |
-| **E** | 030, 040 | 020 | FIC automation + Power BI verification, fully independent |
+| **E** | **030** ⏩ | 020 | FIC automation. **Pulled forward (owner, 2026-08-19): run immediately after 020, ahead of 021/022** — provisioning Wave G-3 is soft-blocked on it. 040 removed (Power BI deferred) |
 | **F** | 050, 051, 052, 053, 054, 055, 056 | none | Group 2 — independent of everything; can start any time |
 | **G** | 060, 061, 062, 063 | 022 | Forcing functions — need the end-state shape to assert against |
 | — | 031 → 032 → 033 | 022 | Serial by construction (deploy → flip → soak → remove) |
@@ -162,7 +173,7 @@ sub-agent write boundary. Applies to 033 (constraint/pattern updates) and 063.
 | R1 | **OBO fails closed** — breakage locks out every user immediately and totally | Staged slot rollout; secret retained as ordered fallback until 033; soak before removal; no in-session flips |
 | R2 | Phase 0 spike fails — MI-FIC + our OBO chain incompatible | Pivot to Option B (KV certificate), already proven in-repo by `CiamGraphClientFactory`. The provider seam is credential-agnostic, so Phase 2 work is not wasted |
 | R3 | **Silent misconfiguration** — wrong FIC issuer/subject/audience creates cleanly, fails only at exchange | 023 conflation guard + test; 030 verifies by performing an actual exchange, not by a successful create |
-| R4 | Power BI SP profiles unsupported under a managed identity | 040 verifies BEFORE 041/042 commit. Fallbacks: MI-FIC on existing SP, or documented ADR-028 exception |
+| ~~R4~~ | Power BI SP profiles unsupported under a managed identity | **Retired from this project 2026-08-19** — Phase 4 deferred. The risk is not resolved, it is *deferred with the work*: 040 must verify before 041/042 are ever attempted |
 | R5 | 46 test fixtures break | Nullable provider parameter with null default; NFR-04 |
 | R6 | `ADR010_DITests` ceiling failure reddens CI | Raise 153→154 in the same PR as 020 (already an acceptance criterion) |
 | R7 | Forcing functions deleted by `/test-diet` at wrap-up | 063 pre-declares them MAINTAIN-class |
@@ -186,12 +197,12 @@ sub-agent write boundary. Applies to 033 (constraint/pattern updates) and 063.
 | 1 Prerequisites | 2 | 1 day |
 | 2 Provider seam | 5 | 3–4 days |
 | 3 Rollout + FIC automation | 4 | 2–3 days + soak |
-| 4 Power BI | 3 | 1–3 days (depends on 040) |
+| ~~4 Power BI~~ | ~~3~~ | ⏭️ **deferred — 0 days in this project** |
 | 5 Group 2 | 7 | 2–3 days (parallel) |
 | 6 Forcing functions | 4 | 1–2 days |
 | 9 Wrap-up | 1 | 0.5 day |
 
-**Total: 29 tasks, ~12–18 working days** excluding soak. Note the original design's ~350–550 LOC estimate is
+**Total: 29 tasks authored — 26 active (~11–15 working days), 3 deferred (Phase 4 Power BI)** excluding soak. Note the original design's ~350–550 LOC estimate is
 **understated** — it assumed the declarative adoption ruled out by E4′.
 
 ## 9. References

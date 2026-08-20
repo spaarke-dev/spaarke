@@ -36,7 +36,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">Scope: EXACTLY these six sites. SpeAdminTokenProvider and SpeAdminGraphService are OUT (ADR-028 E-1 — they authenticate other applications' identities, not the BFF's). CiamGraphClientFactory is OUT (already certificate-based). Power BI is OUT (task 041, UAMI-as-principal).</constraint>
+    <constraint source="project">Scope: EXACTLY these six sites. SpeAdminTokenProvider and SpeAdminGraphService are OUT (ADR-028 E-1 — they authenticate other applications' identities, not the BFF's). CiamGraphClientFactory is OUT (already certificate-based). Power BI is OUT (Workstream D DEFERRED 2026-08-19 -- Power BI not yet adopted; tasks 040-042 are parked, PowerBi:ClientSecret stays).</constraint>
     <constraint source="project">Scope: the secret REMAINS configured and selectable as the lowest-priority fallback. Removal is task 033, after the soak. Do not delete anything here.</constraint>
     <constraint source="ADR-028">Scope: DefaultAzureCredential is NOT a valid substitute on OBO paths — it cannot perform the exchange. Use the client assertion.</constraint>
     <constraint source="project">Scope: DataverseServiceClientImpl.cs is being decomposed by dataverse-access-unification-r1. Confine the edit to the credential-construction block (~:60-125) and touch nothing else, per the COORDINATION note §4.1. Report the exact line range in the PR.</constraint>

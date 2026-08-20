@@ -32,6 +32,8 @@
 
   <constraints>
     <constraint source="project">Scope: swap ONLY. Do not remove the secret, do not touch Key Vault, do not edit scripts — all of that is 033, after the soak.</constraint>
+    <constraint source="project">Scope: SITE PROPERTIES DO NOT SWAP -- only app settings and code do. keyVaultReferenceIdentity, and the slot's managed-identity assignment, must already be correct on BOTH slots before the swap; they will not arrive via it. Verify both sides first. See notes/decisions/001-slot-creation.md Finding A.</constraint>
+    <constraint source="project">Scope: do NOT use Deploy-BffApi.ps1 -UseSlotDeploy as the swap mechanism -- it re-deploys first. This task swaps an ALREADY-VERIFIED slot. Use az webapp deployment slot swap directly.</constraint>
     <constraint source="project">Scope: NO in-session flips. Swap as a discrete, announced operation with the rollback command prepared in advance.</constraint>
     <constraint source="project">Scope: if anything looks wrong post-swap, swap BACK first and diagnose afterwards. Do not fix forward on a fail-closed auth path.</constraint>
   </constraints>
@@ -64,6 +66,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion>Pre-swap: keyVaultReferenceIdentity and the managed-identity assignment are verified correct on BOTH slots, since site properties do not swap.</criterion>
     <criterion>Dev runs on MI-FIC as the first-priority credential.</criterion>
     <criterion>The full §6.1 checklist passes post-swap.</criterion>
     <criterion>The soak period elapsed with no auth-related errors.</criterion>

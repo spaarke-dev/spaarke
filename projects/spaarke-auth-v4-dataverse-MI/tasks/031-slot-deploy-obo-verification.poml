@@ -33,6 +33,8 @@
 
   <constraints>
     <constraint source="project">Scope: SLOT ONLY. Do not swap in this task — that is 032.</constraint>
+    <constraint source="project">Scope: BEFORE running the checklist, verify the slot's keyVaultReferenceIdentity is the mi-bff-api-dev resource ID. Task 001 found this is a SITE property that --configuration-source does NOT copy; the slot defaulted to SystemAssigned (which the slot does not have) and every Key Vault reference failed, aborting startup with exit code 134 (SIGABRT). A slot that cannot resolve KV references fails in ways that LOOK like credential failures -- the worst possible misdiagnosis while testing a credential change. See notes/decisions/001-slot-creation.md Finding A.</constraint>
+    <constraint source="project">Scope: do NOT use Deploy-BffApi.ps1 -UseSlotDeploy. It deploys AND SWAPS in one flow with no -SkipSwap option (scripts/Deploy-BffApi.ps1:86-115). Task 032 owns the swap. Use the explicit az webapp deploy recipe in notes/decisions/001-slot-creation.md Finding C, or add a -SkipSwap switch to the script first.</constraint>
     <constraint source="project">Scope: every checklist item is blocking. A partial pass is a FAIL; do not proceed to 032 on "mostly green".</constraint>
     <constraint source="project">Scope: verify with the MI-FIC credential FIRST in the order, and then re-verify with the secret first, proving rollback works before it is needed.</constraint>
   </constraints>
@@ -70,6 +72,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion>Pre-check: the slot's keyVaultReferenceIdentity resolves to mi-bff-api-dev and the slot boots cleanly (no exit-134 SIGABRT), BEFORE any OBO conclusion is drawn.</criterion>
     <criterion>All eight OBO surfaces pass under MI-FIC on the slot.</criterion>
     <criterion>Inbound token validation is unchanged for all three schemes.</criterion>
     <criterion>The secret-first ordering also passes, proving rollback before it is needed.</criterion>

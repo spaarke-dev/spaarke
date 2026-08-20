@@ -212,10 +212,26 @@ the hosting tenant's `/v2.0` OIDC endpoint, subject is the UAMI **principalId** 
 exchange**, not by checking that creation returned success — misconfiguration creates cleanly and fails only at
 exchange. Re-running against an existing FIC is a no-op.
 
-### Workstream D — Power BI (UAMI-as-principal)
+### Workstream D — Power BI (UAMI-as-principal) — ⏭️ **DEFERRED OUT OF THIS PROJECT (owner, 2026-08-19)**
 
-*Owner decision: adopt Microsoft's documented model rather than prototyping MI-FIC on the existing service
-principal. Power BI therefore does **not** consume the FR-B1 provider.*
+> **DEFERRED.** *"we can ignore Power BI if it is not readily available and defined — we are not yet using
+> Power BI (it will be in the future but we can address the MI at that time)."* — owner, 2026-08-19.
+>
+> **Tasks 040, 041, 042 are parked ⏭️ and `PowerBi:ClientSecret` REMAINS in place.** The requirements below are
+> retained verbatim as the re-open specification; nothing about them was found wrong.
+>
+> **Why deferring is safe**: `PowerBi:ClientSecret` (`PowerBiOptions.cs:44-45`) is a *genuinely separate*
+> credential from `BFF-API-ClientSecret`. No OBO path reads it, so Workstream D does not gate FR-C3 (task 033)
+> and does not touch the fail-closed surface. Task 033 already asserts it is left untouched.
+>
+> **What the deferral still obligates**, so this is not silent debt: FR-F1 (task 060) allowlists the Power BI
+> sites **with this reason recorded**; FR-F2 (task 061) keeps them in the census as **secret-backed** entries so
+> the count stays honest; success criterion 10 is **waived with reason**, not dropped. Re-open at FR-D2's
+> gating question — it is still unanswered.
+
+*Original owner decision (still the intended approach when re-opened): adopt Microsoft's documented model rather
+than prototyping MI-FIC on the existing service principal. Power BI therefore does **not** consume the FR-B1
+provider.*
 
 **FR-D1** — Enable and grant the managed identity as a Power BI principal.
 Tenant setting permitting service principals / managed identities to use the Power BI APIs; grant the UAMI
@@ -425,8 +441,11 @@ base shared layer, widening publish size and CVE surface for every downstream co
 8. [ ] Config validators relaxed consistently — Verify: BFF starts with no secret configured; still fails fast
        with no credential at all (FR-B5).
 9. [ ] Local `dotnet run` works, including OBO, via the documented fallback.
-10. [ ] Power BI runs as a managed-identity principal; `PowerBi:ClientSecret` removed — Verify: embed tokens issue;
-        reporting endpoints return unchanged payloads (FR-D).
+10. [⏭️] ~~Power BI runs as a managed-identity principal; `PowerBi:ClientSecret` removed~~ — **WAIVED 2026-08-19
+        (owner): Power BI is not yet in use at Spaarke; Workstream D deferred.** Instead verify at wrap-up that
+        the deferral is *visible, not silent*: the Power BI sites are named in the FR-F1 allowlist with the
+        deferral reason AND appear in the FR-F2 census as still-secret-backed. Re-open with FR-D when Power BI
+        is adopted.
 11. [ ] Group 2 credentials migrated, or each documented with a reason not to — Verify: per-credential acceptance
         in FR-E1..E7.
 12. [ ] **Forcing functions merged and failing correctly** — Verify: introduce a deliberate ninth secret-bearing
@@ -448,13 +467,13 @@ base shared layer, widening publish size and CVE surface for every downstream co
 - ✅ **Platform prerequisites verified live** — app registration + UAMI same tenant; `spaarke-bff-dev` runs
   user-assigned MI only (`mi-bff-api-dev`, principalId `9fd47efb-…`); plan is P1v3.
 - ⬜ **Dev deployment slot** — supported but **zero exist**; created in FR-C1.
-- ⬜ **Power BI tenant setting + workspace grants** — FR-D1, requires Power BI admin.
+- ⏭️ ~~**Power BI tenant setting + workspace grants**~~ — FR-D1. **Not needed: Workstream D deferred 2026-08-19.**
 - `#3b` (app-only Dataverse → MI) — done, live on dev.
 
 ### External Dependencies
 
 - **Azure AD admin** — authenticated in-session; owner runs the project. No external scheduling dependency remains.
-- **Power BI admin** — for FR-D1.
+- ⏭️ ~~**Power BI admin**~~ — for FR-D1. **No longer required: Workstream D deferred 2026-08-19.** This removes the project's last external-approval dependency.
 - **`customer-provisioning-orchestration-r1`** — PR #779, ~68% executed. Not blocking; needs the §5.1 decision.
 - **`dataverse-access-unification-r1`** — **not a prerequisite in either direction.** Parallel execution expected;
   four-file interlock in `notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md` §4.
@@ -496,10 +515,12 @@ base shared layer, widening publish size and CVE surface for every downstream co
 
 ## Unresolved Questions
 
-- [ ] **Power BI service-principal *profiles* under a managed identity.** `ReportingProfileManager` uses Power BI
+- [⏭️] **Power BI service-principal *profiles* under a managed identity.** `ReportingProfileManager` uses Power BI
       SP profiles; whether profiles are supported when the principal is a managed identity is **unverified**.
-      *Blocks*: sizing FR-D2. *If unsupported*: fall back to MI-FIC-on-existing-SP, or retain the Power BI secret
-      under a documented ADR-028 exception. **Verify before committing Workstream D's task set.**
+      **DEFERRED WITH WORKSTREAM D (2026-08-19)** — it no longer blocks anything in this project, but it does
+      **not** become answered by being deferred. It travels with task 040 and must be settled *before* 041/042
+      are ever attempted. *If unsupported*: fall back to MI-FIC-on-existing-SP, or retain the Power BI secret
+      under a documented ADR-028 exception.
 - [x] ~~**ADR-010 DI-registration headroom.**~~ **RESOLVED 2026-08-19 by `/adr-check`.** Not a blocker: ADR-010
       itself records **265 registrations** at the 2026-05-26 baseline against the "≤15 non-framework lines"
       principle, explicitly *"a known violation accepted by the project"*, with reduction out of scope. FR-B1 adds
