@@ -21,7 +21,7 @@
  */
 import * as React from 'react';
 import { mergeClasses, Text, Button, Tooltip } from '@fluentui/react-components';
-import { Checkmark16Filled, Dismiss12Regular } from '@fluentui/react-icons';
+import { Checkmark16Filled, Dismiss12Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { entityLabel, type PrimaryCandidate } from '../../logic/connections';
 import type { ConnectionsReviewStyles } from './EmailConnectionsReview.styles';
 
@@ -40,6 +40,7 @@ export function CandidateCard({
   readOnly,
   onSelect,
   onConfirm,
+  onUndo,
   s,
 }: {
   candidate: PrimaryCandidate;
@@ -58,6 +59,14 @@ export function CandidateCard({
   readOnly: boolean;
   onSelect: () => void;
   onConfirm: () => void;
+  /**
+   * Reconcile variant (owner UAT 2026-08-19, item 2f): when THIS card is the current
+   * primary (auto-matched 🟡 or confirmed 🟢, `tone === 'primary'`), its action button
+   * is **Undo** instead of Confirm — clicking it un-files the association (back to
+   * Confirm) while the other candidate cards keep their Confirm (switch) buttons.
+   * Omitted ⇒ the primary card falls back to a Confirm button (default variant).
+   */
+  onUndo?: () => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
   const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
@@ -80,9 +89,30 @@ export function CandidateCard({
             </Text>
           </div>
           {!readOnly ? (
-            <Button appearance="primary" size="small" icon={<Checkmark16Filled />} disabled={busy} onClick={onConfirm}>
-              Confirm
-            </Button>
+            tone === 'primary' && onUndo ? (
+              // Current primary (auto-matched/confirmed) → Undo un-files it (item 2f).
+              <Button
+                appearance="secondary"
+                size="small"
+                icon={<ArrowUndo16Regular />}
+                disabled={busy}
+                onClick={onUndo}
+                data-testid="candidate-undo"
+              >
+                Undo
+              </Button>
+            ) : (
+              // Non-primary candidate → Confirm switches the association to it.
+              <Button
+                appearance="primary"
+                size="small"
+                icon={<Checkmark16Filled />}
+                disabled={busy}
+                onClick={onConfirm}
+              >
+                Confirm
+              </Button>
+            )
           ) : null}
         </div>
       </div>

@@ -576,6 +576,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 
     /// <summary>
+    /// UAT-12 (2026-08-18, honest/safe): <c>true</c> when the existing-annotation read
+    /// (<see cref="DocxAnnotationReader"/>) THREW during Load, so <see cref="ImportedRevisions"/> and
+    /// <see cref="ImportedComments"/> were forced empty as a fallback. Without this flag a document that
+    /// genuinely CONTAINS tracked changes / reviewer comments would mount looking CLEAN — a trust-breaking
+    /// silent loss on a legal-review surface. The client surfaces an honest "this document's tracked
+    /// changes and comments couldn't be read — do not treat it as clean" banner when this is set.
+    /// <c>false</c> on the normal path (the read succeeded — an empty result then means the document
+    /// really has no annotations).
+    /// </summary>
+    public bool AnnotationReadFailed { get; init; }
+
+    /// <summary>
     /// Task 012 (spaarkeai-compose-r6, the client cutover): the CANONICAL content model projected from
     /// the SAME minted load-time bytes the HTML <see cref="Projection"/> is built from (one mint, two
     /// walks — paraIds agree by construction). The client RETAINS this as the loaded model and, on an
@@ -766,6 +778,21 @@ public sealed record SaveComposeDocumentRequest
     /// same-session save (the <see cref="Content"/> fast-path is used) or a transient create-on-save.
     /// </summary>
     public string? BaselineVersionId { get; init; }
+
+    /// <summary>
+    /// UAT-25/26 (2026-08-18, honest/safe concurrency): the LOAD-TIME SPE ETag the client's in-memory
+    /// document is based on (<see cref="LoadComposeDocumentResult.ETag"/>). It is the client's "base I
+    /// edited from" reference for stale-base detection. <see cref="SaveAsync"/> compares the LIVE SPE ETag
+    /// at save time against the effective baseline (the Compose save-version STAMP if this session has
+    /// already saved, else this load-time ETag) — a mismatch means an external writer (Word / another tab)
+    /// landed a new version since the client loaded. On the whole-body <see cref="ContentModel"/> re-author
+    /// path (which CANNOT re-anchor another writer's changes) a mismatch is refused with a 412 (reload +
+    /// reapply — nothing overwritten) rather than SILENTLY overwriting the external change. Providing it on
+    /// the FIRST Compose save of a pre-existing item closes the prior no-stamp-yet concurrency gap (UAT-26).
+    /// Null on a transient create-on-save (no prior base) or an older client that predates this field
+    /// (then only the stamp-based check applies, unchanged).
+    /// </summary>
+    public string? BaselineETag { get; init; }
 
     /// <summary>
     /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /

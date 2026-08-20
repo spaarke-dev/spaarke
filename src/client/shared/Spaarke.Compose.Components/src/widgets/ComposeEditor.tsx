@@ -156,6 +156,7 @@ import {
   resolveTargetSpans,
   type MaterializeStatus,
   type ConfidenceBand,
+  type PendingRedlineError,
 } from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
@@ -645,6 +646,15 @@ export interface ComposeEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
 
   /**
+   * Banner consolidation (2026-08-19): surfaces the pending-redline anchor-failure notice UP to the
+   * host so it renders in the single {@link ComposeBannerStack} rail (above the toolbar) instead of a
+   * hand-rolled bar below the toolbar. Called whenever {@link usePendingRedline}'s error changes
+   * (null clears it). The host stores it and passes it to ComposeBannerStack; dismissal routes back
+   * via {@link ComposeEditorHandle.clearRedlineError}.
+   */
+  onRedlineErrorChange?: (error: PendingRedlineError | null) => void;
+
+  /**
    * Called with the server projection's fidelity-warning array after each DOCX mount (task 013:
    * formerly mammoth's per-conversion warnings; now `projection.warnings` + unresolved-revision
    * notices). The host can surface a "this document was simplified on load" banner (deferred to R2
@@ -887,6 +897,13 @@ export interface ComposeEditorHandle {
   commitSaved(): void;
 
   /**
+   * Banner consolidation (2026-08-19): clears the pending-redline anchor-failure notice. The notice now
+   * renders in the host's {@link ComposeBannerStack} rail (surfaced via {@link ComposeEditorProps.onRedlineErrorChange});
+   * its dismiss ✕ routes back here so the host does not need to reach into the redline hook's state.
+   */
+  clearRedlineError(): void;
+
+  /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
    * sends on save so the server can stamp minted ids physically onto the retained-original baseline's
    * id-less paragraphs before the synthesizer resolves. Read-only (no dirty-flag side effect) — sourced
@@ -972,7 +989,13 @@ export interface ComposeEditorHandle {
    * text-anchored via the stale `annotations` save field, which the server never deserialized — every
    * comment sent that way was silently dropped). Empty when no session/advisory comments exist.
    */
-  getAnchoredComments(): ComposeAnchoredComment[];
+  /**
+   * @param onDropped UAT-22 (2026-08-18) — optional sink called ONCE per session/advisory thread
+   * that resolves NO anchored comment because its live anchor is gone (a comment still shown in the
+   * gutter that would silently never reach Word). The host passes this to count drops and raise an
+   * honest "N comment(s) couldn't be saved" degradation warning. Omit to keep the plain mapping.
+   */
+  getAnchoredComments(onDropped?: (threadId: string, reason: string) => void): ComposeAnchoredComment[];
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -1562,19 +1585,8 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  redlineError: {
-    display: 'flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
-    padding: tokens.spacingHorizontalS,
-    backgroundColor: tokens.colorStatusWarningBackground1,
-    color: tokens.colorStatusWarningForeground1,
-    borderBottom: `1px solid ${tokens.colorStatusWarningBorder1}`,
-  },
-  redlineErrorText: {
-    flex: 1,
-    minWidth: 0,
-  },
+  // (2026-08-19 banner consolidation) the `redlineError` / `redlineErrorText` styles were removed —
+  // the redline anchor-failure notice now renders as a Fluent MessageBar in ComposeBannerStack.
   // FR-35 Doc Q&A ephemeral highlight banner (task 072, stretch). Semantic
   // tokens only (ADR-021 dark-mode-correct) — transient, dismissible-by-timeout.
   qaHighlightBanner: {
@@ -1877,6 +1889,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       bffBaseUrl,
       sessionId = '',
       onDirtyChange,
+      onRedlineErrorChange,
       onImportWarnings,
       enqueueComposeAction,
       onOpenInWord,
@@ -2461,6 +2474,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
     const redline = usePendingRedline(editor);
 
+    // Banner consolidation (2026-08-19): surface the redline anchor-failure notice up to the host so
+    // it renders in the single ComposeBannerStack rail (one location, MessageBar styling) instead of a
+    // hand-rolled bar below the toolbar. The host owns dismissal via the handle's clearRedlineError.
+    React.useEffect(() => {
+      onRedlineErrorChange?.(redline.error);
+    }, [redline.error, onRedlineErrorChange]);
+
     // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
     // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
     // §6.2). Splitting the pending set here — rather than inside usePendingRedline's accept/reject
@@ -2965,6 +2985,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           dirtyRef.current = stillDirty;
           onDirtyChange?.(stillDirty);
         },
+        // Banner consolidation (2026-08-19): dismiss the redline anchor-failure notice now rendered in
+        // the host's ComposeBannerStack rail. Delegates to the redline hook's own clearError.
+        clearRedlineError: () => redline.clearError(),
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),
@@ -3019,12 +3042,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // (paraId, run-local range) — no text-search (I-7). The imported id set is the load-time
         // `initialCommentThreads` (seeded from the doc's own comments); advisory threads have no
         // imported counterpart, so nothing is excluded for that instance.
-        getAnchoredComments: () => {
+        getAnchoredComments: onDropped => {
           if (!editor) return [];
           const importedIds = new Set(initialCommentThreads.map(t => t.id));
           return [
-            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, commentThreadsRef.current, importedIds),
-            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, advisoryComments.threads, new Set()),
+            ...composeSessionCommentThreadsToAnchoredComments(
+              editor.state.doc,
+              commentThreadsRef.current,
+              importedIds,
+              onDropped
+            ),
+            ...composeSessionCommentThreadsToAnchoredComments(
+              editor.state.doc,
+              advisoryComments.threads,
+              new Set(),
+              onDropped
+            ),
           ];
         },
         getCounts: () => {
@@ -3392,32 +3425,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ) : null}
 
         {/* ===================================================================
-            PENDING REDLINE affordances — task 033 (FR-16). Unresolved-target
-            banner (FR-19 "do not guess") + per-suggestion accept/reject. Driven
-            by usePendingRedline; semantic tokens only (ADR-021 dark-mode).
+            PENDING REDLINE affordances — task 033 (FR-16). The unresolved-target
+            NOTICE (FR-19 "do not guess") was HOISTED (2026-08-19 banner
+            consolidation) into the single ComposeBannerStack rail above the
+            toolbar — surfaced via onRedlineErrorChange, dismissed via the handle's
+            clearRedlineError — so it no longer renders here below the toolbar as a
+            hand-rolled bar. The per-suggestion accept/reject summary bar below
+            (interactive, tied to live document spans) stays with the editor.
             =================================================================== */}
-        {redline.error ? (
-          <div className={styles.redlineError} role="status" data-testid="compose-redline-error">
-            <Text size={200} className={styles.redlineErrorText}>
-              {/* Item 1 (UAT round-4): a table-heavy / cross-extractor document can leave several
-                  exact-but-cross-cell targets unplaceable. Prefer a CALM batched summary (N of M)
-                  over an alarming single-edit "not found" — the document is fully usable regardless.
-                  `ambiguous` keeps its actionable reselect guidance. */}
-              {redline.error.kind === 'ambiguous'
-                ? `This suggested edit matches ${redline.error.matchCount} places in the document. Select the exact passage and try again.`
-                : (redline.error.failedCount ?? 0) > 1
-                  ? `${redline.error.failedCount} of ${redline.error.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
-                  : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
-            </Text>
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<Dismiss16Regular />}
-              aria-label="Dismiss"
-              onClick={redline.clearError}
-            />
-          </div>
-        ) : null}
         {/* ===================================================================
             FR-14 (task 031) — pending-redlines summary bar: count + "Accept
             all" (built ONLY from acceptAllEligible — low-band items are never

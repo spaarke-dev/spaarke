@@ -682,12 +682,42 @@ export interface ComposeWorkspaceProps {
   containerId?: string;
 
   /**
+   * UAT-11 (2026-08-18, honest/safe): a RETRY resolver the host supplies so a transient-create Save
+   * can RE-RESOLVE the BU container at save time instead of relying solely on the one-shot mount-time
+   * `containerId`. The mount resolver runs once in a `useEffect([])`; if Xrm wasn't ready, a transient
+   * 401, or a Dataverse query fault made it fail, `containerId` stays undefined and the save gate used
+   * to emit a DISHONEST "your BU has no storage container configured" — telling the admin to fix a
+   * correctly-configured BU. This callback lets the save path (a) retry the resolution and (b) learn
+   * WHY it's still missing so the banner is honest:
+   *   - `resolved`     → a container id (use it — the retry recovered a transient mount failure)
+   *   - `no-container` → the query succeeded but the BU genuinely has no `sprk_containerid`
+   *   - `unavailable`  → the resolution couldn't run/complete (no Xrm host, threw, transient fault)
+   * Optional — a host that omits it keeps the pre-UAT-11 one-shot behavior + generic message.
+   */
+  resolveContainer?: () => Promise<{ containerId?: string; outcome: 'resolved' | 'no-container' | 'unavailable' }>;
+
+  /**
    * FR-05 create-on-save (task 100): invoked once a transient draft is persisted as a NEW
    * `sprk_document` on first Save, with the server-minted `sprk_documentid`. The host wires this
    * to `useCreateOnSaveAssociation.associate(newDocumentId)` so a chosen parent association is
    * written (a no-op when the user chose "none"). Non-fatal — the document already exists.
    */
   onCreateOnSaveComplete?: (newSprkDocumentId: string) => void | Promise<void>;
+
+  /**
+   * UAT (2026-08-18, owner): the Document + Analysis are created on SAVE. Invoked ONCE, on the FIRST
+   * save (create-on-save) of a NEW document, WHEN a review/analysis actually ran on it (there are
+   * review findings) — with the server-minted `sprk_documentid`. The host wires this to create + bind
+   * the `sprk_analysis` for the review session (so the Summary Memo works and the Analysis is
+   * reopenable from history). NOT called for a plain drafting doc (no review), nor on subsequent saves
+   * / a reopened Analysis (those are the replace/version path and the Analysis already exists). Fired
+   * after the parent-association write so both land on the freshly-created document.
+   */
+  onReviewedDocumentCreated?: (
+    newSprkDocumentId: string,
+    sessionId: string,
+    documentName: string
+  ) => void | Promise<void>;
 
   /** Called when the user clicks Browse in the empty state. */
   onBrowseRequested?: () => void;
@@ -782,6 +812,18 @@ const useStyles = makeStyles({
     paddingBlock: tokens.spacingVerticalXS,
     flexShrink: 0,
   },
+  // UAT-04 (2026-08-18): compact top-area operation-in-flight indicator. Semantic tokens only
+  // (ADR-021 dark-mode-correct); an unobtrusive subtle-background strip above the banner stack.
+  operationIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
   editorSlot: {
     flex: 1,
     minHeight: 0,
@@ -823,7 +865,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     driveId,
     tenantId,
     containerId,
+    resolveContainer,
     onCreateOnSaveComplete,
+    onReviewedDocumentCreated,
     onBrowseRequested,
     onSearchRequested,
     onComposeMount,
@@ -836,6 +880,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
+
+  // UAT (2026-08-18, save-driven Analysis): refs the save closure reads for the first-save Analysis
+  // create. `onReviewedDocumentCreatedRef` mirrors the host callback; `hasReviewFindingsRef` mirrors
+  // "a review actually ran on this doc" (reviewSummaryFindings.length > 0, defined further down — the
+  // ref lets the earlier-declared save callback read it without a stale closure). Updated via effects.
+  const onReviewedDocumentCreatedRef = React.useRef(onReviewedDocumentCreated);
+  React.useEffect(() => {
+    onReviewedDocumentCreatedRef.current = onReviewedDocumentCreated;
+  }, [onReviewedDocumentCreated]);
+  const hasReviewFindingsRef = React.useRef<boolean>(false);
 
   // spaarkeai-compose-r2 (multi-Compose-tab): keep the latest active-tab flag in a ref so the
   // async load effects + the single-slot visibility conduit handler (both of which capture their
@@ -854,6 +908,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   React.useEffect(() => {
     containerIdRef.current = containerId;
   }, [containerId]);
+
+  // UAT-11 (honest/safe): keep the host's save-time container RETRY resolver in a ref so the save
+  // callback can re-resolve without re-subscribing (mirrors containerIdRef). See the prop docs.
+  const resolveContainerRef = React.useRef(resolveContainer);
+  React.useEffect(() => {
+    resolveContainerRef.current = resolveContainer;
+  }, [resolveContainer]);
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
@@ -900,6 +961,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // the same stored draft). `composeDraftError` surfaces a soft failure without crashing.
   const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
+
+  // Banner consolidation (2026-08-19): the pending-redline anchor-failure notice, lifted OUT of
+  // ComposeEditor so it renders in the single ComposeBannerStack rail (above the toolbar) instead of a
+  // hand-rolled bar below the toolbar. The editor pushes changes via onRedlineErrorChange; dismissal
+  // routes back through editorRef.current.clearRedlineError().
+  const [pendingRedlineError, setPendingRedlineError] = React.useState<
+    import('./hooks/usePendingRedline').PendingRedlineError | null
+  >(null);
 
   // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
   // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave
@@ -1105,6 +1174,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap?: ParaIdMapEntry[];
           importedRevisions?: ImportedRevision[];
           importedComments?: ImportedComment[];
+          // UAT-12 (2026-08-18): true when the server's annotation read FAILED, so the empty
+          // revisions/comments above are a fallback — NOT proof the document is clean. Parsed
+          // defensively (older BFF omits it → falsy → no banner).
+          annotationReadFailed?: boolean;
           // The server DOCX→editor projection. Optional so an older BFF (no projection) still parses —
           // task 013 (F-2): the editor now renders an error/unavailable state, not a mammoth fallback.
           projection?: {
@@ -1170,6 +1243,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap: hydratedParaIdMap,
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
+          // UAT-12: carry the honest annotation-read-failed signal into state so the banner stack can
+          // warn the user not to treat a doc-with-unreadable-annotations as clean.
+          annotationReadFailed: payload.annotationReadFailed === true,
           projection: hydratedProjection,
           // task 012 (r6): retain the canonical model atomically with the projection (same response).
           contentModel: payload.contentModel ?? null,
@@ -1478,7 +1554,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             )
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
-      const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+      // `let` (UAT-11): the transient-create gate below may REPLACE this with a save-time retry result.
+      let saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
       // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
       // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
       // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
@@ -1493,18 +1570,40 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         return;
       }
       if (isTransientCreate) {
-        if (!saveContainerId) {
-          // gap 1.4: don't abort silently as the pre-100 code did — surface an honest, actionable
-          // banner. The container resolves from the user's Business Unit; if it's missing the BU is
-          // unconfigured (or we're in a non-Dataverse host).
-          dispatch({
-            kind: 'saveFailed',
-            errorMessage:
-              'Cannot save this new document — your Business Unit has no storage container configured. ' +
-              'Contact an administrator to set the container on your Business Unit.',
-          });
+        let resolvedContainerId = saveContainerId;
+        // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
+        // useEffect([]) — if Xrm wasn't ready, a transient 401, or a Dataverse fault made it fail,
+        // `containerId` stays undefined and the OLD gate emitted a DISHONEST "your BU has no storage
+        // container configured" for what may be a correctly-configured BU. RETRY here (if the host
+        // supplied a resolver) and only claim "no container configured" when the query actually
+        // confirms the BU has none — otherwise say honestly that we couldn't determine it.
+        let containerOutcome: 'resolved' | 'no-container' | 'unavailable' | 'unknown' = resolvedContainerId
+          ? 'resolved'
+          : 'unknown';
+        if (!resolvedContainerId && resolveContainerRef.current) {
+          try {
+            const retry = await resolveContainerRef.current();
+            containerOutcome = retry.outcome;
+            if (retry.containerId) {
+              resolvedContainerId = retry.containerId;
+              containerIdRef.current = retry.containerId; // cache for subsequent saves this mount
+            }
+          } catch {
+            containerOutcome = 'unavailable';
+          }
+        }
+        if (!resolvedContainerId) {
+          const errorMessage =
+            containerOutcome === 'no-container'
+              ? 'Cannot save this new document — your Business Unit has no storage container configured. ' +
+                'Contact an administrator to set the container on your Business Unit.'
+              : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
+                "Cannot save this new document yet — we couldn't determine your storage container " +
+                '(the Dataverse context may still be loading). Please try again in a moment.';
+          dispatch({ kind: 'saveFailed', errorMessage });
           return;
         }
+        saveContainerId = resolvedContainerId;
       } else if (!saveDriveId) {
         dispatch({
           kind: 'saveFailed',
@@ -1544,6 +1643,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 .map(entry => entry.operation),
             }
           : undefined;
+        // UAT-23 (2026-08-18, honest/safe): the filter above excludes `deletedContentFlag` ops from
+        // what we apply. A GENUINE later-deletion is expected to drop silently; but the
+        // `anchorLostFlag` subset (an edit whose anchor drifted so it can't be re-anchored) is a
+        // still-valid edit being lost — count it so the save surfaces an honest degradation warning
+        // instead of dropping it in silence. Only meaningful on the op-log apply path; the model path
+        // (buildImportedContentModel) captures the current text whole, so a drifted op is moot there.
+        const anchorLostOpCount = opLogSnapshot
+          ? opLogSnapshot.orderedOps.filter(entry => entry.anchorLostFlag).length
+          : 0;
 
         // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
         // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
@@ -1568,8 +1676,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // never deserialized an `annotations` property, so every comment previously sent that way was
         // silently dropped (session comments AND advisory comments alike). `?.()` guards an older
         // editor build without the handle.
+        // UAT-22 (2026-08-18, honest/safe): collect any session/advisory comment threads that resolve
+        // NO anchored comment (their live anchor is gone / non-paragraph / drifted across a paragraph)
+        // — a comment the user still sees in the gutter that would otherwise be silently dropped from
+        // the save. Counted below into an honest "N comment(s) couldn't be saved" degradation warning.
+        let droppedCommentCount = 0;
         const anchoredComments: ComposeAnchoredComment[] =
-          typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
+          typeof editorRef.current.getAnchoredComments === 'function'
+            ? editorRef.current.getAnchoredComments(() => {
+                droppedCommentCount += 1;
+              })
+            : [];
 
         // Base64-encode the RETAINED ORIGINAL bytes via the shared module-level encoder (see
         // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
@@ -1742,6 +1859,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             sessionId: state.sessionId,
             documentRecordId: state.documentRef.sprkDocumentId ?? null,
             displayName: state.documentRef.fileName ?? null,
+            // UAT-25/26 (2026-08-18): the load-time SPE ETag this save's edits are based on, for honest
+            // stale-base detection server-side. On the whole-body ContentModel re-author path a stale base
+            // is refused (412 reload-and-reapply) instead of silently overwriting an external writer; on
+            // the op-log path it re-anchors. The server prefers its own save-stamp when this session has
+            // already saved — this covers the first-save-of-a-pre-existing-item gap.
+            baselineETag: state.etag ?? undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -1811,6 +1934,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
               isLock: true,
             });
+            return;
+          }
+          // UAT-25/26 (2026-08-18, honest/safe): 412 = the server refused the save because the document
+          // changed since we opened it (an external Word/tab writer landed a new version) — nothing was
+          // overwritten. Route to the honest external-change banner (explicit Reload; the user's pending
+          // edits are preserved, never silently discarded) instead of a dead-end save error. This is the
+          // "reload and reapply" recovery the 412 ProblemDetails describes.
+          if (response.status === 412) {
+            dispatch({ kind: 'externalChangeDetected' });
             return;
           }
           const msg =
@@ -1916,12 +2048,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // loadedContentModelWarnings) — deliberate: every persisted artifact embodies the intake
         // loss, and the banner is dismissible; a model-path save clears them via the reducer as before.
         const heldWarnings = state.loadedContentModelWarnings ?? [];
+        // UAT-22 / UAT-23 (2026-08-18, honest/safe): on the OP-LOG apply path, a dropped comment
+        // (its live anchor gone) and an anchor-lost edit (its anchor drifted so it can't be
+        // re-anchored) would otherwise vanish from the save with no signal. Surface them as their own
+        // degradation codes so the user is told "a comment / an edit couldn't be saved" instead of
+        // silently losing it. Gated to `!usedModelPath` — the model path captures the current text +
+        // comments whole (buildImportedContentModel), so neither loss occurs there.
+        const clientSurfacedLossWarnings: Array<{ code: string; count: number }> = !usedModelPath
+          ? [
+              ...(droppedCommentCount > 0 ? [{ code: 'comment-anchor-unresolved', count: droppedCommentCount }] : []),
+              ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
+            ]
+          : [];
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
           usedModelPath
             ? heldWarnings
-            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-'))
+            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')),
+          clientSurfacedLossWarnings
         );
         dispatch({
           kind: 'saveDegradationWarnings',
@@ -1981,14 +2126,36 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
         // let the host write any chosen parent association (associate() no-ops on "none"). The
-        // document already exists, so an association failure is non-fatal — do not surface it as a
-        // save failure.
+        // document already exists, so an association failure is NOT a save failure.
+        // UAT-13 (2026-08-18, honest/safe): but it is NOT nothing either — a failed association leaves
+        // the document ORPHANED (saved but not filed under its matter). The old code only console.warn'd
+        // it, so the user saw an unqualified "Saved ✓" while the doc was silently unfiled. Surface an
+        // honest, dismissible, RETRYABLE banner instead of swallowing it.
         if (isTransientCreate && onCreateOnSaveComplete && payload.documentRecordId) {
           try {
             await onCreateOnSaveComplete(payload.documentRecordId);
           } catch (assocErr) {
             // eslint-disable-next-line no-console
-            console.warn('[ComposeWorkspace] create-on-save association write failed (non-fatal):', assocErr);
+            console.warn('[ComposeWorkspace] create-on-save association write failed (surfaced):', assocErr);
+            dispatch({ kind: 'associationWarning', documentRecordId: payload.documentRecordId });
+          }
+        }
+        // UAT (2026-08-18, owner): SAVE-driven Analysis. On the FIRST save of a NEW document that had a
+        // review/analysis run on it, tell the host to create + bind the sprk_analysis (so the Summary
+        // Memo works and the Analysis is reopenable). Gated on `hasReviewFindingsRef` — a plain drafting
+        // doc creates NO Analysis. Only on the transient-create (first) save; subsequent saves and a
+        // reopened Analysis are the replace/version path (no create-on-save → the Analysis already
+        // exists). Fire-and-forget — a failure never fails the save (the host handles it honestly).
+        if (isTransientCreate && payload.documentRecordId && hasReviewFindingsRef.current && state.sessionId) {
+          try {
+            await onReviewedDocumentCreatedRef.current?.(
+              payload.documentRecordId,
+              state.sessionId,
+              forkDisplayName ?? state.documentRef?.fileName ?? 'Document'
+            );
+          } catch (analysisErr) {
+            // eslint-disable-next-line no-console
+            console.warn('[ComposeWorkspace] reviewed-document Analysis create failed (non-fatal):', analysisErr);
           }
         }
       } catch (err) {
@@ -2188,8 +2355,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       if (mode === 'new') return true;
       const ref = state.documentRef;
       if (!ref) return false;
-      const neverPersisted = !ref.speDriveItemId && !ref.sprkDocumentId;
-      return neverPersisted && isUntitledDraftName(ref.fileName);
+      // UAT-03 (owner 2026-08-18): prompt for a name on the FIRST save of ANY new-to-system document,
+      // not only born-in-editor "Untitled" drafts. A never-persisted doc (no speDriveItemId, no
+      // sprkDocumentId) has no sprk_document row yet — this save CREATES it, so the user names it.
+      // Previously an imported/uploaded file (which carries a real filename) skipped the prompt; FR-02's
+      // intent is to prompt on every create-on-save. The modal is seeded with the current filename (see
+      // requestSave) so the user confirms or renames rather than being blocked.
+      return !ref.speDriveItemId && !ref.sprkDocumentId;
     },
     [state.documentRef]
   );
@@ -2202,8 +2374,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     (mode: ComposeSaveMode = 'version'): void => {
       if (saveNeedsName(mode)) {
         const current = state.documentRef?.fileName;
-        // Save As seeds from the source name (the user edits it); a first save starts blank.
-        const defaultName = mode === 'new' && !isUntitledDraftName(current) ? (current ?? '') : '';
+        // Seed the modal with the current filename whenever it is a real name (Save As, OR a first save of
+        // an imported/uploaded file — UAT-03) so the user confirms/renames; a born-in-editor "Untitled"
+        // draft starts blank.
+        const defaultName = !isUntitledDraftName(current) ? (current ?? '') : '';
         setSaveNameModal({ mode: mode === 'new' ? 'save-as' : 'first-save', defaultName });
         return;
       }
@@ -2313,6 +2487,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `onAdvisoryComments` receiver further down also writes to (ADR-040 — one ledgered NDA-REVIEW
   // result, two renderings, never a second server read).
   const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
+  // UAT (2026-08-18): mirror "a review ran on this doc" into a ref the (earlier-declared) save closure
+  // reads to gate the first-save Analysis create.
+  React.useEffect(() => {
+    hasReviewFindingsRef.current = reviewSummaryFindings.length > 0;
+  }, [reviewSummaryFindings]);
   const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
   const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
   // Task 032 — server-asserted overall risk (the event/payload field task 030 planted but nothing
@@ -3835,6 +4014,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // is available when there is unsaved work (an edit OR an unpersisted transient
   // draft) and not mid-save.
   const isSavingNow = state.status === 'saving';
+  // UAT-04 (2026-08-18, owner-requested): the user needs to know when Compose is performing an
+  // operation — surface a progress indicator in the workspace's top notification area (NOT the
+  // Assistant). Aggregate the existing per-action busy flags into ONE active-operation label; the
+  // indicator renders above the banner stack whenever any operation is in flight. Save takes priority
+  // (most frequent), then template apply, memo, Word-open, profile refresh.
+  const activeOperationLabel: string | null = isSavingNow
+    ? 'Saving…'
+    : isApplyingTemplate
+      ? 'Applying template…'
+      : memoActionInFlight
+        ? 'Creating summary memo…'
+        : isWordActing
+          ? 'Opening in Word…'
+          : isRefreshingProfile
+            ? 'Refreshing…'
+            : null;
   const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
   // Task 041 review B-MEDIUM-1: a PDF-sourced mount must NOT open in Word — the persisted item is
   // the .pdf (Word can't edit it), and the C3 "id stable across the flush" invariant breaks: the
@@ -4000,6 +4195,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             onDismiss={() => dispatch({ kind: 'externalChangeDismissed' })}
           />
 
+          {/* UAT-04 (owner-requested): top-area progress indicator so the user knows Compose is
+              performing an operation (save / template / memo / Word-open / refresh). Lives in the
+              workspace's own notification area, NOT the Assistant. `aria-live="polite"` announces the
+              operation to assistive tech; `role="status"` marks it non-alarming. */}
+          {activeOperationLabel ? (
+            <div
+              className={styles.operationIndicator}
+              role="status"
+              aria-live="polite"
+              data-testid="compose-workspace-operation-indicator"
+            >
+              <Spinner size="extra-tiny" />
+              <Text size={200}>{activeOperationLabel}</Text>
+            </div>
+          ) : null}
+
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
@@ -4039,6 +4250,42 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest
             // "N edits couldn't be saved — please redo them" warning (replaces the plain Saved ✓ bar).
             partialApply={state.partialApply}
+            // UAT-12 (2026-08-18): honest "tracked changes/comments couldn't be read" banner when the
+            // server annotation read failed — so a doc that may CONTAIN redlines/comments is never
+            // presented as clean.
+            annotationReadFailed={state.annotationReadFailed}
+            // UAT (2026-08-18, owner): SAVE-driven persistence — while the document has no SPE identity
+            // yet (never persisted), show the "not saved yet — Save to create" notice. `reviewRan`
+            // tailors the copy (and matches when Save will also create the Analysis). Clears
+            // automatically once create-on-save gives the document its speDriveItemId.
+            unsavedDocumentNotice={
+              (state.status === 'loaded' || state.status === 'saving') &&
+              !!state.documentRef &&
+              !state.documentRef.speDriveItemId
+                ? { reviewRan: reviewSummaryFindings.length > 0 }
+                : null
+            }
+            // UAT-13 (2026-08-18): when a create-on-save persisted the document but its parent-
+            // association write failed, show the honest "saved but not filed under its matter" banner
+            // with a Retry that re-runs the host association write (clears on success).
+            associationWarning={state.associationWarning}
+            onRetryAssociation={
+              state.associationWarning && onCreateOnSaveComplete
+                ? () => {
+                    const docId = state.associationWarning?.documentRecordId;
+                    if (!docId) return;
+                    void (async () => {
+                      try {
+                        await onCreateOnSaveComplete(docId);
+                        dispatch({ kind: 'associationWarning', documentRecordId: null }); // succeeded → clear
+                      } catch (retryErr) {
+                        // eslint-disable-next-line no-console
+                        console.warn('[ComposeWorkspace] association retry failed (banner stays):', retryErr);
+                      }
+                    })();
+                  }
+                : undefined
+            }
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its
@@ -4046,6 +4293,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Task 032 (FR-16 128KB budget, Leg B) — an honest notice when a prior review's findings
             // could not be fully restored on reopen (never silent absence).
             reviewFindingsDegraded={reviewFindingsDegraded}
+            // Banner consolidation (2026-08-19): the pending-redline anchor-failure notice (hoisted out
+            // of ComposeEditor's below-toolbar bar) + the two former stray host MessageBars
+            // (draft-error, memo-message) now render in THIS single rail with consistent styling.
+            pendingRedlineError={pendingRedlineError}
+            onClearRedlineError={() => editorRef.current?.clearRedlineError()}
+            composeDraftError={composeDraftError}
+            memoActionMessage={memoActionMessage}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
@@ -4055,42 +4309,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               editor renders the panel, derives each finding's location from the live doc, and wires
               navigation to its own cited-span primitive. */}
 
-          {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
-          {composeDraftError ? (
-            <div
-              className={styles.bannerStack}
-              role="status"
-              aria-live="polite"
-              data-testid="compose-workspace-draft-error"
-            >
-              <MessageBar intent="warning">
-                <MessageBarBody>
-                  <MessageBarTitle>Could not insert AI draft</MessageBarTitle>
-                  {composeDraftError}
-                </MessageBarBody>
-              </MessageBar>
-            </div>
-          ) : null}
-
-          {/* FR-14 (task 051) — "Create Summary Memo" negative-path / failure surface. Covers BOTH the
-              honest "no memo yet" 404 (never a silent empty export) and a transient generate/email
-              network failure. Cleared at the start of the next Generate/Email attempt (mirrors the
-              `composeDraftError` banner above — no separate dismiss affordance). */}
-          {memoActionMessage ? (
-            <div
-              className={styles.bannerStack}
-              role="status"
-              aria-live="polite"
-              data-testid="compose-workspace-memo-action-message"
-            >
-              <MessageBar intent="warning">
-                <MessageBarBody>
-                  <MessageBarTitle>Create Summary Memo</MessageBarTitle>
-                  {memoActionMessage}
-                </MessageBarBody>
-              </MessageBar>
-            </div>
-          ) : null}
+          {/* Banner consolidation (2026-08-19): the FR-04 draft-error and FR-14 "Create Summary Memo"
+              notices moved INTO ComposeBannerStack above (passed as composeDraftError / memoActionMessage)
+              so every passive Compose notice shares one rail + Fluent MessageBar styling. */}
 
           <div className={styles.editorSlot}>
             <ComposeEditor
@@ -4117,6 +4338,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // activeWorkType prop; ComposeEditor defaults to '*' when omitted.
               activeWorkType={activeWorkType}
               onDirtyChange={handleDirtyChange}
+              onRedlineErrorChange={setPendingRedlineError}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.

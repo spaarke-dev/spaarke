@@ -1,8 +1,8 @@
 # Spaarke Compose R7 — Editor UX
 
-> **Last Updated**: 2026-08-17
+> **Last Updated**: 2026-08-19
 >
-> **Status**: ✅ Complete — all 20 tasks shipped; BFF + `sprk_spaarkeai` deployed together to dev (2026-08-17)
+> **Status**: ✅ **COMPLETE (100%)** — closed 2026-08-19. All 20 tasks shipped; UAT-01…26 + follow-up rounds R-1…R-6 + session-4 (R-5 Cosmos `ttl:null` write-outage fix, banner unification, 1b best-effort-24h file re-attach) are all ✅ Fixed or 📦 Deferred-to-`spaarkeai-compose-r8`. Deployed to dev (BFF + `sprk_spaarkeai` together, from current master) and merged to master. **Two non-code follow-ups remain, assigned OUT of r7** and not blocking close: (1) owner real-env UAT pass; (2) UAT-10 Azure SignalR env/ops fix (assigned to `spaarke-notification-spine-r1` / UAT-env owner — [assessment](../../docs/assessments/signalr-uat10-realtime-delivery-assessment-2026-08-19.md)). Faithful render-on-save fidelity + durable session files → `spaarkeai-compose-r8`. Full register: [`notes/uat-issues.md`](notes/uat-issues.md).
 
 ## Overview
 
@@ -22,10 +22,10 @@ Compose R7 is the **editor-UX layer above R6's save/PDF engines**: a Save / Save
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | ✅ Complete (deployed to dev) |
-| **Progress** | 100% (20/20 tasks) |
+| **Phase** | ✅ Complete (closed 2026-08-19; code 100% + deployed + merged; UAT resolved/deferred) |
+| **Progress** | Build 100% (20/20 tasks); UAT open — [`notes/uat-issues.md`](notes/uat-issues.md) |
 | **Target Date** | — |
-| **Completed Date** | 2026-08-17 |
+| **Completed Date** | — (pending UAT sign-off) |
 | **Owner** | Ralph Schroeder |
 
 ## Problem Statement

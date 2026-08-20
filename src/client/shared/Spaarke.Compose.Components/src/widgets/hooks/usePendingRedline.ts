@@ -671,22 +671,23 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         if (resolved.ok) {
           spans = resolved.spans;
         } else {
-          // Round-3 UAT Test #4 fallback: the normalize-tolerant match still couldn't locate the
-          // target verbatim. If the user STILL has a non-empty selection (the clause they asked to
-          // revise — a range implies they haven't clicked away during the round-trip), anchor the
-          // redline there instead of dead-ending. Only for `not_found`: `ambiguous` keeps its
-          // "appears N times, reselect" banner (guessing among real matches would be worse).
-          const hasIntendedSelection = intendedTo > intendedFrom;
-          if (resolved.kind === 'not_found' && hasIntendedSelection) {
-            spans = [{ from: intendedFrom, to: intendedTo }];
-          } else {
-            // FR-19 "do not guess": surface the ambiguity/not-found; render nothing for this entry.
-            setError({ ledgerRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
-            if (superseded.length > 0) {
-              setPending(prev => prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef)));
-            }
-            return resolved.kind;
+          // UAT-21 (2026-08-18, owner: "highest trust priority") — DO NOT fall back to the user's
+          // live selection when the target text can't be located. The prior Round-3 UAT Test #4
+          // fallback anchored the redline on whatever range happened to be selected and returned
+          // `applied`, but that selection can be STALE (the caret moved during the round-trip) or
+          // wholly IRRELEVANT (a ledger/refresh replay where the user never selected anything for
+          // THIS edit) — so it could strike-and-replace the WRONG text and present it as success: a
+          // SILENT mis-placement of a legal edit. Under the R7 honest/safe charter ("never lie — no
+          // silent mis-placement, no false 'applied'") every unresolved target — `not_found` AND
+          // `ambiguous` — now surfaces via the banner and renders NOTHING for this entry. The user
+          // re-selects the exact passage and re-runs, or edits the clause manually. This is the
+          // "propose, don't auto-place" resolution (UAT-24) applied at the placement boundary; it
+          // deliberately reverses the Round-3 fallback (an honest dead-end beats a silent wrong edit).
+          setError({ ledgerRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
+          if (superseded.length > 0) {
+            setPending(prev => prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef)));
           }
+          return resolved.kind;
         }
 
         const insertionHtml = buildInsertionHtml(newText, bindingId, ledgerRef);

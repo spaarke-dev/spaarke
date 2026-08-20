@@ -274,6 +274,7 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
   authenticatedFetch,
   activeCitation,
   uiScale,
+  headerBadges,
 }) => {
   const s = useStyles();
   const { containerRef, ratio, isDragging, splitterHandlers } = useSplitRatio();
@@ -319,6 +320,7 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
         uiScale={uiScale}
         dismiss="explicit"
         nav={{ index, total: queue.length, onNavigate: handleNavigate }}
+        headerActions={headerBadges}
         footerStart={
           <Button appearance="secondary" onClick={onClose} data-testid="reconciliation-browse-close">
             Close

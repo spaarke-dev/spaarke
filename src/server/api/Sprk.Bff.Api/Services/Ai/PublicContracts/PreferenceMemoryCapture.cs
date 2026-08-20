@@ -166,6 +166,10 @@ public sealed class PreferenceMemoryCapture : IPreferenceMemoryCapture
         catch (Exception ex)
         {
             // Best-effort: never propagate. The caller's feedback write has already succeeded on its own terms.
+            // A CosmosException (e.g. the R-5 ttl:null → 400 write outage) lands here — surface it as the
+            // alertable cosmos.write_failures{container=memory-items} metric so a persistent memory-write
+            // stoppage is detectable, not just a swallowed Warning.
+            Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.RecordWriteFailure("memory-items");
             _logger.LogWarning(ex,
                 "PreferenceMemoryCapture: threw while capturing a preference — best-effort, caller unaffected.");
             return PreferenceMemoryCaptureOutcome.Failed(ex.GetType().Name);

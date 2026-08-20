@@ -557,6 +557,55 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
   });
 });
 
+// UAT-23 (2026-08-18, honest/safe): a re-derivation FAILURE at serialize time (an op whose anchor
+// drifted so it can't be re-anchored) is the SILENT-LOSS subcase of deletedContentFlag — the save path
+// surfaces it (`anchorLostFlag`) instead of silently dropping the edit. A GENUINE later-deletion of the
+// target is NOT anchor-lost (dropping it is expected, and surfacing would be a false alarm).
+describe('RebasedOperationLog — anchor-lost drift is distinguished from genuine deletion (UAT-23)', () => {
+  it('flags anchorLostFlag when an op can no longer be re-anchored (still in orderedOps)', () => {
+    // Op A: insert "X" in a paragraph. Later edit: the paragraph LOSES its paraId (a structural
+    // rework — setNodeMarkup with paraId=null; NOT a deletion). At serialize, the op's tracked position
+    // still resolves to a live position, but its block no longer carries a paraId → deriveOperation
+    // returns null. That is a still-valid edit that can't be re-anchored: surfaced, never dropped.
+    const doc0 = onePara(PARA_ID, 'Hello');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    const trIns = state.tr.insertText('X', abs(2), abs(2));
+    log.recordTransaction(trIns);
+    state = state.apply(trIns);
+
+    const trStrip = state.tr.setNodeMarkup(0, undefined, { paraId: null, textAlign: null });
+    log.recordTransaction(trStrip);
+    state = state.apply(trStrip);
+
+    const snapshot = log.serialize(state.doc);
+    const insertOp = snapshot.orderedOps.find(o => o.operation.type === 'insertText');
+    expect(insertOp).toBeDefined(); // NEVER dropped — still in orderedOps
+    expect(insertOp!.anchorLostFlag).toBe(true); // surfaced as a silent-loss candidate
+  });
+
+  it('does NOT set anchorLostFlag for a genuine later-deletion (no false alarm)', () => {
+    // The genuine-deletion case: insert "X", then delete a range enclosing it. deletedContentFlag is
+    // set by rebasing (MapResult.deleted), so this drop is EXPECTED — anchorLostFlag must stay falsy.
+    const doc0 = onePara(PARA_ID, 'Hello World');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    const trInsert = state.tr.insertText('X', abs(5), abs(5));
+    log.recordTransaction(trInsert);
+    state = state.apply(trInsert);
+
+    const trDelete = state.tr.delete(abs(2), abs(9));
+    log.recordTransaction(trDelete);
+    state = state.apply(trDelete);
+
+    const flaggedInsert = log.serialize(state.doc).orderedOps.find(o => o.operation.type === 'insertText')!;
+    expect(flaggedInsert.deletedContentFlag).toBe(true); // genuine deletion — excluded from apply
+    expect(flaggedInsert.anchorLostFlag).toBeFalsy(); // but NOT surfaced as a lost edit (expected drop)
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Structural step → operation synthesis (task 031, FR-05) — the four paragraph ops
 // ---------------------------------------------------------------------------

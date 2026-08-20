@@ -214,7 +214,28 @@ describe('FieldUpdateReconcileTab', () => {
     const applyCall = mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'));
     expect(JSON.parse(applyCall![1].body)).toEqual({ overrideValue: '2026-09-20' });
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith('rl-1', 'applied'));
-    expect(screen.queryByTestId('field-reconcile-card')).not.toBeInTheDocument(); // row leaves Proposed
+    // B2.2: the row STAYS visible in an Accepted state carrying a per-line Undo (the Accept button is gone).
+    expect(await screen.findByTestId('field-reconcile-accepted')).toBeInTheDocument();
+    expect(screen.getByTestId('field-reconcile-undo')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-reconcile-accept')).not.toBeInTheDocument();
+  });
+
+  // B2.2 — Undo reverses a just-accepted field via POST /undo, then the row shows a terminal "Undone" state.
+  it('Undo reverses an accepted field via POST /undo', async () => {
+    wireDefault();
+    renderTab({});
+
+    fireEvent.click(await screen.findByTestId('field-reconcile-accept'));
+    fireEvent.click(await screen.findByTestId('field-reconcile-undo'));
+
+    await waitFor(() =>
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+        '/communications/proposals/rl-1/undo',
+        expect.objectContaining({ method: 'POST' })
+      )
+    );
+    expect(await screen.findByTestId('field-reconcile-undone')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-reconcile-undo')).not.toBeInTheDocument();
   });
 
   // AC2 — Reject terminally dismisses via POST /dismiss.
@@ -305,6 +326,15 @@ describe('FieldUpdateReconcileTab', () => {
     wireDefault([]);
     renderTab();
     expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
+  });
+
+  // Item 2g (owner UAT 2026-08-19) — the "Update other fields" affordance must be present
+  // in the EMPTY state too (a confirmed record with no proposals can still edit other fields).
+  it('item 2g: shows "Update other fields" in the empty state when a record is confirmed', async () => {
+    wireDefault([]);
+    renderTab();
+    expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('field-reconcile-update-other')).toBeInTheDocument();
   });
 
   // AC1/AC5 — the FormModal dual-use mount renders the proposal (ADR-050) and dark-mode renders cleanly (ADR-021).

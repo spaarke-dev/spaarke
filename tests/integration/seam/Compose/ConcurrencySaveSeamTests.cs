@@ -190,6 +190,74 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 1b. UAT-25/26 (2026-08-18) — a stale-base save on the WHOLE-BODY ContentModel path CANNOT re-anchor
+    //     (it re-authors the entire body), so it must REFUSE with 412 (reload + reapply — nothing
+    //     overwritten) rather than SILENTLY OVERWRITING the external writer's new version. The honest
+    //     counterpart to test #1: the op-log path re-anchors; the model path refuses.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    [Fact]
+    public async Task Save_StaleBase_ContentModelPath_Refuses412_WithoutOverwriting_ThroughTheWire()
+    {
+        const string speId = "spe-item-uat25-stale-model";
+        const string driveId = "drive-uat25-stale-model";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // ── Save #1 seeds the version stamp at "v1-etag" (the assert-baseline for the next save). ──
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        var firstBody = await firstSave.Content.ReadAsStringAsync();
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK, $"the seeding save must succeed — body: {firstBody}");
+
+        // ── An EXTERNAL writer lands a new version: the live SPE eTag now differs from the "v1-etag" stamp. ──
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
+
+        // Track that the refused save NEVER overwrites (no ReplaceFileContentAsUserAsync after the seed).
+        var overwroteAfterSeed = false;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback(() => overwroteAfterSeed = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
+
+        // ── Save #2 on the whole-body ContentModel path against the stale base. ──
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            contentModel = new { blocks = Array.Empty<object>() },
+        });
+
+        var secondBody = await secondSave.Content.ReadAsStringAsync();
+        secondSave.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
+            $"a stale-base whole-body ContentModel save must refuse (412), never silently overwrite the external writer — body: {secondBody}");
+        overwroteAfterSeed.Should().BeFalse(
+            "nothing may be written on the refused save — the external writer's version stays intact (no silent lost-update)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 2. NEGATIVE — an un-re-anchorable operation surfaces as ORPHAN, never silently dropped, never
     //    silently (mis-)applied — task 050's "no operation is ever silently lost" contract.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════

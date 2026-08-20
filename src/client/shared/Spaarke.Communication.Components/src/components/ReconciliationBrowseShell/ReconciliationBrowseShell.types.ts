@@ -104,6 +104,12 @@ export interface ReconciliationBrowseShellProps {
   /** Observability — fired when the shell advances to a new record (does NOT control the index). */
   onIndexChange?: (index: number, record: ReconciliationBrowseRecord) => void;
   /**
+   * Optional header-right badges (B2.3 progress badges) — rendered in the SprkModal header (before the
+   * window controls) via its `headerActions` slot. The host builds the "Related ✓ · Fields n/N · Tasks
+   * n/N" progress node for the CURRENT record. Omitted ⇒ no header badges.
+   */
+  headerBadges?: React.ReactNode;
+  /**
    * RIGHT-pane slot — the three reconcile tabs (Related to = task 052 · Fields =
    * 055 · Tasks = 056/057). Invoked with the current record + index. This task
    * ships the slot; the tabs are added by 052/055/056/057.

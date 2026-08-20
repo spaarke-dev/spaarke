@@ -49,6 +49,7 @@ import type {
   ComposeReviewFindingsDegraded,
 } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
+import type { PendingRedlineError } from './hooks/usePendingRedline';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
@@ -104,6 +105,30 @@ export interface ComposeBannerStackProps {
    */
   partialApply?: ComposePartialApplyInfo | null;
   /**
+   * UAT-13 (2026-08-18, honest/safe): populated when a create-on-save persisted the document but its
+   * parent/regarding association write failed — the doc is saved but ORPHANED (not filed under its
+   * matter). Renders an honest, dismissible warning bar with a Retry action. Null when the association
+   * succeeded or none was attempted.
+   */
+  associationWarning?: { documentRecordId: string } | null;
+  /** UAT-13: re-run the host association write for {@link associationWarning}. Clears the banner on success. */
+  onRetryAssociation?: () => void;
+  /**
+   * UAT (2026-08-18, owner): shown while the document has NOT been saved to the DMS yet — a file
+   * uploaded / a review run persists nothing until the user Saves (the owner's SAVE-driven model).
+   * Informs the user that the Document (and, when a review ran, its Analysis) isn't saved and that
+   * Save creates it. `null` once the document is persisted. `reviewRan` tailors the copy (mentions the
+   * Analysis) — the Analysis is created on Save only when a review actually ran.
+   */
+  unsavedDocumentNotice?: { reviewRan: boolean } | null;
+  /**
+   * UAT-12 (2026-08-18, honest/safe): true when the server's annotation read FAILED on load, so the
+   * document's imported tracked changes / reviewer comments are EMPTY as a fallback — NOT proof the
+   * document is clean. Renders a prominent honest warning so the reviewer never treats a
+   * possibly-redlined legal document as clean. Dismissable per mount.
+   */
+  annotationReadFailed?: boolean;
+  /**
    * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B) — populated when a
    * prior agreement-review's findings could not be fully restored on reopen (the 128KB inline-payload
    * cap silently dropped the ledger entry server-side, or a present-but-corrupted findings payload
@@ -112,6 +137,27 @@ export interface ComposeBannerStackProps {
    * a clean restore (the normal case).
    */
   reviewFindingsDegraded?: ComposeReviewFindingsDegraded | null;
+  /**
+   * Banner consolidation (2026-08-19): the pending-redline anchor-failure notice, HOISTED out of
+   * ComposeEditor (where it was a hand-rolled bar BELOW the toolbar) into this single rail so all
+   * passive Compose notices share one location + Fluent MessageBar styling. Surfaced by the editor via
+   * `onRedlineErrorChange`; `null` (every target placed) renders nothing. The interactive
+   * "N suggested edits pending / Accept all" bar stays by the editor — only this passive NOTICE moved.
+   */
+  pendingRedlineError?: PendingRedlineError | null;
+  /** Banner consolidation (2026-08-19): dismiss {@link pendingRedlineError} — routes to the editor handle's clearRedlineError. */
+  onClearRedlineError?: () => void;
+  /**
+   * Banner consolidation (2026-08-19): soft-failure notice for AI-draft materialization (FR-04,
+   * task 016) — folded in from a stray MessageBar the host rendered in its own div. Null renders nothing.
+   */
+  composeDraftError?: string | null;
+  /**
+   * Banner consolidation (2026-08-19): "Create Summary Memo" negative-path notice (FR-14, task 051) —
+   * the honest "no memo yet / generate failed" message, folded in from a stray host MessageBar. Null
+   * renders nothing. No dismiss affordance (cleared by the parent at the next Generate/Email attempt).
+   */
+  memoActionMessage?: string | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -181,6 +227,9 @@ function writeImportWarningsDismissed(signature: string): void {
 
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
+  // UAT-23 (2026-08-18): an edit whose anchor drifted during editing so it couldn't be re-anchored on
+  // save (a still-valid edit the op-log path had to drop) — surfaced instead of vanishing silently.
+  'edit-anchor-lost': "An edit couldn't be saved because its location changed while editing — please redo it.",
   'hyperlink-target-dropped': "A link's target could not be preserved.",
   'tracked-format-change-dropped': 'A tracked formatting change was simplified.',
   'tracked-format-change-flattened': 'A tracked formatting change was simplified.',
@@ -196,7 +245,36 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'edited-paragraph-page-break-dropped': 'A page break inside an edited paragraph was dropped.',
   'edited-paragraph-line-break-dropped': 'A line break inside an edited paragraph was dropped.',
   'edited-table-structure-rebuilt': "An edited table's structure was rebuilt; some table formatting may be simplified.",
-  'comment-anchor-unresolved': 'A comment could not be anchored and was not saved.',
+  // Warned-but-cryptic copy gap (2026-08-18, honest/safe): the server EMITS these degradation codes
+  // but they had no friendly copy, so the banner fell through to the raw "…(code ×N)" line. Give each
+  // an honest, plain-language sentence (no false "your content is intact" — several are real content
+  // losses). Sibling of the DEF-002/compose-r8 fidelity work, which actually PRESERVES these; here we
+  // only make the existing WARNING legible.
+  'unrepresented-footnote-reference': "A footnote couldn't be carried into the saved document.",
+  'unrepresented-endnote-reference': "An endnote couldn't be carried into the saved document.",
+  'field-flattened-to-text':
+    'A Word field (such as a cross-reference, date, or page number) was saved as plain text and will no longer update automatically.',
+  'hard-tier-sdt-flattened': 'A content control (form field, dropdown, or date picker) was saved as plain text.',
+  'comment-flattened': "A comment's rich content was simplified when saving.",
+  'comment-anchor-flattened': "A comment's anchored range was simplified when saving.",
+  'strikethrough-flattened': 'Strikethrough formatting was not preserved.',
+  'numbering-unresolved': "An automatic list number couldn't be preserved and may differ.",
+  'numstylelink-unresolved': "A linked list-numbering style couldn't be preserved.",
+  'style-linked-numbering-dropped': 'Style-linked list numbering was simplified.',
+  'heading-direct-numbering-dropped': 'Direct numbering on a heading was simplified.',
+  'picture-bullet-unresolved': 'A picture bullet was replaced with a standard bullet.',
+  'ruby-phonetic-guide-dropped': 'A phonetic (ruby) guide was not preserved.',
+  'empty-table-dropped': 'An empty table was removed.',
+  'template-merge-comment-threading-dropped': 'Comment reply threading from a merged template was simplified.',
+  'template-merge-numbering-unresolved': "List numbering from a merged template couldn't be preserved.",
+  'template-merge-story-reference-dropped':
+    'A header, footer, or note reference from a merged template was not carried over.',
+  'template-merge-unresolved-reference': "A cross-reference from a merged template couldn't be preserved.",
+  // UAT-22 (2026-08-18): a session/advisory comment the user sees in the gutter whose anchored text
+  // changed so it could NOT be written into the saved document — surfaced (counted) instead of silently
+  // dropped. (Distinct from -dropped above, where the comment text is retained.)
+  'comment-anchor-unresolved':
+    "A comment couldn't be saved to the document because its anchored text changed — re-add it if it's still needed.",
   // Task 041 (FR-06, PDF intake): the pdf-intake-* degradation family (task 040's projector) — these
   // ride ContentModelWarnings on a PDF open and fold into the first model-path save like the docx
   // flatten codes. Honest, non-alarming copy; the general reflow fact also drives the PDF notice banner.
@@ -208,6 +286,32 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'pdf-intake-table-style-approximated': "A table's PDF styling was replaced with standard table formatting.",
   'pdf-intake-table-cell-consolidated': 'Overlapping table cells were combined into one cell.',
   'pdf-intake-table-cell-dropped': "A table cell's text could not be placed and was left out — please check the table.",
+  // UAT-07b (owner 2026-08-18): the render-on-save "flatten" widener family previously had NO friendly
+  // copy, so users saw raw codes like "paragraph-style-flattened ×62". These are FORMATTING-only
+  // simplifications (the text/content is intact) — folded into the concise summary below via
+  // SAVE_DEGRADATION_LABEL rather than one sentence each. Entries here keep the per-code fallback honest
+  // if the summary path is ever bypassed. See also DEF-002 (the actual widener engine work, UAT-07a).
+  'indentation-dropped': 'Some indentation was simplified.',
+  'paragraph-style-flattened': 'Some paragraph styles were simplified.',
+  'section-break-flattened': 'A section break was simplified.',
+  'tab-flattened': 'Some tab stops were simplified.',
+  'table-formatting-flattened': 'Some table formatting was simplified.',
+  'line-break-flattened': 'A line break was simplified.',
+  'internal-link-flattened': 'An internal link was simplified.',
+};
+
+// UAT-07b: short NOUN labels for the common formatting-simplification codes, used to build ONE concise,
+// plain-language summary ("indentation, paragraph styles, tables") instead of a wall of per-code sentences.
+// Codes not listed here fall back to their full SAVE_DEGRADATION_COPY sentence (they are usually
+// content-affecting, e.g. a dropped link target, and deserve their own line).
+const SAVE_DEGRADATION_LABEL: Record<string, string> = {
+  'indentation-dropped': 'indentation',
+  'paragraph-style-flattened': 'paragraph styles',
+  'section-break-flattened': 'section breaks',
+  'tab-flattened': 'tab stops',
+  'table-formatting-flattened': 'table formatting',
+  'line-break-flattened': 'line breaks',
+  'internal-link-flattened': 'internal links',
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */
@@ -217,6 +321,36 @@ function saveDegradationSentence(warning: { code: string; count: number }): stri
     return warning.count > 1 ? `${known} (×${warning.count})` : known;
   }
   return `Some content was simplified when saving (${warning.code}${warning.count > 1 ? ` ×${warning.count}` : ''}).`;
+}
+
+/**
+ * UAT-07b — build ONE plain-language body for the save-degradation banner. Formatting-only
+ * simplifications (SAVE_DEGRADATION_LABEL) collapse into a single reassuring sentence naming the
+ * categories; any OTHER (content-affecting) codes keep their own full sentence. Deduplicates + orders
+ * so the user reads "your text is intact; these formatting kinds were simplified" instead of
+ * "paragraph-style-flattened ×62".
+ */
+function summarizeSaveDegradation(warnings: ReadonlyArray<{ code: string; count: number }>): string {
+  const formattingLabels: string[] = [];
+  const otherSentences: string[] = [];
+  for (const w of warnings) {
+    const label = SAVE_DEGRADATION_LABEL[w.code];
+    if (label) {
+      if (!formattingLabels.includes(label)) formattingLabels.push(label);
+    } else {
+      otherSentences.push(saveDegradationSentence(w));
+    }
+  }
+  const parts: string[] = [];
+  if (formattingLabels.length > 0) {
+    const list =
+      formattingLabels.length === 1
+        ? formattingLabels[0]
+        : `${formattingLabels.slice(0, -1).join(', ')} and ${formattingLabels[formattingLabels.length - 1]}`;
+    parts.push(`Some formatting (${list}) was simplified to fit Compose's editor. Your text and content are intact.`);
+  }
+  if (otherSentences.length > 0) parts.push(otherSentences.join(' '));
+  return parts.join(' ');
 }
 
 /** Stable content signature for a save-degradation set — the sessionStorage dismissal key suffix. */
@@ -252,7 +386,15 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     pendingAssistantInsert,
     saveSuccessToken = 0,
     partialApply = null,
+    associationWarning = null,
+    onRetryAssociation,
+    annotationReadFailed = false,
+    unsavedDocumentNotice = null,
     reviewFindingsDegraded = null,
+    pendingRedlineError = null,
+    onClearRedlineError,
+    composeDraftError = null,
+    memoActionMessage = null,
   } = props;
 
   // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
@@ -341,15 +483,54 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [reviewFindingsDegraded]);
   const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
+  // UAT-13 (2026-08-18): the create-on-save persisted the document but its parent association write
+  // failed — the doc is saved but not filed under its matter. Dismissable; re-shows on a NEW warning
+  // (fresh object per failed association), stays dismissed for the same reference.
+  const showAssociationWarning = !!associationWarning;
+  const [associationWarningDismissed, setAssociationWarningDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setAssociationWarningDismissed(false);
+  }, [associationWarning]);
+  const showAssociationWarningBanner = showAssociationWarning && !associationWarningDismissed;
+
+  // UAT-12 (2026-08-18): the server annotation read failed — the document may CONTAIN tracked changes
+  // and comments that couldn't be read, so it must NOT be presented as clean. Per-mount dismissal
+  // (like the PDF notice): a fresh load re-warns (honesty over convenience).
+  const [annotationReadFailedDismissed, setAnnotationReadFailedDismissed] = React.useState(false);
+  React.useEffect(() => {
+    if (annotationReadFailed) setAnnotationReadFailedDismissed(false);
+  }, [annotationReadFailed]);
+  const showAnnotationReadFailedBanner = annotationReadFailed && !annotationReadFailedDismissed;
+
+  // UAT (2026-08-18, owner): the "not saved yet — Save to create" notice. Non-dismissible: it reflects
+  // LIVE persistence state and clears automatically when the parent stops passing it (i.e. on Save).
+  const showUnsavedDocumentNotice = !!unsavedDocumentNotice;
+
+  // UAT-05 (owner 2026-08-18): the generic Save-error banner previously had NO dismiss ✕ (unlike the
+  // warning/info banners), so a stale "Save error" could not be cleared. Add a local dismissal reset
+  // whenever the message changes (a NEW error re-shows). The parent still owns `errorMessage`; this only
+  // hides the CURRENT one on the client. The Word-lock variant keeps its Retry/Reload actions instead.
+  const [errorDismissed, setErrorDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setErrorDismissed(false);
+  }, [errorMessage]);
+  const showErrorBanner = !!errorMessage && !saveErrorIsLock && !errorDismissed;
+
   const showStack =
     showPdfSourceNotice ||
     showImportWarnings ||
     showSaveDegradation ||
-    !!errorMessage ||
+    (!!errorMessage && (saveErrorIsLock || !errorDismissed)) ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
     showPartialApplyBanner ||
     showReviewFindingsDegradedBanner ||
+    showAssociationWarningBanner ||
+    showAnnotationReadFailedBanner ||
+    showUnsavedDocumentNotice ||
+    !!pendingRedlineError ||
+    !!composeDraftError ||
+    !!memoActionMessage ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -456,6 +637,79 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
+      {showUnsavedDocumentNotice ? (
+        // UAT (2026-08-18, owner): SAVE-driven persistence — nothing is saved until the user clicks Save.
+        // Informational (info intent), non-dismissible; clears automatically once the document is saved.
+        <MessageBar intent="info" data-testid="compose-workspace-unsaved-notice" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Not saved yet</MessageBarTitle>
+            {unsavedDocumentNotice?.reviewRan
+              ? 'This document and its analysis haven’t been saved yet — click Save to create them.'
+              : 'This document hasn’t been saved yet — click Save to keep it.'}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {showAnnotationReadFailedBanner ? (
+        // UAT-12 (2026-08-18): the server couldn't read this document's tracked changes / comments —
+        // it may CONTAIN redlines or reviewer comments that are NOT shown. Never let a legal reviewer
+        // treat it as clean. Prominent (warning intent), dismissable per mount.
+        <MessageBar intent="warning" data-testid="compose-workspace-annotation-read-failed-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Tracked changes and comments couldn&apos;t be read</MessageBarTitle>
+            {"This document's existing tracked changes and comments couldn't be read, so they aren't " +
+              "shown here. Don't treat this document as clean — open it in Word to review its changes and " +
+              'comments before relying on it.'}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-annotation-read-failed-dismiss"
+                onClick={() => setAnnotationReadFailedDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showAssociationWarningBanner ? (
+        // UAT-13 (2026-08-18): the document SAVED but its parent-association write failed — honest
+        // "saved but not filed" notice with a Retry (re-runs the host association write). The document
+        // itself is safe; only the matter/regarding link is missing.
+        <MessageBar intent="warning" data-testid="compose-workspace-association-warning-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Saved, but not filed under its matter</MessageBarTitle>
+            {'This document was saved, but it couldn’t be linked to its matter/parent record. ' +
+              'It won’t appear under that record until the link is written.'}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-association-warning-dismiss"
+                onClick={() => setAssociationWarningDismissed(true)}
+              />
+            }
+          >
+            {onRetryAssociation ? (
+              <Button
+                appearance="primary"
+                size="small"
+                data-testid="compose-workspace-association-warning-retry"
+                onClick={onRetryAssociation}
+              >
+                Retry
+              </Button>
+            ) : null}
+          </MessageBarActions>
+        </MessageBar>
+      ) : null}
+
       {errorMessage && saveErrorIsLock ? (
         // UAT #10/#11 (task 052): honest Word co-authoring lock bar. No programmatic unlock exists — offer
         // Retry (works once Word is closed) + Reload from Word (pull Word's version as the new baseline).
@@ -477,12 +731,24 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             ) : null}
           </MessageBarActions>
         </MessageBar>
-      ) : errorMessage ? (
+      ) : showErrorBanner ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Save error</MessageBarTitle>
             {errorMessage}
           </MessageBarBody>
+          {/* UAT-05: dismiss ✕ (the error banner previously had none). */}
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-error-dismiss"
+                onClick={() => setErrorDismissed(true)}
+              />
+            }
+          />
         </MessageBar>
       ) : null}
 
@@ -545,8 +811,8 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
         <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Some content was simplified when saving</MessageBarTitle>
-            {saveWarnings.map(saveDegradationSentence).join(' ')}
+            <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
+            {`${summarizeSaveDegradation(saveWarnings)} The original file is unchanged until you save.`}
           </MessageBarBody>
           <MessageBarActions
             containerAction={
@@ -559,6 +825,58 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
               />
             }
           />
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): the pending-redline anchor-failure NOTICE, hoisted here
+          from a hand-rolled bar BELOW the toolbar inside ComposeEditor. Now a Fluent MessageBar in the
+          single rail (above the toolbar), matching every other notice's font/icon/chrome. Copy is
+          verbatim from the former in-editor bar. */}
+      {pendingRedlineError ? (
+        <MessageBar intent="warning" data-testid="compose-redline-error" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Suggested edit couldn&apos;t be placed</MessageBarTitle>
+            {pendingRedlineError.kind === 'ambiguous'
+              ? `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
+              : (pendingRedlineError.failedCount ?? 0) > 1
+                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
+          </MessageBarBody>
+          {onClearRedlineError ? (
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  aria-label="Dismiss"
+                  icon={<Dismiss16Regular />}
+                  data-testid="compose-redline-error-dismiss"
+                  onClick={onClearRedlineError}
+                />
+              }
+            />
+          ) : null}
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): FR-04 (task 016) AI-draft materialization soft failure,
+          folded in from a stray host MessageBar so it shares this rail's location + styling. */}
+      {composeDraftError ? (
+        <MessageBar intent="warning" data-testid="compose-workspace-draft-error" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Could not insert AI draft</MessageBarTitle>
+            {composeDraftError}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): FR-14 (task 051) "Create Summary Memo" negative-path notice,
+          folded in from a stray host MessageBar. Cleared by the parent at the next Generate/Email attempt. */}
+      {memoActionMessage ? (
+        <MessageBar intent="warning" data-testid="compose-workspace-memo-action-message" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Create Summary Memo</MessageBarTitle>
+            {memoActionMessage}
+          </MessageBarBody>
         </MessageBar>
       ) : null}
 

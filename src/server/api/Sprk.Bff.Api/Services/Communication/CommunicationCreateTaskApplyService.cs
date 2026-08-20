@@ -87,6 +87,20 @@ public interface ICommunicationCreateTaskApplyService
     /// </summary>
     Task<CreateAdHocTaskResult> CreateAdHocAsync(
         Guid communicationId, CreateAdHocTaskRequest request, ClaimsPrincipal? caller, CancellationToken ct);
+
+    /// <summary>
+    /// UNDO a just-created task (email-communication-intelligence-r2 B2.2): soft-cancels the <c>sprk_event</c>
+    /// identified by <paramref name="taskId"/> (the <c>CreatedTaskId</c> the apply/ad-hoc create returned) by setting
+    /// <c>sprk_eventstatus</c> = Cancelled UNDER THE CALLER'S IMPERSONATION, then writes ONE append-only compensating
+    /// audit row for <paramref name="communicationId"/> (provenance + append-only-audit symmetry with the field-undo).
+    /// Soft-cancel (not hard delete) so the write is gated by the caller's Dataverse access (a caller who cannot write
+    /// the event cannot cancel it — no app-only "delete any event by id" hole), it is reversible, and it preserves the
+    /// event's own audit trail (<c>modifiedby</c> = the caller). Throws <see cref="SdapProblemException"/> for an
+    /// unresolved caller (403), a failed cancel write (422 — caller lacks access, or the event no longer exists), or a
+    /// failed audit write after the cancel (500).
+    /// </summary>
+    Task<UndoCreateTaskResult> UndoCreateTaskAsync(
+        Guid communicationId, Guid taskId, ClaimsPrincipal? caller, CancellationToken ct);
 }
 
 /// <summary>Human-supplied FR-E5 fields for a create-task apply (task 056 reconcile tab). All optional — an omitted
@@ -152,6 +166,10 @@ public sealed record CreateAdHocTaskResult(
     Guid RegardingRecordId,
     IReadOnlyList<string> FieldsPatched);
 
+/// <summary>Result of a successful <see cref="ICommunicationCreateTaskApplyService.UndoCreateTaskAsync"/> (B2.2). The
+/// task was soft-cancelled (<c>sprk_eventstatus</c> = Cancelled) — carries the task id + the new status value.</summary>
+public sealed record UndoCreateTaskResult(Guid TaskId, int NewStatus);
+
 /// <inheritdoc />
 public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTaskApplyService
 {
@@ -173,6 +191,10 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private const string EventFinalDueDateField = "sprk_finalduedate";
     private const string EventCompletedDateField = "sprk_completeddate";
     private const string EventStatusField = "sprk_eventstatus";
+
+    // sprk_eventstatus Choice value for a soft-cancel undo (canonical Events status set: Draft=0, Open=1,
+    // Completed=2, Closed=3, On Hold=4, Cancelled=5, Reassigned=6, Archived=7 — mirrors the client EVENT_STATUS map).
+    private const int EventStatusCancelled = 5;
 
     /// <summary>The <c>sprk_targetfield</c> sentinel PREFIX Job C writes for a create-task proposal — mirrored from
     /// <c>CommunicationEnrichmentService.CreateTaskSentinelFieldPrefix</c> (duplicated with a "mirrored from" note the
@@ -531,6 +553,95 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
             createdTaskId, regardingEntity, regardingRecordId, callerSystemUserId, communicationId, fieldsPatched.Count, auditLogId);
 
         return new CreateAdHocTaskResult(createdTaskId, auditLogId, regardingEntity, regardingRecordId, fieldsPatched);
+    }
+
+    /// <summary>The <c>sprk_targetfield</c> marker written on the compensating task-undo audit row — a distinct
+    /// sentinel so it never collides with a create-task proposal's <c>(communication, targetEntity, targetField)</c>
+    /// open-walk key.</summary>
+    private const string UndoTaskSentinelField = "__undo_task__";
+
+    /// <inheritdoc />
+    public async Task<UndoCreateTaskResult> UndoCreateTaskAsync(
+        Guid communicationId, Guid taskId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        // (1) Resolve the caller server-side; fail closed (403). The cancel runs under the caller's identity so
+        //     Dataverse gates it (a caller who cannot write the event cannot cancel it) — never app-only.
+        var resolution = await _callerResolver.ResolveAsync(caller, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved
+            || !Guid.TryParse(resolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "CALLER_NOT_RESOLVED",
+                title: "Caller Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; the task undo is refused (fail closed — the cancel must run under the caller's identity).",
+                statusCode: 403);
+        }
+
+        // (2) Soft-cancel via the SAME blessed impersonated write core the create PATCH uses (String mapping →
+        //     metadata-driven Choice coercion). Preserves the event + its audit trail; reversible. Impersonation is
+        //     the authorization gate — a caller who cannot write the event gets 422 (no app-only "cancel any event").
+        var updateResult = await _actionSeam.UpdateRecordAsync(
+            new UpdateRecordRequest
+            {
+                EntityLogicalName = EventEntity,
+                RecordId = taskId,
+                FieldMappings = new[]
+                {
+                    new ActionFieldMapping(EventStatusField, ActionFieldType.String,
+                        EventStatusCancelled.ToString(CultureInfo.InvariantCulture)),
+                },
+                ImpersonateSystemUserId = callerSystemUserId,
+            },
+            ct).ConfigureAwait(false);
+
+        if (!updateResult.Success)
+        {
+            throw new SdapProblemException(
+                code: "TASK_UNDO_FAILED",
+                title: "Task Undo Failed",
+                detail: updateResult.Error ?? "The created task could not be cancelled (it may no longer exist or the caller lacks access).",
+                statusCode: 422);
+        }
+
+        // (3) Write EXACTLY ONE append-only compensating audit row (Dismissed, actor = the caller) tying the cancel
+        //     to the communication + the cancelled task — symmetric with the Job B field-undo (W1) and the append-only
+        //     -audit culture; also the provenance record for the cancel (W2). Mutate-without-audit does not exist:
+        //     the event was cancelled, so a failed audit write surfaces loudly (500) for reconciliation.
+        Guid auditLogId;
+        try
+        {
+            var entity = new Entity(ReviewLogEntity)
+            {
+                ["sprk_name"] = Truncate($"Cancelled task: {taskId}", 850),
+                ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeHuman),
+                ["sprk_action"] = new OptionSetValue(ReviewActionDismissed),
+                ["sprk_actor"] = Truncate(callerSystemUserId.ToString(), 200),
+                ["sprk_targetentity"] = Truncate(EventEntity, 100),
+                ["sprk_targetrecordid"] = Truncate(taskId.ToString(), 100),
+                ["sprk_targetfield"] = Truncate(UndoTaskSentinelField, 100),
+            };
+            auditLogId = await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(
+                ex,
+                "Job C undo CANCELLED sprk_event {TaskId} (communication {CommunicationId}) for caller {Caller} but the compensating audit row write FAILED. Manual audit reconciliation required.",
+                taskId, communicationId, callerSystemUserId);
+            throw new SdapProblemException(
+                code: "AUDIT_WRITE_FAILED",
+                title: "Audit Write Failed",
+                detail: "The task was cancelled but the audit row could not be written; this has been logged for reconciliation.",
+                statusCode: 500);
+        }
+
+        _logger.LogInformation(
+            "Job C undo: sprk_event {TaskId} soft-cancelled (sprk_eventstatus=Cancelled) under caller {Caller} impersonation; audit row {AuditLogId} written.",
+            taskId, callerSystemUserId, auditLogId);
+
+        return new UndoCreateTaskResult(taskId, EventStatusCancelled);
     }
 
     private static List<ActionFieldMapping> BuildPatchMappings(ApplyCreateTaskRequest? request) =>
