@@ -114,9 +114,6 @@ param serviceBusNamespaceName string
 @description('Name of the fleet-scoped Service Bus queue this App Service enqueues onto / receives from (DS-5 C5.1). Defaults to the canonical queue declared by task 108.')
 param serviceBusQueueName string = 'sprk-provisioning-jobs'
 
-@description('Name of the KV secret holding the Dataverse S2S ClientSecret. Handlers H5/H6/H7/H10 (registry + solution-import + env-var writes) run in the WORKER post-split (task 100) -- this setting moved here from .Api, which no longer needs it (the .Api host has no handler DI; task 100 Program.cs header).')
-param dataverseClientSecretName string
-
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table. Consumed by DataverseEnvironmentRegistryOptions.AdminEnvironmentUrl (Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs, task 112 -- Path X MI-native, DefaultAzureCredential pinned to this module\'s UAMI via ManagedIdentity__ClientId below; NO client secret). REQUIRED as of task 122 (Wave G-2): the Worker\'s composition root now registers the REAL client unconditionally (NullDataverseEnvironmentRegistryClient placeholder removed from DI) and DataverseEnvironmentRegistryOptions.Validate() fails fast at boot if this is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (DS-8 mandates Path X real from day one).')
 param adminDataverseEnvironmentUrl string
 
@@ -212,15 +209,6 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
         { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
-
-        // ---------------------------------------------------------------
-        // Dataverse S2S (H5/H6/H7/H10 registry + env-var writes -- these
-        // handlers live in the WORKER post-split; see param description).
-        // ---------------------------------------------------------------
-        {
-          name: 'Dataverse__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${dataverseClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 122 (Wave G-2): DataverseEnvironmentRegistry -- Path X

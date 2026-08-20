@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9981241564397686716"
+      "templateHash": "15734870157518315769"
     }
   },
   "parameters": {
@@ -62,13 +62,6 @@
         "description": "Name of the resource group that hosts the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4). Defaults to SharePointEmbedded - the verified live dev value; this is a legacy pre-per-env-model resource group name, NOT the canonical rg-spaarke-{env} shape, so staging/prod deploys MUST override this parameter once the shared Service Bus resource group name for those environments is known."
       }
     },
-    "dataverseClientSecretName": {
-      "type": "string",
-      "defaultValue": "Dataverse-ClientSecret",
-      "metadata": {
-        "description": "Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path (CustomerRunGuardOptions.cs:24-25 already anticipates this), this param + its appSettings are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule)."
-      }
-    },
     "adminDataverseEnvironmentUrl": {
       "type": "string",
       "metadata": {
@@ -87,6 +80,27 @@
       "defaultValue": "AzureOpenAI-Endpoint",
       "metadata": {
         "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c's Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs)."
+      }
+    },
+    "githubActionsOidcPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Principal ID of the GitHub Actions OIDC service principal for CI artifact publishing (Wave G-8 Batch 2). When provided, grants Storage Blob Data Contributor on the provisioning-artifacts storage account (tasks 116/117 upload compiled ARM JSON / BFF zips / solution zips) and AcrPush on the platform ACR (task 115 sidecar image push). Empty (default) skips BOTH grants -- supply once the CI OIDC app-reg principal is known for this environment."
+      }
+    },
+    "acrImageTag": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/appsvc/staticsite:latest",
+      "metadata": {
+        "description": "Container image reference for the DS-1b Exchange sidecar, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11 -- the worker module always supported this but nothing plumbed it to the top level, so a real sidecar image could never be deployed). Default remains the documented public MCR placeholder until task 115 CI pushes the real image; then override with {acrLoginServer output}/sprk-provisioning-sidecar:{tag}. Do not leave the placeholder in a live deploy."
+      }
+    },
+    "sidecarAuthType": {
+      "type": "string",
+      "defaultValue": "[if(startsWith(parameters('acrImageTag'), 'mcr.microsoft.com/'), 'Anonymous', 'UserAssigned')]",
+      "metadata": {
+        "description": "ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed."
       }
     },
     "jwtTenantId": {
@@ -128,6 +142,10 @@
     "keyVaultName": "[format('sprk-controlplane-{0}-kv', parameters('environmentName'))]",
     "appInsightsName": "[format('sprk-controlplane-{0}-insights', parameters('environmentName'))]",
     "logAnalyticsName": "[format('sprk-controlplane-{0}-logs', parameters('environmentName'))]",
+    "artifactsStorageAccountName": "[format('sprkcpartifacts{0}', parameters('environmentName'))]",
+    "acrName": "[format('sprkcontrolplane{0}acr', parameters('environmentName'))]",
+    "artifactsStorageSku": "[if(equals(parameters('environmentName'), 'prod'), 'Standard_ZRS', 'Standard_LRS')]",
+    "acrSku": "[if(equals(parameters('environmentName'), 'prod'), 'Standard', 'Basic')]",
     "effectiveJwtTenantId": "[if(empty(parameters('jwtTenantId')), subscription().tenantId, parameters('jwtTenantId'))]",
     "effectiveServiceBusNamespaceName": "[if(empty(parameters('serviceBusNamespaceName')), format('spaarke-servicebus-{0}', parameters('environmentName')), parameters('serviceBusNamespaceName'))]"
   },
@@ -1106,17 +1124,11 @@
           "cosmosRunsContainerName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning'), '2025-04-01').outputs.containerName.value]"
           },
-          "keyVaultName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultName.value]"
-          },
           "serviceBusNamespaceName": {
             "value": "[variables('effectiveServiceBusNamespaceName')]"
           },
           "serviceBusQueueName": {
             "value": "sprk-provisioning-jobs"
-          },
-          "dataverseClientSecretName": {
-            "value": "[parameters('dataverseClientSecretName')]"
           },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
@@ -1132,7 +1144,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "8603298383239634648"
+              "templateHash": "15868794668967312266"
             }
           },
           "parameters": {
@@ -1204,12 +1216,6 @@
                 "description": "Cosmos runs container name (runs per task 024 spec)."
               }
             },
-            "keyVaultName": {
-              "type": "string",
-              "metadata": {
-                "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings)."
-              }
-            },
             "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
@@ -1221,12 +1227,6 @@
               "defaultValue": "sprk-provisioning-jobs",
               "metadata": {
                 "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
-              }
-            },
-            "dataverseClientSecretName": {
-              "type": "string",
-              "metadata": {
-                "description": "Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path, this param + its appSetting are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule)."
               }
             },
             "appInsightsConnectionString": {
@@ -1313,10 +1313,6 @@
                       "value": "[parameters('serviceBusQueueName')]"
                     },
                     {
-                      "name": "Dataverse__ClientSecret",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('dataverseClientSecretName'))]"
-                    },
-                    {
                       "name": "AZURE_CLIENT_ID",
                       "value": "[parameters('uamiClientId')]"
                     },
@@ -1401,7 +1397,6 @@
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-app-service-plan')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
@@ -1454,9 +1449,6 @@
           "serviceBusQueueName": {
             "value": "sprk-provisioning-jobs"
           },
-          "dataverseClientSecretName": {
-            "value": "[parameters('dataverseClientSecretName')]"
-          },
           "adminDataverseEnvironmentUrl": {
             "value": "[parameters('adminDataverseEnvironmentUrl')]"
           },
@@ -1465,6 +1457,15 @@
           },
           "azureOpenAiEndpointSecretName": {
             "value": "[parameters('azureOpenAiEndpointSecretName')]"
+          },
+          "acrImageTag": {
+            "value": "[parameters('acrImageTag')]"
+          },
+          "sidecarAuthType": {
+            "value": "[parameters('sidecarAuthType')]"
+          },
+          "artifactsStorageContainerUri": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage'), '2025-04-01').outputs.blobUri.value]"
           },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
@@ -1480,7 +1481,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "12373001440753295510"
+              "templateHash": "15054058479504984665"
             }
           },
           "parameters": {
@@ -1558,12 +1559,6 @@
                 "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto / receives from (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
               }
             },
-            "dataverseClientSecretName": {
-              "type": "string",
-              "metadata": {
-                "description": "Name of the KV secret holding the Dataverse S2S ClientSecret. Handlers H5/H6/H7/H10 (registry + solution-import + env-var writes) run in the WORKER post-split (task 100) -- this setting moved here from .Api, which no longer needs it (the .Api host has no handler DI; task 100 Program.cs header)."
-              }
-            },
             "adminDataverseEnvironmentUrl": {
               "type": "string",
               "metadata": {
@@ -1582,6 +1577,19 @@
               "defaultValue": "AzureOpenAI-Endpoint",
               "metadata": {
                 "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer's sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a's Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash."
+              }
+            },
+            "redisConnectionStringSecretName": {
+              "type": "string",
+              "defaultValue": "Redis-ConnectionString",
+              "metadata": {
+                "description": "Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name \"Redis-ConnectionString\" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module's platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName / azureOpenAiEndpointSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments."
+              }
+            },
+            "artifactsStorageContainerUri": {
+              "type": "string",
+              "metadata": {
+                "description": "HTTPS URI of the provisioning-artifacts blob CONTAINER (e.g. https://{account}.blob.core.windows.net/provisioning-artifacts) -- output of modules/controlplane-artifacts-storage.bicep (G-8 Batch 2, audit defect #5). Threaded into the three handler option sections that each REQUIRE it at boot per NFR-05 (G-8 audit defect #7): BicepInfraDeployOptions (H2a), BffDeployOptions (H9), SolutionImportOptions (H6) -- Program.cs binds each via GetSection(nameof(...Options)), so the app-setting keys below carry the literal \"...Options\" section names. All three Validate() throw on empty, so this param is REQUIRED (no default) -- platform-controlplane.bicep MUST pass the artifacts-storage module's container URI output here (wiring owned by G-8 Batch 2). The Worker's UAMI reads blobs via DefaultAzureCredential (Storage Blob Data Reader grant -- audit defect #3); no account key or SAS in config."
               }
             },
             "appInsightsConnectionString": {
@@ -1680,10 +1688,6 @@
                       "value": "[parameters('serviceBusQueueName')]"
                     },
                     {
-                      "name": "Dataverse__ClientSecret",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('dataverseClientSecretName'))]"
-                    },
-                    {
                       "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
                       "value": "[parameters('adminDataverseEnvironmentUrl')]"
                     },
@@ -1694,6 +1698,22 @@
                     {
                       "name": "RuntimeReferences__SharedPlatformOpenAiEndpoint",
                       "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('azureOpenAiEndpointSecretName'))]"
+                    },
+                    {
+                      "name": "ConnectionStrings__Redis",
+                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))]"
+                    },
+                    {
+                      "name": "BicepInfraDeployOptions__ProvisioningArtifactsContainerUri",
+                      "value": "[parameters('artifactsStorageContainerUri')]"
+                    },
+                    {
+                      "name": "BffDeployOptions__ProvisioningArtifactsContainerUri",
+                      "value": "[parameters('artifactsStorageContainerUri')]"
+                    },
+                    {
+                      "name": "SolutionImportOptions__ProvisioningArtifactsContainerUri",
+                      "value": "[parameters('artifactsStorageContainerUri')]"
                     },
                     {
                       "name": "AZURE_CLIENT_ID",
@@ -1774,6 +1794,7 @@
       },
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-app-service-plan')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-cosmos-provisioning')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring')]",
@@ -1950,6 +1971,439 @@
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
       ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-artifacts-storage",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "storageAccountName": {
+            "value": "[variables('artifactsStorageAccountName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "sku": {
+            "value": "[variables('artifactsStorageSku')]"
+          },
+          "controlPlaneUamiPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
+          },
+          "githubActionsOidcPrincipalId": {
+            "value": "[parameters('githubActionsOidcPrincipalId')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "15710774707441980711"
+            }
+          },
+          "parameters": {
+            "storageAccountName": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 24,
+              "metadata": {
+                "description": "Name of the provisioning-artifacts Storage Account (lowercase alphanumeric, 3-24 chars, globally unique; typically sprkcpartifacts{env} per AZURE-RESOURCE-NAMING-CONVENTION.md no-hyphen storage rule)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the Storage Account."
+              }
+            },
+            "sku": {
+              "type": "string",
+              "defaultValue": "Standard_LRS",
+              "allowedValues": [
+                "Standard_LRS",
+                "Standard_ZRS",
+                "Standard_GRS"
+              ],
+              "metadata": {
+                "description": "SKU. Standard_LRS is sufficient for dev/staging (artifacts are CI-reproducible from a git sha, so durability requirements are low); Standard_ZRS recommended for prod (region-resilient reads keep provisioning runs alive through a zonal outage)."
+              }
+            },
+            "containerName": {
+              "type": "string",
+              "defaultValue": "provisioning-artifacts",
+              "metadata": {
+                "description": "Name of the blob container CI publishes provisioning artifacts into and H2a/H6/H9 read from. Default matches the container segment every *Options.ProvisioningArtifactsContainerUri test/CI convention already uses."
+              }
+            },
+            "controlPlaneUamiPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep) granted Storage Blob Data Reader (read-only -- the Worker downloads artifacts, never writes them). Empty skips the grant (not expected in real deploys; kept optional for what-if isolation)."
+              }
+            },
+            "githubActionsOidcPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the GitHub Actions OIDC service principal granted Storage Blob Data Contributor (CI uploads compiled ARM JSON / BFF artifacts / solution zips). Empty (default) skips the grant -- supply once the CI OIDC app-reg principal is known for this environment."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource."
+              }
+            }
+          },
+          "variables": {
+            "storageBlobDataReaderRoleId": "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1",
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-01-01",
+              "name": "[parameters('storageAccountName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('sku')]"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "accessTier": "Hot",
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false,
+                "networkAcls": {
+                  "defaultAction": "Allow",
+                  "bypass": "AzureServices"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-01-01",
+              "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+              "properties": {
+                "deleteRetentionPolicy": {
+                  "enabled": true,
+                  "days": 7
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-01-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('containerName'))]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('controlPlaneUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('controlPlaneUamiPrincipalId'), variables('storageBlobDataReaderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataReaderRoleId'))]",
+                "principalId": "[parameters('controlPlaneUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 control-plane UAMI downloads provisioning artifacts (H2a/H6/H9) -- Wave G-8 Batch 2, audit defects #3/#5"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('githubActionsOidcPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('githubActionsOidcPrincipalId'), variables('storageBlobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalId": "[parameters('githubActionsOidcPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "GitHub Actions OIDC principal uploads provisioning artifacts (tasks 116/117 CI) -- Wave G-8 Batch 2, audit defect #5"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "resourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            },
+            "accountName": {
+              "type": "string",
+              "value": "[parameters('storageAccountName')]"
+            },
+            "blobUri": {
+              "type": "string",
+              "value": "[format('{0}{1}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob, parameters('containerName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-acr",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "acrName": {
+            "value": "[variables('acrName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "sku": {
+            "value": "[variables('acrSku')]"
+          },
+          "controlPlaneUamiPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
+          },
+          "githubActionsOidcPrincipalId": {
+            "value": "[parameters('githubActionsOidcPrincipalId')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "5218739170439966873"
+            }
+          },
+          "parameters": {
+            "acrName": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 50,
+              "metadata": {
+                "description": "Name of the container registry (alphanumeric only, 5-50 chars, globally unique; typically sprkcontrolplane{env}acr -- ACR names cannot contain hyphens)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the registry."
+              }
+            },
+            "sku": {
+              "type": "string",
+              "defaultValue": "Basic",
+              "allowedValues": [
+                "Basic",
+                "Standard",
+                "Premium"
+              ],
+              "metadata": {
+                "description": "SKU. Basic is sufficient for dev (single small sidecar image, low pull volume); Standard recommended for prod (higher storage/throughput headroom + webhooks). Premium only if geo-replication or private endpoints become requirements."
+              }
+            },
+            "controlPlaneUamiPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep) granted AcrPull -- the Worker sitecontainer pulls the sidecar image with this identity (sidecarAuthType=UserAssigned). Empty skips the grant (not expected in real deploys; kept optional for what-if isolation)."
+              }
+            },
+            "githubActionsOidcPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the GitHub Actions OIDC service principal granted AcrPush (task 115 sidecar CI build+push). Empty (default) skips the grant -- supply once the CI OIDC app-reg principal is known for this environment."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource."
+              }
+            }
+          },
+          "variables": {
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+            "acrPushRoleId": "8311e382-0749-46cb-b1d6-9b7aacc770eb"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-07-01",
+              "name": "[parameters('acrName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('sku')]"
+              },
+              "properties": {
+                "adminUserEnabled": false,
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('controlPlaneUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), parameters('controlPlaneUamiPrincipalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+                "principalId": "[parameters('controlPlaneUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 control-plane UAMI pulls the Exchange sidecar image for the Worker sitecontainer -- Wave G-8 Batch 2, audit defect #4"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('githubActionsOidcPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), parameters('githubActionsOidcPrincipalId'), variables('acrPushRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPushRoleId'))]",
+                "principalId": "[parameters('githubActionsOidcPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "GitHub Actions OIDC principal pushes the Exchange sidecar image (task 115 CI) -- Wave G-8 Batch 2, audit defect #10"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "resourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]"
+            },
+            "acrName": {
+              "type": "string",
+              "value": "[parameters('acrName')]"
+            },
+            "loginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-07-01').loginServer]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-subscription-rbac",
+      "location": "[deployment().location]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "17238208266467465798"
+            }
+          },
+          "parameters": {
+            "principalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep outputs) granted Contributor on this subscription. Pass empty to skip the grant (what-if isolation only -- a real deploy always needs it)."
+              }
+            }
+          },
+          "variables": {
+            "contributorRoleId": "b24988ac-6180-42a0-ab88-20f7382dd24c"
+          },
+          "resources": [
+            {
+              "condition": "[not(empty(parameters('principalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(subscription().id, parameters('principalId'), variables('contributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('contributorRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 control-plane UAMI ensures customer RGs + runs subscription-scope ARM deployments (H2a ArmDeploymentRunner) -- Wave G-8 Batch 2, audit defect #2"
+              }
+            }
+          ],
+          "outputs": {
+            "subscriptionId": {
+              "type": "string",
+              "value": "[subscription().subscriptionId]"
+            },
+            "contributorRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('principalId'))), guid(subscription().id, parameters('principalId'), variables('contributorRoleId')), '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
+      ]
     }
   ],
   "outputs": {
@@ -2108,6 +2562,34 @@
     "fleetServiceBusRbacNamespaceId": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-rbac'), '2025-04-01').outputs.namespaceId.value]"
+    },
+    "artifactsStorageAccountName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage'), '2025-04-01').outputs.accountName.value]"
+    },
+    "artifactsStorageAccountId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage'), '2025-04-01').outputs.resourceId.value]"
+    },
+    "artifactsBlobUri": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage'), '2025-04-01').outputs.blobUri.value]"
+    },
+    "acrName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-acr'), '2025-04-01').outputs.acrName.value]"
+    },
+    "acrId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-acr'), '2025-04-01').outputs.resourceId.value]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-acr'), '2025-04-01').outputs.loginServer.value]"
+    },
+    "subscriptionContributorRoleAssignmentName": {
+      "type": "string",
+      "value": "[reference(subscriptionResourceId('Microsoft.Resources/deployments', 'controlplane-subscription-rbac'), '2025-04-01').outputs.contributorRoleAssignmentName.value]"
     }
   }
 }

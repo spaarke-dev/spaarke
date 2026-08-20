@@ -64,8 +64,11 @@ param cosmosDatabaseName string
 @description('Cosmos runs container name (runs per task 024 spec).')
 param cosmosRunsContainerName string
 
-@description('Key Vault name (for @Microsoft.KeyVault references in appSettings).')
-param keyVaultName string
+// NOTE (Wave G-8 Batch 2): the former `keyVaultName` param was removed along
+// with the Path-Y deletion below -- the Dataverse__ClientSecret emission was
+// this module's ONLY @Microsoft.KeyVault reference, so the .Api site now has
+// no KV-ref app settings at all (the Worker module still does). Re-add the
+// param if a future .Api setting genuinely needs a KV reference.
 
 @description('Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix -- MI-only send/receive, no connection string per ServiceBusModule.cs:53).')
 param serviceBusNamespaceName string
@@ -73,8 +76,10 @@ param serviceBusNamespaceName string
 @description('Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108.')
 param serviceBusQueueName string = 'sprk-provisioning-jobs'
 
-@description('Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path, this param + its appSetting are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule).')
-param dataverseClientSecretName string
+// NOTE (FR-38 / Wave G-8 Batch 2, audit defect #20): the former
+// `dataverseClientSecretName` param + `Dataverse__ClientSecret` app-setting
+// were DELETED -- task 112's Path X migration made the runtime MI-native and
+// FR-38's acceptance criterion requires the Bicep residue's absence.
 
 @description('App Insights connection string (from monitoring.bicep outputs).')
 param appInsightsConnectionString string
@@ -143,16 +148,6 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
         { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
-
-        // ---------------------------------------------------------------
-        // Dataverse S2S (H5/H6/H10 registry writes). DEPRECATED pending
-        // C1.4 (DS-5 C5.3) -- see dataverseClientSecretName param
-        // description. Kept as dummy KV binding until C1.4 lands.
-        // ---------------------------------------------------------------
-        {
-          name: 'Dataverse__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${dataverseClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Managed-identity discovery (pin DefaultAzureCredential to bound

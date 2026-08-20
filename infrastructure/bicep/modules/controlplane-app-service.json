@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8603298383239634648"
+      "templateHash": "15868794668967312266"
     }
   },
   "parameters": {
@@ -77,12 +77,6 @@
         "description": "Cosmos runs container name (runs per task 024 spec)."
       }
     },
-    "keyVaultName": {
-      "type": "string",
-      "metadata": {
-        "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings)."
-      }
-    },
     "serviceBusNamespaceName": {
       "type": "string",
       "metadata": {
@@ -94,12 +88,6 @@
       "defaultValue": "sprk-provisioning-jobs",
       "metadata": {
         "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
-      }
-    },
-    "dataverseClientSecretName": {
-      "type": "string",
-      "metadata": {
-        "description": "Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path, this param + its appSetting are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule)."
       }
     },
     "appInsightsConnectionString": {
@@ -184,10 +172,6 @@
             {
               "name": "ServiceBus__QueueName",
               "value": "[parameters('serviceBusQueueName')]"
-            },
-            {
-              "name": "Dataverse__ClientSecret",
-              "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('dataverseClientSecretName'))]"
             },
             {
               "name": "AZURE_CLIENT_ID",

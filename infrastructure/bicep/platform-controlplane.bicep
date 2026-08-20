@@ -52,6 +52,25 @@
 //                       target shape, not required at v1). Hosts the
 //                       DS-1b Exchange ApplicationAccessPolicy sidecar as a
 //                       Microsoft.Web/sites/sitecontainers child resource.
+//   9. Artifacts SA:    sprkcpartifacts{env} (Wave G-8 Batch 2 / audit
+//                       defects #3+#5) -- StorageV2 + provisioning-artifacts
+//                       container; CI (OIDC, Blob Data Contributor) uploads
+//                       compiled ARM JSON / BFF zips / solution zips; the
+//                       Worker's H2a/H6/H9 handlers download them via the
+//                       shared UAMI (Blob Data Reader). Its blobUri output
+//                       is the value the Worker's three
+//                       *Options__ProvisioningArtifactsContainerUri app
+//                       settings must carry (wired by the worker module).
+//   10. Platform ACR:   sprkcontrolplane{env}acr (Wave G-8 Batch 2 / audit
+//                       defects #4+#10) -- hosts the task 114/115 Exchange
+//                       sidecar image; AcrPull to the shared UAMI, AcrPush
+//                       to the CI OIDC principal.
+//   11. Subscription RBAC: Contributor for the shared UAMI at the deploying
+//                       subscription's scope (Wave G-8 Batch 2 / audit
+//                       defect #2) -- H2a's ArmDeploymentRunner needs it for
+//                       customer RG-ensure + subscription-scope ARM deploys
+//                       (via modules/controlplane-subscription-rbac.bicep;
+//                       BCP120 forces the module split -- see its header).
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -131,8 +150,14 @@ param serviceBusNamespaceName string = ''
 @description('Name of the resource group that hosts the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4). Defaults to SharePointEmbedded - the verified live dev value; this is a legacy pre-per-env-model resource group name, NOT the canonical rg-spaarke-{env} shape, so staging/prod deploys MUST override this parameter once the shared Service Bus resource group name for those environments is known.')
 param serviceBusResourceGroupName string = 'SharePointEmbedded'
 
-@description('Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings. DEPRECATED pending C1.4 (registry-client credential model decision, DS-5 C5.3) -- when C1.4 lands on the UAMI-as-Dataverse-App-User path (CustomerRunGuardOptions.cs:24-25 already anticipates this), this param + its appSettings are removed entirely (tasks 111/112). Until then keep the dummy KV binding; do NOT seed a real secret (r3 MUST-NOT-reintroduce-S2S rule).')
-param dataverseClientSecretName string = 'Dataverse-ClientSecret'
+// NOTE (FR-38 / Wave G-8 Batch 2, audit defect #20): the former
+// `dataverseClientSecretName` param + its `Dataverse__ClientSecret`
+// app-setting emissions were DELETED here and in both controlplane app-service
+// modules. Task 112's Path X migration made the runtime code path MI-native
+// (DataverseEnvironmentRegistryClient via DefaultAzureCredential pinned to the
+// UAMI); FR-38's acceptance criterion explicitly requires the Bicep residue's
+// absence. The `Dataverse-ClientSecret` KV SECRET itself is untouched
+// (BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml).
 
 @description('Admin Dataverse environment URL (e.g. https://spaarkedev1.crm.dynamics.com) hosting the sprk_dataverseenvironment registry table -- passed through to modules/controlplane-worker-app-service.bicep as DataverseEnvironmentRegistry__AdminEnvironmentUrl (task 122 / task 112 Path X MI-native client). REQUIRED: DataverseEnvironmentRegistryOptions.Validate() fails fast at Worker boot (NFR-05) if this is missing -- no default is supplied here deliberately (dev/staging/prod each target a distinct admin Dataverse environment; a default would risk silently pointing a non-dev deploy at the dev org).')
 param adminDataverseEnvironmentUrl string
@@ -142,6 +167,15 @@ param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
 @description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c\'s Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs).')
 param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
+
+@description('Principal ID of the GitHub Actions OIDC service principal for CI artifact publishing (Wave G-8 Batch 2). When provided, grants Storage Blob Data Contributor on the provisioning-artifacts storage account (tasks 116/117 upload compiled ARM JSON / BFF zips / solution zips) and AcrPush on the platform ACR (task 115 sidecar image push). Empty (default) skips BOTH grants -- supply once the CI OIDC app-reg principal is known for this environment.')
+param githubActionsOidcPrincipalId string = ''
+
+@description('Container image reference for the DS-1b Exchange sidecar, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11 -- the worker module always supported this but nothing plumbed it to the top level, so a real sidecar image could never be deployed). Default remains the documented public MCR placeholder until task 115 CI pushes the real image; then override with {acrLoginServer output}/sprk-provisioning-sidecar:{tag}. Do not leave the placeholder in a live deploy.')
+param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
+
+@description('ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed.')
+param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? 'Anonymous' : 'UserAssigned'
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -215,6 +249,22 @@ var keyVaultName = 'sprk-controlplane-${environmentName}-kv'
 
 var appInsightsName = 'sprk-controlplane-${environmentName}-insights'
 var logAnalyticsName = 'sprk-controlplane-${environmentName}-logs'
+
+// Provisioning-artifacts storage account (Wave G-8 Batch 2 / audit defect #5).
+// Storage names: lowercase alphanumeric only, <=24 chars, globally unique
+// (AZURE-RESOURCE-NAMING-CONVENTION.md no-hyphen storage rule).
+// sprkcpartifactsstaging = 22 chars -- longest env fits.
+var artifactsStorageAccountName = 'sprkcpartifacts${environmentName}'
+
+// Platform ACR (Wave G-8 Batch 2 / audit defect #10). ACR names: alphanumeric
+// only (no hyphens), 5-50 chars, globally unique.
+var acrName = 'sprkcontrolplane${environmentName}acr'
+
+// SKU escalation for prod: region-resilient artifact reads (ZRS) + ACR
+// storage/throughput headroom (Standard). Dev/staging stay on the cheap tier
+// -- artifacts are CI-reproducible from a git sha.
+var artifactsStorageSku = environmentName == 'prod' ? 'Standard_ZRS' : 'Standard_LRS'
+var acrSku = environmentName == 'prod' ? 'Standard' : 'Basic'
 
 // Effective JWT tenant - default to subscription tenant if not overridden.
 // Single-issuer per spec.md §4.2 (control plane is Spaarke-internal).
@@ -360,11 +410,11 @@ module appService 'modules/controlplane-app-service.bicep' = {
     cosmosAccountEndpoint: cosmos.outputs.accountEndpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     cosmosRunsContainerName: cosmos.outputs.containerName
-    keyVaultName: keyVault.outputs.keyVaultName
+    // (keyVaultName arg removed -- Wave G-8 Batch 2: the .Api module's only
+    // KV-ref app setting was the deleted Path-Y Dataverse__ClientSecret.)
     // DS-5 C5.1: MI-only FQNS + queue name, NOT a KV-ref connection string.
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
-    dataverseClientSecretName: dataverseClientSecretName
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
@@ -403,10 +453,22 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // header "DS-5 C5.1 FOLLOW-ON FIX" for the full rationale).
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
-    dataverseClientSecretName: dataverseClientSecretName
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     bffApiClientSecretName: bffApiClientSecretName
     azureOpenAiEndpointSecretName: azureOpenAiEndpointSecretName
+    // Wave G-8 Batch 2 (audit defect #11): sidecar image + pull-auth plumbed
+    // from top-level params (previously the worker module's defaults were
+    // unreachable from this stack). The sitecontainer's UserAssigned
+    // pull-identity wiring (userManagedIdentityClientId) is the worker
+    // module's concern (Batch 3).
+    acrImageTag: acrImageTag
+    sidecarAuthType: sidecarAuthType
+    // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
+    // URI of the provisioning-artifacts store (module 9 below). Batch 3's
+    // worker module emits it as the three
+    // *Options__ProvisioningArtifactsContainerUri app settings H2a/H6/H9
+    // Validate() against (NFR-05).
+    artifactsStorageContainerUri: artifactsStorage.outputs.blobUri
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
@@ -522,6 +584,88 @@ module fleetServiceBusRbac 'modules/controlplane-sb-rbac.bicep' = {
 }
 
 // ============================================================================
+// 9. PROVISIONING-ARTIFACTS STORAGE (Wave G-8 Batch 2 / audit defects #3+#5)
+//
+//    The CI -> Worker artifact hand-off store: tasks 116/117 CI uploads
+//    compiled ARM JSON manifests/templates + BFF zip-deploy artifacts +
+//    solution zips into the provisioning-artifacts container (Blob Data
+//    Contributor via the CI OIDC principal, when provided); the Worker's
+//    H2a/H6/H9 handlers download them via the shared control-plane UAMI
+//    (Blob Data Reader). Before this module existed, all three handlers
+//    were a hard blocker on first live dispatch -- their *Options.Validate()
+//    fails fast (NFR-05) on a missing ProvisioningArtifactsContainerUri,
+//    and no storage account backed that URI anywhere in infrastructure/**.
+//
+//    The blobUri OUTPUT below is the exact value the Worker's three
+//    *Options__ProvisioningArtifactsContainerUri app settings must carry
+//    (BicepInfraDeployOptions / BffDeployOptions / SolutionImportOptions) --
+//    app-setting wiring lands in modules/controlplane-worker-app-service.bicep
+//    (Batch 3), consuming artifactsStorage.outputs.blobUri via a new module
+//    param on the worker invocation above.
+// ============================================================================
+
+module artifactsStorage 'modules/controlplane-artifacts-storage.bicep' = {
+  scope: rg
+  name: 'controlplane-artifacts-storage'
+  params: {
+    storageAccountName: artifactsStorageAccountName
+    location: location
+    sku: artifactsStorageSku
+    controlPlaneUamiPrincipalId: uami.outputs.principalId
+    githubActionsOidcPrincipalId: githubActionsOidcPrincipalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// 10. PLATFORM ACR (Wave G-8 Batch 2 / audit defects #4+#10)
+//
+//    Hosts the task 114/115 Exchange ApplicationAccessPolicy sidecar image.
+//    AcrPull to the shared control-plane UAMI (the Worker sitecontainer's
+//    pull identity once sidecarAuthType=UserAssigned); AcrPush to the CI
+//    OIDC principal (task 115 build+push workflow), when provided. Before
+//    this module existed, no Microsoft.ContainerRegistry resource existed
+//    anywhere in infrastructure/** despite the sidecar CI header claiming
+//    otherwise.
+// ============================================================================
+
+module acr 'modules/controlplane-acr.bicep' = {
+  scope: rg
+  name: 'controlplane-acr'
+  params: {
+    acrName: acrName
+    location: location
+    sku: acrSku
+    controlPlaneUamiPrincipalId: uami.outputs.principalId
+    githubActionsOidcPrincipalId: githubActionsOidcPrincipalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// 11. SUBSCRIPTION-SCOPE RBAC -- Contributor for the shared control-plane
+//     UAMI (Wave G-8 Batch 2 / audit defect #2)
+//
+//    H2a's ArmDeploymentRunner requires Contributor at subscription scope
+//    for customer RG-ensure + subscription-scope ARM deployments (its own
+//    error guidance, ArmDeploymentRunner.cs:162, says to verify exactly this
+//    grant -- but nothing ever made it). Declared via a dedicated
+//    subscription-scope module rather than inline because the role
+//    assignment's guid() NAME must be calculable at deployment start and the
+//    UAMI principalId is a runtime module output here (BCP120) -- inside the
+//    module it is a param, which is legal. Covers the DEPLOYING subscription;
+//    Model 2 stamps in foreign customer subscriptions need their own grant
+//    (see module header).
+// ============================================================================
+
+module subscriptionRbac 'modules/controlplane-subscription-rbac.bicep' = {
+  name: 'controlplane-subscription-rbac'
+  params: {
+    principalId: uami.outputs.principalId
+  }
+}
+
+// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -594,3 +738,23 @@ output provisioningJobsQueueName string = fleetServiceBusQueue.outputs.queueName
 // scope. Consumed by task 113's deploy script (post-deploy `az role
 // assignment list` verification).
 output fleetServiceBusRbacNamespaceId string = fleetServiceBusRbac.outputs.namespaceId
+
+// Provisioning-artifacts storage (Wave G-8 Batch 2 / audit defects #3+#5).
+// artifactsBlobUri is the exact value for the Worker's three
+// *Options__ProvisioningArtifactsContainerUri app settings (Batch 3 wiring)
+// AND the CI upload target (tasks 116/117).
+output artifactsStorageAccountName string = artifactsStorage.outputs.accountName
+output artifactsStorageAccountId string = artifactsStorage.outputs.resourceId
+output artifactsBlobUri string = artifactsStorage.outputs.blobUri
+
+// Platform ACR (Wave G-8 Batch 2 / audit defects #4+#10). loginServer is the
+// prefix for the real sidecar acrImageTag once task 115's CI pushes
+// ({loginServer}/sprk-provisioning-sidecar:{tag}).
+output acrName string = acr.outputs.acrName
+output acrId string = acr.outputs.resourceId
+output acrLoginServer string = acr.outputs.loginServer
+
+// Subscription-scope Contributor for the control-plane UAMI (Wave G-8
+// Batch 2 / audit defect #2) -- consumed by deploy-script post-deploy
+// `az role assignment list` verification.
+output subscriptionContributorRoleAssignmentName string = subscriptionRbac.outputs.contributorRoleAssignmentName
