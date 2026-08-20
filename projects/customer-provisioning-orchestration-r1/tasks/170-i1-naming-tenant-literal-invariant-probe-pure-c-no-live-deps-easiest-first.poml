@@ -4,7 +4,7 @@
     <title>I1: naming/tenant-literal invariant probe (pure C#, no live deps -- easiest first)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H13 acceptance-gate probe -- the terminal correctness check per handler; a wrong probe (false Pass) is a silent-fail-trap class defect at the acceptance layer itself. FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
