@@ -262,6 +262,31 @@
                        Link="Handlers\KvSecretsPopulation\CanonicalManifest\manifest.yaml">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
     </EmbeddedResource>
+
+    <!-- Task 151 (Wave G-5 Batch G-5A, parallel with task 150) — H12b
+         DataGrid + workspace-layout DV-REST ports. Same single-source-of-
+         truth embedding pattern as the task 124/126/150 entries above: the
+         4 reconciliation-grid config JSON files are the shared-lib's OWN
+         source of truth (src/client/shared/Spaarke.Communication.Components,
+         NOT duplicated into this project) so DataverseWebApiDataGridSeeder's
+         seed content can never drift from the shared-lib source, matching
+         the retired seed-reconciliation-gridconfig.ps1's own stated design
+         intent ("Reads the config JSON verbatim from the shared-lib source
+         of truth so the seed can never drift from code"). -->
+    <EmbeddedResource Include="..\..\..\client\shared\Spaarke.Communication.Components\src\components\ReconciliationGrid\*.gridconfiguration.json"
+                       Link="Handlers\AppConfigSeed\GridConfig\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.GridConfig.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 151: scripts/system-layouts.json is the retired
+         Deploy-SystemWorkspaceLayouts.ps1's data sidecar (repo-root
+         scripts/, NOT this project's folder) — embedded directly so
+         DataverseWebApiWorkspaceLayoutSeeder reads the SAME single source of
+         truth the PS script did (no duplicated copy to drift). -->
+    <EmbeddedResource Include="..\..\..\..\scripts\system-layouts.json"
+                       Link="Handlers\AppConfigSeed\SystemLayouts\system-layouts.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.SystemLayouts.system-layouts.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Expose internal seams to the L2 test project (parity with the pre-split

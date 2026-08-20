@@ -4,7 +4,7 @@
     <title>H12b: 2 near-mechanical DV-REST ports (DataGrid + workspace-layout seeders)</title>
     <phase>C'' Wave G-5 -- Seed</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Near-mechanical ~40-line-script ports with no complex logic, no BFF touch -- STANDARD per root CLAUDE.md §8, but touches L2 handler code so tagged accordingly.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- both source scripts are real, correct, and small; nothing to redesign. Extension -- a direct near-mechanical port is the correct minimal move DS-1b itself characterizes this way. Cost-of-doing-nothing -- these 2 seed scopes cannot execute under Option D's zero-shell main site, leaving DataGrid + workspace-layout configuration unseeded for every new customer.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- both source scripts are real, correct, and small; nothing to redesign. Extension -- a direct near-mechanical port is the correct minimal move DS-1b itself characterizes this way. Cost-of-doing-nothing -- these 2 seed scopes cannot execute under Option D's zero-shell main site, leaving DataGrid + workspace-layout configuration unseeded for every new customer.
+
+COMPLETION (2026-08-20): Ported both scopes to DataverseWebApiDataGridSeeder.cs (sprk_gridconfigurations GET/PATCH/POST-per-row, 4 rows, config JSON embedded from the ReconciliationGrid shared-lib source) and DataverseWebApiWorkspaceLayoutSeeder.cs (sprk_workspacelayouts GET/POST-if-missing/skip-if-present, layouts embedded from scripts/system-layouts.json). Auth: DefaultAzureCredential pinned to the L2 UAMI (NOT ClientSecretCredential) -- design.md's handler DAG places H12b after H10 (App User creation), unlike H6/H7 which run before H10. PowerShellAppConfigSeeder retired + unregistered (kept on disk per Wave G-2..G-4 convention); AppConfigSeedModule.cs now wires 2 real Web-API seeders + 2 Deferred (task 152 scope). AppConfigSeedOptions gained DataverseRequestTimeout + Validate()/ValidateOnStart (NFR-05 parity with task 142). Workspace-layout schema half (sprk_issystem column add) intentionally NOT ported -- documented decision that H6 solution import now carries this column in the managed solution (see DataverseWebApiWorkspaceLayoutSeeder.cs file header). 19 new tests, all passing; grep 'ProcessStartInfo' returns 0 matches in both new files.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

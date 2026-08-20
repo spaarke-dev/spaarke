@@ -1,6 +1,36 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 144 COMPLETE — H11 live verification post C5.8 grants. Consent-gate
+> **Last Updated**: 2026-08-20 (Task 151 COMPLETE — H12b DataGrid + workspace-layout DV-REST ports, Batch
+> G-5A [parallel with task 150]. `DataverseWebApiDataGridSeeder.cs` [sprk_gridconfigurations: 4-row
+> find-by-id-or-name -> PATCH sprk_configjson if found / POST if not — always refreshes on match, config
+> JSON embedded from the ReconciliationGrid shared-lib's own JSON files so seed content can never drift]
+> + `DataverseWebApiWorkspaceLayoutSeeder.cs` [sprk_workspacelayouts: N-row find-by-name+isSystem ->
+> skip if found / POST if not — default no-`-Force` parity, layouts embedded from scripts/system-layouts.json]
+> replace the retired PowerShellAppConfigSeeder shell-outs to seed-reconciliation-gridconfig.ps1 /
+> Deploy-SystemWorkspaceLayouts.ps1 (kept on disk unregistered per the Wave G-2..G-4 retirement
+> convention). **Auth decision**: DefaultAzureCredential pinned to the L2 UAMI (NOT ClientSecretCredential)
+> — design.md's handler DAG places H12b after H10 (App User creation) + H11, unlike H6/H7 which run
+> before H10; parity with H12c's existing DataverseWebApiModelDeploymentReferenceWriter. **Documented
+> deviation** (not a defect): the source script's schema half (Add-IsSystemAttribute, adds sprk_issystem
+> column) was intentionally NOT ported — the POML's own dependency note frames H6 solution import as
+> already carrying that column in the managed solution; re-adding metadata-mutation logic to a per-customer
+> data seeder would also poorly fit Option D's "pure Web API upserts" characterization. AppConfigSeedOptions
+> gained DataverseRequestTimeout + Validate()/ValidateOnStart (NFR-05 parity with task 142's H7 precedent).
+> Embedded-resource pattern (task 124/126 precedent) used for both JSON sources — single source of truth,
+> no drift, self-contained L2 publish output. 19 new tests (hand-rolled fake HttpMessageHandler, never
+> Mock&lt;HttpMessageHandler&gt; per ADR-038), all passing. Quality gates (code-review + adr-check) clean —
+> zero critical/warning findings, zero ADR violations (test-modifying override made gates mandatory despite
+> STANDARD rigor). Shared-file coordination: Sprk.Provisioning.ControlPlane.Core.csproj is also being
+> edited by sibling task 150 (H12a) concurrently — this task's commit surgically isolates ONLY its own
+> 25-line `<EmbeddedResource>` addition into the commit (task 150's in-flight block was preserved
+> unstaged in the working tree for them to commit separately); Worker/Program.cs was NOT touched (H12b's
+> `AddH12bAppConfigSeedHandler()` extension method is fully self-contained, unchanged 1-line call site).
+> L2 tests (this task's scope alone): 19/19 passing; full-suite run showed 3 PRE-EXISTING failures, all in
+> `YamlSeedManifestEngineTests` (task 150's own in-progress work, unrelated files) — not caused by this
+> task's changes. **Wave G-5 Batch G-5A is now HALF complete** (151 done; 150 in progress) — task 152
+> (H12b greenfield seeders) unblocked once 151 lands; task 153 (H12c) still waits on 150 too.)
+>
+> **Previous** (2026-08-20, Task 144 COMPLETE — H11 live verification post C5.8 grants. Consent-gate
 > seam [`GraphRestB2BConsentVerifier`, fully read-only] live-verified end-to-end via new durable smoke
 > tests [`H11SeamsSmokeTests.cs`] run genuinely live in-sandbox, both Verified/Pending branches — the
 > escalation-trigger-relevant seam (false-Pass-on-pending would be HIGH severity; directly tested and NOT
@@ -43,11 +73,11 @@ Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 ```
 
 **Batch G-5A** (parallel-safe now, dispatch immediately): 150 + 151
-- 150: H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done)
-- 151: H12b 2 DV-REST ports (DataGrid + workspace-layout seeders) (deps 141 done)
+- 150: H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done) — IN PROGRESS (sibling agent)
+- 151: ✅ COMPLETE — H12b 2 DV-REST ports (DataGrid + workspace-layout seeders) (deps 141 done)
 
-**Batch G-5B** (after 151 lands): 152 alone
-- 152: H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151)
+**Batch G-5B** (after 151 lands — 151 landed, ready to dispatch): 152 alone
+- 152: H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151, now satisfied)
 
 **Batch G-5C** (after 150 + 151 + 152 all land): 153 alone
 - 153: H12c credential config only (no code delta) (deps 123, 150, 151, 152)

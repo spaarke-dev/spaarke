@@ -6,11 +6,15 @@
 //
 // SCOPE:
 //   - Bind AppConfigSeed:{PwshExecutable, ScriptsDirectory, ManifestPath,
-//     SeederTimeout, DataGridScriptFileName, WorkspaceLayoutScriptFileName}
-//     options.
-//   - Register the four IAppConfigSeeder instances (two shell-out via
-//     PowerShellAppConfigSeeder + two Deferred via DeferredAppConfigSeeder,
-//     per task 004 §4b decision matrix).
+//     SeederTimeout, DataGridScriptFileName, WorkspaceLayoutScriptFileName,
+//     DataverseRequestTimeout} options, with ValidateOnStart (task 151,
+//     NFR-05 parity with task 142's EnvVarValuesOptions wiring).
+//   - Register the four IAppConfigSeeder instances. Task 151 (Wave G-5)
+//     ported two of the four from PowerShellAppConfigSeeder shell-outs to
+//     direct Dataverse Web API calls: DataverseWebApiDataGridSeeder +
+//     DataverseWebApiWorkspaceLayoutSeeder. The remaining two (field-mapping,
+//     chart-def) stay DeferredAppConfigSeeder — task 152's scope (greenfield
+//     seeders, not a port).
 //   - Register H12bAppConfigSeedHandler as Scoped (parity with H0/H0.5/H1/H2a
 //     handler scoping).
 //
@@ -33,6 +37,10 @@
 //     per-options + one per-handler registrations.
 //   - ADR-032: Unconditional registration; feature-gates apply per-service
 //     via Null-Object, never at the module boundary.
+//   - design.md §4.1b: H12b classified Class A (pure .NET) — no
+//     ProcessStartInfo/shell-out collaborator may remain (task 151 closes
+//     that gap for the 2 real scopes; DeferredAppConfigSeeder was already
+//     pure C#).
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md §10):
 //   H12b lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; it consumes NO
@@ -74,11 +82,23 @@ public static class AppConfigSeedModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        // Bind AppConfigSeed options. Defaults inside AppConfigSeedOptions
-        // cover the operator running from a workstation with pwsh on PATH
-        // + scripts/ under AppContext.BaseDirectory. Production deployments
-        // override via App Service settings.
-        services.Configure<AppConfigSeedOptions>(configuration.GetSection(ConfigSection));
+        // Bind AppConfigSeed options with fail-fast startup validation (task
+        // 151, NFR-05 parity with task 142's EnvVarValuesOptions wiring — a
+        // misconfigured DataverseRequestTimeout fails the Worker at boot
+        // rather than surfacing only on H12b's first dispatch). Defaults
+        // inside AppConfigSeedOptions cover the operator running from a
+        // workstation with pwsh on PATH + scripts/ under
+        // AppContext.BaseDirectory (vestigial — see PowerShellAppConfigSeeder.cs
+        // retirement note below). Production deployments override via App
+        // Service settings.
+        services.AddOptions<AppConfigSeedOptions>()
+            .Bind(configuration.GetSection(ConfigSection))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "AppConfigSeed options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         // Four seeder registrations — kept explicit (rather than reflection
         // / attribute-scanning) so the compile-time diff is visible: a new
@@ -90,19 +110,30 @@ public static class AppConfigSeedModule
         // logic does not depend on order but the operator-visible outcome
         // ordering follows this list.
 
-        // (1) DataGrid — shell-out to scripts/seed-reconciliation-gridconfig.ps1
-        services.AddScoped<IAppConfigSeeder>(sp => new PowerShellAppConfigSeeder(
-            scopeName: AppConfigSeedScopes.DataGrid,
-            scriptFileName: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>().Value.DataGridScriptFileName,
+        // (1) DataGrid — task 151 (Wave G-5) ported from PowerShellAppConfigSeeder
+        // (shell-out to scripts/seed-reconciliation-gridconfig.ps1, now
+        // RETIRED + unregistered — see PowerShellAppConfigSeeder.cs) to a
+        // pure Dataverse Web API port. Named HttpClient (parity with H7's
+        // DataverseWebApiEnvVarValuesWriter fix — task 103 — typed-client
+        // registration silently fails DI resolution for a ctor that doesn't
+        // take HttpClient as its literal first parameter via AddHttpClient<T,U>()).
+        services.AddHttpClient(DataverseWebApiDataGridSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiDataGridSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiDataGridSeeder.HttpClientName),
             options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
-            logger: sp.GetRequiredService<ILogger<PowerShellAppConfigSeeder>>()));
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiDataGridSeeder>>()));
 
-        // (2) System workspace layouts — shell-out to scripts/Deploy-SystemWorkspaceLayouts.ps1
-        services.AddScoped<IAppConfigSeeder>(sp => new PowerShellAppConfigSeeder(
-            scopeName: AppConfigSeedScopes.WorkspaceLayout,
-            scriptFileName: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>().Value.WorkspaceLayoutScriptFileName,
+        // (2) System workspace layouts — task 151 (Wave G-5) ported from
+        // PowerShellAppConfigSeeder (shell-out to
+        // scripts/Deploy-SystemWorkspaceLayouts.ps1, now RETIRED +
+        // unregistered) to a pure Dataverse Web API port (data half only —
+        // see DataverseWebApiWorkspaceLayoutSeeder.cs file header for why the
+        // schema half was intentionally not ported).
+        services.AddHttpClient(DataverseWebApiWorkspaceLayoutSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiWorkspaceLayoutSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiWorkspaceLayoutSeeder.HttpClientName),
             options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
-            logger: sp.GetRequiredService<ILogger<PowerShellAppConfigSeeder>>()));
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiWorkspaceLayoutSeeder>>()));
 
         // (3) Field-mapping — Deferred (no repo source yet; task 004 §4b row 11 + §5b N3)
         services.AddScoped<IAppConfigSeeder>(sp => new DeferredAppConfigSeeder(

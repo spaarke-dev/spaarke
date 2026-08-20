@@ -1,6 +1,17 @@
 // -----------------------------------------------------------------------------
 // PowerShellAppConfigSeeder.cs
 //
+// *** RETIRED (task 151, Wave G-5, Option D hybrid, 2026-08-20) ***
+// No longer registered in AppConfigSeedModule.AddH12bAppConfigSeedHandler —
+// superseded by DataverseWebApiDataGridSeeder.cs (DataGrid scope) and
+// DataverseWebApiWorkspaceLayoutSeeder.cs (WorkspaceLayout scope), both pure
+// HttpClient + DefaultAzureCredential ports replacing this class's
+// `pwsh -File {scriptPath}` shell-outs to seed-reconciliation-gridconfig.ps1
+// and Deploy-SystemWorkspaceLayouts.ps1 respectively. Kept on disk
+// UNREGISTERED per the Wave G-2/G-3/G-4 retirement convention (see
+// DeployDataverseSolutionsScriptImporter.cs / PacCliSolutionVerifier.cs for
+// the precedent) — NOT reachable from any production code path.
+//
 // Production <see cref="IAppConfigSeeder"/> implementation — shells out to
 // one of the existing per-scope PS scripts under <c>scripts/</c> (per task 004
 // §4b decision matrix) and interprets the exit code + tail of stdout/stderr
