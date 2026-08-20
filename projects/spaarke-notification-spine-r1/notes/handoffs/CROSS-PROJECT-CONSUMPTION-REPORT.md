@@ -1,6 +1,7 @@
 # Notification & Action Spine — Cross-Project Consumption Report
 
 > **Status**: The spine (ADR-047, Layers A–D) is **merged to master** (`f1236e269`, 2026-07-22) — Phases 1–5 complete (tasks 001–052). Only the project wrap-up (090) remains.
+> **⚠️ 2026-08-20 correction**: the SpaarkeAi proactive-**suggestion renderer** (051/052) was later **removed** by `spaarkeai-assistant-enhancements-r2` (FR-E1). `suggestion` rows are still produced by the spine but are **not rendered** in SpaarkeAi today; the one live UI consumer is `communication-arrived`. The suggestion surface is rebuilt as OOB Dataverse notifications in `spaarke-notification-spine-r2`. Consumers of `communication-arrived` are UNAFFECTED. See the corrected rows below.
 > **Purpose**: What each related project needs to know now that the spine is on master, plus the runtime/ops prerequisites to light it up.
 > **Author**: `spaarke-notification-spine-r1` (pre-090 coordination).
 > **Companion**: [`notification-spine-contract-lock.md`](notification-spine-contract-lock.md) (the FR-19 envelope contract lock for messaging-r3).
@@ -12,7 +13,7 @@
 | Project | What changed | Action required |
 |---|---|---|
 | **messaging-communication-app-r3** | Its **FR-22 notification awareness (task 045) was ⛔ blocked on "spine not in master" — now UNBLOCKED.** | Consume `communication-arrived` via `@spaarke/notifications` (below). **Do NOT wire your own producer.** Verify your envelope type mirror matches the shipped 9-field `CommunicationEnvelope`. |
-| **spaarkeai-assistant-enhancements-r1** | Its **R1.5 proactive push (designed, not decomposed) is now SHIPPED here** — suggestion renderer + suggestion action. | Do NOT build a second proactive-push channel. Produce proactive suggestions via the `kind=suggestion` producer pattern (grounded+gated → outbox). |
+| **spaarkeai-assistant-enhancements-r1 / r2** | R1 shipped the R1.5 proactive-push renderer here (051/052); **r2 then REMOVED it** (FR-E1 — `useSuggestionCards.tsx` deleted, `suggestion` handler now log-only). So `suggestion` rows are produced-but-unrendered today. | Do NOT build a second proactive-push channel. Produce proactive suggestions via the `kind=suggestion` producer pattern (grounded+gated → outbox). The **visible** surface is rebuilt as OOB Dataverse notifications in `spaarke-notification-spine-r2` — do not re-add a SpaarkeAi card. |
 | **spaarke-daily-update-service-r5** | A `DailyBriefingSuggestionProducer` sibling now runs on the Daily-Briefing render leg. | If you touch `Services/Ai/Narrators/DailyBriefing*`, the producer is a **sibling** (narrator untouched, Null peer). Enable per-env with `Notifications:Suggestions:Enabled=true`. |
 | **email-communication-solution-r4**, **messaging-r1/r2** | The comms producers (024/040/041/042) emit from the `Services/Communication` persist path. | Preserve the producer emit points on any `Services/Communication` change (the 5 `communication-arrived` emit sites are AFTER participant-index, not raw create). |
 | **spaarke-ai-architecture-redesign-r2**, **spaarkeai-compose-r3/r4** | Layer-A `IActionSeam` (`Services/Ai/PublicContracts/`) on master; **SpaarkeAi builds clean from tip**. | Consume the seam, don't fork `Services/Ai/`. The flagged `@spaarke/notifications` build break is **not present** (verified `npm run build` exit 0) — SpaarkeAi is deployable from master. |
@@ -42,6 +43,7 @@ await getNotificationsClient().start(); // negotiate → connect → poll-fallba
   // oid-scoped, read-time expiry-filtered server-side. This is also the degrade path when SignalR is down.
   ```
 - **Acting on a notification** MUST re-fetch/re-ground through the auth-checked BFF at action time — the envelope is never sufficient to perform the action.
+- **Dismissing** a notification: `POST /api/notifications/{outboxRowId}/dismiss` (owner-scoped; stamps `sprk_dismissed`; 404 if not the caller's own pending row — ADR-028 no cross-user writes). Added by the assistant-enhancements-r1 UAT-polish work.
 
 ## 2. Envelope contracts (the wire shapes on master)
 
@@ -67,7 +69,7 @@ To emit a proactive suggestion, follow `DailyBriefingSuggestionProducer` (`Servi
 2. **Gate** (ADR-041 `origin=proactive`) — a declared-metadata admit decision (a `*GateOptions` policy dial), NOT the chat/Redis `PendingPlanManager` machinery.
 3. Both pass → **one** `kind=suggestion` outbox row via `OutboxService.WriteAsync` (store BEFORE ping) → best-effort `SignalRDeliveryService.PingUserAsync`.
 - Deny-by-default: ship with the gate `Enabled=false`.
-- The suggestion renderer (SpaarkeAi) + "acting opens the regarding record in a modal" (task 052) are already built — you get the consumer for free.
+- ⚠️ **There is no renderer today.** The SpaarkeAi suggestion renderer (051/052) was **removed** by `spaarkeai-assistant-enhancements-r2` (FR-E1); a produced `suggestion` row is currently pollable via `/pending` but has **no visible surface**. The consumer (OOB Dataverse bell + modal-on-click) is being rebuilt in `spaarke-notification-spine-r2` — coordinate there rather than re-adding an Assistant card.
 
 ## 5. Shared-lib reuse (all client projects)
 
