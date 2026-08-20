@@ -136,6 +136,12 @@ var cosmosAccountName = take('spaarke-${customerId}-${environmentName}-cosmos', 
 // Only referenced when signalrEnabled=true (ADR-032 Null-Object kill-switch caller-side gate).
 var signalrName = 'sprk-${customerId}-${environmentName}-signalr'
 
+// Azure OpenAI: sprk-{customer}-{env}-openai (per design.md §7.1 naming convention).
+var openAiName = 'sprk-${customerId}-${environmentName}-openai'
+
+// AI Search: sprk-{customer}-{env}-search (per design.md §7.1 naming convention).
+var searchServiceName = 'sprk-${customerId}-${environmentName}-search'
+
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
 
@@ -243,6 +249,59 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
     location: location
     databaseName: 'spaarke-ai'
     appServicePrincipalId: bffPrincipalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// AZURE OPENAI (Phase C — customer-provisioning-orchestration-r1, task 128;
+// module authored by task 046). Per design.md §7.2 row 9 / §7.6 Deployment
+// Order step 10 — UAMI (task 127's `uami` module) granted Cognitive Services
+// User RBAC (built-in role a97b65f3-24c7-4388-baec-2e87135dc908) via the
+// module's existing `userAssignedIdentityPrincipalId` param. NO `deployments`
+// override is passed — the module's own default array (gpt-4o:150,
+// gpt-4o-mini:200, spaarke-gpt4o-mini:30, text-embedding-3-large:350) is the
+// exact spec.md FR-01 / NFR-12 TPM budget and design.md §7.4's 4-row table,
+// byte-for-byte verified consistent. `openAiEndpoint` output name is
+// LOAD-BEARING — ArmDeploymentRunner.MapOutputs (task 123) reads it exactly.
+// ============================================================================
+
+module openAi 'modules/openai.bicep' = {
+  scope: rg
+  name: 'openAi-${baseName}'
+  params: {
+    openAiName: openAiName
+    location: location
+    sku: 'S0'
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// AI SEARCH (Phase C — customer-provisioning-orchestration-r1, task 128;
+// module authored by task 046). Per design.md §7.2 row 10 / §7.6 Deployment
+// Order step 11 — UAMI granted Cognitive Services User RBAC per task 030
+// POML constraint (c); see ai-search.bicep's own header note for the
+// documented N1 caveat (role is functionally dormant on Microsoft.Search —
+// not fixed here, honors the literal spec/design instruction as the module
+// already does). Module defaults used for sku/replicaCount/partitionCount/
+// semanticSearch — task 124's H2b completion notes confirm the real
+// SearchIndexClientProvisioner authenticates via the UAMI-pinned
+// TokenCredential (zero admin-key handling) and needs no infra shape beyond
+// the service endpoint; index creation is H2b's job (SearchIndexClient via
+// Deploy-AllIndexes.ps1's catalog), not this Bicep phase. `aiSearchEndpoint`
+// output name is LOAD-BEARING — ArmDeploymentRunner.MapOutputs (task 123)
+// reads it exactly.
+// ============================================================================
+
+module aiSearch 'modules/ai-search.bicep' = {
+  scope: rg
+  name: 'aiSearch-${baseName}'
+  params: {
+    searchServiceName: searchServiceName
+    location: location
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -395,6 +454,19 @@ output cosmosAccountName string = cosmosDb.outputs.accountName
 output cosmosAccountId string = cosmosDb.outputs.accountId
 output cosmosAccountEndpoint string = cosmosDb.outputs.accountEndpoint
 output cosmosDatabaseName string = cosmosDb.outputs.databaseName
+
+// --- Azure OpenAI (task 128 / Phase C). Output name is LOAD-BEARING:
+// ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
+// BicepDeployOutputs.OpenAiEndpoint. Raw `openAiKey` is intentionally NOT
+// echoed here — flows through task 129's kv-secrets wiring instead. ---
+output openAiEndpoint string = openAi.outputs.openAiEndpoint
+
+// --- AI Search (task 128 / Phase C). Output name is LOAD-BEARING:
+// ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
+// BicepDeployOutputs.AiSearchEndpoint. Raw `searchServiceAdminKey` is
+// intentionally NOT echoed here — flows through task 129's kv-secrets wiring
+// instead. ---
+output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName

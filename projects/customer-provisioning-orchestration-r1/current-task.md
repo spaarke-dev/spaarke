@@ -1,9 +1,15 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-19 (Task 127 COMPLETE + pushed — customer.bicep now wires UAMI + BFF App Service (plan/prod-slot/staging-slot). Path 1 (owner decision): 128 next (OpenAI+AISearch), then 129 (kv-secrets.generated.bicep wiring), THEN Wave G-3 dispatch.)
+> **Last Updated**: 2026-08-20 (Task 128 COMPLETE — customer.bicep now also wires Azure OpenAI + AI Search (modules/openai.bicep + modules/ai-search.bicep, both unmodified). Path 1 (owner decision): 129 next (kv-secrets.generated.bicep wiring), THEN Wave G-3 dispatch. 128.5 (Doc Intelligence + App Insights + Log Analytics + Redis) authored in parallel by a sibling agent — separate task, not landed by this commit.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` — final commit `8fdd0e2d0`, in sync with `origin/work/customer-provisioning-orchestration-r1`
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + tasks 128/129 (customer.bicep completion) remain)
+> **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-3..G-7 remain + task 129 (customer.bicep kv-secrets wiring) + 128.5 remain)
+
+## Task 128 — COMPLETE (2026-08-20)
+
+Wired `modules/openai.bicep` + `modules/ai-search.bicep` (task 046, both UNMODIFIED per CLAUDE.md §11) into `infrastructure/bicep/customer.bicep`, inserted immediately after the Cosmos DB section / before Membership Topic (task 128's declared insertion zone, disjoint from task 127's UAMI/App Service zones). OpenAI named `sprk-{customerId}-{env}-openai`, AI Search named `sprk-{customerId}-{env}-search` per design.md §7.1. NO `deployments` override passed to openai.bicep — module default array (150/200/30/350 TPM) is verified byte-for-byte identical to design.md §7.4 + spec.md NFR-12. AI Search uses module defaults throughout (task 124's completion notes confirm SearchIndexClientProvisioner needs only the service endpoint via UAMI-pinned TokenCredential — zero admin-key handling, no additional infra shape). Both modules granted Cognitive Services User RBAC via `uami.outputs.principalId` (task 127's uami module). Two new outputs added under the exact required names: `openAiEndpoint`, `aiSearchEndpoint` (ArmDeploymentRunner.MapOutputs contract, task 123). No raw `openAiKey`/`searchServiceAdminKey` echoed (task 129's scope). `az bicep build` exits 0 with 7 pre-existing warnings (verified zero net-new against baseline). Live `az deployment sub what-if` (throwaway `customerId=t128wif`) returned `status: Succeeded`, 27 resources `Create` — the 2 new AI resources (plus the pre-existing `keyVault`) were short-circuited from per-resource what-if detail by a confirmed PRE-EXISTING ARM limitation (nested deployment consuming a sibling module's not-yet-resolved output), not introduced by this task. Quality gates (code-review + adr-check) both passed clean — 0 critical, 0 warnings, 0 ADR violations.
+
+**Remaining customer.bicep gap**: task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2) is NOT done yet. Task 128.5 (Doc Intelligence + App Insights + Log Analytics + Redis) is out of this task's scope (being authored in parallel by a sibling agent as of this write).
 
 ## Task 127 — COMPLETE (2026-08-19, commit `8fdd0e2d0`)
 
