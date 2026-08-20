@@ -1,26 +1,54 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 — **🎉 PHASE C'' 100% COMPLETE + PR #779 ready for owner decision on next steps.** Wave G-7 all 17 tasks landed. 58 tasks across 8 waves. L2 tests 787 baseline → 1481/1482 final (+695). Zero code-review criticals + zero ADR violations across the entire build. Owner-in-the-loop live ceremony (11 items) is the remaining track per Path C directive.
+> **Last Updated**: 2026-08-20 — **Post-authoring 5-Fable-reviewer audit surfaced 30 gaps between "authoring complete" and "E2E provable." Wave G-8 (12 parallel autonomous fix agents) DISPATCHED to close all 30. Owner directive: "commit and push, then proceed."**
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `1067bfc17` — in sync with origin |
-| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — authoring COMPLETE, live ceremony pending) |
-| **L2 tests** | **1481 pass / 1 skip / 1482 total** (+695 vs 787 baseline) |
-| **Phase status** | **Phase C'' 100% COMPLETE (authoring)** — 58 tasks / 8 waves / Waves G-1, G-2, G-2.5, G-3, G-4, G-5, G-6, G-7 all ✅ |
-| **r1 E2E goal (FR-18 / SC #5)** | **MET at framework level** — all 15 H13 checks resolve to real handlers, zero placeholders, Ready writer verified. **LIVE proof deferred** to owner ceremony. |
-| **IN-FLIGHT** | None — task 186 committed + pushed. All 58 Phase C'' authoring tasks complete. |
-| **Owner decision needed** | 3 non-exclusive paths: (A) live ceremony first, then merge; (B) merge PR now, live ceremony later; (C) address 5 follow-up items first. See § Next-Session Owner Decision Points. |
+| **HEAD** | See `git log -1` (audit + Wave G-8 kickoff commit lands next) |
+| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — Wave G-8 will amend to close audit findings) |
+| **L2 tests baseline** | 1481 pass / 1 skip / 1482 total (before Wave G-8) |
+| **Phase status** | **Phase C'' (Wave G-8 IN FLIGHT)** — 58 tasks across G-1..G-7 landed; Wave G-8 = 12 parallel fix agents dispatched 2026-08-20 |
+| **r1 E2E goal (FR-18 / SC #5)** | **NOT YET met live** — audit reveals ≥9 blockers between framework-authoring and first live provisioning success. Wave G-8 addresses ALL of them. |
+| **IN-FLIGHT** | Wave G-8 = 12 parallel agents (see § Wave G-8 In-Flight below) |
+| **Working ledger** | `notes/post-authoring-audit-2026-08-20.md` — the 30 defects, source Fable reviewer, fix scope, dispatch batch |
 
 ### On post-/compact resume
 
-1. **Read this file** — Quick Recovery table above + § Phase C'' Complete Tally below
-2. **No in-flight subagents** — Phase C'' authoring is done; nothing to resume
-3. **Await owner direction** — see § Next-Session Owner Decision Points for the 3 non-exclusive paths
-4. **Do NOT auto-dispatch** — no more waves; the next actions are owner-in-the-loop (live ceremony OR PR merge OR follow-up authoring)
+1. **Read `notes/post-authoring-audit-2026-08-20.md`** — this is the authoritative defect list + fix plan
+2. **Check `git log --oneline -20`** — count Wave G-8 landings vs 12 batches
+3. **If Wave G-8 still in-flight**: agents self-notify on completion; no polling needed
+4. **After Wave G-8 lands**: main-session runs verification (`dotnet build` + Bicep `what-if`) before Wave H-3 dispatch
+5. **Wave H-3 (live deploy) + H-4 (first E2E) are owner-in-the-loop** — will NOT auto-dispatch
+
+---
+
+## 🌊 Wave G-8 IN FLIGHT (post-audit fix wave)
+
+Dispatched 2026-08-20 after 5-reviewer audit. 12 parallel agents closing 30 defects across Bicep + scripts + BFF + CI + tests + docs. Full defect list + traceability at [`notes/post-authoring-audit-2026-08-20.md`](./notes/post-authoring-audit-2026-08-20.md).
+
+Batches (see notes file for detail):
+1. customer.bicep amendments (5 fixes: Cosmos RBAC + Storage RBAC + bffApi appSettings + kv-secrets skip-if-exists + healthCheckPath)
+2. platform-controlplane consolidated (6 fixes: NEW artifacts-storage module + NEW ACR module + role assignments + FR-38 Path-Y deletion + top-level ACR params)
+3. Worker Bicep boot-blocker fixes (Redis + ASPNETCORE_ENVIRONMENT + 3 artifacts URI settings)
+4. Scripts: Deploy-ControlPlane.ps1 L2 kvRefIdentity PATCH + NEW Seed-PlatformKeyVault.ps1
+5. Grant-ControlPlaneIdentity.ps1 `$LASTEXITCODE` fix
+6. BFF diagnostic endpoint `/api/diagnostics/tenant-container-resolver` (I4 probe dependency)
+7. CI workflow: NEW `publish-dataverse-solutions-manifest.yml`
+8. Doc drift sweep + retired shell-out class deletion
+9. FR-40 I6 ArchTest (only Open FR)
+10. FR-34 H0 upgrade-mode version-compat matrix query
+11. SC #5 4 sample-workload checks in E2EValidationRunner
+12. SC #9 MDA view + spec/SC text fixes
+
+---
+
+## ⏭️ Waves after G-8 (owner-in-the-loop)
+
+- **Wave H-3**: Live deployment sequence — 11 sequential steps starting from Service Bus queue recreate through Deploy-ControlPlane.ps1 execution
+- **Wave H-4**: First live E2E provisioning of a trial customer → `Setup Status = Ready`
 
 ---
 
