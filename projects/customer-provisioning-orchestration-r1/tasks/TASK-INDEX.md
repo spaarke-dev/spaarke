@@ -285,7 +285,7 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 | 180 | ✅ | T4: Exchange policy count probe (sidecar read-route, pipelined with H14a) | FULL | sonnet / high | waveG7-parallel | 114, 161, 162 |
 | 181 | 🔲 | IE2EValidationRunner C# port (replaces Validate-DeployedEnvironment.ps1) | FULL | sonnet / high | none | 132, 141, 142, 173 |
 | 182 | ✅ | INamingConformanceChecker pure-C# port | STANDARD | sonnet / high | waveG7-parallel | none |
-| 183 | 🔲 | ICostEnvelopeChecker ARM.CostManagement port | FULL | sonnet / high | waveG7-parallel | 123 |
+| 183 | ✅ | ICostEnvelopeChecker ARM.CostManagement port | FULL | sonnet / high | waveG7-parallel | 123 |
 | 184 | 🔲 | IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself | FULL | sonnet / high | none | 112, 181, 182, 183 |
 | 185 | 🔲 | H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic | FULL | opus / high | none | 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184 |
 | 186 | 🔲 | Real Phase F E2E acceptance rerun (task 089 for real this time) | FULL | sonnet / xhigh | none | 185, 113, 162 |

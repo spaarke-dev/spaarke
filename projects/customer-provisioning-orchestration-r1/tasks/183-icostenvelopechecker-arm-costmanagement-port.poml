@@ -4,7 +4,7 @@
     <title>ICostEnvelopeChecker ARM.CostManagement port</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Feeds H13's cost-envelope acceptance criterion (cost drift &gt; 20% fails the run per this project's risk register) -- correctness-relevant for the final gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
