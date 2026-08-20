@@ -23,7 +23,10 @@
 //     what needs to happen to un-defer field-mapping + chart-def scopes).
 //   - .claude/adr/ADR-004-job-contract.md — idempotent + at-least-once safe.
 //   - .claude/adr/ADR-010-di-minimalism.md — IAppConfigSeeder seam earns
-//     keep: ≥2 impls (PowerShell + Deferred + test-only stubs).
+//     keep: 4 real Dataverse Web API impls as of task 152 (Wave G-5 Batch
+//     G-5B) — DataGrid/WorkspaceLayout ports (task 151) + FieldMapping/
+//     ChartDefinition greenfield seeders (task 152). DeferredAppConfigSeeder
+//     is RETIRED (kept on disk unregistered, zero remaining callers).
 //   - .claude/adr/ADR-036-background-job-infrastructure.md — reuse shared
 //     background-job infrastructure (Service Bus + IHandlerEnqueuer; Redis
 //     IdempotencyService pending L2 wiring).

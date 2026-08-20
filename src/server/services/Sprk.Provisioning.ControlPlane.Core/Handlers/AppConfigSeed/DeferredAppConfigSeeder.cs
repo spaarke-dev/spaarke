@@ -1,24 +1,37 @@
 // -----------------------------------------------------------------------------
 // DeferredAppConfigSeeder.cs
 //
+// *** RETIRED (task 152, Wave G-5 Batch G-5B, 2026-08-20) ***
+// No longer registered in AppConfigSeedModule.AddH12bAppConfigSeedHandler —
+// superseded by DataverseWebApiFieldMappingSeeder.cs (FieldMapping scope) and
+// DataverseWebApiChartDefSeeder.cs (ChartDefinition scope), both GREENFIELD
+// pure HttpClient + DefaultAzureCredential seeders (NOT ports — neither scope
+// ever had a shipping repo source, per DS-4 §3). Kept on disk UNREGISTERED
+// per the Wave G-2/G-3/G-4/G-5 retirement convention (see
+// PowerShellAppConfigSeeder.cs for the precedent) — NOT reachable from any
+// production code path. FR-16's 4-scope delivery is now fully complete;
+// this class has zero remaining callers anywhere in the repo.
+//
 // <see cref="IAppConfigSeeder"/> implementation for app-config scopes that
 // have NO shipping repo source yet. Returns a Deferred outcome with a clear
 // diagnostic + drift-resolution reference so the operator understands the
 // skip is intentional (per task 004 §4b decision matrix).
 //
-// SCOPES CURRENTLY DEFERRED:
+// SCOPES FORMERLY DEFERRED (both now real — see retirement banner above):
 //   scope=field-mapping    — task 004 §4b row 11 + §5b N3 delta. NO repo
-//                            source; H12b MUST author mirror files by
-//                            exporting live spaarkedev1 first. Wave-C5
-//                            follow-on task will land the mirror + swap
-//                            this DeferredAppConfigSeeder for a
-//                            PowerShellAppConfigSeeder wrapping the new
-//                            seeder script.
+//                            source; replaced by DataverseWebApiFieldMappingSeeder
+//                            (task 152), which ground-truthed the default
+//                            attorney-matrix seed content directly against
+//                            live spaarkedev1 via the Dataverse MCP.
 //   scope=chart-definition — task 004 §4b row 13 + §5b N5 delta. Per-family
 //                            scripts (create-test-chartdefinitions.ps1,
 //                            Create-UpcomingTodosChartDefinitions.ps1) exist
-//                            but a consolidated mirror does NOT. Same
-//                            Wave-C5 migration pattern.
+//                            but a consolidated mirror does NOT. Replaced by
+//                            DataverseWebApiChartDefSeeder (task 152), which
+//                            seeds the one family WITH a repo JSON mirror
+//                            (Upcoming To Dos, 4 rows) — see that file's
+//                            header for the documented scope decision on the
+//                            other ~15 live, unmirrored chart-def records.
 //
 // WHY NOT SILENTLY OMIT THE SCOPE?
 //   Explicit Deferred rows in the handler's outcome roll-up (visible in

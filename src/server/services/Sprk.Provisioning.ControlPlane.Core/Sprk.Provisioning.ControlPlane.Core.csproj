@@ -328,6 +328,24 @@
                        Link="Handlers\AppConfigSeed\SystemLayouts\system-layouts.json">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.SystemLayouts.system-layouts.json</LogicalName>
     </EmbeddedResource>
+
+    <!-- Task 152 (Wave G-5 Batch G-5B) — H12b GREENFIELD chart-def scope.
+         infrastructure/dataverse/charts/upcoming-todos-*.json (repo-root
+         infrastructure/, NOT this project's folder) are the 4 checked-in
+         sprk_chartdefinition record mirrors smart-todo-r4 task 080-G already
+         authored + proved live (FR-31..FR-36) — the ONLY chart-def family in
+         the repo with both a JSON source-of-truth AND a proven idempotent
+         upsert script (scripts/Create-UpcomingTodosChartDefinitions.ps1).
+         Embedded directly so DataverseWebApiChartDefSeeder reads the SAME
+         single source of truth the PS script did (no duplicated copy to
+         drift). The other ~15 chart-def records live in spaarkedev1 today
+         have NO JSON mirror in the repo at all — intentionally NOT seeded by
+         this task (see DataverseWebApiChartDefSeeder.cs file header SCOPE
+         DECISION). -->
+    <EmbeddedResource Include="..\..\..\..\infrastructure\dataverse\charts\upcoming-todos-*.json"
+                       Link="Handlers\AppConfigSeed\ChartDefs\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ChartDefs.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Expose internal seams to the L2 test project (parity with the pre-split

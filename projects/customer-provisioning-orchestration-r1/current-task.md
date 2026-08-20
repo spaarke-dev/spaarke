@@ -1,6 +1,42 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 150 COMPLETE — H12a YamlDotNet manifest engine + DV-REST seed writes,
+> **Last Updated**: 2026-08-20 (Task 152 COMPLETE — H12b field-mapping + chart-def GREENFIELD
+> seeders, Batch G-5B [ran alone, no siblings]. New `DataverseWebApiFieldMappingSeeder.cs` [3
+> sprk_fieldmappingprofile profiles -- Matter to Event/Invoice/Report Card Attorney Matrix -- + 20
+> sprk_fieldmappingrule Copy rules, all ground-truthed live against spaarkedev1 via Dataverse MCP
+> describe+read_query, not invented] + `DataverseWebApiChartDefSeeder.cs` [4 "Upcoming To Dos"
+> sprk_chartdefinition rows, embedded from the ONE chart-def family with a checked-in repo JSON
+> mirror -- infrastructure/dataverse/charts/upcoming-todos-*.json -- + a proven idempotent script,
+> smart-todo-r4 task 080-G] replace the 2 DeferredAppConfigSeeder no-op placeholders in
+> AppConfigSeedModule.cs. **FR-16's 4-scope delivery (DataGrid + workspace-layout + field-mapping +
+> chart-def) is now fully complete.** DeferredAppConfigSeeder.cs RETIRED (kept on disk unregistered,
+> retirement banner added matching the PowerShellAppConfigSeeder.cs precedent; grep 'new
+> DeferredAppConfigSeeder(' in AppConfigSeedModule.cs returns 0 matches -- verified via a dedicated
+> unit test AND a manual grep). **Escalation trigger did NOT fire** -- seed content was clearly
+> specified: field-mapping is a literal, MCP-verified mirror of the 3 Active profiles already
+> documented in SPAARKE-FIELD-MAPPING-FRAMEWORK.md + FIELD-MAPPING-ADMIN-GUIDE.md's Worked Example;
+> chart-def is the one family with a real repo source + proven script (FR-31..FR-36). **2 documented
+> scope decisions** (not silent): (1) a 4th live field-mapping profile ("Matter to Work Assignment")
+> exists in spaarkedev1 but is undocumented + carries only 1 of 8 expected rules with a
+> self-inconsistent name/value -- intentionally excluded as in-progress/incomplete, not a finished
+> default; (2) spaarkedev1 carries ~19 live sprk_chartdefinition records total but only the 4
+> "Upcoming To Dos" rows have a repo JSON mirror -- the other ~15 (MATTER HEALTH, MATTER BUDGET,
+> etc.) have zero repo source of truth and were intentionally NOT reproduced from a live SELECT
+> (would have been exactly the "inventing default seed content" risk the POML's escalation trigger
+> warns against) -- flagged as a Wave-C5-style follow-on, not silently dropped. Idempotency
+> semantics: field-mapping profiles/rules are find-then-SKIP-if-found (admin-editable config, parity
+> with WorkspaceLayoutSeeder); chart-defs are find-then-PATCH-if-found/always-refresh (parity with
+> DataGridSeeder). FK pre-requisite (missing sprk_recordtype_ref row) fails loud with the admin
+> guide's exact remediation, never silently invents/skips. 17 new tests (hand-rolled fake
+> HttpMessageHandler, never Mock&lt;HttpMessageHandler&gt; per ADR-038) incl. idempotency-on-rerun
+> tests for BOTH scopes + a fail-loud missing-recordtype_ref test, all passing. Quality gates
+> (code-review + adr-check, FULL rigor + test-modifying override, both unconditional): 0 Critical, 0
+> Warnings, 0 ADR violations. No BFF Hygiene trigger (files are under
+> Sprk.Provisioning.ControlPlane.Core, not Sprk.Bff.Api). L2 tests: 1044 -> **1061/1061** [+17, zero
+> regressions]. **Wave G-5 Batch G-5B is now 100% COMPLETE** — task 153 (H12c credential config,
+> Batch G-5C, deps 123+150+151+152 all now satisfied) is unblocked.)
+>
+> **Previous** (2026-08-20, Task 150 COMPLETE — H12a YamlDotNet manifest engine + DV-REST seed writes,
 > Batch G-5A [parallel with task 151, now also complete — **Wave G-5 Batch G-5A is 100% COMPLETE**]. Deleted
 > `InvokeSeedManifestScriptRunner.cs` (`ProcessStartInfo` shell-out to `Invoke-SeedManifest.ps1`, which
 > itself required a second PowerShell YAML module — the DS-1b matrix-correction finding this task closes).
@@ -120,11 +156,11 @@ Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 - 150: ✅ COMPLETE — H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done)
 - 151: ✅ COMPLETE — H12b 2 DV-REST ports (DataGrid + workspace-layout seeders) (deps 141 done)
 
-**Batch G-5B** (after 151 lands — 151 landed, ready to dispatch): 152 alone
-- 152: H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151, now satisfied)
+**Batch G-5B** — ✅ 100% COMPLETE (152 landed 2026-08-20)
+- 152: ✅ COMPLETE — H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151, satisfied)
 
-**Batch G-5C** (after 150 + 151 + 152 all land): 153 alone
-- 153: H12c credential config only (no code delta) (deps 123, 150, 151, 152)
+**Batch G-5C** (after 150 + 151 + 152 all land — all 3 now landed, ready to dispatch): 153 alone
+- 153: H12c credential config only (no code delta) (deps 123, 150, 151, 152 — all satisfied)
 
 ---
 
@@ -166,6 +202,32 @@ L2 tests: **938 → 1005/1005** (+67 across Wave G-4). Zero code-review critical
 - 144: ✅ COMPLETE — H11 live verification (Graph REST + B2B invitation + consent verifier; code already real). See "Task 144 — COMPLETE" section below.
 
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
+
+---
+
+## Task 152 — COMPLETE (2026-08-20)
+
+H12b field-mapping + chart-def GREENFIELD seeders (Wave G-5 Batch G-5B, ran alone — no sibling
+agents this dispatch). Completes FR-16's 4-scope delivery. Full detail in the "Last Updated" banner
+above; summary here for the per-task index pattern.
+
+New `DataverseWebApiFieldMappingSeeder.cs` (3 `sprk_fieldmappingprofile` profiles + 20
+`sprk_fieldmappingrule` Copy rules, ground-truthed live via Dataverse MCP against spaarkedev1's
+Active configuration rather than invented) + `DataverseWebApiChartDefSeeder.cs` (4 "Upcoming To
+Dos" `sprk_chartdefinition` rows, embedded from the repo's one JSON-backed chart-def family)
+replace the 2 `DeferredAppConfigSeeder` no-op placeholders in `AppConfigSeedModule.cs`.
+`DeferredAppConfigSeeder.cs` retired (kept on disk unregistered, zero remaining callers).
+
+Tests: 1044 → **1061/1061** (+17, zero regressions). Step 9.5 (code-review + adr-check, FULL rigor
++ test-modifying override, both unconditional): 0 Critical, 0 Warnings, 0 ADR violations.
+
+Commit scope: 2 new seeder files, 2 new test files, `AppConfigSeedModule.cs` (registration swap),
+`DeferredAppConfigSeeder.cs` (retirement banner), `IAppConfigSeeder.cs` + `H12bAppConfigSeedHandler.cs`
+(doc-comment updates), `Sprk.Provisioning.ControlPlane.Core.csproj` (1 new EmbeddedResource block),
+this project's `current-task.md`/`TASK-INDEX.md`/task-152 POML status flip.
+
+No coordination needed — ran alone this dispatch (Wave G-5 Batch G-5A siblings 150/151 both already
+landed before this task started; task 153 dispatches after this lands).
 
 ---
 

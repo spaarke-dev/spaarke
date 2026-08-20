@@ -12,9 +12,12 @@
 //   - Register the four IAppConfigSeeder instances. Task 151 (Wave G-5)
 //     ported two of the four from PowerShellAppConfigSeeder shell-outs to
 //     direct Dataverse Web API calls: DataverseWebApiDataGridSeeder +
-//     DataverseWebApiWorkspaceLayoutSeeder. The remaining two (field-mapping,
-//     chart-def) stay DeferredAppConfigSeeder — task 152's scope (greenfield
-//     seeders, not a port).
+//     DataverseWebApiWorkspaceLayoutSeeder. Task 152 (Wave G-5 Batch G-5B)
+//     authored the remaining two as GREENFIELD C# seeders (no shell-out
+//     predecessor ever existed for either): DataverseWebApiFieldMappingSeeder
+//     + DataverseWebApiChartDefSeeder, replacing the DeferredAppConfigSeeder
+//     no-op placeholders. FR-16's 4-scope delivery is now complete; zero
+//     DeferredAppConfigSeeder registrations remain in this module.
 //   - Register H12bAppConfigSeedHandler as Scoped (parity with H0/H0.5/H1/H2a
 //     handler scoping).
 //
@@ -135,19 +138,31 @@ public static class AppConfigSeedModule
             options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
             logger: sp.GetRequiredService<ILogger<DataverseWebApiWorkspaceLayoutSeeder>>()));
 
-        // (3) Field-mapping — Deferred (no repo source yet; task 004 §4b row 11 + §5b N3)
-        services.AddScoped<IAppConfigSeeder>(sp => new DeferredAppConfigSeeder(
-            scopeName: AppConfigSeedScopes.FieldMapping,
-            driftMatrixReference: "§4b row 11",
-            followOnDeltaId: "N3",
-            logger: sp.GetRequiredService<ILogger<DeferredAppConfigSeeder>>()));
+        // (3) Field-mapping — task 152 (Wave G-5 Batch G-5B) GREENFIELD seeder,
+        // replacing the retired DeferredAppConfigSeeder no-op (task 004 §4b row
+        // 11 + §5b N3 delta). Upserts the default Matter->{Event, Invoice,
+        // Report Card} attorney-matrix configuration per
+        // docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md — see
+        // DataverseWebApiFieldMappingSeeder.cs file header for the full
+        // seed-content provenance + scope decision.
+        services.AddHttpClient(DataverseWebApiFieldMappingSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiFieldMappingSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiFieldMappingSeeder.HttpClientName),
+            options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiFieldMappingSeeder>>()));
 
-        // (4) Chart-def — Deferred (no consolidated mirror yet; task 004 §4b row 13 + §5b N5)
-        services.AddScoped<IAppConfigSeeder>(sp => new DeferredAppConfigSeeder(
-            scopeName: AppConfigSeedScopes.ChartDefinition,
-            driftMatrixReference: "§4b row 13",
-            followOnDeltaId: "N5",
-            logger: sp.GetRequiredService<ILogger<DeferredAppConfigSeeder>>()));
+        // (4) Chart-def — task 152 (Wave G-5 Batch G-5B) GREENFIELD seeder,
+        // replacing the retired DeferredAppConfigSeeder no-op (task 004 §4b row
+        // 13 + §5b N5 delta). Upserts the 4 "Upcoming To Dos" chart-def rows —
+        // see DataverseWebApiChartDefSeeder.cs file header for the full
+        // seed-content provenance + scope decision (the other ~15 live
+        // chart-defs have no repo JSON mirror and are intentionally NOT
+        // seeded by this task).
+        services.AddHttpClient(DataverseWebApiChartDefSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiChartDefSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiChartDefSeeder.HttpClientName),
+            options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiChartDefSeeder>>()));
 
         // Handler — Scoped per IProvisioningHandler contract + parity with
         // IHandlerEnqueuer's Scoped registration + parity with H0/H0.5/H1/H2a

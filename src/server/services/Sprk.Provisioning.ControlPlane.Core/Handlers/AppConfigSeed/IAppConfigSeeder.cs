@@ -16,37 +16,27 @@
 //       deltas N1/N2/N3/N5) is a per-seeder swap, not a handler
 //       rewrite.
 //
-// SCOPE INVENTORY (task 004 §4b decision matrix):
-//   scope=data-grid            → PowerShellAppConfigSeeder wrapping
-//                                scripts/seed-reconciliation-gridconfig.ps1
-//                                (task 004 §4b row 10 — interim: existing
-//                                script; N1/N2 deltas defer generalization)
-//   scope=workspace-layout     → PowerShellAppConfigSeeder wrapping
-//                                scripts/Deploy-SystemWorkspaceLayouts.ps1
-//                                (task 004 §4b row 12 — verbatim reuse;
-//                                schema-additive + data-idempotent)
-//   scope=field-mapping        → DeferredAppConfigSeeder (task 004 §4b row 11
-//                                — NO repo source; H12b MUST author mirror
-//                                files by exporting live spaarkedev1 first,
-//                                which is a Wave-C5 follow-on. Interim: Deferred.)
-//   scope=chart-definition     → DeferredAppConfigSeeder (task 004 §4b row 13
-//                                — per-family scripts exist but consolidated
-//                                mirror does not; N5 delta pending. Interim: Deferred.)
-//
-// FUTURE (Wave C5+):
-//   When task 069's manifest gains `scope: app-config` artifact entries for
-//   these four scopes, the handler MAY migrate to invoking
-//   scripts/seed-data/Invoke-SeedManifest.ps1 with a scope filter (mirrors
-//   task 070's H12a shape). Today the manifest carries only ai-seed scope —
-//   the in-code IAppConfigSeeder registry IS the app-config seed plan per
-//   task 004 §4b interim design.
+// SCOPE INVENTORY (task 004 §4b decision matrix; both DataverseWebApiX
+// seeders now REAL as of task 151/152, Wave G-5 — DeferredAppConfigSeeder is
+// RETIRED, zero remaining callers):
+//   scope=data-grid            → DataverseWebApiDataGridSeeder (task 151 —
+//                                DV-REST port of scripts/seed-reconciliation-
+//                                gridconfig.ps1; PowerShellAppConfigSeeder
+//                                retired/unregistered)
+//   scope=workspace-layout     → DataverseWebApiWorkspaceLayoutSeeder (task
+//                                151 — DV-REST port of scripts/Deploy-
+//                                SystemWorkspaceLayouts.ps1's data half)
+//   scope=field-mapping        → DataverseWebApiFieldMappingSeeder (task 152
+//                                — GREENFIELD; no repo source ever existed,
+//                                seed content ground-truthed live via MCP)
+//   scope=chart-definition     → DataverseWebApiChartDefSeeder (task 152 —
+//                                GREENFIELD; seeds the one chart-def family
+//                                with a repo JSON mirror, "Upcoming To Dos")
 //
 // DESIGN REFS:
 //   - .claude/adr/ADR-004-job-contract.md — idempotent + at-least-once safe
-//   - .claude/adr/ADR-010-di-minimalism.md — seam earns keep: ≥2 impls
-//     (PowerShellAppConfigSeeder for shell-out scopes +
-//      DeferredAppConfigSeeder for interim scopes; more impls arrive as
-//      mirror-authoring completes per task 004 §4b N-deltas)
+//   - .claude/adr/ADR-010-di-minimalism.md — seam earns keep: 4 real impls
+//     (2 DV-REST ports + 2 greenfield DV-REST seeders, one per scope)
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-16
 //     (H12b app-config seed acceptance)
 //   - projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md
@@ -126,15 +116,17 @@ public static class AppConfigSeedScopes
 
     /// <summary>
     /// Field-mapping profiles + rules (<c>sprk_fieldmappingprofile</c> +
-    /// <c>sprk_fieldmappingrule</c>). Interim: <see cref="DeferredAppConfigSeeder"/>.
-    /// Mirror-authoring path documented in task 004 §4b row 11 + §5b N3.
+    /// <c>sprk_fieldmappingrule</c>). Seeded by the GREENFIELD
+    /// <see cref="DataverseWebApiFieldMappingSeeder"/> (task 152 — no repo
+    /// source ever existed for this scope; see that class's file header).
     /// </summary>
     public const string FieldMapping = "field-mapping";
 
     /// <summary>
-    /// Chart definitions (<c>sprk_chartdefinition</c>). Interim:
-    /// <see cref="DeferredAppConfigSeeder"/>. Consolidated-mirror authoring
-    /// path documented in task 004 §4b row 13 + §5b N5.
+    /// Chart definitions (<c>sprk_chartdefinition</c>). Seeded by the
+    /// GREENFIELD <see cref="DataverseWebApiChartDefSeeder"/> (task 152 —
+    /// the "Upcoming To Dos" family, the only one with a repo JSON mirror;
+    /// see that class's file header for the documented scope decision).
     /// </summary>
     public const string ChartDefinition = "chart-definition";
 }

@@ -4,7 +4,7 @@
     <title>H12b: 2 greenfield seeders (field-mapping + chart-def) -- completes FR-16</title>
     <phase>C'' Wave G-5 -- Seed</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Greenfield seeders never authored anywhere in the repo before -- completes a half-delivered FR (DS-4: 'Half of FR-16 is undelivered -- second-strongest overstatement after H1/H13'). FULL rigor, new-component-justification-heavy.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,4 +95,55 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion>
+    Completed 2026-08-20. New `DataverseWebApiFieldMappingSeeder.cs` (3 sprk_fieldmappingprofile
+    profiles -- Matter to Event/Invoice/Report Card Attorney Matrix -- + 20 sprk_fieldmappingrule
+    Copy rules) + `DataverseWebApiChartDefSeeder.cs` (4 "Upcoming To Dos" sprk_chartdefinition rows)
+    replace the 2 DeferredAppConfigSeeder no-op placeholders in AppConfigSeedModule.cs.
+    DeferredAppConfigSeeder.cs retired (kept on disk unregistered, retirement banner added, zero
+    remaining callers -- grep 'new DeferredAppConfigSeeder(' in AppConfigSeedModule.cs returns 0
+    matches, verified both by a dedicated unit test and a manual grep).
+
+    SEED CONTENT PROVENANCE (escalation trigger did NOT fire -- content was clearly specified):
+    field-mapping content ground-truthed live against spaarkedev1 via Dataverse MCP
+    (describe + read_query against sprk_matter/sprk_event/sprk_invoice/sprk_reportcard/
+    sprk_fieldmappingprofile/sprk_fieldmappingrule/sprk_recordtype_ref) -- the 3 profiles + 20
+    rules seeded are a literal, verified mirror of the 3 Active profiles already documented in
+    docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md + docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md's
+    Worked Example. chart-def content sourced from the ONE family with a checked-in repo JSON
+    mirror (infrastructure/dataverse/charts/upcoming-todos-*.json) + a proven idempotent script
+    (scripts/Create-UpcomingTodosChartDefinitions.ps1, smart-todo-r4 task 080-G, FR-31..FR-36).
+
+    SCOPE DECISIONS (documented, not silent):
+    (1) a 4th live field-mapping profile ("Matter to Work Assignment (Attorney Matrix)") exists in
+    spaarkedev1 but is undocumented in the architecture doc's Worked Example and carries only 1 of
+    8 expected rules whose own sprk_name string doesn't match its actual sprk_targetfield value --
+    read as in-progress/incomplete, intentionally excluded from this seeder's default set.
+    (2) spaarkedev1 carries ~19 live sprk_chartdefinition records total; only the 4 "Upcoming To
+    Dos" rows have a repo JSON mirror + proven script. The other ~15 (MATTER HEALTH, MATTER BUDGET,
+    etc.) have NO repo source of truth and were intentionally NOT reproduced -- inventing their
+    FetchXML/optionsJSON from a live SELECT with no checked-in mirror would have been exactly the
+    "inventing default seed content" the escalation trigger warns against. Recommended as a
+    Wave-C5-style follow-on (live-export the other 15 into repo JSON mirrors first).
+
+    Idempotency semantics: field-mapping profiles/rules are find-then-SKIP-if-found (admin-editable
+    config, parity with the sibling WorkspaceLayout seeder's default no-refresh behavior); chart-defs
+    are find-then-PATCH-if-found/always-refresh (shared-lib-fed feature config, parity with the
+    sibling DataGrid seeder). FK pre-requisite: a missing sprk_recordtype_ref row for source/target
+    fails loud (AppConfigSeederResult.Failed citing the admin guide's exact remediation), never
+    silently invents or skips.
+
+    Tests: 1044 -> **1061/1061** (+17, zero regressions) -- both new seeder test files use the
+    hand-rolled fake-HttpMessageHandler idiom (never Mock&lt;HttpMessageHandler&gt;, ADR-038),
+    including idempotency-on-rerun tests for both scopes and the fail-loud recordtype_ref-missing
+    test. Step 9.5 (code-review + adr-check, FULL rigor + test-modifying override, both
+    unconditional): 0 Critical, 0 Warnings, 0 ADR violations.
+
+    Acceptance criteria: all 5 verified (grep 0 matches for active DeferredAppConfigSeeder
+    registration; field-mapping test asserts schema shape matches the framework doc; chart-def test
+    asserts the 4 seeded rows' shape; both scopes have idempotency-on-rerun tests; dotnet build/test
+    both exit 0). FR-16's 4-scope delivery (DataGrid + workspace-layout + field-mapping +
+    chart-def) is now fully complete.
+  </notes-completion>
 </task>
