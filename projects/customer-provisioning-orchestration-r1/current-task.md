@@ -1,6 +1,159 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 162 COMPLETE — Sidecar live verification INFRASTRUCTURE,
+> **Last Updated**: 2026-08-20 — Pre-`/compact` checkpoint. Wave G-7 (FINAL wave) 11 of 17 tasks landed on origin; task 181 IN-FLIGHT (subagent `a29835c5cd9603e37`). Remaining after 181: 184 (Ready writer) → 185 (H13 aggregation OPUS) → 186 (real Phase F E2E acceptance xhigh — delivers r1's stated goal).
+
+## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | `ca490d5a6` (task 183 cost envelope) — in sync with origin |
+| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — Phase C'' incomplete) |
+| **L2 tests** | **1390/1391** (1 pre-existing skip). 787 baseline → +603 across Phase C'' |
+| **Phase** | Phase C'' Wave G-7 (FINAL GATE) — delivers r1 E2E goal per FR-18 / SC #5 |
+| **Waves complete** | G-1, G-2, G-2.5, G-3, G-4, G-5, G-6 all 100% ✅ |
+| **Wave G-7 landed** | 11 of 17 (all 11 probes + 2 of 3 runners) |
+| **IN-FLIGHT** | Task 181 (IE2EValidationRunner C# port, replaces `Validate-DeployedEnvironment.ps1`). Subagent `a29835c5cd9603e37` (name: `task-181-e2e-validation-runner`). Deps 132/141/142/173 all done. |
+| **Next action after 181** | Dispatch task 184 (Ready writer — THE acceptance-target transition) alone |
+| **Then** | Task 185 (H13 gate aggregation, **OPUS tier**, deps ALL 170-184) |
+| **Then** | Task 186 (Real Phase F E2E acceptance rerun, **xhigh effort**, deps 185/113/162) — **DELIVERS r1 E2E GOAL** |
+
+### On post-/compact resume
+
+1. **Read this file** (Quick Recovery table above)
+2. **Check task 181 status**: `git log --oneline -5` — if task 181's commit appears (feat message like `feat(l2/e2e-acceptance): task 181 -- IE2EValidationRunner ...`), task 181 landed. Otherwise check `git status` for uncommitted task 181 WIP.
+3. **Wait for task 181 completion notification** if not already landed; use `SendMessage to: 'task-181-e2e-validation-runner'` to resume if stalled at "proceed to commit" (Wave G-7 stall pattern — see § Wave G-7 Learnings)
+4. **Dispatch task 184** using the dispatch template from § Wave G-7 Dispatch Templates below
+
+---
+
+## Wave G-7 (FINAL GATE) status — 11 of 17 landed
+
+### Batches complete
+- **Batch G-7A1** (7 probes, 2026-08-20): 170/173/174/175/177/179/182 — L2 1105 → 1246 (+141)
+  - Cleanup commit `022e7f2ef` flipped stale TASK-INDEX rows + landed task 182 stragglers
+- **Batch G-7A2.1** (3 probes, 2026-08-20): 171 T1 `8aec1b918`, 172 T5 `93165236d`, 176 I4 `54a348ed8`+`4541abe6a` — L2 1246 → 1325
+- **Batch G-7A2.2** (2 probes + 1 runner, 2026-08-20): 178 T3 `8f1029567`+`cb87752cd`, 180 T4 `dbac0facb`+`dfb85060d`, 183 cost `a238e1d6e`+`ca490d5a6` — L2 1325 → 1390
+
+### In-flight
+- **Batch G-7B**: task 181 (IE2EValidationRunner C# port) — subagent `a29835c5cd9603e37` / `task-181-e2e-validation-runner` — Deps satisfied
+
+### Remaining
+- **Batch G-7C**: task 184 (Ready writer — THE acceptance-target transition, FULL/sonnet/high, deps 112/181/182/183)
+- **Batch G-7D**: task 185 (H13 gate aggregation — assembles all 11 probes + 3 runners + Ready writer, **OPUS**/high, deps ALL 170-184)
+- **Batch G-7E**: task 186 (Real Phase F E2E acceptance rerun — task 089 for real this time, FULL/sonnet/**xhigh**, deps 185/113/162) — **This delivers r1 stated E2E goal**
+
+---
+
+## Wave G-7 Dispatch Template (for post-/compact use)
+
+**Standard dispatch prompt for Wave G-7 tasks** (proven across 13 landings, adjust task-specific fields):
+
+```
+Working directory: c:/code_files/spaarke-wt-customer-provisioning-orchestration-r1
+Branch at HEAD <HEAD-COMMIT> (in sync with origin). Phase C'' Wave G-7 <BATCH-ID>.
+Wave G-7 progress: <N> of 17 tasks landed. <SIBLINGS-STATE>.
+
+Execute POML `projects/customer-provisioning-orchestration-r1/tasks/<NUMBER>-*.poml`. 
+<RIGOR> / <TIER> / <EFFORT>. Deps: <LIST>.
+
+**Key context**: <TASK-SPECIFIC — cite CompositeInvariantVerifier pattern (task 174) for probes; sibling patterns; runner conventions; SDK ground-truthing precedents from Wave G-4/G-5/G-6>
+
+**PUSH BEHAVIOR — CRITICAL**: **PUSH ON SUCCESS** (`git push origin work/customer-provisioning-orchestration-r1`) 
+after your commit lands. Tasks 179/180/183 all initially stalled at "proceed to commit" and had to be 
+manually resumed. Complete the flow: Step 9.5 → commit → push → report. Only skip push if tests fail.
+
+**Directives** (proven across 13 clean Wave G-7 landings):
+- Anti-pause: never wait for siblings; never stop at "proceed to commit"
+- Silent-fail audit rigor (Waves G-4/G-5/G-6 caught 5 major defects; Wave G-7 verification tasks caught 
+  wrong-GUID, missing-role, missing-Bicep-wiring, missing-BFF-endpoint)
+- Reuse fake-transport patterns (ADR-038 no `Mock<HttpMessageHandler>`)
+- Step 9.5 MANDATORY (test-modifying override applies)
+- Git hygiene: `git commit --only <specific paths>` (never `-A`); use task 179's soft-reset + 
+  stash-with-keep-index if pre-commit sweeps siblings
+- Grep-collision defense (~10 self-catches this session)
+- Sub-agent write boundary: root `.claude/` NO; project files YES
+- Follow task-execute skill at `.claude/skills/task-execute/SKILL.md` fully
+
+Report ≤300 words: commit hash(es), final L2 test count, new tests, Step 9.5 findings, deviations, 
+bonus catches, push confirmation.
+
+Do NOT push if tests fail. Do NOT stop mid-task. Do NOT wait for anything.
+```
+
+**Naming**: give each subagent a `name: task-XXX-slug` so cross-agent SendMessage works.
+
+**Batch G-7C dispatch (task 184 — Ready writer)**:
+- Task title: "IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself"
+- Rigor: FULL / sonnet / high
+- Deps: 112 (registry client landed Wave G-1), 181 (in flight), 182 (landed), 183 (landed)
+- Key context: task 112's `DataverseEnvironmentRegistryClient` uses `DefaultAzureCredential` with `ManagedIdentityClientId` (Path X). Task 184 uses same seam to PATCH `sprk_setupstatus` to Ready on the L2 admin Dataverse env. This is THE acceptance-target transition — its correctness determines whether H13 gate can flip customer state to Ready.
+- Silent-fail category: wrong entity name (customer's `sprk_dataverseenvironment` record vs L2 admin one); wrong PATCH shape; missing ETag/If-Match; silent 204-No-Content vs 404-Not-Found distinction
+
+**Batch G-7D dispatch (task 185 — H13 gate aggregation, OPUS)**:
+- Assembles ALL 11 probes (via CompositeInvariantVerifier from task 174) + 3 runners (naming from 182, cost from 183, E2E from 181) + Ready writer (from 184) into final H13 acceptance logic
+- Rigor: FULL / **OPUS** / high — high blast radius, aggregation logic is load-bearing
+- Deps: ALL 170-184
+- Task 174's `IInvariantProbe` seam ready to consume. Task 173's I1 adapter unmutes task 170's real check. Both patterns in place.
+- Set `model: "opus"` in Agent tool call (main session Opus 4.7 dispatches Opus subagent)
+
+**Batch G-7E dispatch (task 186 — Real Phase F E2E acceptance rerun, xhigh)**:
+- The final gate — proves customer environment reaches `sprk_dataverseenvironment.sprk_setupstatus = Ready` per FR-18 / SC #5
+- Rigor: FULL / sonnet / **xhigh**
+- Deps: 185, 113 (Deploy-ControlPlane.ps1), 162 (sidecar live verification infrastructure)
+- Live-ceremony-aware: builds acceptance framework, real live run deferred to owner-in-the-loop ceremony per Path C
+
+---
+
+## Wave G-7 Learnings (proven patterns for post-/compact continuation)
+
+### 1. Named-agent SendMessage works (from task 143 lesson applied in Wave G-7)
+When dispatching parallel agents, use `name: task-XXX-slug`. Enables cross-agent coordination via SendMessage (e.g., task 174's `CompositeInvariantVerifier` design was coordinated with task 173 via named SendMessage during Batch G-7A1).
+
+### 2. Push-behavior stall pattern (5 documented instances)
+Multiple Wave G-7 agents stalled at "proceed to commit" after Step 9.5 gates: tasks 179, 180, 183 all needed resume via SendMessage with explicit "commit AND push" directive. **Dispatch prompts MUST explicitly say "PUSH ON SUCCESS"** (added to template above). Tasks that received the explicit directive (171, 178) pushed cleanly.
+
+### 3. Sibling adapter pattern (task 173 for task 170)
+Task 174's `CompositeInvariantVerifier` swap would have silently regressed task 170's I1 real check. Task 173 authored `PackagedScriptTenantLiteralInvariantProbe` as thin adapter to preserve task 170's work. **When a sibling introduces a composite pattern that supersedes yours, author the adapter as part of the same batch — don't defer to task 185.**
+
+### 4. Git-index-race hygiene (7-way parallel Batch G-7A1)
+Under 7-parallel dispatch, files got swept into unexpected sibling commits (task 170's chore swept task 182's `NamingConformanceChecker.cs`). **Working recovery pattern**: (a) `git commit --only <specific paths>`, (b) if pre-commit sweeps, use task 179's `git soft-reset + stash push --keep-index + commit + stash pop` pattern, (c) TASK-INDEX row flips can lag actual commits — needs main-session cleanup commit at batch close.
+
+### 5. Verification tasks catch silent-fail defects (5 total across Waves G-4/G-5/G-6/G-7)
+- Task 143: wrong `GroupMember.ReadWrite.All` GUID (`c6571` → `c6695`) — silent 403 at runtime
+- Task 144: missing `User.Invite.All` role entirely — silent 403 on B2B invites
+- Task 142: `SectionName` bare `nameof()` vs Bicep key drift — silent config-binding fail
+- Task 153: `SharedPlatformOpenAiEndpoint` zero Bicep wiring — silent Model1 fail
+- Task 176: BFF `/api/diagnostics/tenant-container-resolver` endpoint MISSING (task 132 shipped BFF deploy but not diagnostic surface) — new work item for owner
+- Task 178: probe uses `_rolesRegistry.GetAll().Count` (not hardcoded 14) with regression-guard test — future-proofs against parity drift
+
+### 6. SDK ground-truthing via reflection/WebFetch (repeatedly successful pattern)
+Wave G-1..G-7 tasks routinely caught SDK gotchas by reflection or WebFetch against Microsoft Learn BEFORE writing code: WhatIfOperationResult properties-wrap (task 123), UpdateAsync = PATCH not PUT (task 125), slot resource id needs `/slots/{name}` (task 125), PrincipalId is Guid not string (task 125), no per-request tenantId on GraphServiceClient (task 130), FIC verification impossible for L2 (task 130), FileStorageContainerType shape (task 131), SearchIndex has no JSON-read path (task 124), ImportJob polls `importjobs({id})` not `asyncoperations` (task 141), BAP endpoint audience (task 140 via WebSearch). **~10 SDK defects prevented before landing.**
+
+### 7. Test-modifying override forces mandatory Step 9.5 gates
+STANDARD-rigor tasks that modify tests trigger the binding override — Step 9.5 gates become MANDATORY. Task 142, 151, 153, 182 all invoked this correctly.
+
+---
+
+## 🚨 Follow-ups (address during Wave G-7 wrap-up or before project close)
+
+1. **Auth-v4 FIC coord pre-project-close** (task 141 uses `ClientSecretCredential` + BFF-API secret; task 130 built pluggability seam awaiting auth-v4 phase-5 rollout; task 151 discovered post-H10 handlers use MI so auth-v4 obligation is scoped to pre-H10 only)
+2. **New work item: BFF `/api/diagnostics/tenant-container-resolver` endpoint** (task 176 flag; task 132 shipped BFF deploy but not diagnostic surface)
+3. **spaarkedev1 live "Matter to Work Assignment" data-quality issue** (task 152 flag; excluded from field-mapping seed defaults; needs owner cleanup)
+4. **Spaarke.ArchTests `CosmosProvisioningSecretGuardTests` stale refs** to retired pre-split `Sprk.Provisioning.ControlPlane` project (task 150 flag; needs update to `.Core/.Api/.Worker` split)
+5. **H11UserProvisioningOptions zero Bicep wiring** (task 144 flag; fail-loud but incomplete)
+
+## Live-ceremony backlog (10+ items, deferred per Path C — owner-in-the-loop)
+
+Original 8 items (from Wave G-1 checkpoint) + task 141's `dataverse-solutions-latest.json` CI publish gap + task 162's sidecar-live-verification runbook (`scripts/provisioning/Verify-Sidecar-Live.ps1` + `notes/sidecar-live-verification-runbook.md`) + task 176's BFF diagnostic endpoint requirement.
+
+---
+
+## Original current-task.md history (preserved below for detailed per-task context)
+
+<!-- The previous content below documents each task landing with per-task detail. Preserved for context but not needed for /compact recovery — Quick Recovery table above is sufficient. -->
+
+> **Last Updated (superseded)**: 2026-08-20 (Task 162 COMPLETE — Sidecar live verification INFRASTRUCTURE,
 > Wave G-6 Batch G-6C [ran alone this dispatch, OPUS tier — Opus subagent under Opus 4.7 main-session].
 > Owner selected Path C for Wave G-6 (dispatch autonomously, defer live ceremony) — this task
 > delivers the VERIFICATION INFRASTRUCTURE the ceremony will exercise, not the live run itself
