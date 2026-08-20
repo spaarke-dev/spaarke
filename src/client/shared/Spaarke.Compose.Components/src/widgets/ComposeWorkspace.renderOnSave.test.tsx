@@ -117,15 +117,13 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
     saveRequests.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
     if (config.failNextCreateOnSave) {
       config.failNextCreateOnSave = false; // one-shot: the retry succeeds
-      return {
-        ok: false,
-        status: 500,
-        json: async () => ({ detail: 'transient create failure' }),
-        text: async () => 'transient create failure',
-        clone() {
-          return this;
-        },
-      } as unknown as Response;
+      // FR-S01 (r8 task 010): a failure is THROWN, never resolved as a non-ok Response —
+      // `authenticatedFetch` returns only when `response.ok` (see Spaarke.Auth/src/authenticatedFetch.ts).
+      // Thrown lazily via requireMock so the class is the same one ComposeWorkspace imports.
+      const { ApiError } = jest.requireMock('@spaarke/auth') as {
+        ApiError: new (message: string, status: number) => Error;
+      };
+      throw new ApiError('transient create failure', 500);
     }
     return saveResponse('spe-created-1');
   }
@@ -173,7 +171,13 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
       }),
     } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => [], text: async () => '' } as unknown as Response;
+  // Session-ledger compose-outputs probe + everything else → benign 404, expressed the way
+  // `authenticatedFetch` actually expresses one (a thrown ApiError, not a resolved non-ok Response —
+  // FR-S01, r8 task 010). Verified behaviour-neutral for this suite.
+  const { ApiError } = jest.requireMock('@spaarke/auth') as {
+    ApiError: new (message: string, status: number) => Error;
+  };
+  throw new ApiError('Not found', 404);
 });
 
 jest.mock(

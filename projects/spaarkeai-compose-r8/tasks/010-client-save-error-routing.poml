@@ -4,7 +4,7 @@
     <title>FR-S01 — Route client save errors on ApiError.status; retire the unreachable !response.ok block</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx on the save path; rewrites the error-handling contract that every other Track S task depends on; tests currently validate unreachable code.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -100,4 +100,65 @@
     <criterion>NEGATIVE: a save that SUCCEEDS still reports success and does not render any error banner (no false positives).</criterion>
     <criterion>The Compose client test suite passes.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-20. All acceptance criteria met.
+
+    **Implementation** — `ComposeWorkspace.tsx`: the `if (!response.ok)` block on the save path is DELETED
+    (grep-verified); status routing moved into the catch via two new module-local helpers,
+    `classifySaveFailure` (never throws) and `saveFailureMessage`. Routed outcomes: 423 → lock banner +
+    Retry (existing surface) · 412 → honest "not saved / nothing overwritten" + the existing
+    external-change Reload (transitional; task 011 retires it) · 403 · 404 · 401/AuthError · other-4xx ·
+    5xx · transport. Every message states the pending edits survive, which is true — `commitSaved()` fires
+    only after a confirmed 200.
+
+    **Deviation from step 3 (directional mode)**: the status is read STRUCTURALLY (`err.status`) rather
+    than via `err instanceof ApiError`. `instanceof` fails silently when `@spaarke/auth` resolves to two
+    copies across a bundle boundary, and a silent fall-through to the generic message is the exact defect
+    FR-S01 removes. Documented inline.
+
+    **Escalation trigger FIRED (non-blocking, handed to task 016)**: `ApiError.status` does NOT cover every
+    failure class. `authenticatedFetch` throws `AuthError` (carries `code`, no `status`) when the 401 retry
+    budget is exhausted, and a `fetch` rejection (offline/DNS/CORS/abort) never reaches an HTTP status at
+    all. Both are handled honestly client-side here, but the FR-S06 save-outcome contract needs a
+    transport-failure member that is not a status code. Task 012's AbortSignal work lands in the same class.
+
+    **Defect found and fixed during self-review**: the request and all post-save bookkeeping share one
+    try/catch, so a throw AFTER the 2xx (unreadable body, failing dispatch, draft cleanup) was being
+    reported as a save failure. Harmless while the message was a generic "Save failed", actively dishonest
+    once the messages assert "Not saved — nothing was overwritten". Added a `savePersisted` flag; a
+    post-2xx throw now reports "Your document was saved, but something went wrong immediately afterwards".
+    Covered by a NEGATIVE test.
+
+    **Tests** — `ComposeWorkspace.saveOpLogPreservation.test.tsx` rewritten to THROW the 422 (it previously
+    RESOLVED `{ok:false}`, a shape the transport cannot emit — it exercised the dead block). New
+    `ComposeWorkspace.saveErrorRouting.test.tsx`: 13 tests covering every routed status plus four NEGATIVE
+    cases. Verified non-self-confirming: 9 of 11 routing tests FAIL against the pre-change implementation.
+    `renderOnSave.test.tsx`'s create-on-save failure mock converted from `{ok:false, status:500}` to a
+    thrown ApiError. All three suites now carry `{ virtual: true }` on the sibling-lib mocks so they run in
+    a fresh clone without a SharedLibs build.
+
+    **Verification** (deterministic `--runInBand`, same environment both sides):
+    HEAD 47 suites passed / 40 failed, 771 tests passed / 2 failed →
+    after 49 passed / 39 failed, 784 passed / 2 failed. No regression; +2 suites, +13 tests.
+    The 2 failing tests are PRE-EXISTING create-on-save failures in `renderOnSave.test.tsx`, reproduced on
+    a clean HEAD checkout — unrelated to this task.
+
+    **Pre-existing conditions found (reported, not fixed — out of FR-S01 scope)**:
+    1. `Spaarke.Compose.Components` is NOT in CI. No workflow runs its 88 jest suites.
+    2. ~39 of 88 suites cannot run without a prior SharedLibs `dist/` build; the suite is also
+       non-deterministic under parallel workers (2–14 failures across identical runs).
+    3. The package has no ESLint config — `npm run lint` fails on any checkout.
+    4. Two create-on-save tests in `renderOnSave.test.tsx` fail on HEAD.
+    5. Five `if (!response.ok)` blocks remain OUTSIDE the save path (load, memo, draft probe) — same dead
+       shape, different features. FR-S09 / task 016 territory.
+
+    Quality gates: code-review ✅ (three findings, all fixed in-task: the post-2xx false negative,
+    duplicated 401 copy, missing 403 reassurance) · adr-check ✅ (ADR-028 verified by grep — no raw fetch,
+    no hand-built Authorization header, no tokenBridge/`__SPAARKE_BFF_TOKEN__`; ADR-021 no new colour or
+    banner surface; ADR-038 no banned test shapes) · prettier ✅ · tsc ✅ (no new errors once
+    `@spaarke/auth` types resolve).
+
+    NOT deployed — Track S deploys as a batch at task 017.
+  </notes>
 </task>

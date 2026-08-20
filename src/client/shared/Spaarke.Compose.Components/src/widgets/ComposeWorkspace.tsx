@@ -377,6 +377,88 @@ function mergeDegradationWarnings(
   return Array.from(byCode.entries()).map(([code, count]) => ({ code, count }));
 }
 
+/**
+ * FR-S01 (r8 task 010) — how a save failure is classified before it is routed to an outcome.
+ *
+ * `authenticatedFetch` (ADR-028) RETURNS only when `response.ok`; every non-2xx is THROWN as an
+ * `ApiError` carrying `.status` + ProblemDetails. Two failure classes never reach an HTTP status at
+ * all, and both used to render as the same dead-end "Save failed: …" string:
+ *   - `AuthError` — thrown when the 401 retry budget is exhausted, or no response was received.
+ *     It carries `code`, never `status` (see `Spaarke.Auth/src/authenticatedFetch.ts`).
+ *   - a transport rejection — `fetch` itself rejected (offline, DNS, CORS, abort), so no HTTP
+ *     exchange happened. A malformed success body (`response.json()` throwing) lands here too.
+ */
+type SaveFailureClass =
+  | { kind: 'http'; status: number; detail: string }
+  | { kind: 'auth'; detail: string }
+  | { kind: 'transport'; detail: string };
+
+/**
+ * FR-S01 (r8 task 010): classify a thrown save failure. Never throws.
+ *
+ * The `status` read is deliberately STRUCTURAL rather than `err instanceof ApiError`: `instanceof`
+ * fails silently when `@spaarke/auth` resolves to two copies across a bundle boundary (the host page
+ * and this library), and a silent fall-through to the generic message is precisely the defect FR-S01
+ * exists to remove. `.status` is the only field the routing needs, so it is read directly.
+ */
+function classifySaveFailure(err: unknown): SaveFailureClass {
+  const detail = err instanceof Error ? err.message : String(err);
+  const status = (err as { status?: unknown } | null | undefined)?.status;
+  if (typeof status === 'number' && status >= 100 && status <= 599) {
+    return { kind: 'http', status, detail };
+  }
+  if (err instanceof Error && err.name === 'AuthError') {
+    return { kind: 'auth', detail };
+  }
+  return { kind: 'transport', detail };
+}
+
+/**
+ * FR-S01 (r8 task 010): the honest save-failure sentence for a classified failure.
+ *
+ * Every message states (a) that nothing was saved and (b) that the pending edits survive — which is
+ * TRUE on every path here: `commitSaved()` (which drops the op-log batch) fires only after a
+ * confirmed 200, so a refused save leaves the document dirty with its edits intact for a retry.
+ *
+ * `ApiError.message` is already `problemDetails.detail ?? title ?? "HTTP {status}"`, so the
+ * synthesized `HTTP {status}` fallback is stripped rather than echoed back after our own status text.
+ *
+ * 423 is NOT handled here — it routes to the lock banner (which owns its own copy + Retry).
+ */
+const SIGN_IN_EXPIRED_MESSAGE =
+  'Not saved — your sign-in expired. Refresh the page to sign in again, then Save. Your changes are still here.';
+
+function saveFailureMessage(failure: SaveFailureClass): string {
+  // A 401 that exhausted the retry budget arrives as an AuthError (no status); one that did not can
+  // still arrive as an ApiError with status 401. Same cause, same recovery, same sentence.
+  if (failure.kind === 'auth') {
+    return SIGN_IN_EXPIRED_MESSAGE;
+  }
+  if (failure.kind === 'transport') {
+    return "Not saved — we couldn't complete the request (network or connection problem). Your changes are still here — try again.";
+  }
+  const { status } = failure;
+  const serverDetail = (failure.detail && failure.detail !== `HTTP ${status}` ? failure.detail : '')
+    .trim()
+    .replace(/\.$/, '');
+  const suffix = serverDetail ? `: ${serverDetail}.` : '.';
+  switch (status) {
+    case 401:
+      return SIGN_IN_EXPIRED_MESSAGE;
+    case 403:
+      return `You do not have permission to save this document${suffix} Your changes are still here.`;
+    case 404:
+      return (
+        'Not saved — this document no longer exists at its saved location (it may have been moved or ' +
+        'deleted). Your changes are still here — use Save As to store them as a new document.'
+      );
+    default:
+      return status >= 500
+        ? `Not saved — the server hit an error (HTTP ${status})${suffix} Your changes are still here — try again.`
+        : `Not saved — the server rejected this save (HTTP ${status})${suffix} Your changes are still here.`;
+  }
+}
+
 /** Raw wire shape of a `projection` field on a Compose bytes->response payload (Load / Upload /
  * Project) — every field optional so an older BFF build (predating the projection wiring) still
  * normalizes cleanly. */
@@ -1613,6 +1695,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
 
       dispatch({ kind: 'requestSave' });
+      // FR-S01 (r8 task 010): did the POST reach a 2xx? Everything after the fetch — response parsing,
+      // dispatches, draft cleanup, the editor's `commitSaved()` — runs inside the same `try`, so a throw
+      // there would otherwise be reported as "Not saved" for a document the server ALREADY wrote. That is
+      // the same class of dishonest outcome this task removes, pointing the other way.
+      let savePersisted = false;
       try {
         // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
         // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
@@ -1906,53 +1993,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           body: JSON.stringify(requestBody),
         });
 
-        if (!response.ok) {
-          // Try to extract ProblemDetails.detail so the banner surfaces the
-          // actual server-side reason (BFF puts exception name + message +
-          // TraceId in `detail`). Fall back to a generic message if the body
-          // isn't JSON.
-          let detail = '';
-          try {
-            const problem = (await response.clone().json()) as {
-              detail?: string;
-              title?: string;
-            };
-            detail = problem.detail ?? problem.title ?? '';
-          } catch {
-            detail = (await response.text().catch(() => '')).slice(0, 400);
-          }
-          // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
-          // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
-          // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
-          // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
-          // carries the honest message.
-          if (response.status === 423) {
-            dispatch({
-              kind: 'saveFailed',
-              errorMessage:
-                detail ||
-                'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
-              isLock: true,
-            });
-            return;
-          }
-          // UAT-25/26 (2026-08-18, honest/safe): 412 = the server refused the save because the document
-          // changed since we opened it (an external Word/tab writer landed a new version) — nothing was
-          // overwritten. Route to the honest external-change banner (explicit Reload; the user's pending
-          // edits are preserved, never silently discarded) instead of a dead-end save error. This is the
-          // "reload and reapply" recovery the 412 ProblemDetails describes.
-          if (response.status === 412) {
-            dispatch({ kind: 'externalChangeDetected' });
-            return;
-          }
-          const msg =
-            response.status === 403
-              ? `You do not have permission to save this document. ${detail}`.trim()
-              : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
-          dispatch({ kind: 'saveFailed', errorMessage: msg });
-          return;
-        }
+        // `authenticatedFetch` resolved, so the response is 2xx by construction — the server has written
+        // the document. Everything below is post-save bookkeeping (FR-S01).
+        savePersisted = true;
 
+        // FR-S01 (r8 task 010): there is NO `if (!response.ok)` branch here, and there must never be one
+        // again. `authenticatedFetch` returns ONLY when `response.ok` — every non-2xx is thrown as a typed
+        // `ApiError` (ADR-028 / ADR-019 ProblemDetails). The block that used to sit here (423 lock banner,
+        // 412 reload flow, 403 copy) was therefore unreachable from R5 onward, which is why every server
+        // refusal rendered as one undifferentiated "Save failed: …" with no recovery. Status routing now
+        // lives in the `catch` below, on `ApiError.status` — the ONE save-error path.
         const payload = (await response.json()) as {
           documentSpeId: string;
           documentRecordId?: string;
@@ -2096,8 +2146,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
         // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
         // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
-        // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
-        // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
+        // the batch, and ONLY on success. FR-S01 (r8 task 010): a rejected save THROWS out of
+        // `authenticatedFetch` straight to the catch below, so it never reaches here — the op-log + dirty
+        // flag survive for a retry that re-sends the same edits.
         // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
         // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
         // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
@@ -2159,8 +2210,63 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
+        // FR-S01 (r8 task 010): THE save-error path. Every server refusal arrives here as a thrown
+        // `ApiError` (ADR-028), so each status gets its own outcome + recovery affordance instead of one
+        // dead-end string. The op-log and dirty flag are untouched on every branch — `commitSaved()` fires
+        // only after a confirmed 200 — so each message can honestly promise the edits survive.
+        const failure = classifySaveFailure(err);
+
+        // The POST already returned 2xx — the document IS written. Something in the post-save bookkeeping
+        // threw. Every message below promises "Not saved", which would be a lie here; say what actually
+        // happened instead. The `saveSucceeded` dispatch (if it got that far) stands.
+        if (savePersisted) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              'Your document was saved, but something went wrong immediately afterwards ' +
+              `(${failure.detail}). Reload the document to see the saved version.`,
+          });
+          return;
+        }
+
+        // UAT #10/#11 (task 052): 423 = a Word-for-the-web CO-AUTHORING lock (Spaarke never does a formal
+        // checkout, so a 423 is always co-authoring). No programmatic unlock exists — `isLock` routes to the
+        // honest "Open in Word" bar with Retry Save + Reload from Word, not a fake Unlock. The server detail
+        // already carries the honest message; the fallback covers a detail-less 423.
+        if (failure.kind === 'http' && failure.status === 423) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              failure.detail && failure.detail !== 'HTTP 423'
+                ? failure.detail
+                : 'This document is open in Word — close it there, then Retry. It also releases automatically ' +
+                  'within a few minutes. Your Compose changes are safe and still pending.',
+            isLock: true,
+          });
+          return;
+        }
+
+        // UAT-25/26 (2026-08-18): 412 = the server refused the save because the document changed since we
+        // opened it (an external Word/tab writer landed a new version) — nothing was overwritten. Two
+        // dispatches, both onto EXISTING surfaces: `saveFailed` so the user is told the save did not land
+        // (the external-change banner alone reads like an FYI on a save that succeeded), and
+        // `externalChangeDetected` so the explicit Reload affordance appears. `saveFailed` also returns
+        // `status` to 'loaded' — `externalChangeDetected` alone would strand the workspace in 'saving'.
+        //
+        // TRANSITIONAL: task 011 (FR-S02) replaces the server's 412 refusal with last-writer-wins +
+        // `If-Match`, at which point this branch retires with it. Do not build on it.
+        if (failure.kind === 'http' && failure.status === 412) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              'Not saved — this document changed in the document management system since you opened it, so ' +
+              'nothing was overwritten. Reload to pick up the latest version, then reapply your edits.',
+          });
+          dispatch({ kind: 'externalChangeDetected' });
+          return;
+        }
+
+        dispatch({ kind: 'saveFailed', errorMessage: saveFailureMessage(failure) });
       }
     },
     [

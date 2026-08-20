@@ -11,10 +11,21 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none** — project INITIALIZED, execution owner-gated |
-| **Status** | Planning artifacts + **all 36 task files** generated (2026-08-20). No implementation started. |
-| **Next Action** | Owner starts **Phase 1 (Track S)** — the P0 save-reliability batch that ships alone. Say "work on task 010". |
-| **Blocked on** | Phase 2+ gated on **PR #690** (Git-LFS corpus fixtures in CI) landing — owner decision 2026-08-19. Track S is NOT blocked. |
+| **Task** | **011** — Concurrency: last-writer-wins + warning (retire the 412), `If-Match` at the storage boundary |
+| **Status** | not-started. Task **010 ✅ complete** (2026-08-20) — the client save-error contract now routes on `ApiError.status`. |
+| **Next Action** | Begin Step 0 of task 011 (`tasks/011-concurrency-last-writer-wins.poml`). It supersedes the transitional 412 branch task 010 left in `ComposeWorkspace.tsx`'s save catch. |
+| **Blocked on** | Nothing. Phase 2+ is gated on **PR #690** (Git-LFS corpus fixtures in CI) landing — owner decision 2026-08-19. Track S is NOT blocked. |
+
+### Carried forward from task 010 (read before 011)
+
+- The save catch in `ComposeWorkspace.tsx` holds a **transitional 412 branch**, marked as such inline.
+  Task 011 retires it with the server-side refusal — do not build on it.
+- **Escalation trigger fired, handed to task 016**: `ApiError.status` does not cover every failure class.
+  `AuthError` (401 budget exhausted) carries `code`, not `status`; a `fetch` rejection never reaches an
+  HTTP status. FR-S06's outcome contract needs a transport-failure member that is not a status code.
+- **`Spaarke.Compose.Components` is not in CI** and ~39 of its 88 jest suites cannot run without a prior
+  SharedLibs `dist/` build; the suite is also flaky under parallel workers. Task 017 / wrap-up material.
+- New save-path tests must drive the **thrown** `ApiError` — never a resolved `{ok:false}`.
 
 ---
 
@@ -25,7 +36,7 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 | Phase | Track | Status |
 |---|---|---|
 | 0 (001–002) | Coordination + PR #690 dependency | 🔲 |
-| 1 (010–017) | **Track S — save reliability (P0, ships alone)** | 🔲 |
+| 1 (010–017) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011–017 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
@@ -64,4 +75,13 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 
 ## Files modified this task
 
-_(none — initialization only)_
+_(task 011 not started — none yet)_
+
+### Task 010 (complete) — files changed
+
+| File | Purpose |
+|---|---|
+| `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` | Deleted the unreachable `!response.ok` save block; added `classifySaveFailure` + `saveFailureMessage`; status routing in the save catch; `savePersisted` guard against reporting a post-2xx throw as a failed save |
+| `.../widgets/ComposeWorkspace.saveErrorRouting.test.tsx` | NEW — 13 tests: every routed status + 4 negative cases |
+| `.../widgets/ComposeWorkspace.saveOpLogPreservation.test.tsx` | 422 now THROWN, not resolved as `{ok:false}`; `virtual: true` mocks |
+| `.../widgets/ComposeWorkspace.renderOnSave.test.tsx` | create-on-save failure mock converted to a thrown `ApiError` |

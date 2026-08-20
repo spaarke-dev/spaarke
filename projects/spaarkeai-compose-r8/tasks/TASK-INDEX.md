@@ -45,7 +45,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 010 | **Client save-error contract** — route on `ApiError.status`, delete the unreachable `!response.ok` block, rebuild tests on the real thrown path | FR-S01 | FULL | opus/xhigh | ❌ | — | 🔲 |
+| 010 | **Client save-error contract** — route on `ApiError.status`, delete the unreachable `!response.ok` block, rebuild tests on the real thrown path | FR-S01 | FULL | opus/xhigh | ❌ | — | ✅ |
 | 011 | **Concurrency** — last-writer-wins + warning (retire the 412 loop) **and** `If-Match` at the storage boundary | FR-S02, A12 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
 | 012 | **Save lifecycle hardening** — dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery | FR-S03/04/05 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
 | 013 | **Save-outcome contract + telemetry** — closed enum on the wire; no 200-with-nothing-written; emit the outcome | FR-S06, S10 | FULL | opus/xhigh | ❌ | — | 🔲 |
