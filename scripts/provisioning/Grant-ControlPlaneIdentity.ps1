@@ -640,11 +640,17 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 Write-Success "PowerShell version: $($PSVersionTable.PSVersion)"
 
 # Verify az CLI.
-$azProbe = az --version 2>$null | Select-Object -First 1
-if ($LASTEXITCODE -ne 0 -or -not $azProbe) {
+# NOTE: capture the native command's full output to a variable BEFORE piping
+# through Select-Object -First -- chaining `az ... | Select-Object -First 1`
+# directly can short-circuit the pipeline before the native process's exit
+# code is captured, leaving $LASTEXITCODE stale/$null (see Deploy-ControlPlane.ps1
+# for the reproduction notes). Capturing first avoids the early-pipeline-stop entirely.
+$azProbeLines = az --version 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $azProbeLines) {
     Write-Fail 'Azure CLI (az) not found on PATH. Install: https://learn.microsoft.com/cli/azure/install-azure-cli'
     exit 2
 }
+$azProbe = $azProbeLines | Select-Object -First 1
 Write-Success "Azure CLI available: $azProbe"
 
 # Verify az login and target tenant match.
