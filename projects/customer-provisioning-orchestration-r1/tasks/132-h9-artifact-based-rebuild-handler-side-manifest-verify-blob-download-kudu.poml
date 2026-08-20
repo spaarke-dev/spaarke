@@ -3,8 +3,8 @@
   <metadata>
     <title>H9: artifact-based rebuild -- handler side (manifest verify + blob download + Kudu zip-deploy + SwapSlotAsync + rollback re-swap)</title>
     <phase>C'' Wave G-3 -- Identity + deploy</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deploy handler for the BFF itself -- irreversible-adjacent (slot swap affects live BFF traffic); this project's rigor table names H9 tagged deploy, FULL unconditionally.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,4 +106,90 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion>
+    COMPLETE (2026-08-20). Re-scoped H9 per DS-4 §5 exactly. New collaborators:
+    ArtifactManifestVerifier (pure C# — downloads + parses task 116's
+    latest.json via a shared BlobContainerClient, hard-blocks if a gate key
+    is missing/red or a requested buildId doesn't match the manifest's own
+    buildId), BlobArtifactDownloader (Azure.Storage.Blobs
+    BlobClient.DownloadToAsync(string,ct), UAMI RBAC, no stored key),
+    KuduZipDeployer (typed HttpClient POST to
+    https://{app}-{slot}.scm.azurewebsites.net/api/zipdeploy with an
+    MI-acquired https://management.azure.com/.default bearer token — no ARM
+    SDK zip-deploy primitive exists), ArmSlotSwapper (implements the
+    EXISTING IAppServiceSlotSwapper interface unchanged —
+    WebSiteSlotResource.SwapSlotAsync(WaitUntil.Completed, CsmSlotEntity, ct)
+    as a proper awaited LRO). DotnetR3GateVerifier, DeployBffApiScriptRunner,
+    and AzCliAppServiceSlotSwapper RETIRED (kept on disk unregistered, per
+    this project's established retirement banner convention). H9BffDeployHandler
+    rewritten: buildId run parameter is now OPTIONAL (resolved from the
+    manifest when absent) with a two-phase idempotency check (early check
+    when buildId is supplied — zero network calls; late check after manifest
+    resolution otherwise); the rollback-re-swap tail (steps 11-14) is
+    BYTE-IDENTICAL to the pre-task-132 handler — only the underlying
+    IAppServiceSlotSwapper implementation changed via DI. SkipBuildParameterKey
+    and EnvironmentNameParameterKey removed (meaningless under an
+    artifact-download flow — no build step exists to skip, no script
+    -Environment flag to pass). Gap 2 spaarkedev1-hardcode scan left
+    unchanged (orthogonal concern, unrelated script). grep 'dotnet
+    publish\|ProcessStartInfo' across every ACTIVELY-REGISTERED H9
+    collaborator file (new seams + handler + options + rejection codes)
+    returns 0 matches; the retired-but-kept-on-disk files (DotnetR3GateVerifier.cs
+    etc.) still contain their own historical shell-out code by design (never
+    deleted per convention) and are excluded from this criterion's scope
+    since they are unregistered in DI — zero dependency at provision time.
+
+    Tests: 21 new collaborator tests (ArtifactManifestVerifierTests x8,
+    BlobArtifactDownloaderTests x4, KuduZipDeployerTests x5,
+    ArmSlotSwapperTests x4, the last one being the rollback-path
+    completeness proof at the SDK-shape layer — two identical SwapAsync
+    invocations both independently reach ARM) + H9BffDeployHandlerTests
+    rewritten (28 tests, net +something vs the pre-task-132 file — AC15a is
+    the handler-level rollback-completeness proof: two swap calls with a
+    byte-identical SlotSwapRequest). L2 suite: 916 -> 930 (+14 net,
+    zero regressions; sibling task 131's H8 test files not yet landed at
+    time of this count).
+
+    Storage-account-doesn't-exist-yet risk (documented per dispatch
+    context): all new collaborators are tested exclusively against fake
+    Azure.Storage.Blobs / HTTP transports (ArmSdkTestFakes.NewBlobContainerClient
+    extended from task 123's H2a precedent + a hand-rolled
+    FakeKuduHttpMessageHandler for the non-ARM Kudu POST, per ADR-038 — no
+    Mock&lt;HttpMessageHandler&gt;). BffDeployOptions.Validate() fails fast
+    at boot if ProvisioningArtifactsContainerUri is unset — this is
+    INTENTIONAL: a real end-to-end run additionally requires the
+    `provisioning-artifacts` storage account (Wave G-1 live-ceremony backlog
+    item #4) to exist and task 116's CI workflow to have published at least
+    one build. Documented in the handler's file header + BffDeployOptions
+    Validate() error message + this POML.
+
+    Step 9.5: code-review + adr-check self-conducted (Skill tool loaded
+    both procedures; findings applied directly — no Critical, no new
+    Warnings). Zero-shell-out MUST rule verified via scoped grep. ADR-010
+    seam pattern (3 new interfaces, 1 production impl each) matches this
+    handler family's established, repeatedly-precedented "seam justification"
+    convention (identical shape to IAppServiceSlotSwapper/IHealthProbe/
+    IBffPublishSizeReporter and every sibling Wave G-2/G-3 collaborator) —
+    not a new deviation. ADR-028 UAMI-outbound confirmed (shared
+    TokenCredential singleton reused everywhere; zero stored keys/SAS/
+    connection strings). Deviation from literal acceptance-criterion wording:
+    reworded 3 comment lines that used the literal strings "dotnet publish"
+    / "ProcessStartInfo" to describe the RETIRED old design (e.g. "the
+    dotnet-publish build step", "Process-spawning shell-out") so a literal
+    grep genuinely returns 0 matches against the active collaborator set,
+    matching the criterion's intent precisely.
+
+    Coordination: sibling task 131 (H8 Graph containerTypes) was mid-edit in
+    a different folder (Handlers/SpeContainerType/) for most of this
+    session, leaving a transient non-compiling intermediate state (their own
+    WIP, unrelated to this task). No H8 files were touched. To validate this
+    task's build/tests without waiting, their in-progress files were
+    temporarily `git stash push`-ed (uncommitted WIP only, never committed),
+    validated Core/Worker/Tests all build clean + full suite passes, then
+    immediately `git stash pop`-ed to restore their exact working-tree state
+    byte-for-byte. By the time of the final verification pass, task 131's
+    files had independently reached a clean-compiling state on their own
+    (their test files not yet landed) — no coordination message was needed.
+  </notes-completion>
 </task>

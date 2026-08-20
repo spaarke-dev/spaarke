@@ -1,6 +1,17 @@
 // -----------------------------------------------------------------------------
 // AzCliAppServiceSlotSwapper.cs
 //
+// RETIRED (task 132, Wave G-3, 2026-08-19): superseded by
+// <see cref="ArmSlotSwapper"/> (Azure.ResourceManager.AppService
+// WebSiteSlotResource.SwapSlotAsync — a proper awaited LRO, DS-4 §5
+// re-scope). IAppServiceSlotSwapper ITSELF is UNCHANGED (still the active
+// interface — H9BffDeployHandler's swap + rollback-re-swap call sites are
+// not modified by this retirement); only THIS implementation is no longer
+// registered in Worker/Program.cs's IAppServiceSlotSwapper DI slot. Retained
+// on disk (NOT deleted); see AzCliKvSecretsWriter.cs's retirement banner for
+// the full rationale of this project's on-disk-retention convention.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IAppServiceSlotSwapper"/> implementation. Shells out
 // to `az webapp deployment slot swap` — the operator auth chain (az login)
 // provides the ARM token, honoring ADR-028's UAMI-outbound MUST rule at the

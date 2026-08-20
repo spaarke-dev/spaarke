@@ -1,66 +1,78 @@
 // -----------------------------------------------------------------------------
 // H9BffDeployHandlerTests.cs
 //
-// Unit tests over H9BffDeployHandler (task 052 — wave C4 Batch 4B).
+// Unit tests over H9BffDeployHandler (task 052 — wave C4 Batch 4B; RE-SCOPED
+// task 132, Wave G-3, per DS-4 §5's artifact-based design).
 //
 // ADR-038 CATEGORY:
-//   Path #1 — pure C# unit test. NO live pwsh / az CLI / HTTP / Azure. Fakes
-//   replace the repository + all FIVE collaborator seams (r3-gate verifier,
-//   deploy runner, slot swapper, health probe, publish-size reporter) so the
-//   handler orchestration + §4C rollback classification + blue-green swap +
-//   rollback logic is exercised in isolation. Live-Azure coverage belongs in
-//   env-guarded smoke tests (parity with H2a/H8 — a real BFF slot-swap
-//   deploy requires an actual customer stamp + deploy artifact + Azure
-//   round-trip).
+//   Path #1 — pure C# unit test. NO live HTTP / Azure. Fakes replace the
+//   repository + all SIX collaborator seams (artifact manifest verifier,
+//   artifact downloader, Kudu zip-deployer, slot swapper, health probe,
+//   publish-size reporter) so the handler orchestration + §4C rollback
+//   classification + blue-green swap + rollback logic is exercised in
+//   isolation. Live-Azure coverage belongs in the dedicated collaborator
+//   test files (ArtifactManifestVerifierTests / BlobArtifactDownloaderTests /
+//   KuduZipDeployerTests / ArmSlotSwapperTests) which exercise the real SDK
+//   call path against fake HTTP transports — parity with H2a/H4's split
+//   between handler-orchestration tests and collaborator-SDK-shape tests.
+//
+// COMPLETENESS PROOF FOR THE ROLLBACK PATH (task 132 dispatch directive #5):
+//   AC-15a below is the load-bearing "rollback re-swap is preserved
+//   unchanged" proof — FakeSlotSwapper is the IDENTICAL fake class this file
+//   used before task 132 (byte-for-byte unchanged), and the assertion that
+//   BOTH swap calls carry an IDENTICAL SlotSwapRequest (Source=staging,
+//   Target=production) demonstrates the re-swap-is-self-inverse invariant the
+//   handler's rollback branch depends on, now exercised against the new
+//   SDK-based ArmSlotSwapper via DI only (no handler-code change).
 //
 // COVERAGE (POML acceptance criteria mapped to test cases):
-//   AC-1  Happy path — all r3 gates green, deploy runner Success, publish-size
-//         under threshold, slot swap Success, /health probe Success → handler
-//         Success + CompletedPhase(H9) + NFR-01 gate Verified.
-//   AC-2a Missing tenantId (§4D I1) → Resumable + MissingTenantId.
-//   AC-2b Missing subscriptionId → Resumable + MissingSubscriptionId.
-//   AC-2c Missing resourceGroupName → Resumable + MissingResourceGroupName.
-//   AC-2d Missing appServiceName → Resumable + MissingAppServiceName.
-//   AC-2e Missing buildId (idempotency) → Resumable + MissingBuildId.
-//   AC-3  Spaarkedev1 hardcode detected in Deploy-Release.ps1 → QuarantineRequired
-//         + Spaarkedev1HardcodeDetected (POML criterion 5 Gap 2 assertion);
-//         verifier + runner NEVER called.
-//   AC-4a r3-gate Analyzers Failed → Resumable + R3GateFailedAnalyzers;
-//         runner + swapper NEVER called.
-//   AC-4b r3-gate GodClassRatchet Failed → Resumable + R3GateFailedGodClassRatchet.
-//   AC-4c r3-gate ArchTests Failed → Resumable + R3GateFailedArchTests.
-//   AC-4d r3-gate NamingConformance Failed → Resumable + R3GateFailedNamingConformance.
-//   AC-4e r3-gate GraphAppRoleParity Failed → Resumable + R3GateFailedGraphAppRoleParity.
-//   AC-4f r3-gates all Skipped → treated as green (proceeds through the deploy).
-//   AC-5  r3-gate verifier throws → Resumable + R3GateFailedAnalyzers.
-//   AC-6  Deploy runner Failure → Resumable + BffDeployFailed;
-//         publish-size reporter + swapper + probe NEVER called.
-//   AC-7  Deploy runner throws → Resumable + BffDeployInfraFault.
-//   AC-8  Deploy runner Success but outputs incomplete → Resumable +
-//         BffDeployOutputsIncomplete.
-//   AC-9  Publish-size reporter throws → Resumable + PublishSizeReporterInfraFault.
-//   AC-10a Publish-size delta > threshold → QuarantineRequired +
+//   AC-1   Happy path — manifest Verified, download Success, Kudu Success,
+//          staging /health Success, size under threshold, slot swap Success,
+//          prod /health Success → handler Success + CompletedPhase(H9) +
+//          NFR-01 gate Verified.
+//   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
+//   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
+//   AC-2c  Missing resourceGroupName → Resumable + MissingResourceGroupName.
+//   AC-2d  Missing appServiceName → Resumable + MissingAppServiceName.
+//   AC-2e  buildId ABSENT (now optional, task 132 DS-4 §5 item 1) → resolves
+//          from manifest.BuildId; deploy proceeds + idempotency key uses the
+//          RESOLVED buildId, not a run parameter.
+//   AC-3   Spaarkedev1 hardcode detected in Deploy-Release.ps1 → QuarantineRequired
+//          + Spaarkedev1HardcodeDetected (POML criterion 5 Gap 2 assertion);
+//          manifest verifier + downstream collaborators NEVER called.
+//   AC-4   Manifest Rejected (missing/red gate, buildId mismatch) → Resumable
+//          + ArtifactManifestRejected; downloader/kudu/swapper NEVER called.
+//   AC-5   Manifest verifier throws → Resumable + ManifestVerifierInfraFault.
+//   AC-6   Artifact download Failure → Resumable + ArtifactDownloadFailed;
+//          kudu/swapper NEVER called.
+//   AC-7   Artifact download throws → Resumable + ArtifactDownloadInfraFault.
+//   AC-8   Kudu zip-deploy Failure → Resumable + KuduZipDeployFailed; swapper
+//          NEVER called.
+//   AC-9   Kudu zip-deploy throws → Resumable + KuduZipDeployInfraFault.
+//   AC-10  Staging /health probe Failure → Resumable + StagingHealthCheckFailed;
+//          size reporter + swapper NEVER called.
+//   AC-11  Publish-size reporter throws → Resumable + PublishSizeReporterInfraFault.
+//   AC-12a Publish-size delta > threshold → QuarantineRequired +
 //          PublishSizeDeltaExceeded; swapper NEVER called.
-//   AC-10b Publish-size absolute > ceiling → QuarantineRequired +
-//          PublishSizeDeltaExceeded.
-//   AC-11 Slot-swap Failure → RetryableWithCleanup + SlotSwapFailed.
-//   AC-12 Slot-swap throws → RetryableWithCleanup + SlotSwapInfraFault.
-//   AC-13a Smoke test failure + rollback success → RetryableWithCleanup +
-//          SmokeTestFailedRolledBack (POML criterion 3).
-//   AC-13b Smoke test failure + rollback failure → QuarantineRequired +
+//   AC-12b Publish-size absolute > ceiling → QuarantineRequired + PublishSizeDeltaExceeded.
+//   AC-13  Slot-swap Failure → RetryableWithCleanup + SlotSwapFailed.
+//   AC-14  Slot-swap throws → RetryableWithCleanup + SlotSwapInfraFault.
+//   AC-15a Smoke test (production) failure + rollback success →
+//          RetryableWithCleanup + SmokeTestFailedRolledBack — COMPLETENESS:
+//          swapper called exactly twice with an IDENTICAL request both times.
+//   AC-15b Smoke test failure + rollback failure → QuarantineRequired +
 //          SmokeTestFailedRollbackAlsoFailed (POML escalation trigger 2).
-//   AC-13c Smoke test failure + rollback throws → QuarantineRequired +
+//   AC-15c Smoke test failure + rollback throws → QuarantineRequired +
 //          RollbackInfraFault.
-//   AC-13d Smoke test throws → treated as smoke test failure → rollback flow;
+//   AC-15d Smoke test throws → treated as smoke test failure → rollback flow;
 //          RetryableWithCleanup + SmokeTestInfraFault on rollback success.
-//   AC-14 Idempotency — two invocations for same customerId+buildId; second
-//         call is a no-op (bff-{customerId}-{buildId} match) — NO r3-verifier /
-//         runner / swapper / probe calls.
-//   AC-15 Idempotency-key format determinism — bff-{customerId}-{buildId}.
-//   AC-16 Run not found → Resumable + RunNotFound.
-//   AC-17 HandlerId mismatch → throws InvalidOperationException.
-//   AC-18 Rejection code mapping — every R3GateKind maps to its distinct
-//         rejection code (POML criterion 2).
+//   AC-16a Idempotency (buildId supplied) — EARLY no-op, before ANY
+//          collaborator call (manifest verifier included).
+//   AC-16b Idempotency (buildId ABSENT) — LATE no-op: manifest verifier IS
+//          called (to resolve buildId) but downloader/kudu/swapper are NOT.
+//   AC-17  Idempotency-key format determinism — bff-{customerId}-{buildId}.
+//   AC-18  Run not found → Resumable + RunNotFound.
+//   AC-19  HandlerId mismatch → throws InvalidOperationException.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -84,25 +96,27 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "spaarke-bff-acme";
     private const string BuildId = "ci-2026.08.17.1";
+    private const string ResolvedManifestOnlyBuildId = "ci-2026.08.19-1";
+    private const string ArtifactBlobName = "bff-api-ci-2026.08.17.1.zip";
     private const string StagingSlotName = "staging";
     private const string HealthCheckPath = "/healthz";
 
-    private readonly string _tempPublishZip;
+    private readonly string _tempLocalZip;
 
     public H9BffDeployHandlerTests()
     {
         // Real zero-byte temp zip so the publish-size reporter fake can be
         // driven by canned reports without a File.Exists coupling to a real
         // artifact; the reporter fake ignores the path anyway.
-        _tempPublishZip = Path.Combine(Path.GetTempPath(), $"h9-test-{Guid.NewGuid():N}.zip");
-        File.WriteAllBytes(_tempPublishZip, Array.Empty<byte>());
+        _tempLocalZip = Path.Combine(Path.GetTempPath(), $"h9-test-{Guid.NewGuid():N}.zip");
+        File.WriteAllBytes(_tempLocalZip, Array.Empty<byte>());
     }
 
     public void Dispose()
     {
-        if (File.Exists(_tempPublishZip))
+        if (File.Exists(_tempLocalZip))
         {
-            try { File.Delete(_tempPublishZip); } catch { /* best-effort cleanup */ }
+            try { File.Delete(_tempLocalZip); } catch { /* best-effort cleanup */ }
         }
     }
 
@@ -113,12 +127,13 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var verifier = FakeR3GateVerifier.AllGreen();
-        var runner = FakeDeployRunner.Success(_tempPublishZip);
+        var verifier = FakeManifestVerifier.Verified(BuildId, ArtifactBlobName);
+        var downloader = FakeArtifactDownloader.Success(_tempLocalZip);
+        var kudu = FakeKuduDeployer.Success();
         var swapper = FakeSlotSwapper.Success();
         var probe = FakeHealthProbe.Success();
         var sizer = FakeSizeReporter.Ok(bytes: 44_000_000L);
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var handler = BuildHandler(repo, verifier, downloader, kudu, swapper, probe, sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -133,14 +148,18 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         repo.LastWrittenRun.GateStates["h9-nfr01-publish-size"].Status.Should().Be(GateState.Verified);
 
         verifier.CallCount.Should().Be(1);
-        runner.CallCount.Should().Be(1);
+        downloader.CallCount.Should().Be(1);
+        kudu.CallCount.Should().Be(1);
+        probe.CallCount.Should().Be(2, "staging probe + production probe both fire on the happy path");
         swapper.CallCount.Should().Be(1, "swap runs exactly once on the happy path");
-        probe.CallCount.Should().Be(1);
         sizer.CallCount.Should().Be(1);
 
         swapper.LastRequests.Should().ContainSingle();
         swapper.LastRequests[0].SourceSlotName.Should().Be(StagingSlotName);
         swapper.LastRequests[0].TargetSlotName.Should().Be("production");
+
+        probe.RequestedUrls[0].Should().Be($"https://{AppServiceName}-{StagingSlotName}.azurewebsites.net{HealthCheckPath}");
+        probe.RequestedUrls[1].Should().Be($"https://{AppServiceName}.azurewebsites.net{HealthCheckPath}");
     }
 
     // ---------- AC-2 parameter guards ----------
@@ -150,18 +169,18 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(H9BffDeployHandler.TenantIdParameterKey);
-        var (verifier, runner, swapper, probe, sizer) = FreshGreenSeams();
+        var seams = FreshGreenSeams();
         var repo = new FakeRepository(run, etag: "etag-2a");
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.MissingTenantId);
-        verifier.CallCount.Should().Be(0);
-        runner.CallCount.Should().Be(0);
-        swapper.CallCount.Should().Be(0);
+        seams.Verifier.CallCount.Should().Be(0);
+        seams.Downloader.CallCount.Should().Be(0);
+        seams.Swapper.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -169,7 +188,8 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(H9BffDeployHandler.SubscriptionIdParameterKey);
-        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2b"), out _);
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2b"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -182,7 +202,8 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(H9BffDeployHandler.ResourceGroupNameParameterKey);
-        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2c"), out _);
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2c"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -195,7 +216,8 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(H9BffDeployHandler.AppServiceNameParameterKey);
-        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2d"), out _);
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2d"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -204,16 +226,27 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task AC2e_MissingBuildId_FailsResumable()
+    public async Task AC2e_MissingBuildId_ResolvesFromManifest_SucceedsWithResolvedIdempotencyKey()
     {
         var run = BuildRun();
         run.Parameters.NonSecret.Remove(H9BffDeployHandler.BuildIdParameterKey);
-        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2e"), out _);
+        var repo = new FakeRepository(run, etag: "etag-2e");
+        var verifier = FakeManifestVerifier.Verified(ResolvedManifestOnlyBuildId, ArtifactBlobName);
+        var downloader = FakeArtifactDownloader.Success(_tempLocalZip);
+        var kudu = FakeKuduDeployer.Success();
+        var swapper = FakeSlotSwapper.Success();
+        var probe = FakeHealthProbe.Success();
+        var sizer = FakeSizeReporter.Ok();
+        var handler = BuildHandler(repo, verifier, downloader, kudu, swapper, probe, sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.MissingBuildId);
+        var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
+        success.IdempotencyKey.Should().Be(H9BffDeployHandler.BuildIdempotencyKey(CustomerId, ResolvedManifestOnlyBuildId));
+        verifier.LastRequestedBuildId.Should().BeNull("buildId run parameter was absent — resolve-from-manifest path");
+        downloader.CallCount.Should().Be(1);
+        kudu.CallCount.Should().Be(1);
+        swapper.CallCount.Should().Be(1);
     }
 
     // ---------- AC-3 Gap 2 spaarkedev1 hardcode detected ----------
@@ -223,7 +256,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-3");
-        var (verifier, runner, swapper, probe, sizer) = FreshGreenSeams();
+        var seams = FreshGreenSeams();
 
         // Write a fixture Deploy-Release.ps1 containing the regressed literal.
         var scriptPath = Path.Combine(Path.GetTempPath(), $"h9-test-deploy-release-{Guid.NewGuid():N}.ps1");
@@ -231,7 +264,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
 
         try
         {
-            var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer,
+            var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
                 configureOptions: o => o.DeployReleaseScriptPath = scriptPath);
 
             var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -242,9 +275,9 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             failure.Diagnostic.Should().Contain("spaarkedev1");
             repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
 
-            verifier.CallCount.Should().Be(0, "spaarkedev1 pre-flight blocks the r3-gate verifier + everything downstream");
-            runner.CallCount.Should().Be(0);
-            swapper.CallCount.Should().Be(0);
+            seams.Verifier.CallCount.Should().Be(0, "spaarkedev1 pre-flight blocks the manifest verifier + everything downstream");
+            seams.Downloader.CallCount.Should().Be(0);
+            seams.Swapper.CallCount.Should().Be(0);
         }
         finally
         {
@@ -252,144 +285,155 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         }
     }
 
-    // ---------- AC-4 r3-era gate failures (POML criterion 2 distinct code per gate) ----------
+    // ---------- AC-4 manifest rejected ----------
 
-    [Theory]
-    [InlineData(R3GateKind.Analyzers, BffDeployRejectionCodes.R3GateFailedAnalyzers)]
-    [InlineData(R3GateKind.GodClassRatchet, BffDeployRejectionCodes.R3GateFailedGodClassRatchet)]
-    [InlineData(R3GateKind.ArchTests, BffDeployRejectionCodes.R3GateFailedArchTests)]
-    [InlineData(R3GateKind.NamingConformance, BffDeployRejectionCodes.R3GateFailedNamingConformance)]
-    [InlineData(R3GateKind.GraphAppRoleParity, BffDeployRejectionCodes.R3GateFailedGraphAppRoleParity)]
-    public async Task AC4_R3GateFailed_BlocksSwap_WithDistinctRejectionCode(R3GateKind failingKind, string expectedCode)
+    [Fact]
+    public async Task AC4_ManifestRejected_BlocksDeploy_Resumable()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: $"etag-4-{failingKind}");
-        var verifier = FakeR3GateVerifier.WithFailure(failingKind, "gate diagnostic");
-        var runner = FakeDeployRunner.Success(_tempPublishZip);
-        var swapper = FakeSlotSwapper.Success();
-        var probe = FakeHealthProbe.Success();
-        var sizer = FakeSizeReporter.Ok();
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var repo = new FakeRepository(run, etag: "etag-4");
+        var verifier = FakeManifestVerifier.Rejected("Manifest reports RED gate(s): archTests.");
+        var seams = FreshGreenSeams(overrideVerifier: verifier);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable, "gate failures are fixable via code+build cycle");
-        failure.RejectionCode.Should().Be(expectedCode);
-        runner.CallCount.Should().Be(0, "runner never runs when a gate has failed");
-        swapper.CallCount.Should().Be(0);
+        failure.Class.Should().Be(FailureClass.Resumable, "manifest issues are fixable via a new build + resume");
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ArtifactManifestRejected);
+        failure.Diagnostic.Should().Contain("RED gate");
+        seams.Downloader.CallCount.Should().Be(0, "no download when manifest is rejected");
+        seams.Kudu.CallCount.Should().Be(0);
+        seams.Swapper.CallCount.Should().Be(0);
     }
 
-    [Fact]
-    public async Task AC4f_AllGatesSkipped_TreatedAsGreen_ProceedsThroughDeploy()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-4f");
-        var verifier = FakeR3GateVerifier.AllSkipped();
-        var runner = FakeDeployRunner.Success(_tempPublishZip);
-        var swapper = FakeSlotSwapper.Success();
-        var probe = FakeHealthProbe.Success();
-        var sizer = FakeSizeReporter.Ok();
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        runner.CallCount.Should().Be(1);
-        swapper.CallCount.Should().Be(1);
-    }
-
-    // ---------- AC-5 r3-gate verifier throws ----------
+    // ---------- AC-5 manifest verifier throws ----------
 
     [Fact]
-    public async Task AC5_R3GateVerifierThrows_FailsResumable()
+    public async Task AC5_ManifestVerifierThrows_FailsResumable()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-5");
-        var verifier = FakeR3GateVerifier.Throws(new InvalidOperationException("dotnet not on PATH"));
-        var runner = FakeDeployRunner.Success(_tempPublishZip);
-        var handler = BuildHandler(repo, verifier, runner,
-            FakeSlotSwapper.Success(), FakeHealthProbe.Success(), FakeSizeReporter.Ok());
+        var verifier = FakeManifestVerifier.Throws(new InvalidOperationException("blob container unreachable"));
+        var seams = FreshGreenSeams(overrideVerifier: verifier);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.R3GateFailedAnalyzers);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ManifestVerifierInfraFault);
         failure.Diagnostic.Should().Contain("InvalidOperationException");
     }
 
-    // ---------- AC-6 deploy runner Failure ----------
+    // ---------- AC-6 artifact download Failure ----------
 
     [Fact]
-    public async Task AC6_DeployRunnerFailure_FailsResumable_NoSwap()
+    public async Task AC6_ArtifactDownloadFailure_FailsResumable_NoKuduOrSwap()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-6");
-        var runner = FakeDeployRunner.Failure("Deploy-BffApi.ps1 exit 1: staging deploy failed");
-        var swapper = FakeSlotSwapper.Success();
-        var probe = FakeHealthProbe.Success();
-        var sizer = FakeSizeReporter.Ok();
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(), runner, swapper, probe, sizer);
+        var downloader = FakeArtifactDownloader.Failure("Artifact blob not found (HTTP 404)");
+        var seams = FreshGreenSeams(overrideDownloader: downloader);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.BffDeployFailed);
-        failure.Diagnostic.Should().Contain("staging deploy failed");
-        swapper.CallCount.Should().Be(0);
-        probe.CallCount.Should().Be(0);
-        sizer.CallCount.Should().Be(0);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ArtifactDownloadFailed);
+        failure.Diagnostic.Should().Contain("not found");
+        seams.Kudu.CallCount.Should().Be(0);
+        seams.Probe.CallCount.Should().Be(0);
+        seams.Swapper.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-7 deploy runner throws ----------
+    // ---------- AC-7 artifact download throws ----------
 
     [Fact]
-    public async Task AC7_DeployRunnerThrows_FailsResumable()
+    public async Task AC7_ArtifactDownloadThrows_FailsResumable()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-7");
-        var runner = FakeDeployRunner.Throws(new FileNotFoundException("script not found"));
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(), runner,
-            FakeSlotSwapper.Success(), FakeHealthProbe.Success(), FakeSizeReporter.Ok());
+        var downloader = FakeArtifactDownloader.Throws(new IOException("disk full"));
+        var seams = FreshGreenSeams(overrideDownloader: downloader);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.BffDeployInfraFault);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ArtifactDownloadInfraFault);
     }
 
-    // ---------- AC-8 deploy runner outputs incomplete ----------
+    // ---------- AC-8 Kudu zip-deploy Failure ----------
 
     [Fact]
-    public async Task AC8_DeployRunnerOutputsIncomplete_FailsResumable()
+    public async Task AC8_KuduZipDeployFailure_FailsResumable_NoSwap()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-8");
-        var runner = FakeDeployRunner.SuccessWithBlankUrls();
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(), runner,
-            FakeSlotSwapper.Success(), FakeHealthProbe.Success(), FakeSizeReporter.Ok());
+        var kudu = FakeKuduDeployer.Failure("Kudu zip-deploy returned HTTP 500");
+        var seams = FreshGreenSeams(overrideKudu: kudu);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.BffDeployOutputsIncomplete);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.KuduZipDeployFailed);
+        seams.Probe.CallCount.Should().Be(0, "staging probe never runs when the Kudu deploy itself failed");
+        seams.Swapper.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-9 publish-size reporter throws ----------
+    // ---------- AC-9 Kudu zip-deploy throws ----------
 
     [Fact]
-    public async Task AC9_PublishSizeReporterThrows_FailsResumable()
+    public async Task AC9_KuduZipDeployThrows_FailsResumable()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-9");
+        var kudu = FakeKuduDeployer.Throws(new TimeoutException("kudu POST timed out"));
+        var seams = FreshGreenSeams(overrideKudu: kudu);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.KuduZipDeployInfraFault);
+    }
+
+    // ---------- AC-10 staging health-check failure ----------
+
+    [Fact]
+    public async Task AC10_StagingHealthCheckFailure_FailsResumable_NoSizeOrSwap()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-10");
+        var probe = FakeHealthProbe.StagingFailure("HTTP 500 staging unhealthy");
+        var seams = FreshGreenSeams(overrideProbe: probe);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.StagingHealthCheckFailed);
+        seams.Sizer.CallCount.Should().Be(0, "no size measurement when staging never came up healthy");
+        seams.Swapper.CallCount.Should().Be(0);
+    }
+
+    // ---------- AC-11 publish-size reporter throws ----------
+
+    [Fact]
+    public async Task AC11_PublishSizeReporterThrows_FailsResumable()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-11");
         var sizer = FakeSizeReporter.Throws(new FileNotFoundException("zip missing"));
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            FakeSlotSwapper.Success(), FakeHealthProbe.Success(), sizer);
+        var seams = FreshGreenSeams(overrideSizer: sizer);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -398,38 +442,35 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.PublishSizeReporterInfraFault);
     }
 
-    // ---------- AC-10 publish-size thresholds ----------
+    // ---------- AC-12 publish-size thresholds ----------
 
     [Fact]
-    public async Task AC10a_PublishSizeDeltaExceeded_FailsQuarantine_NoSwap()
+    public async Task AC12a_PublishSizeDeltaExceeded_FailsQuarantine_NoSwap()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-10a");
+        var repo = new FakeRepository(run, etag: "etag-12a");
         var sizer = FakeSizeReporter.WithFlags(bytes: 55_000_000L, deltaBytes: 10_000_000L,
             exceedsDelta: true, exceedsAbsolute: false);
-        var swapper = FakeSlotSwapper.Success();
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, FakeHealthProbe.Success(), sizer);
+        var seams = FreshGreenSeams(overrideSizer: sizer);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.QuarantineRequired);
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.PublishSizeDeltaExceeded);
-        swapper.CallCount.Should().Be(0, "swap never runs when NFR-01 threshold is exceeded");
+        seams.Swapper.CallCount.Should().Be(0, "swap never runs when NFR-01 threshold is exceeded");
     }
 
     [Fact]
-    public async Task AC10b_PublishSizeAbsoluteCeilingExceeded_FailsQuarantine()
+    public async Task AC12b_PublishSizeAbsoluteCeilingExceeded_FailsQuarantine()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-10b");
+        var repo = new FakeRepository(run, etag: "etag-12b");
         var sizer = FakeSizeReporter.WithFlags(bytes: 65_000_000L, deltaBytes: 20_000_000L,
             exceedsDelta: true, exceedsAbsolute: true);
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            FakeSlotSwapper.Success(), FakeHealthProbe.Success(), sizer);
+        var seams = FreshGreenSeams(overrideSizer: sizer);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -438,38 +479,35 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.PublishSizeDeltaExceeded);
     }
 
-    // ---------- AC-11 slot-swap Failure ----------
+    // ---------- AC-13 slot-swap Failure ----------
 
     [Fact]
-    public async Task AC11_SlotSwapFailure_FailsRetryableWithCleanup()
+    public async Task AC13_SlotSwapFailure_FailsRetryableWithCleanup()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-11");
+        var repo = new FakeRepository(run, etag: "etag-13");
         var swapper = FakeSlotSwapper.Failure("ARM 403 AuthorizationFailed");
-        var probe = FakeHealthProbe.Success();
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, probe, FakeSizeReporter.Ok());
+        var seams = FreshGreenSeams(overrideSwapper: swapper);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.RetryableWithCleanup);
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SlotSwapFailed);
-        probe.CallCount.Should().Be(0, "smoke test never runs when swap failed");
+        seams.Probe.CallCount.Should().Be(1, "only the staging probe ran — production smoke test never runs when swap failed");
     }
 
-    // ---------- AC-12 slot-swap throws ----------
+    // ---------- AC-14 slot-swap throws ----------
 
     [Fact]
-    public async Task AC12_SlotSwapThrows_FailsRetryableWithCleanup()
+    public async Task AC14_SlotSwapThrows_FailsRetryableWithCleanup()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-12");
-        var swapper = FakeSlotSwapper.Throws(new InvalidOperationException("az not on PATH"), thenSuccess: true);
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, FakeHealthProbe.Success(), FakeSizeReporter.Ok());
+        var repo = new FakeRepository(run, etag: "etag-14");
+        var swapper = FakeSlotSwapper.Throws(new InvalidOperationException("ARM call faulted"), thenSuccess: true);
+        var seams = FreshGreenSeams(overrideSwapper: swapper);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -478,18 +516,17 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SlotSwapInfraFault);
     }
 
-    // ---------- AC-13a smoke test failure + rollback success (POML criterion 3) ----------
+    // ---------- AC-15a smoke test failure + rollback success (completeness proof) ----------
 
     [Fact]
-    public async Task AC13a_SmokeTestFailure_RollbackSuccess_ReSwapsAndFailsRetryable()
+    public async Task AC15a_SmokeTestFailure_RollbackSuccess_ReSwapsWithIdenticalRequest_FailsRetryable()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-13a");
+        var repo = new FakeRepository(run, etag: "etag-15a");
         var swapper = FakeSlotSwapper.SuccessThenSuccess();
-        var probe = FakeHealthProbe.Failure("HTTP 500 InternalServerError");
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, probe, FakeSizeReporter.Ok());
+        var probe = FakeHealthProbe.SuccessThenFailure("HTTP 500 InternalServerError");
+        var seams = FreshGreenSeams(overrideSwapper: swapper, overrideProbe: probe);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -497,21 +534,29 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.Class.Should().Be(FailureClass.RetryableWithCleanup);
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SmokeTestFailedRolledBack);
         failure.Diagnostic.Should().Contain("ROLLED BACK");
+
+        // COMPLETENESS PROOF: exactly two swap calls, and the rollback
+        // re-swap is a BYTE-IDENTICAL request to the initial swap (a slot
+        // swap is self-inverse — re-invoking it restores the prior state).
         swapper.CallCount.Should().Be(2, "one initial swap + one rollback re-swap");
+        swapper.LastRequests.Should().HaveCount(2);
+        swapper.LastRequests[0].Should().Be(swapper.LastRequests[1],
+            "the rollback re-swap MUST be the identical request to the initial swap — this is what makes re-swap a valid rollback");
+        swapper.LastRequests[0].SourceSlotName.Should().Be(StagingSlotName);
+        swapper.LastRequests[0].TargetSlotName.Should().Be("production");
     }
 
-    // ---------- AC-13b smoke test failure + rollback failure (POML escalation trigger 2) ----------
+    // ---------- AC-15b smoke test failure + rollback failure (POML escalation trigger 2) ----------
 
     [Fact]
-    public async Task AC13b_SmokeTestFailure_RollbackFailure_FailsQuarantineWithEscalation()
+    public async Task AC15b_SmokeTestFailure_RollbackFailure_FailsQuarantineWithEscalation()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-13b");
+        var repo = new FakeRepository(run, etag: "etag-15b");
         var swapper = FakeSlotSwapper.SuccessThenFailure("ARM 500 InternalServerError");
-        var probe = FakeHealthProbe.Failure("HTTP 500 InternalServerError");
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, probe, FakeSizeReporter.Ok());
+        var probe = FakeHealthProbe.SuccessThenFailure("HTTP 500 InternalServerError");
+        var seams = FreshGreenSeams(overrideSwapper: swapper, overrideProbe: probe);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -522,18 +567,17 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
-    // ---------- AC-13c smoke test failure + rollback throws ----------
+    // ---------- AC-15c smoke test failure + rollback throws ----------
 
     [Fact]
-    public async Task AC13c_SmokeTestFailure_RollbackThrows_FailsQuarantineWithRollbackInfraFault()
+    public async Task AC15c_SmokeTestFailure_RollbackThrows_FailsQuarantineWithRollbackInfraFault()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-13c");
-        var swapper = FakeSlotSwapper.SuccessThenThrows(new InvalidOperationException("az CLI died"));
-        var probe = FakeHealthProbe.Failure("HTTP 503 ServiceUnavailable");
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, probe, FakeSizeReporter.Ok());
+        var repo = new FakeRepository(run, etag: "etag-15c");
+        var swapper = FakeSlotSwapper.SuccessThenThrows(new InvalidOperationException("ARM call died mid-swap"));
+        var probe = FakeHealthProbe.SuccessThenFailure("HTTP 503 ServiceUnavailable");
+        var seams = FreshGreenSeams(overrideSwapper: swapper, overrideProbe: probe);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -543,18 +587,17 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.Diagnostic.Should().Contain("BOTH SLOTS MAY BE BAD");
     }
 
-    // ---------- AC-13d smoke test throws → rollback flow → SmokeTestInfraFault ----------
+    // ---------- AC-15d smoke test throws → rollback flow → SmokeTestInfraFault ----------
 
     [Fact]
-    public async Task AC13d_SmokeTestThrows_TreatedAsFailure_RollbackSuccessMapsToSmokeTestInfraFault()
+    public async Task AC15d_SmokeTestThrows_TreatedAsFailure_RollbackSuccessMapsToSmokeTestInfraFault()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-13d");
+        var repo = new FakeRepository(run, etag: "etag-15d");
         var swapper = FakeSlotSwapper.SuccessThenSuccess();
-        var probe = FakeHealthProbe.Throws(new HttpRequestException("dns failure"));
-        var handler = BuildHandler(repo, FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            swapper, probe, FakeSizeReporter.Ok());
+        var probe = FakeHealthProbe.SuccessThenThrows(new HttpRequestException("dns failure"));
+        var seams = FreshGreenSeams(overrideSwapper: swapper, overrideProbe: probe);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -563,10 +606,10 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SmokeTestInfraFault);
     }
 
-    // ---------- AC-14 idempotency (level-3 durable no-op) ----------
+    // ---------- AC-16 idempotency ----------
 
     [Fact]
-    public async Task AC14_Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
+    public async Task AC16a_IdempotentEarly_BuildIdSupplied_NoCollaboratorCalled()
     {
         var run = BuildRun();
         var expectedKey = H9BffDeployHandler.BuildIdempotencyKey(CustomerId, BuildId);
@@ -578,25 +621,54 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             CompletedAt = DateTimeOffset.UtcNow,
             JobId = "prior-run",
         });
-        var repo = new FakeRepository(run, etag: "etag-14");
-        var (verifier, runner, swapper, probe, sizer) = FreshGreenSeams();
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var repo = new FakeRepository(run, etag: "etag-16a");
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
-        verifier.CallCount.Should().Be(0);
-        runner.CallCount.Should().Be(0);
-        swapper.CallCount.Should().Be(0);
-        probe.CallCount.Should().Be(0);
-        sizer.CallCount.Should().Be(0);
+        seams.Verifier.CallCount.Should().Be(0, "the EARLY idempotency check short-circuits before any network call");
+        seams.Downloader.CallCount.Should().Be(0);
+        seams.Kudu.CallCount.Should().Be(0);
+        seams.Swapper.CallCount.Should().Be(0);
+        seams.Probe.CallCount.Should().Be(0);
+        seams.Sizer.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-15 idempotency-key format determinism ----------
+    [Fact]
+    public async Task AC16b_IdempotentLate_BuildIdAbsent_ManifestVerifierCalledButNothingElse()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove(H9BffDeployHandler.BuildIdParameterKey);
+        var expectedKey = H9BffDeployHandler.BuildIdempotencyKey(CustomerId, ResolvedManifestOnlyBuildId);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H9",
+            IdempotencyKey = expectedKey,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = "prior-run",
+        });
+        var repo = new FakeRepository(run, etag: "etag-16b");
+        var verifier = FakeManifestVerifier.Verified(ResolvedManifestOnlyBuildId, ArtifactBlobName);
+        var seams = FreshGreenSeams(overrideVerifier: verifier);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
+        repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
+        seams.Verifier.CallCount.Should().Be(1, "buildId was absent — manifest resolution is required to compute the idempotency key");
+        seams.Downloader.CallCount.Should().Be(0, "no download once the resolved key proves this build already completed");
+        seams.Swapper.CallCount.Should().Be(0);
+    }
+
+    // ---------- AC-17 idempotency-key format determinism ----------
 
     [Fact]
-    public void AC15_IdempotencyKey_Deterministic_CustomerIdAndBuildId()
+    public void AC17_IdempotencyKey_Deterministic_CustomerIdAndBuildId()
     {
         var k1 = H9BffDeployHandler.BuildIdempotencyKey("acme", "ci-42");
         var k2 = H9BffDeployHandler.BuildIdempotencyKey("acme", "ci-42");
@@ -608,14 +680,14 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         H9BffDeployHandler.BuildIdempotencyKey("other", "ci-42").Should().NotBe(k1);
     }
 
-    // ---------- AC-16 run not found ----------
+    // ---------- AC-18 run not found ----------
 
     [Fact]
-    public async Task AC16_RunNotFound_ReturnsResumableFailure()
+    public async Task AC18_RunNotFound_ReturnsResumableFailure()
     {
         var repo = new FakeRepository(run: null, etag: null);
-        var (verifier, runner, swapper, probe, sizer) = FreshGreenSeams();
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -624,15 +696,15 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.RunNotFound);
     }
 
-    // ---------- AC-17 handler-id mismatch ----------
+    // ---------- AC-19 handler-id mismatch ----------
 
     [Fact]
-    public async Task AC17_HandlerIdMismatch_Throws()
+    public async Task AC19_HandlerIdMismatch_Throws()
     {
         var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-17");
-        var (verifier, runner, swapper, probe, sizer) = FreshGreenSeams();
-        var handler = BuildHandler(repo, verifier, runner, swapper, probe, sizer);
+        var repo = new FakeRepository(run, etag: "etag-19");
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -648,25 +720,13 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             .WithMessage("*mismatched HandlerId*");
     }
 
-    // ---------- AC-18 rejection code mapping ----------
-
-    [Theory]
-    [InlineData(R3GateKind.Analyzers, BffDeployRejectionCodes.R3GateFailedAnalyzers)]
-    [InlineData(R3GateKind.GodClassRatchet, BffDeployRejectionCodes.R3GateFailedGodClassRatchet)]
-    [InlineData(R3GateKind.ArchTests, BffDeployRejectionCodes.R3GateFailedArchTests)]
-    [InlineData(R3GateKind.NamingConformance, BffDeployRejectionCodes.R3GateFailedNamingConformance)]
-    [InlineData(R3GateKind.GraphAppRoleParity, BffDeployRejectionCodes.R3GateFailedGraphAppRoleParity)]
-    public void AC18_RejectionCodeMapping_IsDistinctPerGate(R3GateKind kind, string expectedCode)
-    {
-        H9BffDeployHandler.MapGateKindToRejectionCode(kind).Should().Be(expectedCode);
-    }
-
     // ---------- helpers ----------
 
     private H9BffDeployHandler BuildHandler(
         IProvisioningRunRepository repo,
-        IR3GateVerifier verifier,
-        IBffDeployRunner runner,
+        IArtifactManifestVerifier verifier,
+        IBffArtifactDownloader downloader,
+        IKuduZipDeployer kudu,
         IAppServiceSlotSwapper swapper,
         IHealthProbe probe,
         IBffPublishSizeReporter sizer,
@@ -677,34 +737,41 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             // Point every filesystem-touching option at a path that intentionally
             // does not exist so no test accidentally reads the real repo tree.
             DeployReleaseScriptPath = Path.Combine(Path.GetTempPath(), "h9-test-nonexistent-deploy-release.ps1"),
-            BffPublishZipPath = _tempPublishZip,
             BaselinePublishSizeBytes = 44_960_000L,
             PublishSizeDeltaThresholdBytes = 5L * 1024L * 1024L,
             AbsolutePublishSizeCeilingBytes = 60L * 1024L * 1024L,
+            ProvisioningArtifactsContainerUri = "https://faketest.blob.core.windows.net/provisioning-artifacts",
         };
         configureOptions?.Invoke(options);
 
         return new H9BffDeployHandler(
-            repo, verifier, runner, swapper, probe, sizer,
+            repo, verifier, downloader, kudu, swapper, probe, sizer,
             Options.Create(options),
             NullLogger<H9BffDeployHandler>.Instance);
     }
 
-    private H9BffDeployHandler BuildHandler(
-        IProvisioningRunRepository repo,
-        out FakeR3GateVerifier verifier)
-    {
-        var (v, runner, swapper, probe, sizer) = FreshGreenSeams();
-        verifier = v;
-        return BuildHandler(repo, v, runner, swapper, probe, sizer);
-    }
+    private sealed record GreenSeams(
+        FakeManifestVerifier Verifier,
+        FakeArtifactDownloader Downloader,
+        FakeKuduDeployer Kudu,
+        FakeSlotSwapper Swapper,
+        FakeHealthProbe Probe,
+        FakeSizeReporter Sizer);
 
-    private (FakeR3GateVerifier, FakeDeployRunner, FakeSlotSwapper, FakeHealthProbe, FakeSizeReporter) FreshGreenSeams()
-        => (FakeR3GateVerifier.AllGreen(),
-            FakeDeployRunner.Success(_tempPublishZip),
-            FakeSlotSwapper.Success(),
-            FakeHealthProbe.Success(),
-            FakeSizeReporter.Ok());
+    private GreenSeams FreshGreenSeams(
+        FakeManifestVerifier? overrideVerifier = null,
+        FakeArtifactDownloader? overrideDownloader = null,
+        FakeKuduDeployer? overrideKudu = null,
+        FakeSlotSwapper? overrideSwapper = null,
+        FakeHealthProbe? overrideProbe = null,
+        FakeSizeReporter? overrideSizer = null)
+        => new(
+            overrideVerifier ?? FakeManifestVerifier.Verified(BuildId, ArtifactBlobName),
+            overrideDownloader ?? FakeArtifactDownloader.Success(_tempLocalZip),
+            overrideKudu ?? FakeKuduDeployer.Success(),
+            overrideSwapper ?? FakeSlotSwapper.Success(),
+            overrideProbe ?? FakeHealthProbe.Success(),
+            overrideSizer ?? FakeSizeReporter.Ok());
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -767,53 +834,70 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         }
     }
 
-    private sealed class FakeR3GateVerifier : IR3GateVerifier
+    private sealed class FakeManifestVerifier : IArtifactManifestVerifier
     {
-        private readonly R3GateVerificationResult? _result;
+        private readonly ArtifactManifestVerificationResult? _result;
         private readonly Exception? _throwOnCall;
         public int CallCount { get; private set; }
+        public string? LastRequestedBuildId { get; private set; }
 
-        private FakeR3GateVerifier(R3GateVerificationResult? result, Exception? throwOnCall)
+        private FakeManifestVerifier(ArtifactManifestVerificationResult? result, Exception? throwOnCall)
         {
             _result = result;
             _throwOnCall = throwOnCall;
         }
 
-        public static FakeR3GateVerifier AllGreen()
-            => new(new R3GateVerificationResult(new[]
-            {
-                new R3GateOutcome(R3GateKind.Analyzers, R3GateStatus.Passed, ""),
-                new R3GateOutcome(R3GateKind.GodClassRatchet, R3GateStatus.Passed, ""),
-                new R3GateOutcome(R3GateKind.ArchTests, R3GateStatus.Passed, ""),
-                new R3GateOutcome(R3GateKind.NamingConformance, R3GateStatus.Passed, ""),
-                new R3GateOutcome(R3GateKind.GraphAppRoleParity, R3GateStatus.Passed, ""),
-            }), null);
+        public static FakeManifestVerifier Verified(string buildId, string artifactBlobName)
+            => new(new ArtifactManifestVerificationResult.Verified(
+                new ArtifactManifest(
+                    buildId,
+                    "sha-test-abc123",
+                    44_500_000L,
+                    artifactBlobName,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["r3AnalyzersAsErrors"] = "Passed",
+                        ["godClassRatchet"] = "Passed",
+                        ["archTests"] = "Passed",
+                        ["namingConformance"] = "Passed",
+                        ["graphAppRoleParity"] = "Skipped",
+                    })), null);
 
-        public static FakeR3GateVerifier AllSkipped()
-            => new(new R3GateVerificationResult(new[]
-            {
-                new R3GateOutcome(R3GateKind.Analyzers, R3GateStatus.Skipped, "not landed"),
-                new R3GateOutcome(R3GateKind.GodClassRatchet, R3GateStatus.Skipped, "not landed"),
-                new R3GateOutcome(R3GateKind.ArchTests, R3GateStatus.Skipped, "not landed"),
-                new R3GateOutcome(R3GateKind.NamingConformance, R3GateStatus.Skipped, "not landed"),
-                new R3GateOutcome(R3GateKind.GraphAppRoleParity, R3GateStatus.Skipped, "not landed"),
-            }), null);
+        public static FakeManifestVerifier Rejected(string diagnostic)
+            => new(new ArtifactManifestVerificationResult.Rejected(diagnostic), null);
 
-        public static FakeR3GateVerifier WithFailure(R3GateKind failingKind, string diagnostic)
+        public static FakeManifestVerifier Throws(Exception ex) => new(null, ex);
+
+        public Task<ArtifactManifestVerificationResult> VerifyAsync(ArtifactManifestVerificationRequest request, CancellationToken ct)
         {
-            var outcomes = new List<R3GateOutcome>();
-            foreach (var k in Enum.GetValues<R3GateKind>())
-            {
-                outcomes.Add(k == failingKind
-                    ? new R3GateOutcome(k, R3GateStatus.Failed, diagnostic)
-                    : new R3GateOutcome(k, R3GateStatus.Passed, ""));
-            }
-            return new(new R3GateVerificationResult(outcomes), null);
+            CallCount++;
+            LastRequestedBuildId = request.RequestedBuildId;
+            if (_throwOnCall is not null) throw _throwOnCall;
+            return Task.FromResult(_result!);
+        }
+    }
+
+    private sealed class FakeArtifactDownloader : IBffArtifactDownloader
+    {
+        private readonly ArtifactDownloadResult? _result;
+        private readonly Exception? _throwOnCall;
+        public int CallCount { get; private set; }
+
+        private FakeArtifactDownloader(ArtifactDownloadResult? result, Exception? throwOnCall)
+        {
+            _result = result;
+            _throwOnCall = throwOnCall;
         }
 
-        public static FakeR3GateVerifier Throws(Exception ex) => new(null, ex);
+        public static FakeArtifactDownloader Success(string localZipPath)
+            => new(new ArtifactDownloadResult.Success(localZipPath, 44_500_000L), null);
 
-        public Task<R3GateVerificationResult> VerifyAsync(R3GateVerificationRequest request, CancellationToken ct)
+        public static FakeArtifactDownloader Failure(string diagnostic)
+            => new(new ArtifactDownloadResult.Failure(diagnostic), null);
+
+        public static FakeArtifactDownloader Throws(Exception ex) => new(null, ex);
+
+        public Task<ArtifactDownloadResult> DownloadAsync(ArtifactDownloadRequest request, CancellationToken ct)
         {
             CallCount++;
             if (_throwOnCall is not null) throw _throwOnCall;
@@ -821,46 +905,29 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         }
     }
 
-    private sealed class FakeDeployRunner : IBffDeployRunner
+    private sealed class FakeKuduDeployer : IKuduZipDeployer
     {
-        private readonly BffDeployRunnerOutcome? _outcome;
+        private readonly KuduZipDeployResult? _result;
         private readonly Exception? _throwOnCall;
         public int CallCount { get; private set; }
 
-        private FakeDeployRunner(BffDeployRunnerOutcome? outcome, Exception? throwOnCall)
+        private FakeKuduDeployer(KuduZipDeployResult? result, Exception? throwOnCall)
         {
-            _outcome = outcome;
+            _result = result;
             _throwOnCall = throwOnCall;
         }
 
-        public static FakeDeployRunner Success(string publishZipPath)
-            => new(new BffDeployRunnerOutcome.Success(new BffDeployRunnerOutputs
-            {
-                PublishZipPath = publishZipPath,
-                StagingSlotUrl = "https://spaarke-bff-acme-staging.azurewebsites.net",
-                ProductionSlotUrl = "https://spaarke-bff-acme.azurewebsites.net",
-                Duration = TimeSpan.FromSeconds(60),
-            }), null);
+        public static FakeKuduDeployer Success() => new(new KuduZipDeployResult.Success(TimeSpan.FromSeconds(45)), null);
 
-        public static FakeDeployRunner SuccessWithBlankUrls()
-            => new(new BffDeployRunnerOutcome.Success(new BffDeployRunnerOutputs
-            {
-                PublishZipPath = "path",
-                StagingSlotUrl = "",
-                ProductionSlotUrl = "",
-                Duration = TimeSpan.Zero,
-            }), null);
+        public static FakeKuduDeployer Failure(string diagnostic) => new(new KuduZipDeployResult.Failure(diagnostic), null);
 
-        public static FakeDeployRunner Failure(string diagnostic)
-            => new(new BffDeployRunnerOutcome.Failure(diagnostic), null);
+        public static FakeKuduDeployer Throws(Exception ex) => new(null, ex);
 
-        public static FakeDeployRunner Throws(Exception ex) => new(null, ex);
-
-        public Task<BffDeployRunnerOutcome> DeployAsync(BffDeployRunnerRequest request, CancellationToken ct)
+        public Task<KuduZipDeployResult> DeployAsync(KuduZipDeployRequest request, CancellationToken ct)
         {
             CallCount++;
             if (_throwOnCall is not null) throw _throwOnCall;
-            return Task.FromResult(_outcome!);
+            return Task.FromResult(_result!);
         }
     }
 
@@ -937,29 +1004,65 @@ public sealed class H9BffDeployHandlerTests : IDisposable
 
     private sealed class FakeHealthProbe : IHealthProbe
     {
-        private readonly HealthProbeResult? _result;
-        private readonly Exception? _throwOnCall;
+        private readonly Queue<Func<HealthProbeResult>> _plannedOutcomes;
+        private readonly Exception? _firstCallThrows;
+        private readonly Exception? _secondCallThrows;
         public int CallCount { get; private set; }
+        public List<string> RequestedUrls { get; } = new();
 
-        private FakeHealthProbe(HealthProbeResult? result, Exception? throwOnCall)
+        private FakeHealthProbe(Queue<Func<HealthProbeResult>> plan, Exception? firstThrows, Exception? secondThrows)
         {
-            _result = result;
-            _throwOnCall = throwOnCall;
+            _plannedOutcomes = plan;
+            _firstCallThrows = firstThrows;
+            _secondCallThrows = secondThrows;
         }
 
+        /// <summary>Every call (staging + production) returns 200.</summary>
         public static FakeHealthProbe Success()
-            => new(new HealthProbeResult.Success(1, TimeSpan.FromSeconds(2)), null);
+        {
+            var q = new Queue<Func<HealthProbeResult>>();
+            q.Enqueue(() => new HealthProbeResult.Success(1, TimeSpan.FromSeconds(1)));
+            q.Enqueue(() => new HealthProbeResult.Success(1, TimeSpan.FromSeconds(1)));
+            return new(q, null, null);
+        }
 
-        public static FakeHealthProbe Failure(string diagnostic)
-            => new(new HealthProbeResult.Failure(24, diagnostic), null);
+        /// <summary>First call (staging) fails — handler must not call again.</summary>
+        public static FakeHealthProbe StagingFailure(string diagnostic)
+        {
+            var q = new Queue<Func<HealthProbeResult>>();
+            q.Enqueue(() => new HealthProbeResult.Failure(24, diagnostic));
+            return new(q, null, null);
+        }
 
-        public static FakeHealthProbe Throws(Exception ex) => new(null, ex);
+        /// <summary>Staging succeeds, production (post-swap) fails — triggers rollback.</summary>
+        public static FakeHealthProbe SuccessThenFailure(string diagnostic)
+        {
+            var q = new Queue<Func<HealthProbeResult>>();
+            q.Enqueue(() => new HealthProbeResult.Success(1, TimeSpan.FromSeconds(1)));
+            q.Enqueue(() => new HealthProbeResult.Failure(24, diagnostic));
+            return new(q, null, null);
+        }
+
+        /// <summary>Staging succeeds, production (post-swap) throws — triggers rollback.</summary>
+        public static FakeHealthProbe SuccessThenThrows(Exception secondCallEx)
+        {
+            var q = new Queue<Func<HealthProbeResult>>();
+            q.Enqueue(() => new HealthProbeResult.Success(1, TimeSpan.FromSeconds(1)));
+            return new(q, null, secondCallEx);
+        }
 
         public Task<HealthProbeResult> ProbeAsync(HealthProbeRequest request, CancellationToken ct)
         {
             CallCount++;
-            if (_throwOnCall is not null) throw _throwOnCall;
-            return Task.FromResult(_result!);
+            RequestedUrls.Add(request.TargetUrl);
+            if (CallCount == 1 && _firstCallThrows is not null) throw _firstCallThrows;
+            if (CallCount == 2 && _secondCallThrows is not null) throw _secondCallThrows;
+            if (_plannedOutcomes.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"FakeHealthProbe exhausted its planned outcomes after {CallCount} calls.");
+            }
+            return Task.FromResult(_plannedOutcomes.Dequeue()());
         }
     }
 

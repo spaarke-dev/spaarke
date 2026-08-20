@@ -1,6 +1,17 @@
 // -----------------------------------------------------------------------------
 // DotnetR3GateVerifier.cs
 //
+// RETIRED (task 132, Wave G-3, 2026-08-19): superseded by
+// <see cref="ArtifactManifestVerifier"/> (DS-4 §5 re-scope — the five r3-era
+// gates now run in CI, task 116's deploy-bff-api.yml Build job; this
+// collaborator's dotnet/pwsh shell-outs are no longer invoked at provision
+// time). No longer registered in Worker/Program.cs's IR3GateVerifier DI slot.
+// Retained on disk (NOT deleted); see AzCliKvSecretsWriter.cs's retirement
+// banner for the full rationale of this project's on-disk-retention
+// convention. ZERO ProcessStartInfo/shell-out collaborator remains in H9's
+// target-state DI graph per DS-4 §5 / spec.md MUST rules.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IR3GateVerifier"/> implementation. Runs each of the
 // five r3-era gates in a deterministic order via <c>dotnet build</c> +
 // <c>dotnet test</c> + <c>pwsh</c> shell-outs, treating gates whose artifacts

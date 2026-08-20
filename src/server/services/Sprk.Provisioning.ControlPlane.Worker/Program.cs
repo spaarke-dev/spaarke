@@ -536,24 +536,46 @@ builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName)
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 
-// Task 051 (Batch 3E): H8 SPE container-type + root-container handler + THREE
-// collaborator seams (ISpeContainerTypeProvisioner shells out to the task-011
-// T6-hardened scripts/Create-NewContainerType.ps1 -CreateTestContainer;
-// ISpeContainerVerifier shells out to scripts/Get-SpeContainerMetadata-AppOnly.ps1;
-// ISpeContainerIdKvWriter persists the real container-type id to the customer
-// KV `SPE-ContainerTypeId` slot H4's manifest pre-creates).
+// Task 051 (Batch 3E) -> task 131 (Wave G-3) Graph SDK port: H8 SPE
+// container-type + root-container handler + THREE collaborator seams, now
+// Microsoft.Graph 6.5.0 under ClientCertificateCredential (T6) instead of the
+// retired shell-out scripts (CreateNewContainerTypeScriptProvisioner.cs /
+// SpeContainerAppOnlyVerifier.cs / AzCliSpeContainerIdKvWriter.cs — kept on
+// disk, UNREGISTERED, per this project's retirement pattern):
+//   - ISpeContainerTypeProvisioner -> GraphContainerTypeProvisioner: POST
+//     /storage/fileStorage/containerTypes (v1.0 GA) + POST
+//     /storage/fileStorage/containerTypeRegistrations (owning-app FULL
+//     permission grant — replaces the retired script's separate SharePoint
+//     REST applicationPermissions PUT under a different token audience) +
+//     POST /storage/fileStorage/containers (root container).
+//   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET
+//     /storage/fileStorage/containers/{id} — dramatically simplified vs the
+//     retired script's "123 lines of token ceremony around ONE GET"
+//     (Azure.Identity.ClientCertificateCredential owns the JWT client-
+//     assertion ceremony the script hand-rolled). Also owns the NEW 24h
+//     SPE-replication-lag classification (404 -> ReplicationPending ->
+//     handler sets RunStatus.WaitingOnGate, never Resumable/QuarantineRequired
+//     — DS-4 §2 / this project's CLAUDE.md MUST rules).
+//   - ISpeContainerIdKvWriter -> SecretClientSpeContainerIdKvWriter: reuses
+//     task 125's SecretClient idiom (single-secret, narrower than H4's
+//     manifest-driven writer — see that file's header for the justification).
+// Both Graph collaborators load the T6 cert from KV via SecretClient (NOT
+// CertificateClient — see SpeConfidentialClientGraphFactory.cs's header for
+// why: the private key is only obtainable via the paired Secret, never via
+// CertificateClient's public-cert-only DownloadCertificateAsync).
 //
 // spec.md MUST rule (T6, FR-33): confidential-client (app-only) cert-based
-// token is the ONLY auth path — enforced in BOTH the provisioner (creation)
-// and the verifier (post-condition GET), each independently detecting a
-// delegated-token trap signature ("public client not allowed") or missing
-// "T6 cleared" evidence markers and classifying QuarantineRequired +
-// TrapT6DelegatedTokenDetected rather than a routine Resumable failure.
+// token is the ONLY auth path (ClientCertificateCredential, NEVER
+// ClientSecretCredential) — enforced in BOTH the provisioner (creation) and
+// the verifier (post-condition GET), each independently detecting a
+// delegated-token trap signature ("public client not allowed") and
+// classifying QuarantineRequired + TrapT6DelegatedTokenDetected rather than a
+// routine Resumable failure.
 builder.Services.Configure<SpeContainerTypeOptions>(
     builder.Configuration.GetSection(nameof(SpeContainerTypeOptions)));
-builder.Services.AddSingleton<ISpeContainerTypeProvisioner, CreateNewContainerTypeScriptProvisioner>();
-builder.Services.AddSingleton<ISpeContainerVerifier, SpeContainerAppOnlyVerifier>();
-builder.Services.AddSingleton<ISpeContainerIdKvWriter, AzCliSpeContainerIdKvWriter>();
+builder.Services.AddSingleton<ISpeContainerTypeProvisioner, GraphContainerTypeProvisioner>();
+builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
+builder.Services.AddSingleton<ISpeContainerIdKvWriter, SecretClientSpeContainerIdKvWriter>();
 builder.Services.AddScoped<H8SpeContainerTypeHandler>();
 
 // Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler
@@ -614,20 +636,69 @@ builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 // pattern.
 builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
 
-// Task 052 (Batch 4B): H9 BFF-deploy handler + FIVE collaborator seams
-// (IR3GateVerifier = DotnetR3GateVerifier — shells to dotnet CLI + pwsh for
-// the five r3-era gates; IBffDeployRunner = DeployBffApiScriptRunner shells
-// out to scripts/Deploy-BffApi.ps1; IAppServiceSlotSwapper = AzCliAppServiceSlotSwapper
-// shells out to `az webapp deployment slot swap`; IHealthProbe = HttpHealthProbe
-// issues HttpClient GETs against BFF /healthz with retry parity to
+// Task 052 (Batch 4B) / task 132 (Wave G-3, Option D hybrid, DS-4 §5
+// re-scope): H9 BFF-deploy handler + SIX collaborator seams. Task 132
+// replaced the two shell-out collaborators (DotnetR3GateVerifier /
+// DeployBffApiScriptRunner — both RETIRED, kept on disk unregistered per
+// their retirement banners) AND the ARM-adjacent-but-CLI AzCliAppServiceSlotSwapper
+// (also RETIRED) with pure SDK/REST ports: IArtifactManifestVerifier =
+// ArtifactManifestVerifier (pure C# metadata check — downloads + parses
+// task 116's latest.json manifest via a shared BlobContainerClient; hard-
+// blocks on missing/red gates — the r3-era gates now run in CI, not here),
+// IBffArtifactDownloader = BlobArtifactDownloader (Azure.Storage.Blobs
+// BlobClient.DownloadToAsync — UAMI RBAC, no stored key), IKuduZipDeployer =
+// KuduZipDeployer (typed HttpClient POST to the Kudu SCM zip-deploy route —
+// no ARM SDK zip-deploy primitive exists; MI-acquired ARM-scope bearer
+// token), and IAppServiceSlotSwapper = ArmSlotSwapper
+// (Azure.ResourceManager.AppService WebSiteSlotResource.SwapSlotAsync — a
+// proper awaited LRO, replacing the CLI's fire-and-parse). IHealthProbe =
+// HttpHealthProbe (UNCHANGED — already real, reused unmodified per DS-4 §5
+// item 3) issues HttpClient GETs against BFF /healthz with retry parity to
 // Deploy-BffApi.ps1's Test-HealthCheck; IBffPublishSizeReporter =
-// FileBffPublishSizeReporter measures the compressed publish zip + computes
-// NFR-01 delta vs 44.96 MB baseline).
+// FileBffPublishSizeReporter (UNCHANGED) measures the DOWNLOADED artifact
+// zip + computes NFR-01 delta vs the configured baseline.
+//
+// ArmClient + BlobContainerClient are constructed via factory lambdas that
+// reuse the shared UAMI-pinned TokenCredential singleton (ADR-028
+// MI-outbound) — parity with task 123's H2a ArmDeploymentRunner registration
+// comment above (self-contained against sibling handler ports).
+//
+// LIVE-CEREMONY DEPENDENCY: BffDeployOptions:ProvisioningArtifactsContainerUri
+// points at the SAME `provisioning-artifacts` storage account task 116/117
+// publish to, which does NOT YET EXIST (Wave G-1 live-ceremony backlog item
+// #4, project current-task.md). PostConfigure.Validate() fails fast at boot
+// if the app-setting is blank — this handler is fully buildable/unit-testable
+// today; a real end-to-end run additionally requires that live-ceremony item.
 builder.Services.Configure<BffDeployOptions>(
     builder.Configuration.GetSection(nameof(BffDeployOptions)));
-builder.Services.AddSingleton<IR3GateVerifier, DotnetR3GateVerifier>();
-builder.Services.AddSingleton<IBffDeployRunner, DeployBffApiScriptRunner>();
-builder.Services.AddSingleton<IAppServiceSlotSwapper, AzCliAppServiceSlotSwapper>();
+builder.Services.PostConfigure<BffDeployOptions>(o => o.Validate());
+builder.Services.AddSingleton<IArtifactManifestVerifier>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
+    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
+        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var logger = sp.GetRequiredService<ILogger<ArtifactManifestVerifier>>();
+    return new ArtifactManifestVerifier(artifactsContainer, options, logger);
+});
+builder.Services.AddSingleton<IBffArtifactDownloader>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
+    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
+        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var logger = sp.GetRequiredService<ILogger<BlobArtifactDownloader>>();
+    return new BlobArtifactDownloader(artifactsContainer, options, logger);
+});
+builder.Services.AddHttpClient<IKuduZipDeployer, KuduZipDeployer>();
+builder.Services.AddSingleton<IAppServiceSlotSwapper>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
+    var logger = sp.GetRequiredService<ILogger<ArmSlotSwapper>>();
+    return new ArmSlotSwapper(armClient, options, logger);
+});
 builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();

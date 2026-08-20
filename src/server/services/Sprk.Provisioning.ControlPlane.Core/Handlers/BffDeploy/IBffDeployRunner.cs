@@ -1,6 +1,15 @@
 // -----------------------------------------------------------------------------
 // IBffDeployRunner.cs
 //
+// RETIRED (task 132, Wave G-3, 2026-08-19): superseded by the
+// resolve-manifest/download-blob/Kudu-zip-deploy triad
+// (<see cref="IArtifactManifestVerifier"/> + <see cref="IBffArtifactDownloader"/> +
+// <see cref="IKuduZipDeployer"/> — see DeployBffApiScriptRunner.cs's
+// retirement banner). No production or test code implements this interface
+// going forward; retained on disk unregistered per this project's retirement
+// convention.
+// -----------------------------------------------------------------------------
+
 // L2 abstraction over the actual BFF-to-staging-slot deploy invocation. The
 // production impl (<see cref="DeployBffApiScriptRunner"/>) shells out to
 // <c>scripts/Deploy-BffApi.ps1 -UseSlotDeploy</c>. Unit tests inject stubs

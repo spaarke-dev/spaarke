@@ -1,6 +1,19 @@
 // -----------------------------------------------------------------------------
 // DeployBffApiScriptRunner.cs
 //
+// RETIRED (task 132, Wave G-3, 2026-08-19): superseded by the
+// resolve-manifest/download-blob/Kudu-zip-deploy triad
+// (<see cref="ArtifactManifestVerifier"/> + <see cref="BlobArtifactDownloader"/> +
+// <see cref="KuduZipDeployer"/>, DS-4 §5 re-scope). This collaborator ran
+// `dotnet publish` AT PROVISION TIME (line ~221 below) — "the heaviest
+// environment dependency of all" per DS-4's handler audit — requiring a full
+// repo checkout + dotnet SDK inside the L2 runtime, which Option D's zero-
+// shell design forbids. No longer registered in Worker/Program.cs's
+// IBffDeployRunner DI slot. Retained on disk (NOT deleted); see
+// AzCliKvSecretsWriter.cs's retirement banner for the full rationale of this
+// project's on-disk-retention convention.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IBffDeployRunner"/> implementation. Shells out to
 // scripts/Deploy-BffApi.ps1 to build + zip + deploy to the staging slot +
 // verify staging /health (steps 1–3 of the script's 7-step flow). The

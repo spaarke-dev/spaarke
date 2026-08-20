@@ -194,6 +194,15 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // is never invoked here, only constructor-graph resolution.
         builder.UseSetting("BicepInfraDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
 
+        // Task 132 — ArtifactManifestVerifier / BlobArtifactDownloader's
+        // BffDeployOptions.Validate() fails fast at boot on a missing
+        // ProvisioningArtifactsContainerUri (same convention as
+        // BicepInfraDeployOptions above — same underlying `provisioning-artifacts`
+        // container, different options binding per this project's
+        // self-contained-per-handler convention); syntactically-valid-but-
+        // unreachable value, the blob client itself is never invoked here.
+        builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
+
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs
         // (parity with Api/RunsEndpointsTests.cs L2WebApplicationFactory).

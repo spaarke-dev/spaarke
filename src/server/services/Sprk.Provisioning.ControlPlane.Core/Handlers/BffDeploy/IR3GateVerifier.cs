@@ -1,6 +1,13 @@
 // -----------------------------------------------------------------------------
 // IR3GateVerifier.cs
 //
+// RETIRED (task 132, Wave G-3, 2026-08-19): superseded by
+// <see cref="IArtifactManifestVerifier"/> (DS-4 §5 re-scope — see
+// DotnetR3GateVerifier.cs's retirement banner). No production or test code
+// implements this interface going forward; retained on disk unregistered per
+// this project's retirement convention.
+// -----------------------------------------------------------------------------
+
 // L2 abstraction over the r3-era pre-swap gate verification for H9. Production
 // impl (<see cref="DotnetR3GateVerifier"/>) shells out to <c>dotnet build</c> +
 // <c>dotnet test</c> + <c>naming-conformance-check.ps1</c>. Unit tests inject

@@ -71,7 +71,55 @@ public static class BffDeployRejectionCodes
     /// </summary>
     public const string Spaarkedev1HardcodeDetected = "spaarkedev1-hardcode-detected";
 
-    // ---- r3-era gate failures (POML acceptance criterion 2 — distinct code per gate) ----
+    // ---- task 132 (Wave G-3, DS-4 §5 re-scope) — artifact manifest / download / Kudu deploy ----
+
+    /// <summary>
+    /// <see cref="IArtifactManifestVerifier"/> hard-blocked the
+    /// deploy — missing manifest, missing gate key, a RED gate, or a
+    /// requested buildId that does not match the manifest's buildId. Slot-swap
+    /// BLOCKED per DS-4 §5 (not a warning-and-proceed condition).
+    /// </summary>
+    public const string ArtifactManifestRejected = "artifact-manifest-rejected";
+
+    /// <summary>
+    /// The manifest verifier's blob-container call threw (unreachable, auth
+    /// failure) BEFORE any external side effect against the customer's App
+    /// Service — Resumable.
+    /// </summary>
+    public const string ManifestVerifierInfraFault = "manifest-verifier-infra-fault";
+
+    /// <summary>
+    /// <see cref="IBffArtifactDownloader"/> reported a domain
+    /// failure (artifact blob not found) — Resumable, no external side effect
+    /// against the customer's App Service.
+    /// </summary>
+    public const string ArtifactDownloadFailed = "artifact-download-failed";
+
+    /// <summary>The artifact downloader's blob-container call threw (unreachable, auth failure, disk I/O) — Resumable.</summary>
+    public const string ArtifactDownloadInfraFault = "artifact-download-infra-fault";
+
+    /// <summary>
+    /// <see cref="IKuduZipDeployer"/> reported a non-2xx Kudu
+    /// response — Resumable (staging is dedicated + re-deployable; production
+    /// is untouched at this point in the flow).
+    /// </summary>
+    public const string KuduZipDeployFailed = "kudu-zip-deploy-failed";
+
+    /// <summary>The Kudu zip-deploy HTTP call threw (DNS failure, timeout, local zip missing) — Resumable.</summary>
+    public const string KuduZipDeployInfraFault = "kudu-zip-deploy-infra-fault";
+
+    /// <summary>
+    /// Post-deploy STAGING /health probe (via the existing, reused IHealthProbe)
+    /// never returned 200 within the retry budget — Resumable (staging is
+    /// dedicated; no production impact; the swap step is never reached).
+    /// </summary>
+    public const string StagingHealthCheckFailed = "staging-health-check-failed";
+
+    // ---- r3-era gate failures (SUPERSEDED by task 132 — see ArtifactManifestRejected
+    //      above; retained per this file's stability policy — "do NOT rename;
+    //      mark old ones @[Obsolete] on removal" — no code path emits these
+    //      anymore, but DotnetR3GateVerifier.cs / IR3GateVerifier.cs remain on
+    //      disk unregistered, so the constants stay defined) ----
 
     /// <summary>
     /// r3-era analyzers-as-errors gate failed — <c>dotnet build</c> exited
@@ -111,7 +159,10 @@ public static class BffDeployRejectionCodes
     /// </summary>
     public const string R3GateFailedGraphAppRoleParity = "r3-gate-failed-graph-app-role-parity";
 
-    // ---- deploy runner failures (Deploy-BffApi.ps1) ----
+    // ---- deploy runner failures (Deploy-BffApi.ps1) — SUPERSEDED by task 132's
+    //      KuduZipDeployFailed/KuduZipDeployInfraFault/ArtifactDownloadFailed
+    //      above; retained per this file's stability policy (DeployBffApiScriptRunner.cs
+    //      remains on disk unregistered) ----
 
     /// <summary>The invoked <c>Deploy-BffApi.ps1</c> reported a hard failure (non-zero exit, build failure, slot deploy failure, staging health check failure).</summary>
     public const string BffDeployFailed = "bff-deploy-failed";
