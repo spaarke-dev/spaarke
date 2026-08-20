@@ -40,6 +40,18 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// Spaarke default from <c>scripts/Register-EntraAppRegistrations.ps1:63</c>
 /// (previously <c>[string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"</c>).
 /// </para>
+///
+/// <para>
+/// <b>Nil-GUID sentinel exemption (added 2026-08-20, Wave G-8 Batch 9)</b>: the
+/// all-zeros GUID <c>00000000-0000-0000-0000-000000000000</c> is NOT an offender.
+/// It is a deliberately-INVALID sentinel — Entra rejects the nil tenant before any
+/// operation can run — so it cannot cause the cross-tenant identity leak I1 exists
+/// to prevent; it is the GUID-shaped equivalent of the compliant empty-string
+/// default. Legitimate use: <c>scripts/provisioning/Verify-Sidecar-Live.ps1</c>
+/// (task 162) uses it as a SAFE-DEFAULT-MODE payload sentinel whose all-zeros
+/// shape is load-bearing (the script branches on it to refuse real Exchange
+/// mutation until an operator overrides with a real test tenant).
+/// </para>
 /// </summary>
 public class I1_NoHardcodedTenantTests
 {
@@ -164,6 +176,12 @@ public class I1_NoHardcodedTenantTests
                     var paramName = hit.Groups[1].Value;
                     var guid = hit.Groups[2].Value;
 
+                    // Nil-GUID sentinel exemption (see class doc): a deliberately-invalid
+                    // all-zeros tenant cannot leak provisioning into a real tenant — Entra
+                    // rejects it before any operation runs. Functionally equivalent to the
+                    // compliant empty-string default.
+                    if (guid == "00000000-0000-0000-0000-000000000000") continue;
+
                     offenders.Add(
                         $"{rel}:{lineNumber} — Param [string]${paramName} = '{guid}' " +
                         $"(GUID-shaped tenant DEFAULT). Fix: remove the default and mark the parameter " +
@@ -221,6 +239,36 @@ public class I1_NoHardcodedTenantTests
         Assert.False(
             TenantIdDefaultInParam.IsMatch(goodParamBlock3),
             "Regex should NOT flag a non-tenant parameter with a GUID default (out of I1 scope).");
+    }
+
+    [Fact(DisplayName = "FR-28 negative control: the nil-GUID sentinel default is exempt end-to-end (deliberately-invalid tenant, no leak possible)")]
+    public void ScanForI1Offenders_NilGuidSentinelDefault_IsExempt()
+    {
+        var tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "spaarke-i1-nilguid-seed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            // Mirrors the legitimate shape in scripts/provisioning/Verify-Sidecar-Live.ps1:189
+            // (task 162 SAFE-DEFAULT-MODE sentinel). The scanner must NOT report it.
+            File.WriteAllText(
+                Path.Combine(tempDir, "SeedNilGuid.ps1"),
+                "param(\n" +
+                "    [Parameter(Mandatory = $false)][string]$TenantId = '00000000-0000-0000-0000-000000000000'\n" +
+                ")\n");
+
+            var offenders = ScanForI1Offenders(tempDir, Array.Empty<string>());
+
+            Assert.Empty(offenders);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
     }
 
     /// <summary>
