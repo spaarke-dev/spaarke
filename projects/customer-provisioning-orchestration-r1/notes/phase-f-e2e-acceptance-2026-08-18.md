@@ -300,3 +300,13 @@ result + confirmation that §4.1a differences (H0/H2a/H2b/H4/H7/H10/H12c/H13 beh
 ---
 
 *Session ended with owner-preferred pause for analytical reset. Fable-model gap analysis next.*
+
+---
+
+## SUPERSEDED-BY footer (added 2026-08-20 by task 186 Wave G-7 Batch G-7E)
+
+This SPLIT-MODE report (2026-08-18) captured a real, useful discovery cycle: L2 App Service, L2 app-reg, KV secrets, RBAC, and Bicep config-key mismatches all needed live remediation before the pipeline could even accept a run — that work built the foundation Phase C'' sits on. But the run itself never achieved E2E execution; per the report's own honest closing statement, *"r1 has ~75/78 tasks ✅ by count but the stated project goal (E2E customer provisioning per spec FR-18 / SC #5) is NOT met."* The dispatcher had not been built (Wave-C5 designed only in code comments); 11 of 19 handlers shelled out to unavailable tools or were placeholder-backed; H13's own aggregation returned `InfraFault` for every trap/invariant regardless of what happened upstream.
+
+[`r1-gap-analysis-2026-08-18.md`](r1-gap-analysis-2026-08-18.md) was the forensic that followed. Phase C'' (Waves G-1..G-7, 58 tasks) was the response. Task 186 (Wave G-7 Batch G-7E TERMINAL, 2026-08-20) is the "for real this time" rerun.
+
+**Acceptance evidence trail moved to**: [`phase-c-double-prime-e2e-acceptance-real-run.md`](phase-c-double-prime-e2e-acceptance-real-run.md). That document is the binding SC #5 / SC #6 report for task 090 wrap-up. This SPLIT-MODE report is retained as the deployment-lessons-learned record (its 23-gap catalog remains the definitive inventory of what needed to be true before Phase C'' could start).
