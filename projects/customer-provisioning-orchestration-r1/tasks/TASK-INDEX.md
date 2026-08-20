@@ -272,19 +272,19 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 170 | 🔲 | I1: naming/tenant-literal invariant probe (pure C#, no live deps -- easiest first) | FULL | sonnet / high | waveG7-parallel | none |
+| 170 | ✅ | I1: naming/tenant-literal invariant probe (pure C#, no live deps -- easiest first) | FULL | sonnet / high | waveG7-parallel | none |
 | 171 | 🔲 | T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4) | FULL | sonnet / high | waveG7-parallel | 123, 125 |
 | 172 | 🔲 | T5: slot-MI KV RBAC role-assignment probe (pipelined with H4) | FULL | sonnet / high | waveG7-parallel | 125 |
 | 173 | ✅ | I2: AI Search tenant filter probe (pipelined with H2b) | FULL | sonnet / high | waveG7-parallel | 124 |
-| 174 | 🔲 | I3: Cosmos partition-key probe (pipelined with H2a) | FULL | sonnet / high | waveG7-parallel | 123 |
-| 175 | 🔲 | T6: SPE confidential-client trap probe (pipelined with H8) | FULL | sonnet / high | waveG7-parallel | 131 |
+| 174 | ✅ | I3: Cosmos partition-key probe (pipelined with H2a) + CompositeInvariantVerifier + IInvariantProbe seam (extended by tasks 170/173/179 adapters) | FULL | sonnet / high | waveG7-parallel | 123 |
+| 175 | ✅ | T6: SPE confidential-client trap probe (pipelined with H8) | FULL | sonnet / high | waveG7-parallel | 131 |
 | 176 | 🔲 | I4: SPE container resolver probe (pipelined with H9) | FULL | sonnet / high | waveG7-parallel | 132 |
 | 177 | ✅ | T2: Dataverse App User pair probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143, 111 |
 | 178 | 🔲 | T3: Graph app-role parity (14) probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143 |
 | 179 | ✅ | I5: Graph token tenant scope probe (pipelined with C5.8 grants) | FULL | sonnet / high | waveG7-parallel | 111 |
 | 180 | 🔲 | T4: Exchange policy count probe (sidecar read-route, pipelined with H14a) | FULL | sonnet / high | waveG7-parallel | 114, 161, 162 |
 | 181 | 🔲 | IE2EValidationRunner C# port (replaces Validate-DeployedEnvironment.ps1) | FULL | sonnet / high | none | 132, 141, 142, 173 |
-| 182 | 🔲 | INamingConformanceChecker pure-C# port | STANDARD | sonnet / high | waveG7-parallel | none |
+| 182 | ✅ | INamingConformanceChecker pure-C# port | STANDARD | sonnet / high | waveG7-parallel | none |
 | 183 | 🔲 | ICostEnvelopeChecker ARM.CostManagement port | FULL | sonnet / high | waveG7-parallel | 123 |
 | 184 | 🔲 | IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself | FULL | sonnet / high | none | 112, 181, 182, 183 |
 | 185 | 🔲 | H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic | FULL | opus / high | none | 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184 |

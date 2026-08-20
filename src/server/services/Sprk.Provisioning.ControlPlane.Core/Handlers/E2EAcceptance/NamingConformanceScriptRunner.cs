@@ -1,7 +1,25 @@
 // -----------------------------------------------------------------------------
 // NamingConformanceScriptRunner.cs
 //
-// Production <see cref="INamingConformanceChecker"/> impl — shells out to
+// RETIRED (task 182, Phase C'' Wave G-7 Batch G-7A1, 2026-08-20): superseded by
+// <see cref="NamingConformanceChecker"/> -- a pure-C# port of the same three
+// rules (R1 env-token-in-name / R2 casing-drift / R3 vault-name-drift) with
+// ZERO ProcessStartInfo / pwsh dependency. Per DS-4 section 6 the source
+// script makes "0 az/REST calls" -- the entire port is a mechanical
+// string/regex translation, so H13 can execute under Option D's zero-shell
+// L2 Worker host without a pwsh prerequisite in the App Service publish
+// layout. The .ps1 script itself is UNCHANGED and remains the r3-owned
+// CI-time gate wired into .github/workflows/sdap-ci.yml +
+// deploy-bff-api.yml.
+//
+// Retained on disk (NOT deleted); see AzCliKvSecretsWriter.cs's retirement
+// banner for the full rationale of this project's on-disk-retention
+// convention. No longer registered in E2EAcceptanceModule.cs's
+// INamingConformanceChecker DI slot (see the task-182 DI-swap comment in
+// that file).
+//
+// (ORIGINAL SUMMARY -- for historical context)
+// Production <see cref="INamingConformanceChecker"/> impl -- shells out to
 // pwsh + scripts/naming-conformance-check.ps1 (r3 task 063). The script's
 // exit code IS the outcome: 0 = conformant, non-zero = at least one violation.
 // The wrapper captures stdout/stderr to build the diagnostic message.
