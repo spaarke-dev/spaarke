@@ -210,6 +210,15 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // constructor-graph resolution.
         builder.UseSetting("EnvVarValues:ClientSecret", "l2-test-envvarvalues-client-secret-placeholder");
 
+        // Task 141 — SolutionImportOptions.Validate() (H6) fails fast at boot
+        // on a missing ProvisioningArtifactsContainerUri (same convention as
+        // BicepInfraDeployOptions/BffDeployOptions above — same underlying
+        // `provisioning-artifacts` container, different options binding per
+        // this project's self-contained-per-handler convention);
+        // syntactically-valid-but-unreachable value, the blob client itself
+        // is never invoked here, only constructor-graph resolution.
+        builder.UseSetting("SolutionImportOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
+
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs
         // (parity with Api/RunsEndpointsTests.cs L2WebApplicationFactory).

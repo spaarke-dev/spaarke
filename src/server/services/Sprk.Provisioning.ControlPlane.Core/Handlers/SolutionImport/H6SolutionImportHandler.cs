@@ -337,7 +337,8 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
             TargetDataverseUrl: targetDataverseUrl,
             TenantId: tenantId,
             ClientId: clientId,
-            ExpectedCatalog: _catalog.Solutions);
+            ExpectedCatalog: _catalog.Solutions,
+            ClientSecret: clientSecret);
 
         SolutionVerificationOutcome verifyOutcome;
         try

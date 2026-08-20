@@ -94,4 +94,94 @@ public sealed class SolutionImportOptions
     /// persisted to Cosmos (it flows through the runner's env vars only).
     /// </remarks>
     public string? ClientSecret { get; set; }
+
+    // ---- task 141 (Wave G-4, Option D hybrid) additions ----
+    // The fields above (PwshExecutable/PacCliExecutable/DeployDataverseSolutionsScriptPath/
+    // SolutionPath/ImportMode) remain UNCHANGED — they stay load-bearing for the
+    // retired-but-kept-on-disk DeployDataverseSolutionsScriptImporter /
+    // PacCliSolutionVerifier (Wave G retirement convention: retain fields so
+    // retired files still compile). The fields below feed the NEW
+    // DataverseWebApiSolutionImporter / DataverseWebApiSolutionVerifier.
+
+    /// <summary>
+    /// Base URI of the `provisioning-artifacts` blob container (e.g.
+    /// <c>https://{account}.blob.core.windows.net/provisioning-artifacts</c>).
+    /// SAME underlying container task 116's <c>deploy-bff-api.yml</c> +
+    /// task 117's ARM-JSON publish + task 132's H9 artifact both use — naming
+    /// matches <c>BffDeployOptions.ProvisioningArtifactsContainerUri</c> /
+    /// <c>BicepInfraDeployOptions.ProvisioningArtifactsContainerUri</c>
+    /// EXACTLY (DS-1b §1 H6 row: "coordinate the packaging mechanism with
+    /// task 116's blob-artifact pattern"). Required for
+    /// <see cref="DataverseWebApiSolutionImporter"/> to resolve the 8 solution
+    /// ZIPs as versioned artifacts rather than a local filesystem path.
+    /// </summary>
+    public string ProvisioningArtifactsContainerUri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Blob name of the solution-artifact manifest — the mutable "latest"
+    /// pointer <see cref="DataverseWebApiSolutionImporter"/> reads to resolve
+    /// each of the 8 catalog solutions' blob name (+ optional version) inside
+    /// <see cref="ProvisioningArtifactsContainerUri"/>. Defaults to
+    /// <c>dataverse-solutions-latest.json</c> (parity with H9's
+    /// <c>latest.json</c> naming convention). Manifest shape:
+    /// <c>{"solutions":{"SpaarkeCore":{"blobName":"SpaarkeCore-1.0.0.4.zip","version":"1.0.0.4"}, ...}}</c>
+    /// keyed by <see cref="CanonicalSolutionEntry.SolutionUniqueName"/>.
+    /// </summary>
+    /// <remarks>
+    /// LIVE-CEREMONY GAP (documented, not a defect of this task): no CI
+    /// workflow publishes this manifest yet as of task 141 — grep of
+    /// <c>.github/workflows/**</c> confirmed no solution-ZIP publish step
+    /// exists (task 116/117 publish the BFF zip + ARM JSON only). This
+    /// handler is fully buildable/unit-testable today (fake-transport tests
+    /// exercise the manifest-driven resolution path); a live E2E run
+    /// additionally requires (a) the provisioning-artifacts storage account
+    /// to exist (Wave G-1 live-ceremony backlog item #4) and (b) a NEW CI
+    /// publish step producing this manifest + the 8 solution ZIPs — tracked
+    /// as a follow-on live-ceremony backlog item, out of scope for task 141's
+    /// 2-collaborator-file deliverable per the POML's <c>&lt;outputs&gt;</c>.
+    /// </remarks>
+    public string SolutionArtifactManifestBlobName { get; set; } = "dataverse-solutions-latest.json";
+
+    /// <summary>
+    /// Per-HTTP-request timeout for a single Dataverse Web API call (existing-
+    /// solutions GET, ImportSolution/StageAndUpgrade POST, or a single
+    /// importjobs poll GET). Defaults to 100 seconds — generous headroom for
+    /// the ImportSolution/StageAndUpgrade POST's base64-encoded solution ZIP
+    /// payload (largest of the 8 solutions is still well under Dataverse's
+    /// binary-parameter size limits). Distinct from <see cref="ImportTimeout"/>
+    /// (the OVERALL 8-solution deadline).
+    /// </summary>
+    public TimeSpan DataverseWebApiRequestTimeout { get; set; } = TimeSpan.FromSeconds(100);
+
+    /// <summary>
+    /// Interval between <c>importjobs({ImportJobId})</c> poll GETs while
+    /// waiting for a single solution's import to reach a terminal state
+    /// (<c>completedon</c> non-null). Defaults to 15 seconds — solution
+    /// imports run minutes, not seconds, so a 15 s cadence keeps API call
+    /// volume low across the fleet's longest-running handler (DS-2b §1.2)
+    /// without meaningfully delaying terminal-state detection.
+    /// </summary>
+    public TimeSpan ImportJobPollInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Validates the task-141 additions that have no safe default (parity
+    /// with <c>BffDeployOptions.Validate</c> / <c>BicepInfraDeployOptions.Validate</c>).
+    /// Wired via <c>PostConfigure&lt;SolutionImportOptions&gt;(o =&gt; o.Validate())</c>
+    /// in Worker/Program.cs.
+    /// </summary>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ProvisioningArtifactsContainerUri))
+        {
+            throw new InvalidOperationException(
+                "SolutionImportOptions:ProvisioningArtifactsContainerUri is required — " +
+                "DataverseWebApiSolutionImporter cannot resolve the 8 solution ZIPs as versioned " +
+                "artifacts without it. Set the app-setting to the provisioning-artifacts storage " +
+                "account (same container task 116/117/132 publish to — live-ceremony backlog item #4).");
+        }
+        if (string.IsNullOrWhiteSpace(SolutionArtifactManifestBlobName))
+        {
+            throw new InvalidOperationException("SolutionImportOptions:SolutionArtifactManifestBlobName is required.");
+        }
+    }
 }

@@ -3,8 +3,8 @@
   <metadata>
     <title>H6: Web-API import port (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging</title>
     <phase>C'' Wave G-4 -- Dataverse chain</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Named explicitly in the parent task instructions' xhigh-effort exception list: 'complex-but-fully-specified... H6 heavy port'. Longest-running handler per DS-2b (30-60 min) -- dispatcher lock-renewal sizing case.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,20 @@
   </acceptance-criteria>
 
   <notes>Justification (CLAUDE.md §11): Existing -- Deploy-DataverseSolutions.ps1 already implements the correct, shipped 8-solution dependency order and retry semantics; nothing to re-derive. Extension -- porting the proven ordering/retry logic to Web API calls, with artifact packaging (owed under every option per DS-1b) as the one genuinely new piece, is the minimal correct move. Cost-of-doing-nothing -- H6 cannot execute under Option D's zero-shell main site, AND its credential is currently unprovisioned (Program.cs:440-443's deferred wiring) meaning it cannot authenticate even where it could otherwise run -- the entire Dataverse solution layer (H7/H10/H11/H12x depend on these solutions existing) stays permanently unreachable.</notes>
+
+  <notes-completion>
+COMPLETE (2026-08-20). New: DataverseWebApiSolutionImporter.cs (ISolutionImporter -- Dataverse Web API ImportSolution/StageAndUpgrade actions + importjobs polling, resolving the 8 solution ZIPs from a versioned blob-artifact manifest in the `provisioning-artifacts` container rather than a local filesystem path) + DataverseWebApiSolutionVerifier.cs (ISolutionVerifier -- trivial GET /solutions?$select=uniquename,version,solutionid). Retired (kept on disk, unregistered, retirement banners): DeployDataverseSolutionsScriptImporter.cs / PacCliSolutionVerifier.cs. ISolutionCatalog (CanonicalSolutionCatalog) UNCHANGED -- now the runtime ordering authority the new importer reads directly (already verified byte-for-byte equivalent to the PS script's $SolutionImportOrder by the existing catalog-mirror test).
+
+Web API shapes ground-truthed via WebFetch against Microsoft Learn (not guessed): ImportSolution/StageAndUpgrade share OverwriteUnmanagedCustomizations/PublishWorkflows/CustomizationFile(base64)/ImportJobId(client-generated GUID)/SkipProductUpdateDependencies; StageAndUpgrade can be invoked directly with CustomizationFile populated (no separate StageSolution round-trip required). Deviation from the dispatch context's "poll /asyncoperations" framing (documented, not silent): polls importjobs({ImportJobId}) using the client-generated GUID directly -- deterministic, no Location-header parsing needed; completedon non-null is the terminal signal (populated exactly when the underlying asyncoperation reaches statecode 3/Completed -- the dispatch context's "statecode 0/3" framing conflated Ready [pre-run] with a terminal state, corrected here). importjobs.data (XML, schema not fully documented by Microsoft) is defensively parsed for result="failure"/"warning" nodes -- an unparseable/empty data field is treated as a provisional success WHOSE diagnostic says so explicitly (never silently swallowed), with the separate DataverseWebApiSolutionVerifier's independent post-import GET as defense-in-depth.
+
+Two intentionally distinct credentials: ClientSecretCredential (BFF app-reg, task 142's H7 precedent -- KV-sourced, zero new S2S secret) for the customer-Dataverse-env Web API calls; the shared L2 UAMI TokenCredential singleton (ADR-028 MI-outbound) for the provisioning-artifacts blob container. Live-ceremony gap documented (not a defect of this task): no CI workflow yet publishes the solution-artifact manifest/ZIPs to blob storage -- SolutionImportOptions.Validate() fails fast at boot if the container URI is unset (NFR-05 parity); a live E2E run additionally needs that CI step + the provisioning-artifacts storage account (existing backlog item #4).
+
+Grep-collision self-catch: initial doc-comment drafts of both new files literally contained "pac solution import"/"pac solution list" (describing what was replaced) -- would have failed the POML's own literal `grep 'pac solution\|ProcessStartInfo'` acceptance criterion. Reworded before the grep was re-run; verified 0 matches.
+
+Tests: 968 -> **1003/1003** (+35 this task on top of sibling task 143's own concurrent +3 landing [965->968] -- zero regressions from either task. New: DataverseWebApiSolutionImporterTests [~28 facts/theories incl. ImportJob failure-parsing -- EvaluateImportJobData: explicit failure/warning-only/clean-success/empty-data/unparseable-XML -- a real TimeProvider.System polling-timeout test, PartialImport-vs-first-solution-not-promoted distinction, per-tier verification gate, manifest/blob 404 paths, ClassifyHttpFailure theory, TryReadSolutionVersionFromZip] + DataverseWebApiSolutionVerifierTests [7 facts]). `dotnet build` 0 errors/0 warnings across Core/Worker/Tests. One bonus catch during Step 9.5 prep: the new SolutionImportOptions.PostConfigure(Validate) broke HandlerRegistrationCompletenessTests's WorkerTestFactory (task 103's all-19-handlers-resolve DI sweep) -- fixed by adding the same UseSetting convention task 122/123/132/142 already established for their own Validate() additions.
+
+Step 9.5 (self-conducted code-review + adr-check, FULL rigor mandatory): 0 Critical, 0 blocking Warnings. code-review: 2 minor Suggestions (5 ctor params on the importer; ImportAsync orchestration length) both precedent-matching (BapRestEnvironmentCreator), no action needed. adr-check: 1 Warning noted for the record -- ClientSecretCredential (not MI) for the customer-Dataverse-env auth is the SAME pre-existing pattern H7/task 142 already established (DAG-ordering constraint: H10, which creates the MI-Dataverse-App-User, runs after H6/H7) -- not a new deviation, no fresh Path A/B/C escalation required.
+  </notes-completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -64,11 +64,20 @@ public interface ISolutionVerifier
 /// <param name="TenantId">Entra tenant id (§4D I1).</param>
 /// <param name="ClientId">BFF Entra app registration id.</param>
 /// <param name="ExpectedCatalog">The 8 authoritative solutions the verifier must confirm are installed.</param>
+/// <param name="ClientSecret">
+/// Resolved BFF app-reg client secret. NEVER logged. Added by task 141 (Wave
+/// G-4) for <see cref="DataverseWebApiSolutionVerifier"/> — unlike the retired
+/// PacCliSolutionVerifier (which reused the importer's already-created pac
+/// auth profile), the stateless Web API verifier acquires its OWN bearer
+/// token via <c>Azure.Identity.ClientSecretCredential</c> and therefore needs
+/// this value independently.
+/// </param>
 public sealed record SolutionVerificationRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
-    ImmutableArray<CanonicalSolutionEntry> ExpectedCatalog);
+    ImmutableArray<CanonicalSolutionEntry> ExpectedCatalog,
+    string ClientSecret);
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionVerifier.VerifyAsync"/>.

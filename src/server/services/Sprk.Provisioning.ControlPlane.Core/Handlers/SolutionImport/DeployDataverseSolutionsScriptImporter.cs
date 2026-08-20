@@ -1,6 +1,26 @@
 // -----------------------------------------------------------------------------
 // DeployDataverseSolutionsScriptImporter.cs
 //
+// *** RETIRED (task 141, Wave G-4, Option D hybrid, 2026-08-20) ***
+// No longer registered in Worker/Program.cs — superseded by
+// DataverseWebApiSolutionImporter.cs (pure HttpClient + ClientSecretCredential
+// port of this class's pwsh shell-out, calling Dataverse Web API
+// ImportSolution / StageAndUpgrade actions + polling the importjobs entity,
+// instead of shelling out to scripts/Deploy-DataverseSolutions.ps1). Kept on
+// disk UNREGISTERED per the Wave G-2/G-3/G-4 retirement convention (parity
+// with PacAdminDataverseEnvCreator, AzCliKvSecretsWriter, etc.) — this class
+// is a shell-out (pwsh + Deploy-DataverseSolutions.ps1) and Option D's entire
+// point is deleting the pwsh/az/pac dependency from the L2 runtime.
+// ClassifyOutput remains unit-tested (H6SolutionImportHandlerTests T26) as a
+// historical reference for the PS-script-era failure taxonomy this class
+// implemented; it is NOT reachable from any production code path. The
+// dependency-tier ORDER this class relied on the PS script for is now sourced
+// directly from ISolutionCatalog (CanonicalSolutionCatalog) by the new
+// importer — CanonicalSolutionCatalog was already verified byte-for-byte
+// equivalent to the PS script's $SolutionImportOrder by the existing
+// H6SolutionImportHandlerTests catalog-mirror test, so the ordering invariant
+// is preserved even though the PS script itself is no longer invoked.
+//
 // Production <see cref="ISolutionImporter"/> — shells out to
 // <c>scripts/Deploy-DataverseSolutions.ps1</c> (task 012 wave 0 hardened
 // Package Deployer wrapper). The PS script's <c>$SolutionImportOrder</c>

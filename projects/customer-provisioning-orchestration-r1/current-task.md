@@ -1,8 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 143 COMPLETE — H10 live verification post C5.8 grants. Live-verified 3 of 5 REST/Graph seams fully end-to-end [T2 DataverseWebApiAppUserVerifier + T3 GraphRestAppRoleParityVerifier, both fully read-only]; live-verified the READ components of the remaining 2 [DataverseWebApiAppUserCreator, GraphRestAppRoleGranter] via direct REST against spaarkedev1 + real Microsoft Graph; WRITE components deferred to live-ceremony [C5.8/task 111 not yet live-executed]. **BONUS CATCH**: found + fixed a genuine wrong-but-non-null AppRoleId GUID in GraphAppRoles.cs [GroupMember.ReadWrite.All — last 4 hex chars `6571` should be `6695`] by cross-checking all 14 catalog entries against the REAL Microsoft Graph resource SP's own appRoles collection — the exact failure class the T3 trap's own diagnostic warns about, undetectable by the pre-existing null-GUID escalation gate or by task 067's own (never-live-run) parity test. Fixed in GraphAppRoles.cs + L2GraphAppRolesRegistry.cs mirror; new regression-guard test added to NightlyTests project. Also self-caught + fixed a vacuous-pass risk in my OWN new smoke tests mid-authoring: DefaultAzureCredential fails via ManagedIdentityCredential's IMDS-unreachable AuthenticationFailedException in this sandbox [confirmed: throws before reaching AzureCliCredential, ~27s], and the production T2/T3 collaborators swallow that exception internally, returning a business-shaped-but-fake result with only a LogWarning as the tell — added a CapturingLogger<T> helper so the tests soft-skip on credential-only failures instead of silently passing on a swallowed exception. L2 tests: 965 -> **968/968** [+3, zero regressions]. Full evidence: notes/h10-live-verification-2026-08.md. Batch G-4B: 143 done, 141 [H6, xhigh] still in flight from sibling agent at task-completion time.)
+> **Last Updated**: 2026-08-20 (Task 141 COMPLETE — H6 Web-API import port. `DataverseWebApiSolutionImporter.cs` [ISolutionImporter — Dataverse Web API ImportSolution/StageAndUpgrade actions + importjobs polling, resolving the 8 solution ZIPs from a versioned blob-artifact manifest in the `provisioning-artifacts` container] + `DataverseWebApiSolutionVerifier.cs` [ISolutionVerifier — trivial GET /solutions?$select=uniquename,version,solutionid] replace the retired DeployDataverseSolutionsScriptImporter/PacCliSolutionVerifier shell-outs. Web API shapes ground-truthed via WebFetch against Microsoft Learn (not guessed). Documented deviation from the dispatch context's "poll /asyncoperations" framing: polls importjobs({ImportJobId}) using the client-generated GUID directly (deterministic, no Location-header parsing needed) — completedon non-null is the terminal signal. importjobs.data (XML) defensively parsed for result="failure"/"warning" nodes; unparseable/empty data is a provisional success whose diagnostic says so explicitly (never silently swallowed) — the separate verifier's independent GET is defense-in-depth. Two intentionally distinct credentials: ClientSecretCredential (BFF app-reg, task 142's H7 precedent) for the customer-Dataverse-env calls; the shared L2 UAMI TokenCredential for the artifacts blob container. Live-ceremony gap documented (no CI workflow yet publishes the solution-artifact manifest — SolutionImportOptions.Validate() fails fast at boot if unset). Grep-collision self-catch: initial doc-comment drafts literally contained "pac solution import"/"pac solution list" — reworded before the grep was re-run. L2 tests: 968 -> **1003/1003** [+35 this task, zero regressions]. Batch G-4B now FULLY COMPLETE (141 + 143 both done); Batch G-4C (144, H11 verify) unblocked.)
 >
-> **Previous** (2026-08-20, Task 140 COMPLETE — H5 BAP-REST env-create + async-operation-polling port. `BapRestEnvironmentCreator.cs` [pure HttpClient + DefaultAzureCredential] replaces the retired `PacAdminDataverseEnvCreator` shell-out, porting Provision-Customer.ps1 STEP 5/6's create+poll sequence exactly. Ground-truthed a real discrepancy between the script and this project's OWN task-120 BAP-REST precedent [provider namespace + token audience] via live WebSearch — resolved in favor of task 120's already-verified values. Bonus correctness catch: added an idempotent existing-environment check the original pac-CLI creator never had, closing a resume-after-partial-success domain-conflict trap. Two new failure classifications (DomainAlreadyExists, ProvisioningFailed) threaded through the full failure-mapping chain. L2 tests: 938 -> **965/965** [+19 this task, +8 concurrent sibling task 142, zero regressions]. Batch G-4A now fully complete pending sibling 142's own landing; Batch G-4B [141+143] unblocked.)
+> **Previous** (2026-08-20, Task 143 COMPLETE — H10 live verification post C5.8 grants. Live-verified 3 of 5 REST/Graph seams fully end-to-end [T2 DataverseWebApiAppUserVerifier + T3 GraphRestAppRoleParityVerifier, both fully read-only]; live-verified the READ components of the remaining 2 [DataverseWebApiAppUserCreator, GraphRestAppRoleGranter] via direct REST against spaarkedev1 + real Microsoft Graph; WRITE components deferred to live-ceremony [C5.8/task 111 not yet live-executed]. **BONUS CATCH**: found + fixed a genuine wrong-but-non-null AppRoleId GUID in GraphAppRoles.cs [GroupMember.ReadWrite.All — last 4 hex chars `6571` should be `6695`] by cross-checking all 14 catalog entries against the REAL Microsoft Graph resource SP's own appRoles collection. L2 tests: 965 -> **968/968** [+3, zero regressions]. Full evidence: notes/h10-live-verification-2026-08.md.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-4..G-7 remain. Wave G-2.5 (customer.bicep completion) is fully closed. Wave G-3 (130/131/132) is now FULLY COMPLETE.)
@@ -21,16 +21,83 @@
 - 140: ✅ COMPLETE — H5 BAP-REST env-create + async-operation-polling port (deps 102/103/123 — all done). See "Task 140 — COMPLETE" section below.
 - 142: ✅ COMPLETE — H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done). See "Task 142 — COMPLETE" section below.
 
-**Batch G-4B** (after 140 lands): 141 + 143 — parallel
-- 141: H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging (xhigh — needs deep SDK ground-truthing) — in flight (sibling agent) at the time task 143 completed
+**Batch G-4B** (after 140 lands): 141 + 143 — BOTH COMPLETE, Batch G-4B closed
+- 141: ✅ COMPLETE — H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging. See "Task 141 — COMPLETE" section below.
 - 143: ✅ COMPLETE — H10 live verification post C5.8 grants (5 REST/Graph seams; code already real — verification-focused task). See "Task 143 — COMPLETE" section below.
 
-**Batch G-4C** (after 143 lands): 144 alone — now unblocked (143 done)
+**Batch G-4C** (after 141 + 143 land): 144 alone — now unblocked
 - 144: H11 live verification (Graph REST + B2B invitation + consent verifier; code already real)
 
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
 
 ---
+
+## Task 141 — COMPLETE (2026-08-20)
+
+H6 Web-API import port. New `Handlers/SolutionImport/DataverseWebApiSolutionImporter.cs` (implements `ISolutionImporter` —
+Dataverse Web API `ImportSolution`/`StageAndUpgrade` actions + `importjobs` polling; resolves the 8 solution ZIPs from a
+versioned blob-artifact manifest in the `provisioning-artifacts` container rather than a local filesystem path — the
+DS-1b §1 H6 invariant) + `DataverseWebApiSolutionVerifier.cs` (implements `ISolutionVerifier` — trivial GET
+`/solutions?$select=uniquename,version,solutionid`). Retired (kept on disk, unregistered, retirement banners):
+`DeployDataverseSolutionsScriptImporter.cs` / `PacCliSolutionVerifier.cs`. `ISolutionCatalog`
+(`CanonicalSolutionCatalog`) is UNCHANGED and is now the runtime ordering authority the new importer reads directly —
+it was already verified byte-for-byte equivalent to the PS script's `$SolutionImportOrder` by the pre-existing
+catalog-mirror test, so the "port the order verbatim" constraint holds even though the PS script itself is no longer
+invoked.
+
+**Web API shapes ground-truthed via WebFetch against Microsoft Learn** (not guessed, per Wave G discipline):
+`ImportSolution`/`StageAndUpgrade` share `OverwriteUnmanagedCustomizations`/`PublishWorkflows`/`CustomizationFile`
+(base64)/`ImportJobId` (client-generated GUID)/`SkipProductUpdateDependencies`; `StageAndUpgrade` can be invoked
+directly with `CustomizationFile` populated (no separate `StageSolution` round-trip needed). The importer maps the
+retired PS script's own `Import-ManagedSolution` branch (existing solution + Auto/Upgrade mode → stage-and-upgrade;
+else plain import) onto: existing solution → `StageAndUpgrade` action; absent → `ImportSolution` action — a literal
+1:1 port of that branch, and a faithful mapping of the POML's "ImportSolution + StageAndUpgrade" framing onto two
+distinct action calls.
+
+**Documented deviation from the dispatch context's "poll /asyncoperations" framing** (not silent — same discipline
+task 140 used for its own ground-truthed deviation): this importer polls `importjobs({ImportJobId})` using the
+client-generated GUID directly, never touching `asyncoperations` or a `Location` header — `ImportJobId` is
+deterministic and known before the POST is even sent, so it needs no header parsing or `AsyncOperationId` discovery.
+`completedon` (non-null) is the terminal signal; the dispatch context's "statecode 0/3" framing conflated `Ready`
+(Dataverse's pre-run state) with a terminal one — corrected in the file header for future auditors. `importjobs.data`
+(XML, schema not published in a single canonical Microsoft Learn page) is defensively parsed for
+`result="failure"`/`"warning"` nodes; an unparseable/empty `data` field is treated as a **provisional** success whose
+diagnostic explicitly says so (never silently swallowed) — the separate `DataverseWebApiSolutionVerifier`'s
+independent post-import GET (called by the handler immediately after) is the defense-in-depth for that ambiguity.
+
+**Two intentionally distinct credentials**: `ClientSecretCredential` (BFF app-reg ClientId/ClientSecret — task 142's
+H7 precedent, KV-sourced, zero new S2S secret) for the customer-Dataverse-env Web API calls; the shared L2 UAMI
+`TokenCredential` singleton (ADR-028 MI-outbound) for the `provisioning-artifacts` blob container. **Live-ceremony
+gap** (documented, not a defect of this task): no CI workflow yet publishes the solution-artifact manifest
+(`dataverse-solutions-latest.json`) or the 8 solution ZIPs to blob storage — `SolutionImportOptions.Validate()` fails
+fast at boot if the container URI is unset (NFR-05 parity); a live E2E run additionally needs a new CI publish step
++ the provisioning-artifacts storage account (existing backlog item #4). This handler is fully buildable/unit-testable
+today via fake-transport tests.
+
+**Grep-collision self-catch** (same anti-pattern class task 127/130/140 caught): initial doc-comment drafts of both
+new files literally contained "pac solution import"/"pac solution list" (describing what was replaced) — would have
+failed the POML's own literal `grep 'pac solution\|ProcessStartInfo'` acceptance criterion. Reworded before the grep
+was re-run; verified 0 matches.
+
+**Bonus catch during Step 9.5 prep**: the new `SolutionImportOptions.PostConfigure(Validate)` broke
+`HandlerRegistrationCompletenessTests`'s `WorkerTestFactory` (task 103's all-19-handlers-resolve DI sweep) — fixed by
+adding the same `UseSetting` convention tasks 122/123/132/142 already established for their own `Validate()` additions.
+
+Tests: 968 → **1003/1003** (+35 this task on top of sibling task 143's own concurrent +3 landing — zero regressions
+from either task). New: `DataverseWebApiSolutionImporterTests` (~28 facts/theories incl. ImportJob failure-parsing —
+`EvaluateImportJobData`: explicit failure/warning-only/clean-success/empty-data/unparseable-XML — a real
+`TimeProvider.System` polling-timeout test, PartialImport-vs-first-solution-not-promoted distinction, per-tier
+verification gate, manifest/blob 404 paths, `ClassifyHttpFailure` theory, `TryReadSolutionVersionFromZip`) +
+`DataverseWebApiSolutionVerifierTests` (7 facts). `dotnet build` 0 errors/0 warnings across Core/Worker/Tests. Step 9.5
+(self-conducted code-review + adr-check, FULL rigor mandatory): 0 Critical, 0 blocking Warnings. code-review: 2 minor
+Suggestions (5 ctor params on the importer; `ImportAsync` orchestration length) both precedent-matching
+(`BapRestEnvironmentCreator`), no action needed. adr-check: 1 Warning noted for the record — `ClientSecretCredential`
+(not MI) for the customer-Dataverse-env auth is the SAME pre-existing pattern H7/task 142 already established
+(DAG-ordering: H10, which creates the MI-Dataverse-App-User, runs after H6/H7) — not a new deviation, no fresh Path
+A/B/C escalation required.
+
+No coordination needed with sibling task 143 (H10 verify) — zero file overlap confirmed (different handler folders,
+disjoint Worker/Program.cs insertion points; git status showed a clean, expected diff scope throughout).
 
 ## Task 143 — COMPLETE (2026-08-20)
 
@@ -302,8 +369,8 @@ Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modu
 | **Wave G-1 status** | ✅ 100% COMPLETE — 17 tasks + governance + auth-v4 coord = 20 substantive commits |
 | **Wave G-2 status** | ✅ 100% COMPLETE — 7 tasks + 1 fix-at-discovery = 8 commits (120/121/122/123/124/125/126 + bicepparam fix). L2 tests: 787 → **903/903** (+116 new, zero regressions). Zero Step 9.5 findings across the wave. |
 | **Wave G-3 status** | ✅ 100% COMPLETE — task 130 (H3) + task 131 (H8) + task 132 (H9) all landed. L2 tests at 938/938. |
-| **Wave G-4 status** | Batch G-4A ✅ COMPLETE (140 H5 + 142 H7). Batch G-4B: 143 (H10 verify) ✅ COMPLETE; 141 (H6) in flight (sibling agent). L2 tests at 968/968. Batch G-4C (144, H11 verify) now unblocked pending 141. |
-| **Next decision** | Await 141 (H6) landing, then dispatch 144 (H11 live verification, Batch G-4C). |
+| **Wave G-4 status** | Batch G-4A ✅ COMPLETE (140 H5 + 142 H7). Batch G-4B ✅ COMPLETE (141 H6 + 143 H10 verify). L2 tests at 1003/1003. Batch G-4C (144, H11 verify) now unblocked. |
+| **Next decision** | Dispatch 144 (H11 live verification, Batch G-4C — final task of Wave G-4). |
 | **Live-ceremony backlog** | 8 items now (originally 7 + BAP admin REST verification from task 120); item #4 (provisioning-artifacts storage account) is now ALSO a hard dependency for task 132's H9 to run live, not just tasks 116/117's CI publish. |
 | **NEW work items surfaced** | 2 customer.bicep gaps (see § New Work Items below) — both now resolved (see task 128/128b/129 entries) |
 | **Status** | Fully clean checkpoint — working tree empty, all commits pushed |

@@ -1,6 +1,16 @@
 // -----------------------------------------------------------------------------
 // PacCliSolutionVerifier.cs
 //
+// *** RETIRED (task 141, Wave G-4, Option D hybrid, 2026-08-20) ***
+// No longer registered in Worker/Program.cs — superseded by
+// DataverseWebApiSolutionVerifier.cs (a trivial pure-HttpClient GET
+// /api/data/v9.2/solutions?$select=uniquename,version, replacing this class's
+// `pac solution list` shell-out). Kept on disk UNREGISTERED per the Wave
+// G-2/G-3/G-4 retirement convention. ParseListOutput remains unit-tested
+// (H6SolutionImportHandlerTests T27) as a historical reference for the pac-
+// CLI-era tabular-output parsing this class implemented; it is NOT reachable
+// from any production code path.
+//
 // Production <see cref="ISolutionVerifier"/> implementation — shells out to
 // `pac solution list --environment {envUrl}` and parses the tabular text
 // output for the 8 authoritative solution unique-names + installed versions
