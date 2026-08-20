@@ -50,11 +50,30 @@
 //       ?$filter=sprk_tenantid eq '{tenantId-escaped}'
 //       &$select=sprk_dataverseenvironmentid,sprk_customerid,sprk_tenantid,sprk_setupstatus,sprk_currentrunid
 //       &$top=1
+//     Response ships `sprk_setupstatus` as an INTEGER (Dataverse choice
+//     option-set value). ParseSnapshot maps the integer back to the display-
+//     name string the higher-level SetupStatus contract exposes (H0.5's
+//     NoOpStatuses / RestartStatuses HashSets compare against the display-
+//     name form).
 //
 //   WRITE (UpdateSetupStatusAsync):
 //     PATCH /api/data/v9.2/{entitySet}({environmentId})
 //       Body:
-//         { "sprk_setupstatus": "Ready", "sprk_currentrunid": null }
+//         { "sprk_setupstatus": 2, "sprk_currentrunid": null }
+//         — sprk_setupstatus is a Dataverse CHOICE (option-set) and MUST be
+//           sent as an INTEGER, NOT a string. Sending "Ready" as a JSON
+//           string yields a 400 "Property 'sprk_setupstatus' is not a valid
+//           column" — the exact silent-fail that gated task 184's ability
+//           to actually land Ready. Mapping table (verified via Dataverse
+//           MCP describe against admin env spaarkedev1, 2026-08-20):
+//              NotStarted  = 0
+//              InProgress  = 1
+//              Ready       = 2   (H13 green-path terminal value)
+//              Issue       = 3
+//           BuildPatchBody accepts the display-name string (preserves the
+//           RegistrySetupStatusUpdate contract H0.5 shares) and maps to the
+//           option-set integer on the wire; unknown display names throw
+//           (fail-loud rather than silently PATCH garbage).
 //         — the sprk_currentrunid property is INCLUDED-AS-NULL only when
 //           `ClearCurrentRunId=true` (H13 green-path). Otherwise omitted.
 //       Prefer: return=minimal
@@ -329,13 +348,22 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
 
     // Public for test coverage of the request-shape builder as a pure function
     // (ADR-038 KEEP: pure-function tests avoid HttpMessageHandler mocks).
+    //
+    // WIRE SHAPE (task 184 correctness fix, 2026-08-20): sprk_setupstatus is
+    // a Dataverse CHOICE (option-set integer) — writing it as a JSON string
+    // yields 400 from the Web API. BuildPatchBody accepts the display-name
+    // string form (preserves RegistrySetupStatusUpdate.SetupStatus contract
+    // shared with H0.5) and maps to the option-set integer here. Unknown
+    // display names throw so a caller cannot silently PATCH garbage. See
+    // MapDisplayNameToOptionSet for the verified integer mapping.
     internal static string BuildPatchBody(string setupStatus, bool clearCurrentRunId)
     {
+        var optionSetValue = MapDisplayNameToOptionSet(setupStatus);
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString(SetupStatusColumn, setupStatus);
+            writer.WriteNumber(SetupStatusColumn, optionSetValue);
             if (clearCurrentRunId)
             {
                 writer.WriteNull(CurrentRunIdColumn);
@@ -347,15 +375,86 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
 
     // Extracts a snapshot from a row JsonElement. Null-column projection
     // convention: missing property == null value.
+    //
+    // sprk_setupstatus is a Dataverse CHOICE (option-set integer) — the raw
+    // Web API response ships it as a JSON number. The higher-level SetupStatus
+    // contract (H0.5's NoOpStatuses / RestartStatuses HashSets) compares
+    // against the display-name string form, so ParseSnapshot maps the option-
+    // set integer back to the display name for continuity with H0.5's existing
+    // decision logic. Unknown option-set values map to the raw integer as a
+    // string (e.g. "42") — surfaces a "unmapped status" branch in H0.5 rather
+    // than silently coercing to a known value.
     internal static DataverseEnvironmentRegistrySnapshot ParseSnapshot(JsonElement row)
     {
         var environmentId = ReadRequiredString(row, EnvironmentRowIdColumn);
         var customerId = ReadRequiredString(row, CustomerIdColumn);
         var tenantId = ReadRequiredString(row, TenantIdColumn);
-        var setupStatus = ReadOptionalString(row, SetupStatusColumn) ?? string.Empty;
+        var setupStatus = ReadSetupStatusAsDisplayName(row) ?? string.Empty;
         var currentRunId = ReadOptionalString(row, CurrentRunIdColumn);
         return new DataverseEnvironmentRegistrySnapshot(
             environmentId, customerId, tenantId, setupStatus, currentRunId);
+    }
+
+    // Maps a display-name string (as used by RegistrySetupStatusUpdate.SetupStatus
+    // and H0.5's NoOpStatuses / RestartStatuses) to the Dataverse choice
+    // option-set integer for sprk_setupstatus. Verified against admin env
+    // sprk_dataverseenvironment schema via Dataverse MCP describe (2026-08-20):
+    //   NotStarted = 0, InProgress = 1, Ready = 2, Issue = 3.
+    // Case-insensitive to survive minor differences in caller casing (H0.5
+    // uses OrdinalIgnoreCase). Throws for unknown display names — task 184
+    // silent-fail guard: PATCHing an unknown-integer would silently corrupt
+    // the row (Dataverse accepts arbitrary integers on a choice write and
+    // returns 204 No Content).
+    internal static int MapDisplayNameToOptionSet(string displayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        if (string.Equals(displayName, "NotStarted", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(displayName, "Not Started", StringComparison.OrdinalIgnoreCase))
+            return 0;
+        if (string.Equals(displayName, "InProgress", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(displayName, "In Progress", StringComparison.OrdinalIgnoreCase))
+            return 1;
+        if (string.Equals(displayName, "Ready", StringComparison.OrdinalIgnoreCase))
+            return 2;
+        if (string.Equals(displayName, "Issue", StringComparison.OrdinalIgnoreCase))
+            return 3;
+        throw new InvalidOperationException(
+            $"Unknown sprk_setupstatus display name '{displayName}'. " +
+            "Dataverse choice supports: NotStarted (0), InProgress (1), Ready (2), Issue (3). " +
+            "Update DataverseEnvironmentRegistryClient.MapDisplayNameToOptionSet if the schema changes.");
+    }
+
+    // Reverse of MapDisplayNameToOptionSet — maps the Dataverse choice option-
+    // set integer back to a display-name string for callers comparing against
+    // the display-name form (H0.5). Absent property yields null (H0.5 first-
+    // consent path); unknown integer yields the integer as a string (surfaces
+    // the "unmapped status" WARN branch rather than silently coercing).
+    private static string? ReadSetupStatusAsDisplayName(JsonElement row)
+    {
+        if (!row.TryGetProperty(SetupStatusColumn, out var prop))
+        {
+            return null;
+        }
+        // Dataverse ships choice as a JSON number. If a payload variant ever
+        // ships it as a string (SDK-shaped stub, hand-crafted response), fall
+        // through to the string reader.
+        if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out var raw))
+        {
+            return raw switch
+            {
+                0 => "NotStarted",
+                1 => "InProgress",
+                2 => "Ready",
+                3 => "Issue",
+                _ => raw.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            };
+        }
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            var s = prop.GetString();
+            return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+        return null;
     }
 
     private static string ReadRequiredString(JsonElement row, string column)

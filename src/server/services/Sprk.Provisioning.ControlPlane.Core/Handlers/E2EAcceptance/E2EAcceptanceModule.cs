@@ -150,7 +150,14 @@ public static class E2EAcceptanceModule
         // -- the shared UAMI-pinned TokenCredential singleton is reused).
         // Registration remains UNCONDITIONAL (ADR-032).
         services.AddSingleton<ICostEnvelopeChecker, ArmCostEnvelopeChecker>();
-        services.AddSingleton<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();
+        // Task 184 (Wave G-7 Batch G-7C): real Ready writer. Delegates to task
+        // 112's IDataverseEnvironmentRegistryClient (registered SCOPED by
+        // AddDataverseEnvironmentRegistry). Registered SCOPED to avoid
+        // singleton-consuming-scoped captive-dependency at DI resolution
+        // (parity with the H13 handler itself). The Wave-C4 placeholder was
+        // Singleton because it took no dependencies beyond ILogger; now that
+        // it delegates to a scoped registry client the lifetime must widen.
+        services.AddScoped<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();
 
         services.AddScoped<H13E2EAcceptanceGateHandler>();
 
