@@ -170,6 +170,34 @@ All of Wave G-4 (140, 141, 142, 143, 144) has landed. L2 tests: 903 (Wave G-3 ba
 across the full wave. Zero code-review criticals, zero unresolved ADR violations across all 5 commits.
 Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 
+## 🎯 Wave G-6 Dispatch Plan (unblocked 2026-08-20 after Wave G-5 close)
+
+**Dependency DAG for Wave G-6 (3 tasks, sequential chain)**:
+```
+160 (H14 KV-reader swap, FULL/high, deps 125+153) ─→ 161 (H14a sidecar client, OPUS/high, deps 114+160) ─→ 162 (sidecar live verify, OPUS/high, deps 101+113+114+161)
+```
+
+No parallelism possible — linear chain. All 3 depend transitively on each prior.
+
+**Batch G-6A**: task 160 alone (H14 KV-reader swap; sonnet tier)
+**Batch G-6B**: task 161 alone (H14a sidecar client wiring; **OPUS tier** — main-session Opus 4.7 dispatches Opus subagent)
+**Batch G-6C**: task 162 alone (sidecar live verify against dev L2 Worker; **OPUS tier**; live-ceremony-aware — may defer live check if credentials unavailable)
+
+---
+
+## Wave G-5 Tally (100% COMPLETE 2026-08-20)
+
+| Task | Commit | Handler | Δ tests | Notable |
+|---|---|---|---|---|
+| 151 | `9cfb0ec61` | H12b DataGrid + workspace-layout ports | +19 → 1024 | Post-H10 auth insight (`DefaultAzureCredential` not `ClientSecretCredential`); cross-agent SendMessage validated |
+| 150 | `99c0a5a0e` | H12a YamlDotNet + DV-REST seed writes | +20 → 1044 | ADR-039 Path A (4 of 12 artifacts direct-seeded); embedded-resource manifest at build-time; T3 same-shape-as-H12c test; **fixed sibling 151's flagged 3 pre-existing failures** |
+| 152 | `9bcf53c5f` | H12b field-mapping + chart-def greenfield seeders | +17 → 1061 | **FR-16 fully closed** (all 4 scopes now real DV-REST seeders); Dataverse MCP used for live schema ground-truthing; live-data-inconsistency flagged on spaarkedev1 |
+| 153 | `f44cc746b` | H12c credential config (STANDARD, no code delta) | +6 → 1067 | Investigated-before-implementing (POML framing wrong — H12c uses UAMI not ClientSecret); **major silent-fail catch: SharedPlatformOpenAiEndpoint zero Bicep wiring** (Model1 would silent-fail forever); conditional NFR-05 (bounds-check only Model2-required fields) |
+
+L2 tests: **1005 → 1067/1067** (+62 across Wave G-5). Zero code-review criticals, zero ADR violations. FR-16 closed. Silent-fail-at-runtime defects caught across Waves G-4+G-5: **4 total** (wrong AppRoleId GUID; missing User.Invite.All role; SectionName drift; SharedPlatformOpenAiEndpoint zero Bicep wiring).
+
+---
+
 ## 🎯 Wave G-5 Dispatch Plan (unblocked 2026-08-20 after Wave G-4 close)
 
 **Dependency DAG for Wave G-5 (4 tasks 150-153)**:
