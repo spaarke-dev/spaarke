@@ -112,6 +112,16 @@ public static class HandlersModule
             sp.GetRequiredService<TokenCredential>(),
             sp.GetRequiredService<ILogger<KeyVaultCertBootstrapProbe>>()));
 
+        // FR-34 version-compat matrix (Wave G-8 Batch 10, defect #24) —
+        // singleton: the parsed matrix is immutable per process lifetime
+        // (matrix edits ship with a release-tag → new deploy). Default source
+        // is the embedded version-compat-matrix.json; operators can override
+        // with an on-disk file via Preflight:VersionCompatMatrixPath (hotfix
+        // path — no rebuild). Queried by H0 in upgrade mode ONLY.
+        services.TryAddSingleton<IVersionCompatMatrix>(sp => new JsonFileVersionCompatMatrix(
+            configuration["Preflight:VersionCompatMatrixPath"],
+            sp.GetRequiredService<ILogger<JsonFileVersionCompatMatrix>>()));
+
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the
         // keyed IProvisioningHandler registration (below) factory-forwards

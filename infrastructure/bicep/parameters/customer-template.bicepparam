@@ -56,9 +56,15 @@ param location = 'westus2'
 // ============================================================================
 
 // Platform Key Vault name - from platform.bicep deployment outputs.
+// Canonical naming: sprk-{env}-kv (matches customer.bicep's own
+// `param platformKeyVaultName string = 'sprk-${environmentName}-kv'` default
+// per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md "KV-Secret &
+// Resource Naming Standard" R3 + spec.md §7.9 / FR-35, task-018). This
+// template's `environmentName` above is 'prod', so the value below MUST
+// track it — update BOTH if you change environmentName.
 // Get from: az deployment sub show -n platform-prod \
 //   --query properties.outputs.keyVaultName.value -o tsv
-param platformKeyVaultName = 'sprk-platform-prod-kv'
+param platformKeyVaultName = 'sprk-prod-kv'
 
 // ============================================================================
 // STORAGE

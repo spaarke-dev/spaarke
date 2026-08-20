@@ -374,6 +374,19 @@
                        Link="Handlers\AppConfigSeed\ChartDefs\%(Filename)%(Extension)">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ChartDefs.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+
+    <!-- Wave G-8 Batch 10 (FR-34 defect #24) — H0 upgrade-mode version-compat
+         matrix. Runtime JSON mirror of the authoritative human-maintained doc
+         docs/deployment/version-compatibility-matrix.md, queried by
+         JsonFileVersionCompatMatrix. Embedded (not CopyToOutput) per the same
+         publish-safety rationale as the seed-content entries above; an
+         operator can hot-override with an on-disk file via
+         Preflight:VersionCompatMatrixPath without rebuilding. OPS: append new
+         cells here in the SAME PR that updates the .md doc at each
+         release-tag milestone (doc §6 update cadence). -->
+    <EmbeddedResource Include="Handlers\Preflight\version-compat-matrix.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.Preflight.version-compat-matrix.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Expose internal seams to the L2 test project (parity with the pre-split

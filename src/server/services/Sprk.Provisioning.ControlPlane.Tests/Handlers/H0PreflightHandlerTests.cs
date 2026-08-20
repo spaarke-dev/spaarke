@@ -40,6 +40,20 @@
 //   T10 Idempotency key determinism: same customerId + parameters produce
 //                                    the same idempotency key regardless of
 //                                    dictionary insertion order.
+//
+//   FR-34 UPGRADE-MODE VERSION-COMPAT GATE (Wave G-8 Batch 10, defect #24):
+//   T11 Upgrade + Green verdict: matrix queried once with the correct
+//       current/target pairs; probes still fire; run succeeds.
+//   T12 Upgrade + Red verdict: Failure(Resumable, upgrade-compat-red) BEFORE
+//       any probe fires; Cosmos Failed + gate entry recorded; no enqueue.
+//   T13 Upgrade + Yellow verdict: run proceeds (Success) with a Pending
+//       `upgrade-compat-yellow` gate entry persisted on the success write.
+//   T14 Upgrade + missing version parameters: Failure(Resumable,
+//       upgrade-compat-missing-versions); matrix NOT queried; no probe fires.
+//   T15 Upgrade + matrix source fault (throws): Failure(Resumable,
+//       upgrade-compat-matrix-unavailable); no probe fires.
+//   (Non-upgrade runs implicitly assert the matrix is NEVER queried: the
+//   default matrix stub used by T1–T9 throws on any call.)
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;
@@ -75,7 +89,7 @@ public sealed class H0PreflightHandlerTests
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
         };
-        var handler = new H0PreflightHandler(repo, enqueuer, probes, NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -119,7 +133,7 @@ public sealed class H0PreflightHandlerTests
         var repo = new FakeRepository(run, etag: "etag-2");
         var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = new H0PreflightHandler(repo, enqueuer, probes, NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -139,7 +153,7 @@ public sealed class H0PreflightHandlerTests
         var repo = new FakeRepository(run, etag: "etag-3");
         var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = new H0PreflightHandler(repo, enqueuer, probes, NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -187,7 +201,7 @@ public sealed class H0PreflightHandlerTests
                 ? FakeProbe.Fail(PreflightCheckNames.SpeCertBootstrap, "SPE cert: secret 'spe-owner-cert-pfx' not found in vault spaarke-platform-kv")
                 : FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
         };
-        var handler = new H0PreflightHandler(repo, enqueuer, probes, NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -210,7 +224,7 @@ public sealed class H0PreflightHandlerTests
         var repo = new FakeRepository(run: null, etag: null);
         var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = new H0PreflightHandler(repo, enqueuer, probes, NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -229,8 +243,7 @@ public sealed class H0PreflightHandlerTests
         var run = BuildRunWithTenant();
         var repo = new FakeRepository(run, etag: "etag-5");
         var enqueuer = new FakeEnqueuer();
-        var handler = new H0PreflightHandler(
-            repo, enqueuer, Array.Empty<IPreflightQuotaProbe>(), NullLogger<H0PreflightHandler>.Instance);
+        var handler = CreateHandler(repo, enqueuer, Array.Empty<IPreflightQuotaProbe>());
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -267,7 +280,173 @@ public sealed class H0PreflightHandlerTests
         key1.Should().StartWith($"preflight-{CustomerId}-");
     }
 
+    // ---------- T11-T15 FR-34 upgrade-mode version-compat gate ----------
+
+    [Fact]
+    public async Task Upgrade_GreenVerdict_QueriesMatrixWithCorrectPairs_AndProceeds()
+    {
+        var run = BuildUpgradeRun();
+        var repo = new FakeRepository(run, etag: "etag-11");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var matrix = new FakeMatrix(VersionCompatVerdict.Green);
+        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        matrix.CallCount.Should().Be(1);
+        matrix.LastCurrent.Should().Be(new VersionPair("1.0.0-net10", "S2026.08"));
+        matrix.LastTarget.Should().Be(new VersionPair("1.1.0-net10", "S2026.09"));
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue("Green verdict does not block the probes");
+        enqueuer.Sent.Should().ContainSingle();
+        repo.LastWrittenRun!.GateStates.Should().NotContainKey(
+            H0PreflightHandler.UpgradeCompatYellowGateId, "Green records no operator-ACK gate");
+    }
+
+    [Fact]
+    public async Task Upgrade_RedVerdict_FailsFastBeforeAnyProbe_WithGateEntry()
+    {
+        var run = BuildUpgradeRun();
+        var repo = new FakeRepository(run, etag: "etag-12");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var matrix = new FakeMatrix(VersionCompatVerdict.Red, ucbClasses: new[] { "U-CB-1" });
+        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("upgrade-compat-red");
+        failure.Diagnostic.Should().Contain("stub-Red");
+
+        probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue("Red blocks BEFORE any quota probe fires");
+        enqueuer.Sent.Should().BeEmpty();
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain("upgrade-compat-red");
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-upgrade-compat-red");
+    }
+
+    [Fact]
+    public async Task Upgrade_YellowVerdict_ProceedsWithPendingOperatorAckGate()
+    {
+        var run = BuildUpgradeRun();
+        var repo = new FakeRepository(run, etag: "etag-13");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var matrix = new FakeMatrix(VersionCompatVerdict.Yellow, ucbClasses: new[] { "U-CB-3" });
+        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>("Yellow warns but does NOT block");
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
+        enqueuer.Sent.Should().ContainSingle();
+
+        // The operator-ACK obligation is persisted on the success write.
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
+        var gate = repo.LastWrittenRun.GateStates.Should()
+            .ContainKey(H0PreflightHandler.UpgradeCompatYellowGateId).WhoseValue;
+        gate.Status.Should().Be(GateState.Pending);
+        gate.VerifierHandler.Should().Be("H0");
+        gate.Evidence.Should().NotBeNull();
+        gate.Evidence!.Value.GetProperty("ucbClasses")[0].GetString().Should().Be("U-CB-3");
+        gate.Evidence.Value.GetProperty("targetBffVersion").GetString().Should().Be("1.1.0-net10");
+    }
+
+    [Fact]
+    public async Task Upgrade_MissingVersionParameters_FailsWithoutQueryingMatrixOrProbes()
+    {
+        var run = BuildUpgradeRun(includeVersions: false);
+        var repo = new FakeRepository(run, etag: "etag-14");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var matrix = new FakeMatrix(VersionCompatVerdict.Green);
+        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("upgrade-compat-missing-versions");
+        failure.Diagnostic.Should().Contain(H0PreflightHandler.CurrentBffVersionParameterKey)
+            .And.Contain(H0PreflightHandler.TargetSolutionVersionParameterKey);
+
+        matrix.CallCount.Should().Be(0, "cannot query the matrix without the version pairs");
+        probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-upgrade-compat-missing-versions");
+    }
+
+    [Fact]
+    public async Task Upgrade_MatrixSourceFault_FailsResumable_NoProbeFires()
+    {
+        var run = BuildUpgradeRun();
+        var repo = new FakeRepository(run, etag: "etag-15");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var matrix = new FakeMatrix(
+            VersionCompatVerdict.Green,
+            throws: new InvalidOperationException("matrix file corrupt"));
+        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("upgrade-compat-matrix-unavailable");
+        failure.Diagnostic.Should().Contain("matrix file corrupt");
+        probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
+        enqueuer.Sent.Should().BeEmpty();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
     // ---------- helpers ----------
+
+    /// <summary>
+    /// Constructs the handler under test. When <paramref name="matrix"/> is
+    /// omitted, a throwing stub is injected — non-upgrade tests therefore
+    /// implicitly assert that first-install runs NEVER query the matrix.
+    /// </summary>
+    private static H0PreflightHandler CreateHandler(
+        FakeRepository repo,
+        FakeEnqueuer enqueuer,
+        IPreflightQuotaProbe[] probes,
+        IVersionCompatMatrix? matrix = null)
+        => new(
+            repo,
+            enqueuer,
+            probes,
+            matrix ?? new FakeMatrix(
+                VersionCompatVerdict.Green,
+                throws: new InvalidOperationException(
+                    "IVersionCompatMatrix must not be queried outside upgrade mode")),
+            NullLogger<H0PreflightHandler>.Instance);
+
+    private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]
+    {
+        FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
+        FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
+        FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
+        FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+    };
+
+    private static ProvisioningRun BuildUpgradeRun(bool includeVersions = true)
+    {
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.ProvisionedOnParameterKey] = "2026-07-01T00:00:00Z";
+        if (includeVersions)
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.CurrentBffVersionParameterKey] = "1.0.0-net10";
+            run.Parameters.NonSecret[H0PreflightHandler.CurrentSolutionVersionParameterKey] = "S2026.08";
+            run.Parameters.NonSecret[H0PreflightHandler.TargetBffVersionParameterKey] = "1.1.0-net10";
+            run.Parameters.NonSecret[H0PreflightHandler.TargetSolutionVersionParameterKey] = "S2026.09";
+        }
+        return run;
+    }
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -335,6 +514,46 @@ public sealed class H0PreflightHandlerTests
             _run = run;
             _etag = ifMatchEtag + "-next";
             return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, _etag));
+        }
+    }
+
+    /// <summary>
+    /// Verdict-forcing <see cref="IVersionCompatMatrix"/> stub. Records the
+    /// pairs it was queried with; optionally throws to simulate a matrix
+    /// source fault.
+    /// </summary>
+    private sealed class FakeMatrix : IVersionCompatMatrix
+    {
+        private readonly VersionCompatVerdict _verdict;
+        private readonly IReadOnlyList<string> _ucbClasses;
+        private readonly Exception? _throws;
+
+        public int CallCount { get; private set; }
+        public VersionPair? LastCurrent { get; private set; }
+        public VersionPair? LastTarget { get; private set; }
+
+        public FakeMatrix(
+            VersionCompatVerdict verdict,
+            IReadOnlyList<string>? ucbClasses = null,
+            Exception? throws = null)
+        {
+            _verdict = verdict;
+            _ucbClasses = ucbClasses ?? Array.Empty<string>();
+            _throws = throws;
+        }
+
+        public Task<VersionCompatCheckResult> CheckPairAsync(
+            VersionPair current, VersionPair target, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastCurrent = current;
+            LastTarget = target;
+            if (_throws is not null)
+            {
+                throw _throws;
+            }
+            return Task.FromResult(new VersionCompatCheckResult(
+                _verdict, $"stub-{_verdict}", _ucbClasses));
         }
     }
 

@@ -34,31 +34,31 @@
 //   — H4 does NOT reuse a KV-writer from H2a, confirming H2a never owned KV
 //   writes in the target-state DI graph).
 //
-// BLOCKING DISCOVERY FOR A FOLLOW-ON BICEP TASK (surfaced per the POML's
-// escalation-trigger spirit, not a hard STOP — see task 123 completion notes
-// / final report for full detail): infrastructure/bicep/customer.bicep (the
-// template FileBicepTemplateInspector.ResolveTemplatePath selects for the
-// Model2Dedicated branch — the only branch exercised in production today)
-// deploys ONLY Key Vault + Storage + Service Bus + Cosmos + membership-topic
-// + optional ACS + optional SignalR. It does NOT deploy a UAMI, App Service,
-// Azure OpenAI, or Azure AI Search resource — `userAssignedIdentityResourceId`
-// is a PASS-THROUGH parameter only (customer.bicep line 67-68 comment: "no
-// resource in THIS module binds to it yet"). BicepDeployOutputs therefore
-// cannot be populated for UserAssignedIdentityObjectId/ClientId,
-// AppServiceName, AppServiceStagingSlotName, OpenAiEndpoint, or
-// AiSearchEndpoint from a REAL customer.bicep deploy today — this runner maps
-// exactly what the template outputs (leaving the rest as empty string) so
-// H2aBicepInfraDeployHandler's existing AreOutputsComplete() check correctly
-// reports BicepDeployOutputsIncomplete rather than silently fabricating
-// values. This gap PRE-DATES this task (the retired
-// ProvisionCustomerScriptBicepDeployRunner's own header comment already
-// flagged the pre-Phase-B script as unable to produce a matching outputs
-// block — "a compilation error... is the intended forcing function"); this
-// runner does not introduce it, and honestly surfacing it via a real ARM
-// call is strictly more correct than the retired collaborator's parser,
-// which could never have succeeded in principle. Fixing customer.bicep to
-// add the missing UAMI/App Service/OpenAI/AI Search modules is Bicep-
-// authoring work outside this task's SDK-port scope.
+// HISTORICAL — PRE-WAVE-G-2.5 STATE (2026-08-19 and earlier; resolved, kept
+// for context only): at task 123 authoring time, infrastructure/bicep/
+// customer.bicep (the template FileBicepTemplateInspector.ResolveTemplatePath
+// selects for the Model2Dedicated branch) deployed ONLY Key Vault + Storage +
+// Service Bus + Cosmos + membership-topic + optional ACS + optional SignalR.
+// It did NOT deploy a UAMI, App Service, or Azure OpenAI resource —
+// `userAssignedIdentityResourceId` was a pass-through parameter with no
+// resource binding it. BicepDeployOutputs could not be populated for
+// UserAssignedIdentityObjectId/ClientId, AppServiceName,
+// AppServiceStagingSlotName, or OpenAiEndpoint from a real deploy. This
+// runner mapped exactly what the template output at the time (leaving the
+// rest as empty string) so H2aBicepInfraDeployHandler's AreOutputsComplete()
+// check correctly reported BicepDeployOutputsIncomplete rather than silently
+// fabricating values.
+//
+// CURRENT STATE (as of Batch 1 + tasks 127/128/128b/129, Wave G-2.5):
+// customer.bicep now deploys `module uami` (modules/uami.bicep), `module
+// bffApi` / `bffApiSlot` (modules/app-service.bicep), and `module openAi`
+// (modules/openai.bicep) — see customer.bicep lines ~203, ~340, ~532 — and
+// exposes `userAssignedIdentityResourceId`, `openAiEndpoint`, and the App
+// Service outputs this runner consumes. Azure AI Search is deployed via the
+// separate H2b handler path, not customer.bicep, so no AiSearchEndpoint gap
+// remains here. If AreOutputsComplete() reports BicepDeployOutputsIncomplete
+// today, treat it as a real signal (template drift or a genuinely partial
+// deploy) — not as this historical gap resurfacing.
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;

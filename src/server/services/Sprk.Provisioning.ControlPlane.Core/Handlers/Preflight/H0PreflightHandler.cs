@@ -26,6 +26,20 @@
 //       after.
 //   - scripts/preflight/README.md § Purpose: 4 checks + shared return
 //       contract; H0 orchestrates all four in parallel.
+//   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (Wave G-8
+//       Batch 10 — upgrade-mode version-compat gate): when `provisionedOn` is
+//       populated (upgrade of an already-provisioned customer), H0 queries the
+//       version-compat matrix (docs/deployment/version-compatibility-matrix.md,
+//       runtime mirror version-compat-matrix.json) BEFORE any quota probe
+//       fires. Red → block fast (Resumable, `upgrade-compat-red`); Yellow →
+//       warn + record a Pending `upgrade-compat-yellow` gate entry (operator
+//       ACK per matrix doc §5) but allow the run to proceed; Green → proceed.
+//       Upgrade-mode detection + version inputs follow the established
+//       registry-mirrored run-parameter convention (parity with H2a/H4/H8's
+//       ProvisionedOnParameterKey — H0 stays Dataverse-client-free): the L2
+//       intake mirrors `sprk_provisionedon` / `sprk_bffversion` /
+//       `sprk_solutionversion` into run parameters, and the release manifest
+//       supplies the target versions.
 //
 // ROLLBACK CLASSIFICATION (§ 4C):
 //   H0 writes NO external side effect — the four probes are pure read-only
@@ -82,6 +96,28 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§ 4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
+    /// <summary>
+    /// Non-secret parameter mirroring the registry's <c>sprk_provisionedon</c>.
+    /// Non-empty ⇒ upgrade mode (spec.md FR-34). Naming parity with
+    /// H2a/H4/H8's <c>ProvisionedOnParameterKey</c>.
+    /// </summary>
+    public const string ProvisionedOnParameterKey = "provisionedOn";
+
+    /// <summary>Upgrade mode: current BFF version (registry mirror of <c>sprk_bffversion</c>).</summary>
+    public const string CurrentBffVersionParameterKey = "currentBffVersion";
+
+    /// <summary>Upgrade mode: current Solution-set version (registry mirror of <c>sprk_solutionversion</c>).</summary>
+    public const string CurrentSolutionVersionParameterKey = "currentSolutionVersion";
+
+    /// <summary>Upgrade mode: incoming release's BFF version (release manifest).</summary>
+    public const string TargetBffVersionParameterKey = "targetBffVersion";
+
+    /// <summary>Upgrade mode: incoming release's Solution-set version (release manifest).</summary>
+    public const string TargetSolutionVersionParameterKey = "targetSolutionVersion";
+
+    /// <summary>Gate id recorded on a Yellow verdict (operator manual-step ACK per matrix doc §5).</summary>
+    public const string UpgradeCompatYellowGateId = "upgrade-compat-yellow";
+
     private static readonly JsonSerializerOptions ParameterHashSerializerOptions = new()
     {
         // Canonical JSON for hashing — sorted keys + no whitespace + no
@@ -94,6 +130,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly IHandlerEnqueuer _enqueuer;
     private readonly IEnumerable<IPreflightQuotaProbe> _probes;
+    private readonly IVersionCompatMatrix _versionCompatMatrix;
     private readonly ILogger<H0PreflightHandler> _logger;
 
     /// <inheritdoc/>
@@ -105,21 +142,25 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H0.5 on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="probes">The four preflight probes. Registration order does not matter; the handler orchestrates all four in parallel and aggregates results.</param>
+    /// <param name="versionCompatMatrix">Version-compat matrix queried in upgrade mode ONLY (spec.md FR-34; Wave G-8 Batch 10).</param>
     /// <param name="logger">Structured logger.</param>
     public H0PreflightHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         IEnumerable<IPreflightQuotaProbe> probes,
+        IVersionCompatMatrix versionCompatMatrix,
         ILogger<H0PreflightHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(probes);
+        ArgumentNullException.ThrowIfNull(versionCompatMatrix);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _enqueuer = enqueuer;
         _probes = probes;
+        _versionCompatMatrix = versionCompatMatrix;
         _logger = logger;
     }
 
@@ -190,6 +231,20 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             await MarkFailedAsync(run, etag, rejectionCode, diagnostic, evidence: null, cancellationToken)
                 .ConfigureAwait(false);
             return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, diagnostic);
+        }
+
+        // (3.5) FR-34 upgrade-mode version-compat gate (Wave G-8 Batch 10).
+        // Fires BEFORE any quota probe so an incompatible pair blocks fast
+        // with zero Azure API calls. Skipped entirely for first-install runs
+        // (no `provisionedOn` parameter).
+        if (run.Parameters.NonSecret.TryGetValue(ProvisionedOnParameterKey, out var provisionedOnRaw)
+            && !string.IsNullOrWhiteSpace(provisionedOnRaw))
+        {
+            var compatFailure = await CheckUpgradeCompatAsync(run, etag, cancellationToken).ConfigureAwait(false);
+            if (compatFailure is not null)
+            {
+                return compatFailure;
+            }
         }
 
         // (4) Execute all probes in parallel. Each probe is independent per
@@ -284,6 +339,142 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var json = JsonSerializer.Serialize(canonical, ParameterHashSerializerOptions);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         return Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// FR-34 upgrade-mode version-compat gate. Returns a terminal
+    /// <see cref="HandlerResult.Failure"/> when the run must block (missing
+    /// version parameters / matrix unavailable / Red pair), or <c>null</c>
+    /// when the run may proceed (Green, or Yellow — which records a Pending
+    /// <see cref="UpgradeCompatYellowGateId"/> gate entry on the in-memory
+    /// run so it persists with the next Cosmos write, per matrix doc §5
+    /// operator-ACK guidance, without blocking H0 itself).
+    /// </summary>
+    private async Task<HandlerResult?> CheckUpgradeCompatAsync(
+        ProvisioningRun run,
+        string etag,
+        CancellationToken cancellationToken)
+    {
+        var parameters = run.Parameters.NonSecret;
+
+        var missing = new List<string>(4);
+        if (!TryGetNonEmpty(parameters, CurrentBffVersionParameterKey, out var currentBff)) { missing.Add(CurrentBffVersionParameterKey); }
+        if (!TryGetNonEmpty(parameters, CurrentSolutionVersionParameterKey, out var currentSolutions)) { missing.Add(CurrentSolutionVersionParameterKey); }
+        if (!TryGetNonEmpty(parameters, TargetBffVersionParameterKey, out var targetBff)) { missing.Add(TargetBffVersionParameterKey); }
+        if (!TryGetNonEmpty(parameters, TargetSolutionVersionParameterKey, out var targetSolutions)) { missing.Add(TargetSolutionVersionParameterKey); }
+        if (missing.Count > 0)
+        {
+            const string rejectionCode = "upgrade-compat-missing-versions";
+            var diagnostic =
+                $"Upgrade mode (non-empty '{ProvisionedOnParameterKey}') requires version parameters " +
+                $"[{string.Join(", ", missing)}] for the FR-34 version-compat matrix query. The L2 intake mirrors " +
+                "currentBffVersion/currentSolutionVersion from the customer's sprk_dataverseenvironment registry row " +
+                "(sprk_bffversion / sprk_solutionversion) and targetBffVersion/targetSolutionVersion from the " +
+                "release manifest. Populate the parameters + resume.";
+            await MarkFailedAsync(run, etag, rejectionCode, diagnostic, evidence: null, cancellationToken)
+                .ConfigureAwait(false);
+            return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, diagnostic);
+        }
+
+        VersionCompatCheckResult compat;
+        try
+        {
+            compat = await _versionCompatMatrix.CheckPairAsync(
+                new VersionPair(currentBff, currentSolutions),
+                new VersionPair(targetBff, targetSolutions),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Matrix-source infrastructure fault (missing/corrupt matrix file).
+            // Resumable: operator repairs the matrix deployment + resumes; no
+            // external side effect has occurred.
+            _logger.LogError(
+                ex,
+                "H0 version-compat matrix query failed: runId={RunId} customerId={CustomerId}",
+                run.RunId, run.CustomerId);
+            const string rejectionCode = "upgrade-compat-matrix-unavailable";
+            var diagnostic =
+                $"Version-compat matrix unavailable: {ex.GetType().Name}: {ex.Message}. Upgrade runs MUST NOT " +
+                "proceed without the FR-34 compatibility verdict — repair the matrix source " +
+                "(version-compat-matrix.json / Preflight:VersionCompatMatrixPath) and resume.";
+            await MarkFailedAsync(run, etag, rejectionCode, diagnostic, evidence: null, cancellationToken)
+                .ConfigureAwait(false);
+            return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, diagnostic);
+        }
+
+        switch (compat.Verdict)
+        {
+            case VersionCompatVerdict.Red:
+            {
+                const string rejectionCode = "upgrade-compat-red";
+                _logger.LogWarning(
+                    "H0 upgrade blocked by version-compat matrix (Red): runId={RunId} customerId={CustomerId} " +
+                    "currentBff={CurrentBff} currentSolutions={CurrentSolutions} targetBff={TargetBff} targetSolutions={TargetSolutions}",
+                    run.RunId, run.CustomerId, currentBff, currentSolutions, targetBff, targetSolutions);
+                await MarkFailedAsync(
+                    run, etag, rejectionCode, compat.Diagnostic,
+                    evidence: BuildCompatEvidence(compat, currentBff, currentSolutions, targetBff, targetSolutions),
+                    cancellationToken).ConfigureAwait(false);
+                return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, compat.Diagnostic);
+            }
+
+            case VersionCompatVerdict.Yellow:
+                // Warn-but-allow: the run proceeds, but the operator manual-step
+                // obligation (matrix doc §5 U-CB-N remediation + ACK before
+                // H2a/H6/H9) is recorded as a Pending gate entry. Persisted by
+                // the NEXT ReplaceRunAsync write on this in-flight run (success
+                // advance or a later probe failure) — H0 does not spend an
+                // extra Cosmos round trip on it.
+                _logger.LogWarning(
+                    "H0 version-compat verdict Yellow (proceeding with operator-ACK gate recorded): runId={RunId} " +
+                    "customerId={CustomerId} ucbClasses={UcbClasses} diagnostic={Diagnostic}",
+                    run.RunId, run.CustomerId, string.Join(",", compat.UcbClasses), compat.Diagnostic);
+                run.GateStates[UpgradeCompatYellowGateId] = new GateEntry
+                {
+                    Status = GateState.Pending,
+                    VerifierHandler = HandlerIdentifier,
+                    Evidence = BuildCompatEvidence(compat, currentBff, currentSolutions, targetBff, targetSolutions),
+                };
+                return null;
+
+            default:
+                _logger.LogInformation(
+                    "H0 version-compat verdict Green: runId={RunId} customerId={CustomerId} targetBff={TargetBff} targetSolutions={TargetSolutions}",
+                    run.RunId, run.CustomerId, targetBff, targetSolutions);
+                return null;
+        }
+    }
+
+    private static JsonElement BuildCompatEvidence(
+        VersionCompatCheckResult compat,
+        string currentBff,
+        string currentSolutions,
+        string targetBff,
+        string targetSolutions)
+        => JsonSerializer.SerializeToElement(new
+        {
+            verdict = compat.Verdict.ToString(),
+            currentBffVersion = currentBff,
+            currentSolutionVersion = currentSolutions,
+            targetBffVersion = targetBff,
+            targetSolutionVersion = targetSolutions,
+            ucbClasses = compat.UcbClasses,
+            diagnostic = compat.Diagnostic,
+        });
+
+    private static bool TryGetNonEmpty(
+        IDictionary<string, string> parameters,
+        string key,
+        out string value)
+    {
+        if (parameters.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw))
+        {
+            value = raw;
+            return true;
+        }
+        value = string.Empty;
+        return false;
     }
 
     private static string BuildRejectionCode(string checkName) => checkName switch

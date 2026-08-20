@@ -775,27 +775,37 @@ builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
 
-// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams
-// (IE2EValidationRunner = ValidateDeployedEnvironmentScriptRunner wrapped the
-// Phase-B extended scripts/Validate-DeployedEnvironment.ps1 for SC #5 sample
-// checks -- retired 2026-08-20 task 181, now E2EValidationRunner pure-C# port
-// with live BFF /healthz + /ping + CORS effect probes + explicit ChecksSkipped
-// list for the Dataverse-auth-gated + Phase-B extended set (Phase F rerun task
-// 186 closes); IE2ETrapVerifier = PlaceholderTrapVerifier — Wave-C4 stub that
-// returns InfraFault for every T1–T6; IE2EInvariantVerifier =
-// PlaceholderInvariantVerifier — parity stub for I1–I5; INamingConformanceChecker
-// = NamingConformanceScriptRunner shells out to r3 task 063's
-// scripts/naming-conformance-check.ps1 -- retired 2026-08-20 task 182, now
-// NamingConformanceChecker pure-C# port; ICostEnvelopeChecker =
-// ArmCostEnvelopeChecker (task 183, Wave G-7 SDK port, 2026-08-20 -- retired
-// AzCliCostEnvelopeChecker's `az costmanagement query` shell-out) uses
-// Azure.ResourceManager.CostManagement.UsageQueryAsync per subscription +
-// compares against §15 #14 envelopes;
-// IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater is a
-// Wave-C4 placeholder returning Success WITHOUT a real Dataverse write —
-// Wave-C5 swaps for a real Web API PATCH once the L2 Dataverse client
-// wiring lands). H13 also REUSES IDataverseEnvironmentRegistryClient
-// (task 042) for the idempotency-short-circuit registry Ready-check lookup.
+// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams,
+// ALL NOW REAL as of Wave G-7 (task 185, 2026-08-20) — see
+// E2EAcceptanceModule.AddH13E2EAcceptanceGateHandler for the authoritative
+// registration (this comment summarizes; that module is the source of truth):
+// IE2EValidationRunner = E2EValidationRunner — pure-C# port (task 181,
+// 2026-08-20) with live BFF /healthz + /ping + CORS effect probes + explicit
+// ChecksSkipped list for the Dataverse-auth-gated + Phase-B extended set
+// (Phase F rerun task 186 closes); IE2ETrapVerifier = CompositeTrapVerifier
+// dispatching per-TrapKind to the 6 registered real ITrapProbe implementations
+// (T1–T6, tasks 171/177/178/180/172/175); IE2EInvariantVerifier =
+// CompositeInvariantVerifier dispatching to the 5 registered real
+// IInvariantProbe implementations (I1–I5, tasks 170/173/174/176/179);
+// INamingConformanceChecker = NamingConformanceChecker — pure-C# port of r3
+// task 063's scripts/naming-conformance-check.ps1 (task 182, 2026-08-20);
+// ICostEnvelopeChecker = ArmCostEnvelopeChecker (task 183, Wave G-7 SDK port,
+// 2026-08-20) uses Azure.ResourceManager.CostManagement.UsageQueryAsync per
+// subscription + compares against §15 #14 envelopes;
+// IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater (task 184)
+// performs the real Web API PATCH via IDataverseEnvironmentRegistryClient —
+// THE acceptance-target sprk_setupstatus = Ready transition (spec.md FR-18 /
+// SC #5). PlaceholderTrapVerifier and PlaceholderInvariantVerifier (the
+// Wave-C4 stubs the composite verifiers replaced) remain on disk UNREGISTERED
+// for reference only per the project retirement convention. The retired
+// shell-out predecessors (ValidateDeployedEnvironmentScriptRunner,
+// NamingConformanceScriptRunner, AzCliCostEnvelopeChecker, and the Wave-C4
+// logged-no-op registry updater) were deleted in the Wave G-8 cleanup sweep
+// (2026-08-20) — none were registered anywhere and none had live test
+// dependencies. E2EAcceptanceCompositionRootTests.cs (task 186) asserts the
+// REAL types resolve from Worker DI, not the placeholders. H13 also REUSES
+// IDataverseEnvironmentRegistryClient (task 042) for the
+// idempotency-short-circuit registry Ready-check lookup.
 builder.Services.AddH13E2EAcceptanceGateHandler(builder.Configuration);
 
 // ---- Reconciler + crash-recovery + concurrency + rollback (Wave C5) ----
