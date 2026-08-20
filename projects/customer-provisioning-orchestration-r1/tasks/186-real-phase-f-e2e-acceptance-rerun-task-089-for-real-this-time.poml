@@ -4,7 +4,7 @@
     <title>Real Phase F E2E acceptance rerun (task 089 for real this time)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>authoring-and-framework-proof-complete-live-ceremony-pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Full E2E acceptance run against a real customer stamp -- irreversible-adjacent (live Azure/Dataverse/SPE/Exchange resources provisioned for a real trial customer), the project's terminal deliverable.</rigor-reason>
     <model-tier>sonnet</model-tier>
