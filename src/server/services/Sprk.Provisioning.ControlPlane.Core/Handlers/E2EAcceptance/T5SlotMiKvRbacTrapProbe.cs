@@ -137,7 +137,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
 /// registration.
 /// </summary>
-public sealed class T5SlotMiKvRbacTrapProbe
+public sealed class T5SlotMiKvRbacTrapProbe : ITrapProbe
 {
     /// <summary>
     /// KV Secrets User role definition GUID -- well-known public-cloud

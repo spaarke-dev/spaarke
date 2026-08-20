@@ -287,7 +287,7 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 | 182 | ✅ | INamingConformanceChecker pure-C# port | STANDARD | sonnet / high | waveG7-parallel | none |
 | 183 | ✅ | ICostEnvelopeChecker ARM.CostManagement port | FULL | sonnet / high | waveG7-parallel | 123 |
 | 184 | ✅ | IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself | FULL | sonnet / high | none | 112, 181, 182, 183 |
-| 185 | 🔲 | H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic | FULL | opus / high | none | 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184 |
+| 185 | ✅ | H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic | FULL | opus / high | none | 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184 |
 | 186 | 🔲 | Real Phase F E2E acceptance rerun (task 089 for real this time) | FULL | sonnet / xhigh | none | 185, 113, 162 |
 
 **Note on task 089 vs task 186**: The original task 089 (below) is recorded SPLIT MODE — its scaffolding (harness + report skeleton + operator runbook) landed, but the actual E2E acceptance run against a genuinely-functional pipeline never happened, because the pipeline was not genuinely functional (per the r1-gap-analysis this Phase C'' build responds to: no dispatcher existed, 11 of 19 handlers shelled out to unavailable tools, several handlers were placeholder-backed). Task 186 is the REAL rerun once Waves G-1..G-7 land; it supersedes 089 as the project's actual acceptance evidence. Do not close out this project on 089 alone.

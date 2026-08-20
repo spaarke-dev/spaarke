@@ -92,7 +92,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
 /// registration.
 /// </summary>
-public sealed class DataverseAppUserPairT2Probe
+public sealed class DataverseAppUserPairT2Probe : ITrapProbe
 {
     /// <summary>Which §4B trap this probe verdicts. Exposed for task 185's aggregate composition to route by kind.</summary>
     public TrapKind Kind => TrapKind.T2DataverseAppUser;

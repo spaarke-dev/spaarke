@@ -30,6 +30,8 @@
 //   idempotency-short-circuit registry lookup; no BFF-facade dependencies.
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
+
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
@@ -56,8 +58,27 @@ public static class E2EAcceptanceModule
 
         services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
 
-        // Production seam registrations. PlaceholderTrapVerifier surfaces
-        // "not yet wired" as Resumable per POML deferral note.
+        // Production seam registrations. All 6 trap + 5 invariant probes are
+        // real as of task 185 (Wave G-7 Batch G-7D) -- PlaceholderTrapVerifier
+        // and PlaceholderInvariantVerifier are retained on disk UNREGISTERED
+        // per this project's retirement convention.
+        //
+        // IE2ETrapVerifier -- Wave G-7 Batch G-7D composite migration (task 185).
+        // CompositeTrapVerifier dispatches per-TrapKind to registered ITrapProbe
+        // impls; un-registered kinds fall back to
+        // TrapProbeDeferralMessages.DeferralDiagnostic InfraFault, preserving
+        // PlaceholderTrapVerifier's Resumable semantics for any future un-wired
+        // kinds. Direct parity with the earlier IE2EInvariantVerifier composite
+        // migration (Batch G-7A1 / task 174). Task 185 wires all 6 real trap
+        // probes below:
+        //   - task 171 (T1) - KeyVaultReferenceIdentityT1Probe (ArmClient)
+        //   - task 177 (T2) - DataverseAppUserPairT2Probe (IDataverseAppUserVerifier)
+        //   - task 178 (T3) - GraphAppRoleParityT3Probe (IGraphAppRoleParityVerifier
+        //                     + IGraphAppRolesRegistry + typed HttpClient)
+        //   - task 180 (T4) - ExchangePolicyCountT4Probe (IExchangePolicyReadClient)
+        //   - task 172 (T5) - T5SlotMiKvRbacTrapProbe (ArmClient)
+        //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (TokenCredential
+        //                     + IT6GraphAppOnlyProbe + H13AcceptanceOptions)
         //
         // IE2EInvariantVerifier — Wave G-7 Batch G-7A1 composite migration
         // (task 174 coordinated with task 173). CompositeInvariantVerifier
@@ -67,13 +88,9 @@ public static class E2EAcceptanceModule
         // preserving PlaceholderInvariantVerifier's Resumable semantics for
         // un-wired kinds. Sibling wave-G-7 tasks each add ONE
         // AddSingleton<IInvariantProbe, TProbe>() line here:
-        //   - task 170 (I1) — currently ships PackagedScriptTenantLiteralInvariantVerifier
-        //                     as a whole-IE2EInvariantVerifier hybrid; task 185
-        //                     is expected to refactor its ProbeI1 internal
-        //                     static into a proper IInvariantProbe adapter so
-        //                     it composes here. Until then, I1 returns the
-        //                     deferral-diagnostic InfraFault (called out
-        //                     explicitly here rather than silently).
+        //   - task 170 (I1) — PackagedScriptTenantLiteralInvariantProbe adapter
+        //                     preserves task-170's real packaged-scripts I1 check
+        //                     under the composite pattern.
         //   - task 173 (I2)  — sibling I2 AI Search tenant-filter probe.
         //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe.
         //   - task 176 (I4)  — SpeContainerResolverInvariantProbe (real BFF
@@ -100,8 +117,36 @@ public static class E2EAcceptanceModule
         // banner). Registration remains UNCONDITIONAL (ADR-032).
         services.AddHttpClient(E2EValidationRunner.HttpClientName);
         services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
-        services.AddSingleton<IE2ETrapVerifier, PlaceholderTrapVerifier>();
+        services.AddSingleton<IE2ETrapVerifier, CompositeTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
+        // Task 185 (Wave G-7 Batch G-7D): 6 real ITrapProbe registrations for
+        // the composite trap verifier. Order does not matter (composite
+        // dispatches per Kind); each probe's own file header documents its
+        // dependencies. IT6GraphAppOnlyProbe (registered below) is the
+        // T6-specific Graph seam consumed by T6SpeConfidentialClientTrapProbe.
+        // ArmClient (T1 + T5) + TokenCredential (T6) come from the shared
+        // HandlersModule / Program.cs registrations; IDataverseAppUserVerifier
+        // (T2) + IGraphAppRoleParityVerifier + IGraphAppRolesRegistry (T3)
+        // come from H10's own module registration (line-parity with H10 wire);
+        // IExchangePolicyReadClient (T4) comes from H14's IntegrationWiringModule
+        // registration. All UNCONDITIONAL (ADR-032).
+        services.AddSingleton<ITrapProbe, KeyVaultReferenceIdentityT1Probe>();       // T1 (task 171)
+        services.AddSingleton<ITrapProbe, DataverseAppUserPairT2Probe>();            // T2 (task 177)
+        // T3 (task 178) -- has TWO public constructors (production 4-param +
+        // testing 5-param with Func<string,TokenCredential>); ActivatorUtilities
+        // cannot disambiguate them under AddHttpClient<T>() typed-client factory
+        // (both signatures have HttpClient at index 3), so we hand-construct via
+        // named HttpClient + explicit ctor call. Pins the production ctor.
+        services.AddHttpClient(nameof(GraphAppRoleParityT3Probe));
+        services.AddSingleton<ITrapProbe>(sp => new GraphAppRoleParityT3Probe(
+            sp.GetRequiredService<IGraphAppRoleParityVerifier>(),
+            sp.GetRequiredService<IGraphAppRolesRegistry>(),
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GraphAppRoleParityT3Probe)),
+            sp.GetRequiredService<ILogger<GraphAppRoleParityT3Probe>>()));
+        services.AddSingleton<ITrapProbe, ExchangePolicyCountT4Probe>();             // T4 (task 180)
+        services.AddSingleton<ITrapProbe, T5SlotMiKvRbacTrapProbe>();                // T5 (task 172)
+        services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainerTypesListAppOnlyProbe>();
+        services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
         // I1 adapter (task 173) — preserves task-170's real packaged-scripts
         // I1 check under the composite pattern by wrapping its internal-static
         // ProbeI1 in an IInvariantProbe (see PackagedScriptTenantLiteralInvariantProbe.cs

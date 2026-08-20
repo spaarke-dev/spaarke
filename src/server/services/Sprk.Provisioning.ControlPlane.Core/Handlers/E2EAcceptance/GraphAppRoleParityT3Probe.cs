@@ -175,7 +175,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
 /// registration.
 /// </summary>
-public sealed class GraphAppRoleParityT3Probe
+public sealed class GraphAppRoleParityT3Probe : ITrapProbe
 {
     /// <summary>
     /// Graph default scope -- parity with the callers this probe reuses

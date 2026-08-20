@@ -3,8 +3,8 @@
   <metadata>
     <title>H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Terminal assembly of every Wave G-2..G-6 correctness fix into ONE gate decision -- the highest-aggregation-risk task in the whole Phase G'' build; a wiring mistake here silently masks any one probe's real failure.</rigor-reason>
     <model-tier>opus</model-tier>

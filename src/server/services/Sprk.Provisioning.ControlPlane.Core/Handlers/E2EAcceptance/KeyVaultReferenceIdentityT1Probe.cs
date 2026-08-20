@@ -146,7 +146,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// implementation that replaces <see cref="PlaceholderTrapVerifier"/>'s DI
 /// registration.
 /// </summary>
-public sealed class KeyVaultReferenceIdentityT1Probe
+public sealed class KeyVaultReferenceIdentityT1Probe : ITrapProbe
 {
     /// <summary>Sentinel value ARM emits when keyVaultReferenceIdentity is set to the App Service's own SystemAssigned identity. NOT a UAMI resource id -- T1 manifested.</summary>
     internal const string SystemAssignedSentinel = "SystemAssigned";

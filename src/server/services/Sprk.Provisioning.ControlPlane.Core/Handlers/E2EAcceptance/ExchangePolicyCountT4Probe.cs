@@ -114,7 +114,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// <see cref="IE2ETrapVerifier"/> implementation that replaces
 /// <see cref="PlaceholderTrapVerifier"/>'s DI registration.
 /// </summary>
-public sealed class ExchangePolicyCountT4Probe
+public sealed class ExchangePolicyCountT4Probe : ITrapProbe
 {
     /// <summary>Which s4B trap this probe verdicts. Exposed for task 185's aggregate composition to route by kind.</summary>
     public TrapKind Kind => TrapKind.T4ExchangePolicyCount;

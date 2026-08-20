@@ -69,7 +69,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// Real T6 (SPE confidential-client) probe per DS-4 s6. Produces exactly one
 /// <see cref="TrapVerificationOutcome"/> for <see cref="TrapKind.T6SpeConfidentialClient"/>.
 /// </summary>
-public sealed class T6SpeConfidentialClientTrapProbe
+public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
 {
     /// <summary>Canonical KV secret name for the SPE owner cert -- mirrors <see cref="SpeContainerTypeOptions.DefaultCertSecretName"/>. Flagged for Phase H reconciliation (task 084).</summary>
     internal const string SpeOwnerCertSecretName = "SPE-OwnerCert-Pfx";
