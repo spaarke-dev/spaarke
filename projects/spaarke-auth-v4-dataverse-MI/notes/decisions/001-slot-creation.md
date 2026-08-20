@@ -33,7 +33,7 @@ az webapp deployment slot delete --name spaarke-bff-dev --resource-group rg-spaa
 
 ---
 
-## 2. FINDING A (red) — `keyVaultReferenceIdentity` is not copied by `--configuration-source`, and is not in IaC
+## 2. FINDING A (amber) — `keyVaultReferenceIdentity` is not copied by `--configuration-source`
 
 **This cost the first deploy attempt.** The slot was created with `--configuration-source spaarke-bff-dev`,
 which faithfully copied all 213 app settings. The app then **aborted at startup with exit code 134 (SIGABRT)**
@@ -54,12 +54,40 @@ property to the UAMI and restarting fixed it: `/healthz` → 200.
 ### Why this matters beyond task 001
 
 1. **It is a swap hazard.** `keyVaultReferenceIdentity` is a site property, and site properties **do not swap**.
-   It must be correct on the slot permanently — it will not arrive via the swap at task 032.
-2. **It is unmanaged production drift.** `grep -rn keyVaultReferenceIdentity infrastructure/bicep/` returns
-   **nothing**. Production `spaarke-bff-dev` depends on this property today, and re-applying the IaC would reset
-   it to `SystemAssigned` and break every Key Vault reference in production. Filed as **ISS-001**.
-3. **Deployment slots are absent from the IaC entirely** — no slot resource in
-   `infrastructure/bicep/modules/app-service.bicep`. The slot created here is drift by construction.
+   It must be correct on the slot permanently — it will not arrive via the swap at task 032. This is the part
+   that actually affects this project.
+2. **It has no declarative record anywhere.** `grep -rn keyVaultReferenceIdentity infrastructure/bicep/` returns
+   nothing, and neither do deployment slots. Filed as **ISS-001**.
+
+> ### ⚠️ CORRECTION (2026-08-20, same day)
+>
+> This finding was **first written with a wrong implication**, and the correction matters because it changes the
+> severity from red to amber.
+>
+> I originally wrote that re-applying the Bicep IaC *"would reset `keyVaultReferenceIdentity` to `SystemAssigned`
+> and break every Key Vault reference in production."* **That is not true.** The Bicep stack does not describe
+> the running dev environment at all:
+>
+> | | Bicep would create | Actually running |
+> |---|---|---|
+> | App Service | `sprkspaarkedev1dev-api` | `spaarke-bff-dev` |
+> | Plan | `sprkspaarkedev1dev-plan` | `spaarke-dev-plan` |
+> | Resource group | `rg-spaarke-spaarkedev1-dev` | `rg-spaarke-dev` |
+>
+> (`baseName = 'sprk${customerId}${environment}'`, `model2-full.bicep:60`; app name `'${baseName}-api'` at `:181`.)
+> None of the Bicep-derived names exist in the subscription. Running the infrastructure workflow would stand up a
+> **parallel** environment; it would not touch `spaarke-bff-dev`.
+>
+> **The corrected finding is milder but still real**: the live dev environment was created out-of-band and is
+> **not IaC-managed**. There is therefore no declarative record of `keyVaultReferenceIdentity`, of the UAMI
+> assignment, or of the new slot. The cost is reproducibility and recovery — if the dev environment were lost,
+> rebuilding it from the repo would produce something different from what exists. It is **not** a
+> one-button-breaks-production risk.
+>
+> `dev.bicepparam`'s `B1 → P1v3` change is likewise **not** a drift reconciliation, as I first described it. It
+> is an aspirational correction to a stack that has never been applied. It remains worth making — B1 has no
+> slots, so leaving it would make the slot-based rollout impossible if the stack were ever used — but the
+> reasoning recorded in the file has been corrected.
 
 **Obligation added to task 031**: verify `keyVaultReferenceIdentity` on the slot *before* running the §6.1 OBO
 checklist. A slot that cannot resolve Key Vault references fails in ways that look like credential failures —

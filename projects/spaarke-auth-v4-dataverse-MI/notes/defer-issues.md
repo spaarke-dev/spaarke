@@ -74,7 +74,7 @@ already specified; nothing about the FR-D requirements was found wrong, only unt
 | Field | Value |
 |---|---|
 | **Status** | Open |
-| **Urgency** | now |
+| **Urgency** | next-round (was `now` before the severity correction) |
 | **Filed** | 2026-08-20 |
 | **Source** | Task 001 — reproduced live while creating the dev staging slot |
 | **GitHub Issue** | [#805](https://github.com/spaarke-dev/spaarke/issues/805) |
@@ -86,10 +86,16 @@ already specified; nothing about the FR-D requirements was found wrong, only unt
 likewise absent from `infrastructure/bicep/modules/app-service.bicep`.
 
 The App Service has **no system-assigned identity**, and `keyVaultReferenceIdentity` defaults to
-`SystemAssigned`. So re-applying the IaC would revert the property and **break every Key Vault reference in
-production** — `ConnectionStrings__Redis`, `AzureOpenAI__ApiKey`, `ServiceBus__ConnectionString`,
-`AiSearch__ReferencesApiKey`, `DocumentIntelligence__AiSearchKey`, `RecordSync__AiSearchApiKey`,
-`Communication__WebhookSigningKey`.
+`SystemAssigned` — so any slot created from it cannot resolve `ConnectionStrings__Redis`, `AzureOpenAI__ApiKey`,
+`ServiceBus__ConnectionString`, `AiSearch__ReferencesApiKey`, `DocumentIntelligence__AiSearchKey`,
+`RecordSync__AiSearchApiKey` or `Communication__WebhookSigningKey`.
+
+> **⚠️ Corrected same day.** This entry first claimed re-applying the IaC would break production Key Vault
+> references. **Wrong.** The Bicep stack would create `sprkspaarkedev1dev-api` in `rg-spaarke-spaarkedev1-dev`,
+> not `spaarke-bff-dev` in `rg-spaarke-dev` — a re-apply builds a *parallel* environment and does not touch the
+> running one. Corrected finding: the live dev environment is simply **not IaC-managed**, so there is no
+> declarative record of the identity wiring or the slot. Cost is reproducibility, not availability.
+> Severity high → medium.
 
 **Reproduced, not hypothesised.** Creating the `staging` slot with `--configuration-source` copied all 213 app
 settings but not this site-level property; the slot defaulted to `SystemAssigned`, could resolve no Key Vault

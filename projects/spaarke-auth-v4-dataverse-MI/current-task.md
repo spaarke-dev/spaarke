@@ -60,7 +60,7 @@ before task 002.
 
 Slot `staging` on `spaarke-bff-dev`: `https://spaarke-bff-dev-staging.azurewebsites.net` · `/healthz` **200
 Healthy** · UserAssigned only (`mi-bff-api-dev`, principalId `9fd47efb-…`) · **NOT swapped**, production 200
-throughout · `dev.bicepparam` reconciled `B1` → `P1v3`.
+throughout · `dev.bicepparam` set `B1` → `P1v3` (aspirational — that stack does not describe the live env).
 
 Full record: [`notes/decisions/001-slot-creation.md`](notes/decisions/001-slot-creation.md).
 
@@ -68,7 +68,7 @@ Full record: [`notes/decisions/001-slot-creation.md`](notes/decisions/001-slot-c
 
 | # | Finding | Booked onto |
 |---|---|---|
-| **A** 🔴 | `keyVaultReferenceIdentity` is a **site** property — `--configuration-source` does not copy it. Slot defaulted to `SystemAssigned` (which this app lacks), every Key Vault reference failed, container aborted **exit 134 / SIGABRT** — the `#3b` signature. Absent from Bicep IaC → live **production** drift | Pre-check on **031**; "site properties do not swap" on **032**; **ISS-001** / [#805](https://github.com/spaarke-dev/spaarke/issues/805) |
+| **A** 🟠 | `keyVaultReferenceIdentity` is a **site** property — `--configuration-source` does not copy it. Slot defaulted to `SystemAssigned` (which this app lacks), every Key Vault reference failed, container aborted **exit 134 / SIGABRT** — the `#3b` signature. **Severity corrected 🔴→🟠 same day**: the Bicep IaC does not describe the live dev env (`sprkspaarkedev1dev-api` vs `spaarke-bff-dev`), so this is a reproducibility gap, not a production risk | Pre-check on **031**; "site properties do not swap" on **032**; **ISS-001** / [#805](https://github.com/spaarke-dev/spaarke/issues/805) |
 | **B** 🟠 | **Escalation trigger fired** — `--configuration-source` mirrored **16 plaintext secret app settings** into the slot. Retained deliberately (stripping breaks boot *and* would strip production's secrets at swap; KV-refs would add a second variable to the comparison). Reversible by deleting the slot | **033** purges **both** slots; removal is app-setting deletion, not only Key Vault |
 | **C** 🟠 | `Deploy-BffApi.ps1 -UseSlotDeploy` **always swaps** — no `-SkipSwap` | **031** + **032** must use explicit `az webapp deploy` / `slot swap` |
 
@@ -86,7 +86,7 @@ identity. Task 023 now has a real reproduction to test against.
 | 2026-08-19 | **FR-C4 (FIC automation) in scope**, pulled forward | Provisioning task 130 soft-blocked on it |
 | 2026-08-20 | **Power BI deferred** (DEF-001) | Not yet in use; separate secret; does not gate OBO |
 | 2026-08-20 | Slot keeps the **faithful app-setting mirror** incl. secrets | Both alternatives are worse — see Finding B. Cost booked onto 033 |
-| 2026-08-20 | `dev.bicepparam` → **P1v3** | File had drifted, not the environment. P1v3 is load-bearing: B1 has no slots |
+| 2026-08-20 | `dev.bicepparam` → **P1v3** | *Not* a drift fix — that stack has never been applied and names a different env. Still worth doing: B1 has no slots, so it would silently make a slot rollout impossible if ever used |
 
 ### Two live CI gates that will bite
 

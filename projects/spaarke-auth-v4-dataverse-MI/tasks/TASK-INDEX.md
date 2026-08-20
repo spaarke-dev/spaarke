@@ -44,7 +44,7 @@ changed downstream tasks — see [`notes/decisions/001-slot-creation.md`](../not
 
 | Finding | Effect on later tasks |
 |---|---|
-| **A** `keyVaultReferenceIdentity` is a *site* property, not copied by `--configuration-source`; slot aborted with exit 134 (SIGABRT) until set. Absent from Bicep IaC → live **production** drift | Pre-check added to **031**; "site properties do not swap" constraint added to **032**; filed as **ISS-001** ([#805](https://github.com/spaarke-dev/spaarke/issues/805)) |
+| **A** `keyVaultReferenceIdentity` is a *site* property, not copied by `--configuration-source`; slot aborted with exit 134 (SIGABRT) until set. Also absent from Bicep IaC — but the IaC turns out not to describe the live dev env at all, so this is a **reproducibility** gap, not a production risk (severity corrected high→medium same day) | Pre-check added to **031**; "site properties do not swap" constraint added to **032**; filed as **ISS-001** ([#805](https://github.com/spaarke-dev/spaarke/issues/805)) |
 | **B** Escalation trigger fired — 16 plaintext secret app settings mirrored into the slot. Retained deliberately (alternatives are worse); reversible | **033** must purge **both** slots, and treat removal as app-setting deletion, not only Key Vault deletion |
 | **C** `Deploy-BffApi.ps1 -UseSlotDeploy` always swaps — no `-SkipSwap` | **031** and **032** must not use it; explicit `az webapp deploy` recipe recorded |
 
