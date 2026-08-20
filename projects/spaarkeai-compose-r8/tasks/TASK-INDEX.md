@@ -1,156 +1,162 @@
 # Task Index — `spaarkeai-compose-r8`
 
-> **Created**: 2026-08-19 via `/project-pipeline` · **Status**: INITIALIZED — execution owner-gated
-> **58 tasks / 9 phases** · Legend: 🔲 pending · 🔄 needs retry · ✅ complete · ⛔ blocked
+> **Created**: 2026-08-19 · **Re-cut**: 2026-08-20 (decomposed by **file-pass**, not by concern)
+> **Status**: INITIALIZED — execution owner-gated
+> **36 tasks / 9 phases** · Legend: 🔲 pending · 🔄 needs retry · ✅ complete · ⛔ blocked
 
 **Phase 4 does not start until Phase 3's gate passes.** A miss is an owner escalation (root §6/§6.5).
 
 ---
 
+## Decomposition principle (why 36 and not 58)
+
+The **entire Compose spine is `parallel-safe: false`** — `Services/Compose/**`, `Api/ComposeEndpoints.cs`,
+`ComposeWorkspace.tsx`, `ComposeEditor.tsx`, `ComposeAiToolbar.tsx`, `usePendingRedline.ts`. Splitting one
+file's changes across N tasks therefore means **N sequential passes**: N context loads, N review cycles, N
+merge windows on the most contended files in the repo.
+
+Tasks are decomposed by **file-pass**, not by concern. A consolidated task carries the **union** of the
+constraints and a **union acceptance-criteria closed set** (incl. negative cases) — density, not dilution.
+**No scope was removed in the re-cut.**
+
+Separate "write the tests" tasks are an ADR-038 anti-pattern and were folded into each task's acceptance
+criteria — tests are part of the work, not a follow-on.
+
+## Model-tier principle
+
+Capability-matched: the tier that **fully meets** the required capability. Budget is not a constraint —
+code quality is the priority. The discriminator is **"does a subtle miss ship silently?"**
+
+- `opus` — any task where correctness is subtle and a miss ships (i.e. most of this project, by its nature).
+- `sonnet` — genuinely mechanical work with a clear oracle: verification notes, corpus fixture authoring,
+  baseline measurement, deploy mechanics.
+- `effort: max` — the gate and the merge mechanism. `xhigh` — brownfield root-cause work. `high` — mechanical.
+
+---
+
 ## Phase 0 — Coordination & prerequisites
 
-| # | Task | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 001 | Land/verify **PR #690** (Git-LFS corpus fixtures in CI); confirm corpus loads | MINIMAL | sonnet/high | ✅ | — | 🔲 |
-| 002 | Publish-size baseline (vs 44.96 MB) + `/conflict-check` + net10 verify | MINIMAL | sonnet/high | ✅ | — | 🔲 |
-| 003 | Sequence decision for **PR #266** (`DocumentFormat.OpenXml` 3.4.1→3.5.1) | MINIMAL | sonnet/high | ✅ | — | 🔲 |
+| 001 | Land/verify **PR #690** (Git-LFS corpus fixtures in CI); confirm fixtures resolve to real bytes | MINIMAL | sonnet/high | ✅ | — | 🔲 |
+| 002 | Publish-size baseline (vs 44.96 MB) + `/conflict-check` + **PR #266** (OpenXml 3.5.1) sequencing decision | MINIMAL | sonnet/high | ✅ | — | 🔲 |
 
 ## Phase 1 — Track S: Save reliability · **P0, SHIPS ALONE** (no architecture dependency)
 
-| # | Task | FR | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 010 | Route client save errors on `ApiError.status`; retire the unreachable `!response.ok` block | FR-S01 | FULL | sonnet/xhigh | ❌ | — | 🔲 |
-| 011 | Last-writer-wins + warning; retire the 412 refusal | FR-S02 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
-| 012 | `If-Match` on the content PUT (storage-boundary concurrency) | FR-A12 | FULL | sonnet/xhigh | ❌ | 011 | 🔲 |
-| 013 | Born-in-editor dirty flag survives a failed POST | FR-S03 | FULL | sonnet/high | ❌ | — | 🔲 |
-| 014 | 423 lock → clear message + working Retry | FR-S04 | STANDARD | sonnet/high | ❌ | 010 | 🔲 |
-| 015 | Save timeout + `AbortSignal` + in-flight guard | FR-S05 | STANDARD | sonnet/high | ❌ | — | 🔲 |
-| 016 | Save-outcome enum on the wire (`SaveComposeDocumentResponse`) | FR-S06 | FULL | opus/xhigh | ❌ | — | 🔲 |
-| 017 | Re-anchor download failure must never persist the stale baseline | FR-S07 | FULL | opus/xhigh | ❌ | — | 🔲 |
-| 018 | Chunked upload for Compose + remove ~22 MB body ceiling + oversize pre-flight | FR-S08 | FULL | sonnet/xhigh | ❌ | — | 🔲 |
-| 019 | Honest-failure set (guards, name modal, tenant precondition, checkout, promote, 429, filesize, draft slot) | FR-S09 | FULL | sonnet/xhigh | ❌ | 010,016 | 🔲 |
-| 020 | Save-outcome telemetry | FR-S10 | STANDARD | sonnet/high | ❌ | 016 | 🔲 |
-| 021 | Track S seam + contract tests driving the **real thrown `ApiError`** path | NFR-08 | FULL¹ | sonnet/xhigh | ❌ | 010–020 | 🔲 |
-| 022 | Track S deploy (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 021 | 🔲 |
-
-¹ TEST-MODIFYING → code-review + adr-check unconditional at Step 9.5 (root §8).
+| 010 | **Client save-error contract** — route on `ApiError.status`, delete the unreachable `!response.ok` block, rebuild tests on the real thrown path | FR-S01 | FULL | opus/xhigh | ❌ | — | 🔲 |
+| 011 | **Concurrency** — last-writer-wins + warning (retire the 412 loop) **and** `If-Match` at the storage boundary | FR-S02, A12 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
+| 012 | **Save lifecycle hardening** — dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery | FR-S03/04/05 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
+| 013 | **Save-outcome contract + telemetry** — closed enum on the wire; no 200-with-nothing-written; emit the outcome | FR-S06, S10 | FULL | opus/xhigh | ❌ | — | 🔲 |
+| 014 | **Engine-side integrity** — re-anchor download failure must never persist the stale baseline *(the ONE Half-A defect in Track S)* | FR-S07 | FULL | opus/xhigh | ❌ | — | 🔲 |
+| 015 | **Document size ceilings** — route to the existing chunked upload; remove the ~22 MB body ceiling; honest oversize pre-flight | FR-S08 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
+| 016 | **Honest-failure set** — silent guard drops · name-modal gate · tenant precondition · checkout force-close · promote-after-write · 429 mapping · filesize/filepath refresh · per-document draft slot | FR-S09 | FULL | opus/xhigh | ❌ | 010, 013 | 🔲 |
+| 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016 | 🔲 |
 
 ## Phase 2 — Oracle & corpus (build the measurement BEFORE the fix)
 
-| # | Task | FR | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 030 | Preservation oracle (untouched-block XML equivalence) | FR-G01 | FULL¹ | opus/xhigh | ❌ | 001 | 🔲 |
-| 031 | Outcome-honesty assertion in the gate | FR-G02 | FULL¹ | sonnet/xhigh | ❌ | 016,030 | 🔲 |
-| 032 | Two comparison levels + normalization (rsid, proofErr, bookmarks, numId, attr order) | FR-G03 | FULL¹ | opus/xhigh | ❌ | 030 | 🔲 |
-| 033 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds, interior text boxes, multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
-| 034 | Corpus: near-tier owner documents (char formatting, court spacing, footnotes, REF, content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
-| 035 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | sonnet/high | ❌ | 030–034 | 🔲 |
+| 020 | **The gate contract** — preservation oracle + outcome-honesty assertion + two comparison levels with normalization *(all one harness file)* | FR-G01/02/03 | FULL | opus/max | ❌ | 001, 013 | 🔲 |
+| 021 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds · interior text boxes · multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
+| 022 | Corpus: near-tier owner documents (char formatting · court spacing · footnotes · `REF` · content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
+| 023 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | opus/high | ❌ | 020–022 | 🔲 |
 
 ## Phase 3 — Model proof · **THE GATE**
 
-| # | Task | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 040 | Merge prototype: stamp baseline → re-project → per-block compare → clone unchanged | FULL | opus/max | ❌ | 035 | 🔲 |
-| 041 | Answer spec §5.3 research questions (granularity, paraId reliability, tracked-changes/comments, perf) | FULL | opus/max | ❌ | 040 | 🔲 |
-| 042 | Heavy-restructure (FR-G06) + N-cycle Word round-trip (FR-G07) measurement | FULL | opus/xhigh | ❌ | 040 | 🔲 |
-| 043 | **GATE DECISION** + draft ADR-049 third amendment. *Escalation trigger: miss → owner, do not improvise* | FULL | opus/max | ❌ | 040–042 | 🔲 |
+| 030 | **Merge prototype + measurement** — stamp → re-project → per-block compare → clone unchanged; answers spec §5.3; includes heavy-restructure (FR-G06) + N-cycle Word round-trip (FR-G07) | FULL | opus/max | ❌ | 023 | 🔲 |
+| 031 | **GATE DECISION** + ADR-049 third-amendment draft. *Escalation trigger: a miss goes to the owner — do not improvise* | FULL | opus/max | ❌ | 030 | 🔲 |
 
-## Phase 4 — Track A: Faithful save *(blocked until 043 passes)*
+## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*
 
-| # | Task | FR | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 050 | Baseline paraId stamping on the render path | FR-A01 | FULL | sonnet/xhigh | ❌ | 043 | 🔲 |
-| 051 | Server-side re-projection equality oracle (production path) | FR-A02 | FULL | opus/xhigh | ❌ | 050 | 🔲 |
-| 052 | Block copy-through for unchanged blocks | FR-A03 | FULL | opus/xhigh | ❌ | 051 | 🔲 |
-| 053 | Property inheritance for edited blocks | FR-A04 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 054 | Opaque-atom payload carry (write model + `opaqueAtomNode.ts`) | FR-A05 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 055 | Table + atom identity | FR-A06 | FULL | sonnet/xhigh | ❌ | 054 | 🔲 |
-| 056 | Comment anchors + revision-id seeding under cloning | FR-A11 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 057 | Capability gate → read-only + **"Edit a copy"** (`ConfirmModal`, ADR-050) | FR-A07 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 058 | Two document classes (Authored/Imported) + PDF version coordinates | FR-A08/09 | FULL | sonnet/xhigh | ❌ | 052 | 🔲 |
-| 059 | Residual loss list published + owner sign-off | FR-A10 | STANDARD | sonnet/high | ❌ | 052–058 | 🔲 |
-| 060 | **ADR-049 third amendment merged** (7 invariants) — main-session only² | — | FULL | opus/xhigh | ❌ | 043 | 🔲 |
+| 040 | **The merge mechanism** — baseline stamping · server-side re-projection oracle · block copy-through · property inheritance for edited blocks *(ONE mechanism, one file-pass)* | FR-A01/02/03/04 | FULL | opus/max | ❌ | 031 | 🔲 |
+| 041 | **Opaque-atom payload carry** + table/atom identity (write model + `opaqueAtomNode.ts`) | FR-A05/06 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 042 | **Comment anchors + revision-id seeding under cloning** (dup-paraId consume-in-order, cross-boundary ranges) | FR-A11 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 043 | **Capability gate** → read-only + **"Edit a copy"** (`ConfirmModal`/ADR-050; fork stamped `Authored`; original never written) | FR-A07 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044 | 🔲 |
 
-² `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
+¹ `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
 
 ## Phase 5 — Track C: AI edit placement
 
-| # | Task | FR | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 065 | **ADR-043 + ADR-041 assessment** (compose-edit `ActionKind`; "apply anyway?" as a Gate). *Escalation trigger* | — | FULL | opus/xhigh | ✅ | — | 🔲 |
-| 066 | Thread the captured `(paraId, span)` request→response→apply | FR-C01 | FULL | opus/xhigh | ❌ | 065 | 🔲 |
-| 067 | Wire `CitationResolver` for reference-driven targets | FR-C02 | FULL | sonnet/xhigh | ❌ | 065 | 🔲 |
-| 068 | Closed-set paraId return for model-initiated review passes | FR-C03 | FULL | opus/xhigh | ❌ | 066 | 🔲 |
-| 069 | Deterministic stale/deleted-target outcomes | FR-C05 | FULL | sonnet/xhigh | ❌ | 066 | 🔲 |
-| 070 | Retire the text-search path (validator, `target_text`/`match_mode`, client matchers) | FR-C04 | FULL | opus/xhigh | ❌ | 066–069 | 🔲 |
-| 071 | Tolerant matching as a bounded **confirmable** fallback only | FR-C06 | FULL | opus/xhigh | ❌ | 070 | 🔲 |
-| 072 | Verify the dead-end is **unreachable**; no UAT-21 regression | FR-C07 | FULL¹ | sonnet/xhigh | ❌ | 070,071 | 🔲 |
+| 050 | **ADR-043 + ADR-041 assessment** (ADR-043 explicitly names "compose edit"; is FR-C05's "apply anyway?" a Gate?). *Escalation trigger* | — | FULL | opus/xhigh | ✅ | — | 🔲 |
+| 051 | **Anchor supply** — thread the captured `(paraId, span)` request→response→apply · wire `CitationResolver` · closed-set paraId return for review passes *(three sources, one code path)* | FR-C01/02/03 | FULL | opus/max | ❌ | 050 | 🔲 |
+| 052 | **Retire the text-search path** (`ComposeEditValidator`, `FindAll`, `target_text`/`match_mode`, client matchers) + deterministic stale/deleted outcomes | FR-C04/05 | FULL | opus/xhigh | ❌ | 051 | 🔲 |
+| 053 | **Bounded confirmable fallback** + verify the dead-end is **unreachable**; no UAT-21 regression | FR-C06/07 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
 
-## Phase 6 — Track B: Durable session files
+## Phase 6 — Track B: Durable session files *(the only genuinely parallel track)*
 
-| # | Task | FR | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 075 | Durable byte store (blob, tenant-partitioned, existing MI RBAC) | FR-B01 | FULL | sonnet/xhigh | ✅ | — | 🔲 |
-| 076 | Lazy re-index from the durable copy on recall | FR-B02 | FULL | sonnet/xhigh | ✅ | 075 | 🔲 |
-| 077 | `SessionFilesCleanupJob` evicts the hot index only | FR-B03 | FULL | sonnet/high | ✅ | 075 | 🔲 |
-| 078 | Retention follows session TTL (incl. `-1` filed = indefinite) | FR-B04 | FULL | sonnet/xhigh | ✅ | 075 | 🔲 |
-| 079 | Server-authoritative availability (replace R7's 24h heuristic) | FR-B05 | STANDARD | sonnet/high | ✅ | 076 | 🔲 |
-| 080 | Erasure deletes bytes + tenant isolation (ADR-014/015) | FR-B06 | FULL | opus/xhigh | ✅ | 075 | 🔲 |
+| 060 | **Durable byte store** (blob, tenant-partitioned, existing MI RBAC + provisioned container) | FR-B01 | FULL | opus/xhigh | ✅ | — | 🔲 |
+| 061 | **Lazy re-index** on recall + `SessionFilesCleanupJob` evicts the **hot index only** | FR-B02/03 | FULL | opus/xhigh | ✅ | 060 | 🔲 |
+| 062 | **Retention follows session TTL** (incl. `-1` filed = indefinite) + server-authoritative availability | FR-B04/05 | FULL | opus/xhigh | ✅ | 060 | 🔲 |
+| 063 | **Erasure deletes the bytes** + tenant-isolation verification (ADR-014/015) | FR-B06 | FULL | opus/xhigh | ✅ | 060 | 🔲 |
 
-## Phase 7 — Track D: God-class removal *(interleave with Phases 4–6, do not parallelize)*
+## Phase 7 — Track D: God-class removal *(interleave with Phases 4–6; each task deletes its own waiver)*
 
-| # | Task | File | Rigor | Tier/Effort | ∥-safe | Deps | Status |
+| # | Task | File (LOC) | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 082 | Decompose `ComposeService.cs` (3,573) | — | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 083 | Decompose `ComposeDocxProjectionBuilder.cs` (3,085) | — | FULL | opus/xhigh | ❌ | 051 | 🔲 |
-| 084 | Decompose `ComposeDocumentRenderer.cs` (2,304) | — | FULL | opus/xhigh | ❌ | 052 | 🔲 |
-| 085 | Decompose `Api/ComposeEndpoints.cs` (2,651) | — | FULL | opus/xhigh | ❌ | 016 | 🔲 |
-| 086 | Retire `ComposeShadowPatchEngine.cs` (2,999) — confirm at gate **before** deleting | — | FULL | opus/max | ❌ | 043,052 | 🔲 |
-| 087 | Delete all five waivers from `GodClassGuardTests.cs`; ArchTests green | — | FULL¹ | sonnet/high | ❌ | 082–086 | 🔲 |
+| 070 | Decompose `ComposeService.cs` + delete its waiver | 3,573 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 071 | Decompose `ComposeDocxProjectionBuilder.cs` + delete its waiver | 3,085 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 072 | Decompose `ComposeDocumentRenderer.cs` + delete its waiver | 2,304 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 073 | Decompose `Api/ComposeEndpoints.cs` + delete its waiver | 2,651 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
+| 074 | **Retire `ComposeShadowPatchEngine.cs`** + delete its waiver — confirm at the gate **before** deleting | 2,999 | FULL | opus/max | ❌ | 031, 040 | 🔲 |
 
 ## Phase 8 — Wrap-up
 
-| # | Task | Rigor | ∥-safe | Deps | Status |
-|---|---|---|---|---|---|
-| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` update | STANDARD | ❌ | all | 🔲 |
+| # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
+|---|---|---|---|---|---|---|
+| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` + root §17 update | STANDARD | sonnet/high | ❌ | all | 🔲 |
 
 ---
 
 ## Critical path
 
 ```
-001 → 030 → 031/032 → 033/034 → 035 → 040 → 041/042 → 043 (GATE)
-    → 050 → 051 → 052 → 058 → 059 → 090
+001 → 020 → 021/022 → 023 → 030 → 031 (GATE) → 040 → 044 → 045 → 090
 ```
 
-**Track S (010–022) is off the critical path** — it ships first and independently.
+**Track S (010–017) is off the critical path** — it ships first and independently, and needs no gate.
 
 ## Parallel groups
 
 | Group | Tasks | Prerequisite | Notes |
 |---|---|---|---|
-| P0 | 001, 002, 003 | — | Independent coordination tasks |
-| C1 | 033, 034 | 001 | Corpus fixture authoring — different files |
-| B1 | 075 … 080 | Phase 3 gate | **Track B is the only genuinely parallel-safe track** — touches `Services/Ai/Sessions`, not the Compose spine |
-| C2 | 065 | — | ADR assessment is read-only; can run any time |
+| P0 | 001, 002 | — | Independent coordination |
+| C1 | 021, 022 | 001 | Corpus fixture authoring — different files |
+| B1 | 060 → 063 | — | **Track B is the only genuinely parallel-safe track** (touches `Services/Ai/Sessions`, not the Compose spine) |
+| C2 | 050 | — | ADR assessment is read-only; runs any time |
 
-**Everything else is `parallel-safe: false`.** The Compose spine (`Services/Compose/**`,
-`ComposeEndpoints.cs`, `ComposeWorkspace.tsx`, `ComposeEditor.tsx`, `ComposeAiToolbar.tsx`,
-`usePendingRedline.ts`, `docxBridge.ts`) is the most contended surface in the repo — 13+ active worktrees
-touch BFF. Serial execution is deliberate, not an oversight.
+Everything else is serial **by necessity**, not oversight — 13+ active worktrees contend on the BFF.
 
 ## Goal-eligible waves
 
-**None.** Every wave either has a judgment boundary (Phase 3 gate, ADR assessments), touches irreversible
-surface (deploys, deletions), or is single-task-serial. Per root §8.5, `/goal` eligibility requires ≥3
-well-specified low-ambiguity parallel tasks — no wave here qualifies.
+**None.** Every wave has a judgment boundary, touches irreversible surface, or is single-task-serial. Root §8.5
+requires ≥3 well-specified low-ambiguity parallel tasks; no wave here qualifies.
 
 ## High-risk items
 
 | Task | Risk |
 |---|---|
-| 043 | Gate failure re-opens the architecture. **Escalate; do not improvise.** |
-| 057 | Capability-gate false positives block documents we could have handled |
-| 070 | Retiring the text-search path — verify no consumer outside Compose |
-| 086 | Deleting a 3,000-line engine — gate-confirm first |
-| 011/012 | Concurrency semantics change; regression risk on the save path |
+| **031** | Gate failure re-opens the architecture. **Escalate; do not improvise.** |
+| 040 | The merge mechanism — the project's central bet, in one pass |
+| 043 | Capability-gate false positives block documents we could have handled |
+| 052 | Retiring the text-search path — verify no consumer outside Compose |
+| 074 | Deleting a 3,000-line engine — gate-confirm first |
+| 011 | Concurrency semantics reversal on the live save path |
+
+## Re-cut record (2026-08-20)
+
+58 → 36 tasks, **zero scope removed**. Merged: client lifecycle (3→1) · concurrency + If-Match (2→1) ·
+outcome + telemetry (2→1) · gate contract (3→1) · merge mechanism (4→1) · anchor supply (3→1) ·
+Phase-3 proof (3→2) · coordination (3→2). Removed the standalone test task (ADR-038 anti-pattern — folded
+into acceptance criteria). Model tiers re-assigned on capability-match, not budget.

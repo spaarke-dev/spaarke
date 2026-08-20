@@ -7,8 +7,8 @@
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx on the save path; rewrites the error-handling contract that every other Track S task depends on; tests currently validate unreachable code.</rigor-reason>
-    <model-tier>sonnet</model-tier>
-    <model-tier-reason>Well-specified brownfield fix with a named root cause and a known-correct target contract; no architectural judgment required.</model-tier-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched (quality priority, not budget): the trap here is that the EXISTING tests validate unreachable code, so a plausible-looking fix can pass a green suite while leaving the contract broken. Detecting that class of self-confirming test requires judgment, and a subtle miss ships silently — the exact failure mode that carried this defect across R5–R7.</model-tier-reason>
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
