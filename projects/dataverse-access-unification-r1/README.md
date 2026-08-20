@@ -57,8 +57,10 @@ once for the single-impl target amortizes the security-test burden and permanent
 2. Port the 4 WebApi-only capability groups (events, field-mapping, impersonated reads, POA) onto the SDK path.
 3. Delete `DataverseWebApiService`; collapse the DI routing (`GraphModule.cs` **and** `CommunicationModule.cs`,
    whose two seam adapters bind the concrete type) to a single binding.
-4. **Decompose** the residual `DataverseServiceClientImpl` below the 2,000-line ratchet ceiling (removes its
-   waiver). Separable into a follow-on project — Phases 0–3 already retire the trap.
+4. **Decompose** the residual `DataverseServiceClientImpl` on
+   [COMPONENT-COMPLEXITY](../../docs/standards/COMPONENT-COMPLEXITY.md) grounds — responsibilities and cohesion,
+   not line count (the LOC ratchet was retired 2026-08-20). Separable into a follow-on project — Phases 0–3
+   already retire the trap.
 
 ## Prerequisites / sequencing
 
@@ -72,8 +74,9 @@ once for the single-impl target amortizes the security-test burden and permanent
 - [ ] ADR merged; one `IDataverseService` implementation family; `DataverseWebApiService` deleted.
 - [ ] NFR-06 impersonation row-level-security paths re-verified — named suites green, including the
       **negative canary** (impersonated low-privilege read returns strictly fewer rows than the app-only read).
-- [ ] Resulting files ≤ 2,000 LOC; the `DataverseServiceClientImpl` waiver removed from `GodClassGuardTests`
-      (the `DataverseWebApiService` waiver was already removed 2026-08-16). *(Phase 4 — drops if Phase 4 is split off.)*
+- [ ] Resulting components pass the [COMPONENT-COMPLEXITY](../../docs/standards/COMPONENT-COMPLEXITY.md) review
+      — single responsibility, cohesive, reasonable ctor deps. **Not** a LOC threshold (ratchet retired
+      2026-08-20). *(Phase 4 — drops if Phase 4 is split off.)*
 - [ ] No `ClientSecretCredential` constructed anywhere inside the `IDataverseService` family; the single impl
       resolves the DI-registered `TokenCredential` (ADR-028 A4 shared-provider rule). `DataverseAccessDataSource`
       explicitly excluded (auth-v4's).

@@ -54,15 +54,16 @@ Three of this design's original premises have moved. The remaining problem is sm
 | Original premise | Status today | Consequence for this project |
 |---|---|---|
 | "~1,100 LOC of runtime-dead duplicate code" | **Deleted** by RED-4 B (−1,414 LOC); `DataverseWebApiService` narrowed from the composite `IDataverseService` to `: IEventDataverseService, IFieldMappingDataverseService` | Phase 2's porting surface is the **live** event / field-mapping / impersonation / POA code only — no dead code to reconcile |
-| "two ~2,800-LOC god-classes" | **One**: `DataverseServiceClientImpl` **2,975**; `DataverseWebApiService` is **1,468** and its waiver was removed 2026-08-16 | Phase 4 removes **one** waiver, not two (README graduation criterion is stale on this point) |
+| "two ~2,800-LOC god-classes" | **One**: `DataverseServiceClientImpl` **2,945**; `DataverseWebApiService` is **1,468**. **The LOC ratchet itself was retired 2026-08-20** (`866f9c101`) — `GodClassGuardTests` is deleted, superseded by [`docs/standards/COMPONENT-COMPLEXITY.md`](../../docs/standards/COMPONENT-COMPLEXITY.md) (evaluate cohesion/responsibilities; size is a prompt, not a verdict) | Phase 4's justification is now **cohesion**, not a waiver to remove. Judge `DataverseServiceClientImpl` on the COMPONENT-COMPLEXITY signals (multiple responsibilities, low cohesion, ctor deps) — "it is over 2,000 lines" is no longer an argument by itself |
 | "secret-based auth on both" | **#3b landed (2026-08-17, live on dev)**: both impls are MI-first. `DataverseWebApiService.cs:55-86` is flag-gated on `Graph:ManagedIdentity:Enabled` (secret only as local-dev fallback, `:70-86`); `DataverseWebApiClient.cs:42-54` picks `ClientSecretCredential` on **secret presence alone** and otherwise falls through to `DefaultAzureCredential` | The credential work is **residual cleanup, not a migration**. Deleting `DataverseWebApiService` is secret-shaped-code hygiene, **not** a security win — it does not block removal of `BFF-API-ClientSecret` (it degrades to MI). State it that way in the PR. |
 | "delete `DataverseWebApiService` **+ `DataverseWebApiClient`**" | **`DataverseWebApiClient` is NOT a two-consumer cleanup** — **45 references across 16 consumer files** (verified 2026-08-19): registered singleton in `SpeAdminModule.cs:56` (not `GraphModule`), injected across all 4 `Api/SpeAdmin/*Endpoints.cs`, all 6 `Api/ExternalAccess/*Endpoint.cs`, `SpeAdminGraphService.cs` (the 4,911-LOC RED-1 god class), `SpeAuditService`, `SpeDashboardSyncService`, `RegistrationDataverseService`, `ScopeManagementService`. It is a **third, independent REST stack**, not part of the `IDataverseService` family, and `DataverseWebApiService` never consumes it | **Removed from scope** — see "Non-goals". Phase 3 deletes `DataverseWebApiService` only. The T3-halving claim inherited from the coordination memo is **withdrawn**. |
 
-**Pre-existing ratchet red (not caused by this project, but Phase 4 owns half of it)**: `GodClassGuardTests`
-currently **fails on `master`** — `DataverseServiceClientImpl` is 2,975 vs its 2,864 waiver (+100 grace = 2,964,
-over by 11, grown by #3b) and `ComposeEndpoints.cs` is 2,755 vs 2,651 (+4). Phase 0 should decide whether to
-re-baseline the Dataverse waiver as a one-line hygiene PR up front or absorb it in Phase 4; the Compose half is
-not ours.
+**Ratchet finding — now moot (2026-08-20)**: the 2026-08-19 validation found `GodClassGuardTests` failing on
+`master` (`DataverseServiceClientImpl` 2,975 vs 2,864 waiver +100 grace; `ComposeEndpoints.cs` 2,755 vs 2,651).
+`code-quality-and-assurance-r3` resolved it at the root by **retiring the LOC ratchet entirely** (`866f9c101`,
+2026-08-20) — the gate treated line count as a verdict, froze files at arbitrary values, and hard-failed CI on
+normal feature work. `docs/standards/COMPONENT-COMPLEXITY.md` replaces it: complexity is evaluated by humans at
+authoring and review; size is observed, not gated. **No waiver work is owed by this project.**
 
 ## Goal
 
@@ -86,8 +87,8 @@ stacks rather than converging "the two."
    [`notes/validation-2026-08-19.md` §7a](notes/validation-2026-08-19.md).
 2. **Write the impersonation characterization + negative-canary suite** — valuable independent of unification,
    and `spaarke-auth-v4-dataverse-MI` needs it too (it is changing the credential under the OBO path).
-3. **Resolve the god-class ratchet red** — `DataverseServiceClientImpl` 2,975 vs waiver 2,864 (+100 grace),
-   failing on `master` today.
+3. ~~**Resolve the god-class ratchet red**~~ — **moot as of 2026-08-20**: r3 retired the LOC ratchet outright
+   (`866f9c101`); `GodClassGuardTests` is deleted, `docs/standards/COMPONENT-COMPLEXITY.md` supersedes it.
 
 **Resume triggers** — re-evaluate this assessment when any fires:
 
@@ -168,9 +169,10 @@ real but capturable at ~10–15% of the cost without touching the impersonated r
    (events, field-mapping, `RetrieveMultipleImpersonatedAsync`, POA grants).
    **Port target = NEW per-concern services, NOT `DataverseServiceClientImpl`.** Each group lands in its own
    file (e.g. `DataverseEventService : IEventDataverseService`) sharing the SDK connection. Rationale: the impl
-   is already 11 LOC past waiver+grace, so porting ~1,000 live LOC *into* it hard-fails `GodClassGuardTests`
-   mid-project and would need an interim waiver bump that Phase 4 then unwinds. Porting outward instead keeps
-   every PR small, never grows the frozen file, and *is* the Phase 0 ADR's stated target shape.
+   is already the largest file in the lib, so porting ~1,000 live LOC *into* it makes a cohesion problem worse
+   before Phase 4 makes it better. (This argument originally rested on the LOC ratchet, retired 2026-08-20; it
+   survives on the COMPONENT-COMPLEXITY grounds — piling a fifth and sixth responsibility onto one class.)
+   Porting outward keeps every PR small and *is* the Phase 0 ADR's stated target shape.
    **"SDK path" means SDK-managed connection + auth, NOT "QueryExpression everywhere."** The impersonated-read
    seam passes raw OData query strings and returns `Dictionary<string, JsonElement>` rows including
    `@OData.Community.Display.V1.FormattedValue` annotations (`IImpersonatedCommunicationQuery.cs:50-55`); a
@@ -193,8 +195,9 @@ real but capturable at ~10–15% of the cost without touching the impersonated r
    `docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md` and
    `src/server/shared/Spaarke.Dataverse/docs/TECHNICAL-OVERVIEW.md` in the same PR (both describe the two-stack
    world). Ping auth-v4 on merge so its credential inventory re-baselines.
-4. **Decompose** the residual `DataverseServiceClientImpl` into per-concern services ≤ 2,000 LOC; remove its
-   `GodClassGuardTests` waiver (the `DataverseWebApiService` waiver is already gone). **Separable**: Phases 0–3
+4. **Decompose** the residual `DataverseServiceClientImpl` into per-concern services — justified on
+   [COMPONENT-COMPLEXITY](../../docs/standards/COMPONENT-COMPLEXITY.md) signals (responsibilities, cohesion,
+   ctor deps), **not** on line count, and with no waiver to remove. **Separable**: Phases 0–3
    fully retire the split-brain routing trap; Phase 4 is god-class hygiene on a pre-existing file and may be
    split into a follow-on project if the operator wants a smaller first landing. If it stays, it must keep one
    concrete owner of `OrganizationService` and update `UnwrapServiceClient`
@@ -240,7 +243,7 @@ re-provisioning, rather than claiming "green per env".
 | Behavior drift between the two impls of a ported method | Characterization-test each capability against both impls, switch behind the interface, keep the REST impl until parity is green (ADR-032 seam). Pin the four known quirks listed in Phase 1a |
 | **Sync-over-async on hot read paths** — `ExecuteWebRequest` is synchronous (wrapped in `Task.Run`, `DataverseServiceClientImpl.cs:1957`); moving events + Communication feed reads onto it converts fully-async `HttpClient` reads into threadpool-blocking calls | Measure threadpool impact on the queue-feed endpoint under load before cutting over; prefer the ServiceClient's async Web-API surface where available |
 | Leaky abstraction — ~16 sites downcast to the concrete SDK class (`UnwrapServiceClient`, `DataverseServiceClientExtensions.cs:34-77`) | Unaffected through Phases 1–3 (the single impl keeps `OrganizationService`). **Phase 4 breaks this** if decomposition renames/splits the concrete registered as `IDataverseService` — see Phase 4's same-PR requirement |
-| Interim god-class ratchet failure mid-project | Port outward into new per-concern files (Phase 2), never into `DataverseServiceClientImpl.cs`; no interim waiver bump needed |
+| Porting worsens cohesion in the class Phase 4 must then split | Port outward into new per-concern files (Phase 2), never into `DataverseServiceClientImpl.cs` |
 | Highest-contention shared lib | `/conflict-check`; quiet windows; small reviewable PRs; land AFTER the interim hardening |
 | Concurrent edits to `Spaarke.Dataverse` from `spaarke-auth-v4-dataverse-MI` | **File-level overlap is nil** (see below) — mitigation is PR serialisation + `/conflict-check`, not sequencing the projects |
 

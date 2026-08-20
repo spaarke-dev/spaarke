@@ -102,12 +102,16 @@ Roughly 10–15% of the project cost; none of it touches the impersonated read p
    `spaarke-auth-v4-dataverse-MI` is about to change the credential underneath `DataverseAccessDataSource`'s OBO
    path; this suite protects that work too, and it does not exist today. Canary: an impersonated low-privilege
    read MUST return strictly fewer rows than the app-only read of the same query.
-3. **Resolve the god-class ratchet red** — `DataverseServiceClientImpl` 2,975 vs waiver 2,864 (+100 grace),
-   over by 11, grown by #3b. (`ComposeEndpoints.cs` is over by 4.) **Owned by `code-quality-and-assurance-r3`**
-   (operator direction, 2026-08-20) — not this project's to fix.
-   *Note*: item 1's stub replaced ~60 LOC with ~30, so `DataverseServiceClientImpl` is now **2,945** — back
-   under waiver+grace (2,964). That is incidental, not the fix; r3 still owns the re-baseline decision, and
-   `ComposeEndpoints.cs` remains over.
+3. ✅ **RESOLVED AT THE ROOT 2026-08-20 — by retiring the gate, not by re-baselining.** The validation found
+   `GodClassGuardTests` failing on `master` (`DataverseServiceClientImpl` 2,975 vs 2,864 +100 grace, over by 11;
+   `ComposeEndpoints.cs` over by 4). `code-quality-and-assurance-r3` took the better path: **`866f9c101` retired
+   the LOC ratchet entirely** and deleted `GodClassGuardTests`, superseded by
+   [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md) — *"file size is
+   a symptom, not the thing we care about… a large file is sometimes the right answer."* The gate had frozen
+   files at arbitrary values and hard-failed CI on normal feature work in Compose and Chat.
+   **Consequence for this project**: Phase 4 loses its "remove the waiver" justification and must stand on
+   cohesion/responsibility grounds instead. That is a *weaker* mechanical argument and a *more honest* one —
+   factor it into the next re-evaluation.
 
 ## 7a. The defect the B3 fix surfaced (2026-08-20)
 
