@@ -279,7 +279,7 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 | 174 | 🔲 | I3: Cosmos partition-key probe (pipelined with H2a) | FULL | sonnet / high | waveG7-parallel | 123 |
 | 175 | 🔲 | T6: SPE confidential-client trap probe (pipelined with H8) | FULL | sonnet / high | waveG7-parallel | 131 |
 | 176 | 🔲 | I4: SPE container resolver probe (pipelined with H9) | FULL | sonnet / high | waveG7-parallel | 132 |
-| 177 | 🔲 | T2: Dataverse App User pair probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143, 111 |
+| 177 | ✅ | T2: Dataverse App User pair probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143, 111 |
 | 178 | 🔲 | T3: Graph app-role parity (14) probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143 |
 | 179 | 🔲 | I5: Graph token tenant scope probe (pipelined with C5.8 grants) | FULL | sonnet / high | waveG7-parallel | 111 |
 | 180 | 🔲 | T4: Exchange policy count probe (sidecar read-route, pipelined with H14a) | FULL | sonnet / high | waveG7-parallel | 114, 161, 162 |
