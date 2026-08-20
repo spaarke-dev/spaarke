@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S02 — Last-writer-wins with a warning; retire the 412 refusal loop</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>blocked-until-010</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes save-path concurrency semantics across server and client; reverses a behavior shipped to dev 2026-08-18; data-integrity blast radius.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency semantics + a deliberate reversal of a recent shipped decision; requires judgment about what "warn" means when a user overwrites a newer version.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeService.SaveAsync and ComposeWorkspace.tsx — the two most contended files in the project.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, frontend, compose, save-path, concurrency</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    R7's UAT-25/26 fix (commit 6a75eb7b7, deployed 2026-08-18) made the mainstream ContentModel save refuse with
+    HTTP 412 whenever the live SPE eTag differs from the Compose stamp. Combined with the dead client handler
+    (task 010), this produced an UNRECOVERABLE LOOP: no reload path, and `state.etag` only updates on
+    saveSucceeded, so every retry re-412s until a full page reload. It also compares eTag (not cTag), so
+    metadata-only changes and Word-for-web sessions can trigger FALSE-POSITIVE lockouts.
+
+    Owner decision 2026-08-19: concurrency is LAST-WRITER-WINS WITH A WARNING. Replace the refusal.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in ComposeService.SaveAsync, SPE eTag/cTag semantics, and the Redis version-stamp path (ADR-009). Follow ADR-049 and ADR-007 strictly.</role>
+
+  <goal>
+    A save that lands on a moved base SUCCEEDS and warns the user that they overwrote a newer version, naming
+    SPE version history as the recovery path. No save-path state can produce an unrecoverable retry loop. The
+    412 refusal introduced 2026-08-18 is removed from the ContentModel path.
+  </goal>
+
+  <context>
+    <background>
+      design.md §3 S-2 and §7 D5. This supersedes the 412 behavior; ADR-049's third amendment (task 060) codifies
+      last-writer-wins as invariant (e). Task 012 adds If-Match at the storage boundary, which is the DURABLE
+      enforcement — this task removes the application-level refusal and adds the honest warning. The eTag-vs-cTag
+      distinction matters: Graph eTags move on metadata-only changes, so an eTag comparison over-fires.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="reference-impl">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">The save MUST terminate in a defined outcome (R8 standing invariant a). A stale base is NOT an undefined content-refusal — it is `persisted-with-warnings`. Scope: the ContentModel save path in SaveAsync.</constraint>
+    <constraint source="ADR-009">Version-stamp state MUST use IDistributedCache, never IMemoryCache. Scope: any stamp read/write touched here.</constraint>
+    <constraint source="project">MUST NOT simply delete the staleness DETECTION — detection is what powers the warning. Only the REFUSAL is removed.</constraint>
+    <constraint source="project">MUST assess eTag vs cTag and record the finding. If eTag over-fires on metadata-only changes, prefer cTag (content tag) for the "did the content actually move" signal. Scope: the staleness comparison only.</constraint>
+    <constraint source="project">MUST verify no retry path can loop: after a warned save, client state MUST advance so an immediate second save does not re-warn for the same event.</constraint>
+    <constraint source="bff-extensions">State the Placement Justification in the PR and report publish size vs the 44.96 MB baseline (root §10).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose save concurrency, SPE eTag, version stamping</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Locate the staleness assert added by 6a75eb7b7 in ComposeService.SaveAsync (~:1227) and trace exactly which request shapes reach it.</step>
+    <step order="2">Determine empirically whether eTag or cTag is the correct "content moved" signal; record the finding in task notes.</step>
+    <step order="3">Replace the refusal with: proceed with the write, and return a `persisted-with-warnings` outcome carrying a stale-base warning (coordinate the outcome shape with task 016 — do not invent a second one).</step>
+    <step order="4">Client: render the warning honestly ("you overwrote a newer version — previous versions are in version history") and ADVANCE the stamp/etag state so the warning does not repeat.</step>
+    <step order="5">Add a seam test: an external writer moves the base between load and save; assert the save SUCCEEDS, warns once, and a second save does not re-warn.</step>
+    <step order="6">Verify no 412 remains reachable on the ContentModel path.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the refusal would allow a genuine data-loss scenario that version history cannot recover (e.g. the overwritten version is never retained), STOP and surface it — the owner's last-writer-wins decision assumes SPE version history is the safety net.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/ComposeConcurrencySeamTests.cs</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/etag-vs-ctag-finding.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A save onto a moved base SUCCEEDS and returns a warning outcome — no 412 refusal on the ContentModel path.</criterion>
+    <criterion>The warning names SPE version history as the recovery path.</criterion>
+    <criterion>An immediate second save after a warned save does NOT re-warn for the same event (loop impossible) — proven by test.</criterion>
+    <criterion>The eTag-vs-cTag assessment is recorded with evidence.</criterion>
+    <criterion>Staleness DETECTION still exists — only the refusal is removed.</criterion>
+    <criterion>NEGATIVE: a save with an UNMOVED base produces no warning (no false positives).</criterion>
+    <criterion>NEGATIVE: no IMemoryCache used for version state (ADR-009).</criterion>
+    <criterion>Publish size reported vs 44.96 MB; no new HIGH CVE; Placement Justification stated in the PR.</criterion>
+  </acceptance-criteria>
+</task>

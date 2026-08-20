@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S01 — Route client save errors on ApiError.status; retire the unreachable !response.ok block</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx on the save path; rewrites the error-handling contract that every other Track S task depends on; tests currently validate unreachable code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified brownfield fix with a named root cause and a known-correct target contract; no architectural judgment required.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>ComposeWorkspace.tsx is the most contended client file in the repo; every other Track S task builds on this error contract.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, compose, save-path, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    The entire HTTP-status-specific save-error handling in ComposeWorkspace.tsx is DEAD CODE. `authenticatedFetch`
+    returns only when `response.ok` and THROWS an `ApiError` for every non-2xx — so the `if (!response.ok)` block
+    (423 lock banner + Retry, 412 reload flow, 403 copy) can never execute. Every server refusal falls into the
+    generic catch as "Save failed: {detail}" with no recovery, even though `ApiError` carries `.status`.
+
+    Rewrite the save error path to route on `ApiError.status`. Replace the tests that mock `authenticatedFetch`
+    to RETURN `{ok:false}` — a shape the real function cannot produce — with tests that drive the real thrown path.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in the Compose widget reducer, the @spaarke/auth fetch contract, and Fluent v9 banner surfaces. Follow ADR-028 and ADR-021 strictly.</role>
+
+  <goal>
+    Every non-2xx save response produces its own user-visible outcome and recovery affordance, driven by
+    `ApiError.status`. The unreachable `!response.ok` block is deleted. Tests exercise the real thrown-ApiError
+    contract. No raw `fetch` is introduced — `authenticatedFetch` remains the transport (ADR-028).
+  </goal>
+
+  <context>
+    <background>
+      Verified 2026-08-19 by the Fable review of the save path (design.md §3 S-1). This is the single highest-leverage
+      Track S fix: because every distinct failure renders identically today, the owner cannot distinguish a 423 lock
+      from a 412 stale-base from a 500 — which is why "can't save" persisted across R5, R6 and R7 as a queue of
+      different bugs wearing one error message. Fixing this makes every other Track S failure diagnosable.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+      <file role="reference-impl">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</file>
+      <file role="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.saveOpLogPreservation.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">MUST keep `authenticatedFetch` as the transport for the save request. MUST NOT introduce a raw `fetch` with a hand-built Authorization header, and MUST NOT reference tokenBridge / window.__SPAARKE_BFF_TOKEN__. Scope: the save request path in ComposeWorkspace.tsx only.</constraint>
+    <constraint source="ADR-021">Banner/alert surfaces MUST use Fluent v9 semantic tokens — no hex, no inline color. Scope: any banner copy or state added by this task.</constraint>
+    <constraint source="project">MUST reuse R7's existing banner stack and SAVE_DEGRADATION_COPY layer — do NOT author a parallel message surface (root CLAUDE.md §11).</constraint>
+    <constraint source="project">MUST delete the unreachable `if (!response.ok)` block rather than leaving it beside the new path — two error paths is the exact drift this project exists to remove.</constraint>
+    <constraint source="ADR-038">Replacement tests MUST drive the real thrown-ApiError contract. MUST NOT mock authenticatedFetch to return {ok:false}. Scope: the Compose save-path test files touched here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose save path, auth fetch contract, error surfacing</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-028.</step>
+    <step order="1">Read authenticatedFetch.ts and confirm the exact throw contract and the shape of ApiError (status, detail, any problem-details fields).</step>
+    <step order="2">Map every save-path call site in ComposeWorkspace.tsx: locate the `!response.ok` block and the generic catch; enumerate which statuses currently have (dead) handling.</step>
+    <step order="3">Implement status routing in the catch: 423 → lock banner + Retry; 412 → stale-base flow (NOTE: task 011 replaces this with last-writer-wins — coordinate, do not duplicate); 403 → permission copy; other 4xx → honest detail; 5xx → retryable failure. Reuse the existing banner stack.</step>
+    <step order="4">Delete the unreachable `!response.ok` block.</step>
+    <step order="5">Rewrite the affected tests to reject a thrown ApiError from a mocked authenticatedFetch, asserting the rendered outcome per status.</step>
+    <step order="6">Verify no raw fetch was introduced; run the Compose client test suite.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ApiError does not actually carry a usable `.status` for some failure classes (e.g. network-level failures that never reach an HTTP status), stop and surface the gap — the save-outcome contract (task 016) may need a client-side transport-failure member rather than a status code.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.saveOpLogPreservation.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The save error path routes on `ApiError.status`; each of 423 / 412 / 403 / other-4xx / 5xx renders a distinct, honest message.</criterion>
+    <criterion>423 renders a lock banner with a working Retry affordance.</criterion>
+    <criterion>The `if (!response.ok)` block is DELETED from the save path — verified by grep.</criterion>
+    <criterion>Tests drive the real thrown-ApiError path; no test mocks authenticatedFetch to return {ok:false}.</criterion>
+    <criterion>NEGATIVE: no raw `fetch(` with a hand-built Authorization header exists in the save path (ADR-028).</criterion>
+    <criterion>NEGATIVE: no second/parallel banner or message surface was created — the existing stack is reused.</criterion>
+    <criterion>NEGATIVE: a save that SUCCEEDS still reports success and does not render any error banner (no false positives).</criterion>
+    <criterion>The Compose client test suite passes.</criterion>
+  </acceptance-criteria>
+</task>
