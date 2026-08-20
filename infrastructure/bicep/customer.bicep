@@ -8,11 +8,18 @@
 //   - Key Vault (customer-specific secrets)
 //   - Service Bus namespace (job queues)
 //
-// Note: per-customer Redis is DEPRECATED per Q-E Architecture 1 / FR-12
-// (spaarke-redis-cache-remediation-r1 + r2). Redis is provisioned per-environment
-// via scripts/Deploy-RedisCache.ps1 (spaarke-bff-redis-{env}) and consumed by the
-// BFF via Key Vault reference. See projects/spaarke-redis-cache-remediation-r2/
-// for the IaC gap closure (this template's Redis module call was removed in r2 task 020).
+// Note (UPDATED 2026-08-19, task 128b -- E2 reconciliation): per-customer Redis
+// WAS deprecated per Q-E Architecture 1 / FR-12 (spaarke-redis-cache-remediation-r1
+// + r2, which removed this template's Redis module call in r2 task 020). Owner
+// reconciliation (2026-08-19): this template is confirmed (task 129 background) to
+// be the SOLE template deployed for the Model2Dedicated branch, where env=customer
+// 1:1 -- so "per-environment" and "per-customer" are the same unit for THIS
+// template. modules/redis.bicep is wired unconditionally below (see REDIS CACHE
+// section) as the per-environment Redis for that customer's dedicated environment.
+// Model 1 (shared/trial) Redis is UNAFFECTED -- it remains per-env-shared via
+// scripts/Deploy-RedisCache.ps1 and has no code path through this file. See
+// spec.md v3.6 FR-04 / § MUST Rules and design.md v3.6 §7.2 for the Model 1 vs
+// Model 2 distinction this reconciliation introduced.
 
 targetScope = 'subscription'
 
@@ -88,6 +95,16 @@ param acsWebhookEndpointUrl string = ''
 @allowed(['B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
 param appServiceSku string = 'S1'
 
+// --- Redis Cache options (Phase C — customer-provisioning-orchestration-r1, task 128b;
+// E2 reconciliation — per-customer Redis for Model2Dedicated, see header note) ---
+
+@description('SKU for the per-customer Redis Cache. Default Basic (dev-cost-optimized, ~$15/mo) per redis-dev.bicepparam precedent — single overridable default, not environment-conditional Bicep logic; override via CLI --parameters for staging/prod, matching appServiceSku default S1 being overridden the same way.')
+@allowed(['Basic', 'Standard', 'Premium'])
+param redisSku string = 'Basic'
+
+@description('SKU capacity (family size) for the per-customer Redis Cache. Default 0 (Basic C0, cheapest tier) per redis-dev.bicepparam precedent.')
+param redisCapacity int = 0
+
 // --- Tags ---
 
 @description('Tags applied to ALL resources for cost tracking and management')
@@ -141,6 +158,20 @@ var openAiName = 'sprk-${customerId}-${environmentName}-openai'
 
 // AI Search: sprk-{customer}-{env}-search (per design.md §7.1 naming convention).
 var searchServiceName = 'sprk-${customerId}-${environmentName}-search'
+
+// App Insights: sprk-{customer}-{env}-insights (per design.md §7.1 naming convention).
+var appInsightsName = 'sprk-${customerId}-${environmentName}-insights'
+
+// Log Analytics workspace: sprk-{customer}-{env}-logs (per design.md §7.1 naming convention).
+var logAnalyticsName = 'sprk-${customerId}-${environmentName}-logs'
+
+// Document Intelligence: sprk-{customer}-{env}-docintel (per design.md §7.1 naming convention).
+var docIntelligenceName = 'sprk-${customerId}-${environmentName}-docintel'
+
+// Redis Cache: sprk-{customer}-{env}-redis (task 128b / E2 reconciliation -- not yet a
+// canonical design.md §7.1 row; matches the existing SignalR/OpenAI/AI Search naming
+// shape used elsewhere in this file. See design.md v3.6 §7.1 amendment.)
+var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
@@ -199,6 +230,29 @@ module keyVault 'modules/key-vault.bicep' = {
 }
 
 // ============================================================================
+// MONITORING (App Insights + Log Analytics) — Phase C — customer-provisioning-
+// orchestration-r1, task 128b. Single module (modules/monitoring.bicep) emits
+// BOTH the Log Analytics workspace AND the App Insights instance wired to it via
+// `WorkspaceResourceId`. Per design.md §7.2 row 12 / §7.6 Deployment Order step 3
+// -- placed immediately after Key Vault (closest available position to the
+// documented early placement without reordering already-shipped modules). No
+// UAMI RBAC param -- App Insights auth is connection-string/instrumentation-key
+// based, not MI-based, so there is nothing to grant. No `retentionInDays`
+// override passed -- module default (90) already matches design.md.
+// ============================================================================
+
+module monitoring 'modules/monitoring.bicep' = {
+  scope: rg
+  name: 'monitoring-${baseName}'
+  params: {
+    appInsightsName: appInsightsName
+    logAnalyticsName: logAnalyticsName
+    location: location
+    tags: tags
+  }
+}
+
+// ============================================================================
 // STORAGE ACCOUNT (Temp files, document processing)
 // ============================================================================
 
@@ -237,7 +291,10 @@ module serviceBus 'modules/service-bus.bicep' = {
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
 // Wave C2 (task 032) will refactor into the multi-stack composition (model1-shared /
 // model2-full); this scaffold ensures the module is wired so C2 lands cleanly.
-// Redis is intentionally NOT provisioned per-customer (Q-E FR-12) — see header note.
+// Redis IS now provisioned per-customer (task 128b, E2 reconciliation) -- see the
+// REDIS CACHE section below + the updated header note. Redis is not co-located
+// with Cosmos DB in this file; it is grouped with the other supporting-infra
+// resources (Document Intelligence + Monitoring) after AI Search per §7.6.
 // Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.
 // ============================================================================
 
@@ -302,6 +359,66 @@ module aiSearch 'modules/ai-search.bicep' = {
     searchServiceName: searchServiceName
     location: location
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// DOCUMENT INTELLIGENCE (Phase C — customer-provisioning-orchestration-r1,
+// task 128b; module authored by task 030). Per design.md §7.2 row 11 / §7.6
+// Deployment Order step 12 -- placed immediately after AI Search (still before
+// Membership Topic), grouping with the other AI resources per design.md §7.6's
+// 10-11-12 (OpenAI -> AI Search -> DocIntel) adjacency. UAMI granted Cognitive
+// Services User RBAC (built-in role a97b65f3-24c7-4388-baec-2e87135dc908) via
+// the module's existing `userAssignedIdentityPrincipalId` param, same pattern
+// task 128 wired for openai.bicep/ai-search.bicep. `docIntelligenceEndpoint`
+// output name is LOAD-BEARING -- ArmDeploymentRunner.MapOutputs (task 123)
+// reads it exactly. Raw `docIntelligenceKey` is intentionally NOT echoed here.
+// ============================================================================
+
+module docIntelligence 'modules/doc-intelligence.bicep' = {
+  scope: rg
+  name: 'docIntelligence-${baseName}'
+  params: {
+    docIntelligenceName: docIntelligenceName
+    location: location
+    sku: 'S0'
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
+    tags: tags
+  }
+}
+
+// ============================================================================
+// REDIS CACHE (Phase C — customer-provisioning-orchestration-r1, task 128b;
+// module authored by spaarke-redis-cache-remediation-r1 task 020, FR-09
+// hardened). Per the owner's E2 reconciliation (2026-08-19; see the updated
+// header note above): this template is confirmed to be the SOLE template
+// deployed for the Model2Dedicated branch, where "per-environment" and
+// "per-customer" are the same unit -- so modules/redis.bicep is wired
+// UNCONDITIONALLY (no feature-gate param), matching Cosmos DB's unconditional-
+// invocation precedent in this file. Model 1 (shared/trial) is NOT affected --
+// it has no code path through this file and continues to use the per-env-
+// shared Redis via scripts/Deploy-RedisCache.ps1. `redisSku`/`redisCapacity`
+// default to 'Basic'/0 (dev-appropriate cost posture per redis-dev.bicepparam
+// precedent, same pattern as `appServiceSku`'s single overridable default --
+// staging/prod override at deploy time via CLI `--parameters`, not env-
+// conditional Bicep logic). No UAMI RBAC param -- Redis auth is access-key
+// based, not MI-based. No `subnetId`/`staticIP` override -- this file has no
+// VNet module; public network access matches Cosmos DB / OpenAI / AI Search's
+// own public-endpoint posture here. Raw `redisPrimaryKey`/`redisConnectionString`
+// are intentionally NOT echoed as top-level outputs (secret-output-hygiene
+// precedent from task 128) -- future task-129-style kv-secrets wiring can
+// reference `redis.outputs.*` symbolically in-file.
+// ============================================================================
+
+module redisCache 'modules/redis.bicep' = {
+  scope: rg
+  name: 'redisCache-${baseName}'
+  params: {
+    redisName: redisCacheName
+    location: location
+    sku: redisSku
+    capacity: redisCapacity
     tags: tags
   }
 }
@@ -467,6 +584,29 @@ output openAiEndpoint string = openAi.outputs.openAiEndpoint
 // intentionally NOT echoed here — flows through task 129's kv-secrets wiring
 // instead. ---
 output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
+
+// --- Document Intelligence (task 128b / Phase C). Output name is LOAD-BEARING:
+// ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
+// BicepDeployOutputs.DocIntelligenceEndpoint. Raw `docIntelligenceKey` is
+// intentionally NOT echoed here — flows through a future kv-secrets wiring
+// task instead (task 129 territory). ---
+output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
+output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
+
+// --- Monitoring: App Insights + Log Analytics (task 128b / Phase C). Raw
+// `connectionString`/`instrumentationKey` are intentionally NOT echoed here —
+// flows through a future kv-secrets wiring task instead (task 129 territory). ---
+output appInsightsName string = monitoring.outputs.appInsightsName
+output appInsightsId string = monitoring.outputs.appInsightsId
+output logAnalyticsName string = monitoring.outputs.logAnalyticsName
+output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
+
+// --- Redis Cache (task 128b / Phase C — E2 reconciliation). Raw
+// `redisPrimaryKey`/`redisConnectionString` are intentionally NOT echoed here —
+// flows through a future kv-secrets wiring task instead (task 129 territory). ---
+output redisName string = redisCache.outputs.redisName
+output redisHostName string = redisCache.outputs.redisHostName
+output redisPort int = redisCache.outputs.redisPort
 
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName

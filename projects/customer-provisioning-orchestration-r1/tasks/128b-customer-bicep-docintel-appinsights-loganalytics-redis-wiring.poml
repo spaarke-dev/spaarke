@@ -3,8 +3,8 @@
   <metadata>
     <title>customer.bicep: wire Document Intelligence + App Insights + Log Analytics + Redis -- closes the E1/E2 escalation gap task 127/128/129 flagged as out-of-scope</title>
     <phase>Phase C'' Wave G-2.5 -- customer.bicep completion (Path 1 owner decision; E1/E2 follow-on POML authored 2026-08-19 during task 128's authoring)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Owner-directed FULL, matching 127/128/129's rigor (customer.bicep is the LIVE production ARM template task 123's ArmDeploymentRunner deploys via the real Azure SDK -- a mistake here is deploy-blast-radius). Independently justified: this task also reverses a versioned (v3.2) documented architecture decision for Redis (see escalation trigger 1) -- FULL rigor's code-review + adr-check gate is the correct place to confirm that reversal is intentional before it ships.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -144,4 +144,13 @@ Grep-verified: `modules/doc-intelligence.bicep`, `modules/monitoring.bicep` (com
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>COMPLETION (2026-08-19). All 3 modules (doc-intelligence.bicep, monitoring.bicep, redis.bicep) wired into customer.bicep UNMODIFIED, in the declared insertion zones (monitoring after Key Vault/before Storage; docIntelligence after AI Search/before Membership Topic; redis immediately after docIntelligence). Two stale Redis comments (header + Cosmos-DB-section) corrected to state the E2 reconciliation. New params `redisSku`='Basic'/`redisCapacity`=0 (dev-cost posture, mirrors redis-dev.bicepparam). 9 new non-secret outputs added under the exact required names; no raw docIntelligenceKey/redisPrimaryKey/redisConnectionString echoed. `az bicep build` exits 0 with exactly 7 warnings, byte-identical to the pre-task baseline (zero net-new). Live `az deployment sub what-if` (customerId=t128bwif, dev) returned status Succeeded, 30 resources Create-only, zero unexpected changes to tasks 127/128's already-landed resources; Redis + App Insights + Log Analytics resolved fully in the plan, Document Intelligence short-circuited from per-resource validation by the SAME pre-existing ARM nested-deployment limitation already documented in task 128's notes (consumes uami.outputs.principalId, not introduced by this task). Quality gates (code-review + adr-check) both passed clean: 0 critical, 0 violations, 1 suggestion (accepted, non-blocking table-numbering tradeoff).
+
+  **Step 8 deviation (documented, not silent)**: the POML text (authored 2026-08-19 during task 128's authoring) specified "v3.3" as the spec.md/design.md amendment's target version. By the time this task executed (same day), design.md had independently advanced to v3.5 via the auth-v4 MI-FIC coordination commit, and "v3.3" was ALREADY a taken, semantically-distinct version in both spec.md's and design.md's own history (the 2026-08-16 owner-review-round entry). Reusing "v3.3" would have created a duplicate, misleading version marker. Bumped to **v3.6** instead (the correct next-sequential version) and documented the correction explicitly in spec.md's header, design.md's header + CHANGELOG entry, and this note. All acceptance-criteria INTENT (Model 1 vs Model 2 Redis distinction, version-bump grep-ability) is satisfied under v3.6; `grep -c "v3.6"` returns 7 (spec.md) / 8 (design.md) / 2 (CLAUDE.md).
+
+  Escalation trigger 1 (owner-directed, RESOLVED per the POML's own annotation): folded into step 8, executed without re-STOP.
+  Escalation trigger 2 (Redis naming/SKU not yet canonical in §7.1): RESOLVED as part of the v3.6 amendment — §7.1 naming table now carries a Redis row (`sprk-{customerId}-{env}-redis`, Model 2 only).
+  Escalation trigger 3 (task 129 re-verification): FIRES. Task 129's TASK-INDEX row + its own POML's kv-secrets triage should be re-verified against this task's landed customer.bicep state before 129 executes — flagged in TASK-INDEX.md's Last-Updated note; task 129's POML itself was NOT touched by this task (per the escalation trigger's own instruction not to silently amend it).
+  Escalation trigger 4 (race with 129 already executed): does not apply — 129 had not executed as of this task's completion.</notes>
 </task>

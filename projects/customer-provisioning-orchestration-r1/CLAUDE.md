@@ -1,7 +1,7 @@
 # CLAUDE.md — customer-provisioning-orchestration-r1
 
 > **Per-project AI context. This file is loaded automatically when Claude Code operates in this project directory.**
-> **Last Updated**: 2026-08-16
+> **Last Updated**: 2026-08-19 (v3.6 — task 128b Redis Model 1/Model 2 reconciliation; see spec.md/design.md v3.6 CHANGELOG)
 > **Root CLAUDE.md rules apply — this file EXTENDS, does not replace.**
 
 ---
@@ -98,7 +98,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 - **MUST** register provisioning handlers in **L2 control-plane service, not the BFF** (§5.2 + D3/D8/D12)
 - **MUST NOT** create per-customer Entra tenant; use one Spaarke tenant + one multitenant BFF app (spec.md §9.1 v3)
 - **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
-- **MUST NOT** provision Redis per-customer (Q-E FR-12; per-env via `Deploy-RedisCache.ps1`)
+- **MUST NOT** provision Redis per-customer **FOR MODEL 1** (Q-E FR-12; per-env via `Deploy-RedisCache.ps1`, unchanged). **MUST** provision Redis per-customer **FOR MODEL 2** (v3.6, task 128b, 2026-08-19 — `customer.bicep` is the sole Model2Dedicated template, env=customer 1:1 there, so `modules/redis.bicep` is wired unconditionally in that file)
 - **MUST** use confidential-client (app-only) token for SPE container-type creation (T6)
 - **MUST** PATCH App Service `keyVaultReferenceIdentity` to UAMI on both slots (T1)
 - **MUST** apply canonical KV secret + resource naming (Phase G / R1–R4); vault name is Bicep parameter
