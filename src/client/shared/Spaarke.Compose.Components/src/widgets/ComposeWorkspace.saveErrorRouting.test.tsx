@@ -53,6 +53,7 @@ type SaveOutcome =
   | { kind: 'transport' }
   | { kind: 'post-save-throw' }
   | { kind: 'concurrent-warning' }
+  | { kind: 'outcome-200'; outcome: string }
   | null;
 
 const config: { saveOutcome: SaveOutcome } = { saveOutcome: null };
@@ -88,8 +89,9 @@ const authenticatedFetchMock = jest.fn(async (url: string): Promise<Response> =>
       throw new TypeError('Failed to fetch');
     }
     if (outcome?.kind === 'post-save-throw') {
-      // 2xx from the server — the document IS written — but the body is unreadable, so the workspace's
-      // post-save bookkeeping throws INSIDE the same try/catch as the request.
+      // A 2xx whose body cannot be read. Since FR-S06 the status alone does NOT say whether anything
+      // was written (`storage-failed` also arrives on a 200), so this case is genuinely indeterminate —
+      // the throw happens inside the same try/catch as the request, before the outcome can be read.
       return {
         ok: true,
         status: 200,
@@ -112,6 +114,13 @@ const authenticatedFetchMock = jest.fn(async (url: string): Promise<Response> =>
         // FR-S02: the concurrent-writer outcome is a 200 carrying a warning, not a refusal.
         degradationWarnings:
           outcome?.kind === 'concurrent-warning' ? [{ code: 'concurrent-external-change', count: 1 }] : undefined,
+        // FR-S06: the terminal outcome. A 200 does NOT imply anything was written.
+        outcome:
+          outcome?.kind === 'outcome-200'
+            ? outcome.outcome
+            : outcome?.kind === 'concurrent-warning'
+              ? 'persisted-with-warnings'
+              : 'persisted',
       }),
     } as unknown as Response;
   }
@@ -439,16 +448,73 @@ describe('ComposeWorkspace — save errors route on ApiError.status (FR-S01, r8 
     expect(screen.queryByTestId('compose-external-change-banner')).not.toBeInTheDocument();
   });
 
-  it('NEGATIVE: a throw AFTER the 2xx does not claim "Not saved" — the document was written', async () => {
-    // The request and all post-save bookkeeping share one try/catch. A throw after the 200 (an
-    // unreadable body, a failing dispatch, draft cleanup) must not be reported as a refused save —
-    // that is the same dishonest outcome FR-S01 removes, pointing the other way.
+  it('a 2xx whose body cannot be read is reported as INDETERMINATE, never as saved or not-saved', async () => {
+    // Task 010 originally asserted "was saved" here, on the assumption that a 2xx meant the write
+    // landed. FR-S06 (task 013) disproved that assumption — `storage-failed` also arrives on a 200 —
+    // so when the body cannot be read we genuinely do not know. Claiming "Not saved" risks a duplicate
+    // save; claiming "Saved" risks silent data loss. The honest report is that it is unconfirmed.
     config.saveOutcome = { kind: 'post-save-throw' };
     await mountAndSave();
 
     const text = await errorBannerText();
-    expect(text).toContain('was saved');
-    expect(text).not.toContain('Not saved');
+    expect(text).toContain('could not confirm');
+    expect(text).toContain('Reload the document to check');
+    expect(text).not.toContain('Not saved —');
+    // Unconfirmed is NOT success: the op-log must survive so a retry re-sends the same work.
+    expect(commitSavedMock).not.toHaveBeenCalled();
+  });
+
+  // ── FR-S06 (task 013): the outcome field, not the HTTP status, decides success ────────────────────
+  //
+  // THE defect this contract removes: `ComposeService`'s container-failure path RETURNS a result rather
+  // than throwing, and the endpoint wraps every returned result in `Results.Ok` — so a save that wrote
+  // nothing at all arrived as HTTP 200 and rendered as "Saved ✓".
+
+  it('a 200 carrying storage-failed does NOT render Saved — nothing was written (FR-S06)', async () => {
+    config.saveOutcome = { kind: 'outcome-200', outcome: 'storage-failed' };
+    await mountAndSave();
+
+    const text = await errorBannerText();
+    expect(text).toContain('Not saved');
+    expect(text).toContain('could not store the document');
+    // The success side effects must NOT have fired: no op-log commit (so a retry re-sends the work).
+    expect(commitSavedMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(editorProps.current.canSave).toBe(true));
+  });
+
+  it('a 200 carrying partially-recorded says PARTLY saved — stored, but not everything (FR-S06)', async () => {
+    config.saveOutcome = { kind: 'outcome-200', outcome: 'partially-recorded' };
+    await mountAndSave();
+
+    const text = await errorBannerText();
+    expect(text).toContain('Partly saved');
+    expect(text).toContain('redo anything missing');
+    // Deliberately not a success: the document is stored but incomplete, so the user has work to redo
+    // and must not be told an unqualified "Saved".
+    expect(commitSavedMock).not.toHaveBeenCalled();
+  });
+
+  it('an UNRECOGNIZED outcome is treated as not-a-success — the safe direction is to under-claim', async () => {
+    // A newer BFF adding a member this client does not know must never silently render as "Saved".
+    config.saveOutcome = { kind: 'outcome-200', outcome: 'some-future-member' };
+    await mountAndSave();
+
+    await screen.findByTestId('compose-workspace-error-banner');
+    expect(commitSavedMock).not.toHaveBeenCalled();
+  });
+
+  it('NEGATIVE: persisted and persisted-with-warnings ARE successes (no false failures)', async () => {
+    config.saveOutcome = { kind: 'outcome-200', outcome: 'persisted' };
+    await mountAndSave();
+    await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
+  });
+
+  it("NEGATIVE: an ABSENT outcome is a success — an older BFF's 200 always meant a completed write", async () => {
+    config.saveOutcome = { kind: 'outcome-200', outcome: undefined as unknown as string };
+    await mountAndSave();
+    await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
   });
 
   it('NEGATIVE: a failed save never commits the op-log — the edits survive for a retry', async () => {

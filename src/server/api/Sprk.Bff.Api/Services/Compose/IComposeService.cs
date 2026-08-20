@@ -911,9 +911,111 @@ public sealed record SaveComposeDocumentRequest
     public Guid? SourceDocumentRecordId { get; init; }
 }
 
+/// <summary>
+/// FR-S06 (spaarkeai-compose-r8 task 011/013) — the CLOSED set of terminal save outcomes.
+///
+/// <para><b>Why this exists.</b> Before it, a save's completion state was inferable only from the HTTP
+/// status, and the status lied: <see cref="ComposeService"/>'s container-failure path RETURNS a result
+/// (it does not throw), and the endpoint wraps every returned result in <c>Results.Ok</c> — so a save
+/// that wrote nothing at all presented to the user as HTTP 200 "Saved ✓". Putting the outcome ON the
+/// wire makes the completion state something the client READS rather than infers.</para>
+///
+/// <para><b>The set is closed and every member has a real producer.</b> Do NOT add a catch-all
+/// "unknown"/"other" member — that recreates the undefined outcome this type removes. If a genuine
+/// terminal state does not map to one of these seven, that is a spec change (FR-S06 names the set) and
+/// an escalation, not a local widening.</para>
+/// </summary>
+public enum ComposeSaveOutcome
+{
+    /// <summary>The bytes were written and nothing was lost or simplified. The only "clean" outcome.</summary>
+    Persisted,
+
+    /// <summary>
+    /// The bytes were written, but something the user should know about happened: content the renderer
+    /// simplified, a stale-base re-anchor, or (FR-S02) another writer's version was superseded. Still a
+    /// success — the document IS saved.
+    /// </summary>
+    PersistedWithWarnings,
+
+    /// <summary>
+    /// The save was refused because the document kept changing under it: the If-Match precondition failed
+    /// AND the single rebase retry also lost (FR-S02, task 011). Nothing was written and nothing was
+    /// overwritten. NOT a storage fault — the storage layer worked exactly as asked.
+    /// </summary>
+    RefusedStale,
+
+    /// <summary>The document is held by a Word-for-the-web co-authoring lock (HTTP 423). Nothing written.</summary>
+    RefusedLocked,
+
+    /// <summary>
+    /// The request could not be honored as submitted: a missing required field, a PDF replace target, a
+    /// patch-engine refusal, or insufficient permission. Nothing written. The distinguishing property is
+    /// that RETRYING THE SAME REQUEST cannot succeed — something about the request or the caller's rights
+    /// must change first.
+    /// </summary>
+    RefusedInvalid,
+
+    /// <summary>
+    /// The storage layer failed to complete the write: the container step failed, the SPE call returned
+    /// null, or the write faulted. Nothing durable landed. Distinct from <see cref="RefusedStale"/> and
+    /// <see cref="RefusedInvalid"/> in that the REQUEST was fine — the storage attempt was not.
+    /// </summary>
+    StorageFailed,
+
+    /// <summary>
+    /// Some of what the user asked for landed and some did not — the best-effort per-paragraph recovery
+    /// applied the resolvable edits and could not place the rest. The document IS saved, but it does not
+    /// contain everything that was submitted, so it is deliberately NOT a success member: the user has
+    /// work to redo.
+    /// </summary>
+    PartiallyRecorded,
+}
+
+/// <summary>
+/// FR-S06: the STABLE wire strings for <see cref="ComposeSaveOutcome"/>.
+///
+/// <para>Deliberately hand-mapped rather than relying on enum serialization: the wire contract must
+/// survive member reordering, renaming, and any future change to the app's global
+/// <c>JsonStringEnumConverter</c> configuration. The client keys its success/failure decision off these
+/// strings, so they are a published contract, not an implementation detail.</para>
+/// </summary>
+public static class ComposeSaveOutcomes
+{
+    public const string Persisted = "persisted";
+    public const string PersistedWithWarnings = "persisted-with-warnings";
+    public const string RefusedStale = "refused-stale";
+    public const string RefusedLocked = "refused-locked";
+    public const string RefusedInvalid = "refused-invalid";
+    public const string StorageFailed = "storage-failed";
+    public const string PartiallyRecorded = "partially-recorded";
+
+    /// <summary>Map an outcome to its stable wire string. Total over the closed set.</summary>
+    public static string ToWireValue(this ComposeSaveOutcome outcome) => outcome switch
+    {
+        ComposeSaveOutcome.Persisted => Persisted,
+        ComposeSaveOutcome.PersistedWithWarnings => PersistedWithWarnings,
+        ComposeSaveOutcome.RefusedStale => RefusedStale,
+        ComposeSaveOutcome.RefusedLocked => RefusedLocked,
+        ComposeSaveOutcome.RefusedInvalid => RefusedInvalid,
+        ComposeSaveOutcome.StorageFailed => StorageFailed,
+        ComposeSaveOutcome.PartiallyRecorded => PartiallyRecorded,
+        // Unreachable over the closed set; the compiler cannot prove exhaustiveness for an enum, and
+        // returning a silent default here would be the "unknown member" the enum exists to forbid.
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unmapped ComposeSaveOutcome."),
+    };
+}
+
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
 public sealed record SaveComposeDocumentResult : ComposeDocumentResult
 {
+    /// <summary>
+    /// FR-S06 (task 013): the terminal outcome of this save. <c>required</c> BY DESIGN — it makes
+    /// "returned a result without saying what happened" a COMPILE error rather than a runtime check,
+    /// which is what stops a future save path from silently reintroducing the 200-with-nothing-written
+    /// defect this field exists to remove.
+    /// </summary>
+    public required ComposeSaveOutcome Outcome { get; init; }
+
     /// <summary>New SPE version id committed by this Save. Empty when the operation failed
     /// before a version was committed (e.g. the create-on-save container step failed).</summary>
     public required string VersionId { get; init; }

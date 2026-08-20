@@ -1668,8 +1668,17 @@ public class ComposeService : IComposeService
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
 
+        // FR-S06 (task 013): the ONE success-path outcome decision. Ordered most-severe first so a save
+        // that both partially applied AND warned reports the more consequential state — `partially-recorded`
+        // means the user has work to redo, which must not be masked by the softer warning member.
+        var outcome =
+            partialApplySummary is { UnresolvedCount: > 0 } ? ComposeSaveOutcome.PartiallyRecorded
+            : (renderDegradationWarnings is { Count: > 0 } || reanchorSummary is not null) ? ComposeSaveOutcome.PersistedWithWarnings
+            : ComposeSaveOutcome.Persisted;
+
         return new SaveComposeDocumentResult
         {
+            Outcome = outcome,
             DocumentSpeId = effectiveSpeId,
             DriveId = effectiveDriveId,
             SessionId = promotion.SessionId,
@@ -3267,6 +3276,12 @@ public class ComposeService : IComposeService
 
         return new SaveComposeDocumentResult
         {
+            // FR-S06 (task 013): THE defect this contract exists to remove. This path RETURNS (it does
+            // not throw), so the endpoint wraps it in Results.Ok — a save that wrote nothing at all
+            // presented as HTTP 200, which the client rendered as "Saved ✓". The status stays 200 (the
+            // create-on-save step-projection contract rides on this body), but the body now says plainly
+            // that nothing was stored, and the client keys off THIS field rather than the status.
+            Outcome = ComposeSaveOutcome.StorageFailed,
             DocumentSpeId = request.DocumentSpeId ?? string.Empty,
             DriveId = request.DriveId,
             SessionId = request.SessionId,

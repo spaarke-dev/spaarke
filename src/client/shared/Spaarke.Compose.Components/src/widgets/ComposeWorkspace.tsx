@@ -378,6 +378,36 @@ function mergeDegradationWarnings(
 }
 
 /**
+ * FR-S06 (r8 task 013) — the closed set of terminal save outcomes the server reports on the wire.
+ * Mirrors `ComposeSaveOutcome` / `ComposeSaveOutcomes` in `IComposeService.cs`; the strings ARE the
+ * contract. There is deliberately no "unknown" member: an unrecognized value is handled where it is
+ * read (treated as not-a-success), not by widening the set.
+ */
+type ComposeSaveOutcome =
+  | 'persisted'
+  | 'persisted-with-warnings'
+  | 'refused-stale'
+  | 'refused-locked'
+  | 'refused-invalid'
+  | 'storage-failed'
+  | 'partially-recorded';
+
+/**
+ * FR-S06 (r8 task 013): did this save actually store the document?
+ *
+ * `persisted` and `persisted-with-warnings` are the only outcomes where the bytes are durable and
+ * complete. `partially-recorded` is deliberately NOT here: the document is stored but does not contain
+ * everything submitted, so the user has work to redo and must not be told an unqualified "Saved".
+ *
+ * An ABSENT outcome means an older BFF that predates the field, whose 200 always meant a completed
+ * write — so absent is a success. An UNRECOGNIZED value means a newer BFF added a member this client
+ * does not know: treat it as not-a-success, because the safe failure direction is to under-claim.
+ */
+function isSuccessfulSaveOutcome(outcome: ComposeSaveOutcome | undefined): boolean {
+  return outcome === undefined || outcome === 'persisted' || outcome === 'persisted-with-warnings';
+}
+
+/**
  * FR-S01 (r8 task 010) — how a save failure is classified before it is routed to an outcome.
  *
  * `authenticatedFetch` (ADR-028) RETURNS only when `response.ok`; every non-2xx is THROWN as an
@@ -1700,6 +1730,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // there would otherwise be reported as "Not saved" for a document the server ALREADY wrote. That is
       // the same class of dishonest outcome this task removes, pointing the other way.
       let savePersisted = false;
+      // FR-S06 (r8 task 013): a 2xx arrived, but we have NOT yet read the outcome that says whether
+      // anything was written. Before 013 a 200 was taken to mean "written" — that assumption is exactly
+      // what let a total write failure render as "Saved ✓". So the window between the response arriving
+      // and the outcome being read is genuinely INDETERMINATE, and claiming either result there would be
+      // a guess. Tracked separately from `savePersisted` so the catch can say so honestly.
+      let saveReachedServer = false;
       try {
         // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
         // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
@@ -1993,9 +2029,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           body: JSON.stringify(requestBody),
         });
 
-        // `authenticatedFetch` resolved, so the response is 2xx by construction — the server has written
-        // the document. Everything below is post-save bookkeeping (FR-S01).
-        savePersisted = true;
+        // The request completed with a 2xx. Whether anything was WRITTEN is the outcome field's job.
+        saveReachedServer = true;
 
         // FR-S01 (r8 task 010): there is NO `if (!response.ok)` branch here, and there must never be one
         // again. `authenticatedFetch` returns ONLY when `response.ok` — every non-2xx is thrown as a typed
@@ -2018,6 +2053,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           eTag?: string;
           size: number;
           wasPromotedThisSave: boolean;
+          // FR-S06 (r8 task 013): the server's TERMINAL OUTCOME for this save, from a closed set. This —
+          // not the HTTP status — is what says whether anything was written: the create-on-save
+          // container-failure path returns `storage-failed` on a 200, which is exactly how a total write
+          // failure used to render as "Saved ✓". Optional so an older BFF (no field) still works; absent
+          // is treated as `persisted`, which is what that older BFF's 200 always meant.
+          outcome?: ComposeSaveOutcome;
           // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
           // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
           // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
@@ -2035,6 +2076,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // base for the next model-path save. Optional/null (older BFF, or a non-render-path save).
           contentModel?: ComposeContentModel | null;
         };
+
+        // FR-S06 (r8 task 013): THE honesty gate. A 200 does NOT mean the document was stored — the
+        // create-on-save container-failure path returns a result (it does not throw), so the endpoint
+        // wraps it in a 200 carrying `storage-failed`. Before this branch, that rendered as "Saved ✓"
+        // over a write that never happened.
+        //
+        // Deliberately BEFORE the Assistant notification and the `saveSucceeded` dispatch: announcing a
+        // save to chat, clearing the dirty flag, and committing the op-log are all success side effects,
+        // and every one of them would be wrong here. Returning leaves the document dirty with its edits
+        // intact, exactly as a thrown failure does — so a retry re-sends the same work.
+        if (!isSuccessfulSaveOutcome(payload.outcome)) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              payload.outcome === 'partially-recorded'
+                ? 'Partly saved — the document was stored, but not everything was recorded. Reload the ' +
+                  'document to see what landed, then redo anything missing.'
+                : 'Not saved — the server accepted the request but could not store the document. Your ' +
+                  'changes are still here — try again, and contact an administrator if it keeps failing.',
+          });
+          return;
+        }
+
+        // FR-S01 (task 010) + FR-S06 (task 013): the document is now CONFIRMED persisted — a 2xx AND a
+        // success outcome. Set here rather than at the fetch so the catch below can honestly say "it was
+        // saved" without that claim resting on the status alone; a throw before this point is reported
+        // as a failure, which is correct, because at that point we did not yet know the write landed.
+        savePersisted = true;
 
         // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
         // affordance (FIX #7a below).
@@ -2225,6 +2294,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             errorMessage:
               'Your document was saved, but something went wrong immediately afterwards ' +
               `(${failure.detail}). Reload the document to see the saved version.`,
+          });
+          return;
+        }
+
+        // FR-S06: a 2xx arrived but we never read the outcome (e.g. an unreadable body), so we do not
+        // know whether the write landed. Say that, rather than picking a side — "Not saved" would risk
+        // a duplicate save, and "Saved" would risk silent data loss. Reloading is the one action that
+        // resolves the ambiguity.
+        if (saveReachedServer) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              'We could not confirm whether your document was saved — the server replied, but the reply ' +
+              `could not be read (${failure.detail}). Reload the document to check before saving again; ` +
+              'your changes are still here either way.',
           });
           return;
         }

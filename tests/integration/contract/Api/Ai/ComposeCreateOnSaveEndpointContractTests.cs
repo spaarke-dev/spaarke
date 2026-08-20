@@ -30,6 +30,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -372,6 +373,119 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
                 It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
             Times.Never, "no SPE work happens when the request is rejected at validation");
+    }
+
+    // ── FR-S06 (spaarkeai-compose-r8 task 013) — the 200-with-nothing-written defect ──────────────────
+    //
+    // THE defect the save-outcome contract exists to remove, asserted through the real route.
+    // `ComposeService`'s container-failure path RETURNS a result rather than throwing (it carries the
+    // per-step create-on-save completion projection, which the client needs), and the endpoint wraps
+    // every returned result in `Results.Ok`. So a save that stored NOTHING arrived as HTTP 200 — and
+    // before this contract the client had nothing in the body to distinguish it from success, so it
+    // rendered "Saved ✓" over a write that never happened. Three releases shipped that way.
+    //
+    // The status deliberately stays 200 (the step-projection contract rides on this body). What changed
+    // is that the body now SAYS what happened, and the client keys off that field rather than the status
+    // — see the paired client assertion in ComposeWorkspace.saveErrorRouting.test.tsx.
+    [Fact]
+    public async Task CreateOnSave_WhenSpeCreateReturnsNull_Returns200CarryingStorageFailedOutcome()
+    {
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-storage-failed-001");
+        // The SPE mint fails softly — Graph returned nothing. Nothing is stored.
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId = "b!container-bu-storage-failed",
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = Guid.NewGuid().ToString("N"),
+                content = DraftBytes,
+            });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the container-failure path returns a result (it carries the step projection), so the status stays 200 — body: {body}");
+
+        using var payload = JsonDocument.Parse(body);
+        payload.RootElement.GetProperty("outcome").GetString().Should().Be("storage-failed",
+            "FR-S06: a 200 that stored nothing MUST say so on the wire — this field is the only thing " +
+            "distinguishing it from a successful save, and its absence is how a total write failure " +
+            "rendered as 'Saved ✓' across three releases");
+
+        payload.RootElement.GetProperty("versionId").GetString().Should().BeEmpty(
+            "no SPE version was committed — the outcome and the payload must agree");
+    }
+
+    [Fact]
+    public async Task CreateOnSave_WhenSpeCreateSucceeds_Returns200CarryingPersistedOutcome()
+    {
+        // NEGATIVE pairing for the above: the happy path must still report `persisted`, so the new
+        // field cannot manufacture false failures.
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-persisted-001");
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: "spe-item-persisted-001",
+                Name: "draft.docx",
+                ParentId: null,
+                Size: DraftBytes.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1-etag\"",
+                IsFolder: false,
+                WebUrl: null,
+                DriveId: "drive-persisted-001"));
+
+        // The SUCCESS path continues past the SPE mint into promote + indexing, so those boundaries
+        // must be arranged too (the storage-failed case above returns before reaching them).
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        _fixture.DataverseMock
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId = "b!container-bu-persisted",
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = Guid.NewGuid().ToString("N"),
+                content = DraftBytes,
+            });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+
+        using var payload = JsonDocument.Parse(body);
+        payload.RootElement.GetProperty("outcome").GetString().Should().Be("persisted",
+            "a clean save reports `persisted` — the outcome field must not manufacture false failures");
     }
 
     [Fact]

@@ -13,9 +13,9 @@
 |---|---|
 | **Task** | **012** — Save lifecycle hardening (dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery) |
 | **Status** | not-started. |
-| **Next Action** | Begin Step 0 of task 012 (`tasks/012-save-lifecycle-hardening.poml`). Also startable, no dependency on 012: **013**, **014**, **018**. |
+| **Next Action** | Begin Step 0 of task 012 (`tasks/012-save-lifecycle-hardening.poml`). Also startable: **014**, **015**, **016** (015/016 unblocked by 013), **018**. |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 050 ✅** (all 2026-08-20) |
+| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 013 ✅ · 050 ✅** (all 2026-08-20) |
 
 ### Carried forward from task 011 (read before 012 / 013)
 
@@ -23,8 +23,9 @@
   the etag-less overload serves only saves with no resolved version. **A new save-path test that mocks
   the 5-arg overload will fail with a misleading 404** ("drive-item not found or could not be written").
 - **The save route returns no 412.** A sustained concurrent writer is **409 Conflict** after one rebase
-  retry. Task 013's outcome enum should map this to `storage-failed` (or its own member) — it is NOT
-  `refused-stale`, which no longer exists as an outcome.
+  retry, and task 013 mapped it to **`refused-stale`** — correcting the guess left here after task 011
+  (which said `storage-failed` and that `refused-stale` had no producer). It is a refusal on staleness
+  grounds; nothing in storage failed.
 - The concurrency warning is `concurrent-external-change`, carried on `degradationWarnings` and rendered
   as its own banner row (`compose-workspace-concurrency-banner`).
 
@@ -77,7 +78,7 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 | Phase | Track | Status |
 |---|---|---|
 | 0 (001–002) | Coordination + PR #690 dependency | ✅ |
-| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 012–016, **018**, then 017 🔲 |
+| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 013 ✅ · 012, 014–016, **018**, then 017 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
@@ -113,6 +114,20 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 - `ComposeShadowPatchEngine` was already demoted by R6 to the transitional path; R8 finishes that retirement.
 
 ---
+
+## Files modified — task 013 (complete)
+
+| File | Change |
+|---|---|
+| `Services/Compose/IComposeService.cs` | NEW `ComposeSaveOutcome` closed enum + `ComposeSaveOutcomes` stable wire strings; `required Outcome` on `SaveComposeDocumentResult` |
+| `Services/Compose/ComposeService.cs` | success-path outcome decision (severity-ordered); container-failure path reports `storage-failed` |
+| `Api/ComposeEndpoints.cs` | `outcome` wire field; telemetry at every terminal state incl. all catches |
+| `Telemetry/ComposeSaveTelemetry.cs` | NEW `compose.save_outcomes` counter (outcome + bounded cause) |
+| `Infrastructure/DI/TelemetryModule.cs` | meter registration (unregistered = silently dropped from export) |
+| `widgets/ComposeWorkspace.tsx` | client reads `outcome`, not the status; `savePersisted`/`saveReachedServer` split → indeterminate case |
+| `ComposeCreateOnSaveEndpointContractTests.cs` | 2 new tests: 200+`storage-failed` (the defect) and 200+`persisted` (no false failures) |
+| `ComposeEndpointsContractTests.cs` | construction site updated — the `required` field caught it at compile time |
+| `ComposeWorkspace.saveErrorRouting.test.tsx` | 5 new FR-S06 tests; task 010's post-2xx-throw test updated to the indeterminate truth |
 
 ## Files modified — task 011 (complete)
 

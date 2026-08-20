@@ -7,6 +7,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -1586,6 +1587,26 @@ public static class ComposeEndpoints
         {
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);
 
+            // FR-S10 (task 013): every terminal outcome is counted, including the ones that arrive on a
+            // 200. `storage-failed` here is NOT hypothetical — it is the container-failure path, which
+            // returns rather than throws, and was previously indistinguishable from success in request
+            // telemetry. That indistinguishability is why three releases shipped with saves broken.
+            ComposeSaveTelemetry.RecordSaveOutcome(result.Outcome, result.Outcome switch
+            {
+                ComposeSaveOutcome.Persisted => ComposeSaveTelemetry.CauseNone,
+                ComposeSaveOutcome.PersistedWithWarnings => ComposeSaveTelemetry.CauseWarnings,
+                ComposeSaveOutcome.PartiallyRecorded => ComposeSaveTelemetry.CausePartialApply,
+                ComposeSaveOutcome.StorageFailed => ComposeSaveTelemetry.CauseContainerStep,
+                _ => ComposeSaveTelemetry.CauseNone,
+            });
+
+            if (result.Outcome is ComposeSaveOutcome.StorageFailed or ComposeSaveOutcome.PartiallyRecorded)
+            {
+                logger.LogWarning(
+                    "Compose save completed with a non-success outcome {Outcome} for driveItem={DocumentSpeId} (session={SessionId}). TraceId={TraceId}",
+                    result.Outcome.ToWireValue(), result.DocumentSpeId, result.SessionId, httpContext.TraceIdentifier);
+            }
+
             return Results.Ok(new SaveComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
                 DriveId: result.DriveId,
@@ -1610,10 +1631,18 @@ public static class ComposeEndpoints
                     .ToList(),
                 // Task 012: the post-save canonical model (render-path saves only) — the client adopts it
                 // as its new retained loaded model + re-baselines its snapshot. Additive (ADR-040).
-                ContentModel: result.ContentModel));
+                ContentModel: result.ContentModel,
+                // FR-S06 (task 013): the terminal outcome, as a stable wire string. The client decides
+                // success from THIS, not from the 200 — because a 200 does not imply anything was
+                // written (see the container-failure path, which returns StorageFailed on a 200).
+                Outcome: result.Outcome.ToWireValue()));
         }
         catch (ArgumentException ex)
         {
+            // FR-S10: a malformed request is a terminal save outcome and belongs in the counter — an
+            // upstream client regression that starts sending bad requests should be visible as a spike,
+            // not just as scattered 400s.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseBadRequest);
             return BadRequest(ex.Message);
         }
         catch (ComposePdfIntakeException ex)
@@ -1622,6 +1651,9 @@ public static class ComposeEndpoints
             // the 041 client saves PDF-sourced docs via create-on-save). Refuse with the honest 422
             // instead of a deep OOXML failure surfacing as a generic 500. MUST precede the
             // InvalidOperationException catch below (this type derives from it).
+            ComposeSaveTelemetry.RecordSaveOutcome(
+                ex.Unavailable ? ComposeSaveOutcome.StorageFailed : ComposeSaveOutcome.RefusedInvalid,
+                ComposeSaveTelemetry.CauseBadRequest);
             logger.LogWarning(ex, "Compose save: PDF baseline refused. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
@@ -1630,6 +1662,7 @@ public static class ComposeEndpoints
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseNotFound);
             logger.LogWarning(ex, "Compose save: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
@@ -1639,6 +1672,7 @@ public static class ComposeEndpoints
         }
         catch (UnauthorizedAccessException ex)
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseForbidden);
             logger.LogWarning(ex, "Compose save: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status403Forbidden,
@@ -1656,6 +1690,7 @@ public static class ComposeEndpoints
             // close or SharePoint's ~30-min-from-last-edit timeout. Do NOT say "check it in" (there is nothing
             // to check in) — that misled users who never checked anything out. The client renders a distinct
             // Retry affordance (no fake Unlock button).
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedLocked, ComposeSaveTelemetry.CauseWordLock);
             logger.LogWarning(ex, "Compose save: drive-item locked by Word co-authoring (423). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status423Locked,
@@ -1677,6 +1712,7 @@ public static class ComposeEndpoints
             // a CONFLICT (409), not a failed precondition the caller can fix by reloading: nothing about the
             // caller's state is stale, and the honest instruction is simply to try again. Their work is
             // intact client-side; the save is a no-op.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedStale, ComposeSaveTelemetry.CausePrecondition);
             logger.LogWarning(ex, "Compose save: If-Match precondition failed after the rebase retry (409). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,
@@ -1691,6 +1727,7 @@ public static class ComposeEndpoints
             // paraId/anchor, unsupported schema version, opaque-atom or structural refusal). Mapped to a typed
             // ProblemDetails per Kind — never an opaque 500. Nothing partially wrote — Apply throws before the
             // SPE write in ComposeService.SaveAsync.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CausePatchRefusal);
             logger.LogWarning(ex, "Compose save: patch-engine refusal ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
             return MapPatchException(ex, httpContext);
         }
@@ -1711,6 +1748,12 @@ public static class ComposeEndpoints
             // administrator reconciles the data / reactivates the key.
             var keyInactive = ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
                 || ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase);
+            // FR-S06 (task 013): `partially-recorded`, NOT `storage-failed`. This block's own comment
+            // records why: the SPE version ALREADY PERSISTED and only the sprk_document row upsert
+            // failed. The bytes are durable; the identity record is not. Calling that a storage failure
+            // would tell the user their document is gone when it is not — the precise class of dishonest
+            // outcome the closed enum exists to prevent.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.PartiallyRecorded, ComposeSaveTelemetry.CauseRecordConflict);
             logger.LogError(ex,
                 "Compose save: sprk_document identity-key fault (keyInactive={KeyInactive}). TraceId={TraceId}",
                 keyInactive, httpContext.TraceIdentifier);
@@ -1730,6 +1773,7 @@ public static class ComposeEndpoints
         }
         catch (Exception ex)
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseUnhandled);
             logger.LogError(ex, "Compose save: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
@@ -2658,7 +2702,18 @@ public sealed record SaveComposeDocumentResponse(
     [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null,
     // Task 012 (the client cutover): the post-save canonical model (render-path saves only) — null on
     // op-log/clean saves or when the post-save projection failed. Optional/trailing (ADR-040 additive).
-    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // FR-S06 (r8 task 013): the TERMINAL OUTCOME of this save, as a stable wire string from the closed
+    // ComposeSaveOutcome set. THE CLIENT DECIDES SUCCESS FROM THIS FIELD, NOT FROM THE HTTP STATUS —
+    // a 200 does not imply anything was written (the container-failure path returns `storage-failed`
+    // on a 200, which is exactly how a total write failure used to render as "Saved ✓").
+    //
+    // Defaulted to `persisted` so the record's optional-trailing convention holds and an older caller
+    // deserializing this response is unaffected. The default is safe HERE and only here: every server
+    // construction site passes an explicit value derived from the service result's `required` Outcome,
+    // so the default can never be what a real response carries — it exists for wire compatibility, not
+    // as a fallback for "we didn't know".
+    [property: JsonPropertyName("outcome")] string Outcome = ComposeSaveOutcomes.Persisted);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/apply-template</c> (FR-05, task 032).
 /// <c>templateIdOrName</c> is a template record id (GUID) or the exact template <c>title</c>;
