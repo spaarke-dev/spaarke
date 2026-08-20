@@ -73,7 +73,7 @@ lives for 90 days.
 
 | ID | Requirement | Acceptance |
 |---|---|---|
-| **FR-S01** | Client save error handling routes on `ApiError.status`; the unreachable `if (!response.ok)` block is retired | Each status (423/412/403/4xx/5xx) renders its own message + recovery; tests drive the **thrown** `ApiError` path, not a mocked `{ok:false}` |
+| **FR-S01** | Client save error handling routes on `ApiError.status`; the unreachable `if (!response.ok)` block is retired | Each status (423/412/403/4xx/5xx) renders its own message + recovery; tests drive the **thrown** `ApiError` path, not a mocked `{ok:false}`. **`authenticatedFetch` remains the transport (ADR-028) — only the error branch changes; no raw `fetch` with a hand-built `Authorization` header** |
 | **FR-S02** | Concurrency = **last-writer-wins with a user-visible warning**, enforced by `If-Match` at the storage boundary. Supersedes the 412 refusal shipped 2026-08-18 | A concurrent-writer save **succeeds** and warns, naming version history as recovery. No unrecoverable refusal loop exists |
 | **FR-S03** | The born-in-editor dirty flag is not cleared until the POST succeeds | A failed born-in-editor save leaves Save enabled, Ctrl+S live, `beforeunload` armed, unmount flush armed, and the toolbar **not** showing "Saved" |
 | **FR-S04** | 423 (Word co-authoring lock) renders a clear message with a working Retry | Lock → named banner + Retry; Retry succeeds once the lock clears |
@@ -94,7 +94,7 @@ lives for 90 days.
 | **FR-A04** | Edited blocks render from the model with **property inheritance** from the base block (pPr clone + dominant rPr) | An edit inside a formatted run does not collapse the paragraph to Normal |
 | **FR-A05** | Opaque atoms are promoted into the **write** model with their verbatim XML payload | Fields, SDT, drawings, footnote refs round-trip as whole constructs; the existing `composeBlockAtom`/`composeInlineAtom` nodes are extended, not replaced |
 | **FR-A06** | Tables and atoms carry an identity | `ComposeBlock.Table` keyed by its first descendant cell paraId; atoms by server-minted `AtomId` |
-| **FR-A07** | **Capability gate = read-only + "Edit a copy"** | A document we cannot safely carry opens read-only stating **what** cannot be carried, and offers "Edit a copy": the user is told what the copy will drop and confirms; the fork is a new SPE item with a uniquified filename stamped `ComposeOrigin.Authored`; **the original is never written to**. Trigger list owner-reviewed at Phase 0 |
+| **FR-A07** | **Capability gate = read-only + "Edit a copy"** | A document we cannot safely carry opens read-only stating **what** cannot be carried, and offers "Edit a copy": the user is told what the copy will drop and confirms; the fork is a new SPE item with a uniquified filename stamped `ComposeOrigin.Authored`; **the original is never written to**. Trigger list owner-reviewed at Phase 0. **UI uses `ConfirmModal`/`SprkModal` per ADR-050 — no bespoke chrome; semantic tokens only (ADR-021)** |
 | **FR-A08** | Two document classes are honored: `Imported` preserves against an original; `Authored` (born-in-editor, PDF-sourced, forked copies) has none | Degradation warnings **do not fire** for `Authored` documents — there is no original to lose against |
 | **FR-A09** | PDF-sourced documents track their synthesized file's version coordinates | After a page refresh, save two of a PDF-sourced document resolves its baseline and clones |
 | **FR-A10** | The residual loss list is **published and owner-accepted**, and matches what the gate enforces | Documented in `docs/architecture/`; no construct degrades that is not on the list |
@@ -177,6 +177,9 @@ lives for 90 days.
 | **ADR-032** | Null-object kill-switch if any new service is feature-gated (symmetric registration) |
 | **ADR-038** | Testing strategy — integration-heavy; seam KEEP paths |
 | **ADR-039 / ADR-040** | AI engine frozen; session ledger — Track C's anchor is envelope-only |
+| **ADR-041** | Judgment/confirmation policy — FR-C05's "apply anyway?" must be assessed as a Gate, not an ad-hoc dialog |
+| **ADR-043** | AI capability execution spine — **explicitly names "compose edit"**; Track C must confirm the anchor change does not touch `ActionKind` admission |
+| **ADR-028** | Client fetches via `@spaarke/auth`; FR-S01 changes only the error branch of `authenticatedFetch` |
 
 ### MUST Rules
 
@@ -241,6 +244,8 @@ All other work is **modify-only** or **deletion**.
 | **ADR-039** | Engine frozen; no new dispatch; closed catalogs | Track C adds `(paraId, span)` to the AI edit envelope | **C — comply** | Envelope-only — no new dispatch, no catalog row. ADR-049 **already specifies** paraId-referencing operations; this aligns the implementation with the ADR rather than deviating from it |
 | **ADR-029** | Publish-size ratchet | Track A adds substantial logic | **C — comply** | No new package; report absolute + delta per task |
 | **ADR-038** | Ban on DI-registration / ctor-null tests; seam-first | Track D restructuring invites structural tests | **C — comply** | Gate + merge coverage live in `tests/integration/seam/**` |
+| **ADR-043** | "MUST admit deterministic/interactive capabilities (**compose edit**, retraction) through the declarative spine via a deterministic `ActionKind` + a sanctioned supersession-write leg" (line 23) | Track C changes how compose edits are anchored and retires the validator on that path. ADR-043 names compose edit explicitly | **C — comply, ASSESS FIRST** | Expected orthogonal — the anchor is *where* an edit applies, not *how the capability is admitted*. **Must be confirmed in Phase 0 before Track C code lands**; if the anchor change touches `ActionKind` admission or the supersession-write leg, re-declare as A or B |
+| **ADR-041** | Confirmation MUST be `(risk-tier × origin × completeness)` from **catalog data**, with state as a **Gate-ledger property (ADR-040)** so a second ask is structurally impossible | Two new confirmations: FR-C05 "apply anyway?" (AI-origin — likely in scope) and FR-A07 "Edit a copy" (user-initiated — likely out of scope) | **C — comply, ASSESS FIRST** | FR-C05 must be evaluated as an ADR-041 Gate, not an ad-hoc dialog, or it risks a re-ask that the Gate-ledger rule exists to make impossible. Assessed during Track C design |
 
 *(g) is the general rule beneath three of this project's four root causes — R6's thin model, the AI edit
 contract, and the demand for a fuzzy matcher. Stated once in the ADR so it stops being rediscovered per surface.*
@@ -312,6 +317,9 @@ contract, and the demand for a fuzzy matcher. Stated once in the ADR so it stops
 - [ ] **Capability-gate trigger list** — which constructs force read-only? *Blocks: FR-A07 acceptance. A false positive blocks a document we could have handled — the main risk this feature carries.*
 - [ ] **Residual loss list sign-off** — who accepts it and when? *Blocks: FR-A10, success criterion 5.*
 - [ ] **Gate threshold confirmation** after Phase 0 measures the control. *Blocks: FR-G01 final numbers.*
+- [ ] **ADR-043 assessment** — does Track C's anchor change touch `ActionKind` admission or the supersession-write leg? *Blocks: Track C code landing (assess in Phase 0). Surfaced by `/adr-check` 2026-08-19.*
+- [ ] **ADR-041 assessment** — must FR-C05's "apply anyway?" be modeled as a Gate-ledger confirmation? *Blocks: FR-C05 design. Surfaced by `/adr-check` 2026-08-19.*
+- [ ] **ADR-013 confirmation (low risk)** — verify Track C's envelope addition creates no new CRUD→AI dependency. `ProposedEdit` is Compose-owned with no AI-side producer, so this is expected clean; confirm at implementation. *Blocks: nothing.*
 
 ---
 
