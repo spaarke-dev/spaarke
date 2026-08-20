@@ -4,7 +4,7 @@
     <title>IE2EValidationRunner C# port (replaces Validate-DeployedEnvironment.ps1)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Terminal validation runner feeding H13's final Pass/Fail/InfraFault aggregation -- correctness-critical, converges with the 11 probe families (same effect probes done once).</rigor-reason>
     <model-tier>sonnet</model-tier>
