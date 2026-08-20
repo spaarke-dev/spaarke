@@ -1,6 +1,55 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 153 COMPLETE — H12c credential-config confirmation, Batch G-5C
+> **Last Updated**: 2026-08-20 (Task 160 COMPLETE — H14 KV-reader swap, AzCliKvSecretReader ->
+> SecretClient, Wave G-6 Batch G-6A [ran alone, no siblings]. New `SecretClientKvReader.cs`
+> (`Azure.Security.KeyVault.Secrets` `SecretClient.GetSecretAsync` — same `Success(value) |
+> NotFound() | Failure(diagnostic)` return contract AzCliKvSecretReader.cs used, closing "the
+> fleet's one unconfigurable executable" per DS-1b §1 collaborator #29's hardcoded `FileName="az"`).
+> **Explicit 403-vs-404-vs-generic exception classification** (task 143/144 verification-focused
+> discipline applied proactively, not just reactively): a 404 maps to `NotFound()` (parity with the
+> retired reader's `SecretNotFound` branch); a 403 gets its OWN `Failure` branch with an
+> access-denied-specific diagnostic ("verify the L2 UAMI holds the 'Key Vault Secrets User' RBAC
+> role") rather than falling into the generic catch-all — collapsing the two would make a permanent
+> RBAC misconfiguration read like a transient fault, the exact silent-fail-adjacent trap class task
+> 143/144 caught elsewhere in this project. `AzCliKvSecretReader.cs` retired: **kept on disk
+> unregistered with a retirement banner** — task 125's `AzCliKvSecretsWriter.cs` precedent
+> (confirmed via direct inspection: task 125 used the SAME "keep on disk" posture for ITS retired
+> collaborator despite that file also having zero dedicated tests, establishing this as this
+> project's UNIFORM convention regardless of whether the retired type has its own contract tests,
+> not merely the "delete if untested" reading of the dispatch directive's task-121-vs-122 framing).
+> `IntegrationWiringOptions` gained a new `KvReadTimeout` field + a **deliberately scoped NFR-05
+> `Validate()`** (bounds-checks ONLY `KvReadTimeout`, NOT the 7 pre-existing H14a/b/c fields
+> `PwshExecutable`/`ExchangePolicyScriptPath`/`ExchangeScriptTimeout`/`GraphRequestTimeout`/
+> `DataverseRequestTimeout`/`ServiceEndpoint*` — widening the boot-time gate to fields this task
+> doesn't own would have been unreviewed scope creep against the POML's own "H14a/b/c UNCHANGED"
+> constraint). `IntegrationWiringModule` swapped `Configure<T>()` for
+> `AddOptions<T>().Bind().Validate().ValidateOnStart()` (parity with task 153's
+> `RuntimeReferencesModule` / task 151's `AppConfigSeedModule`) and the `IKvSecretReader`
+> registration from a plain `AddSingleton<TInterface, TImpl>()` to a factory lambda resolving the
+> shared UAMI-pinned `TokenCredential` singleton (AzCliKvSecretReader only needed an `ILogger`;
+> SecretClientKvReader needs the credential — parity with `SecretClientKvWriter`'s own factory-lambda
+> registration in Worker/Program.cs). H14b/H14c sub-handlers were **NOT touched** — both already
+> depended on the `IKvSecretReader` interface (never the concrete `AzCliKvSecretReader`), confirmed
+> by inspecting their existing `FakeReader : IKvSecretReader` test doubles before making any change.
+> 7 new tests (`SecretClientKvReaderTests.cs`, fake-transport `Azure.Core.Pipeline.HttpClientTransport`
+> against a hand-rolled `HttpMessageHandler` — never `Mock<HttpMessageHandler>`, ADR-038 path #1):
+> happy path, NotFound (404), 403 access-denied-diagnostic distinction, empty-value-on-200, generic
+> 500, read-timeout (parity with the retired reader's process-timeout -> `TimeoutException` ->
+> generic-catch -> `Failure` path), and a `[CallerFilePath]`-anchored source-text grep test proving
+> zero `az`/`ProcessStartInfo` references remain in the new production file (satisfies the POML's
+> own literal acceptance criterion — also verified independently via a real `grep` command, 0
+> matches). H14's existing 46 tests (parent + H14a + H14b + H14c + secret-redaction) pass
+> **UNMODIFIED** — confirmed via a scoped `--filter FullyQualifiedName~H14` run. L2 tests: 1067 ->
+> **1074/1074** [+7, zero regressions]. Quality gates (code-review + adr-check, FULL rigor +
+> test-modifying override, both unconditional): 0 Critical, 0 Warnings, 0 ADR violations — multiple
+> `IKvSecretReader` implementations satisfy ADR-010's ≥2-impl justification (retired AzCli + new
+> SecretClient + 3 test-file fakes); `TokenCredential`/`DefaultAzureCredential` reuse satisfies
+> ADR-028 MI-outbound; no BFF Hygiene trigger (files are under
+> `Sprk.Provisioning.ControlPlane.Core`, not `Sprk.Bff.Api`). **Wave G-6 Batch G-6A is now COMPLETE**
+> — task 161 (H14a sidecar client wiring, OPUS tier, deps 114+160) is now unblocked; task 162
+> (sidecar live verify, OPUS tier) remains blocked on 161.)
+>
+> **Previous** (2026-08-20, Task 153 COMPLETE — H12c credential-config confirmation, Batch G-5C
 > [ran alone, no siblings]. **Investigated first** (per dispatch directive #2): confirmed the POML's
 > literal "needs the same H7/task-142 client-secret KV pattern" framing does NOT hold — H12c's
 > `DataverseWebApiModelDeploymentReferenceWriter` already authenticates via `DefaultAzureCredential
@@ -179,9 +228,9 @@ Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 
 No parallelism possible — linear chain. All 3 depend transitively on each prior.
 
-**Batch G-6A**: task 160 alone (H14 KV-reader swap; sonnet tier)
-**Batch G-6B**: task 161 alone (H14a sidecar client wiring; **OPUS tier** — main-session Opus 4.7 dispatches Opus subagent)
-**Batch G-6C**: task 162 alone (sidecar live verify against dev L2 Worker; **OPUS tier**; live-ceremony-aware — may defer live check if credentials unavailable)
+**Batch G-6A**: ✅ COMPLETE — task 160 (H14 KV-reader swap; sonnet tier). L2 tests 1067 → 1074/1074 (+7).
+**Batch G-6B**: task 161 alone (H14a sidecar client wiring; **OPUS tier** — main-session Opus 4.7 dispatches Opus subagent) — now unblocked (deps 114+160 satisfied)
+**Batch G-6C**: task 162 alone (sidecar live verify against dev L2 Worker; **OPUS tier**; live-ceremony-aware — may defer live check if credentials unavailable) — still blocked on 161
 
 ---
 

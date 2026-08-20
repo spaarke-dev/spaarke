@@ -25,6 +25,21 @@
 // Program.cs is a SHARED file across 3 parallel sibling tasks (054/072/073).
 // A single-line addition minimizes merge-conflict surface with those siblings.
 //
+// TASK 160 (Wave G-6): IKvSecretReader swapped from AzCliKvSecretReader (`az
+// keyvault secret show` shell-out, RETIRED — kept on disk unregistered, see
+// that file's retirement banner) to SecretClientKvReader
+// (Azure.Security.KeyVault.Secrets SDK port, the read-side counterpart to
+// task 125's SecretClientKvWriter). Registration moved from a plain
+// AddSingleton&lt;TInterface, TImpl&gt;() to a factory lambda because the new
+// reader needs the shared UAMI-pinned TokenCredential singleton (already
+// registered by AddCosmosModule, ADR-028 MI-outbound — NO second credential
+// chain) — parity with SecretClientKvWriter's own factory-lambda
+// registration in Worker/Program.cs. Options binding also swapped from a
+// plain Configure&lt;T&gt;() to AddOptions&lt;T&gt;().Bind().Validate().ValidateOnStart()
+// (NFR-05 fail-fast parity with task 153's RuntimeReferencesModule / task
+// 151's AppConfigSeedModule) so a misconfigured KvReadTimeout fails the
+// Worker at boot instead of surfacing only on H14b/H14c's first dispatch.
+//
 // PLACEMENT JUSTIFICATION (CLAUDE.md §10):
 //   H14 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
 //   AI-internal types (ADR-013 forcing-function rule — no IActionResolver,
@@ -32,6 +47,9 @@
 //   IProvisioningRunRepository (task 037) + the 4 dedicated seams; no
 //   BFF-facade dependencies.
 // -----------------------------------------------------------------------------
+
+using Azure.Core;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
@@ -58,12 +76,36 @@ public static class IntegrationWiringModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<IntegrationWiringOptions>(configuration.GetSection(ConfigSection));
+        // Task 160 (Wave G-6): AddOptions<T>().Bind().Validate().ValidateOnStart()
+        // replaces the plain Configure<T>() call — NFR-05 fail-fast parity
+        // with RuntimeReferencesModule (task 153) / AppConfigSeedModule (task
+        // 151). See IntegrationWiringOptions.Validate for the scoped
+        // (KvReadTimeout-only) bounds check.
+        services.AddOptions<IntegrationWiringOptions>()
+            .Bind(configuration.GetSection(ConfigSection))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "IntegrationWiring options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         // Collaborator seams — one production impl each (ADR-010 ≥2-impl
         // justification: the 2nd impl is the per-unit-test fake).
         services.AddSingleton<IExchangePolicyApplier, ExchangePolicyScriptApplier>();
-        services.AddSingleton<IKvSecretReader, AzCliKvSecretReader>();
+
+        // Task 160: SecretClientKvReader needs the shared UAMI-pinned
+        // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —
+        // factory-lambda registration, parity with SecretClientKvWriter's own
+        // registration in Worker/Program.cs (AzCliKvSecretReader only needed
+        // an ILogger, so its retired registration was a plain type mapping).
+        services.AddSingleton<IKvSecretReader>(sp =>
+        {
+            var credential = sp.GetRequiredService<TokenCredential>();
+            var options = sp.GetRequiredService<IOptions<IntegrationWiringOptions>>();
+            var logger = sp.GetRequiredService<ILogger<SecretClientKvReader>>();
+            return new SecretClientKvReader(credential, options, logger);
+        });
         services.AddHttpClient<IGraphSubscriptionCreator, GraphRestSubscriptionCreator>();
         services.AddHttpClient<IServiceEndpointWebhookRegistrar, DataverseWebApiServiceEndpointWebhookRegistrar>();
 

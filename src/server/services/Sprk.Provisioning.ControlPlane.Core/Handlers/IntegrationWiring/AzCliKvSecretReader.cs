@@ -1,6 +1,25 @@
 // -----------------------------------------------------------------------------
 // AzCliKvSecretReader.cs
 //
+// RETIRED (task 160, Wave G-6, 2026-08-20): superseded by
+// <see cref="SecretClientKvReader"/> (Azure.Security.KeyVault.Secrets SDK
+// port — the read-side counterpart to task 125's SecretClientKvWriter). No
+// longer registered in IntegrationWiringModule's IKvSecretReader DI slot.
+// Retained on disk (NOT deleted); see AzCliKvSecretsWriter.cs's retirement
+// banner (task 125) for the full "keep on disk unregistered" rationale this
+// project applies uniformly to every retired shell-out collaborator —
+// reversibility + audit trail over silent deletion, same posture regardless
+// of whether the retired type has its own dedicated test file (this one
+// never did; H14b/H14c's own unit tests always faked IKvSecretReader
+// directly, never AzCliKvSecretReader).
+//
+// This was "the fleet's one unconfigurable executable" per DS-1b §1 (H14
+// row, collaborator #29) — hardcoded `FileName = "az"` below, the last
+// ProcessStartInfo shell-out in H14's own collaborator set. Its retirement
+// closes Option D's zero-shell-out target state for H14's KV-reading path
+// (H14a's pwsh Exchange sidecar remains the sole designed Class-C exception
+// — task 161's separate scope).
+//
 // Production IKvSecretReader — shells out to `az keyvault secret show` under
 // the operator's `az` auth chain (DefaultAzureCredential inside az CLI via
 // `az login`). Parity with AzCliKvSecretsWriter's shell-out posture (H4).
