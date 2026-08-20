@@ -58,7 +58,7 @@ Verified clean (not chased): `Mock<HttpMessageHandler>` = 0, CS1998 = 0.
 
 | Project folder | From | What | Status |
 |---|---|---|---|
-| `projects/speadmin-decomposition-r1/` | RED-1 | Decompose `SpeAdminGraphService` (4,911 LOC god-class) | Seed (folder + design) |
+| `projects/sdap-SPE-admin-app-r2/` | RED-1 | Decompose `SpeAdminGraphService` (largest server file) — reduce complexity/cohesion. Follow-on to `sdap-SPE-admin-app-r1` (the original build). | Seed (folder + design + research) |
 | `projects/chatendpoints-decomposition-r1/` | RED-2 | Split `ChatEndpoints.cs` (4,066 LOC) | Seed (folder + design) |
 | `projects/dataverse-access-unification-r1/` | RED-4 C | Converge the two Dataverse impls to one (MI-only) + decompose | Seed (folder + design) |
 | **`projects/spaarke-auth-v4-dataverse-MI/`** | **#3b / task 011** | **Eliminate the BFF client secret entirely — migrate OBO off the secret (MI Federated Identity Credentials or certificate). RESEARCH-FIRST.** | **Seed (folder + [`ASSESSMENT.md`](../../spaarke-auth-v4-dataverse-MI/notes/ASSESSMENT.md))** |
