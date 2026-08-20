@@ -254,7 +254,7 @@ _H12a YamlDotNet engine, H12b DV-REST ports + 2 greenfield seeders (completes FR
 | 150 | ✅ | H12a: YamlDotNet manifest engine + DV-REST seed writes | FULL | sonnet / high | waveG5-parallel | 141 |
 | 151 | ✅ | H12b: 2 near-mechanical DV-REST ports (DataGrid + workspace-layout seeders) | STANDARD | sonnet / high | waveG5-parallel | 141 |
 | 152 | ✅ | H12b: 2 greenfield seeders (field-mapping + chart-def) -- completes FR-16 | FULL | sonnet / high | none | 151 |
-| 153 | 🔲 | H12c: credential config only (no code delta) | STANDARD | sonnet / high | waveG5-parallel | 123, 150, 151, 152 |
+| 153 | ✅ | H12c: credential config only (no code delta) | STANDARD | sonnet / high | waveG5-parallel | 123, 150, 151, 152 |
 
 ### Phase C'' Wave G-6 -- Integration wiring (3 tasks)
 

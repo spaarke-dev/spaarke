@@ -449,6 +449,67 @@ public sealed class H12cRuntimeReferencesHandlerTests
         handler.HandlerId.Should().Be("H12c", "value MUST match design.md §4.1 handler-catalog verbatim.");
     }
 
+    // ---------- NFR-05: RuntimeReferencesOptions.Validate() (task 153) ----------
+
+    [Fact]
+    public void OptionsValidate_Passes_With_Defaults_NoSharedPlatformEndpointRequired()
+    {
+        // Deliberately does NOT set SharedPlatformOpenAiEndpoint — it is a
+        // conditionally-required field (Model1Shared branch only), NOT a
+        // boot-time requirement. See RuntimeReferencesOptions.Validate doc
+        // comment. A Worker serving only Model2Dedicated customers must NOT
+        // crash-loop for a setting it never uses.
+        var options = new RuntimeReferencesOptions();
+        var act = () => options.Validate();
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void OptionsValidate_Passes_With_SharedPlatformOpenAiEndpoint_Set()
+    {
+        var options = new RuntimeReferencesOptions { SharedPlatformOpenAiEndpoint = SharedEndpoint };
+        var act = () => options.Validate();
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void OptionsValidate_Throws_When_DataverseRequestTimeout_TooSmall(int seconds)
+    {
+        var options = new RuntimeReferencesOptions
+        {
+            DataverseRequestTimeout = TimeSpan.FromSeconds(seconds),
+        };
+        var act = () => options.Validate();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*RuntimeReferences:DataverseRequestTimeout*");
+    }
+
+    [Fact]
+    public void OptionsValidate_Throws_When_DataverseRequestTimeout_TooLarge()
+    {
+        var options = new RuntimeReferencesOptions
+        {
+            DataverseRequestTimeout = TimeSpan.FromMinutes(6),
+        };
+        var act = () => options.Validate();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*RuntimeReferences:DataverseRequestTimeout*");
+    }
+
+    [Fact]
+    public void OptionsValidate_SectionName_Is_RuntimeReferences()
+    {
+        // Regression-guard: ground-truths the literal Bicep app-setting-key
+        // prefix contract (RuntimeReferences__SharedPlatformOpenAiEndpoint /
+        // RuntimeReferences__DataverseRequestTimeout) so a future section-name
+        // drift (e.g. an accidental rename back to nameof(RuntimeReferencesOptions))
+        // fails at build time, not silently at deploy time — parity with
+        // EnvVarValuesOptions's identical regression-guard (task 142).
+        RuntimeReferencesOptions.SectionName.Should().Be("RuntimeReferences");
+    }
+
     // -------------------------------------------------------------------------
     // Helpers + fakes
     // -------------------------------------------------------------------------

@@ -26,6 +26,16 @@
 // — keeps the Program.cs edit surface to a single new line + avoids merge-
 // conflict pressure against sibling handler tasks landing in the same
 // Program.cs during this parallel batch (per task 050/051/053 precedent).
+//
+// TASK 153 (Wave G-5): replaced the plain Configure<RuntimeReferencesOptions>()
+// call with AddOptions<T>().Bind().Validate().ValidateOnStart() — parity with
+// DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry (task 122)
+// — so a boot-time DataverseRequestTimeout misconfiguration fails loud instead
+// of only surfacing on H12c's first dispatch. See RuntimeReferencesOptions.Validate
+// doc comment for why SharedPlatformOpenAiEndpoint is NOT part of this
+// boot-time check. Program.cs's single AddH12cRuntimeReferencesHandler(...)
+// call line is unchanged — the god-class-ratchet extension-method surface
+// this module exists for stays a one-line composition-root edit.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
@@ -36,17 +46,19 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 /// </summary>
 public static class RuntimeReferencesModule
 {
-    /// <summary>Configuration section for runtime-references options.</summary>
-    public const string ConfigSection = "RuntimeReferences";
-
     /// <summary>
     /// Registers <see cref="H12cRuntimeReferencesHandler"/> + its
     /// <see cref="IModelDeploymentReferenceWriter"/> dependency with the DI
-    /// container.
+    /// container. Binds <see cref="RuntimeReferencesOptions"/> from its
+    /// <see cref="RuntimeReferencesOptions.SectionName"/> section with
+    /// fail-fast validation at startup (NFR-05, task 153).
     /// </summary>
     /// <param name="services">Service collection.</param>
     /// <param name="configuration">Configuration (reads the <c>RuntimeReferences</c> section).</param>
     /// <returns>The same service collection for chaining.</returns>
+    /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">
+    /// Thrown at boot when <c>RuntimeReferences:DataverseRequestTimeout</c> is out of bounds (NFR-05 fail-fast contract).
+    /// </exception>
     public static IServiceCollection AddH12cRuntimeReferencesHandler(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -54,7 +66,14 @@ public static class RuntimeReferencesModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<RuntimeReferencesOptions>(configuration.GetSection(ConfigSection));
+        services.AddOptions<RuntimeReferencesOptions>()
+            .Bind(configuration.GetSection(RuntimeReferencesOptions.SectionName))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "RuntimeReferences options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         services.AddHttpClient<IModelDeploymentReferenceWriter, DataverseWebApiModelDeploymentReferenceWriter>();
 

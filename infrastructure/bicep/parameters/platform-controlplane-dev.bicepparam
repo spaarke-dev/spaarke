@@ -65,6 +65,15 @@ param serviceBusResourceGroupName = 'SharePointEmbedded'
 param adminDataverseEnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
 
 // ============================================================================
+// TASK 153 (Wave G-5): H12c SHARED-PLATFORM OPENAI ENDPOINT
+// ============================================================================
+
+// Stable canonical secret name (same value in every environment) -- the
+// module default already matches; stated explicitly here for clarity,
+// parity with bffApiClientSecretName below.
+param azureOpenAiEndpointSecretName = 'AzureOpenAI-Endpoint'
+
+// ============================================================================
 // TENANT + APP-REG (optional for dev logging surface)
 // ============================================================================
 

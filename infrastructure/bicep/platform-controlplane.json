@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "3921086854293506026"
+      "templateHash": "9981241564397686716"
     }
   },
   "parameters": {
@@ -80,6 +80,13 @@
       "defaultValue": "BFF-API-ClientSecret",
       "metadata": {
         "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default)."
+      }
+    },
+    "azureOpenAiEndpointSecretName": {
+      "type": "string",
+      "defaultValue": "AzureOpenAI-Endpoint",
+      "metadata": {
+        "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c's Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs)."
       }
     },
     "jwtTenantId": {
@@ -1456,6 +1463,9 @@
           "bffApiClientSecretName": {
             "value": "[parameters('bffApiClientSecretName')]"
           },
+          "azureOpenAiEndpointSecretName": {
+            "value": "[parameters('azureOpenAiEndpointSecretName')]"
+          },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
           },
@@ -1470,7 +1480,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2786986081876053303"
+              "templateHash": "12373001440753295510"
             }
           },
           "parameters": {
@@ -1565,6 +1575,13 @@
               "defaultValue": "BFF-API-ClientSecret",
               "metadata": {
                 "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer's target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above)."
+              }
+            },
+            "azureOpenAiEndpointSecretName": {
+              "type": "string",
+              "defaultValue": "AzureOpenAI-Endpoint",
+              "metadata": {
+                "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer's sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a's Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash."
               }
             },
             "appInsightsConnectionString": {
@@ -1673,6 +1690,10 @@
                     {
                       "name": "EnvVarValues__ClientSecret",
                       "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('bffApiClientSecretName'))]"
+                    },
+                    {
+                      "name": "RuntimeReferences__SharedPlatformOpenAiEndpoint",
+                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('azureOpenAiEndpointSecretName'))]"
                     },
                     {
                       "name": "AZURE_CLIENT_ID",

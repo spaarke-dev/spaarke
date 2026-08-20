@@ -123,6 +123,9 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer\'s target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
+@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer\'s sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a\'s Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash.')
+param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
+
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
@@ -239,6 +242,23 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'EnvVarValues__ClientSecret'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+        }
+
+        // ---------------------------------------------------------------
+        // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
+        // Azure OpenAI endpoint for Model1Shared customers. Sourced from the
+        // SAME canonical "AzureOpenAI-Endpoint" KV secret the .Api site
+        // already resolves (AzureOpenAI__Endpoint / DocumentIntelligence__
+        // OpenAiEndpoint) -- single source of truth for this environment's
+        // shared platform OpenAI resource, not a duplicate. CONDITIONALLY
+        // required (Model1Shared branch only) -- RuntimeReferencesOptions.
+        // Validate() does NOT fail-fast at boot on this being unset (unlike
+        // EnvVarValues__ClientSecret above); a missing value fails the
+        // affected Model1Shared run Resumable, not the whole Worker boot.
+        // ---------------------------------------------------------------
+        {
+          name: 'RuntimeReferences__SharedPlatformOpenAiEndpoint'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${azureOpenAiEndpointSecretName})'
         }
 
         // ---------------------------------------------------------------

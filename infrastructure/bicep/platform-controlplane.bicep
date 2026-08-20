@@ -140,6 +140,9 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
+@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c\'s Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs).')
+param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
+
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
 
@@ -403,6 +406,7 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     dataverseClientSecretName: dataverseClientSecretName
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     bffApiClientSecretName: bffApiClientSecretName
+    azureOpenAiEndpointSecretName: azureOpenAiEndpointSecretName
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }

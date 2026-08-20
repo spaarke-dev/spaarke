@@ -1,6 +1,33 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 152 COMPLETE — H12b field-mapping + chart-def GREENFIELD
+> **Last Updated**: 2026-08-20 (Task 153 COMPLETE — H12c credential-config confirmation, Batch G-5C
+> [ran alone, no siblings]. **Investigated first** (per dispatch directive #2): confirmed the POML's
+> literal "needs the same H7/task-142 client-secret KV pattern" framing does NOT hold — H12c's
+> `DataverseWebApiModelDeploymentReferenceWriter` already authenticates via `DefaultAzureCredential
+> (TenantId=...)` (UAMI-as-Dataverse-App-User), the SAME idiom every other post-H10 handler uses,
+> since H12c dispatches strictly after H12a+H12b (both post-H10). No client-secret credential exists
+> to provision (D-153-1). The GENUINE gap: `RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint`
+> (Model1Shared's shared-platform OpenAI endpoint) had ZERO Bicep wiring anywhere — wired
+> `RuntimeReferences__SharedPlatformOpenAiEndpoint` as a KV-reference app setting sourced from the
+> SAME canonical `AzureOpenAI-Endpoint` secret the `.Api` site already resolves (single source of
+> truth, not a duplicate) — new `azureOpenAiEndpointSecretName` param on both
+> `modules/controlplane-worker-app-service.bicep` + `platform-controlplane.bicep`, threaded through,
+> `platform-controlplane.json` regenerated, set in the dev bicepparam (D-153-2). Added NFR-05:
+> `RuntimeReferencesOptions.SectionName` const + `Validate()` bounds-checking ONLY
+> `DataverseRequestTimeout` — deliberately does NOT require `SharedPlatformOpenAiEndpoint` at boot
+> since it's conditionally required (Model1Shared branch only); an unconditional requirement would
+> crash-loop a Model2-only Worker for a setting it never uses. Wired
+> `AddOptions<T>().Bind().Validate().ValidateOnStart()` inside `RuntimeReferencesModule` (Program.cs's
+> single call line unchanged). `az deployment sub what-if` (dev): status Succeeded, Worker shows full
+> "Create" (live-ceremony hasn't run yet, same as task 142's finding — not a regression). 6 new tests
+> (NFR-05 region, incl. a SectionName regression-guard). Quality gates (code-review + adr-check,
+> test-modifying override): 0 Critical, 0 Warnings, 0 ADR violations across ADR-004/010/028/032/036.
+> Full deviation record: `notes/task-153-h12c-credential-config-deviations.md`. L2 tests: 1061 ->
+> **1067/1067** [+6, zero regressions]. **Wave G-5 is now 100% COMPLETE** (tasks 150/151/152/153 all
+> ✅) — Wave G-6 (tasks 160 H14 KV-reader swap / 161 H14a sidecar client wiring / 162 sidecar live
+> verification) is now unblocked.)
+>
+> **Previous** (2026-08-20, Task 152 COMPLETE — H12b field-mapping + chart-def GREENFIELD
 > seeders, Batch G-5B [ran alone, no siblings]. New `DataverseWebApiFieldMappingSeeder.cs` [3
 > sprk_fieldmappingprofile profiles -- Matter to Event/Invoice/Report Card Attorney Matrix -- + 20
 > sprk_fieldmappingrule Copy rules, all ground-truthed live against spaarkedev1 via Dataverse MCP
@@ -159,8 +186,19 @@ Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 **Batch G-5B** — ✅ 100% COMPLETE (152 landed 2026-08-20)
 - 152: ✅ COMPLETE — H12b 2 greenfield seeders (field-mapping + chart-def) — completes FR-16 (deps 151, satisfied)
 
-**Batch G-5C** (after 150 + 151 + 152 all land — all 3 now landed, ready to dispatch): 153 alone
-- 153: H12c credential config only (no code delta) (deps 123, 150, 151, 152 — all satisfied)
+**Batch G-5C** — ✅ 100% COMPLETE (153 landed 2026-08-20)
+- 153: ✅ COMPLETE — H12c credential-config confirmation (deps 123, 150, 151, 152 — all satisfied). No client-secret needed (already-correct UAMI/DefaultAzureCredential); wired the genuinely-unwired `SharedPlatformOpenAiEndpoint` Bicep KV-ref + NFR-05 bounds-only Validate(). +6 tests.
+
+## 🎯 Wave G-5 — 100% COMPLETE (2026-08-20, 4/4 tasks)
+
+| Task | Handler | Δ tests | Notable |
+|---|---|---|---|
+| 150 | H12a YamlDotNet manifest engine + DV-REST seed writes | +20 → 1044 | Deleted PowerShell shell-out runner; reused H12c's exact HttpClient+DefaultAzureCredential idiom |
+| 151 | H12b DataGrid + workspace-layout DV-REST ports | (parallel w/150) | Retired PowerShellAppConfigSeeder shell-outs |
+| 152 | H12b field-mapping + chart-def GREENFIELD seeders — completes FR-16 | +17 → 1061 | Genuinely new content, ground-truthed live via Dataverse MCP, not invented |
+| 153 | H12c credential-config confirmation | +6 → 1067 | No client-secret needed (D-153-1); wired unwired `SharedPlatformOpenAiEndpoint` Bicep KV-ref (D-153-2) + NFR-05 bounds-only Validate() |
+
+L2 tests: **1024 → 1067/1067** (+43 across Wave G-5). Zero code-review criticals, zero ADR violations across all 4 tasks. Wave G-6 (tasks 160/161/162 — H14 KV-reader swap, H14a sidecar client wiring, sidecar live verification) is now unblocked.
 
 ---
 
