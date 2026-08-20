@@ -75,9 +75,11 @@ public static class E2EAcceptanceModule
         //                     deferral-diagnostic InfraFault (called out
         //                     explicitly here rather than silently).
         //   - task 173 (I2)  — sibling I2 AI Search tenant-filter probe.
-        //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe (THIS task).
-        //   - task 176 (I4)  — sibling I4 SPE container resolver probe.
-        //   - task 179 (I5)  — sibling I5 Graph token tenant probe.
+        //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe.
+        //   - task 176 (I4)  — SpeContainerResolverInvariantProbe (real BFF
+        //                     diagnostic call; LIVE-verification deferred to
+        //                     task 186 per that POML's escalation trigger).
+        //   - task 179 (I5)  — I5GraphTokenTenantScopeProbe.
         // PlaceholderInvariantVerifier.cs is retained on disk unregistered
         // per the Wave G-6 retirement convention.
         services.AddSingleton<IE2EValidationRunner, ValidateDeployedEnvironmentScriptRunner>();
@@ -101,6 +103,17 @@ public static class E2EAcceptanceModule
         services.AddHttpClient(AiSearchTenantFilterInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, AiSearchTenantFilterInvariantProbe>();   // I2 (task 173)
         services.AddSingleton<IInvariantProbe, CosmosPartitionKeyInvariantProbe>();     // I3 (task 174)
+        // I4 (task 176) — real BFF-diagnostic probe for
+        // ITenantContainerResolver-derived SPE container ids. Needs a NAMED
+        // HttpClient (registered below) + the shared UAMI-pinned
+        // TokenCredential (pre-registered by Worker Program.cs). See
+        // SpeContainerResolverInvariantProbe.cs file header for the honest
+        // fake-vs-live posture: authored + unit-tested against fake HTTP
+        // transport NOW; LIVE verification against a real deployed BFF
+        // diagnostic endpoint is deferred to Phase F rerun (task 186) per
+        // this task's POML escalation trigger.
+        services.AddHttpClient(SpeContainerResolverInvariantProbe.HttpClientName);
+        services.AddSingleton<IInvariantProbe, SpeContainerResolverInvariantProbe>();   // I4 (task 176)
         services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)
         // Task 182 (Phase C'' Wave G-7 Batch G-7A1): pure-C# port replaces the
         // NamingConformanceScriptRunner shell-out per DS-4 section 6 (this script
