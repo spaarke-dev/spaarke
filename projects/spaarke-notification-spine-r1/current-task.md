@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **TWO workstreams, both requested by owner 2026-08-20**: **(a) DOC RECONCILIATION** of the notification docs to current reality (the suggestion renderer was removed — docs still describe it as live), and **(b) SPEC a new "Proactive OOB Dataverse notifications" feature** (rebuild the removed suggestions the right way). Neither is `090` — 090 wrap-up still pending after these. |
-| **Step** | (a) NOT started editing yet (read the architecture doc only). (b) NOT started. Design + all decisions + research are captured below — ready to execute. |
-| **Status** | Branch 4 behind master (`d6b34f1ed`) — **merge origin/master first**. 2 uncommitted researcher memory files. |
-| **Next Action** | Merge master → then execute (a) [make the doc edits listed below] → commit/merge → then (b) [write the OOB spec]. Full detail in the "2026-08-20 workstreams" section. |
+| **Active work** | **(a) DOC RECONCILIATION — ✅ DONE 2026-08-20.** **(b) OOB feature — ✅ HYDRATED as a NEW project `spaarke-notification-spine-r2`** (investigation/assessment written; pre-spec). Remaining: **task 090 wrap-up** (ADR-047 Proposed→Accepted + doc-drift + repo-cleanup). |
+| **Step** | (a) 6 canonical/coordination docs corrected to reality (renderer removed; suggestions produced-but-unrendered; dismiss endpoint; read-time expiry; corrected component model). (b) `projects/spaarke-notification-spine-r2/` created with README + CLAUDE.md + current-task.md + `notes/INVESTIGATION-AND-ASSESSMENT.md`. |
+| **Status** | Merged master. Next: commit + push + merge these edits, then 090. |
+| **Next Action** | Commit/push/merge-to-master the (a) doc edits + (b) r2 folder → then task 090 wrap-up. For r2 execution: run `design-to-spec` on `projects/spaarke-notification-spine-r2/notes/INVESTIGATION-AND-ASSESSMENT.md`. |
 
 ### ⚠️ 2026-08-20 workstreams — CRITICAL context (read before resuming)
 

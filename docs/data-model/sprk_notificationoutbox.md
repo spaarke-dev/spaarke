@@ -44,7 +44,7 @@
 | `sprk_regardingrecordtype` | NVARCHAR(100) | Optional | ADR-024 MINIMAL pattern record-type discriminator — the regarding entity's **logical name as plain text** (e.g. `sprk_communication`, `sprk_matter`). NOT a lookup to `sprk_recordtype_ref` — see §4 decision log. |
 | `sprk_delivered` | DATETIME, nullable | Optional | Set when Layer C (SignalR) successfully pushes the row live. `null` = not yet delivered live (row may still be visible via the FR-06 poll endpoint). |
 | `sprk_dismissed` | DATETIME, nullable | Optional | Set when the user acknowledges/dismisses the pending item. `null` = still pending. |
-| `sprk_expiresat` | DATETIME, nullable | Optional (schema level) | Expiry boundary for the pending row (task 012's expiry sweep). Left schema-optional rather than Dataverse-required so no future producer/kind is hard-blocked from writing — the "every active-taxonomy row gets an expiry" guarantee is a task-012 service-layer invariant, not a schema constraint (mirrors how `sprk_delivered`/`sprk_dismissed` are already modeled as nullable state). |
+| `sprk_expiresat` | DATETIME, nullable | Optional (schema level) | Expiry boundary for the pending row, applied as a **read-time filter** by `OutboxService.GetPendingAsync` (a row with `sprk_expiresat <= now` is simply excluded from pending reads). **There is no background sweep/job and rows are not auto-deleted.** Left schema-optional rather than Dataverse-required so no future producer/kind is hard-blocked from writing — the "every active-taxonomy row gets an expiry" guarantee is a task-012 service-layer invariant, not a schema constraint (mirrors how `sprk_delivered`/`sprk_dismissed` are already modeled as nullable state). |
 
 ### 2.3 Relationships
 
@@ -61,7 +61,7 @@ A row moves through the following states, tracked purely by the presence/absence
 | **Pending, undelivered** | `null` | `null` | Row written by a producer; Layer C push has not (yet) succeeded — e.g. user offline, SignalR unreachable. Visible via the FR-06 poll/pending endpoint. |
 | **Pending, delivered** | set | `null` | Layer C successfully pushed a live signal; the user has not dismissed it. Still returned by the pending-read path until dismissed or expired. |
 | **Dismissed** | set or `null` | set | User acknowledged/dismissed the item. Excluded from pending-read results going forward. |
-| **Expired** | any | `null` (typically) | `sprk_expiresat` has passed; task 012's expiry sweep excludes it from pending reads (and may hard-delete/archive per task 012's design — not decided by this schema task). |
+| **Expired** | any | `null` (typically) | `sprk_expiresat` has passed; `OutboxService.GetPendingAsync` **excludes it at read time** (a read-time filter, not a background sweep — the row is not auto-deleted or archived). |
 
 **Write-before-ping invariant** (ADR-041/043, spec): the durable outbox row (`sprk_delivered = null`) is always written FIRST; the best-effort SignalR ping (which sets `sprk_delivered`) happens AFTER. Producers remain correct when SignalR is unreachable.
 
