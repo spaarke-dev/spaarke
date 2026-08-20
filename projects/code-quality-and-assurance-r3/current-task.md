@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-16 (context-handoff — POST-PROGRAM: review + follow-on fixes + RED project setup + RED-4/DEF-1)
+> **Last Updated**: 2026-08-20 (context-handoff — god-class ratchet retired → complexity standard; #3b MI live; auth-v4 seeded+researched; SPE-admin r1/r2 lineage)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,11 +10,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Project** | code-quality-and-assurance-r3 — **COMPLETE (35/35)** + extensive post-program follow-on. **All merged to master `3146837a7`.** Nothing uncommitted. |
+| **Project** | code-quality-and-assurance-r3 — **COMPLETE (35/35)** + extensive post-program follow-on. **All merged to master (latest `27bbf5b43`; main repo synced).** Nothing uncommitted; `work/dataverse-access-hardening` = origin/master. |
 | **State** | ✅ Program closed (aggregate un-gated **F→D**, maintainability mean **C+**; A+ = multi-cycle). ✅ Merged to master + **BFF deployed to dev** (Finance recalc 401 verified live). ✅ Post-program review (4 evidence agents). ✅ Follow-on fixes merged. ✅ RED follow-on projects defined/set up. **No active in-flight task** — this is a coordination/handoff state. |
-| **Next Action** | **RED-4 B COMPLETE + DEF-2 live-verified** (master `08cd5b5b7`). **#3b MI migration RESOLVED + PROVEN LIVE on dev (2026-08-17).** Root cause was a one-line scope bug: the Dataverse `ServiceClient` hands the token provider the full SOAP endpoint URL as `resourceUri`; deriving the scope from it → garbage AAD resource → HTTP 400. Fix: request the token for the env-root authority (`new Uri(dataverseUrl).GetLeftPart(Authority)/.default`) + keep startup-safe lazy connect. Verified live: `/api/dataverse/metadata/*` (SDK→MI) and `/api/v1/field-mappings/profiles` (WebApi→MI) → 200; healthz 200; diag endpoints removed. Both Dataverse impls now authenticate to dev Dataverse via UAMI `mi-bff-api-dev`. **Only remaining #3b step (operator-gated, separate): remove `API_CLIENT_SECRET`/`Dataverse-ClientSecret` from KV now that MI is proven** (kept as fallback until you choose). Full writeup + resolution: `notes/task-011-ng1-3b-mi-migration.md`. |
+| **Next Action** | **NO active in-flight task** — coordination/handoff state; r3 program complete + all follow-on merged. All remaining work is **operator-gated seed projects** (see Open threads). Newest session (2026-08-20) closed the god-class friction and set up the SPE-admin decomposition project. To resume any thread: charter one of the seed projects via `/design-to-spec` → `/project-pipeline`. |
 
-### ✅ Completed this session (all on master `3146837a7`)
+### ✅ This session (2026-08-20 — all merged to master, latest `27bbf5b43`)
+1. **God-class ratchet RETIRED → complexity guidance.** Deleted `tests/Spaarke.ArchTests/GodClassGuardTests.cs` (the hard LOC gate that blocked normal Compose/Chat growth). Replaced with **`docs/standards/COMPONENT-COMPLEXITY.md`** (evaluate complexity/cohesion, NOT line count; a large cohesive file is legitimate) wired into **CLAUDE.md §11.5** (new) + **§17 pointer** + **`task-create` §3.5.6** + **`code-review`** + a non-blocking **observation report** `scripts/report-large-server-files.ps1`. `god-class-ratchet.md` → RETIRED stub; indexes + memory updated. ArchTests now **36/0**. Rationale: complexity is the target, LOC is a symptom (ADR-038 "observe, don't gate").
+2. **#3b MI migration RESOLVED + live** (earlier this session): both Dataverse impls on Managed Identity, proven on dev. Root cause was a scope bug (ServiceClient hands the token provider the SOAP URL) → fixed by requesting the env-root authority + lazy connect. **Secret removal is NOT a #3b step** (shared OBO secret) → the `spaarke-auth-v4-dataverse-MI` project.
+3. **`spaarke-auth-v4-dataverse-MI` seeded → then FULLY RESEARCHED by another session.** MI-as-FIC confirmed GA + works for OBO; **ADR-028 Amendment A4** landed (app-only=MI vs confidential-client=MI-FIC/cert, never secret) + the false-positive `adr-check` OBO rule fixed. Project is now design-complete, ready for `/design-to-spec`.
+4. **SPE-admin r1/r2 lineage established (RED-1).** Renamed `sdap-SPE-admin-app` → **`sdap-SPE-admin-app-r1`** (original build) and the RED-1 decomposition seed `speadmin-decomposition-r1` → **`sdap-SPE-admin-app-r2`** (git-tracked renames, 87 files); copied the RED-1 research into `sdap-SPE-admin-app-r2/notes/`; reframed its README/design around complexity. INITIALIZED, operator-gated.
+
+### ✅ Completed prior session (all on master `3146837a7`)
 1. **r3 closeout**: 061 (`5a6ad556e`), 041 (`e1f06c5a9`), 042+063 (`cec19d374`), 090 (`704b6a213`). Merged to master; BFF deployed to dev.
 2. **Review + follow-on fixes**: eliminated the masked nullable class CS8601/CS8604 (Fable-verified SAFE); tightened analyzer allowlist; **redesigned the God-class ratchet** (per-file freeze + 2,000 new-file ceiling, replacing arbitrary 2,700) + documented it (`.claude/patterns/testing/god-class-ratchet.md` + CLAUDE.md §17 + memory); hardened the naming gate.
 3. **Handoffs**: `customer-provisioning-orchestration-r1` (unblocked; `projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md`) · `ci-cd-unit-test-remediation-r1` (RED-3) · **`email-communication-intelligence-r2` merged to master** for them.
@@ -27,7 +33,7 @@
 - **#3b MI migration (task 011)** — both Dataverse impls migrated to Managed Identity, **proven live on dev** (root cause was a token-scope bug: ServiceClient hands the provider the SOAP URL; fixed by requesting the env-authority scope + lazy connect). Merged. Operator prereqs (App User + sys-admin + MI settings) verified. **Secret removal is NOT a #3b step** — the secret is the shared OBO `BFF-API-ClientSecret` → superseded by the `spaarke-auth-v4-dataverse-MI` project.
 
 ### ▶ Open threads (all operator-gated / future — NO active r3 work)
-- **Seed projects (initialize-only, not started):** RED-1 `sdap-SPE-admin-app-r2` · RED-2 `chatendpoints-decomposition-r1` · RED-4 C `dataverse-access-unification-r1` · **`spaarke-auth-v4-dataverse-MI`** (research-first — eliminate the BFF client secret via MI-FIC/cert for OBO). All listed in `notes/follow-on-quality-backlog.md`.
+- **Seed projects (operator-gated):** RED-1 **`sdap-SPE-admin-app-r2`** (SpeAdminGraphService decomposition; folder+design+research) · RED-2 `chatendpoints-decomposition-r1` · RED-4 C `dataverse-access-unification-r1` · **`spaarke-auth-v4-dataverse-MI`** (eliminate the BFF client secret via MI-FIC for OBO — **research COMPLETE, ADR-028 A4 landed, ready for `/design-to-spec`**; coordinate with `customer-provisioning-orchestration-r1` which is executing). All in `notes/follow-on-quality-backlog.md`.
 - **Backlog carryovers** (`notes/follow-on-quality-backlog.md`): CI-workflow gate wiring (042/063, coordinated PR w/ ci-cd-r1) · TS per-surface mechanical baseline · CS0618 retirement (DemoExpiration refactor) · Console→ILogger (39 DI sites) · #772 deferred pkg majors.
 - **A+ gap** (report card): two additional projects not yet chartered — code-pages build-sprawl consolidation + plugins rebuild/retire — needed for every surface ≥ A–.
 
