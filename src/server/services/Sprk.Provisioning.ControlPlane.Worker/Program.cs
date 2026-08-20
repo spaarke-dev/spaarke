@@ -477,24 +477,28 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
 });
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
-// Task 070: H12a AI seed chain handler + two collaborator seams
+// Task 070 / 150: H12a AI seed chain handler + two collaborator seams
 // (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
-// retired-artifact scan; ISeedManifestRunner = pwsh shell-out to task-069's
-// scripts/seed-data/Invoke-SeedManifest.ps1 -Live). All registrations
-// UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// retired-artifact scan; ISeedManifestRunner = task 150's
+// DataverseWebApiSeedWriter — YamlDotNet manifest parse + direct Dataverse
+// Web API writes, replacing the pwsh shell-out to task-069's
+// scripts/seed-data/Invoke-SeedManifest.ps1 -Live + its powershell-yaml
+// dependency, DS-1b matrix-correction). All registrations UNCONDITIONAL per
+// ADR-032 — no feature-gate branches. Typed-HttpClient registration for the
+// writer — parity with H12c's AddHttpClient<IModelDeploymentReferenceWriter,
+// DataverseWebApiModelDeploymentReferenceWriter>() (RuntimeReferencesModule.cs).
 //
 // Placement Justification (CLAUDE.md §10): H12a lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
 // function rule — no IActionResolver, IActionRunner, IOpenAiClient,
 // IPlaybookService injection). H12a is the terminal AI-domain seeder per
-// spec.md FR-15 — it wraps the task-069 PS orchestrator with Cosmos state
-// management + idempotency (h12a-{customerId}-{SHA256(manifest.yaml)}) +
-// defense-in-depth retired-artifact check that layers on top of the
-// orchestrator's own retiredArtifacts enforcement.
+// spec.md FR-15 — it wraps the seed manifest with Cosmos state management +
+// idempotency (h12a-{customerId}-{SHA256(manifest.yaml)}) + defense-in-depth
+// retired-artifact check.
 builder.Services.Configure<AiSeedChainOptions>(
     builder.Configuration.GetSection(nameof(AiSeedChainOptions)));
 builder.Services.AddSingleton<ISeedManifestReader, FileSeedManifestReader>();
-builder.Services.AddSingleton<ISeedManifestRunner, InvokeSeedManifestScriptRunner>();
+builder.Services.AddHttpClient<ISeedManifestRunner, DataverseWebApiSeedWriter>();
 builder.Services.AddScoped<H12aAiSeedChainHandler>();
 
 // Task 071: H12b app-config seed handler + four IAppConfigSeeder registrations.

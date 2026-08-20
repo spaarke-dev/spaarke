@@ -1,11 +1,18 @@
 // -----------------------------------------------------------------------------
 // AiSeedChainOptions.cs
 //
-// Bound options for the H12a handler's collaborators (manifest reader + PS
-// runner). Loaded from the "AiSeedChain" configuration section by
-// <see cref="Sprk.Provisioning.ControlPlane.Modules.HandlersModule"/> —
-// runtime-configurable so the linux-x64 App Service publish layout can be
+// Bound options for the H12a handler's collaborators (manifest reader +
+// Dataverse Web API seed writer). Loaded from the "AiSeedChain" configuration
+// section by <see cref="Sprk.Provisioning.ControlPlane.Modules.HandlersModule"/>
+// — runtime-configurable so the linux-x64 App Service publish layout can be
 // honored without recompiling. Parity with <c>BicepInfraDeployOptions</c>.
+//
+// Task 150 (Wave G-5 Batch G-5A): removed <c>PwshExecutable</c> +
+// <c>InvokeSeedManifestScriptPath</c> — both were only consumed by the
+// now-deleted <c>InvokeSeedManifestScriptRunner</c> (pwsh shell-out, replaced
+// by <see cref="DataverseWebApiSeedWriter"/>). Added
+// <see cref="DataverseRequestTimeout"/> — parity with
+// <c>RuntimeReferencesOptions.DataverseRequestTimeout</c> (H12c).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
@@ -17,38 +24,39 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 public sealed class AiSeedChainOptions
 {
     /// <summary>
-    /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
-    /// PATH). Parity with <see cref="BicepInfraDeploy.BicepInfraDeployOptions.PwshExecutable"/>.
-    /// </summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>
-    /// Absolute path to <c>scripts/seed-data/manifest.yaml</c> — the declarative
-    /// AI seed manifest authored by task 069. Defaults relative to
-    /// <see cref="AppContext.BaseDirectory"/>; production deployments should
-    /// override via app-setting so the linux-x64 publish layout is honored.
+    /// Absolute path to <c>scripts/seed-data/manifest.yaml</c> — consumed by
+    /// <see cref="FileSeedManifestReader"/> (SHA-256 hash + defense-in-depth
+    /// retired-artifact scan) ONLY. <see cref="DataverseWebApiSeedWriter"/>
+    /// reads the SAME source file via an embedded resource instead (task 150
+    /// file header "SCOPE BOUNDARY" note) — this path is unaffected by that
+    /// change. Defaults relative to <see cref="AppContext.BaseDirectory"/>;
+    /// production deployments should override via app-setting so the
+    /// linux-x64 publish layout is honored.
     /// </summary>
     public string ManifestPath { get; set; }
         = Path.Combine(AppContext.BaseDirectory, "scripts", "seed-data", "manifest.yaml");
 
     /// <summary>
-    /// Absolute path to <c>scripts/seed-data/Invoke-SeedManifest.ps1</c> —
-    /// the task-069 thin orchestrator. Defaults relative to
-    /// <see cref="AppContext.BaseDirectory"/>; production deployments override
-    /// via app-setting when the publish layout differs.
-    /// </summary>
-    public string InvokeSeedManifestScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "seed-data", "Invoke-SeedManifest.ps1");
-
-    /// <summary>
-    /// Maximum time to wait for a single Invoke-SeedManifest.ps1 invocation.
-    /// Defaults to 20 minutes. The seed chain fans out across ~10 artifacts;
-    /// each per-artifact seeder is single-digit-second per row + the target
-    /// Dataverse env is throttled at ~30-60 rows/min, so 20 min covers the
-    /// full manifest (types + knowledge + skills + playbooks + output-types +
-    /// consumers) without truncating a slow-but-progressing run.
+    /// Maximum time to wait for the full seed-manifest invocation (all
+    /// artifacts, in topological order). Defaults to 20 minutes — the seed
+    /// chain fans out across ~10 artifacts; each per-artifact seed is
+    /// single-digit-second per row + the target Dataverse env is throttled at
+    /// ~30-60 rows/min, so 20 min covers the full manifest without truncating
+    /// a slow-but-progressing run. Not directly enforced by
+    /// <see cref="DataverseWebApiSeedWriter"/> itself (no internal
+    /// CancellationTokenSource.CancelAfter, unlike the retired PS-process
+    /// runner it replaces) — the caller's <see cref="CancellationToken"/>
+    /// (the reconciler's own Service-Bus-lock-renewal budget, per FR-22/R20)
+    /// governs the overall wall-clock instead.
     /// </summary>
     public TimeSpan SeedTimeout { get; set; } = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// Per-request timeout for <see cref="DataverseWebApiSeedWriter"/>'s
+    /// Dataverse Web API HTTP calls. Parity with
+    /// <c>RuntimeReferencesOptions.DataverseRequestTimeout</c> (H12c).
+    /// </summary>
+    public TimeSpan DataverseRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Regex patterns whose presence in <see cref="ManifestPath"/> content

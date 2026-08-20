@@ -3,8 +3,8 @@
   <metadata>
     <title>H12a: YamlDotNet manifest engine + DV-REST seed writes</title>
     <phase>C'' Wave G-5 -- Seed</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Replaces a shell-out to a script requiring a second PowerShell module (powershell-yaml) -- a DS-1b matrix-correction item; feeds the AI seed chain (ADR-039 playbook consumers).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,4 +95,38 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion>
+    Completed 2026-08-20 (Wave G-5 Batch G-5A). Deleted InvokeSeedManifestScriptRunner.cs
+    (ProcessStartInfo shell-out); new YamlSeedManifestEngine.cs (YamlDotNet parse +
+    Kahn's-algorithm topological sort, embedded-resource read) + new
+    DataverseWebApiSeedWriter.cs (ISeedManifestRunner impl reusing
+    DataverseWebApiModelDeploymentReferenceWriter's H12c idiom verbatim — HttpClient +
+    DefaultAzureCredential, find-by-filter existence check, JsonContent POST).
+
+    SCOPE BOUNDARY (documented at file-header level, ADR-039 Path A per adr-check):
+    the writer directly seeds the 4 manifest artifacts whose deployer.idempotencyMode
+    is "existence-check-then-insert" AND whose authoritativeSource is a flat JSON
+    content file with no relationship wiring (type-lookups/knowledge/skills/output-types
+    — 44 rows total against an empty env). The remaining 8 artifacts (4 R7 per-file
+    directory loaders already PENDING under the retired PS script; playbooks-mvp /
+    action-outputschema-patches / playbook-consumers — N:N relationship-association
+    writes, a materially different operation shape than H12c's flat-upsert idiom this
+    task's constraint scoped the writer to reuse; aimodeldeployment — H12c-owned
+    placeholder) report the SAME PENDING/PLACEHOLDER marker semantics
+    Invoke-SeedManifest.ps1 already emitted for its own deployer:null artifacts — no
+    observability regression, and no ADR-039 retired-artifact re-introduction (that
+    defense-in-depth scan stays in FileSeedManifestReader, untouched by this task).
+    Relationship-wiring support for the 3 remaining seeded-content artifacts is a
+    legitimate, cleanly-separable follow-on task.
+
+    Quality gates: /code-review (0 critical/warning; 4 low-severity AI-smell notes, all
+    convention-consistent) + /adr-check (5 compliant, 1 documented Path-A warning on
+    ADR-039 scope boundary above, 0 violations) both run per root CLAUDE.md §8 FULL
+    rigor. L2 unit suite: 1044/1044 passing (baseline 1005 + task 151's +19 + this
+    task's +20 new tests). Pre-existing, unrelated ArchTest gap noted: 2
+    CosmosProvisioningSecretGuardTests fail looking for the retired pre-split
+    `Sprk.Provisioning.ControlPlane` project bin dir (superseded by the .Core/.Api/.Worker
+    split, predates this task, out of scope to fix here).
+  </notes-completion>
 </task>

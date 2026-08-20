@@ -1,53 +1,53 @@
 // -----------------------------------------------------------------------------
 // ISeedManifestRunner.cs
 //
-// L2 abstraction over the actual invocation of Invoke-SeedManifest.ps1 (task
-// 069). Production impl shells out with -Live + -EnvironmentUrl; unit tests
-// inject stubs to avoid pwsh + real Dataverse round-trips.
+// L2 abstraction over the actual invocation of the seed-manifest run.
+// Production impl (task 150) parses task-069's scripts/seed-data/manifest.yaml
+// via YamlDotNet + writes directly to the target Dataverse env via the Web
+// API; unit tests inject stubs to avoid real Dataverse round-trips.
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 implementations exist from day 1:
-//     - Production: <see cref="InvokeSeedManifestScriptRunner"/> — shells out
-//       to scripts/seed-data/Invoke-SeedManifest.ps1 with the customer's
-//       Dataverse URL + -Live + captures stdout/stderr.
+//     - Production: <see cref="DataverseWebApiSeedWriter"/> (task 150) —
+//       parses manifest.yaml via <see cref="YamlSeedManifestEngine"/>,
+//       computes the topological seed order, and writes directly to the
+//       customer's Dataverse env via HttpClient + DefaultAzureCredential
+//       (the exact idiom H12c's DataverseWebApiModelDeploymentReferenceWriter
+//       already uses in-process — see that file's header + task 150's file
+//       header "SCOPE BOUNDARY" note for which artifacts it seeds).
 //     - Test: stubs injected per unit test that construct
 //       <see cref="SeedManifestInvocationOutcome"/> directly (see
 //       <c>H12aAiSeedChainHandlerTests</c>).
 //   Interface earns its keep — no NIH.
 //
-// DESIGN CHOICE (shell-out vs re-implementation):
-//   Task 069's Invoke-SeedManifest.ps1 IS the source-of-truth for the seed
-//   chain — topological sort, dependency resolution, per-artifact deployer
-//   dispatch, retired-artifact enforcement, dry-run vs live mode. Re-
-//   implementing that in C# would duplicate the logic across two files that
-//   would drift; instead H12a WRAPS the script (adding Cosmos state
-//   management + idempotency-key semantics + startup verification that the
-//   script does not perform). Parity with
-//   <see cref="BicepInfraDeploy.ProvisionCustomerScriptBicepDeployRunner"/>.
-//
-// POML CONSTRAINT COMPLIANCE:
-//   "Handler MUST NOT invoke seeder scripts directly — MUST go through
-//   Invoke-SeedManifest.ps1 so the single-source-of-truth manifest governs."
-//   This runner is the single call site — the handler never touches individual
-//   Deploy-*.ps1 scripts.
+// HISTORY: prior to task 150, production was <c>InvokeSeedManifestScriptRunner</c>
+// (deleted) — a pwsh process shell-out to scripts/seed-data/Invoke-SeedManifest.ps1,
+// which itself required a second PowerShell YAML-parsing module (the DS-1b
+// matrix-correction finding task 150 closes). Option D's SDK-port program
+// (design.md §4.1b / DS-1b §2) forbids any NEW process-shell-out collaborator
+// remaining in H12a's target state; task 150 removed the old one rather than
+// adding a second parallel Dataverse-write helper.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 
 /// <summary>
 /// Executes the task-069 Invoke-SeedManifest.ps1 orchestrator against a
-/// target customer Dataverse environment. Production impl shells out to
-/// pwsh; test impls return canned <see cref="SeedManifestInvocationOutcome"/>s.
+/// target customer Dataverse environment. Production impl (task 150) parses
+/// manifest.yaml + writes directly via the Dataverse Web API; test impls
+/// return canned <see cref="SeedManifestInvocationOutcome"/>s.
 /// </summary>
 public interface ISeedManifestRunner
 {
     /// <summary>
-    /// Invokes Invoke-SeedManifest.ps1 with <c>-Live</c> + <c>-EnvironmentUrl</c>
-    /// bound to <paramref name="request"/>. Returns a typed outcome — Success
-    /// carries the stdout summary for observability; Failure carries the
-    /// captured stderr + tail-of-stdout for operator diagnosis. Domain
-    /// failures do NOT throw; infrastructure faults (script missing, pwsh
-    /// missing, timeout) MAY throw. Parity with
+    /// Seeds every manifest artifact this runner supports (in topological
+    /// order) against <paramref name="request"/>'s target Dataverse
+    /// environment. Returns a typed outcome — Success carries a per-artifact
+    /// summary for observability; Failure carries a diagnostic identifying
+    /// which artifact failed + how many rows upserted before the failure
+    /// (existence-check-then-insert is retry-safe). Domain failures do NOT
+    /// throw; infrastructure faults (token acquisition, manifest parse) MAY
+    /// throw. Parity with
     /// <see cref="BicepInfraDeploy.IBicepDeployRunner.DeployAsync"/>.
     /// </summary>
     /// <param name="request">Seed inputs (customerId, tenantId, target Dataverse URL).</param>
@@ -58,10 +58,9 @@ public interface ISeedManifestRunner
 }
 
 /// <summary>
-/// Inputs to a single Invoke-SeedManifest.ps1 invocation. The runner passes
-/// <see cref="TargetDataverseUrl"/> as the script's <c>-EnvironmentUrl</c>
-/// parameter; <see cref="TenantId"/> flows via env var so the seeder's
-/// downstream Dataverse-client scripts can attach the correct auth scope.
+/// Inputs to a single seed-manifest invocation. <see cref="TenantId"/> scopes
+/// the <c>DefaultAzureCredential</c> token acquisition (§4D I5 — explicit
+/// per-tenant scope, never a default-tenant credential).
 /// </summary>
 /// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>

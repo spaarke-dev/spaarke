@@ -263,6 +263,47 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
     </EmbeddedResource>
 
+    <!-- Task 150 (Wave G-5 Batch G-5A) — H12a YamlDotNet manifest engine +
+         DV-REST seed writes. task-069's manifest.yaml (single source of
+         truth per its own header) + the 4 flat-JSON content files
+         DataverseWebApiSeedWriter directly seeds (type-lookups / knowledge /
+         skills / output-types — see that file's SCOPE BOUNDARY note for why
+         playbooks-mvp / playbook-consumers / the R7 per-file artifacts are
+         NOT embedded here) are embedded from their canonical repo location
+         (scripts/seed-data/ at repo root — NOT duplicated into this
+         project's folder, parity with the KvSecretsPopulation embed
+         immediately above) so YamlSeedManifestEngine's read is self-
+         contained at runtime (no repo-checkout dependency in the L2 publish
+         output, same "content files in the payload" rationale the POML
+         names). FileSeedManifestReader (the H12a handler's ISeedManifestReader
+         collaborator — SHA-256 hash + defense-in-depth retired-artifact
+         scan) intentionally keeps its existing on-disk Content-copy read
+         path (AiSeedChainOptions.ManifestPath) — unchanged by this task,
+         out of the declared file-modify scope; the writer's embedded copy
+         and the reader's on-disk copy are both sourced from the SAME
+         scripts/seed-data/manifest.yaml file at build time, so there is no
+         drift risk despite the two read mechanisms. -->
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\manifest.yaml"
+                       Link="Handlers\AiSeedChain\SeedContent\manifest.yaml">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.manifest.yaml</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\type-lookups.json"
+                       Link="Handlers\AiSeedChain\SeedContent\type-lookups.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.type-lookups.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\knowledge.json"
+                       Link="Handlers\AiSeedChain\SeedContent\knowledge.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.knowledge.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\skills.json"
+                       Link="Handlers\AiSeedChain\SeedContent\skills.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.skills.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\output-types.json"
+                       Link="Handlers\AiSeedChain\SeedContent\output-types.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.output-types.json</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 151 (Wave G-5 Batch G-5A, parallel with task 150) — H12b
          DataGrid + workspace-layout DV-REST ports. Same single-source-of-
          truth embedding pattern as the task 124/126/150 entries above: the

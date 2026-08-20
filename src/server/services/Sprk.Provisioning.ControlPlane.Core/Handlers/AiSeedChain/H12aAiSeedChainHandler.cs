@@ -1,16 +1,20 @@
 // -----------------------------------------------------------------------------
 // H12aAiSeedChainHandler.cs
 //
-// L2 CONTROL-PLANE H12a AI seed chain handler (task 070, wave C' — Phase C').
+// L2 CONTROL-PLANE H12a AI seed chain handler (task 070, wave C' — Phase C';
+// runner swapped to a pure-.NET Dataverse Web API writer by task 150, wave
+// G-5).
 //
 // PURPOSE:
 //   Terminal AI-domain seeder for a newly-provisioned Spaarke customer
 //   environment. Reads task 069's declarative seed manifest
-//   (scripts/seed-data/manifest.yaml), invokes Invoke-SeedManifest.ps1 -Live
-//   against the target Dataverse env, and records outcome to Cosmos
-//   ProvisioningRun state. Ends the seed chain at `playbook consumers` per
-//   ADR-039 (single AI routing surface; spaarke-playbook-embeddings retired;
-//   frozen multi-node engine deliberately UNDEPLOYED).
+//   (scripts/seed-data/manifest.yaml), invokes the seed-manifest runner
+//   (task 150's DataverseWebApiSeedWriter — direct Dataverse Web API writes,
+//   YamlDotNet manifest parse) against the target Dataverse env, and records
+//   outcome to Cosmos ProvisioningRun state. Ends the seed chain at
+//   `playbook consumers` per ADR-039 (single AI routing surface;
+//   spaarke-playbook-embeddings retired; frozen multi-node engine
+//   deliberately UNDEPLOYED).
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-15 (H12a

@@ -1,6 +1,50 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 151 COMPLETE — H12b DataGrid + workspace-layout DV-REST ports, Batch
+> **Last Updated**: 2026-08-20 (Task 150 COMPLETE — H12a YamlDotNet manifest engine + DV-REST seed writes,
+> Batch G-5A [parallel with task 151, now also complete — **Wave G-5 Batch G-5A is 100% COMPLETE**]. Deleted
+> `InvokeSeedManifestScriptRunner.cs` (`ProcessStartInfo` shell-out to `Invoke-SeedManifest.ps1`, which
+> itself required a second PowerShell YAML module — the DS-1b matrix-correction finding this task closes).
+> New `YamlSeedManifestEngine.cs` [YamlDotNet parse of the embedded manifest.yaml + Kahn's-algorithm
+> topological sort, exact port of the PS script's Read-ManifestYaml + Get-TopologicalOrder] + new
+> `DataverseWebApiSeedWriter.cs` [`ISeedManifestRunner` impl reusing `DataverseWebApiModelDeploymentReferenceWriter`'s
+> (H12c) exact in-process idiom verbatim — HttpClient + DefaultAzureCredential, find-by-filter existence
+> check, JsonContent POST]. **Documented scope boundary** (ADR-039 Path A per adr-check, not a silent gap):
+> the writer directly seeds the 4 manifest artifacts whose deployer.idempotencyMode is
+> existence-check-then-insert AND whose authoritativeSource is a flat JSON content file with no
+> relationship wiring (type-lookups/knowledge/skills/output-types — 44 rows against an empty env). The
+> remaining 8 artifacts (4 R7 per-file directory loaders, already PENDING under the retired PS script;
+> playbooks-mvp/action-outputschema-patches/playbook-consumers — N:N relationship-association writes, a
+> materially different operation shape than H12c's flat-upsert idiom this task's constraint scoped the
+> writer to reuse; aimodeldeployment — H12c-owned placeholder) report the SAME PENDING/PLACEHOLDER marker
+> semantics the retired script already emitted — no observability regression, no ADR-039 retired-artifact
+> re-introduction (that defense-in-depth scan stays in the untouched `FileSeedManifestReader`).
+> Relationship-wiring support is flagged as a legitimate follow-on task, not silently dropped.
+> `AiSeedChainOptions` lost 2 dead fields (`PwshExecutable`/`InvokeSeedManifestScriptPath`), gained
+> `DataverseRequestTimeout` (parity with H12c's `RuntimeReferencesOptions`). Test seam: internal
+> `credentialFactory` constructor overload (parity with `DataverseWebApiSolutionImporter`'s own seam) so
+> token-acquisition failure is unit-testable without a real `DefaultAzureCredential` network path. 20 new
+> tests (`YamlSeedManifestEngineTests` ×13, `DataverseWebApiSeedWriterTests` ×7 — hand-rolled fake
+> `HttpMessageHandler`, never `Mock&lt;HttpMessageHandler&gt;` per ADR-038), all passing — including a
+> writer-level idempotency test (2nd `InvokeAsync` run against a handler reporting every row as existing
+> fires zero new POSTs) and a same-request-shape-as-H12c test (identical Bearer/OData headers +
+> `$filter=sprk_name eq '...'` existence-check shape). **Grep-collision self-catch**: initial doc-comment
+> drafts of both new files literally contained "powershell-yaml"/"Install-Module" (describing what was
+> replaced) — would have failed the POML's own literal grep acceptance criterion; reworded before the grep
+> was re-run, verified 0 matches in the 2 new production files (banned strings only remain inside the test
+> files' own literal assertion strings, which is expected). Quality gates (code-review + adr-check,
+> unconditional per FULL rigor + test-modifying override): 0 Critical, 0 blocking Warnings; adr-check
+> surfaced 1 documented ADR-039 Path-A scope-boundary Warning (see above), 0 violations. `dotnet test
+> tests/Spaarke.ArchTests` showed 2 PRE-EXISTING, unrelated failures (`CosmosProvisioningSecretGuardTests`
+> looking for the retired pre-split `Sprk.Provisioning.ControlPlane` project bin dir — superseded by the
+> `.Core`/`.Api`/`.Worker` split, predates this task, out of scope to fix here). L2 tests (`Sprk.Provisioning
+> .ControlPlane.Tests`): 1024 (post-151) → **1044/1044** [+20, zero regressions]. Shared-file coordination:
+> `Sprk.Provisioning.ControlPlane.Core.csproj` was concurrently edited by sibling task 151 (H12b) — verified
+> clean additive merge (their 2 `<EmbeddedResource>` blocks land strictly after this task's own block,
+> confirmed via their own stash/pop verification + a standalone build). **Wave G-5 Batch G-5A is now 100%
+> COMPLETE** (both 150 + 151 done) — task 152 (H12b greenfield seeders, already unblocked by 151) and task
+> 153 (H12c credential config, needs 150+151+152) can now both proceed once 152 lands.)
+>
+> **Previous** (2026-08-20, Task 151 COMPLETE — H12b DataGrid + workspace-layout DV-REST ports, Batch
 > G-5A [parallel with task 150]. `DataverseWebApiDataGridSeeder.cs` [sprk_gridconfigurations: 4-row
 > find-by-id-or-name -> PATCH sprk_configjson if found / POST if not — always refreshes on match, config
 > JSON embedded from the ReconciliationGrid shared-lib's own JSON files so seed content can never drift]
@@ -72,8 +116,8 @@ Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 151 (H12b DataGrid+workspace-layout ports, STANDARD, parallel) ─→ 152 (H12b field-mapping+chart-def seeders, FULL, needs 151) ─┘
 ```
 
-**Batch G-5A** (parallel-safe now, dispatch immediately): 150 + 151
-- 150: H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done) — IN PROGRESS (sibling agent)
+**Batch G-5A** — ✅ 100% COMPLETE (both 150 + 151 landed 2026-08-20)
+- 150: ✅ COMPLETE — H12a YamlDotNet manifest engine + DV-REST seed writes (deps 141 done)
 - 151: ✅ COMPLETE — H12b 2 DV-REST ports (DataGrid + workspace-layout seeders) (deps 141 done)
 
 **Batch G-5B** (after 151 lands — 151 landed, ready to dispatch): 152 alone
@@ -122,6 +166,34 @@ L2 tests: **938 → 1005/1005** (+67 across Wave G-4). Zero code-review critical
 - 144: ✅ COMPLETE — H11 live verification (Graph REST + B2B invitation + consent verifier; code already real). See "Task 144 — COMPLETE" section below.
 
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
+
+---
+
+## Task 150 — COMPLETE (2026-08-20)
+
+H12a YamlDotNet manifest engine + DV-REST seed writes (Wave G-5 Batch G-5A, parallel with task 151). Full
+detail in the "Last Updated" banner above; summary here for the per-task index pattern.
+
+Deleted `InvokeSeedManifestScriptRunner.cs` (`ProcessStartInfo` shell-out, DS-1b matrix-correction target).
+New `YamlSeedManifestEngine.cs` (YamlDotNet embedded-resource parse + Kahn's-algorithm topological sort) +
+`DataverseWebApiSeedWriter.cs` (new `ISeedManifestRunner` impl, reusing H12c's
+`DataverseWebApiModelDeploymentReferenceWriter` idiom verbatim). Directly seeds 4 of 12 manifest artifacts
+(type-lookups/knowledge/skills/output-types — 44 rows fresh-run); the other 8 report PENDING/PLACEHOLDER
+per the manifest's own pre-existing marker semantics (documented SCOPE BOUNDARY, ADR-039 Path A per
+adr-check — relationship-association writes are a materially different idiom than the flat-upsert pattern
+this task's constraint scoped the writer to reuse from H12c).
+
+Tests: 1024 → **1044/1044** (+20, zero regressions). Step 9.5 (code-review + adr-check, FULL rigor +
+test-modifying override, both unconditional): 0 Critical, 0 blocking Warnings; adr-check found 5 compliant
+ADRs + 1 documented Path-A Warning (ADR-039 scope boundary, see banner) + 0 violations. Pre-existing,
+unrelated `Spaarke.ArchTests` gap noted (2 `CosmosProvisioningSecretGuardTests` failures — retired
+pre-split `Sprk.Provisioning.ControlPlane` project bin dir, predates this task).
+
+No coordination needed with sibling task 151 (H12b) beyond the shared `Core.csproj` — verified clean
+additive merge (see banner). Commit scope: H12a handler doc-header update, 2 new files, 2 deleted-file
+edits (`AiSeedChainOptions.cs`/`ISeedManifestRunner.cs` doc updates + `InvokeSeedManifestScriptRunner.cs`
+deletion), `Worker/Program.cs` DI swap, `Core.csproj` embed block, 2 new test files, this project's
+`current-task.md`/`TASK-INDEX.md`/task-150 POML status flip.
 
 ---
 
