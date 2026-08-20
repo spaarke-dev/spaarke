@@ -164,7 +164,14 @@ public static class FinanceModule
         // Scoped: extracts invoice facts via AI (Playbook B), creates BillingEvent records
         // IdempotencyKey: extract-{invoiceId}
         // VisibilityState ALWAYS "Invoiced" (deterministic, never from LLM)
-        // Enqueues SpendSnapshotGeneration and InvoiceIndexing jobs on success
+        // Enqueues InvoiceIndexing on success (InvoiceExtractionJobHandler.cs:344).
+        // NOTE (verified 2026-08-20): it does NOT enqueue SpendSnapshotGeneration — no code
+        // anywhere submits that job type. The snapshots → signals → rollup analytics chain has
+        // no automatic trigger; FinanceRollupService runs ONLY via the manual
+        // POST /api/finance/{matters|projects}/{id}/recalculate endpoints. Whether the missing
+        // enqueue is a wiring gap or intended is an owner decision — do not wire it without
+        // validating the side effects (same class as the TodoGenerationService trap in
+        // docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md).
         services.AddScoped<IJobHandler, InvoiceExtractionJobHandler>();
 
         // ============================================================================

@@ -144,6 +144,29 @@ consistency work** more than it strengthens the case for the full port.
 dependency). Only the payload contract is now guarded. A live-dev smoke of one matter recalculate is warranted
 before trusting the fix in production.
 
+### 7a.1 Blast radius (traced 2026-08-20)
+
+| Question | Answer |
+|---|---|
+| **Was it silent?** | Not in logs — loud, but unwatched. The endpoint catches, `LogError`s and returns a 500 Problem (`FinanceRollupEndpoints.cs:126+`); the job handler catches, `LogError`s and retries/dead-letters (`SpendSnapshotGenerationJobHandler.cs:109+`). Silent only in the sense that nobody was reading the telemetry |
+| **Did retries corrupt data?** | **No.** `SpendSnapshotService.GenerateAsync` upserts via a 5-field alternate key and `SignalEvaluationService` uses deterministic IDs (`FinanceModule.cs:188`). And the job path never ran at all — see below |
+| **Which invocation paths exist?** | Two are documented; **only one is reachable.** (1) `POST /api/finance/{matters\|projects}/{id}/recalculate` — live, called by the subgrid parent-rollup web resource. (2) `SpendSnapshotGenerationJobHandler` — **dormant**: no code anywhere enqueues job type `SpendSnapshotGeneration` |
+| **Who reads the 9 fields?** | **Nothing in the repo.** The only in-code hit is a JSDoc example in `Spaarke.Visuals/src/types/index.ts:398` (`headlineAboveBar`). Real consumers are outside code — MDA forms/views, visual configs, dashboards — so verification is a Dataverse-side check, not a grep |
+| **Net data state** | The 9 rollup fields on `sprk_matter` / `sprk_project` hold whatever was last written **before 2026-03-03** (or are empty if never successfully written). Snapshots and signals are unaffected — in the job path they complete at Steps 1–2 before the Step-3 rollup throws, and that path isn't triggered anyway |
+
+### 7a.2 Second finding — the analytics chain has no automatic trigger
+
+`FinanceModule.cs:166` documented `InvoiceExtractionJobHandler` as enqueueing "SpendSnapshotGeneration and
+InvoiceIndexing jobs on success". It enqueues **only** InvoiceIndexing (`InvoiceExtractionJobHandler.cs:344`);
+nothing in the codebase submits `SpendSnapshotGeneration`. So snapshots → signals → rollup never runs
+automatically — the rollup fields only update when someone manually hits the recalculate endpoint.
+
+**Not fixed here, deliberately.** Wiring the missing enqueue is a behavior change with unknown intent and
+real side effects (it would start generating snapshots and evaluating signals across matters) — the same
+class as the `TodoGenerationService` trap in the routing doc, which that doc explicitly says to validate
+before enabling. The misleading comment is corrected in place; the wiring decision belongs to the Finance
+owner.
+
 ## 8. Resume triggers (re-evaluate when any fires)
 
 The "piecemeal cleanup never graduates to the real fix" concern is legitimate, so the triggers are named rather
