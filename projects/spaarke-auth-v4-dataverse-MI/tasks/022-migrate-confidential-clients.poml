@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Migrate the 6 BFF-identity confidential clients to the provider (FR-B3)</title>
+    <phase>2 Provider</phase>
+    <gate>021 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs across BFF + shared lib; the highest-blast-radius change in the project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Six heterogeneous call sites, OBO semantics, fail-closed blast radius; a subtle error here locks out every user.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches every confidential client at once; cannot be split across agents safely.</parallel-reason>
+    <deps>021</deps>
+    <tags>auth,bff-api,dataverse,obo,migration</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Move all six BFF-identity confidential clients onto the assertion provider, with the client secret retained as the lowest-priority ordered fallback. This is the migration itself; nothing is removed here.</prompt>
+  <role>SPAARKE platform developer with deep MSAL and OBO experience. Follow ADR-028 A4 strictly.</role>
+  <goal>Every BFF-identity confidential client obtains its credential from the provider, with no inline credential construction remaining, and both credentials demonstrably working.</goal>
+
+  <context>
+    <background>Sites per CREDENTIAL-INVENTORY §1-2: GraphClientFactory.cs:83-90 (OBO :225-228), DataverseAccessDataSource.cs:59-63 (OBO :118-121), DataverseUserClient.cs:91-96 (OBO :178-182), AgentTokenService.cs:49-53 (OBO :92-95 Graph, :162-165 Dataverse), plus the residual ClientSecretCredential fallbacks at DataverseServiceClientImpl.cs:114-118 and DataverseWebApiService.cs:83 / DataverseWebApiClient.cs:44.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/DataverseUserClient.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/AgentTokenService.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="021" status="pending">Ordered credential selection</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: EXACTLY these six sites. SpeAdminTokenProvider and SpeAdminGraphService are OUT (ADR-028 E-1 — they authenticate other applications' identities, not the BFF's). CiamGraphClientFactory is OUT (already certificate-based). Power BI is OUT (task 041, UAMI-as-principal).</constraint>
+    <constraint source="project">Scope: the secret REMAINS configured and selectable as the lowest-priority fallback. Removal is task 033, after the soak. Do not delete anything here.</constraint>
+    <constraint source="ADR-028">Scope: DefaultAzureCredential is NOT a valid substitute on OBO paths — it cannot perform the exchange. Use the client assertion.</constraint>
+    <constraint source="project">Scope: DataverseServiceClientImpl.cs is being decomposed by dataverse-access-unification-r1. Confine the edit to the credential-construction block (~:60-125) and touch nothing else, per the COORDINATION note §4.1. Report the exact line range in the PR.</constraint>
+    <constraint source="ADR-038">Scope: coverage to tests/integration/seam/**. No DI-registration or ctor null-check tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO migration, MSAL confidential clients</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Migrate GraphClientFactory's OBO CCA first — it has the widest downstream surface.</step>
+    <step>Migrate DataverseAccessDataSource's OBO CCA — highest blast radius (row-level authorization).</step>
+    <step>Migrate DataverseUserClient and AgentTokenService.</step>
+    <step>Replace the residual ClientSecretCredential fallbacks in the three Spaarke.Dataverse impls.</step>
+    <step>Verify no inline credential construction remains at any of the six sites.</step>
+    <step>Run the full test suite; verify publish size and CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any OBO path cannot be migrated without changing its exchange semantics — STOP. Fail-closed auth is not a place to improvise.</trigger>
+    <trigger>A site turns out to authenticate as something other than the BFF identity — STOP and re-check against ADR-028 E-1 before touching it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">6 confidential-client sites listed above</output>
+    <output type="new">tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All six sites obtain their credential from the provider; no inline credential construction remains.</criterion>
+    <criterion>The secret is still configured and still selectable as the lowest-priority fallback.</criterion>
+    <criterion>Both credential orderings work — MI-FIC first and secret first — proving rollback.</criterion>
+    <criterion>Negative case: OBO still fails CLOSED for an unauthorised user on every migrated path (AccessRights.None, never error-open).</criterion>
+    <criterion>Negative case: SpeAdminTokenProvider, SpeAdminGraphService and CiamGraphClientFactory are demonstrably untouched.</criterion>
+    <criterion>All 46 test fixtures still pass; full suite green.</criterion>
+    <criterion>DataverseServiceClientImpl edit is confined to the credential block; the exact line range is stated in the PR for the unification interlock.</criterion>
+    <criterion>Publish size + delta reported; no new HIGH CVE; Placement Justification in the PR.</criterion>
+  </acceptance-criteria>
+</task>

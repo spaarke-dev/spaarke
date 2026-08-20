@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Fix the DI-lifetime hazard and record the ADR-009 cache decision (FR-A2)</title>
+    <phase>1 Prerequisites</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs + DI registrations; blocks the credential swap.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified with a named reference implementation to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>auth,bff-api,dataverse,di,bugfix</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>DataverseAccessDataSource is a transient typed HttpClient (SpaarkeCore.cs:39) and AgentTokenService is scoped (AgentModule.cs:24), so each builds a fresh MSAL confidential client per resolution and discards its token cache. Client assertions require shared, cached clients. Fix both to singleton-cached CCAs and record the ADR-009 interaction decision.</prompt>
+  <role>SPAARKE platform developer with MSAL token-cache and ASP.NET DI-lifetime experience.</role>
+  <goal>Both types reuse a process-wide static CCA keyed (tenant|client), with the ADR-009 caching decision written down rather than inherited by accident.</goal>
+
+  <context>
+    <background>Client assertions need shared/cached clients — a per-request CCA discards the token cache and re-acquires on every call. DataverseUserClient.cs:55-56,91 already solved exactly this with a process-wide static CCA cache; that is the pattern to copy, not to reinvent. Independently correct regardless of the credential decision.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/DataverseUserClient.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AgentModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/AgentTokenService.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="003" status="pending">Credential decision recorded</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: copy the static CCA cache keyed (tenant|client) from DataverseUserClient.cs:55-56,91. Do not invent a second caching shape.</constraint>
+    <constraint source="ADR-009">Scope: MSAL's in-process token cache inside a singleton CCA is PER-INSTANCE, while GraphTokenCache.cs:21 already implements a Redis (IDistributedCache) OBO token cache. This task MUST record which is authoritative — serialize MSAL's cache into IDistributedCache, or leave GraphTokenCache as the sole cross-request cache. Silence is not an acceptable outcome. Dev is single-instance so it does not bite in scope, but the decision must be explicit.</constraint>
+    <constraint source="ADR-010">Scope: changing a lifetime is not a licence to add registrations. Keep the registration count flat.</constraint>
+    <constraint source="project">Scope: do not change the credential TYPE — that is Phase 2. Lifetime only.</constraint>
+    <constraint source="ADR-038">Scope: coverage to tests/integration/seam/**. DI-registration tests are banned; assert behaviour (same CCA instance across two resolutions) not container wiring.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>MSAL client caching, DI lifetimes, Redis token cache</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read DataverseUserClient.cs:50-100 to capture the static-cache pattern.</step>
+    <step>Apply it to DataverseAccessDataSource; change SpaarkeCore.cs:39 registration accordingly.</step>
+    <step>Apply it to AgentTokenService; change AgentModule.cs:24 from scoped to singleton.</step>
+    <step>Investigate the GraphTokenCache interaction and DECIDE + WRITE DOWN the ADR-009 position.</step>
+    <step>Add a seam test proving two resolutions share the underlying CCA.</step>
+    <step>Verify publish size + CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Making AgentTokenService singleton surfaces captured scoped dependencies (a captive-dependency error at startup) — STOP and report rather than widening other lifetimes to compensate.</trigger>
+    <trigger>The ADR-009 decision implies multi-instance token-cache work beyond this project's dev-only scope — record it and escalate rather than building it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Api/Agent/AgentTokenService.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AgentModule.cs</output>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Resolving DataverseAccessDataSource twice from DI yields the same underlying CCA instance.</criterion>
+    <criterion>Resolving AgentTokenService twice yields the same underlying CCA instance.</criterion>
+    <criterion>The ADR-009 decision is written down with its reason.</criterion>
+    <criterion>No behaviour change beyond token-cache reuse; the existing test suite stays green.</criterion>
+    <criterion>Negative case: no captive-dependency error at startup; the app boots cleanly.</criterion>
+    <criterion>Negative case: OBO still fails CLOSED for an unauthorised user.</criterion>
+    <criterion>Publish size reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Deploy to slot and run the full OBO verification checklist (FR-C1)</title>
+    <phase>3 Rollout</phase>
+    <gate>022 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, deployment; the gate before touching a live environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive checklist execution against a running deployment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment verification; must be operator-observed.</parallel-reason>
+    <deps>022</deps>
+    <tags>auth,deploy,obo,verification</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the migrated build to the dev slot and run every item of the OBO verification checklist, plus the inbound-validation regression. Nothing flips until this is fully green.</prompt>
+  <role>SPAARKE platform developer. Treat every checklist item as blocking.</role>
+  <goal>A completed, recorded checklist proving every OBO-dependent surface works under MI-FIC on the slot, and that inbound token validation is unaffected.</goal>
+
+  <context>
+    <background>spec §FR-C1 and design §6.1 define the checklist. OBO fails CLOSED: a miss here means an immediate total lockout after the swap, not a degraded experience. NFR-05 adds inbound validation because AddMicrosoftIdentityWebApi binds the same AzureAd config section that carries AzureAd:ClientSecret.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/spec.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="022" status="pending">Migrated confidential clients</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: SLOT ONLY. Do not swap in this task — that is 032.</constraint>
+    <constraint source="project">Scope: every checklist item is blocking. A partial pass is a FAIL; do not proceed to 032 on "mostly green".</constraint>
+    <constraint source="project">Scope: verify with the MI-FIC credential FIRST in the order, and then re-verify with the secret first, proving rollback works before it is needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO verification, SPE, Office add-ins, Copilot agent</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Deploy the migrated build to the slot with MI-FIC first in the credential order.</step>
+    <step>SPE: document upload, download and preview.</step>
+    <step>AI chat: dataverse.* tool calls over /api/ai/chat SSE.</step>
+    <step>Office add-ins: Outlook and Word save flows.</step>
+    <step>M365 Copilot agent: /api/agent.</step>
+    <step>Dataverse row-level authorization: PermissionsEndpoints.cs:56,116 and the AI authorization filters.</step>
+    <step>Send-as-user email via /api/communications.</step>
+    <step>Long-running OBO.</step>
+    <step>Inbound validation regression: workforce JWT, the Ciam scheme, and the RagApiKey scheme all still validate.</step>
+    <step>Reorder to secret-first and re-run an abbreviated pass to prove rollback.</step>
+    <step>Record every result.</step>
+  </steps>
+
+  <escalation>
+    <trigger>ANY checklist item fails — STOP. Do not proceed to 032 and do not "fix forward" on a live path.</trigger>
+    <trigger>Inbound validation changes behaviour in any way — STOP; NFR-05 exists because the AzureAd section is shared between inbound and outbound.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/031-obo-verification-dev.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All eight OBO surfaces pass under MI-FIC on the slot.</criterion>
+    <criterion>Inbound token validation is unchanged for all three schemes.</criterion>
+    <criterion>The secret-first ordering also passes, proving rollback before it is needed.</criterion>
+    <criterion>Negative case: an unauthorised user is denied on every surface — fail-closed confirmed, never error-open.</criterion>
+    <criterion>Negative case: an expired or malformed user token is rejected at the inbound layer, not at the OBO exchange.</criterion>
+    <criterion>The production slot was not deployed to and not swapped.</criterion>
+  </acceptance-criteria>
+</task>

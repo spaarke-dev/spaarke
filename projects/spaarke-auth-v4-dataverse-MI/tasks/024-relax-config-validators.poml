@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Relax the three config validators that mandate the secret (FR-B5)</title>
+    <phase>2 Provider</phase>
+    <gate>020 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs; a wrong change here is a startup crash.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three named files with an exact, bounded change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>auth,bff-api,config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Relax the validators that make the client secret mandatory, so the BFF can start with no secret configured once a higher-priority credential is available — while still failing fast when NO credential of any kind is configured.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-010's Options-with-ValidateOnStart pattern.</role>
+  <goal>The BFF starts secret-free when MI-FIC is available, and still refuses to start with no credential at all.</goal>
+
+  <context>
+    <background>DataverseOptions.cs:32 carries [Required] plus ValidateOnStart via ConfigurationModule.cs:30-34 — this is the startup-crash dependency. GraphOptionsValidator.cs:20-23 requires the secret when MI is disabled. AgentTokenOptions.cs:38 is [Required] but validation is deferred, so it fails at first token request instead. Relaxing [Required] is backward-compatible; the 46 fixtures seed dummy secrets and must keep working.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/DataverseOptions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/GraphOptionsValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/AgentTokenOptions.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ConfigurationModule.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="020" status="pending">The provider seam determines what "a credential is available" means</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: these three validators ONLY. Do not relax any other [Required].</constraint>
+    <constraint source="project">Scope: "relax" means the secret is no longer unconditionally required. It does NOT mean removing validation — no credential of any kind must still fail fast at startup with an actionable message.</constraint>
+    <constraint source="project">Scope: all 46 test fixtures seed dummy secrets. Relaxing [Required] is backward-compatible and must stay so (NFR-04).</constraint>
+    <constraint source="ADR-010">Scope: keep the Options + ValidateOnStart pattern. Do not move validation into runtime code paths.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Options validation, ValidateOnStart</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Replace the unconditional [Required] on the secret with validation that at least one credential is resolvable.</step>
+    <step>Update GraphOptionsValidator so MI-disabled + assertion-available is valid.</step>
+    <step>Align AgentTokenOptions with the same rule and move it under ValidateOnStart for consistency.</step>
+    <step>Verify startup in all four config permutations.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Relaxing DataverseOptions cascades into unrelated startup validation failures — STOP; that is the ValidateOnBuild hazard that took dev down in #3b attempt 1.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/DataverseOptions.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/GraphOptionsValidator.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/AgentTokenOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The BFF starts with no secret configured when a higher-priority credential is available.</criterion>
+    <criterion>Negative case: with NO credential of any kind, startup fails fast with a message naming what is missing.</criterion>
+    <criterion>Negative case: the 46 fixtures seeding dummy secrets still start and pass unchanged.</criterion>
+    <criterion>Negative case: no eager-connect crash at startup (the #3b SIGABRT failure mode) in any permutation.</criterion>
+    <criterion>Full test suite green.</criterion>
+  </acceptance-criteria>
+</task>

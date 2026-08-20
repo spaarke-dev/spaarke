@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Spike: prove OBO end-to-end under a MI-issued client assertion</title>
+    <phase>0 Spike</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs, and its outcome decides the project's credential.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Root-cause reasoning against an undocumented protocol combination; failure is silent and easily misread as propagation delay.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Decision gate for the whole project; must be operator-observed.</parallel-reason>
+    <deps>001</deps>
+    <tags>auth,bff-api,spike,obo</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>On a throwaway spike branch deployed to the dev slot, prove that our OBO chain works when the confidential client authenticates with a Managed-Identity-issued client assertion instead of a client secret. This is the one thing documentation cannot settle and the gate for the entire project.</prompt>
+  <role>SPAARKE platform developer with deep MSAL, Entra and OBO experience. Follow ADR-028 A4 strictly.</role>
+  <goal>Recorded empirical evidence that OBO to Graph/SPE and OBO to Dataverse user_impersonation both succeed under WithClientAssertion backed by ManagedIdentityClientAssertion, plus a tested local-dev fallback.</goal>
+
+  <context>
+    <background>Microsoft documents the OBO+FIC+MI wire protocol (Entra Agent ID doc) but the canonical OBO page still lists only secret and certificate. No first-party sample covers our exact chain. Both platform prerequisites are satisfied and the dev MI-FIC exists (mi-bff-api-dev-assertion, 2026-08-19). E4' established that Microsoft.Identity.Web's declarative ClientCredentials list is NOT usable here, so the spike must use direct MSAL.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/DataverseUserClient.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+    </relevant-files>
+    <dependencies><dependency task="001" status="pending">Dev slot with the UAMI assigned</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: use WithClientAssertion + ManagedIdentityClientAssertion from Microsoft.Identity.Web.Certificateless, and REUSE the instance — it caches the signed assertion until expiry. Do not hand-roll assertion signing.</constraint>
+    <constraint source="project">Scope: spike branch deployed to the SLOT only. Never deploy to the production slot and never swap.</constraint>
+    <constraint source="project">Scope: the assertion is minted for the UAMI (clientId 5967251e-...) while the CCA is built for the app registration (1e40baad-...). These are DIFFERENT identities; conflating them is the expected failure mode.</constraint>
+    <constraint source="project">Scope: AADSTS70021 immediately after a FIC change is propagation delay, not incompatibility. Retry before concluding anything.</constraint>
+    <constraint source="project">Scope: spike code is throwaway. Do NOT merge it to the branch mainline; Phase 2 builds the real seam.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO, MI-FIC, MSAL client assertions</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Add Microsoft.Identity.Web.Certificateless to the BFF; build a minimal assertion provider.</step>
+    <step>Point GraphClientFactory's OBO CCA at WithClientAssertion behind a config flag, secret retained as fallback.</step>
+    <step>Deploy to the slot; exercise SPE document read with a real user token; capture success or the exact AADSTS code.</step>
+    <step>Repeat for Dataverse user_impersonation via DataverseUserClient's path.</step>
+    <step>Exercise long-running OBO (InitiateLongRunningProcessInWebApi + distributed cache).</step>
+    <step>Test local dev: no MI present, ordered fallback must degrade to the user-secret path including for OBO.</step>
+    <step>Record every result with request/response evidence.</step>
+  </steps>
+
+  <escalation>
+    <trigger>OBO fails under the assertion with a non-propagation error after retries — STOP and escalate. The Option B (KV certificate) pivot is the owner's decision, not the implementer's.</trigger>
+    <trigger>Local dev cannot perform OBO under any fallback ordering — STOP; that is a design problem (CREDENTIAL-INVENTORY §8), not a coding problem.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md</output>
+    <output type="branch">throwaway spike branch (not merged)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>OBO to Graph/SPE succeeds under a MI-issued client assertion, with captured evidence.</criterion>
+    <criterion>OBO to Dataverse user_impersonation succeeds under the same, with captured evidence.</criterion>
+    <criterion>Long-running OBO succeeds.</criterion>
+    <criterion>Local dev degrades to the secret path for OBO with no MI present.</criterion>
+    <criterion>Negative case: an assertion minted for the WRONG identity (app-reg clientId instead of UAMI principalId) is shown to fail, proving the conflation hazard is real and detectable.</criterion>
+    <criterion>Negative case: authorization still fails CLOSED — a user without rights gets AccessRights.None, never an error-open.</criterion>
+    <criterion>The production slot was never deployed to and never swapped.</criterion>
+  </acceptance-criteria>
+</task>
