@@ -1,21 +1,20 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 — Pre-`/compact` checkpoint. Wave G-7 (FINAL wave) 11 of 17 tasks landed on origin; task 181 IN-FLIGHT (subagent `a29835c5cd9603e37`). Remaining after 181: 184 (Ready writer) → 185 (H13 aggregation OPUS) → 186 (real Phase F E2E acceptance xhigh — delivers r1's stated goal).
+> **Last Updated**: 2026-08-20 — Task 184 (H13 Ready writer) LANDED at commit `ce5e28673`. Wave G-7 now 13 of 17 tasks landed on origin. Remaining: 185 (H13 aggregation OPUS) → 186 (real Phase F E2E acceptance xhigh — delivers r1's stated goal).
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `ca490d5a6` (task 183 cost envelope) — in sync with origin |
+| **HEAD** | `ce5e28673` (task 184 H13 Ready writer) — pushed to origin |
 | **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — Phase C'' incomplete) |
-| **L2 tests** | **1390/1391** (1 pre-existing skip). 787 baseline → +603 across Phase C'' |
+| **L2 tests** | **1443/1444** (1 pre-existing skip). 787 baseline → +656 across Phase C'' |
 | **Phase** | Phase C'' Wave G-7 (FINAL GATE) — delivers r1 E2E goal per FR-18 / SC #5 |
 | **Waves complete** | G-1, G-2, G-2.5, G-3, G-4, G-5, G-6 all 100% ✅ |
-| **Wave G-7 landed** | 11 of 17 (all 11 probes + 2 of 3 runners) |
-| **IN-FLIGHT** | Task 181 (IE2EValidationRunner C# port, replaces `Validate-DeployedEnvironment.ps1`). Subagent `a29835c5cd9603e37` (name: `task-181-e2e-validation-runner`). Deps 132/141/142/173 all done. |
-| **Next action after 181** | Dispatch task 184 (Ready writer — THE acceptance-target transition) alone |
-| **Then** | Task 185 (H13 gate aggregation, **OPUS tier**, deps ALL 170-184) |
+| **Wave G-7 landed** | 13 of 17 (all 11 probes + all 3 runners + H13 Ready writer) |
+| **IN-FLIGHT** | None — task 184 committed + pushed. |
+| **Next action** | Dispatch task 185 (H13 gate aggregation, **OPUS tier**, deps ALL 170-184 now met) |
 | **Then** | Task 186 (Real Phase F E2E acceptance rerun, **xhigh effort**, deps 185/113/162) — **DELIVERS r1 E2E GOAL** |
 
 ### On post-/compact resume
