@@ -1,4 +1,5 @@
 using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() extension
+using Sprk.Bff.Api.Api;                            // SPIKE 002 (throwaway)
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
@@ -230,6 +231,7 @@ app.UseSpaarkeMiddleware();
 
 // ---- Endpoint Groups ----
 app.MapSpaarkeEndpoints();
+app.MapSpikeOboEndpoints();     // SPIKE 002 ONLY (throwaway; branch spike/002-obo-mi-fic) - DO NOT MERGE
 
 // Dataverse passthrough endpoints (Spaarke DataGrid Framework R1, Phase B)
 app.MapSavedQueryEndpoints();   // task 011: GET /api/dataverse/savedquery/{id} + GET /api/dataverse/savedqueries/{entity}
