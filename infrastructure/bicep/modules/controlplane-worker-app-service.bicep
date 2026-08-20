@@ -126,6 +126,12 @@ param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 @description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer\'s sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a\'s Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash.')
 param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
 
+@description('Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name "Redis-ConnectionString" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module\'s platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName / azureOpenAiEndpointSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments.')
+param redisConnectionStringSecretName string = 'Redis-ConnectionString'
+
+@description('HTTPS URI of the provisioning-artifacts blob CONTAINER (e.g. https://{account}.blob.core.windows.net/provisioning-artifacts) -- output of modules/controlplane-artifacts-storage.bicep (G-8 Batch 2, audit defect #5). Threaded into the three handler option sections that each REQUIRE it at boot per NFR-05 (G-8 audit defect #7): BicepInfraDeployOptions (H2a), BffDeployOptions (H9), SolutionImportOptions (H6) -- Program.cs binds each via GetSection(nameof(...Options)), so the app-setting keys below carry the literal "...Options" section names. All three Validate() throw on empty, so this param is REQUIRED (no default) -- platform-controlplane.bicep MUST pass the artifacts-storage module\'s container URI output here (wiring owned by G-8 Batch 2). The Worker\'s UAMI reads blobs via DefaultAzureCredential (Storage Blob Data Reader grant -- audit defect #3); no account key or SAS in config.')
+param artifactsStorageContainerUri string
+
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
@@ -260,6 +266,42 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
           name: 'RuntimeReferences__SharedPlatformOpenAiEndpoint'
           value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${azureOpenAiEndpointSecretName})'
         }
+
+        // ---------------------------------------------------------------
+        // G-8 Batch 3 (audit defect #6): Level-2 dispatch-idempotency Redis
+        // (DispatchModule.cs:154-199, task 105 / DS-2 §4-L2). The code reads
+        // GetConnectionString("Redis") FIRST, then Redis:ConnectionString --
+        // ConnectionStrings__Redis is used here for exact parity with the
+        // BFF cutover shape (Deploy-RedisCache.ps1 -CutoverBffSettings).
+        // Without this setting the Worker THROWS at composition time under
+        // the App Service default ASPNETCORE_ENVIRONMENT=Production
+        // (deliberate NFR-05 fail-fast; we provide a REAL connection string
+        // rather than bypass the gate with an environment override -- see
+        // the redisConnectionStringSecretName param description).
+        // ---------------------------------------------------------------
+        {
+          name: 'ConnectionStrings__Redis'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${redisConnectionStringSecretName})'
+        }
+
+        // ---------------------------------------------------------------
+        // G-8 Batch 3 (audit defect #7): provisioning-artifacts container
+        // URI for the three artifact-consuming handler option sections.
+        // Program.cs binds each via GetSection(nameof(...Options)) -- the
+        // section names are the LITERAL class names incl. the "Options"
+        // suffix (BicepInfraDeployOptions / BffDeployOptions /
+        // SolutionImportOptions), matching the fixture keys in
+        // HandlerRegistrationCompletenessTests.cs:195,204,220. All three
+        // Validate() throw on empty at boot (NFR-05) -- H2a (Bicep infra
+        // deploy), H9 (BFF zip-deploy), H6 (solution import) each download
+        // artifacts from this container via the bound UAMI (Storage Blob
+        // Data Reader; no key/SAS). Same URI for all three by design --
+        // one artifacts container per environment (audit defect #5 module,
+        // modules/controlplane-artifacts-storage.bicep, G-8 Batch 2).
+        // ---------------------------------------------------------------
+        { name: 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
+        { name: 'BffDeployOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
+        { name: 'SolutionImportOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
 
         // ---------------------------------------------------------------
         // Managed-identity discovery (pin DefaultAzureCredential to bound
