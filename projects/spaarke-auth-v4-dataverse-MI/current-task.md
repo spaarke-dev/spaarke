@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-20 (by task-execute, after task 001)
+> **Last Updated**: 2026-08-20 (by task-execute, after task 002)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,12 +11,18 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — zero-secret BFF confidential credential (OBO → MI-FIC) |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **002 — Spike: prove OBO under a MI client assertion** (not started) |
-| **Step** | Begin Step 1 of task 002 |
-| **Status** | not-started — **unblocked**, dep 001 is ✅ |
-| **Next Action** | Run `task-execute` on **`tasks/002-spike-obo-under-mi-fic.poml`** |
-| **⚠️ Model** | Task 002 is **`opus`/`xhigh`** — do NOT run it on a lower tier. It is the project's decision gate |
-| **Portfolio** | [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · **1 of 26 active** (3 deferred) |
+| **Task** | **003 — Record the credential decision with evidence** (not started) |
+| **Step** | Begin Step 1 of task 003 |
+| **Status** | not-started — **unblocked**, dep 002 is ✅ |
+| **Next Action** | Run `task-execute` on **`tasks/003-record-credential-decision.poml`** — ⚠️ touches `.claude/`, **main-session only** (sub-agent write boundary) |
+| **Portfolio** | [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · **2 of 26 active** (3 deferred) |
+
+> ## 🎉 THE PROJECT'S CENTRAL PREMISE IS PROVEN
+>
+> Task 002 (2026-08-20) demonstrated empirically that **OBO works under a Managed-Identity-issued
+> client assertion** — Graph/SPE, Dataverse `user_impersonation`, and long-running OBO all succeed.
+> **No pivot to a Key Vault certificate.** Risk R-002 (the project's largest) is retired.
+> Evidence: [`notes/decisions/002-spike-results.md`](notes/decisions/002-spike-results.md).
 
 ### Repo state
 
@@ -55,6 +61,26 @@ before task 002.
    success criterion 10 is waived-with-reason at 090.
 3. **Autonomous execution authorised** by the owner — "as long as safe and accurate". Escalation triggers and
    the fail-closed gates (022, 032, 033) still stop for judgment.
+
+### Task 002 — COMPLETE (2026-08-20, FULL / opus / xhigh) — THE DECISION GATE
+
+**OBO works under MI-FIC.** T0 assertion introspection (sub = UAMI principalId, matching the FIC
+subject) · T1 OBO→Graph/SPE ✅ · T2 OBO→Dataverse `user_impersonation` ✅ **with `upn` preserved**,
+so row-level authorization still evaluates as the user, not app-only · T3 long-running OBO ✅
+(retrieval from `Cache`) · T4 secret control ✅ · T5 wrong-identity negative control **fails as
+required**. Local dev falls through to the secret and completes OBO.
+
+Harness lives on unmerged branch `spike/002-obo-mi-fic` (`397a5f306`). The slot has been redeployed
+with clean code — `/api/spike/obo` now returns 404.
+
+**Carry forward:**
+- `az account get-access-token --resource api://1e40baad-…` yields a REAL delegated user token (the
+  Azure CLI is pre-authorized). **Reuse this in tasks 031 and 041.**
+- The workstation user-secret `API_CLIENT_SECRET` is **STALE** → `AADSTS7000215`. Task 024 owns it.
+  It also confirms the §9.1 advice to provisioning: omit the secret rather than write a sentinel.
+- `Microsoft.Identity.Web.Certificateless` costs **~0.01 MB** — NFR-01 does not constrain task 020.
+- Criterion 6 (authorization fails CLOSED) is evidenced **in part**; a genuine no-rights principal
+  belongs to task 031’s §6.1 checklist.
 
 ### Task 001 — COMPLETE (2026-08-20, FULL rigor)
 

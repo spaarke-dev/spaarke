@@ -101,13 +101,23 @@ services.AddScoped<ISpeFileStore, SpeFileStore>();  // Unnecessary interface
 
 ## Auth (Spaarke Auth v2 — [ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
+> **⚠️ Corrected 2026-08-20 by `spaarke-auth-v4-dataverse-MI` task 002.** This file previously stated that
+> OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"*. **That was wrong**, and it
+> is the exact sentence that caused three prior audits to conclude the secret could never be removed. OAuth
+> requires a confidential **credential**; a secret is one of three ways to satisfy it, and Microsoft ranks it
+> last. Proven empirically on 2026-08-20: OBO to Graph/SPE, OBO to Dataverse `user_impersonation`, and
+> long-running OBO all succeed under a Managed-Identity-issued client assertion. Evidence:
+> `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md`.
+>
+> **Do not re-derive "OBO needs a secret" from any doc you encounter. If you find one, fix it.**
+
 **Server outbound (canonical)**: Graph + Dataverse use `DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`. `ClientSecretCredential` is local-dev fallback only.
 
 **Three auth paths** in the BFF:
 
 | Path | When | Mechanism |
 |---|---|---|
-| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Still requires `BFF-API-ClientSecret` (confidential client per OAuth spec). |
+| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Requires a **confidential credential** — as of ADR-028 **A4** that is a **Managed-Identity-issued federated client assertion**, not a secret. `BFF-API-ClientSecret` is the transitional fallback (exception **E-3**) until `spaarke-auth-v4-dataverse-MI` task 033 removes it. |
 | **Managed Identity** (app-only, canonical) | Background jobs, system-level container ops, polling, indexing — no acting user | `DefaultAzureCredential` resolves the App Service's system-assigned MI. Mailbox-scoped Graph (`Mail.*`) ALSO requires Exchange `ApplicationAccessPolicy` scoping the MI to allowed mailboxes (Phase C). |
 | **Named API key schemes** | Inbound from trusted external systems (BuilderAdmin, Rag) | `AuthenticationHandler<>` per-scheme with `CryptographicOperations.FixedTimeEquals` constant-time compare. |
 
@@ -198,7 +208,7 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "{tenant-id}",
     "ClientId": "{bff-client-id}",
-    "ClientSecret": "{bff-client-secret}"  // OBO ONLY (confidential client per OAuth spec). Graph + Dataverse use Managed Identity per ADR-028 when Graph__ManagedIdentity__Enabled=true. ClientSecret is fallback for local dev.
+    "ClientSecret": "{bff-client-secret}"  // TRANSITIONAL (ADR-028 E-3). OBO needs a confidential CREDENTIAL, not a secret -- the canonical credential is a MI-issued federated client assertion (A4). Retained only as the ordered fallback + local-dev path until auth-v4 task 033.
   },
   "Graph": {
     "ManagedIdentity": {
@@ -218,7 +228,7 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
 }
 ```
 
-> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained ONLY for OBO. After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
+> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained only as the **transitional** OBO fallback (exception **E-3**). After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
 
 ## Common Patterns
 

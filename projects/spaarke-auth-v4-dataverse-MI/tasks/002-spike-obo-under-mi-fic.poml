@@ -4,7 +4,7 @@
     <title>Spike: prove OBO end-to-end under a MI-issued client assertion</title>
     <phase>0 Spike</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs, and its outcome decides the project's credential.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,4 +81,47 @@
     <criterion>Negative case: authorization still fails CLOSED — a user without rights gets AccessRights.None, never an error-open.</criterion>
     <criterion>The production slot was never deployed to and never swapped.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-08-20" rigor="FULL" tier="opus" effort="xhigh">
+      VERDICT: OBO WORKS UNDER A MANAGED-IDENTITY-ISSUED CLIENT ASSERTION. No pivot to Option B
+      (Key Vault certificate). No escalation trigger fired. The project proceeds as specified.
+
+      Harness: throwaway branch spike/002-obo-mi-fic (commit 397a5f306, NOT merged), GET /api/spike/obo,
+      deployed to the staging slot ONLY -- production never deployed to, never swapped, 200 throughout.
+
+      T0 assertion introspect  PASS  sub=9fd47efb-... (UAMI principalId, matches the FIC subject),
+                                     iss matches the FIC issuer, aud=fb60f99c-... (api://AzureADTokenExchange
+                                     appears in GUID form, not as the api:// string -- worth knowing).
+      T1 OBO -> Graph/SPE      PASS  full SPE scope set incl. FileStorageContainer.Manage.All; IdentityProvider.
+      T2 OBO -> Dataverse      PASS  scp=user_impersonation AND upn present -> the USER's identity survives the
+                                     exchange, so row-level authorization still evaluates as the user (not app-only).
+      T3 long-running OBO      PASS  init IdentityProvider -> retrieval from Cache; session key intact.
+      T4 CONTROL secret        PASS  harness proven sound.
+      T5 NEGATIVE wrong ident  FAILS AS REQUIRED -- "No User Assigned or Delegated Managed Identity found for
+                                     specified ClientId". Loud, specific, at assertion-minting time. Task 023 has
+                                     a real reproduction.
+
+      LOCAL DEV: fallback shape proven (MI fails managed_identity_unreachable_network -> falls through to secret
+      -> real OBO succeeds). FINDING: the workstation user-secret API_CLIENT_SECRET is STALE and produced
+      AADSTS7000215 on the first run. Independently confirms the advice already given to provisioning
+      (PROVISIONING-CHANGE-REQUEST §9.1): omit the secret rather than write a sentinel, because a WRONG secret
+      yields an opaque AADSTS7000215 while an ABSENT one yields a clean catchable fall-through. Task 024 should
+      carry the stale-local-secret story.
+
+      REUSABLE RECIPE for tasks 031/041: the app registration pre-authorizes the Azure CLI
+      (04b07795-...) for SDAP.Access + user_impersonation, so
+      `az account get-access-token --resource api://1e40baad-...` yields a REAL delegated user token.
+
+      Criterion 6 (authorization fails CLOSED) is evidenced IN PART: no authorization code changed, T2 proves the
+      token carries user identity, and a live /api/containers call returned 403 (denied, not error-open). A
+      genuine no-rights principal returning AccessRights.None needs a second test user and belongs to task 031's
+      §6.1 checklist. Recorded as partial rather than claimed.
+
+      Publish size 43.68 MB compressed incl. PDBs -- Certificateless costs ~0.01 MB, so NFR-01 does not constrain
+      task 020's design. CVE scan clean.
+
+      Full record: notes/decisions/002-spike-results.md
+    </completion>
+  </notes>
 </task>
