@@ -1,10 +1,26 @@
 // -----------------------------------------------------------------------------
 // AzCliCostEnvelopeChecker.cs
 //
-// Production <see cref="ICostEnvelopeChecker"/> impl — shells out to
+// RETIRED (task 183, Phase C'' Wave G-7 Batch G-7A2.2, 2026-08-20): superseded
+// by <see cref="ArmCostEnvelopeChecker"/> -- a pure Azure.ResourceManager.
+// CostManagement SDK port of the same MTD/ActualCost query + drift-classification
+// arithmetic with ZERO ProcessStartInfo / az CLI dependency. Per DS-4 section
+// 6 this is a "straightforward REST/SDK port with no placeholder-replacement
+// subtlety beyond the mechanical swap" -- H13 now executes the cost gate
+// under Option D's zero-shell L2 Worker host without an `az` binary in the
+// App Service publish layout.
+//
+// Retained on disk (NOT deleted) per this project's on-disk-retention
+// convention (parity with NamingConformanceScriptRunner task 182 retirement
+// banner + AzCliKvSecretsWriter retirement banner). No longer registered in
+// E2EAcceptanceModule.cs's ICostEnvelopeChecker DI slot (see the task-183
+// DI-swap comment in that file).
+//
+// (ORIGINAL SUMMARY -- for historical context)
+// Production <see cref="ICostEnvelopeChecker"/> impl -- shells out to
 // `az costmanagement query` to fetch the customer subscription's MTD cost,
 // extrapolates a full-month total, then compares against the expected envelope
-// per <see cref="H13AcceptanceOptions"/> + spec.md §15 #14.
+// per <see cref="H13AcceptanceOptions"/> + spec.md section 15 #14.
 //
 // PLACEHOLDER NOTE (per POML mandatory pre-work #escalation):
 //   Cost Management access requires cross-subscription Reader RBAC on the

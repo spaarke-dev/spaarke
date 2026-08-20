@@ -782,9 +782,12 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 // returns InfraFault for every T1–T6; IE2EInvariantVerifier =
 // PlaceholderInvariantVerifier — parity stub for I1–I5; INamingConformanceChecker
 // = NamingConformanceScriptRunner shells out to r3 task 063's
-// scripts/naming-conformance-check.ps1; ICostEnvelopeChecker =
-// AzCliCostEnvelopeChecker shells out to `az costmanagement query` per
-// subscription + compares against §15 #14 envelopes;
+// scripts/naming-conformance-check.ps1 -- retired 2026-08-20 task 182, now
+// NamingConformanceChecker pure-C# port; ICostEnvelopeChecker =
+// ArmCostEnvelopeChecker (task 183, Wave G-7 SDK port, 2026-08-20 -- retired
+// AzCliCostEnvelopeChecker's `az costmanagement query` shell-out) uses
+// Azure.ResourceManager.CostManagement.UsageQueryAsync per subscription +
+// compares against §15 #14 envelopes;
 // IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater is a
 // Wave-C4 placeholder returning Success WITHOUT a real Dataverse write —
 // Wave-C5 swaps for a real Web API PATCH once the L2 Dataverse client

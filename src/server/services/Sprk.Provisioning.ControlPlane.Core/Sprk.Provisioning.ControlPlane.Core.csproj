@@ -185,6 +185,24 @@
          alongside this project's Azure.ResourceManager 1.14.0 pin. -->
     <PackageReference Include="Azure.ResourceManager.CosmosDB" Version="1.3.2" />
 
+    <!-- Azure.ResourceManager.CostManagement — task 183 (Phase C'' Wave G-7)
+         SDK port of the H13 cost-envelope acceptance gate. Replaces the retired
+         AzCliCostEnvelopeChecker's `az costmanagement query` shell-out with
+         CostManagementExtensions.UsageQueryAsync(scope, QueryDefinition,...)
+         so H13 executes cleanly under Option D's zero-shell L2 Worker host
+         (no `az` binary in the App Service publish layout). Emits the SAME
+         POST /subscriptions/{id}/providers/Microsoft.CostManagement/query
+         call the retired az CLI shell-out did (verified via SDK reflection +
+         HttpMessageHandler capture), typed against QueryResult.Rows for
+         parse safety. Version 1.0.3 verified to resolve cleanly alongside
+         this project's Azure.ResourceManager 1.14.0 / Azure.Core (transitive)
+         pins via a scratch-project build (zero NU1605 warnings) BEFORE adding
+         here. DefaultAzureCredential pinned to the L2 UAMI per ADR-028
+         MI-outbound: reuses the shared UAMI-pinned TokenCredential singleton
+         via the shared ArmClient DI registration in HandlersModule (task 120),
+         parity with sibling Wave-G-7 T1/I3 probe registrations. -->
+    <PackageReference Include="Azure.ResourceManager.CostManagement" Version="1.0.3" />
+
     <!-- Azure Service Bus SDK — L2 handler-enqueue path + (task 102)
          session-processor dispatcher. -->
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />

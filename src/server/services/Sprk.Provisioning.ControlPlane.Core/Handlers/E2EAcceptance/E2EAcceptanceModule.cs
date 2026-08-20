@@ -122,7 +122,17 @@ public static class E2EAcceptanceModule
         // disk UNREGISTERED per this project's retirement convention (see its
         // retirement banner). Registration remains UNCONDITIONAL (ADR-032).
         services.AddSingleton<INamingConformanceChecker, NamingConformanceChecker>();
-        services.AddSingleton<ICostEnvelopeChecker, AzCliCostEnvelopeChecker>();
+        // Task 183 (Phase C'' Wave G-7 Batch G-7A2.2): Azure.ResourceManager.
+        // CostManagement SDK port replaces the AzCliCostEnvelopeChecker shell-out
+        // per DS-4 section 6 (mechanical REST/SDK swap; threshold arithmetic
+        // ported verbatim). AzCliCostEnvelopeChecker is retained on disk
+        // UNREGISTERED per this project's retirement convention (see its
+        // retirement banner). ArmClient is constructed by the WorkerHost's
+        // factory registration in Program.cs (parity with the sibling
+        // Wave-G-7 T1/I3/I5 probe registrations that also inject ArmClient
+        // -- the shared UAMI-pinned TokenCredential singleton is reused).
+        // Registration remains UNCONDITIONAL (ADR-032).
+        services.AddSingleton<ICostEnvelopeChecker, ArmCostEnvelopeChecker>();
         services.AddSingleton<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();
 
         services.AddScoped<H13E2EAcceptanceGateHandler>();
