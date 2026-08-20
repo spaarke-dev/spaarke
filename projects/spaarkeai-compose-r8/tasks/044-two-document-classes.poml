@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A08/A09 — Two document classes (Authored vs Imported; warnings suppressed for Authored) + PDF-sourced version-coordinate tracking</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>blocked-on-031</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which documents produce degradation warnings and fixes a baseline-resolution defect for PDF-sourced documents. PROVISIONAL — amendable by task 031.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: suppressing warnings is one edit away from suppressing them for documents that DO have an original to lose against — which would hide exactly the loss this project exists to surface. The discriminator must be exactly right, and the failure mode is silence.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the save path and warning surfacing shared with tasks 040–043.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    ⚠️ **PROVISIONAL** — re-read `notes/gate-decision.md` first; its findings override anything here.
+
+    **FR-A08** — Compose has two genuinely different document classes, and today treats them the same:
+
+    - **`Imported`** — there IS an original .docx to preserve against. Degradation warnings are meaningful.
+    - **`Authored`** — born in the editor, PDF-sourced, or a fork from task 043's "Edit a copy". There is NO
+      original. A "content simplified" warning here is not just noise — it is FALSE, and it trains the owner to
+      ignore the warnings that do matter.
+
+    Honor the distinction: degradation warnings MUST NOT fire for `Authored` documents.
+
+    **FR-A09** — PDF-sourced documents do not track their synthesized file's version coordinates, so after a
+    page refresh, save two cannot resolve its baseline and falls back to a full rebuild. Track the
+    coordinates so the second save resolves and clones like any other.
+
+    Both use the EXISTING `ComposeOrigin` discriminator. Do not add a class.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose origin model, baseline resolution, and the R7 degradation-warning layer. Follow ADR-049 and ADR-009.</role>
+
+  <goal>
+    `Authored` documents save without degradation warnings; `Imported` documents still warn exactly as before.
+    A PDF-sourced document's second save (after a refresh) resolves its baseline and clones unchanged blocks.
+  </goal>
+
+  <context>
+    <background>
+      The owner's own framing during design Q&amp;A settled this: a PDF-sourced document IS "our file" — there
+      is no original OOXML to preserve against. The same is true of anything born in the editor and of task
+      043's forks. Warning against a nonexistent original is the noise that made R7's honest-signal layer feel
+      like a nuisance rather than information.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ (ComposeOrigin)</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST use the EXISTING `ComposeOrigin` Authored/Imported discriminator. MUST NOT add a third class or a parallel flag (root §11).</constraint>
+    <constraint source="project">Suppression MUST be scoped to DEGRADATION warnings only. Save-outcome warnings (concurrency, partial write, storage) MUST still fire for `Authored` documents — they are about the save, not about an original.</constraint>
+    <constraint source="project">Every path that creates an `Authored` document MUST stamp it: born-in-editor, PDF-sourced, and task 043's fork. A missed path leaves false warnings in place; enumerate them explicitly.</constraint>
+    <constraint source="ADR-009">Version-coordinate state uses `IDistributedCache`, never `IMemoryCache`. Scope: FR-A09's tracking.</constraint>
+    <constraint source="project">FR-A09 MUST be verified across a page REFRESH (the failure requires losing client state), not just across two saves in one session.</constraint>
+    <constraint source="project">MUST NOT weaken warnings for `Imported` documents. Include a positive test that an `Imported` document still warns.</constraint>
+    <constraint source="ADR-038">Seam tests in `tests/integration/seam/**` covering both classes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>document classes, baseline resolution, degradation warnings</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load gate-decision.md, spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Read `ComposeOrigin` and enumerate EVERY path that creates a document. Classify each as Authored or Imported and confirm each stamps correctly today.</step>
+    <step order="2">Fix any creation path that does not stamp (expect: PDF-sourced, and task 043's fork if 043 landed first).</step>
+    <step order="3">Gate degradation-warning emission on `Imported`. Verify save-outcome warnings are NOT affected.</step>
+    <step order="4">FR-A09: track the synthesized file's version coordinates for PDF-sourced documents, in `IDistributedCache`.</step>
+    <step order="5">Verify save-two-after-refresh resolves the baseline and clones — drive it through an actual state loss, not a same-session repeat.</step>
+    <step order="6">Tests: Authored saves with no degradation warning; Imported still warns; Authored still gets save-outcome warnings; PDF-sourced second save after refresh clones.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a document can legitimately change class mid-life (e.g. an Imported document whose original is deleted, or a fork that later re-imports), the discriminator needs a transition rule — surface it rather than picking one silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every document-creation path is enumerated and stamps the correct `ComposeOrigin` — recorded in the task notes.</criterion>
+    <criterion>An `Authored` document saves with NO degradation warning.</criterion>
+    <criterion>An `Imported` document still emits degradation warnings exactly as before (positive test).</criterion>
+    <criterion>An `Authored` document STILL receives save-outcome warnings (concurrency, partial write, storage) — suppression is scoped to degradation only.</criterion>
+    <criterion>A PDF-sourced document's second save AFTER A PAGE REFRESH resolves its baseline and clones unchanged blocks.</criterion>
+    <criterion>Version-coordinate state uses `IDistributedCache` (ADR-009).</criterion>
+    <criterion>NEGATIVE: no third document class or parallel flag was added.</criterion>
+    <criterion>NEGATIVE: no `IMemoryCache` usage introduced.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

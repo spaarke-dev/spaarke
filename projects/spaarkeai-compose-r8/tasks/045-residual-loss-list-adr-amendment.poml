@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 — Publish the residual loss list with owner sign-off, and merge the ADR-049 third amendment (7 invariants) — MAIN SESSION ONLY</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>blocked-on-031</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes a binding ADR amendment and the published contract for what Compose does not preserve. PROVISIONAL — amendable by task 031.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the amendment's wording binds future releases, and the residual list is the document a user is entitled to rely on. Both fail silently when subtly wrong — an invariant stated loosely gets traded away in R9, and a residual list that does not match the gate means we are losing something we told nobody about.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `.claude/adr/` — main session only (root §3). Depends on all Track A outcomes.</parallel-reason>
+    <deps>040, 041, 042, 043, 044</deps>
+    <tags>architecture, documentation, compose</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    ⚠️ **MAIN SESSION ONLY.** This task writes to `.claude/adr/`. Sub-agents launched via the Agent tool
+    CANNOT write these paths (root CLAUDE.md §3) — that boundary is intentional. The main session applies
+    these edits directly.
+
+    Two deliverables that close Track A:
+
+    **FR-A10 — The residual loss list.** Publish, in `docs/architecture/`, exactly what Compose does NOT
+    preserve, and get owner sign-off. The list MUST match what the gate enforces: no construct may degrade
+    that is not on the list, and nothing on the list may be something the gate actually preserves. That parity
+    is the whole value — a residual list that drifts from the gate is a promise nobody is keeping.
+
+    **The ADR-049 third amendment.** Task 031 drafted it in `projects/.../notes/`. Apply it to
+    `.claude/adr/ADR-049-compose-shadow-document.md`, carrying the seven standing invariants and, critically,
+    the rule that invariants (1) "every save terminates in a defined outcome" and (2) "untouched blocks are
+    preserved" are a PAIR no future amendment may trade away singly. Both prior amendments traded one for the
+    other; that is the pendulum this wording stops.
+  </prompt>
+
+  <role>SPAARKE architect. Authority to amend ADRs and publish architecture documentation. Familiar with ADR-049's full history and root CLAUDE.md §6.5.</role>
+
+  <goal>
+    ADR-049 carries the third amendment with all seven invariants and the paired-MUST rule. A residual loss
+    list is published in `docs/architecture/`, owner-signed-off, and in demonstrated parity with the gate.
+  </goal>
+
+  <context>
+    <background>
+      Success criterion 5 of the spec is "zero silent loss; residual list published and matching the gate".
+      "Matching" is the operative word — the parity check is what converts a document into a guarantee.
+
+      The seven invariants are already stated in the project CLAUDE.md and drafted in task 031. This task's
+      job is to move them into the binding location with wording that survives the next project's pressure.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file role="doc-output">docs/architecture/ (residual loss list — write-side companion)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-049-third-amendment-draft.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §3">MAIN SESSION ONLY for the `.claude/adr/` write. Sub-agents cannot write these paths; if an "Edit denied" appears, that is the boundary working, not a bug.</constraint>
+    <constraint source="project">The amendment MUST declare invariants (1) and (2) as a PAIR no future amendment may trade away singly. This exact wording is the structural guard — do not soften it.</constraint>
+    <constraint source="project">The amendment MUST state invariant (7) — "deterministic information available at capture time MUST be carried, not re-derived" — as a GENERAL rule, not per-surface.</constraint>
+    <constraint source="project">The residual list MUST be in demonstrated parity with the gate: for every construct family, either the gate preserves it OR it is on the list. Demonstrate the parity, do not assert it.</constraint>
+    <constraint source="root CLAUDE.md §6.5">This is a Path-B amendment. It MUST merge with or before the dependent code — it cannot trail Track A into master.</constraint>
+    <constraint source="root CLAUDE.md §17/§18">Every PR touching `.claude/` MUST add an entry to `.claude/CHANGELOG.md`. Update the root §17 Compose pointer row if the amendment changes what it says.</constraint>
+    <constraint source="project">Owner sign-off on the residual list is REQUIRED (spec §Unresolved Questions names this as blocking FR-A10 and success criterion 5). An unsigned list does not complete this task.</constraint>
+    <constraint source="project">MUST NOT create a new architecture document that duplicates `COMPOSE-READ-REFERENCE-FIDELITY.md` — the write-side companion complements it (root §11).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR amendment, architecture documentation, residual loss</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-049-third-amendment-draft.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; confirm MAIN SESSION execution; load the amendment draft, gate-decision.md, spec.md.</step>
+    <step order="1">Apply the third amendment to `.claude/adr/ADR-049-compose-shadow-document.md` — concise + full forms, seven invariants, paired-MUST rule, invariant (7) as a general rule.</step>
+    <step order="2">Compile the residual loss list from the final gate results: every construct family the gate does NOT preserve, with what specifically is lost.</step>
+    <step order="3">Run the parity check: for each construct family, confirm gate-preserves XOR on-the-list. Record the check, including any family that fails parity (which is a defect, not a documentation choice).</step>
+    <step order="4">Publish the list in `docs/architecture/` as the write-side companion to `COMPOSE-READ-REFERENCE-FIDELITY.md`.</step>
+    <step order="5">Obtain owner sign-off and record it (who, when, on which version of the list).</step>
+    <step order="6">Add the `.claude/CHANGELOG.md` entry; update the root §17 Compose pointer row if needed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the parity check fails — a construct degrades that is not on the list, or the list names something the gate preserves — that is a defect in Track A or in the list. Fix it; do not publish a list you know does not match.</trigger>
+    <trigger>If the owner declines to sign off on a residual item, that item becomes a scope question (fix it, or gate it via task 043) — not a documentation revision.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="adr">.claude/adr/ADR-049-compose-shadow-document.md</output>
+    <output type="doc">docs/architecture/ (write-side residual loss list)</output>
+    <output type="doc">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ADR-049 carries the third amendment in both concise and full forms.</criterion>
+    <criterion>All seven invariants are stated, with (1) and (2) declared as a pair no future amendment may trade away singly.</criterion>
+    <criterion>Invariant (7) is stated as a general rule, not per-surface.</criterion>
+    <criterion>The residual loss list is published in `docs/architecture/` and names what is lost per construct family.</criterion>
+    <criterion>A parity check is RECORDED demonstrating gate-preserves XOR on-the-list for every construct family.</criterion>
+    <criterion>Owner sign-off is recorded with who, when, and which version of the list.</criterion>
+    <criterion>`.claude/CHANGELOG.md` has an entry; the root §17 Compose pointer is current.</criterion>
+    <criterion>NEGATIVE: the amendment does not weaken or remove either of the paired MUSTs.</criterion>
+    <criterion>NEGATIVE: no new architecture document duplicates `COMPOSE-READ-REFERENCE-FIDELITY.md`.</criterion>
+    <criterion>NEGATIVE: the `.claude/` edits were applied by the MAIN SESSION, not delegated to a sub-agent.</criterion>
+  </acceptance-criteria>
+</task>

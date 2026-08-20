@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S02 + FR-A12 — Concurrency becomes last-writer-wins with a warning, enforced by If-Match at the storage boundary</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Reverses the concurrency semantics on the live save path across both .cs and .tsx; removes a shipped refusal loop; introduces an ETag precondition at the storage boundary.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this reverses a semantic that shipped two days before the project started, and the failure mode is asymmetric — get the If-Match plumbing subtly wrong and saves either silently overwrite the wrong version or start refusing again, both of which look like "it works" in a single-writer test. Concurrency correctness is exactly the class where a plausible implementation passes review and fails in production.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeService.SaveAsync, UploadSessionManager and ComposeWorkspace.tsx — the three most contended files in the save path.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Two halves of one decision, done in one file-pass so the semantics can never disagree with the enforcement:
+
+    (a) The staleness assert in ComposeService (~line 1227) currently REFUSES a save when the stored version
+    moved, producing an HTTP 412 the client cannot recover from (its handler is dead code — task 010 fixes the
+    routing, this task removes the reason). Owner decision 2026-08-19: concurrency is
+    **last-writer-wins with a user-visible warning**. The save SUCCEEDS and names version history as recovery.
+
+    (b) Enforce that at the storage boundary. `UploadSessionManager` already has an `If-Match` overload
+    (~:382, :397-406) and Compose currently passes `ifMatch: null`, leaving a check-then-act TOCTOU window
+    between reading the version and writing the bytes. Send the ETag.
+
+    Doing (a) without (b) means "last writer wins" is a hope, not a guarantee.
+  </prompt>
+
+  <role>SPAARKE backend + frontend developer. Expert in the Compose save path, the Graph upload-session contract, and the R7 banner stack. Follow ADR-007 (no Graph types above SpeFileStore) and ADR-009 (version state via IDistributedCache).</role>
+
+  <goal>
+    A concurrent-writer save succeeds, persists, and warns the user with version history named as the recovery
+    path. The 412 refusal loop no longer exists. The content PUT carries `If-Match`. There is no code path
+    that can produce an unrecoverable content refusal on concurrency grounds.
+  </goal>
+
+  <context>
+    <background>
+      The 412 shipped 2026-08-18 — the same day its client handler was verified dead. That pairing is why
+      NFR-08 exists ("no save-path status code merges without a paired client-recovery test"). The owner's
+      decision is not a softening: last-writer-wins is correct here because Compose already versions every
+      save, so the "losing" content is recoverable, whereas a refusal loop leaves the user with unsaved work
+      in a browser tab and no way forward.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (ResolveSaveBaselineAsync)</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">MUST NOT surface Graph types (`DriveItem`, ETag primitives as Graph types) above the `SpeFileStore` / `UploadSessionManager` boundary. The ETag crosses into `Services/Compose/` as a plain string. Scope: the new If-Match plumbing.</constraint>
+    <constraint source="ADR-009">Version/ETag state MUST use `IDistributedCache`, never `IMemoryCache`. Scope: any version state cached by this task.</constraint>
+    <constraint source="project">MUST reuse R7's existing banner stack + SAVE_DEGRADATION_COPY for the concurrency warning. Do NOT author a new message surface (root CLAUDE.md §11).</constraint>
+    <constraint source="project">MUST NOT leave a second concurrency path behind. The 412 refusal is DELETED, not feature-flagged — two concurrency semantics is the drift this project exists to remove.</constraint>
+    <constraint source="spec NFR-08">A paired client-recovery test is MANDATORY for every status code this task leaves reachable on the save path. Scope: the tests added here.</constraint>
+    <constraint source="ADR-038">Tests live in `tests/integration/seam/**`. MUST NOT use `Mock&lt;HttpMessageHandler&gt;`. Scope: this task's tests.</constraint>
+    <constraint source="project">The If-Match value MUST come from the version resolved for THIS save (the baseline actually merged against), not from a separately re-read version — re-reading reintroduces the TOCTOU window this task closes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose save concurrency, Graph upload sessions, ETag preconditions</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-007, ADR-009, ADR-049.</step>
+    <step order="1">Read `ResolveSaveBaselineAsync` and the staleness assert (~:1227). Map exactly what version value is available at that point and whether it is the same value the eventual PUT would use.</step>
+    <step order="2">Read `UploadSessionManager`'s existing `If-Match` overload (~:382, :397-406) and confirm its behavior on precondition failure (what does Graph return, and how is it currently surfaced?).</step>
+    <step order="3">Replace the refusal with a proceed-and-warn outcome. Coordinate with task 013's save-outcome enum: this is `persisted-with-warnings`, not a new member.</step>
+    <step order="4">Thread the resolved ETag into the content PUT via the existing overload. Do not add a new upload method.</step>
+    <step order="5">Handle the residual case: If-Match fails at Graph (someone wrote between our read and our PUT). This MUST still terminate in a defined outcome — decide and implement whether it retries once with the fresh version or reports `storage-failed`; document the choice.</step>
+    <step order="6">Client: render the concurrency warning via the existing banner stack, naming version history as the recovery path. The save reports SUCCESS.</step>
+    <step order="7">Seam test: an external writer changes the item between load and save; assert the save persists, warns, and the client renders the warning without blocking.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the resolved baseline version and the value Graph expects in If-Match are not the same identifier (e.g. Compose tracks a Dataverse-side version while Graph wants a drive-item ETag), stop — mapping between two version namespaces is a design decision, not an implementation detail, and getting it wrong silently disables the precondition.</trigger>
+    <trigger>If removing the 412 makes any other consumer's error handling unreachable, surface it rather than deleting that consumer's code as a side effect.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A save whose stored version moved since load SUCCEEDS and persists.</criterion>
+    <criterion>That save returns a warning outcome, and the client renders it via the existing banner stack naming version history as recovery.</criterion>
+    <criterion>The content PUT carries a non-null `If-Match` sourced from the version this save's baseline was resolved at.</criterion>
+    <criterion>A Graph-side precondition failure terminates in a DEFINED outcome (retry-once or `storage-failed`), never an undefined refusal — the chosen behavior is documented in the task notes.</criterion>
+    <criterion>NEGATIVE: no code path returns HTTP 412 on the Compose save route — verified by grep.</criterion>
+    <criterion>NEGATIVE: `ifMatch: null` no longer appears on the Compose content-PUT call site — verified by grep.</criterion>
+    <criterion>NEGATIVE: no Graph type crosses above the UploadSessionManager/SpeFileStore boundary (ADR-007).</criterion>
+    <criterion>NEGATIVE: a normal single-writer save is unchanged — it persists with no warning banner.</criterion>
+    <criterion>A seam test drives an external concurrent writer and asserts persist + warn; a paired client test asserts the rendered recovery affordance (NFR-08).</criterion>
+    <criterion>Publish size reported (absolute + delta vs 44.96 MB); no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S08 — Route Compose to the existing chunked upload; remove the ~22 MB request-body ceiling; honest oversize pre-flight</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the storage-boundary write path and the request-body limit for the Compose save route.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the chunked path already exists and the naive fix (raise the limit) leaves a bigger cliff rather than removing it. The judgment is in choosing the routing threshold and ensuring the pre-flight message is honest about a limit that is now enforced in a different place — a subtle mismatch between the advertised limit and the enforced one ships as a raw 413 to a user who was told the file was fine.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeEndpoints.cs, UploadSessionManager and the client save path.</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Compose currently writes through a direct PUT and dies at the ~22 MB request-body ceiling; a legal
+    document with images hits that easily. `UploadSessionManager` throws at 4 MB (~:244-248), while
+    `SpeAdminGraphService` (~:2824) ALREADY implements the chunked path — `largeFileThreshold = 4 MB` then
+    `LargeFileUploadTask` with 5 MB chunks — and `ContainerItemEndpoints.cs:156` documents the automatic
+    routing ("direct PUT &lt; 4 MB, resumable upload session ≥ 4 MB").
+
+    The chunked upload exists. Compose is not using it. Route Compose to it, remove the body ceiling on the
+    save route, and make oversize an honest pre-flight message stating the real limit — never a raw 400/413.
+
+    Do NOT write a new upload implementation (root CLAUDE.md §11 — the existing one is the reuse target).
+  </prompt>
+
+  <role>SPAARKE backend + frontend developer. Expert in the Graph upload-session contract, the BFF request pipeline, and Kestrel/ASP.NET body-size limits. Follow ADR-007 and ADR-029.</role>
+
+  <goal>
+    A ≥4 MB first save succeeds. A ≥30 MB document either saves or is refused with a stated limit before the
+    bytes are sent. No save path produces a raw 400/413. Compose uses the existing chunked-upload routing,
+    not a new one.
+  </goal>
+
+  <context>
+    <background>
+      The owner explicitly rejected a 4 MB cap as "much too small a file" during design Q&amp;A — legal
+      documents with exhibits routinely exceed it. The infrastructure to handle this was already built for
+      the DMS path; Compose simply never routed to it. This is a reuse task wearing a limits task's clothes.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs (largeFileThreshold + LargeFileUploadTask, ~:2824)</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs (~:156 — the documented routing)</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §11">MUST reuse the existing chunked-upload routing. MUST NOT author a second upload implementation, a second threshold constant, or a Compose-specific `LargeFileUploadTask` wrapper.</constraint>
+    <constraint source="project">The advertised pre-flight limit and the enforced limit MUST be the same number, sourced from one place. Two constants is how "you're fine" becomes a 413.</constraint>
+    <constraint source="project">Oversize MUST be refused BEFORE the bytes are transferred, and MUST map to task 013's outcome enum (`refused-invalid`) with a message stating the limit.</constraint>
+    <constraint source="ADR-007">No Graph types above the SpeFileStore/UploadSessionManager boundary. Scope: the routing change.</constraint>
+    <constraint source="project">Task 011 sends `If-Match` on the content PUT. The chunked path MUST carry the same precondition — routing to chunked upload MUST NOT silently drop the concurrency guarantee.</constraint>
+    <constraint source="ADR-029">Report publish size (absolute + delta vs 44.96 MB). No new NuGet.</constraint>
+    <constraint source="ADR-038">Seam tests in `tests/integration/seam/**` covering a ≥4 MB and an oversize document.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>chunked upload, request body limits, Graph upload sessions</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, bff-extensions.md.</step>
+    <step order="1">Read `SpeAdminGraphService` ~:2824 and `ContainerItemEndpoints.cs:156` to learn the EXISTING routing contract — threshold, chunk size, and how the caller invokes it.</step>
+    <step order="2">Read `UploadSessionManager` ~:244-248 (the 4 MB throw) and its `If-Match` overload (~:382, :397-406). Determine how the chunked path can carry the precondition.</step>
+    <step order="3">Route the Compose write through the existing chunked path. Establish ONE limit constant and confirm the request-body limit on the Compose save route no longer caps below it.</step>
+    <step order="4">Add the client pre-flight: measure before sending; over the limit → refuse with the stated number, mapped to `refused-invalid`.</step>
+    <step order="5">Verify the If-Match precondition survives the routing change (coordinate with task 011 — if 011 has not landed, leave the seam and note it).</step>
+    <step order="6">Seam tests: a ≥4 MB document saves; an oversize document is refused pre-flight with the limit stated; NEITHER produces a raw 400/413.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the chunked upload path cannot carry `If-Match` (Graph's resumable session may apply preconditions differently from a direct PUT), stop — silently losing the concurrency guarantee for large documents is a correctness regression disguised as a size fix, and the owner must decide the trade.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A ≥4 MB first save succeeds through the EXISTING chunked-upload path.</criterion>
+    <criterion>A ≥30 MB document either saves or is refused pre-flight with the actual limit stated in the message.</criterion>
+    <criterion>The advertised limit and the enforced limit come from a single constant — verified by grep.</criterion>
+    <criterion>Oversize maps to `refused-invalid` on task 013's enum.</criterion>
+    <criterion>The `If-Match` precondition is carried on the chunked path (or the gap is escalated, not silently accepted).</criterion>
+    <criterion>NEGATIVE: no raw 400 or 413 is reachable on the Compose save route — asserted by test.</criterion>
+    <criterion>NEGATIVE: no new upload implementation, threshold constant, or Compose-specific upload wrapper was created.</criterion>
+    <criterion>NEGATIVE: a small (&lt;4 MB) document still saves via the direct path with no behavior change.</criterion>
+    <criterion>Seam tests cover ≥4 MB and oversize; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

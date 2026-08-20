@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>GATE DECISION — pass/miss against the corpus, plus the ADR-049 third-amendment draft</title>
+    <phase>3 Model Proof — THE GATE</phase>
+    <gate>blocked-on-030</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The decision that authorizes or blocks all of Phase 4. Drafts a binding ADR amendment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched, top of the project: this is the judgment the whole project is organized around. It must resist the strong pull toward "close enough" after a prototype that mostly works, and it drafts an amendment whose wording binds future releases. Both halves punish plausible-but-wrong reasoning that no test can catch.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single decision point; everything in Phase 4 waits on it.</parallel-reason>
+    <deps>030</deps>
+    <tags>architecture, compose, documentation</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the gate call, and draft the amendment that codifies it.
+
+    **The gate**: 100% near-tier / ≥95% overall preservation, with ZERO hard-fails, across the corpus — or the
+    thresholds task 023 recommended, if the owner accepted a revision. This is a pass/miss call, not a
+    negotiation. A miss is an owner escalation (root CLAUDE.md §6/§6.5), NOT a licence to improvise an
+    alternative architecture or to lower the bar retroactively.
+
+    **The amendment**: ADR-049 already carries two Path-B amendments that are each partly right and neither
+    correct as written — R4's I-4 ("untouched XML subtrees byte-identical") and R6's ("render-on-save
+    supersedes surgical byte-patch"). R8 files the third, which reconciles them: the save still renders from
+    the model (R6 holds) AND untouched content is preserved (I-4's intent holds), by base re-projection plus
+    block copy-through.
+
+    Draft it to carry the **seven standing invariants**:
+    1. Every save terminates in a defined outcome — never an undefined content refusal.
+    2. Untouched blocks are preserved.
+    3. The projection is the only coordinate system.
+    4. `paraId` is a hint in the *file*, authoritative within a *session*.
+    5. Concurrency = last-writer-wins with a warning, enforced by `If-Match`.
+    6. One edit-capture mechanism — keystroke or model, same anchor capture + rebasing.
+    7. Deterministic information available at capture time MUST be carried, not re-derived.
+
+    (1) and (2) are declared as a PAIR that no future amendment may trade away singly — that pairing is the
+    structural guard against a fourth swing of the pendulum.
+
+    Also decide, on the prototype's evidence, whether `ComposeShadowPatchEngine` is fully subsumed
+    (task 074 deletes 3,000 lines on this answer — it must be confirmed here, before deletion).
+  </prompt>
+
+  <role>SPAARKE architect. Authority to make the gate call and to draft an ADR amendment. Familiar with ADR-049's full history and the CLAUDE.md §6.5 ADR Conflict Resolution Protocol.</role>
+
+  <goal>
+    A written GATE DECISION (PASS or MISS) with the numbers, and — if PASS — an ADR-049 third-amendment draft
+    (concise + full) carrying the seven invariants and the paired-MUST rule, ready to merge with or before
+    task 045. Plus an explicit, evidence-backed determination on `ComposeShadowPatchEngine` subsumption.
+  </goal>
+
+  <context>
+    <background>
+      The corpus, not the argument, picks the architecture — that is the only thing that stops an R9. This
+      task is where that principle is either honored or quietly abandoned. The failure mode to guard against
+      is specific: a prototype that achieves 93% overall, everyone is tired, and "95 was always approximate"
+      becomes the reasoning. The threshold's whole function is to be decided BEFORE the number is known.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/adr-049-third-amendment-draft.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/control-measurement.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §6.5">A MISS MUST be escalated using the §6.5 output format (ADR in question, rule, conflict, proposed path, rationale, impact, alternative considered). MUST NOT be resolved by lowering the threshold or improvising an architecture.</constraint>
+    <constraint source="root CLAUDE.md §3">The ADR amendment is a `.claude/` write — sub-agents CANNOT write these paths. This task produces a DRAFT in `projects/`; the MAIN SESSION applies it to `.claude/adr/` in task 045.</constraint>
+    <constraint source="project">The amendment MUST declare invariants (1) and (2) as a PAIR that no future amendment may trade away singly. This wording is load-bearing — both prior amendments traded one for the other.</constraint>
+    <constraint source="project">The amendment MUST state invariant (7) as a general rule, not per-surface. It is the rule beneath three of this project's four root causes (R6's thin model, the AI edit contract, the demand for a fuzzy matcher) and exists so it stops being rediscovered.</constraint>
+    <constraint source="project">The `ComposeShadowPatchEngine` subsumption determination MUST cite prototype evidence, specifically including clean-apply for REOPENED AUTHORED documents. "Probably subsumed" is not sufficient to authorize deleting 3,000 lines.</constraint>
+    <constraint source="project">MUST NOT begin any Phase-4 implementation in this task. The gate decision is the deliverable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR amendment, architectural gates, ADR-049 history</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/</file>
+      <file>projects/spaarkeai-compose-r8/design.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-049, merge-prototype-results.md, control-measurement.md.</step>
+    <step order="1">State the thresholds in force (spec defaults, or task 023's owner-accepted revision) BEFORE reading the prototype numbers in this step.</step>
+    <step order="2">Compare the prototype results against those thresholds. Record PASS or MISS per criterion: near tier, overall, zero hard-fails.</step>
+    <step order="3">If MISS → produce the §6.5 escalation block and STOP. Do not draft the amendment; do not authorize Phase 4.</step>
+    <step order="4">If PASS → draft the ADR-049 third amendment (concise + full) with the seven invariants and the paired-MUST rule, in `projects/.../notes/`, NOT in `.claude/`.</step>
+    <step order="5">Determine `ComposeShadowPatchEngine` subsumption from prototype evidence, explicitly covering clean-apply for reopened authored documents. Record CONFIRMED or NOT-CONFIRMED as the authorization for task 074.</step>
+    <step order="6">Record which Phase-4 POMLs need amending in light of what the prototype learned (they were authored as provisional).</step>
+    <step order="7">State the Phase-4 authorization explicitly.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Threshold MISS on any criterion — near tier, overall, or zero-hard-fails. Escalate to the owner in §6.5 format. Do not improvise, do not lower the bar, do not authorize Phase 4.</trigger>
+    <trigger>If the prototype passes overall but fails on a specific construct family, that is not automatically a MISS — but the family must move to the residual loss list (task 045) or the capability-gate trigger list (task 043) EXPLICITLY, with the owner informed, rather than being absorbed into the aggregate.</trigger>
+    <trigger>If `ComposeShadowPatchEngine` subsumption cannot be confirmed, task 074 must NOT delete it — record NOT-CONFIRMED and surface the consequence for FR-D01 (one waiver survives).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/gate-decision.md</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/adr-049-third-amendment-draft.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The thresholds in force are stated BEFORE the results are evaluated against them.</criterion>
+    <criterion>A PASS or MISS is recorded per criterion: near tier, overall, zero hard-fails.</criterion>
+    <criterion>On MISS: a §6.5-format escalation block exists and Phase 4 is NOT authorized.</criterion>
+    <criterion>On PASS: an ADR-049 third-amendment draft exists carrying all seven invariants.</criterion>
+    <criterion>The draft declares invariants (1) and (2) as a pair no future amendment may trade away singly.</criterion>
+    <criterion>The draft states invariant (7) as a general rule, not per-surface.</criterion>
+    <criterion>A `ComposeShadowPatchEngine` subsumption determination is recorded as CONFIRMED or NOT-CONFIRMED, citing prototype evidence including reopened-authored-document clean-apply.</criterion>
+    <criterion>The Phase-4 POMLs requiring amendment are named.</criterion>
+    <criterion>Phase-4 authorization is stated explicitly.</criterion>
+    <criterion>NEGATIVE: the draft was written to `projects/.../notes/`, NOT to `.claude/adr/` (root §3 — main session applies it in task 045).</criterion>
+    <criterion>NEGATIVE: no threshold was revised in this task to accommodate a result.</criterion>
+    <criterion>NEGATIVE: no Phase-4 implementation was started.</criterion>
+  </acceptance-criteria>
+</task>

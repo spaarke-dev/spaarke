@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Merge prototype + measurement — stamp → re-project → per-block compare → clone unchanged; includes heavy-restructure (FR-G06) and N-cycle Word round-trip (FR-G07)</title>
+    <phase>3 Model Proof — THE GATE</phase>
+    <gate>blocked-on-023</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Prototypes the project's central architectural bet and produces the evidence the gate decision is made on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched, top of the project: this prototype decides whether R8's architecture is correct. A prototype that works on the happy path and quietly fails on duplicate paraIds or text boxes would pass the gate and ship R9 — which is the precise history this task exists to break. Every failure mode here is structural and silent.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Prototypes changes to the renderer and projection builder — the Compose spine.</parallel-reason>
+    <deps>023</deps>
+    <tags>bff-api, compose, testing, integration-test</tags>
+    <estimated-effort>12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the three-way merge END-TO-END as a prototype and measure it against the corpus. This is not the
+    production implementation (that is task 040) — it is the experiment that tells us whether task 040 should
+    exist in this shape at all.
+
+    **The mechanism**:
+    1. **Stamp** — run `ComposeBaselineParaIdStamper` on the baseline. It exists but currently runs only on
+       the op-log path (`ComposeService.cs` ~:1280), so on the render path most real imported documents have
+       no stamped baseline at all. Promote it.
+    2. **Re-project** — build a fresh server-side projection of the stamped baseline at save time. This is
+       "base" in the three-way merge. Never trust the client's copy; never compare raw text.
+    3. **Per-block compare** — posted model block vs re-projected base block.
+    4. **Clone unchanged** — identical → clone the whole `w:p` subtree from the baseline, with zero property
+       logic. Edited → render from the model with property inheritance. Failure → thin render + warning.
+
+    **Then measure**, including the two cases the corpus alone will not produce:
+    - **FR-G06 heavy restructure** — section reordering / large cut-paste must degrade GRACEFULLY (more blocks
+      rebuilt, more warnings) and never hard-fail.
+    - **FR-G07 N-cycle Word round trip** — Word ⇄ Compose N times must not degrade cumulatively. Word
+      regenerates paraIds on save, so this is the case where "paraId is not a durable file key" bites hardest.
+
+    Answer spec §5.3's open research questions with data, not argument.
+  </prompt>
+
+  <role>SPAARKE backend architect. Deep expertise in WordprocessingML, `DocumentFormat.OpenXml` DOM cloning, and three-way merge semantics. Follow ADR-049 and the seven R8 invariants in the project CLAUDE.md.</role>
+
+  <goal>
+    A working prototype plus `projects/spaarkeai-compose-r8/notes/merge-prototype-results.md`: preservation
+    numbers against the control at both comparison levels and both tiers, per-construct-family results,
+    heavy-restructure behavior, N-cycle drift measurement, and a clear statement of which cases the model
+    handles, which it degrades on, and which it cannot handle at all.
+  </goal>
+
+  <context>
+    <background>
+      This is the third swing of a pendulum: R4 surgical byte-patch → 422 treadmill; R6 render-on-save →
+      silent fidelity loss; R8 keeps R6's control flow and ADDS the base side. The prototype's job is to prove
+      the addition works before five tasks of production code are written against it.
+
+      `ComposeFormatChange.PreviousPropertiesXml` is the proven opaque-XML-carry pattern with an SDK parse
+      gate — generalize it rather than inventing a new carry. `ComposeDocumentRenderer.RenderIntoCarrier`
+      (~:399) with `body.RemoveAllChildren()` (~:449) is where the merge lands.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs (ComposeFormatChange.PreviousPropertiesXml ~:131)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (ResolveSaveBaselineAsync; stamper call site ~:1280)</file>
+      <file role="test">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049 / project invariant 3">The projection is the ONLY coordinate system. Nothing else independently resolves document positions. Scope: the whole prototype.</constraint>
+    <constraint source="project">MUST NOT walk `body.Descendants&lt;Paragraph&gt;()`. Descend direct `w:body` children; treat `w:txbxContent` / `mc:Choice` / `mc:Fallback` as OPAQUE — carried whole, never entered.</constraint>
+    <constraint source="project">MUST NOT treat `paraId` as a durable file key. Duplicates are spec-legal; Word regenerates ids on save. Pair by document order with paraId as corroboration; on duplicate detection, consume in document order and fall back rather than mis-pair.</constraint>
+    <constraint source="ADR-049 I-5">Exactly ONE body author. The merge lands inside `ComposeDocumentRenderer` — MUST NOT introduce a second component that writes body children.</constraint>
+    <constraint source="ADR-049">MUST NOT reintroduce save-time anchor reconciliation or any HTTP 422 content refusal. Failure to merge a block degrades to thin render + warning; it never refuses the save.</constraint>
+    <constraint source="spec NFR-02">NO new NuGet. Pure `DocumentFormat.OpenXml`. (Clippit/MIT would require an explicit owner decision — do not add it in the prototype.)</constraint>
+    <constraint source="project">"Unchanged" MUST be decided against a fresh server-side re-projection of the baseline — never raw text, never client trust. A text-equality shortcut invalidates the entire measurement.</constraint>
+    <constraint source="spec NFR-07">Measure the performance cost. The budget is no worse than one extra baseline projection + DOM clone per save.</constraint>
+    <constraint source="project">This is a PROTOTYPE. It may be rough, but it MUST be honest — do not special-case a corpus document to make a number look better. Any special-casing invalidates the gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>three-way merge, OOXML cloning, paraId semantics, fidelity measurement</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/design.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/control-measurement.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-contract.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, design.md, CLAUDE.md, ADR-049, control-measurement.md.</step>
+    <step order="1">Read `ComposeBaselineParaIdStamper` fully — its fill-gaps-only, fail-open, text-verified behavior is load-bearing and must be preserved when promoted to the render path.</step>
+    <step order="2">Read `RenderIntoCarrier` (~:399) and `body.RemoveAllChildren()` (~:449). Establish exactly where the merge inserts.</step>
+    <step order="3">Prototype: stamp baseline → re-project → per-block compare → clone unchanged whole / render edited with property inheritance / thin-render+warn on failure.</step>
+    <step order="4">Run the oracle. Compare against the control per construct family, both tiers, both comparison levels.</step>
+    <step order="5">FR-G06: construct a heavy-restructure case (section reorder + large cut-paste). Assert graceful degradation — more blocks rebuilt and warned, never a hard fail.</step>
+    <step order="6">FR-G07: run N Word ⇄ Compose cycles (N ≥ 3, state your N and why). Measure whether loss compounds. Note explicitly what happens when Word regenerates paraIds between cycles.</step>
+    <step order="7">Measure the performance delta per save against the NFR-07 budget.</step>
+    <step order="8">Answer spec §5.3's research questions with data. Write the results note, including cases the model CANNOT handle — those become the residual loss list (task 045) or capability-gate triggers (task 043).</step>
+  </steps>
+
+  <escalation>
+    <trigger>The prototype misses the gate threshold. This is an OWNER ESCALATION per root CLAUDE.md §6/§6.5 — do NOT improvise an alternative architecture, and do NOT loosen the threshold. Report what was achieved, what failed, and why, and let the owner decide.</trigger>
+    <trigger>If block pairing proves unreliable on the duplicate-paraId or multi-part-collision fixtures even with document-order consumption, that is a finding about the model's foundation, not an implementation detail — surface it before writing more prototype code.</trigger>
+    <trigger>If preserving a construct family requires a new package (e.g. Clippit's `WmlComparer`), stop — NFR-02 forbids it and the owner must decide.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (prototype — may be on a scratch branch or behind a flag; state which)</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The prototype implements all four stages: stamp, re-project, per-block compare, clone-unchanged / render-edited / thin-render-and-warn.</criterion>
+    <criterion>"Unchanged" is decided against a fresh server-side re-projection — not raw text, not client trust (verified by reading the comparison code).</criterion>
+    <criterion>Preservation is reported against the control, per construct family, at both tiers and both comparison levels.</criterion>
+    <criterion>The duplicate-paraId, interior-text-box and multi-part-collision fixtures (task 021) are each reported on individually.</criterion>
+    <criterion>FR-G06: a heavy-restructure case degrades gracefully — more blocks rebuilt + warned, zero hard-fails.</criterion>
+    <criterion>FR-G07: N-cycle Word round-trip drift is measured, N is stated with reasoning, and the paraId-regeneration behavior between cycles is described.</criterion>
+    <criterion>Performance delta per save is measured against the NFR-07 budget.</criterion>
+    <criterion>Cases the model CANNOT handle are listed explicitly, as input to tasks 043 and 045.</criterion>
+    <criterion>NEGATIVE: `body.Descendants&lt;Paragraph&gt;()` does not appear in the prototype (grep).</criterion>
+    <criterion>NEGATIVE: no second body author was introduced; the merge lands inside `ComposeDocumentRenderer`.</criterion>
+    <criterion>NEGATIVE: no HTTP 422 / content refusal was introduced; block-merge failure degrades to thin render + warning.</criterion>
+    <criterion>NEGATIVE: no new NuGet package was added.</criterion>
+    <criterion>NEGATIVE: no corpus document was special-cased to improve a number.</criterion>
+  </acceptance-criteria>
+</task>

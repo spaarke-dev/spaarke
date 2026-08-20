@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-G01/G02/G03 — The gate contract: preservation oracle + outcome-honesty assertion + two comparison levels with normalization</title>
+    <phase>2 Oracle &amp; Corpus</phase>
+    <gate>blocked-on-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Builds the measurement the entire project's architecture decision rests on. If the oracle is wrong, the Phase-3 gate is meaningless and R9 follows.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched, highest in the project alongside 030/031/040: an oracle that is too lenient passes a broken merge model and ships R9; an oracle that is too strict fails a correct one and re-opens a settled architecture. Both errors are silent — a green suite looks identical either way. Choosing what to normalize (rsid, proofErr, bookmark ids, numId remapping, attribute order, namespace prefixes) is exactly the judgment that decides which of those two failures we get.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the single fidelity harness file; tasks 021/022 add fixtures to the same corpus directory but not the same file.</parallel-reason>
+    <deps>001, 013</deps>
+    <tags>testing, bff-api, compose, integration-test</tags>
+    <estimated-effort>10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `ComposeFidelityGateHarnessTests` today asserts only that a save did not HARD-FAIL. Its own header states
+    that **byte-identity is not asserted on the save path**. That is why R6's silent fidelity loss shipped
+    through a green gate.
+
+    Upgrade the harness to a real contract, in ONE file-pass (all three requirements land in the same harness):
+
+    **FR-G01 Preservation oracle** — after a save that edits exactly one paragraph, every OTHER block must be
+    XML-equivalent to its original. Report a preservation percentage, split into a **near tier** (character
+    formatting, paragraph properties, indentation, tabs, footnote refs, fields) and overall.
+
+    **FR-G02 Outcome honesty** — every corpus save must terminate in a defined outcome (task 013's enum) and
+    the response must report exactly what persisted. No undefined content-refusal.
+
+    **FR-G03 Two comparison levels** — *lenient* ignores `paraId`/`textId` (detects content loss); *strict*
+    does not (detects identity drift). Both normalize `w:rsid*`, `w:proofErr`, bookmark ids, `numId`/
+    `abstractNumId` remapping, attribute order, and namespace prefixes.
+
+    Build the measurement BEFORE the fix, so task 023 can run it on current master and publish today's real
+    loss as the control.
+  </prompt>
+
+  <role>SPAARKE test architect. Expert in OOXML/WordprocessingML structural comparison, the Compose seam-test harness, and xUnit dynamic `[MemberData]`. Follow ADR-038 strictly.</role>
+
+  <goal>
+    A harness that, for every corpus document, saves with a single-paragraph edit and reports: preservation %
+    at near tier and overall, at both comparison levels, plus the terminal save outcome and whether the
+    response's claim matches what actually persisted. It runs green on current master while reporting real,
+    non-zero loss — that is the control, not a failure.
+  </goal>
+
+  <context>
+    <background>
+      The corpus, not the argument, picks the architecture — that is the only thing that stops an R9. This
+      harness IS that mechanism. Its credibility depends on being built before anyone knows what the merge
+      model will look like, which is why it precedes Phase 3 rather than accompanying it.
+
+      Normalization is where an oracle silently becomes wrong. `w:rsid*` and `w:proofErr` are Word bookkeeping
+      and must be ignored. `numId`/`abstractNumId` are remapped legitimately when numbering definitions merge,
+      so raw inequality there is not loss. Attribute order and namespace prefixes are serialization artifacts.
+      Everything else is signal until proven otherwise — default to treating a difference as loss.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-G08">MUST preserve the dynamic `[MemberData]` + `ComposeCorpusFixtureLocator` enumeration — new corpus documents land in the gate with ZERO code changes. Scope: the harness's fixture discovery.</constraint>
+    <constraint source="root CLAUDE.md §11">MUST extend the EXISTING harness, locator and corpus. MUST NOT create a second fidelity harness (the spec's §11 table records this explicitly as an extension).</constraint>
+    <constraint source="project">MUST NOT walk `body.Descendants&lt;Paragraph&gt;()` when enumerating blocks for comparison — descend direct `w:body` children and treat `w:txbxContent` / `mc:Choice` / `mc:Fallback` as opaque. Walking descendants interleaves text-box paragraphs into the body sequence and will produce false loss reports.</constraint>
+    <constraint source="project">MUST NOT treat `paraId` as a durable file key when pairing blocks between original and saved. Duplicates are spec-legal in `mc:AlternateContent`; pair by document order with paraId as a corroborating hint, and report duplicate-paraId documents distinctly rather than silently mis-pairing.</constraint>
+    <constraint source="project">Every normalization MUST be justified in a comment naming WHY the difference is not loss. An unjustified normalization is how an oracle becomes too lenient.</constraint>
+    <constraint source="spec FR-G05">`OpenXmlValidator` alone is explicitly INSUFFICIENT as a Word-repair check. Structure the harness so a repair check can be added (headless LibreOffice) — but that check itself is task 030's concern; do not block on it here.</constraint>
+    <constraint source="ADR-038">Lives in `tests/integration/seam/**` (KEEP path). MUST NOT use `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, or ctor-null tests.</constraint>
+    <constraint source="project">The harness MUST run green on current master. A red gate before the fix exists cannot serve as a control — it must MEASURE loss, not fail on it. Thresholds are asserted starting at task 030/031, not here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML structural comparison, fidelity harness, seam tests</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-038, ADR-049.</step>
+    <step order="1">Read the existing harness and locator end-to-end. Record exactly what it asserts today and what its header says it does NOT assert.</step>
+    <step order="2">Design the block-pairing strategy: direct `w:body` children, document order, paraId as corroboration only, duplicate-paraId documents reported distinctly.</step>
+    <step order="3">Implement the normalization layer. For each normalization, write the justification comment. Default: a difference is loss.</step>
+    <step order="4">Implement the two comparison levels over one comparison engine — lenient and strict differ ONLY in whether `paraId`/`textId` are normalized.</step>
+    <step order="5">Implement the near-tier classification (character formatting, paragraph properties, indentation, tabs, footnote refs, fields) and the overall percentage.</step>
+    <step order="6">Implement the outcome-honesty assertion against task 013's enum: every save terminates in a defined member, and the reported outcome matches what actually persisted.</step>
+    <step order="7">Run against the current corpus on master. Confirm it is GREEN (measuring, not asserting thresholds) and that the numbers are plausible — a 100% preservation reading on master would mean the oracle is not measuring anything.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the oracle reports ~100% preservation on current master, STOP. R6's silent fidelity loss is verified; a reading of 100% means the comparison is normalizing away real signal. Do not proceed to task 023 with an oracle that cannot see the known defect.</trigger>
+    <trigger>If a normalization cannot be justified as "not loss" but omitting it makes every document fail, surface it — that is a finding about the write path, not a reason to loosen the oracle.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/gate-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The harness reports, per corpus document: near-tier preservation %, overall preservation %, at BOTH comparison levels.</criterion>
+    <criterion>Lenient and strict differ ONLY in `paraId`/`textId` normalization — verified by reading one shared comparison engine.</criterion>
+    <criterion>`w:rsid*`, `w:proofErr`, bookmark ids, `numId`/`abstractNumId` remapping, attribute order and namespace prefixes are normalized, each with a written justification.</criterion>
+    <criterion>Every corpus save is asserted to terminate in a defined member of task 013's enum, and the reported outcome is checked against what actually persisted.</criterion>
+    <criterion>Block pairing descends direct `w:body` children — `body.Descendants&lt;Paragraph&gt;()` does not appear in the comparison path (verified by grep).</criterion>
+    <criterion>Documents with duplicate paraIds are reported distinctly rather than silently mis-paired.</criterion>
+    <criterion>The dynamic `[MemberData]` + `ComposeCorpusFixtureLocator` enumeration is preserved — a new .docx dropped into the corpus is picked up with zero code changes (demonstrated).</criterion>
+    <criterion>The harness runs GREEN on current master while reporting NON-100% preservation — the control is real.</criterion>
+    <criterion>NEGATIVE: no second fidelity harness, locator, or corpus directory was created.</criterion>
+    <criterion>NEGATIVE: no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null test was added (ADR-038).</criterion>
+    <criterion>The gate-contract note documents the normalization list with justifications and the near-tier definition.</criterion>
+  </acceptance-criteria>
+</task>

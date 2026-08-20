@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-G04 (part 2) — Corpus: near-tier documents (character formatting · court-filing spacing · footnotes · REF cross-refs · content controls)</title>
+    <phase>2 Oracle &amp; Corpus</phase>
+    <gate>blocked-on-001</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Authors/curates test fixtures; no product source modified.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical with a clear oracle: each fixture either contains the named construct or it does not, verifiable by inspecting document.xml. The near-tier definition itself is settled in task 020's gate contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds new fixture files; touches no shared source. Runs alongside task 021.</parallel-reason>
+    <deps>001</deps>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    The gate's headline threshold is **100% preservation at the near tier** (FR-G01). The near tier is defined
+    in task 020 as: character formatting, paragraph properties, indentation, tabs, footnote references, and
+    fields. A 100% bar over a corpus that does not exercise those constructs is a bar over nothing.
+
+    Extend the corpus with documents that actually contain them, drawn from real legal drafting:
+
+    - **Character formatting** — mixed bold/italic/underline/small-caps/superscript within paragraphs, and an
+      edit landing INSIDE a formatted run (the FR-A04 property-inheritance case).
+    - **Court-filing spacing** — double spacing, precise indents, hanging indents, line-number-adjacent layout.
+    - **Footnotes** — footnote references in body paragraphs whose targets live in `footnotes.xml`.
+    - **`REF` cross-references** — `w:fldSimple` / `w:fldChar` field constructs with cached results.
+    - **Content controls** — `w:sdt` blocks and inline SDT runs.
+
+    Prefer owner-supplied real documents where cleared (Corteva NDA is cleared per spec §Dependencies);
+    otherwise author representative synthetics. Either way, no confidential content lands in the repo.
+  </prompt>
+
+  <role>SPAARKE test engineer with legal-document domain familiarity. Comfortable with WordprocessingML formatting, field, footnote and SDT constructs.</role>
+
+  <goal>
+    Corpus fixtures covering all five near-tier construct families, each documented in `corpus-manifest.md`,
+    each picked up by the gate with zero code changes, and each opening in Word without repair.
+  </goal>
+
+  <context>
+    <background>
+      The three synthetic fixtures in task 021 test whether the merge model SURVIVES pathological structure.
+      These test whether it PRESERVES ordinary legal formatting — which is what the owner actually experiences
+      as "it destroyed my document". R7's UAT reports named character formatting and spacing specifically.
+    </background>
+    <relevant-files>
+      <file role="output">tests/fixtures/compose-corpus/</file>
+      <file role="primary-edit">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="tests/fixtures/compose-corpus/corpus-manifest.md">Fixtures MUST be committed through Git-LFS. MUST NOT commit raw binaries outside LFS.</constraint>
+    <constraint source="project">MUST NOT commit confidential or client-identifying content. Real documents must be sanitized (names, matter numbers, addresses) before landing — sanitization MUST NOT remove the formatting constructs being tested.</constraint>
+    <constraint source="project">Each fixture MUST open without repair in Word (or LibreOffice as the CI proxy).</constraint>
+    <constraint source="spec FR-G08">MUST NOT modify the harness or locator — dynamic enumeration means dropping the file in is sufficient.</constraint>
+    <constraint source="project">At least one fixture MUST place an edit target INSIDE a formatted run, so FR-A04 (property inheritance for edited blocks) is actually exercised rather than assumed.</constraint>
+    <constraint source="project">Fields MUST include cached results (`w:fldChar` separate/end with result runs), not just the instruction text — a field without a cached result does not test result preservation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>legal document formatting, footnotes, fields, SDT</topic>
+    <files>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor STANDARD; load spec.md + CLAUDE.md.</step>
+    <step order="1">Read `corpus-manifest.md` conventions and inventory what the corpus ALREADY covers — do not duplicate existing coverage.</step>
+    <step order="2">For each of the five families, either curate an owner-supplied document (sanitize) or author a representative synthetic.</step>
+    <step order="3">Ensure at least one document has a paragraph where an edit would land inside a formatted run.</step>
+    <step order="4">Ensure fields carry cached results.</step>
+    <step order="5">Verify each opens without repair; unzip and confirm the constructs are present.</step>
+    <step order="6">Document each in `corpus-manifest.md`, including which near-tier family it covers.</step>
+    <step order="7">Confirm the gate enumerates them with no code change, and note the near-tier coverage map in the manifest.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a near-tier family cannot be covered without confidential content and no synthetic is representative enough to be meaningful, surface it — a gap in near-tier coverage weakens the 100% threshold and the owner should know which family is unmeasured.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="fixture">tests/fixtures/compose-corpus/</output>
+    <output type="doc">tests/fixtures/compose-corpus/corpus-manifest.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All five near-tier families (character formatting, court spacing, footnotes, REF fields, content controls) are covered by at least one fixture each.</criterion>
+    <criterion>At least one fixture places a plausible edit target INSIDE a formatted run.</criterion>
+    <criterion>Field fixtures include cached results, not just instruction text — verified by reading document.xml.</criterion>
+    <criterion>Each fixture opens without repair, evidenced.</criterion>
+    <criterion>`corpus-manifest.md` documents each fixture and maps it to its near-tier family.</criterion>
+    <criterion>All fixtures committed via Git-LFS.</criterion>
+    <criterion>The gate enumerates them with ZERO code changes (demonstrated).</criterion>
+    <criterion>NEGATIVE: no confidential or client-identifying content is present; sanitization did not remove the constructs under test.</criterion>
+    <criterion>NEGATIVE: no harness or locator code was modified.</criterion>
+    <criterion>NEGATIVE: no duplication of coverage the corpus already had.</criterion>
+  </acceptance-criteria>
+</task>

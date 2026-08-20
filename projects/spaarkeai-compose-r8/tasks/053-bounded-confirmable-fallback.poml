@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C06/C07 — Bounded confirmable fallback for replayed/legacy edits; prove "wording differs slightly" is unreachable; no UAT-21 regression</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>blocked-on-052</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Reintroduces tolerant matching in bounded form — the exact mechanism just retired. Must not become a back door.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this task adds back a limited version of what task 052 deleted, and the failure mode is that the bound quietly does not hold — an auto-apply path survives, or the fallback becomes the default for a source that should have an anchor. Proving a STRING IS UNREACHABLE is also a reasoning task, not a grep: the string can be absent from the AI flow and still reachable via a path nobody traced.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same client edit path as 051/052.</parallel-reason>
+    <deps>052</deps>
+    <tags>bff-api, frontend, compose, ai, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Two closing requirements for Track C — the owner's bar is **"MUST be completely addressed"**, i.e.
+    elimination, not reduction.
+
+    **FR-C06 — Bounded confirmable fallback.** Some edits legitimately arrive without a live anchor: replayed
+    edits from a prior session, legacy pending redlines created before this change. Tolerant matching survives
+    for those ONLY as a bounded fallback: low confidence produces a **PROPOSED placement the user confirms**.
+    Never auto-apply. Never for a source that has a real anchor. And no regression versus UAT-21.
+
+    **FR-C07 — "Wording differs slightly" is eliminated.** The string must not exist as a reachable state in
+    the AI edit flow. Proving this is not a grep for the string — it requires tracing every path that could
+    render it and showing each is either deleted or unreachable. Where the message DOES still belong
+    (return-from-Word re-anchor via `AnnotationReanchorService`) it must be SPECIFIC: "this document was
+    edited in Word — here is what re-attached", not the old vague copy.
+
+    The risk this task carries is being the back door for what task 052 just closed. Bound it explicitly.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose redline flow, confidence-scored matching, and the R7 UAT history. Follow ADR-049 I-7, ADR-041 and ADR-050.</role>
+
+  <goal>
+    Replayed/legacy edits get a confirmable proposed placement and nothing else. No AI-edit path auto-applies
+    a tolerant match. "Wording differs slightly" is unreachable in the AI flow; the return-from-Word message
+    is specific. UAT-21 does not regress.
+  </goal>
+
+  <context>
+    <background>
+      The owner's directive: "we NEVER should get the 'wording differs slightly' — this doesn't make any sense
+      or any possibility if we are controlling the document." That is correct for every anchored source, which
+      is why 051 supplied anchors for all three before 052 deleted the search. What remains is genuinely
+      anchorless input, and for that a user-confirmed proposal is honest where a silent guess was not.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file role="keep">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r7/notes/uat-issues.md (UAT-21)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-C06">The fallback MUST be bounded to replayed/legacy edits with NO live anchor. MUST NOT be reachable for any source task 051 anchored. Enforce this structurally (the fallback cannot be called with an anchored edit), not by convention.</constraint>
+    <constraint source="spec FR-C06">MUST NEVER auto-apply. Low confidence produces a PROPOSED placement requiring explicit user confirmation.</constraint>
+    <constraint source="ADR-049 I-7">This fallback is a PROPOSAL mechanism, not a placement mechanism. It must not become the way edits are located.</constraint>
+    <constraint source="ADR-050 / ADR-021">The confirmation uses `SprkModal`/`ConfirmModal` with Fluent v9 semantic tokens. No bespoke chrome.</constraint>
+    <constraint source="task 050">If the assessment made confirmations here ADR-041 Gates, honor that. Cite it.</constraint>
+    <constraint source="spec FR-C07">The unreachability proof MUST be a traced argument over the rendering paths, not just a string grep. State each path and why it is deleted or unreachable.</constraint>
+    <constraint source="project">MUST NOT modify `AnnotationReanchorService`'s BEHAVIOR — only the message it surfaces, which must become specific about the return-from-Word case.</constraint>
+    <constraint source="project">MUST NOT regress UAT-21. Read the UAT-21 case and include it as a test.</constraint>
+    <constraint source="ADR-038">Tests for: the bounded fallback proposes and never auto-applies; an anchored edit cannot reach the fallback; UAT-21 does not regress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bounded fallback, confirmable placement, UAT history</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-policy.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, UAT-21, the task-050 assessment.</step>
+    <step order="1">Enumerate the genuinely anchorless sources that remain after 051/052. If the list is empty, say so — the fallback may not be needed at all, which is a better outcome than building one.</step>
+    <step order="2">Implement the bounded fallback so it is STRUCTURALLY unreachable for anchored edits (e.g. it accepts only a type that anchored edits cannot be).</step>
+    <step order="3">Make low confidence produce a proposed placement requiring explicit confirmation via `ConfirmModal`. No auto-apply path exists.</step>
+    <step order="4">Trace every path that could render "wording differs slightly". For each: deleted, or unreachable-and-why. Write the trace.</step>
+    <step order="5">Rewrite the return-from-Word message to be specific about what re-attached.</step>
+    <step order="6">Tests: fallback proposes only; anchored edit cannot reach the fallback; UAT-21 case passes; the eliminated string is unreachable.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 1 finds NO genuinely anchorless source, do not build the fallback — report it. An unused tolerant matcher is a back door waiting for a future caller, and FR-C06 says "survives only as", not "must exist".</trigger>
+    <trigger>If a path renders "wording differs slightly" that cannot be deleted or proven unreachable, FR-C07 is not met — surface it rather than declaring elimination.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The remaining genuinely anchorless sources are enumerated; if none, the fallback was NOT built and that is recorded.</criterion>
+    <criterion>The fallback is structurally unreachable for anchored edits — enforced by type/shape, not by convention (verified by reading).</criterion>
+    <criterion>Low confidence produces a PROPOSED placement requiring explicit confirmation; no auto-apply path exists (asserted by test).</criterion>
+    <criterion>A written trace shows every path that could render "wording differs slightly" is deleted or unreachable, path by path.</criterion>
+    <criterion>The return-from-Word message is specific about what re-attached.</criterion>
+    <criterion>UAT-21 does not regress — asserted by a test derived from the UAT case.</criterion>
+    <criterion>NEGATIVE: `AnnotationReanchorService` behavior is unchanged (message only).</criterion>
+    <criterion>NEGATIVE: the fallback is not reachable as a placement mechanism for any anchored source.</criterion>
+    <criterion>NEGATIVE: no bespoke modal chrome; `SprkModal`/`ConfirmModal` with semantic tokens only.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

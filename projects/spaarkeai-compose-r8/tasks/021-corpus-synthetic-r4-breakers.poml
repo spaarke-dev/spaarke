@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-G04 (part 1) — Corpus: the three synthetic constructs that broke R4 (mc:AlternateContent duplicate paraIds · interior text boxes · multi-part paraId collisions)</title>
+    <phase>2 Oracle &amp; Corpus</phase>
+    <gate>blocked-on-001</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Authors test fixtures; no product source modified. Correctness is verifiable by inspecting the generated OOXML.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical with a clear oracle: each fixture either contains the named construct or it does not, and that is directly inspectable by unzipping the .docx and reading document.xml. The judgment about WHY these three constructs matter is already settled in the spec.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds new fixture files under tests/fixtures/compose-corpus/; touches no shared source. Runs alongside task 022.</parallel-reason>
+    <deps>001</deps>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Three OOXML constructs killed R4's surgical byte-patch model, and no corpus document currently contains
+    them. Until they are in the corpus, the Phase-3 gate cannot prove the merge model survives the exact
+    cases that ended the previous architecture.
+
+    Author them as **synthetic** fixtures (cheap, deterministic, no confidentiality concerns):
+
+    1. **`mc:AlternateContent` with duplicate `w14:paraId`** — [MS-DOCX] permits the same paraId in the
+       `mc:Choice` and `mc:Fallback` branches. This is how Word writes every text box. Any code treating
+       paraId as a unique key mis-pairs here.
+    2. **Interior text boxes** (`w:txbxContent`) — their paragraphs are descendants of the body but NOT body
+       children. Code walking `body.Descendants&lt;Paragraph&gt;()` interleaves them into the body sequence.
+    3. **Multi-part paraId collisions** — paraId uniqueness is *part*-scoped, so the same id can legitimately
+       appear in `document.xml`, `footnotes.xml` and `header1.xml`.
+
+    Each fixture must be minimal and single-purpose: one construct per document, so a gate failure names its
+    cause without further investigation.
+  </prompt>
+
+  <role>SPAARKE test engineer. Familiar with WordprocessingML part structure, `DocumentFormat.OpenXml`, and the Compose corpus conventions.</role>
+
+  <goal>
+    Three synthetic .docx fixtures in the corpus, each isolating one construct, each opening cleanly in Word,
+    each documented in `corpus-manifest.md` with what it tests and why it matters. The gate picks them up with
+    zero code changes.
+  </goal>
+
+  <context>
+    <background>
+      These three facts are spec-cited in the project's CLAUDE.md as "do not re-derive": paraId is not a
+      durable file key, and `body.Descendants&lt;Paragraph&gt;()` interleaves text-box paragraphs. The fixtures
+      are how those facts become enforceable rather than remembered.
+    </background>
+    <relevant-files>
+      <file role="output">tests/fixtures/compose-corpus/</file>
+      <file role="primary-edit">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="tests/fixtures/compose-corpus/corpus-manifest.md">Fixtures MUST be committed through Git-LFS per the existing `*.docx filter=lfs` rule. MUST NOT commit raw binaries outside LFS.</constraint>
+    <constraint source="project">Each fixture isolates exactly ONE construct. A fixture combining two constructs cannot attribute a gate failure.</constraint>
+    <constraint source="project">Each fixture MUST open without repair in Word (or LibreOffice as the CI proxy). A malformed fixture produces false gate failures and is worse than no fixture.</constraint>
+    <constraint source="spec FR-G08">MUST NOT modify the harness or locator to pick these up — dynamic enumeration means dropping the file in is sufficient. If a code change IS required, that is a defect in task 020's work, not a change to make here.</constraint>
+    <constraint source="project">Fixture 1's duplicate paraId MUST be genuinely duplicated across `mc:Choice` and `mc:Fallback` as Word writes it — not two arbitrary paragraphs sharing an id, which is a different (and invalid) document.</constraint>
+    <constraint source="project">MUST NOT include confidential or client content. These are synthetic by design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML fixtures, mc:AlternateContent, text boxes, part-scoped ids</topic>
+    <files>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor STANDARD; load spec.md + CLAUDE.md.</step>
+    <step order="1">Read `corpus-manifest.md` for the existing naming, LFS and documentation conventions. Follow them.</step>
+    <step order="2">Author fixture 1: a document with a text box written as `mc:AlternateContent`, with the SAME `w14:paraId` in the Choice and Fallback branches, as Word emits.</step>
+    <step order="3">Author fixture 2: body paragraphs plus an interior `w:txbxContent` containing its own paragraphs, arranged so that a `Descendants&lt;Paragraph&gt;()` walk yields a DIFFERENT order than a direct-children walk (the fixture must be able to catch the bug).</step>
+    <step order="4">Author fixture 3: the same paraId value present in `document.xml` and in at least one other part (`footnotes.xml` and/or `header1.xml`).</step>
+    <step order="5">Verify each opens without repair; unzip and confirm the construct is present as intended.</step>
+    <step order="6">Document each in `corpus-manifest.md`: what it contains, which failure it would catch, why it matters.</step>
+    <step order="7">Confirm the gate enumerates all three with no code change.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the harness does NOT pick up a newly dropped fixture without code changes, that violates FR-G08 and is a defect in task 020 — report it rather than patching the locator here.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="fixture">tests/fixtures/compose-corpus/</output>
+    <output type="doc">tests/fixtures/compose-corpus/corpus-manifest.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Three fixtures exist, one per construct, each isolating exactly one construct.</criterion>
+    <criterion>Fixture 1 contains a genuinely duplicated `w14:paraId` across `mc:Choice` and `mc:Fallback` — verified by unzipping and reading document.xml.</criterion>
+    <criterion>Fixture 2 is constructed so a `Descendants&lt;Paragraph&gt;()` walk yields a different order than a direct-children walk — i.e. it can actually catch the bug.</criterion>
+    <criterion>Fixture 3 has the same paraId in `document.xml` and at least one other part.</criterion>
+    <criterion>Each fixture opens without repair (Word or LibreOffice), evidenced.</criterion>
+    <criterion>Each is documented in `corpus-manifest.md` with contents, the failure it catches, and why it matters.</criterion>
+    <criterion>All three are committed via Git-LFS.</criterion>
+    <criterion>The gate enumerates all three with ZERO code changes (demonstrated).</criterion>
+    <criterion>NEGATIVE: no harness or locator code was modified.</criterion>
+    <criterion>NEGATIVE: no confidential or client content is present.</criterion>
+  </acceptance-criteria>
+</task>

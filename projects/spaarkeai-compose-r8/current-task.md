@@ -12,7 +12,7 @@
 | Field | Value |
 |---|---|
 | **Task** | **none** — project INITIALIZED, execution owner-gated |
-| **Status** | Planning artifacts + task files generated. No implementation started. |
+| **Status** | Planning artifacts + **all 36 task files** generated (2026-08-20). No implementation started. |
 | **Next Action** | Owner starts **Phase 1 (Track S)** — the P0 save-reliability batch that ships alone. Say "work on task 010". |
 | **Blocked on** | Phase 2+ gated on **PR #690** (Git-LFS corpus fixtures in CI) landing — owner decision 2026-08-19. Track S is NOT blocked. |
 
@@ -20,18 +20,18 @@
 
 ## Project shape
 
-Six tracks, sequenced:
+Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; all 36 POMLs written).
 
 | Phase | Track | Status |
 |---|---|---|
-| 0 (001–003) | Coordination + PR #690 dependency | 🔲 |
-| 1 (010–022) | **Track S — save reliability (P0, ships alone)** | 🔲 |
-| 2 (030–035) | Oracle + corpus (measures today's loss as the control) | 🔲 |
-| 3 (040–043) | **Model proof — THE GATE** | 🔲 |
-| 4 (050–060) | Track A — faithful save | 🔲 |
-| 5 (065–072) | Track C — AI edit placement | 🔲 |
-| 6 (075–080) | Track B — durable session files | 🔲 |
-| 7 (082–087) | Track D — god-class removal | 🔲 |
+| 0 (001–002) | Coordination + PR #690 dependency | 🔲 |
+| 1 (010–017) | **Track S — save reliability (P0, ships alone)** | 🔲 |
+| 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
+| 3 (030–031) | **Model proof — THE GATE** | 🔲 |
+| 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
+| 5 (050–053) | Track C — AI edit placement | 🔲 |
+| 6 (060–063) | Track B — durable session files *(only parallel-safe track)* | 🔲 |
+| 7 (070–074) | Track D — god-class removal | 🔲 |
 | 8 (090) | Wrap-up | 🔲 |
 
 **Phase 4 does not start until Phase 3's gate passes.** A miss is an owner escalation, not an improvisation.

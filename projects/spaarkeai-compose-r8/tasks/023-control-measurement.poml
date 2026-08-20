@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Control measurement — run the oracle on current master and publish today's real loss numbers</title>
+    <phase>2 Oracle &amp; Corpus</phase>
+    <gate>blocked-on-020</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Runs an existing harness and publishes results; no product source modified. But the interpretation gates Phase 3.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched despite being "just run it": the deliverable is an INTERPRETATION — which losses are real, which are oracle artifacts, and whether the thresholds the spec assumed (100% near / ≥95% overall) are the right bar now that a number exists. A plausible-but-wrong reading here sets the gate at the wrong level and either passes a broken model or blocks a good one.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 020, 021 and 022 all being present; its output is the input to Phase 3.</parallel-reason>
+    <deps>020, 021, 022</deps>
+    <tags>testing, compose, integration-test</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the task-020 oracle over the full extended corpus on **current master** — before any Track A change —
+    and publish the result as the CONTROL.
+
+    This is the number the whole project argues from. R6's render-on-save loses formatting silently; nobody has
+    ever measured how much. Two outputs matter equally:
+
+    1. **The numbers** — near-tier and overall preservation, at both comparison levels, per document and in
+       aggregate, plus the terminal outcome distribution.
+    2. **The interpretation** — which losses are genuine (the merge model must fix them) versus oracle
+       artifacts (the oracle must stop reporting them). Every reported loss must be classified into one of
+       those two buckets. An unclassified loss is not evidence.
+
+    Then answer the open spec question: with a real control in hand, are 100% near-tier / ≥95% overall the
+    right thresholds? The spec explicitly flags these as assumed pending this measurement.
+  </prompt>
+
+  <role>SPAARKE test architect. Expert in the Compose fidelity harness and OOXML structural diffs. Able to distinguish a genuine preservation failure from a comparison artifact by reading the diff.</role>
+
+  <goal>
+    A published control measurement at `projects/spaarkeai-compose-r8/notes/control-measurement.md`: the
+    numbers, a per-loss classification (genuine vs artifact), a threshold recommendation with reasoning, and
+    an explicit statement of what the merge model must achieve to clear the gate.
+  </goal>
+
+  <context>
+    <background>
+      The control exists to make the Phase-3 gate falsifiable. Without it, "the merge model preserves 96%"
+      means nothing — it could be a large improvement or a regression. It also protects the oracle: if the
+      control shows losses that turn out to be artifacts, they are fixed HERE, while nothing depends on them,
+      rather than during the gate when the pressure is to loosen the bar.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/control-measurement.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/gate-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST run against current master's write path with NO Track A change applied. A control taken on partially-fixed code is not a control.</constraint>
+    <constraint source="project">Every reported loss MUST be classified as GENUINE or ARTIFACT, with the evidence (the actual XML diff) cited. An unclassified loss may not be counted in either direction.</constraint>
+    <constraint source="project">Oracle artifacts found here MUST be fixed in task 020's harness and the control RE-RUN — not annotated as known-noise. Noise in the oracle becomes noise in the gate.</constraint>
+    <constraint source="project">MUST NOT modify any `src/` file. If the measurement reveals a product defect, record it as a finding for the relevant task; do not fix it here.</constraint>
+    <constraint source="project">The threshold recommendation MUST be reasoned from the data, and MUST state what it would mean to MISS it — the spec's escalation rule (a gate miss goes to the owner) only works if the miss condition is defined in advance.</constraint>
+    <constraint source="ADR-029">If a build is required, report publish size per the standard rule.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fidelity measurement, control experiments, OOXML diffs</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r8/notes/gate-contract.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor STANDARD; load spec.md, CLAUDE.md, gate-contract.md.</step>
+    <step order="1">Confirm the tree has no Track A change applied. Record the commit SHA the control is taken at.</step>
+    <step order="2">Run the oracle over the full extended corpus (task 021 + 022 fixtures included). Capture per-document and aggregate numbers at both comparison levels.</step>
+    <step order="3">For each reported loss, read the actual XML diff and classify GENUINE or ARTIFACT with evidence.</step>
+    <step order="4">Fix any ARTIFACT in task 020's harness; re-run and record the corrected control. State clearly which numbers are pre- and post-correction.</step>
+    <step order="5">Record the terminal outcome distribution — how many corpus saves reach each member of task 013's enum on master today.</step>
+    <step order="6">Recommend thresholds with reasoning, and define the miss condition explicitly.</step>
+    <step order="7">State what the merge model must achieve, per construct family, to clear the gate.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the control shows near-100% preservation on master, the oracle is not measuring the known R6 loss — STOP and return to task 020. Proceeding would set the gate against an oracle that cannot see the defect the project exists to fix.</trigger>
+    <trigger>If the data suggests the spec's assumed thresholds are unreachable for a legitimate reason (e.g. a construct family that no merge model can preserve), that is an owner decision about scope, not a threshold to quietly lower.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/control-measurement.md</output>
+    <output type="test">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs (only if artifact corrections are required)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The control records the exact commit SHA and confirms no Track A change was applied.</criterion>
+    <criterion>Per-document and aggregate preservation numbers are published at BOTH comparison levels, near tier and overall.</criterion>
+    <criterion>Every reported loss is classified GENUINE or ARTIFACT with the XML diff cited as evidence.</criterion>
+    <criterion>Any ARTIFACT was fixed in the harness and the control re-run; pre- and post-correction numbers are both stated.</criterion>
+    <criterion>The terminal outcome distribution across the corpus is recorded against task 013's enum.</criterion>
+    <criterion>A threshold recommendation is given with reasoning from the data, and the MISS condition is defined explicitly.</criterion>
+    <criterion>What the merge model must achieve per construct family is stated.</criterion>
+    <criterion>NEGATIVE: no `src/` file was modified; any product defect found is recorded as a finding against its owning task.</criterion>
+    <criterion>NEGATIVE: the control does not report ~100% preservation (which would indicate a blind oracle).</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Track S ship gate — anti-clobber deploy (BFF + sprk_spaarkeai together) + owner UAT</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment mechanics + UAT coordination; no new source logic. The code was reviewed in tasks 010–016.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical with a clear oracle: the deploy either lands both artifacts from the same tree or it does not, and UAT results are observed, not judged. The judgment in this phase was spent in 010–016.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys shared environments; must not run concurrently with another deploy.</parallel-reason>
+    <deps>010, 011, 012, 013, 014, 015, 016</deps>
+    <tags>devops, deployment, compose, testing</tags>
+    <estimated-effort>3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Track S ships ALONE — its own PR and its own dev deploy, ahead of everything else (owner decision
+    2026-08-19). This is that gate.
+
+    Deploy the BFF and `sprk_spaarkeai` TOGETHER from the same tree (NFR-05 — deploying one without the other
+    is the anti-clobber failure this rule exists for), then run owner UAT against the ten Track S failure
+    modes. The purpose of shipping alone is to learn whether "can't save" is actually closed BEFORE the
+    fidelity architecture work begins — so the UAT result must be recorded as evidence, not as a vibe.
+  </prompt>
+
+  <role>SPAARKE DevOps engineer. Familiar with the `bff-deploy` and `code-page-deploy` skills and the anti-clobber pairing rule.</role>
+
+  <goal>
+    Track S is deployed to dev as a matched pair, owner UAT is executed against a written checklist covering
+    all ten failure modes, and the result is recorded with a GO/NO-GO for starting Phase 2.
+  </goal>
+
+  <context>
+    <background>
+      Every prior Compose release shipped fidelity work and save work together, so a failed UAT could never
+      attribute the failure. Shipping Track S alone is the experiment that separates them. Its value depends
+      entirely on the UAT being run against a checklist derived from the ten failure modes rather than a
+      general "does it save?" — a general pass would tell us nothing we did not already believe in R7.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/track-s-uat.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/spec.md (Track S FR-S01…S10)</file>
+      <file role="canonical-reference">docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-05">MUST deploy the BFF and `sprk_spaarkeai` together, from the same tree, in the same window. MUST NOT deploy one and defer the other.</constraint>
+    <constraint source="spec NFR-05">MUST NOT build from a net8 tree. Confirm the TFM before building.</constraint>
+    <constraint source="project">MUST run `/conflict-check` before the PR (root CLAUDE.md — every BFF PR).</constraint>
+    <constraint source="project">The UAT checklist MUST enumerate all ten Track S failure modes individually. A single "save works" result is NOT acceptable evidence.</constraint>
+    <constraint source="project">MUST invoke the `bff-deploy` and `code-page-deploy` skills rather than hand-rolling the deploy steps.</constraint>
+    <constraint source="root CLAUDE.md §10">Report publish size (absolute + delta vs 44.96 MB) for the deployed artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment, anti-clobber pairing, UAT</topic>
+    <files>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor STANDARD; load spec.md + CLAUDE.md.</step>
+    <step order="1">Run `/conflict-check` on the Compose spine. Resolve or record any collision.</step>
+    <step order="2">Confirm the TFM is net10; build both artifacts from the same tree.</step>
+    <step order="3">Open the Track S PR. Verify code-review + adr-check were run in tasks 010–016 and cite them.</step>
+    <step order="4">Deploy BFF and `sprk_spaarkeai` together via `bff-deploy` + `code-page-deploy`.</step>
+    <step order="5">Write the UAT checklist: one row per FR-S01…S10, each with the exact steps to reproduce and the expected user-visible outcome.</step>
+    <step order="6">Run the UAT with the owner. Record PASS/FAIL per row with observed behavior, not just a mark.</step>
+    <step order="7">Record a GO/NO-GO for Phase 2 and file any FAIL as a follow-up task against the owning Track S task.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any Track S UAT row FAILS — Phase 2 does not start on a broken save path. Report the failure to the owner with the observed behavior and the task that owns it; do not proceed to Phase 2 on a partial pass.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/track-s-uat.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>BFF and `sprk_spaarkeai` were deployed together from the same net10 tree, in one window — evidenced by build/deploy output.</criterion>
+    <criterion>`/conflict-check` was run before the PR and its result recorded.</criterion>
+    <criterion>The UAT checklist has one row per FR-S01…S10 with reproduction steps and expected outcome.</criterion>
+    <criterion>Each row records PASS/FAIL with the OBSERVED behavior, not just a mark.</criterion>
+    <criterion>A GO/NO-GO for Phase 2 is stated explicitly.</criterion>
+    <criterion>Publish size reported (absolute + delta vs 44.96 MB).</criterion>
+    <criterion>NEGATIVE: no fidelity/Track-A change is included in this PR — Track S ships alone.</criterion>
+    <criterion>NEGATIVE: neither artifact was deployed without the other.</criterion>
+  </acceptance-criteria>
+</task>

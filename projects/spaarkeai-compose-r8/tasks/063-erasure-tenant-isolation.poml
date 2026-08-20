@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-B06 — Session deletion and GDPR erasure delete the durable bytes; tenant-isolation verification across every store path</title>
+    <phase>6 Track B — Durable Session Files</phase>
+    <gate>blocked-on-060</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Compliance-bearing: an erasure that misses the durable copy leaves user data after a deletion request.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: erasure completeness fails by omission — the session record is gone, the UI shows nothing, and the bytes remain. Nothing in the product surfaces that gap. Proving erasure is complete requires enumerating every place a copy can exist, which is reasoning about the whole store surface rather than testing one path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Track B files only.</parallel-reason>
+    <deps>060</deps>
+    <tags>bff-api, storage, auth, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Adding a durable byte copy adds a place data can survive a deletion request. Close it.
+
+    **Session deletion and GDPR erasure MUST delete the durable bytes**, mirroring how `memory-items`
+    erasability already works — reuse that precedent rather than inventing an erasure story for this store.
+
+    And verify **ADR-014/015 tenant isolation on EVERY store path** introduced by Track B: write, read,
+    re-index (task 061), retention/availability (task 062), and erasure. This is the task where the whole
+    track's isolation is proven, not assumed per-task.
+
+    Erasure completeness is the property to establish: enumerate every location a session's bytes can exist
+    — durable blob, hot index, any cache, any derived artifact — and show each is removed.
+  </prompt>
+
+  <role>SPAARKE backend developer. Familiar with the `memory-items` erasure precedent, GDPR deletion obligations, and ADR-014/015 tenant isolation. Follow ADR-038.</role>
+
+  <goal>
+    After a session deletion or GDPR erasure, no byte of that session's files exists in any location. Every
+    Track B store path is proven tenant-isolated by test.
+  </goal>
+
+  <context>
+    <background>
+      `memory-items` already solved erasability in this codebase — the pattern exists and should be mirrored.
+      The risk specific to Track B is that erasure was written against the hot index and the durable copy is
+      new, so the existing erasure path simply does not know about it.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/ (memory-items erasure path)</file>
+      <file role="test">tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-B06">Erasure MUST delete the durable bytes. An erasure that removes the session record while leaving bytes is a compliance failure, not a partial success.</constraint>
+    <constraint source="root CLAUDE.md §11">MUST mirror the `memory-items` erasability pattern. MUST NOT invent a separate erasure mechanism for this store.</constraint>
+    <constraint source="ADR-014/015">Tenant isolation MUST be verified on EVERY Track B store path — write, read, re-index, retention/availability, erasure. Each gets its own cross-tenant negative test.</constraint>
+    <constraint source="project">Erasure MUST be idempotent — a repeated erasure must not fail, and a partial prior erasure must complete.</constraint>
+    <constraint source="project">Enumerate every location a session's bytes can exist before implementing. An unenumerated location is an unerased one.</constraint>
+    <constraint source="ADR-038">Seam tests: erasure removes bytes from every enumerated location; each store path has a cross-tenant negative test; erasure is idempotent.</constraint>
+    <constraint source="spec NFR-02">No new NuGet. Report publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GDPR erasure, tenant isolation, memory-items precedent</topic>
+    <files>
+      <file>.claude/adr/ADR-014-tenant-isolation.md</file>
+      <file>.claude/adr/ADR-015-data-partitioning.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/durable-session-files.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-014/015.</step>
+    <step order="1">Enumerate EVERY location a session's file bytes can exist after tasks 060–062: durable blob, hot index, any cache layer, any derived artifact. Record the list.</step>
+    <step order="2">Read the `memory-items` erasure path and mirror its structure.</step>
+    <step order="3">Extend session deletion and GDPR erasure to remove bytes from every enumerated location. Make it idempotent.</step>
+    <step order="4">Write a cross-tenant negative test for EACH Track B store path (write, read, re-index, retention/availability, erasure).</step>
+    <step order="5">Seam test erasure completeness: create a session with files → erase → assert zero bytes remain at every enumerated location.</step>
+    <step order="6">Seam test idempotency: erase twice; erase a partially-erased session.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a location holding session bytes cannot be erased synchronously (e.g. a storage soft-delete window or backup retention), surface it — the compliance answer must be explicit, not implied by "we called delete".</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</output>
+    <output type="test">tests/integration/seam/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/track-b-erasure-surface.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every location a session's bytes can exist is enumerated and recorded.</criterion>
+    <criterion>Session deletion and GDPR erasure remove bytes from EVERY enumerated location — asserted by seam test.</criterion>
+    <criterion>Erasure is idempotent: a repeated erasure succeeds; a partially-erased session completes.</criterion>
+    <criterion>Every Track B store path (write, read, re-index, retention/availability, erasure) has a cross-tenant negative test that FAILS the cross-tenant access.</criterion>
+    <criterion>The erasure mirrors the `memory-items` pattern rather than introducing a separate mechanism.</criterion>
+    <criterion>NEGATIVE: no session-bytes location survives erasure.</criterion>
+    <criterion>NEGATIVE: no separate/parallel erasure mechanism was invented.</criterion>
+    <criterion>Any non-synchronously-erasable location (soft-delete, backup) is documented explicitly rather than left implied.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>
