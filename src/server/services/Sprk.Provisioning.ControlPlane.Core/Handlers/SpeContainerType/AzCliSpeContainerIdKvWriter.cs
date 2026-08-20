@@ -1,6 +1,11 @@
 // -----------------------------------------------------------------------------
 // AzCliSpeContainerIdKvWriter.cs
 //
+// RETIRED (task 131, Wave G-3) — kept on disk, UNREGISTERED (Worker/Program.cs
+// now wires SecretClientSpeContainerIdKvWriter.cs instead), per this
+// project's established retirement pattern (AzCliKvSecretsWriter.cs). Do NOT
+// re-register this class.
+//
 // Production ISpeContainerIdKvWriter — shells out to `az keyvault secret
 // show`/`set` under the operator's `az` auth chain (DefaultAzureCredential
 // inside az CLI via `az login`). Parity with H4's AzCliKvSecretsWriter

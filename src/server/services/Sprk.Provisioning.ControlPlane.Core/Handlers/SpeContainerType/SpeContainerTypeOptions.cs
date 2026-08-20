@@ -8,6 +8,15 @@
 //
 // PATTERN PARITY: mirrors Handlers/EntraAppReg/EntraAppRegOptions.cs and
 // Handlers/KvSecretsPopulation/KvSecretsPopulationOptions.cs.
+//
+// TASK 131 (Wave G-3) — added GraphRequestTimeout + CertLoadTimeout for the
+// GraphContainerTypeProvisioner / GraphAppOnlyContainerVerifier Graph SDK
+// port. PwshExecutable/CreateNewContainerTypeScriptPath/GetContainerMetadataAppOnlyScriptPath/
+// ProvisionTimeout/VerifyTimeout/AzCliExecutable are RETIRED (kept ONLY so the
+// retired, unregistered CreateNewContainerTypeScriptProvisioner.cs /
+// SpeContainerAppOnlyVerifier.cs / AzCliSpeContainerIdKvWriter.cs still
+// compile — parity with EntraAppRegOptions.cs's identical task-130 pattern).
+// Do NOT wire these into new code.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
@@ -18,10 +27,17 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
 /// </summary>
 public sealed class SpeContainerTypeOptions
 {
-    /// <summary>Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via PATH).</summary>
+    /// <summary>Timeout for a single Graph SDK call (create/get). Graph is normally sub-second; generous ceiling for throttle/backoff. Parity with EntraAppRegOptions.GraphRequestTimeout.</summary>
+    public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Timeout for the T6 cert-from-KV SecretClient.GetSecretAsync read (SpeConfidentialClientGraphFactory.LoadCertificateAsync).</summary>
+    public TimeSpan CertLoadTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>RETIRED (task 131) — see class-header note. Path to the pwsh executable (shell-out era, unused by the Graph SDK collaborators).</summary>
     public string PwshExecutable { get; set; } = "pwsh";
 
     /// <summary>
+    /// RETIRED (task 131) — see class-header note.
     /// Absolute path to <c>scripts/Create-NewContainerType.ps1</c> (task 011
     /// confidential-client cert-based hardening). Defaults relative to
     /// <see cref="AppContext.BaseDirectory"/>; production deployments should
@@ -31,6 +47,7 @@ public sealed class SpeContainerTypeOptions
         = Path.Combine(AppContext.BaseDirectory, "scripts", "Create-NewContainerType.ps1");
 
     /// <summary>
+    /// RETIRED (task 131) — see class-header note.
     /// Absolute path to <c>scripts/Get-SpeContainerMetadata-AppOnly.ps1</c>
     /// (new — task 051, T6-compliant app-only GET verification).
     /// </summary>
@@ -38,6 +55,7 @@ public sealed class SpeContainerTypeOptions
         = Path.Combine(AppContext.BaseDirectory, "scripts", "Get-SpeContainerMetadata-AppOnly.ps1");
 
     /// <summary>
+    /// RETIRED (task 131) — see class-header note.
     /// Maximum time to wait for a single Create-NewContainerType.ps1 invocation.
     /// Defaults to 10 minutes — the script performs 4-5 Graph/SharePoint REST
     /// calls + cert bootstrap; a healthy invocation completes in well under a
@@ -45,7 +63,7 @@ public sealed class SpeContainerTypeOptions
     /// </summary>
     public TimeSpan ProvisionTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
-    /// <summary>Maximum time to wait for a single app-only GET verification invocation.</summary>
+    /// <summary>RETIRED (task 131) — see class-header note. Maximum time to wait for a single app-only GET verification invocation.</summary>
     public TimeSpan VerifyTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
@@ -69,9 +87,9 @@ public sealed class SpeContainerTypeOptions
     /// <summary>Default container-type display name when the run parameter is absent.</summary>
     public string DefaultDisplayName { get; set; } = "Spaarke Document Storage";
 
-    /// <summary>Path to the az CLI executable. Defaults to <c>az</c> (resolved via PATH).</summary>
+    /// <summary>RETIRED (task 131) — see class-header note. Path to the az CLI executable (unused by SecretClientSpeContainerIdKvWriter).</summary>
     public string AzCliExecutable { get; set; } = "az";
 
-    /// <summary>Maximum time to wait for a single <c>az keyvault secret set/show</c> invocation.</summary>
+    /// <summary>Maximum time to wait for a single KV secret set/show operation — consumed by SecretClientSpeContainerIdKvWriter.WriteAsync AND the retired AzCliSpeContainerIdKvWriter.</summary>
     public TimeSpan KvOperationTimeout { get; set; } = TimeSpan.FromSeconds(90);
 }

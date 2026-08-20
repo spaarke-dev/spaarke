@@ -1,6 +1,12 @@
 // -----------------------------------------------------------------------------
 // SpeContainerAppOnlyVerifier.cs
 //
+// RETIRED (task 131, Wave G-3) — kept on disk, UNREGISTERED (Worker/Program.cs
+// now wires GraphAppOnlyContainerVerifier.cs instead), per this project's
+// established retirement pattern. Superseded because Option D's target state
+// forbids ProcessStartInfo/shell-out collaborators in the L2 runtime
+// (design.md §4.1b Class A). Do NOT re-register this class.
+//
 // Production ISpeContainerVerifier implementation — shells out to the new
 // T6-compliant scripts/Get-SpeContainerMetadata-AppOnly.ps1 (see
 // ISpeContainerVerifier.cs header for why the existing delegated

@@ -70,4 +70,18 @@ public abstract record SpeContainerVerificationResult
     /// handler to a distinct T6 rejection code.
     /// </summary>
     public sealed record NotVerified(string Diagnostic, bool IsDelegatedTokenTrap) : SpeContainerVerificationResult;
+
+    /// <summary>
+    /// The app-only GET returned 404 Not Found for a container H8 JUST created
+    /// — the documented signature of SPE's up-to-24h container-type
+    /// replication window (design.md §4.1 H8 row + DS-4 §2: "the 24h SPE
+    /// replication gate is a RUN-LEVEL external blocker, not a handler
+    /// defect — do not attempt to poll around it faster or treat a
+    /// pending-replication response as a handler failure"). Distinct from
+    /// <see cref="NotVerified"/> (a genuine, non-transient failure) — the
+    /// handler maps THIS case to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.RunStatus.WaitingOnGate"/>
+    /// (a session-free run-level pause), never Resumable/QuarantineRequired.
+    /// </summary>
+    public sealed record ReplicationPending(string Diagnostic) : SpeContainerVerificationResult;
 }

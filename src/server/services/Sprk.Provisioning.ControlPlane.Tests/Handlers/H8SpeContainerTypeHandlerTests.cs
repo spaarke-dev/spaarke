@@ -56,6 +56,11 @@
 //   AC-20 KV writer request carries tenant-scoped inputs (subscriptionId +
 //         keyVaultName from run parameters, never hardcoded) — I4 derivation.
 //   AC-21 Upgrade mode propagated to KV writer (provisionedOn param present).
+//   AC-22 (task 131) Verification ReplicationPending (24h SPE replication
+//         lag, GraphAppOnlyContainerVerifier's 404 signature) -> Success +
+//         RunStatus.WaitingOnGate (NOT Resumable, NOT QuarantineRequired) +
+//         InterStepState IDs persisted + T6Verified gate Pending + NO
+//         CompletedPhase appended + kvWriter NEVER called.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -108,6 +113,9 @@ public sealed class H8SpeContainerTypeHandlerTests
             "H7 (task 050) reads this field as the source for sprk_SharePointEmbeddedContainerId");
         repo.LastWrittenRun.GateStates.Should().ContainKey(SpeContainerTypeGates.T6Verified);
         repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Status.Should().Be(GateState.Verified);
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value
+            .GetProperty("verifiedViaAppOnlyToken").GetBoolean().Should().BeTrue(
+                "genuine verification happened on the happy path");
 
         provisioner.CallCount.Should().Be(1);
         verifier.CallCount.Should().Be(1);
@@ -233,7 +241,10 @@ public sealed class H8SpeContainerTypeHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-7");
         var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
-        var verifier = FakeVerifier.NotVerified("GET returned 404 — propagation lag", isDelegatedTokenTrap: false);
+        // NOTE (task 131): a 404 on this GET is now classified ReplicationPending
+        // (see AC-22) — this test uses a genuinely non-transient error (403) to
+        // exercise the NotVerified/QuarantineRequired path.
+        var verifier = FakeVerifier.NotVerified("GET returned 403 Forbidden — unexpected permission error", isDelegatedTokenTrap: false);
         var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -504,6 +515,55 @@ public sealed class H8SpeContainerTypeHandlerTests
         kvWriter.LastRequest!.UpgradeMode.Should().BeTrue();
     }
 
+    // ---------- AC-22 (task 131) 24h SPE replication lag -> WaitingOnGate ----------
+
+    [Fact]
+    public async Task AC22_VerificationReplicationPending_SucceedsWithRunStatusWaitingOnGate_NoKvWriterCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-22");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.ReplicationPending(
+            "App-only GET returned 404 Not Found — consistent with SPE's up-to-24h container-type " +
+            "replication window.");
+        var kvWriter = FakeKvWriter.Wrote();
+        var handler = BuildHandler(repo, provisioner, verifier, kvWriter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        // Success, not Failure — H8 correctly identified + recorded the
+        // external wait; this is not an operator-actionable error.
+        var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
+        success.IdempotencyKey.Should().Be(H8SpeContainerTypeHandler.BuildIdempotencyKey(CustomerId));
+
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.WaitingOnGate,
+            "DS-4 §2 / this project's CLAUDE.md MUST rules: the 24h SPE replication gate is a run-level " +
+            "external blocker, never Resumable/QuarantineRequired");
+        repo.LastWrittenRun.CurrentPhase.Should().Be("H8");
+        repo.LastWrittenRun.ErrorDetail.Should().BeNull("a replication-pending wait is not an error");
+
+        // Container-type/root-container ARE real, durable side effects —
+        // persisted so a later resume does not need to re-derive them.
+        repo.LastWrittenRun.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().Be(RootContainerId);
+
+        // Gate is Pending, NOT Verified — verification genuinely has not happened yet.
+        repo.LastWrittenRun.GateStates.Should().ContainKey(SpeContainerTypeGates.T6Verified);
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Status.Should().Be(GateState.Pending);
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value
+            .GetProperty("verifiedViaAppOnlyToken").GetBoolean().Should().BeFalse(
+                "regression guard: evidence must NOT claim verification happened when it has not " +
+                "(BuildEvidence previously hardcoded true unconditionally — task 131 fix)");
+
+        // NOT recorded as a CompletedPhase — H8 has not finished; a resume
+        // must re-execute HandleAsync in full (Level-3 idempotency does NOT
+        // short-circuit this run).
+        repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+
+        kvWriter.CallCount.Should().Be(0, "KV write only happens after Verified, unchanged ordering");
+    }
+
     // ---------- helpers ----------
 
     private static H8SpeContainerTypeHandler BuildHandler(
@@ -631,6 +691,9 @@ public sealed class H8SpeContainerTypeHandlerTests
 
         public static FakeVerifier NotVerified(string diagnostic, bool isDelegatedTokenTrap)
             => new(new SpeContainerVerificationResult.NotVerified(diagnostic, isDelegatedTokenTrap), null);
+
+        public static FakeVerifier ReplicationPending(string diagnostic)
+            => new(new SpeContainerVerificationResult.ReplicationPending(diagnostic), null);
 
         public static FakeVerifier Throws(Exception ex) => new(null, ex);
 

@@ -1,6 +1,13 @@
 // -----------------------------------------------------------------------------
 // CreateNewContainerTypeScriptProvisioner.cs
 //
+// RETIRED (task 131, Wave G-3) — kept on disk, UNREGISTERED (Worker/Program.cs
+// now wires GraphContainerTypeProvisioner.cs instead), per this project's
+// established retirement pattern (RegisterEntraAppRegScriptProvisioner.cs /
+// AzCliKvSecretsWriter.cs / NullAdminConsentVerifier.cs). Superseded because
+// Option D's target state forbids ProcessStartInfo/shell-out collaborators in
+// the L2 runtime (design.md §4.1b Class A). Do NOT re-register this class.
+//
 // Production ISpeContainerTypeProvisioner implementation — shells out to the
 // T6-hardened scripts/Create-NewContainerType.ps1 (task 011 confidential-client
 // cert-based refactor) with -CreateTestContainer, and parses the script's

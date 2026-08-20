@@ -8,11 +8,21 @@
 //   Creates the customer's SPE container type + a root container within it,
 //   using EXCLUSIVELY confidential-client (app-only) cert-based auth (T6 fix,
 //   spec.md FR-33 — delegated tokens 403 "public client not allowed" against
-//   Microsoft Graph SPE APIs). Wraps the task-011-hardened
-//   scripts/Create-NewContainerType.ps1 (-CreateTestContainer), verifies the
-//   root container is readable via a FRESH app-only token
-//   (scripts/Get-SpeContainerMetadata-AppOnly.ps1 — new, task 051), and
-//   persists the real container-type id to the customer's Key Vault under the
+//   Microsoft Graph SPE APIs). As of task 131 (Wave G-3), the three
+//   collaborator seams are Microsoft.Graph 6.5.0 SDK implementations
+//   (GraphContainerTypeProvisioner / GraphAppOnlyContainerVerifier /
+//   SecretClientSpeContainerIdKvWriter — see those files' headers) rather
+//   than the task-051 shell-out scripts; the retired script-based
+//   collaborators remain on disk, unregistered, per this project's
+//   established retirement pattern. This handler's own orchestration logic
+//   (parameter guards, idempotency, §4C classification) is UNCHANGED by the
+//   port — the seam interfaces (ISpeContainerTypeProvisioner /
+//   ISpeContainerVerifier / ISpeContainerIdKvWriter) are stable across the
+//   swap, plus ONE addition: ISpeContainerVerifier now has a third outcome,
+//   SpeContainerVerificationResult.ReplicationPending, for the documented
+//   24h SPE replication-lag case (see MarkWaitingOnGateAsync + the ROLLBACK
+//   CLASSIFICATION table below).
+//   Persists the real container-type id to the customer's Key Vault under the
 //   canonical `SPE-ContainerTypeId` slot H4 pre-created (StaticKvSecretManifest).
 //
 // SPEC / DESIGN references:
@@ -67,6 +77,12 @@
 //   ┌───────────────────────────────────────────┬──────────────────────────┐
 //   │ Failure mode                               │ §4C class                │
 //   ├───────────────────────────────────────────┼──────────────────────────┤
+//   │ 24h SPE replication lag (verify GET 404    │ NOT a §4C failure class  │
+//   │ on a just-created container; task 131)     │ — RunStatus.WaitingOnGate│
+//   │                                             │ (session-free run-level  │
+//   │                                             │ pause; DS-4 §2 / this    │
+//   │                                             │ project's CLAUDE.md MUST │
+//   │                                             │ rule)                    │
 //   │ Missing tenantId / keyVaultName /          │ Resumable                │
 //   │ subscriptionId / sharePointDomain /        │ (external precondition — │
 //   │ owningAppId (H3 not yet complete)          │ operator fixes + resumes)│
@@ -392,6 +408,23 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
                 rejectionCode, notVerified.Diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (7b) DS-4 §2 / this project's CLAUDE.md MUST rules: the up-to-24h
+        // SPE container-type replication window is a RUN-LEVEL external
+        // blocker, not a handler defect. The container-type + root container
+        // DO exist (real, durable side effects) — persist those IDs so a
+        // later resume does not need to re-derive them — but do NOT write the
+        // KV secret yet (that still waits on Verified, unchanged ordering)
+        // and do NOT record a CompletedPhase (H8 has not finished; a later
+        // resume re-runs HandleAsync in full). RunStatus.WaitingOnGate is a
+        // session-free pause — no other handler in the DAG depends on H8
+        // (DagAdvancer.HandlerDependencies has no entry keyed on H8), so this
+        // does not block unrelated branches.
+        if (verifyResult is SpeContainerVerificationResult.ReplicationPending pending)
+        {
+            return await MarkWaitingOnGateAsync(run, etag, outputs, pending.Diagnostic, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var verified = (SpeContainerVerificationResult.Verified)verifyResult;
 
         // (8) Persist the real container-type id to the customer KV (the slot
@@ -516,6 +549,66 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         return new HandlerResult.Failure(failureClass, rejectionCode, diagnostic);
     }
 
+    /// <summary>
+    /// Records the 24h SPE replication-lag pause. Sets
+    /// <see cref="RunStatus.WaitingOnGate"/> (never Resumable/QuarantineRequired
+    /// per this project's CLAUDE.md MUST rules), persists the already-created
+    /// container-type/root-container IDs, and marks the T6Verified gate
+    /// Pending (with evidence) rather than Verified. Does NOT append a
+    /// CompletedPhase — H8 has not finished; a subsequent resume re-executes
+    /// HandleAsync from the top, re-attempting verification (the container-
+    /// type + container already exist on the SPE side; only the app-only GET
+    /// is retried).
+    /// </summary>
+    private async Task<HandlerResult> MarkWaitingOnGateAsync(
+        ProvisioningRun run,
+        string etag,
+        SpeContainerTypeProvisionOutputs outputs,
+        string diagnostic,
+        CancellationToken cancellationToken)
+    {
+        run.InterStepState.ContainerTypeId = outputs.ContainerTypeId;
+        run.InterStepState.SpeContainerId = outputs.RootContainerId;
+        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
+        {
+            Status = GateState.Pending,
+            VerifierHandler = HandlerIdentifier,
+            Evidence = BuildEvidence(outputs.RootContainerId, "replication-pending", verifiedViaAppOnlyToken: false),
+        };
+
+        run.Status = RunStatus.WaitingOnGate;
+        run.CurrentPhase = HandlerIdentifier;
+        run.ErrorDetail = null; // Not an error — an expected external wait.
+
+        _logger.LogInformation(
+            "H8 SPE container-type provisioning WaitingOnGate (24h replication lag): runId={RunId} " +
+            "customerId={CustomerId} containerTypeId={ContainerTypeId} rootContainerId={RootContainerId} " +
+            "diagnostic={Diagnostic}",
+            run.RunId, run.CustomerId, outputs.ContainerTypeId, outputs.RootContainerId, diagnostic);
+
+        var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
+        if (replace is ReplaceRunResult.Conflict conflict)
+        {
+            _logger.LogWarning(
+                "H8 WaitingOnGate state write LOST optimistic-concurrency race: " +
+                "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus}",
+                run.RunId, run.CustomerId, conflict.Current.Run.Status);
+        }
+        else if (replace is ReplaceRunResult.NotFound)
+        {
+            _logger.LogWarning(
+                "H8 WaitingOnGate state write raced with row delete: runId={RunId} customerId={CustomerId}",
+                run.RunId, run.CustomerId);
+        }
+
+        // Success: H8 correctly identified + recorded the external wait — this
+        // is not an operator-actionable failure. HandlerOutcomeApplier does
+        // NOT overwrite run.Status on the Success path (it reads run.Status
+        // as-is — see HandlerOutcomeApplier.cs's "Success path" comment), so
+        // the WaitingOnGate write above is preserved.
+        return new HandlerResult.Success(BuildIdempotencyKey(run.CustomerId));
+    }
+
     private async Task<HandlerResult> MarkCompleteAsync(
         ProvisioningRun run,
         string etag,
@@ -540,7 +633,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             Status = GateState.Verified,
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status),
+            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true),
         };
 
         run.Status = RunStatus.Running;
@@ -582,13 +675,21 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         return new HandlerResult.Success(idempotencyKey);
     }
 
-    private static System.Text.Json.JsonElement BuildEvidence(string rootContainerId, string verifiedStatus)
+    /// <summary>
+    /// Builds the gate evidence JSON. <paramref name="verifiedViaAppOnlyToken"/>
+    /// is now an explicit parameter (task 131 fix — previously hardcoded
+    /// <c>true</c> unconditionally, which would have produced misleading
+    /// evidence for the WaitingOnGate/replication-pending case, where
+    /// verification has explicitly NOT happened yet).
+    /// </summary>
+    private static System.Text.Json.JsonElement BuildEvidence(
+        string rootContainerId, string verifiedStatus, bool verifiedViaAppOnlyToken)
     {
         var doc = System.Text.Json.JsonSerializer.SerializeToElement(new
         {
             rootContainerId,
             verifiedStatus,
-            verifiedViaAppOnlyToken = true,
+            verifiedViaAppOnlyToken,
         });
         return doc;
     }
