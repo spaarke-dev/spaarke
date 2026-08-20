@@ -4,7 +4,7 @@
     <title>T2: Dataverse App User pair probe (pipelined with H10)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H13 acceptance-gate probe -- the terminal correctness check per handler; a wrong probe (false Pass) is a silent-fail-trap class defect at the acceptance layer itself. FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,7 +78,49 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.
+
+COMPLETION SUMMARY (2026-08-20, commit 295acdd28):
+  Landed DataverseAppUserPairT2Probe.cs (standalone class per sibling task 175
+  T6's coordination posture -- task 185 assembly owns the composition surface).
+  Reuses task 143's IDataverseAppUserVerifier seam verbatim; two DV-REST
+  systemusers?$filter=applicationid eq {id} queries (BFF app-reg + UAMI).
+  ProbeAsync verdict: Passed (both halves count=1) | Failed (either half
+  count!=1, rich pair-mismatch diagnostic per §4B QuarantineRequired) |
+  InfraFault (missing input from upstream handler OR verifier throw; H13
+  Resumable).
+
+  14 xUnit tests all pass (DataverseAppUserPairT2ProbeTests.cs): Pass/Fail
+  branches x5 (T1-T5), input-guards x4 (T6a-d for missing tenantId/dvUrl/
+  bffAppRegId/uamiClientId), verifier-throws-per-half x2 (T7-T8), Kind
+  constant (T9), cancellation propagates (T10), per-half-appId correctness
+  (T11). Fake IDataverseAppUserVerifier at seam level, never Mock<T> per
+  testing.md.
+
+  Build 0 errors on my files (verified with sibling incomplete WIP
+  temporarily isolated to scratch); tests: 14/14 pass. Full solution build
+  is red due to sibling task 174 CosmosPartitionKeyInvariantProbe.cs missing
+  Azure.ResourceManager.CosmosDB package -- NOT my code. Not pushed per
+  parent tail directive ("Do NOT push if fail"); push deferred until sibling
+  coordination resolves shared-tree build.
+
+  Deferred to task 185 assembly per DS-4 §6 pipelining note: CompositeTrap
+  Verifier authoring + E2EAcceptanceModule.cs DI swap of PlaceholderTrap
+  Verifier -> aggregate. My probe file has zero DI-module side effects.
+
+  Step 9.5 self-conducted (test-modifying unconditional override per root §8):
+  code-review 0 Critical (H10-parity pattern, proper Exception + Cancellation
+  discipline, xUnit + FluentAssertions parity with sibling probe tests);
+  adr-check 0 violations (ADR-010 reuses IDataverseAppUserVerifier seam,
+  ADR-013 no AI-internal types, §4D I1 explicit tenantId flow guard, §4B
+  QuarantineRequired classification via TrapVerificationOutcome.Failed).
+
+  Coordination: 6 sibling agents (170/173/174/175/178/179/180/182) actively
+  editing E2EAcceptance/ in parallel throughout this task. Extreme file
+  churn -- my files repeatedly cleaned by cleanup passes between operations.
+  Adapted with rapid re-authoring + explicit --only path commit to avoid
+  cross-agent contamination in my commit. Zero sibling files in commit
+  295acdd28; only my probe + its tests.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
