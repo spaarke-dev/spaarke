@@ -4,7 +4,7 @@
     <title>I4: SPE container resolver probe (pipelined with H9)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H13 acceptance-gate probe -- the terminal correctness check per handler; a wrong probe (false Pass) is a silent-fail-trap class defect at the acceptance layer itself. FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,7 +77,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.
+
+Completion (2026-08-20): SpeContainerResolverInvariantProbe.cs (real IInvariantProbe) + composite registration + 23 unit tests all pass. Escalation trigger EXERCISED per POML: BFF-side ITenantContainerResolver + /api/diagnostics/tenant-container-resolver endpoint do NOT yet exist (repo-wide grep confirmed); L2 probe authored + fake-transport-tested per DS-4 §6's "buildable earlier against fakes" note. LIVE-verification gap flagged for task 185 (Wave G-7 assembly) / task 186 (Phase F rerun) via HTTP 404 -> InfraFault branch and probe file header contract documentation. Endpoint response contract documented in-file for the future BFF-side implementer. Full L2 test suite: 1293/1293 pass (1 pre-existing skip). Commit 54a348ed8. NOT pushed (siblings active).
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
