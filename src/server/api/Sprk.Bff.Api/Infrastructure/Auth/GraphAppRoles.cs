@@ -27,15 +27,19 @@ namespace Sprk.Bff.Api.Infrastructure.Auth;
 /// </para>
 /// <para>
 /// <b>AppRoleId (GUID) provenance</b>: per this task's escalation rule, GUIDs are NOT shipped from
-/// memory. <b>All 14 GUIDs are populated as of 2026-08-17</b> (r1 task 005): the 11 SPE / Directory /
+/// memory. <b>All 14 GUIDs were populated as of 2026-08-17</b> (r1 task 005): the 11 SPE / Directory /
 /// Email GUIDs were confirmed via live <c>az ad sp show</c> enumeration against the Microsoft Graph
 /// resource SP (<see cref="GraphResourceAppId"/>) by <c>ralph.schroeder@spaarke.com</c> against tenant
 /// <c>a221a95e-6abc-4434-aecc-e48338a1b2f2</c> (see per-GUID commits for each cited invocation +
 /// result); the 3 self-service-registration GUIDs were sourced pre-r1 from
-/// <c>scripts/Setup-EntraInfrastructure.ps1</c>. <see cref="GraphAppRole.AppRoleId"/> remains
-/// declared as <c>string?</c> for schema stability. <see cref="Value"/> is the stable match key. Do
-/// NOT change any GUID without a fresh live re-enumeration — a wrong GUID in the single source of
-/// truth propagates to every future provisioning run.
+/// <c>scripts/Setup-EntraInfrastructure.ps1</c>. A 15th role (<see cref="UserInviteAll"/>) was added
+/// 2026-08-20 by <c>customer-provisioning-orchestration-r1</c> task 144 (H11 live verification found
+/// the catalog was missing the permission H11's B2BGuest preset needs for <c>POST /invitations</c>);
+/// its GUID was ground-truthed the same way, live, against the same tenant. <see
+/// cref="GraphAppRole.AppRoleId"/> remains declared as <c>string?</c> for schema stability. <see
+/// cref="Value"/> is the stable match key. Do NOT change any GUID without a fresh live
+/// re-enumeration — a wrong GUID in the single source of truth propagates to every future
+/// provisioning run.
 /// </para>
 /// </remarks>
 public static class GraphAppRoles
@@ -86,6 +90,9 @@ public static class GraphAppRoles
     /// <summary>Read and write directory data (app-only) — Self-Service Registration subsystem.</summary>
     public const string DirectoryReadWriteAll = "Directory.ReadWrite.All";
 
+    /// <summary>Invite guest users to the organization (app-only) — Customer Provisioning (H11 B2B guest preset).</summary>
+    public const string UserInviteAll = "User.Invite.All";
+
     // ── Well-known Microsoft Graph application-permission (app role) IDs ─────────────────────
     // Enumerated 2026-08-17 via `az ad sp show --id 00000003-0000-0000-c000-000000000000
     //   --query "appRoles[?value=='<name>'].id"` (r1 task 005 — H10 escalation gate; discovery
@@ -129,6 +136,27 @@ public static class GraphAppRoles
     private const string IdGroupMemberReadWriteAll = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695";
     private const string IdDirectoryReadWriteAll = "19dbc75e-c2e2-444c-a770-ec69d8559fc7";
 
+    // Customer Provisioning (H11 B2B guest preset) — ADDED 2026-08-20 by
+    // customer-provisioning-orchestration-r1 task 144 (H11 live verification).
+    // FINDING: H11UserProvisioningHandler's B2BGuest identity preset issues
+    // POST /v1.0/invitations (GraphRestB2BInvitationClient.cs), whose
+    // least-privileged app-only permission is User.Invite.All per Microsoft
+    // Learn (learn.microsoft.com/graph/api/invitation-post — Permissions
+    // table). The pre-existing 14-role catalog (task 005, 2026-08-17) did NOT
+    // include this role — the L2 UAMI would have held User.ReadWrite.All
+    // (sufficient for H11's NativeAccount branch + the B2B consent-verifier
+    // GET) but NOT User.Invite.All, so every B2BGuest-preset H11 run would
+    // have received a permanent 403 from Graph on the invitation POST, once
+    // task 111's C5.8 grants are live-executed. Live-verified: this GUID is
+    // NOT a substitute/overlap of any of the other 14 (User.ReadWrite.All's
+    // "higher privileged" table entry for POST /users does NOT cover
+    // /invitations — Invitation.Create/User.Invite.All is a distinct
+    // permission family). GUID ground-truthed via
+    // GET /v1.0/servicePrincipals?$filter=appId eq '00000003-...'&$select=appRoles
+    // against the real Microsoft Graph resource SP in tenant
+    // a221a95e-6abc-4434-aecc-e48338a1b2f2 (same methodology as task 005/143).
+    private const string IdUserInviteAll = "09850681-111b-4a89-9bed-3f2cae46d706";
+
     /// <summary>
     /// Well-known Microsoft Graph resource service principal appId (constant across every tenant).
     /// The verifier enumerates a service principal's <c>appRoleAssignments</c> whose <c>resourceId</c>
@@ -138,8 +166,9 @@ public static class GraphAppRoles
 
     /// <summary>
     /// One expected Graph application role. <see cref="Value"/> is the stable match key;
-    /// <see cref="AppRoleId"/> is the Graph well-known role GUID (populated for all 14 roles as of
-    /// 2026-08-17 per r1 task 005; nullable type retained for schema stability — see class remarks).
+    /// <see cref="AppRoleId"/> is the Graph well-known role GUID (populated for all 15 roles as of
+    /// 2026-08-20 — 14 per r1 task 005 (2026-08-17) + 1 added by task 144; nullable type retained
+    /// for schema stability — see class remarks).
     /// <see cref="ModuleConditional"/> roles are only required when their <see cref="OwningModule"/>
     /// is enabled (e.g. <c>Mail.*</c> only with Email/Communication).
     /// </summary>
@@ -153,8 +182,9 @@ public static class GraphAppRoles
 
     /// <summary>
     /// The canonical expected app-only Graph role set. Covers the §5b baseline (SPE + directory +
-    /// Email/Communication) plus the three Self-Service Registration subsystem roles. Adding a role
-    /// is a single append here.
+    /// Email/Communication) plus the three Self-Service Registration subsystem roles plus the one
+    /// Customer Provisioning (H11 B2BGuest) role added by task 144. Adding a role is a single
+    /// append here.
     /// </summary>
     public static readonly IReadOnlyList<GraphAppRole> All = new[]
     {
@@ -193,5 +223,10 @@ public static class GraphAppRoles
             "Self-Service Registration", "Add provisioned users to the demo security group.", true),
         new GraphAppRole(DirectoryReadWriteAll, "Read and write directory data", IdDirectoryReadWriteAll,
             "Self-Service Registration", "Directory writes required by the registration provisioning pipeline.", true),
+
+        // Customer Provisioning — module-conditional (H11 B2BGuest identity preset only;
+        // added 2026-08-20 by customer-provisioning-orchestration-r1 task 144)
+        new GraphAppRole(UserInviteAll, "Invite guest users to the organization", IdUserInviteAll,
+            "Customer Provisioning", "H11's B2BGuest identity preset invites the customer's initial guest users via POST /invitations.", true),
     };
 }

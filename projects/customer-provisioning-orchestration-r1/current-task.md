@@ -1,11 +1,37 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 (Task 141 COMPLETE — H6 Web-API import port. `DataverseWebApiSolutionImporter.cs` [ISolutionImporter — Dataverse Web API ImportSolution/StageAndUpgrade actions + importjobs polling, resolving the 8 solution ZIPs from a versioned blob-artifact manifest in the `provisioning-artifacts` container] + `DataverseWebApiSolutionVerifier.cs` [ISolutionVerifier — trivial GET /solutions?$select=uniquename,version,solutionid] replace the retired DeployDataverseSolutionsScriptImporter/PacCliSolutionVerifier shell-outs. Web API shapes ground-truthed via WebFetch against Microsoft Learn (not guessed). Documented deviation from the dispatch context's "poll /asyncoperations" framing: polls importjobs({ImportJobId}) using the client-generated GUID directly (deterministic, no Location-header parsing needed) — completedon non-null is the terminal signal. importjobs.data (XML) defensively parsed for result="failure"/"warning" nodes; unparseable/empty data is a provisional success whose diagnostic says so explicitly (never silently swallowed) — the separate verifier's independent GET is defense-in-depth. Two intentionally distinct credentials: ClientSecretCredential (BFF app-reg, task 142's H7 precedent) for the customer-Dataverse-env calls; the shared L2 UAMI TokenCredential for the artifacts blob container. Live-ceremony gap documented (no CI workflow yet publishes the solution-artifact manifest — SolutionImportOptions.Validate() fails fast at boot if unset). Grep-collision self-catch: initial doc-comment drafts literally contained "pac solution import"/"pac solution list" — reworded before the grep was re-run. L2 tests: 968 -> **1003/1003** [+35 this task, zero regressions]. Batch G-4B now FULLY COMPLETE (141 + 143 both done); Batch G-4C (144, H11 verify) unblocked.)
+> **Last Updated**: 2026-08-20 (Task 144 COMPLETE — H11 live verification post C5.8 grants. Consent-gate
+> seam [`GraphRestB2BConsentVerifier`, fully read-only] live-verified end-to-end via new durable smoke
+> tests [`H11SeamsSmokeTests.cs`] run genuinely live in-sandbox, both Verified/Pending branches — the
+> escalation-trigger-relevant seam (false-Pass-on-pending would be HIGH severity; directly tested and NOT
+> observed). Write-capable seams [`GraphRestUserProvisioner`'s POST /users + assignLicense,
+> `GraphRestB2BInvitationClient`'s POST /invitations] had shapes ground-truthed against Microsoft Learn
+> (exact field-name match) — writes deferred to live-ceremony (real user creation / real invitation email,
+> no safe automated undo). **BONUS CATCH (MAJOR)**: the 14-role `GraphAppRoles.cs`/`L2GraphAppRolesRegistry.cs`
+> catalog (task 005) was missing `User.Invite.All` entirely — H11's B2BGuest branch would have received a
+> permanent 403 on every invitation POST once C5.8 grants land. Fixed: added a 15th role (GUID
+> ground-truthed live: `09850681-111b-4a89-9bed-3f2cae46d706`), mirrored to L2, every stale "14" reference
+> updated across 8 files + spec.md FR-33 + the customer deployment guide; mirror-parity test re-confirmed
+> byte-identical. Consent-verifier reuse check (CLAUDE.md §11): confirmed H11's verifier and H3's
+> `GraphAdminConsentVerifier` answer genuinely different questions (guest `externalUserState` vs app-reg
+> `oauth2PermissionGrants`) — no consolidation opportunity. Deferred+documented (not fixed):
+> `H11UserProvisioningOptions` has zero Bicep wiring (`AccountDomain` defaults to Spaarke's own tenant
+> domain — assessed fail-loud via Graph's UPN-domain-verification, not fail-silent). L2 tests: 1003 ->
+> **1005/1005** [+2, zero regressions]. Full evidence: notes/h11-live-verification-2026-08.md.
+> **Wave G-4 is now 100% COMPLETE (5/5 tasks)** — Wave G-5 (H12a/b/c seed chain, 4 tasks) unblocked.)
+>
+> **Previous** (2026-08-20, Task 141 COMPLETE — H6 Web-API import port. `DataverseWebApiSolutionImporter.cs` [ISolutionImporter — Dataverse Web API ImportSolution/StageAndUpgrade actions + importjobs polling, resolving the 8 solution ZIPs from a versioned blob-artifact manifest in the `provisioning-artifacts` container] + `DataverseWebApiSolutionVerifier.cs` [ISolutionVerifier — trivial GET /solutions?$select=uniquename,version,solutionid] replace the retired DeployDataverseSolutionsScriptImporter/PacCliSolutionVerifier shell-outs. Web API shapes ground-truthed via WebFetch against Microsoft Learn (not guessed). Documented deviation from the dispatch context's "poll /asyncoperations" framing: polls importjobs({ImportJobId}) using the client-generated GUID directly (deterministic, no Location-header parsing needed) — completedon non-null is the terminal signal. importjobs.data (XML) defensively parsed for result="failure"/"warning" nodes; unparseable/empty data is a provisional success whose diagnostic says so explicitly (never silently swallowed) — the separate verifier's independent GET is defense-in-depth. Two intentionally distinct credentials: ClientSecretCredential (BFF app-reg, task 142's H7 precedent) for the customer-Dataverse-env calls; the shared L2 UAMI TokenCredential for the artifacts blob container. Live-ceremony gap documented (no CI workflow yet publishes the solution-artifact manifest — SolutionImportOptions.Validate() fails fast at boot if unset). Grep-collision self-catch: initial doc-comment drafts literally contained "pac solution import"/"pac solution list" — reworded before the grep was re-run. L2 tests: 968 -> **1003/1003** [+35 this task, zero regressions]. Batch G-4B now FULLY COMPLETE (141 + 143 both done); Batch G-4C (144, H11 verify) unblocked.)
 >
 > **Previous** (2026-08-20, Task 143 COMPLETE — H10 live verification post C5.8 grants. Live-verified 3 of 5 REST/Graph seams fully end-to-end [T2 DataverseWebApiAppUserVerifier + T3 GraphRestAppRoleParityVerifier, both fully read-only]; live-verified the READ components of the remaining 2 [DataverseWebApiAppUserCreator, GraphRestAppRoleGranter] via direct REST against spaarkedev1 + real Microsoft Graph; WRITE components deferred to live-ceremony [C5.8/task 111 not yet live-executed]. **BONUS CATCH**: found + fixed a genuine wrong-but-non-null AppRoleId GUID in GraphAppRoles.cs [GroupMember.ReadWrite.All — last 4 hex chars `6571` should be `6695`] by cross-checking all 14 catalog entries against the REAL Microsoft Graph resource SP's own appRoles collection. L2 tests: 965 -> **968/968** [+3, zero regressions]. Full evidence: notes/h10-live-verification-2026-08.md.)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-4..G-7 remain. Wave G-2.5 (customer.bicep completion) is fully closed. Wave G-3 (130/131/132) is now FULLY COMPLETE.)
+
+## 🎯 Wave G-4 — 100% COMPLETE (2026-08-20, 5/5 tasks)
+
+All of Wave G-4 (140, 141, 142, 143, 144) has landed. L2 tests: 903 (Wave G-3 baseline) → **1005/1005**
+across the full wave. Zero code-review criticals, zero unresolved ADR violations across all 5 commits.
+Wave G-5 (H12a/b/c seed chain, 4 tasks — 150+) is now unblocked.
 
 ## 🎯 Wave G-4 Dispatch Plan (unblocked 2026-08-20 after Wave G-3 close)
 
@@ -25,12 +51,100 @@
 - 141: ✅ COMPLETE — H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging. See "Task 141 — COMPLETE" section below.
 - 143: ✅ COMPLETE — H10 live verification post C5.8 grants (5 REST/Graph seams; code already real — verification-focused task). See "Task 143 — COMPLETE" section below.
 
-**Batch G-4C** (after 141 + 143 land): 144 alone — now unblocked
-- 144: H11 live verification (Graph REST + B2B invitation + consent verifier; code already real)
+**Batch G-4C** (after 141 + 143 land): 144 alone — COMPLETE, Batch G-4C closed, Wave G-4 100% COMPLETE
+- 144: ✅ COMPLETE — H11 live verification (Graph REST + B2B invitation + consent verifier; code already real). See "Task 144 — COMPLETE" section below.
 
 **Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
 
 ---
+
+## Task 144 — COMPLETE (2026-08-20)
+
+H11 live verification post C5.8 grants. DS-4 §2 classified all 3 of H11's REST/Graph seams as
+"already real" — this task performed the live-verification pass, direct sibling of task 143's H10
+verify (same template, same discipline).
+
+**Live verification results** (full detail: `notes/h11-live-verification-2026-08.md`): the consent
+verifier (`GraphRestB2BConsentVerifier`, fully read-only, the escalation-trigger-relevant seam) was
+**fully live-verified end-to-end** — both `Verified` (a real existing accepted guest,
+`ad268fcd-ac34-4e40-b63f-dacdc849fcbb`) and `Pending` (unknown/never-invited guest id → Graph 404
+→ correctly folded to Pending, never Verified) branches — via new durable xUnit smoke tests
+(`H11SeamsSmokeTests.cs`) run **genuinely live in-sandbox** (notably better than H10's own smoke
+tests, which soft-skipped on `DefaultAzureCredential` in this sandbox — task 144's consent-verifier
+calls resolved a real token in ~23s and completed against real Graph responses). The two
+WRITE-capable seams (`GraphRestUserProvisioner`'s `POST /users` + `POST /assignLicense`,
+`GraphRestB2BInvitationClient`'s `POST /invitations`) had their exact request/response shapes
+ground-truthed against Microsoft Learn (field-name-exact match, incl. least-privileged permissions)
+— the actual writes are deferred to live-ceremony: creating a real Entra user or sending a real
+invitation email has no safe automated undo, and task 111's C5.8 grants haven't been live-executed
+yet (same precedent task 143 established for H10's write paths).
+
+**BONUS CATCH** (MAJOR, genuine defect, fixed same commit): cross-referencing
+`GraphRestB2BInvitationClient`'s `POST /invitations` against Microsoft Learn's own
+least-privileged-permission table found the pre-existing 14-role `GraphAppRoles.cs` /
+`L2GraphAppRolesRegistry.cs` catalog (r1 task 005) was **missing `User.Invite.All` entirely** — not
+a wrong GUID (task 143's H10 class of defect) but a **missing role**. Once task 111's C5.8 grants
+are live-executed, the L2 UAMI would hold `User.ReadWrite.All` (sufficient for the NativeAccount
+branch + the consent-verifier GET) but NOT `User.Invite.All`, so every B2BGuest-preset H11 run
+would receive a **permanent, unrecoverable 403** on the invitation POST — this is the same failure
+class task 144's own escalation trigger names ("a signal that either task 111's grant scope is
+wrong or the classification needs correction"). Fixed in the same commit: added a 15th catalog
+role (GUID ground-truthed live via `GET /v1.0/servicePrincipals?$filter=appId eq
+'00000003-...'&$select=appRoles` against the real Microsoft Graph resource SP:
+`09850681-111b-4a89-9bed-3f2cae46d706`), mirrored to L2, and every stale "14"/"14-role" reference
+updated across `GraphAppRoles.cs`, `L2GraphAppRolesRegistry.cs`, `IGraphAppRolesRegistry.cs`,
+`H10DataverseAppUserGraphParityHandler.cs`, `Program.cs`, `GraphAppRoleParityTest.cs`,
+`H10DataverseAppUserGraphParityHandlerTests.cs` (AC16, renamed off the now-stale
+`...EnumeratesAll14PopulatedGuids` method name), `spec.md` FR-33, and
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. Re-verified:
+`L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant` (task 067's unconditional mirror-parity
+test) **PASSES** post-addition — the two catalogs remain byte-identical (confirmed via live
+`dotnet test` run against `AZURE_TENANT_ID` this task).
+
+**Consent-verifier reuse check** (CLAUDE.md §11 three-question test, explicit per the dispatch
+directive): confirmed H11's `GraphRestB2BConsentVerifier` (checks an invited **guest user's**
+`externalUserState`) and H3's `GraphAdminConsentVerifier` (checks the **app registration's**
+`oauth2PermissionGrants`) answer genuinely different questions against different Graph resources —
+no consolidation opportunity; the two verifiers correctly share only the Verified/Pending result
+SHAPE (documented explicitly in `IB2BConsentVerifier.cs`'s own header), not an implementation. H11
+correctly owns its own verifier.
+
+**Deferred, documented, NOT fixed** (out of this verification task's proportionate scope):
+`H11UserProvisioningOptions` has zero Bicep wiring anywhere in `infrastructure/bicep/` and its
+`AccountDomain` defaults to `"spaarke.onmicrosoft.com"` — the Spaarke tenant's OWN domain, not a
+customer's. Assessed as fail-**loud** in practice (Microsoft Graph rejects a UPN whose domain isn't
+verified in the authenticating tenant — a 400, not a silent wrong-tenant write), not fail-silent,
+but a genuine deployment-completeness gap: every NativeAccount-preset H11 run against a real
+customer will fail until this is wired. A NFR-05 `Validate()` addition would not help (all 5 fields
+have non-null defaults, so a null-check `Validate()` never fires — the defect class is "wrong value
+in play", undetectable by options-validation without per-customer context). Recommended as a
+follow-up task (thread as Bicep app settings, parity with task 142's `EnvVarValues__ClientSecret`
+wiring); not applied here to avoid unreviewed scope creep, consistent with task 143's own precedent
+for its 2 out-of-scope wrong-GUID doc findings.
+
+Both POML escalation triggers checked and cleared: trigger 1 (branch failure) did not fire — the
+one genuine defect found was a catalog-completeness gap, fixed in-commit per task 143's own
+precedent, not a live orchestration failure in H11 itself. Trigger 2 (consent verifier false-Pass
+on genuinely-pending consent) was directly tested and **not observed** — the Pending-branch smoke
+test proves an unknown/unaccepted guest id is never reported as Verified, both by live execution
+and by code inspection of the fail-closed `!response.IsSuccessStatusCode → pendingIds.Add(userId)`
+branch.
+
+Tests: `Sprk.Provisioning.ControlPlane.Tests` (L2, CI-gated) 1003 → **1005/1005** (+2,
+`H11SeamsSmokeTests.cs` — zero regressions). `NightlyTests` project (not CI-gated): no new test
+added; `L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant` re-confirmed passing post-15-role-
+addition; `GraphAppRolesCatalog_AppRoleIds_MatchRealMicrosoftGraphAppRoleDefinitions` hits the SAME
+pre-existing sandbox-only `ManagedIdentityCredential`/IMDS limitation task 143 already documented
+(not a regression from this task — confirmed by inspection: the failure is in credential
+construction, unrelated to catalog contents). Step 9.5 (self-conducted code-review + adr-check,
+test-modifying unconditional override): 0 Critical, 0 Warnings, 0 ADR violations (ADR-028
+`DefaultAzureCredential` + explicit tenant confirmed throughout; ADR-010 no new DI registrations;
+ADR-038 no banned mock patterns in the new smoke test). BFF Hygiene checklist (root CLAUDE.md §10)
+assessed as not triggered — the `GraphAppRoles.cs` edit is a data-catalog addition (one constant +
+one array entry), not a new endpoint/service/DI registration/package/background work.
+
+No coordination needed with any sibling task — task 144 ran alone per the dispatch (no other Wave
+G-4 agents active); git status showed a clean, expected diff scope throughout.
 
 ## Task 141 — COMPLETE (2026-08-20)
 

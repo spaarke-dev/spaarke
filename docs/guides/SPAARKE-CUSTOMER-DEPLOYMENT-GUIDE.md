@@ -740,7 +740,7 @@ az webapp config show --name spaarke-bff-{customer}-{env} --resource-group rg-sp
 # T2 — UAMI registered as Dataverse App User
 pac admin application list --environment <dv-org-url>
 
-# T3 — Graph app-role parity (14 roles per GraphAppRoles.cs)
+# T3 — Graph app-role parity (15 roles per GraphAppRoles.cs — 14 populated 2026-08-17 + 1 User.Invite.All added 2026-08-20 by task 144)
 az ad sp show --id <uami-principal-id> --query "appRoleAssignments"
 
 # T4 — Exchange ApplicationAccessPolicy (2 entries)

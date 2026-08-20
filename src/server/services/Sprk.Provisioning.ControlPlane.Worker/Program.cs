@@ -346,7 +346,7 @@ builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 //   - Admin-consent WaitingOnGate is NOT a failure per design.md §4.1 H3 row —
 //     envelope is processed correctly; the gate is external.
 //   - CLAUDE.md §11 Path C (documented in H3EntraAppRegHandler.cs "SCOPE
-//     DEVIATION" notes): H3 does NOT grant the 14 GraphAppRoles.cs app-only
+//     DEVIATION" notes): H3 does NOT grant the GraphAppRoles.cs app-only
 //     roles (H10 already owns that, correctly targeting the UAMI SP) and does
 //     NOT perform its own Dataverse-app-user assignment (H10 already performs
 //     this for BOTH the BFF app-reg and the UAMI, using H3's own
@@ -650,13 +650,13 @@ builder.Services.AddScoped<H8SpeContainerTypeHandler>();
 // (T2 + T3 silent-fail trap owner) + FIVE collaborator seams
 // (IGraphAppRolesRegistry = L2GraphAppRolesRegistry, a compiled mirror of
 // Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles — L2 cannot reference the BFF
-// assembly per ADR-010 / project MUST rule, so the 14-role catalog is
-// duplicated as its own DI-registered source of truth; IDataverseAppUserCreator
+// assembly per ADR-010 / project MUST rule, so the catalog (15 roles as of
+// task 144) is duplicated as its own DI-registered source of truth; IDataverseAppUserCreator
 // = DataverseWebApiAppUserCreator issues real Dataverse Web API systemusers
 // upsert + role-association calls for BOTH the BFF app-reg and the UAMI;
 // IDataverseAppUserVerifier = DataverseWebApiAppUserVerifier is the INDEPENDENT
 // T2 post-registration re-query; IGraphAppRoleGranter = GraphRestAppRoleGranter
-// grants the 14 roles onto the UAMI SP via raw Graph REST calls;
+// grants the roles onto the UAMI SP via raw Graph REST calls;
 // IGraphAppRoleParityVerifier = GraphRestAppRoleParityVerifier is the INDEPENDENT
 // T3 post-grant re-query).
 builder.Services.Configure<H10DataverseAppUserGraphParityOptions>(

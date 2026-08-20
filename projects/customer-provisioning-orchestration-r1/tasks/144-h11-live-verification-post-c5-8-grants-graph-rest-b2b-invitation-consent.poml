@@ -3,8 +3,8 @@
   <metadata>
     <title>H11: live verification post C5.8 grants (Graph REST + B2B invitation + consent verifier, code already real)</title>
     <phase>C'' Wave G-4 -- Dataverse chain</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H11 is the terminal handler in the Dataverse chain and its consent-gate correctness matters for the acceptance-target run; live verification before Wave G-7 trusts it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,4 +87,43 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion date="2026-08-20">
+    Live verification of H11's 3 REST/Graph seams (GraphRestUserProvisioner, GraphRestB2BInvitationClient,
+    GraphRestB2BConsentVerifier). The consent verifier (fully read-only, the escalation-trigger-relevant
+    seam) was fully live-verified end-to-end -- both Verified and Pending branches -- via new durable
+    xUnit smoke tests (H11SeamsSmokeTests.cs) run genuinely live in-sandbox (unlike H10's equivalent
+    tests, which soft-skipped). The two WRITE-capable seams (POST /users, POST /assignLicense, POST
+    /invitations) had their REST shapes ground-truthed against Microsoft Learn (exact field-name match);
+    the actual writes are deferred to live-ceremony (real Entra user creation / real invitation email --
+    no safe automated undo), same precedent as task 143 (H10).
+
+    BONUS CATCH (MAJOR, fixed same commit): cross-referencing GraphRestB2BInvitationClient's POST
+    /invitations against Microsoft Learn's own least-privileged-permission table found the pre-existing
+    14-role GraphAppRoles.cs / L2GraphAppRolesRegistry.cs catalog (task 005) was missing User.Invite.All
+    entirely -- once task 111's C5.8 grants are live-executed, every B2BGuest-preset H11 run would have
+    received a permanent 403 on the invitation POST. Fixed by adding a 15th catalog role (GUID
+    ground-truthed live: 09850681-111b-4a89-9bed-3f2cae46d706), mirrored to L2, with every stale "14"
+    reference across 8 files (+ spec.md FR-33 + the customer deployment guide) updated. Mirror-parity
+    test (L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant) re-confirmed byte-identical post-fix.
+
+    Consent-verifier reuse check (CLAUDE.md §11): confirmed H11's GraphRestB2BConsentVerifier (checks a
+    guest user's externalUserState) and H3's GraphAdminConsentVerifier (checks app-registration
+    oauth2PermissionGrants) answer genuinely different questions against different Graph resources -- no
+    consolidation opportunity; H11 correctly owns its own verifier.
+
+    Deferred, documented (not fixed): H11UserProvisioningOptions has zero Bicep wiring and its
+    AccountDomain default ("spaarke.onmicrosoft.com") is the Spaarke tenant's own domain, not a
+    customer's -- assessed as fail-loud (Graph rejects an unverified UPN domain), not fail-silent, but a
+    genuine deployment-completeness gap. Recommended as a follow-up task; out of proportion to this
+    verification-scoped task's boundary.
+
+    Escalation triggers: both cleared. Trigger 1 (branch failure) did not fire -- the one genuine defect
+    found was a catalog-completeness gap, fixed in-commit per task 143's own precedent, not a live
+    orchestration failure. Trigger 2 (false-Pass on pending consent) was directly tested and NOT
+    observed -- the Pending-branch smoke test proves an unknown/unaccepted guest id is never reported as
+    Verified.
+
+    Tests: 1003 -> 1005/1005 (+2, H11SeamsSmokeTests.cs). Full report: notes/h11-live-verification-2026-08.md.
+  </notes-completion>
 </task>

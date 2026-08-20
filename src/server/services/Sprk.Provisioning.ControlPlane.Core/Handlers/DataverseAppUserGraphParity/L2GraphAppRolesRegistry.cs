@@ -16,6 +16,14 @@
 // "6695"), mirrored verbatim from the then-wrong BFF source. Live-verified
 // against the real Microsoft Graph resource SP appRoles collection -- see
 // GraphAppRoles.cs's matching correction comment for full evidence trail.
+//
+// ADDITION (2026-08-20, task 144 -- H11 live verification): a 15th role,
+// User.Invite.All (AppRoleId "09850681-111b-4a89-9bed-3f2cae46d706"), was
+// added to close a genuine grant-catalog gap H11's B2BGuest identity preset
+// needs (POST /invitations) that the pre-existing 14-role catalog did not
+// cover. See GraphAppRoles.cs's matching addition comment for full evidence
+// trail (Microsoft Learn least-privileged-permission citation + live GUID
+// ground-truthing).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
@@ -52,6 +60,9 @@ public sealed class L2GraphAppRolesRegistry : IGraphAppRolesRegistry
         new GraphAppRoleEntry("User.ReadWrite.All", "741f803b-c850-494e-b5df-cde7c675a1ca"),
         new GraphAppRoleEntry("GroupMember.ReadWrite.All", "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"),
         new GraphAppRoleEntry("Directory.ReadWrite.All", "19dbc75e-c2e2-444c-a770-ec69d8559fc7"),
+
+        // Customer Provisioning (H11 B2BGuest identity preset) — added 2026-08-20, task 144.
+        new GraphAppRoleEntry("User.Invite.All", "09850681-111b-4a89-9bed-3f2cae46d706"),
     };
 
     /// <inheritdoc/>

@@ -15,11 +15,12 @@
 //   file headers).
 //
 // COVERAGE (task POML acceptance criteria + dispatcher-required cases):
-//   AC-1  Happy path — all 14 GraphAppRoles.cs GUIDs (task 005 note taken:
+//   AC-1  Happy path — all GraphAppRoles.cs GUIDs (task 005 note taken:
 //         this handler operates over WHATEVER the registry returns, so the
 //         happy-path fixture uses a representative 3-role registry; a
-//         SEPARATE test (AC-14) exercises the REAL L2GraphAppRolesRegistry
-//         mirror to assert it enumerates exactly 14 populated GUIDs).
+//         SEPARATE test (AC-16) exercises the REAL L2GraphAppRolesRegistry
+//         mirror to assert it enumerates exactly 15 populated GUIDs — 14 per
+//         r1 task 005 + 1 added by task 144, H11 verification).
 //   AC-2  T2 verify fail (CountMismatch) — QuarantineRequired, trap-T2 code,
 //         diagnostic cites the observed count.
 //   AC-3  T3 verify fail (Partial, 2 of 3 present) — QuarantineRequired,
@@ -41,8 +42,9 @@
 //         distinct from T3's QuarantineRequired classification (dispatcher-
 //         required: both classifications exercised).
 //   AC-15 Idempotency key format determinism.
-//   AC-16 L2GraphAppRolesRegistry (REAL, not faked) enumerates all 14 roles
-//         with non-null AppRoleId + the well-known Graph resource appId.
+//   AC-16 L2GraphAppRolesRegistry (REAL, not faked) enumerates all 15 roles
+//         with non-null AppRoleId + the well-known Graph resource appId
+//         (14 per r1 task 005 + 1 added by task 144 -- H11 verification).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -431,20 +433,22 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         k3.Should().NotBe(k1);
     }
 
-    // ---------- AC-16 real L2GraphAppRolesRegistry mirror — all 14 GUIDs ----------
+    // ---------- AC-16 real L2GraphAppRolesRegistry mirror — all 15 GUIDs ----------
 
     [Fact]
-    public void AC16_L2GraphAppRolesRegistry_EnumeratesAll14PopulatedGuids()
+    public void AC16_L2GraphAppRolesRegistry_EnumeratesAllPopulatedGuids()
     {
         var registry = new L2GraphAppRolesRegistry();
 
         registry.GraphResourceAppId.Should().Be("00000003-0000-0000-c000-000000000000");
 
         var roles = registry.GetAll();
-        roles.Should().HaveCount(14, "GraphAppRoles.cs r3 task 062 catalog is 14 entries");
+        roles.Should().HaveCount(15,
+            "GraphAppRoles.cs r3 task 062 catalog is 14 entries + 1 added by task 144 (User.Invite.All, " +
+            "H11 B2BGuest preset)");
         roles.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.AppRoleId),
-            "all 14 AppRoleId GUIDs were populated by r1 task 005 (2026-08-17) — a null here would silently " +
-            "fire the H10 escalation gate for every future run");
+            "all AppRoleId GUIDs must be populated (14 by r1 task 005 on 2026-08-17, +1 by task 144 on " +
+            "2026-08-20) — a null here would silently fire the H10 escalation gate for every future run");
         roles.Select(r => r.Value).Should().OnlyHaveUniqueItems();
         roles.Select(r => r.AppRoleId).Should().OnlyHaveUniqueItems("no two roles share an AppRoleId GUID");
     }

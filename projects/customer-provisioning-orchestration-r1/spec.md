@@ -191,7 +191,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 
 **Silent-fail trap catalog (§4B):**
 
-33. **FR-33**: Six silent-fail traps (T1–T6) baked into handler post-conditions as verified assertions (not runbook footnotes). Each handler asserts its trap is cleared before reporting success. **Acceptance**: T1 (App Service `keyVaultReferenceIdentity == UAMI`); T2 (`systemusers?$filter=applicationid eq {mi-app-id}` returns 1); T3 (UAMI SP `appRoleAssignments` includes all 14 from `GraphAppRoles.cs`); T4 (`Get-ApplicationAccessPolicy` returns 2 entries with both principals — H14 creates if missing, verifies drift diagnostic if 2+); T5 (both slot MIs have KV RBAC — interim; structurally impossible post-Phase C UAMI); T6 (SPE container-type creation uses confidential-client cert from KV).
+33. **FR-33**: Six silent-fail traps (T1–T6) baked into handler post-conditions as verified assertions (not runbook footnotes). Each handler asserts its trap is cleared before reporting success. **Acceptance**: T1 (App Service `keyVaultReferenceIdentity == UAMI`); T2 (`systemusers?$filter=applicationid eq {mi-app-id}` returns 1); T3 (UAMI SP `appRoleAssignments` includes all 15 from `GraphAppRoles.cs` — 14 populated by r1 task 005 on 2026-08-17, +1 `User.Invite.All` added by task 144 on 2026-08-20 for H11's B2BGuest preset); T4 (`Get-ApplicationAccessPolicy` returns 2 entries with both principals — H14 creates if missing, verifies drift diagnostic if 2+); T5 (both slot MIs have KV RBAC — interim; structurally impossible post-Phase C UAMI); T6 (SPE container-type creation uses confidential-client cert from KV).
 
 **Upgrade model (§14A — added v3.3):**
 

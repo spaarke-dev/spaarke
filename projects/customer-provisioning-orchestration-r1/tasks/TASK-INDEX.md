@@ -243,7 +243,7 @@ _H5/H6/H7 SDK ports + credential config, H10/H11 live verification_
 | 141 | ✅ | H6: Web-API import port (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging | FULL | sonnet / xhigh | none | 102, 103, 140 |
 | 142 | ✅ | H7: credential provisioning (EnvVarValues:ClientSecret KV ref) + NFR-05 validation | STANDARD | sonnet / high | waveG4-parallel | 126 |
 | 143 | ✅ | H10: live verification post C5.8 grants (5 REST/Graph seams, code already real) | FULL | sonnet / high | none | 111, 140 |
-| 144 | 🔲 | H11: live verification post C5.8 grants (Graph REST + B2B invitation + consent verifier, code already real) | FULL | sonnet / high | none | 111, 143 |
+| 144 | ✅ | H11: live verification post C5.8 grants (Graph REST + B2B invitation + consent verifier, code already real) | FULL | sonnet / high | none | 111, 143 |
 
 ### Phase C'' Wave G-5 -- Seed (4 tasks)
 

@@ -7,8 +7,8 @@
 // PURPOSE:
 //   Registers the BFF app-registration AND the UAMI as Dataverse System
 //   Administrator Application Users on the target Dataverse environment, then
-//   syncs the 14-role Microsoft Graph application (app-only) permission
-//   catalog (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally
+//   syncs the Microsoft Graph application (app-only) permission catalog (15
+//   roles as of task 144; Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally
 //   via IGraphAppRolesRegistry — see that file's header for the L2/BFF
 //   assembly-isolation rationale) onto the UAMI service principal.
 //
@@ -266,7 +266,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             var diagnostic =
                 $"H10 escalation gate: {nullGuidRoles.Count} of {expectedRoles.Count} GraphAppRoles entries have a " +
                 $"null AppRoleId ({string.Join(", ", nullGuidRoles)}). Phase A GUID completion (task 005) must " +
-                "populate ALL 14 AppRoleId GUIDs via live 'az ad sp show' enumeration BEFORE H10 runs for any " +
+                "populate ALL AppRoleId GUIDs via live 'az ad sp show' enumeration BEFORE H10 runs for any " +
                 "production customer. Refusing to proceed — NO Graph or Dataverse write has been attempted.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 H10Rejections.EscalationGateNullAppRoleId, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -311,7 +311,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
         var uamiSystemUserId = ((DataverseAppUserVerificationResult.Verified)t2Result).SystemUserId;
 
-        // (12) Grant all 14 Graph app-roles onto the UAMI service principal.
+        // (12) Grant all Graph app-roles (15 as of task 144) onto the UAMI service principal.
         var grantOutcome = await _roleGranter.GrantRolesAsync(
             uamiObjectId, tenantId, expectedRoles, cancellationToken).ConfigureAwait(false);
         if (grantOutcome is GraphAppRoleGrantOutcome.Failure grantFailure)

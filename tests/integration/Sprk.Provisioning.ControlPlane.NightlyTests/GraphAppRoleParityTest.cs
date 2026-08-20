@@ -1,14 +1,15 @@
 // -----------------------------------------------------------------------------
 // GraphAppRoleParityTest.cs
 //
-// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the 14-role Microsoft
+// Nightly (NOT per-PR) T3 silent-fail-trap safety net for the 15-role Microsoft
 // Graph application (app-only) permission catalog owned by the BFF's
 // Infrastructure/Auth/GraphAppRoles.cs constant.
 //
 // Purpose (POML task 067 goal):
 //   (a) Reflectively enumerate Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All
-//       (14 (Value, DisplayName, AppRoleId, ...) entries as of 2026-08-17 per r1
-//       task 005's live `az ad sp show` enumeration).
+//       (15 (Value, DisplayName, AppRoleId, ...) entries — 14 as of 2026-08-17 per
+//       r1 task 005's live `az ad sp show` enumeration, +1 User.Invite.All added
+//       2026-08-20 by task 144's H11 live verification).
 //   (b) Query the customer environment's UAMI service principal
 //       (envelope: AZURE_TENANT_ID + UAMI_SP_OBJECT_ID) for its
 //       appRoleAssignments via Microsoft.Graph SDK v6, using an EXPLICIT tenantId
@@ -110,12 +111,14 @@ public sealed class GraphAppRoleParityTest
         // rather than silently going stale.
         var expectedRoles = ReadExpectedRolesReflectively();
         expectedRoles.Should().HaveCount(
-            14,
-            "GraphAppRoles.All must enumerate exactly the 14 canonical roles "
-            + "populated by r1 task 005 (5 SPE + 2 Directory + 4 Email + 3 Self-Service).");
+            15,
+            "GraphAppRoles.All must enumerate exactly the 15 canonical roles "
+            + "(5 SPE + 2 Directory + 4 Email + 3 Self-Service, populated by r1 task 005; + 1 Customer "
+            + "Provisioning User.Invite.All, added by task 144 -- H11 verification).");
         expectedRoles.Where(r => string.IsNullOrWhiteSpace(r.AppRoleId)).Should().BeEmpty(
-            "All 14 AppRoleId GUIDs must be populated per H10 escalation gate "
-            + "(spec.md MUST rule); r1 task 005 landed all 14 on 2026-08-17.");
+            "All AppRoleId GUIDs must be populated per H10 escalation gate "
+            + "(spec.md MUST rule); r1 task 005 landed the first 14 on 2026-08-17, task 144 added the 15th "
+            + "on 2026-08-20.");
 
         var graphResourceAppId = GetGraphResourceAppIdReflectively();
 
@@ -469,11 +472,12 @@ public sealed class GraphAppRoleParityTest
         var sb = new StringBuilder();
         sb.AppendLine(
             $"UAMI service principal '{uamiSpObjectId}' Graph app-role assignments diverge from "
-            + "GraphAppRoles.cs (14-role canonical catalog).");
+            + "GraphAppRoles.cs (15-role canonical catalog).");
         sb.AppendLine($"Tenant: {tenantId}");
         sb.AppendLine(
             $"Expected: {expectedRoles.Count} roles from Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All"
-            + $" (r1 task 005 populated all 14 GUIDs 2026-08-17).");
+            + $" (r1 task 005 populated 14 GUIDs 2026-08-17; task 144 added a 15th, User.Invite.All, "
+            + "2026-08-20).");
         sb.AppendLine();
         if (missing.Count > 0)
         {
