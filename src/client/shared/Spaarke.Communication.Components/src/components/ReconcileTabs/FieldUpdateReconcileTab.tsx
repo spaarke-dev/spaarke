@@ -656,6 +656,21 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
         <div className={s.state} role="note" data-testid="field-reconcile-empty">
           <Text>No field updates proposed for this record.</Text>
         </div>
+        {/* Item 2g (owner UAT 2026-08-19): the "Update other fields" affordance must be
+            available even when the engine proposed no field updates — a confirmed record
+            can always have other fields edited via its OOB form. Shown whenever a record
+            is confirmed (gated the same as the populated-list button below). */}
+        {regarding ? (
+          <Button
+            appearance="secondary"
+            icon={<AddRegular />}
+            className={s.updateOther}
+            data-testid="field-reconcile-update-other"
+            onClick={() => void openRecordForm()}
+          >
+            Update other fields
+          </Button>
+        ) : null}
       </div>
     );
   }

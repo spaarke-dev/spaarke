@@ -66,3 +66,61 @@ describe('derivePrimaryReview type label (item 1 — "Matter", not "Record")', (
     expect(model.primary?.typeLabel).toBe('Matter');
   });
 });
+
+describe('candidate display name (item 3 — parse name from contributor provenance, not the GUID)', () => {
+  // Real provenance shape (spaarkedev1 2026-08-19): the flat candidate carries only a GUID
+  // targetId; the resolved name lives in the contributor's `name="…"` token.
+  const prov = JSON.stringify({
+    version: 1,
+    direction: 'Incoming',
+    decision: { status: '', autoFiled: false, killSwitchEnabled: false, autoFileThreshold: 0.85 },
+    rungsFired: [],
+    candidates: [
+      {
+        field: 'sprk_regardingmatter',
+        targetEntity: 'sprk_matter',
+        targetId: '86335ce3-4c18-f111-8343-7ced8d1dc988',
+        reinforcedConfidence: 0.97,
+        deterministicConfidence: 0.97,
+        written: false,
+        conflict: false,
+        contributors: [
+          {
+            rung: 'RecordNameMatch',
+            confidence: 0.97,
+            provenance:
+              'record-name-match:sprk_matter:where=subject:matched=number:name="Monte Rosa Biotechnology v Spaarke Inc":number="LITG-119896":reason="reference number in subject"',
+          },
+        ],
+      },
+      {
+        field: 'sprk_regardingperson',
+        targetEntity: 'contact',
+        targetId: '8e9918a9-9021-f111-88b5-7c1e520aa4df',
+        reinforcedConfidence: 0.7,
+        deterministicConfidence: 0,
+        written: false,
+        conflict: false,
+        contributors: [
+          {
+            rung: 'ContactNameMatch',
+            confidence: 0.7,
+            provenance: 'contact-name-match:where=body:matched=fullname:name="Ralph Schroeder":reason="name in body"',
+          },
+        ],
+      },
+    ],
+    signals: [],
+  });
+
+  it('flattens the candidate name/number from the contributor provenance (never the raw GUID)', () => {
+    const model = derivePrimaryReview(prov, 100000001 /* pending */, [], {});
+    const matter = model.candidates.find(c => c.entity === 'sprk_matter');
+    const contact = model.candidates.find(c => c.entity === 'contact');
+    expect(matter?.targetName).toBe('Monte Rosa Biotechnology v Spaarke Inc');
+    expect(matter?.recordNumber).toBe('LITG-119896');
+    expect(contact?.targetName).toBe('Ralph Schroeder');
+    // Never the GUID.
+    expect(model.candidates.some(c => c.targetName.includes('-f111-'))).toBe(false);
+  });
+});

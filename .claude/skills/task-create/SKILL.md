@@ -335,6 +335,11 @@ FOR each new-component task:
 
 **Audit trail**: tasks with hollow or missing `<justification>` are blocked from code review per CLAUDE.md §11. The `code-review` skill Step 6.6 verifies justification concreteness at PR time.
 
+**Component-complexity check (per [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md))** — for any task that creates a new component OR **materially grows an existing one**, evaluate **complexity/cohesion, not line count**:
+- If the task would add a **second (or Nth) responsibility** to an already-multi-purpose component, design the task to **extract the diverging responsibility into the right seam** up front — don't accrete another concern onto a god-class. (Prefer extending a *cohesive* component; don't manufacture thin components to dodge a size number.)
+- A large file is **not** a defect by itself — a large, single-responsibility/cohesive component (state machine, exhaustive mapping, generated code) is legitimate; note it in the task if relevant.
+- When an existing component's responsibilities have genuinely diverged, prefer a **deliberate decomposition task** over reactively splitting mid-feature. (There is no hard LOC gate — the retired God-class ratchet is replaced by this authoring/review guidance + a non-blocking observation report, `scripts/report-large-server-files.ps1`.)
+
 ### Step 3.6: Add Deployment Tasks (REQUIRED)
 
 ```

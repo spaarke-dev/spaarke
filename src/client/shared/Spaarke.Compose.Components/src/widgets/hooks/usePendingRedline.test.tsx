@@ -1165,8 +1165,9 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
   }: {
     editorRef: React.Ref<import('../ComposeEditor').ComposeEditorHandle>;
   }): React.JSX.Element {
-    const [redlineError, setRedlineError] =
-      React.useState<import('./usePendingRedline').PendingRedlineError | null>(null);
+    const [redlineError, setRedlineError] = React.useState<import('./usePendingRedline').PendingRedlineError | null>(
+      null
+    );
     return (
       <FluentProvider theme={webDarkTheme}>
         <ComposeEditor ref={editorRef} docxBytes={null} onRedlineErrorChange={setRedlineError} />
