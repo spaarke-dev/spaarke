@@ -229,7 +229,7 @@ _H3 Graph app-reg + real consent verifier, H8 confidential-client, H9 artifact-b
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 130 | 🔲 | H3: Graph app-reg port (Applications/ServicePrincipals/AppRoleAssignedTo/Oauth2PermissionGrants) + real consent verifier + KV writes + H10-idiom app-user assign | FULL | sonnet / xhigh | none | 102, 103, 125, 126 |
+| 130 | ✅ | H3: Graph app-reg port (Applications/ServicePrincipals/Oauth2PermissionGrants) + real consent verifier + Model 1/2 branch + FIC + KV writes (14-grant + Dataverse app-user reuse deviated to H10 — see task notes) | FULL | sonnet / xhigh | none | 102, 103, 125, 126 |
 | 131 | 🔲 | H8: Graph containerTypes port (ClientCertificateCredential, T6 cert from KV) | FULL | sonnet / high | none | 102, 103, 125, 126 |
 | 132 | 🔲 | H9: artifact-based rebuild -- handler side (manifest verify + blob download + Kudu zip-deploy + SwapSlotAsync + rollback re-swap) | FULL | sonnet / high | none | 102, 103, 116 |
 

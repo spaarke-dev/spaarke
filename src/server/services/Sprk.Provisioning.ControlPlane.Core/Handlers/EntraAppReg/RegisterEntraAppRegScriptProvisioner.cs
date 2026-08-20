@@ -1,6 +1,20 @@
 // -----------------------------------------------------------------------------
 // RegisterEntraAppRegScriptProvisioner.cs
 //
+// RETIRED (task 130, Wave G-3, xhigh, 2026-08-19): superseded by
+// <see cref="GraphAppRegistrationProvisioner"/> (Microsoft.Graph 6.5.0 SDK
+// port — Applications/ServicePrincipals/FederatedIdentityCredentials, per
+// design.md §4.1's H3 SDK-surface table + Option D's zero-shell-out
+// invariant). This ProcessStartInfo shell-out is exactly what Option D
+// requires be eliminated from the L2 main-site process (spec.md MUST rule
+// post-line-254 block — the sole sanctioned exception is the H14a Exchange
+// sidecar). No longer registered in Worker/Program.cs's IEntraAppRegProvisioner
+// DI slot. Retained on disk (NOT deleted); see AzCliKvSecretsWriter.cs's
+// retirement banner (task 125) for the project's retirement-not-deletion
+// rationale. BuildKvUriReference is duplicated (not reused) in
+// GraphAppRegistrationProvisioner.cs — this file is intentionally inert.
+// -----------------------------------------------------------------------------
+
 // Production <see cref="IEntraAppRegProvisioner"/> implementation — shells out
 // to the hardened <c>scripts/Register-EntraAppRegistrations.ps1</c> with the
 // H3 envelope's parameters and parses the script's summary output to extract
@@ -86,6 +100,25 @@ public sealed class RegisterEntraAppRegScriptProvisioner : IEntraAppRegProvision
         _options = options.Value;
         _logger = logger;
     }
+
+    /// <summary>
+    /// RETIRED — never invoked (unregistered). Stub satisfies the
+    /// <see cref="IEntraAppRegProvisioner"/> interface's task-130 extension
+    /// (Model 1 shared-app-reg verification did not exist when this class was
+    /// authored) so the retired file keeps compiling. Throws if ever called.
+    /// </summary>
+    public Task<EntraAppRegSharedVerifyOutcome> VerifySharedAsync(
+        EntraAppRegSharedVerifyRequest request, CancellationToken cancellationToken)
+        => throw new NotSupportedException(
+            "RegisterEntraAppRegScriptProvisioner is RETIRED (task 130) and unregistered — " +
+            "VerifySharedAsync should never be reachable. See file-header retirement banner.");
+
+    /// <summary>RETIRED — never invoked (unregistered). See <see cref="VerifySharedAsync"/> stub doc.</summary>
+    public Task<string?> CommitPendingSecretsAsync(
+        IReadOnlyList<PendingKvSecretWrite> pendingWrites, CancellationToken cancellationToken)
+        => throw new NotSupportedException(
+            "RegisterEntraAppRegScriptProvisioner is RETIRED (task 130) and unregistered — " +
+            "CommitPendingSecretsAsync should never be reachable. See file-header retirement banner.");
 
     /// <inheritdoc/>
     public async Task<EntraAppRegOutcome> ProvisionAsync(

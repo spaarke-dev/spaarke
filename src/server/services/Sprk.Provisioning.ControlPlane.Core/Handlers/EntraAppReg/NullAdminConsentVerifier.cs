@@ -1,6 +1,16 @@
 // -----------------------------------------------------------------------------
 // NullAdminConsentVerifier.cs
 //
+// RETIRED (task 130, Wave G-3, xhigh, 2026-08-19): superseded by
+// <see cref="GraphAdminConsentVerifier"/> (Microsoft.Graph 6.5.0 SDK — real
+// oauth2PermissionGrants query). This placeholder's unconditional "Verified"
+// return was DS-4 §3's primary defect finding: "the consent gate can advance
+// on fiction." No longer registered in Worker/Program.cs's IAdminConsentVerifier
+// DI slot. Retained on disk (NOT deleted); see AzCliKvSecretsWriter.cs's
+// retirement banner (task 125) for the project's retirement-not-deletion
+// rationale.
+// -----------------------------------------------------------------------------
+
 // L2 CONTROL-PLANE placeholder impl of IAdminConsentVerifier (task 046 —
 // Wave C4 scaffold). Wave C5 replaces this with a real Microsoft.Graph SDK
 // v6 impl querying oauth2PermissionGrants / servicePrincipals.appRoleAssignments

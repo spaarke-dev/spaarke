@@ -298,37 +298,69 @@ builder.Services.AddSingleton<ITenantFilterTemplateStore>(sp => new CosmosTenant
 builder.Services.AddSingleton<IAiSearchTenantFilterTemplateProvisioner, AiSearchTenantFilterTemplateProvisioner>();
 builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 
-// Task 046: H3 Entra app-registration handler + two collaborator seams
-// (IEntraAppRegProvisioner shells out to hardened
-// scripts/Register-EntraAppRegistrations.ps1 per r1 task 010 commit fea66c023;
-// IAdminConsentVerifier queries Graph oauth2PermissionGrants — Wave C4 uses
-// NullAdminConsentVerifier (always Verified) as scaffold, Wave C5 swaps for
-// Microsoft.Graph SDK v6 impl with DefaultAzureCredential per ADR-028). All
-// registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// Task 046 / task 130: H3 Entra app-registration handler + two collaborator
+// seams. Task 130 (Wave G-3, xhigh, Option D hybrid) REPLACED the shell-out
+// scaffold (RegisterEntraAppRegScriptProvisioner + NullAdminConsentVerifier —
+// both RETIRED, kept on disk unregistered per their retirement banners) with
+// pure Microsoft.Graph 6.5.0 SDK ports: GraphAppRegistrationProvisioner
+// (Applications/ServicePrincipals/FederatedIdentityCredentials/AddPassword —
+// Model 2 ensure/create + FIC trusting the shared BFF UAMI per auth-v4 §3.1)
+// and GraphAdminConsentVerifier (a REAL oauth2PermissionGrants query —
+// closes DS-4 §3's "consent gate can advance on fiction" defect finding).
+// Task 130 also added the Model 1 vs Model 2 tenancy-model runtime branch
+// (I6-enforced, design.md §4D / spec.md FR-40 — no default/fallback) inside
+// H3EntraAppRegHandler itself. All registrations UNCONDITIONAL per ADR-032 —
+// no feature-gate branches.
+//
+// Both Graph collaborators construct a FRESH per-tenant DefaultAzureCredential
+// per call (parity with H10's GraphRestAppRoleGranter — §4D I5 explicit
+// per-tenant scope) rather than reusing the shared UAMI-pinned TokenCredential
+// singleton (that credential is only used for GraphAppRegistrationProvisioner's
+// KV writes, which target the customer's own vault under L2's own platform
+// UAMI's RBAC grant — see that file's header for the full Graph-vs-KV
+// credential split rationale + the 2 SDK gotchas ground-truthed via reflection
+// before authoring).
 //
 // Placement Justification (CLAUDE.md §10): H3 lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H3
 // uses IProvisioningRunRepository (task 037) + two dedicated seams; no BFF-
 // facade dependencies. Downstream H4 (task 047, Batch 3D) reads bffAppRegId
-// from interStepState; H3 does NOT enqueue H4 directly — Wave C5 reconciler
-// owns fan-out (parity with H2a's post-deploy branching model).
+// from interStepState AND the BFF-API-ClientId/Audience/ClientSecret KV
+// references H3 now writes to RunParameters.Secrets (task 129's manifest.yaml
+// reclassification of the first two entries to from-run-parameter, owner E3);
+// H3 does NOT enqueue H4 directly — the reconciler owns fan-out.
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
-//   - ADR-028 UAMI-outbound + KV-secret-ref: script uses az operator auth;
-//     client secret stored in KV as BFF-API-ClientSecret and referenced
-//     downstream as @Microsoft.KeyVault(SecretUri=...) — cleartext NEVER
-//     traverses Cosmos parameters/interStepState (handler leak-guard enforces).
+//   - ADR-028 UAMI-outbound + KV-secret-ref: client secret stored in KV as
+//     BFF-API-ClientSecret and referenced downstream as
+//     @Microsoft.KeyVault(SecretUri=...) — cleartext NEVER traverses Cosmos
+//     parameters/interStepState (handler leak-guard enforces); KV writes are
+//     DEFERRED (PendingKvSecretWrite, in-memory only) until admin-consent is
+//     verified, per DS-4 §3's binding recipe ordering.
 //   - spec.md MUST rule (Dataverse S2S drop per r3 task 060): NO S2sAppRegId
 //     field on EntraAppRegOutputs (compile-time guard); NO code path to
 //     invoke a script that would create one.
 //   - §4C rollback: provisioner failures + missing precondition are Resumable;
-//     cleartext-secret-leak + S2S-forbidden are QuarantineRequired.
+//     cleartext-secret-leak + S2S-forbidden + deferred-KV-commit-failure are
+//     QuarantineRequired.
 //   - Admin-consent WaitingOnGate is NOT a failure per design.md §4.1 H3 row —
 //     envelope is processed correctly; the gate is external.
+//   - CLAUDE.md §11 Path C (documented in H3EntraAppRegHandler.cs "SCOPE
+//     DEVIATION" notes): H3 does NOT grant the 14 GraphAppRoles.cs app-only
+//     roles (H10 already owns that, correctly targeting the UAMI SP) and does
+//     NOT perform its own Dataverse-app-user assignment (H10 already performs
+//     this for BOTH the BFF app-reg and the UAMI, using H3's own
+//     InterStepState.BffAppRegId output).
 builder.Services.Configure<EntraAppRegOptions>(
     builder.Configuration.GetSection(nameof(EntraAppRegOptions)));
-builder.Services.AddSingleton<IEntraAppRegProvisioner, RegisterEntraAppRegScriptProvisioner>();
-builder.Services.AddSingleton<IAdminConsentVerifier, NullAdminConsentVerifier>();
+builder.Services.AddSingleton<IEntraAppRegProvisioner>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var options = sp.GetRequiredService<IOptions<EntraAppRegOptions>>();
+    var logger = sp.GetRequiredService<ILogger<GraphAppRegistrationProvisioner>>();
+    return new GraphAppRegistrationProvisioner(credential, options, logger);
+});
+builder.Services.AddSingleton<IAdminConsentVerifier, GraphAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
 
 // Task 048: H5 Dataverse env creation handler + 2 collaborator seams

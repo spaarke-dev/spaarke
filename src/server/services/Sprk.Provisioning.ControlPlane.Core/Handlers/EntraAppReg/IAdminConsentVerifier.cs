@@ -3,36 +3,46 @@
 //
 // L2 abstraction over the Microsoft Graph admin-consent verification H3
 // performs AFTER provisioning the BFF app-registration. Post-provisioning,
-// the app-registration exists but its Graph application-role assignments
-// (14 of them per Infrastructure/Auth/GraphAppRoles.cs) require a tenant
-// admin's explicit consent before the tokens can carry those roles. H3
-// queries Graph to confirm the tenant admin has consented and — if not —
-// transitions the run to WaitingOnGate rather than failing.
+// the app-registration's DELEGATED permissions (5 per
+// EntraAppRegPermissionCatalog.cs — Files/Sites/User.Read/Mail.Send +
+// Dynamics user_impersonation) require a tenant admin's explicit consent
+// before tokens can carry those scopes. H3 queries Graph
+// (oauth2PermissionGrants) to confirm the tenant admin has consented and —
+// if not — transitions the run to WaitingOnGate rather than failing.
+//
+// SCOPE CORRECTION (task 130, Wave G-3 — Path C per root CLAUDE.md §6.5,
+// documented in task 130's completion notes): the Wave-C4 scaffold's doc
+// comments described this verifier as covering the 14 APPLICATION-ONLY
+// (app-role) grants from Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.cs.
+// That catalog is H10's exclusive concern (GraphRestAppRoleGranter +
+// GraphRestAppRoleParityVerifier already grant + verify all 14 onto the
+// customer's UAMI service principal — a DIFFERENT principal than this
+// app-registration's own service principal). design.md §4.1's H3 SDK-surface
+// table (Applications/ServicePrincipals/Oauth2PermissionGrants — no
+// AppRoleAssignedTo) confirms H3 never owned the app-role catalog. This
+// verifier's true scope is the 5 DELEGATED (OAuth2PermissionScope) grants —
+// EntraAppRegPermissionCatalog.cs is the shared source of truth both this
+// verifier and GraphAppRegistrationProvisioner consume.
 //
 // SPEC / DESIGN references:
-//   - spec.md FR-06 (H3 acceptance): "app-reg's 14 permissions returned by
-//     Graph oauth2PermissionGrants query"
+//   - spec.md FR-06 (H3 acceptance): app-reg permissions returned by a Graph
+//     oauth2PermissionGrants query.
 //   - spec.md NFR-09: Graph v6 / Kiota 2.0 error type — catch ODataError
-//     (not ServiceException); ResponseStatusCode is int
+//     (not ServiceException); ResponseStatusCode is int.
 //   - design.md §4.1 H3 row: WaitingOnGate on admin-consent-pending is a
-//     resumable pause, NOT a failure
-//   - .claude/adr/ADR-028-spaarke-auth-architecture.md: MI-outbound MUST rule —
-//     Wave C5 real impl uses DefaultAzureCredential, never account-key
-//
-// DESIGN CHOICE (verifier deferred, not implemented in Wave C4):
-//   Parity with NullSubscriptionReadinessProbe (task 043) and
-//   NullDataverseEnvironmentRegistryClient (task 042). Wave C4 ships the
-//   interface + a "Verified" null placeholder so H3 is fully unit-testable
-//   without wiring up the Graph SDK against a live customer tenant. Wave C5
-//   replaces with a real Microsoft.Graph SDK v6 implementation querying
-//   `oauth2PermissionGrants` or `appRoleAssignments` for the BFF servicePrincipal.
+//     resumable pause, NOT a failure.
+//   - .claude/adr/ADR-028-spaarke-auth-architecture.md: MI-outbound MUST rule.
 //
 // GATE SEMANTICS:
-//   - Verified(grantedCount, expectedCount) — enough grants observed;
-//     `admin-consent` gate flips to Verified; handler returns Success.
-//   - Pending(grantedCount, expectedCount, diagnostic) — some grants missing;
-//     handler transitions run to WaitingOnGate with `admin-consent` = Pending;
-//     Reconciler re-invokes H3 after operator grants consent.
+//   - Verified(grantedCount, expectedCount) — all 5 delegated scope values
+//     observed on the app's oauth2PermissionGrants; `admin-consent` gate
+//     flips to Verified; handler returns Success.
+//   - Pending(grantedCount, expectedCount, diagnostic) — some/all scopes
+//     missing (or the service principal does not exist yet in the target
+//     tenant — the multi-tenant SP is only materialized once someone in that
+//     tenant interacts with the app); handler transitions run to
+//     WaitingOnGate with `admin-consent` = Pending; reconciler re-invokes H3
+//     after operator grants consent.
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;
@@ -41,32 +51,31 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 
 /// <summary>
 /// Verifies tenant admin consent has been granted for the BFF app-registration's
-/// requested Graph application roles (14 per <c>Sprk.Bff.Api.Infrastructure.
-/// Auth.GraphAppRoles</c>). Domain outcomes (consent granted, consent pending)
-/// return typed results; only unexpected infrastructure errors (transient
-/// Graph SDK fault, network fault) should throw.
+/// 5 requested DELEGATED permissions (<see cref="EntraAppRegPermissionCatalog"/>).
+/// Domain outcomes (consent granted, consent pending) return typed results;
+/// only unexpected infrastructure errors (transient Graph SDK fault, network
+/// fault) should throw.
 /// </summary>
 public interface IAdminConsentVerifier
 {
     /// <summary>
-    /// Queries Microsoft Graph for the current admin-consent state on the BFF
-    /// app-registration in the target tenant. Wave C5 real impl calls
-    /// <c>/oauth2PermissionGrants</c> and/or <c>/servicePrincipals/{id}/appRoleAssignments</c>
-    /// against the customer tenant using DefaultAzureCredential (Wave C4 uses
-    /// <see cref="NullAdminConsentVerifier"/>).
+    /// Queries Microsoft Graph <c>oauth2PermissionGrants</c> for the BFF
+    /// app-registration's service principal in the target tenant, using
+    /// DefaultAzureCredential scoped explicitly to that tenant (§4D I5).
     /// </summary>
     /// <param name="bffAppRegId">The BFF app-registration <c>appId</c> to verify.</param>
     /// <param name="tenantId">Target Entra tenant id (§4D I1 — mandatory).</param>
-    /// <param name="expectedRoleCount">
-    /// Number of Graph application roles expected per <c>GraphAppRoles.cs</c>
-    /// (14 as of 2026-08-17). The verifier compares observed grants against
-    /// this expected count to decide Verified vs Pending.
+    /// <param name="expectedDelegatedScopeCount">
+    /// Number of delegated scopes expected per
+    /// <see cref="EntraAppRegPermissionCatalog.All"/> (5 as of task 130). The
+    /// verifier compares observed grant scope values against this expected
+    /// count to decide Verified vs Pending.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<AdminConsentVerificationResult> VerifyAsync(
         string bffAppRegId,
         string tenantId,
-        int expectedRoleCount,
+        int expectedDelegatedScopeCount,
         CancellationToken cancellationToken);
 }
 

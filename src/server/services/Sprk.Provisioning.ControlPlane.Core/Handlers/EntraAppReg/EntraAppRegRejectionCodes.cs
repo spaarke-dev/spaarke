@@ -51,14 +51,40 @@ public static class EntraAppRegRejectionCodes
     public const string RunNotFound = "appreg-run-not-found";
 
     /// <summary>
-    /// <see cref="Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles"/> constant
-    /// contains one or more roles with a null <c>AppRoleId</c>. Handler MUST
-    /// refuse to proceed — a null AppRoleId propagates a Graph 400 downstream
-    /// (r1 task 005 Phase A completed all 14 GUIDs; this guard catches
-    /// regression). NEVER emitted after Phase A completion; kept as a
-    /// forcing-function.
+    /// <see cref="EntraAppRegOptions.ExpectedDelegatedScopeCount"/> is &lt; 1 —
+    /// configuration drift. RENAMED SCOPE (task 130, Wave G-3): this guard
+    /// previously validated the app-role catalog count; H10 now owns the
+    /// 14-app-role catalog exclusively (see EntraAppRegPermissionCatalog.cs
+    /// file header), so this guard validates the 5-delegated-scope count H3's
+    /// own <see cref="IAdminConsentVerifier"/> checks. The STRING VALUE is
+    /// kept unchanged for rejection-code stability (external tools / operator
+    /// UI filters key on this constant).
     /// </summary>
     public const string NullAppRoleIdInCatalog = "appreg-null-approleid-in-catalog";
+
+    /// <summary>
+    /// Run parameter <c>tenancyModel</c> missing or unrecognized — I6 invariant
+    /// (design.md §4D, spec.md FR-40, task 130). The Model 1 vs Model 2 branch
+    /// selection MUST take an explicit tenancy-model parameter with NO default
+    /// value; a missing/blank/unrecognized value refuses loudly rather than
+    /// silently defaulting to either branch.
+    /// </summary>
+    public const string MissingOrInvalidTenancyModel = "appreg-missing-or-invalid-tenancy-model";
+
+    /// <summary>Model 2 branch requires <c>InterStepState.MiObjectId</c> (UAMI principalId — the FIC <c>subject</c>, per auth-v4 §3.1) populated by H2a before H3 dispatches.</summary>
+    public const string MissingUamiObjectId = "appreg-missing-uami-object-id";
+
+    /// <summary>Model 1 branch's shared app-reg configuration (<see cref="EntraAppRegOptions.SharedBffAppRegistrationId"/> / <see cref="EntraAppRegOptions.SharedPlatformKeyVaultName"/>) is not configured — operator must set these app-settings before onboarding a Model 1 tenant.</summary>
+    public const string MissingSharedAppRegConfig = "appreg-missing-shared-appreg-config";
+
+    /// <summary>Model 1's read-only grant-currency verification found the shared app-reg's configuration has drifted (signInAudience / requiredResourceAccess / exposed scope no longer matches expected) — operator must reconcile the shared platform app-reg (out of a per-customer handler's blast radius by design).</summary>
+    public const string SharedAppRegConfigurationDrift = "appreg-shared-appreg-configuration-drift";
+
+    /// <summary>Model 2's federated identity credential creation (auth-v4 §3.1 recipe) failed.</summary>
+    public const string FicCreationFailed = "appreg-fic-creation-failed";
+
+    /// <summary>Model 2's FIC exchange-based verification (a real OAuth2 client_credentials token request using the FIC's client_assertion) did not succeed after exhausting the AADSTS70021 propagation-delay retry budget.</summary>
+    public const string FicVerificationFailed = "appreg-fic-verification-failed";
 
     /// <summary>
     /// The provisioner reported a hard failure (PS script non-zero exit / Graph

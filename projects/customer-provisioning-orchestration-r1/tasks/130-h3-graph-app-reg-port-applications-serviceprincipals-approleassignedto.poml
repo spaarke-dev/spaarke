@@ -3,8 +3,8 @@
   <metadata>
     <title>H3: Graph app-reg port (Applications/ServicePrincipals/AppRoleAssignedTo/Oauth2PermissionGrants) + real consent verifier + KV writes + H10-idiom app-user assign</title>
     <phase>C'' Wave G-3 -- Identity + deploy</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Heaviest single port in the whole Phase G'' backlog per DS-1b (982-line script, 14 grants, consent flow) -- security-sensitive (Entra app registration, consent gate). FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,4 +116,22 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes-completion date="2026-08-19">
+Landed: GraphAppRegistrationProvisioner.cs (Model 2 Graph SDK ensure/create/reconcile app-reg + SP + client-secret + FIC), GraphAdminConsentVerifier.cs (real oauth2PermissionGrants query -- replaces NullAdminConsentVerifier's unconditional Verified), EntraAppRegPermissionCatalog.cs (shared 5-delegated-permission source of truth). H3EntraAppRegHandler.cs rewritten with the Model 1/Model 2 tenancy branch (I6-enforced -- explicit tenancyModel required, no default), deferred-KV-write ordering (DS-4 SS3 binding: KV writes commit only AFTER consent Verified, never before), and BFF-API-ClientId/Audience/ClientSecret RunParameters.Secrets population (task 129's manifest.yaml contract). RegisterEntraAppRegScriptProvisioner.cs + NullAdminConsentVerifier.cs retired (kept on disk, unregistered, retirement banners added -- same pattern as AzCliKvSecretsWriter.cs). Microsoft.Graph 6.5.0 added to Sprk.Provisioning.ControlPlane.Core.csproj (L2's first Graph SDK dependency; every other L2 Graph collaborator stayed on raw HttpClient REST -- a considered per-handler exception, design.md SS4.1's H3 SDK-surface table explicitly assigns Microsoft.Graph 6.x to H3).
+
+DEVIATIONS FROM THIS POML'S LITERAL TEXT (Path C per root CLAUDE.md SS6.5 -- documented at decision point, not deferred):
+
+1. Did NOT implement the 14 AppRoleAssignedTo grants (step 2 / AC "14 AppRoleAssignedTo grants attempted"). design.md SS4.1's authoritative H3 SDK-surface table (line ~197) lists ONLY Applications/ServicePrincipals/Oauth2PermissionGrants for H3 -- no AppRoleAssignedTo. H10 (H10DataverseAppUserGraphParityHandler + GraphRestAppRoleGranter, task 053, already landed) already grants all 14 GraphAppRoles.cs application-only roles onto the customer's UAMI service principal -- a DIFFERENT principal than H3's own app-reg SP (GraphAppRoles.cs's own doc comment: "roles MUST be granted on the UAMI SP -- not on the app registration"). Reimplementing in H3 targeting the wrong principal would be a functional bug, not just duplication -- CLAUDE.md SS11 forced the more-authoritative-source read. H3's real consent verifier instead covers the 5 DELEGATED (OAuth2PermissionScope) grants per the same design.md table's "Oauth2PermissionGrants" entry.
+
+2. Did NOT implement H3's own Dataverse-app-user-assignment step (step 5). H10 (already landed) registers BOTH the BFF app-reg (via H3's own InterStepState.BffAppRegId output) AND the UAMI as Dataverse App Users via DataverseWebApiAppUserCreator -- the exact idiom this POML's step 5 asks H3 to reuse. Per design.md's DAG, "H4 -> H3" and "H5 -> H6 -> H7 -> H10" are separate parallel branches; H5/H6 (which populate DataverseEnvUrl) have not necessarily completed when H3 dispatches, so an H3-side attempt would almost always short-circuit dead in the success path -- exactly the "second, parallel implementation" DS-4's own instruction (reuse H10's idiom, don't duplicate) forbids.
+
+3. Renamed EntraAppRegOptions.ExpectedAppRoleCount -> ExpectedDelegatedScopeCount (default 5, was 14) to correct the Wave-C4 scaffold's scope conflation (its doc comment described the 14-role app-only catalog, which was never actually H3's -- see deviation 1).
+
+4. FIC "exchange-based verification" (AC: "followed by an exchange-based verification call, not treated as verified on a 200 from the creation call alone") implemented as an INDEPENDENT RE-GET of the FIC object (fresh GET confirming Subject/Issuer/Audiences persisted exactly as requested) rather than a literal OAuth2 client_credentials token exchange. Root cause: L2's Worker runs under L2's OWN platform UAMI (Spaarke's tenant), not the customer's per-customer BFF UAMI (the FIC's subject) -- L2 has no credential path to mint a token AS that UAMI to use as a client_assertion. A literal exchange proof belongs to whichever component actually runs AS the customer's UAMI (the deployed BFF itself, H9's domain) -- structurally out of L2's reach, not an oversight. Documented as GOTCHA 2 in GraphAppRegistrationProvisioner.cs's file header.
+
+Acceptance criteria satisfied as originally written: #1 (0 ProcessStartInfo/script-name grep matches), #6 (dotnet build 0 errors / dotnet test 0 failures -- 916/916), #7 (I6 -- explicit tenancyModel param, no default, 2 dedicated tests), #8 (Model 1 creates 0 new app-reg/FIC objects -- test-verified via ProvisionCallCount==0). #3/#4 (consent-verifier Pending/Verified branching) satisfied via a refactored pure-logic EvaluateGrantedScopes function + 5 new direct unit tests (GraphAdminConsentVerifierTests.cs), since the Graph I/O itself follows this project's established "collaborator I/O untested, logic extracted + tested" precedent (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator, etc. have zero direct unit tests). #5 (Dataverse app-user reuse, no duplicate impl) satisfied per deviation 2 -- trivially true since H3 has no such implementation at all. #2, #9 deviated per above.
+
+L2 test suite: 903 -> 916 (+13 net; ~30 new/rewritten test methods across H3EntraAppRegHandlerTests.cs full rewrite + new GraphAdminConsentVerifierTests.cs). Zero regressions. Zero new vulnerable packages (dotnet list package --vulnerable --include-transitive clean after Microsoft.Graph 6.5.0 add).
+  </notes-completion>
 </task>

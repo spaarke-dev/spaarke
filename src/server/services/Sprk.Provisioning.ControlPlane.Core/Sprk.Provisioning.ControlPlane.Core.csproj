@@ -211,6 +211,28 @@
          No transitive conflicts with any existing package in this project
          (verified: `dotnet add package` resolved cleanly, zero NU1605s). -->
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
+
+    <!-- Microsoft.Graph — task 130 (Wave G-3, xhigh) H3 SDK port
+         (GraphAppRegistrationProvisioner / GraphAdminConsentVerifier —
+         Applications/ServicePrincipals/FederatedIdentityCredentials/
+         Oauth2PermissionGrants). Pinned to 6.5.0 for cross-service version
+         parity with Sprk.Bff.Api (dotnet-10-upgrade-r1 task 033). This is
+         L2's FIRST Microsoft.Graph SDK dependency — every other L2 Graph
+         collaborator (GraphRestAppRoleGranter, GraphRestB2BInvitationClient,
+         etc., H10/H11) deliberately stayed on raw HttpClient REST per those
+         handlers' own file-header "Path C" rationale (2 GET + 1 POST shapes
+         don't justify the SDK weight). H3's surface is materially richer
+         (full Application manifest CRUD + FederatedIdentityCredentials +
+         AddPassword) — design.md §4.1's H3 SDK-surface table explicitly
+         assigns Microsoft.Graph 6.x to H3 specifically, not L2 generally;
+         this is a considered per-handler exception, not a reversal of the
+         REST-first convention. Verified zero NU1605 warnings alongside this
+         project's existing Azure.Identity 1.21.0 / Azure.ResourceManager*
+         pins via a scratch-project build BEFORE adding here (ground-truthed
+         Graph SDK shapes via reflection against the installed package per
+         Wave G-2/G-3 discipline — see GraphAppRegistrationProvisioner.cs
+         file header for the 2 gotchas caught). -->
+    <PackageReference Include="Microsoft.Graph" Version="6.5.0" />
   </ItemGroup>
 
   <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
