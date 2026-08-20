@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "3499815538792193307"
+      "templateHash": "17329517737637201381"
     }
   },
   "parameters": {
@@ -802,6 +802,9 @@
           "enableTestDocumentLifecycle": {
             "value": false
           },
+          "userAssignedIdentityPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -1060,7 +1063,8 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -1242,6 +1246,9 @@
           },
           "appServicePrincipalId": {
             "value": "[parameters('bffPrincipalId')]"
+          },
+          "userAssignedIdentityPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
           "tags": {
             "value": "[parameters('tags')]"
@@ -1640,7 +1647,8 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -3079,6 +3087,24 @@
           "userAssignedIdentityResourceId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
           },
+          "appSettings": {
+            "value": {
+              "AZURE_CLIENT_ID": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
+              "ManagedIdentity__ClientId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
+              "Redis__Enabled": "true",
+              "Redis__ConnectionString": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=Redis-ConnectionString)', parameters('keyVaultName'))]",
+              "Redis__InstanceName": "spaarke:",
+              "ConnectionStrings__ServiceBus": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=ServiceBus-ConnectionString)', parameters('keyVaultName'))]",
+              "ConnectionStrings__Storage": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=Storage-ConnectionString)', parameters('keyVaultName'))]",
+              "OPENAI_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
+              "AI_SEARCH_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
+              "AI_SEARCH_API_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=AiSearch--AdminKey)', parameters('keyVaultName'))]",
+              "DOC_INTELLIGENCE_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
+              "DOC_INTELLIGENCE_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=DocumentIntelligence-ApiKey)', parameters('keyVaultName'))]",
+              "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
+              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
+            }
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -3090,7 +3116,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14015268074549436645"
+              "templateHash": "7592742079279306541"
             }
           },
           "parameters": {
@@ -3140,6 +3166,13 @@
                 "description": "Subnet ID for VNet integration (outbound traffic). Leave empty to disable."
               }
             },
+            "healthCheckPath": {
+              "type": "string",
+              "defaultValue": "/healthz",
+              "metadata": {
+                "description": "Health check path probed by App Service. Default /healthz — the BFF maps /healthz (Program.cs), NOT /health. Matches app-service-slot.bicep default (was asymmetric: prod probed /health → 404 → instances marked unhealthy; G-8 Batch 1 defect #16)."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -3183,7 +3216,7 @@
                   "http20Enabled": true,
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
-                  "healthCheckPath": "/health"
+                  "healthCheckPath": "[parameters('healthCheckPath')]"
                 }
               }
             }
@@ -3209,7 +3242,11 @@
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('appServicePlan-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
@@ -3388,7 +3425,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "4839189845163144654"
+              "templateHash": "14320282680820496780"
             }
           },
           "parameters": {
@@ -3402,24 +3439,18 @@
               "type": "secureObject",
               "defaultValue": {},
               "metadata": {
-                "description": "Optional per-secret value map (secret name -> value). Absent secrets get a placeholder marker."
-              }
-            },
-            "placeholderValue": {
-              "type": "string",
-              "defaultValue": "placeholder-populate-out-of-band",
-              "metadata": {
-                "description": "Placeholder value written for slots not populated via secretValues. Do NOT rely on this in production."
+                "description": "Per-secret value map (secret name -> value). ONLY secrets present in this map are deployed; absent secrets are left untouched (skip-if-absent — no placeholders are ever written)."
               }
             }
           },
           "resources": [
             {
+              "condition": "[contains(parameters('secretValues'), 'AiSearch--AdminKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AiSearch--AdminKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'AiSearch--AdminKey'), parameters('secretValues')['AiSearch--AdminKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['AiSearch--AdminKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3434,11 +3465,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'AiSearch-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AiSearch-Endpoint')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'AiSearch-Endpoint'), parameters('secretValues')['AiSearch-Endpoint'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['AiSearch-Endpoint']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3453,11 +3485,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'AppInsights-ConnectionString')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AppInsights-ConnectionString')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'AppInsights-ConnectionString'), parameters('secretValues')['AppInsights-ConnectionString'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['AppInsights-ConnectionString']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3472,11 +3505,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'AzureOpenAI-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AzureOpenAI-ApiKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'AzureOpenAI-ApiKey'), parameters('secretValues')['AzureOpenAI-ApiKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['AzureOpenAI-ApiKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3491,11 +3525,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'AzureOpenAI-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AzureOpenAI-Endpoint')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'AzureOpenAI-Endpoint'), parameters('secretValues')['AzureOpenAI-Endpoint'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['AzureOpenAI-Endpoint']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3510,11 +3545,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'BFF-API-Audience')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-Audience')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'BFF-API-Audience'), parameters('secretValues')['BFF-API-Audience'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['BFF-API-Audience']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3529,11 +3565,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'BFF-API-ClientId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-ClientId')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'BFF-API-ClientId'), parameters('secretValues')['BFF-API-ClientId'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['BFF-API-ClientId']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3548,30 +3585,12 @@
               }
             },
             {
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BFF-API-ClientSecret')]",
-              "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'BFF-API-ClientSecret'), parameters('secretValues')['BFF-API-ClientSecret'], parameters('placeholderValue'))]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-existing-kv"
-              },
-              "tags": {
-                "canonicalName": "BFF-API-ClientSecret",
-                "category": "auth",
-                "rotation": "90-days",
-                "neverDelete": "true",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
+              "condition": "[contains(parameters('secretValues'), 'BingSearch-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BingSearch-ApiKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'BingSearch-ApiKey'), parameters('secretValues')['BingSearch-ApiKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['BingSearch-ApiKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3586,11 +3605,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Communication-DefaultMailbox')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-DefaultMailbox')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Communication-DefaultMailbox'), parameters('secretValues')['Communication-DefaultMailbox'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Communication-DefaultMailbox']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3605,11 +3625,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Communication-Webhook-SigningKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-Webhook-SigningKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Communication-Webhook-SigningKey'), parameters('secretValues')['Communication-Webhook-SigningKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Communication-Webhook-SigningKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3624,11 +3645,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Communication-WebhookClientState')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-WebhookClientState')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Communication-WebhookClientState'), parameters('secretValues')['Communication-WebhookClientState'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Communication-WebhookClientState']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3643,11 +3665,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Communication-WebhookUrl')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Communication-WebhookUrl')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Communication-WebhookUrl'), parameters('secretValues')['Communication-WebhookUrl'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Communication-WebhookUrl']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3662,11 +3685,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Compose-Webhook-ClientState')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Compose-Webhook-ClientState')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Compose-Webhook-ClientState'), parameters('secretValues')['Compose-Webhook-ClientState'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Compose-Webhook-ClientState']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3681,11 +3705,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Compose-Webhook-SigningKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Compose-Webhook-SigningKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Compose-Webhook-SigningKey'), parameters('secretValues')['Compose-Webhook-SigningKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Compose-Webhook-SigningKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3700,11 +3725,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'ContentSafety-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ContentSafety-ApiKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'ContentSafety-ApiKey'), parameters('secretValues')['ContentSafety-ApiKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['ContentSafety-ApiKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3719,30 +3745,12 @@
               }
             },
             {
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ClientSecret')]",
-              "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Dataverse-ClientSecret'), parameters('secretValues')['Dataverse-ClientSecret'], parameters('placeholderValue'))]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-existing-kv"
-              },
-              "tags": {
-                "canonicalName": "Dataverse-ClientSecret",
-                "category": "auth",
-                "rotation": "manual-on-incident",
-                "neverDelete": "true",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
+              "condition": "[contains(parameters('secretValues'), 'Dataverse-ServiceUrl')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ServiceUrl')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Dataverse-ServiceUrl'), parameters('secretValues')['Dataverse-ServiceUrl'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Dataverse-ServiceUrl']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3757,11 +3765,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-ApiKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey'), parameters('secretValues')['DocumentIntelligence-ApiKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['DocumentIntelligence-ApiKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3776,11 +3785,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-Endpoint')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint'), parameters('secretValues')['DocumentIntelligence-Endpoint'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['DocumentIntelligence-Endpoint']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3795,11 +3805,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Email-WebhookSecret')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Email-WebhookSecret')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Email-WebhookSecret'), parameters('secretValues')['Email-WebhookSecret'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Email-WebhookSecret']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3814,11 +3825,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Email-WebhookSigningKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Email-WebhookSigningKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Email-WebhookSigningKey'), parameters('secretValues')['Email-WebhookSigningKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Email-WebhookSigningKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3833,11 +3845,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'LlamaParse-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'LlamaParse-ApiKey')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'LlamaParse-ApiKey'), parameters('secretValues')['LlamaParse-ApiKey'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['LlamaParse-ApiKey']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3852,11 +3865,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'PromptFlow-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Endpoint')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'PromptFlow-Endpoint'), parameters('secretValues')['PromptFlow-Endpoint'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['PromptFlow-Endpoint']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3871,11 +3885,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'PromptFlow-Key')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Key')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'PromptFlow-Key'), parameters('secretValues')['PromptFlow-Key'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['PromptFlow-Key']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3890,11 +3905,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Redis-ConnectionString')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Redis-ConnectionString')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Redis-ConnectionString'), parameters('secretValues')['Redis-ConnectionString'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Redis-ConnectionString']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3909,11 +3925,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'ServiceBus-ConnectionString')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ServiceBus-ConnectionString')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'ServiceBus-ConnectionString'), parameters('secretValues')['ServiceBus-ConnectionString'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['ServiceBus-ConnectionString']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3928,11 +3945,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'SPE-CommunicationArchiveContainerId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-CommunicationArchiveContainerId')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'SPE-CommunicationArchiveContainerId'), parameters('secretValues')['SPE-CommunicationArchiveContainerId'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['SPE-CommunicationArchiveContainerId']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3947,11 +3965,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'SPE-ContainerTypeId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-ContainerTypeId')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'SPE-ContainerTypeId'), parameters('secretValues')['SPE-ContainerTypeId'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['SPE-ContainerTypeId']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3966,11 +3985,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'SPE-DefaultContainerId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-DefaultContainerId')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'SPE-DefaultContainerId'), parameters('secretValues')['SPE-DefaultContainerId'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['SPE-DefaultContainerId']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -3985,11 +4005,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'Storage-ConnectionString')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Storage-ConnectionString')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'Storage-ConnectionString'), parameters('secretValues')['Storage-ConnectionString'], parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues')['Storage-ConnectionString']]",
                 "attributes": {
                   "enabled": true
                 },
@@ -4004,11 +4025,12 @@
               }
             },
             {
+              "condition": "[contains(parameters('secretValues'), 'TenantId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'TenantId')]",
               "properties": {
-                "value": "[if(contains(parameters('secretValues'), 'TenantId'), parameters('secretValues').TenantId, parameters('placeholderValue'))]",
+                "value": "[parameters('secretValues').TenantId]",
                 "attributes": {
                   "enabled": true
                 },

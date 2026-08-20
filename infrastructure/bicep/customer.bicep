@@ -265,6 +265,13 @@ module storage 'modules/storage-account.bicep' = {
     sku: storageSku
     containers: effectiveStorageContainers
     enableTestDocumentLifecycle: false
+    // G-8 Batch 1 defect #13: grant the per-customer UAMI Storage Blob Data
+    // Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe) on this account. The
+    // invocation previously passed neither principal param, so the module's
+    // RBAC blocks never fired and blob access relied solely on the KV
+    // account-key fallback. Same T5-stable UAMI pattern as openAi/aiSearch/
+    // docIntelligence below.
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -306,6 +313,13 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
     location: location
     databaseName: 'spaarke-ai'
     appServicePrincipalId: bffPrincipalId
+    // G-8 Batch 1 defect #12: the UAMI is the BFF's actual runtime identity
+    // (ADR-028 DefaultAzureCredential over UAMI). `bffPrincipalId` defaults ''
+    // and H2a never passes it — without this grant the module's sqlRoleAssignment
+    // never fires and the BFF 403s on every Cosmos data-plane call at runtime
+    // (deploy stays green). Module grants Cosmos DB Built-in Data Contributor
+    // (data-plane role 00000000-0000-0000-0000-000000000002) via sqlRoleAssignments.
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -523,6 +537,57 @@ module bffApi 'modules/app-service.bicep' = {
     appServicePlanId: appServicePlan.outputs.planId
     location: location
     userAssignedIdentityResourceId: uami.outputs.id
+    // G-8 Batch 1 defect #14: this invocation previously passed ZERO appSettings
+    // — the Model 2 BFF booted with no config and no AZURE_CLIENT_ID UAMI pin,
+    // so DefaultAzureCredential could not resolve the UAMI and the H9 health
+    // probe 404'd post-zip-deploy. Mirrors the model1-shared.bicep sharedBffApi
+    // pattern, adapted per-customer:
+    //   - KV references target the CUSTOMER vault using the CANONICAL secret
+    //     names written by the kvSecrets module below (kv-secrets.generated.bicep
+    //     / manifest.yaml) — NOT the legacy lowercase names model1-shared still
+    //     carries for Redis/ServiceBus/Storage.
+    //   - Only secrets in this file's resolvable kvSecretValues set get KV refs.
+    //     OPENAI_API_KEY (AzureOpenAI-ApiKey, value_source=from-run-parameter) is
+    //     deliberately OMITTED: an unresolvable KV ref surfaces the literal
+    //     @Microsoft.KeyVault(...) string as the setting value and would be sent
+    //     as an API key. Absent the setting, the BFF falls back to
+    //     DefaultAzureCredential (MI) per ADR-028 — and the UAMI already holds
+    //     Cognitive Services User on the OpenAI resource (openAi module above).
+    //   - KV references resolve only after H4 PATCHes keyVaultReferenceIdentity
+    //     to the UAMI on both slots (ArmAppServiceIdentityPatcher, task 125) and
+    //     the kvSecrets module has written real values. No ARM dependsOn needed:
+    //     KV refs are runtime-resolved strings (and kvSecrets depends on THIS
+    //     module for Communication-WebhookUrl — a dependsOn here would cycle).
+    appSettings: {
+      // UAMI pin — DefaultAzureCredential resolves this client ID (ADR-028 / T5).
+      AZURE_CLIENT_ID: uami.outputs.clientId
+      ManagedIdentity__ClientId: uami.outputs.clientId
+
+      // Redis (per-customer, task 128b)
+      Redis__Enabled: 'true'
+      Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Redis-ConnectionString)'
+      Redis__InstanceName: 'spaarke:' // Prefix for key isolation
+
+      // Service Bus (per-customer)
+      ConnectionStrings__ServiceBus: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=ServiceBus-ConnectionString)'
+
+      // Storage (per-customer)
+      ConnectionStrings__Storage: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Storage-ConnectionString)'
+
+      // AI Services — endpoints direct from sibling-module outputs; admin key via
+      // canonical KV ref. OpenAI auth is MI-only here (see header note above).
+      OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
+      AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
+      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=AiSearch--AdminKey)'
+
+      // Document Intelligence (per-customer, task 128b)
+      DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
+      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=DocumentIntelligence-ApiKey)'
+
+      // Monitoring (per-customer App Insights, task 128b)
+      APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
+      ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
+    }
     tags: tags
   }
 }

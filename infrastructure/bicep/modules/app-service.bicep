@@ -78,6 +78,9 @@ param userAssignedIdentityResourceId string
 @description('Subnet ID for VNet integration (outbound traffic). Leave empty to disable.')
 param vnetIntegrationSubnetId string = ''
 
+@description('Health check path probed by App Service. Default /healthz — the BFF maps /healthz (Program.cs), NOT /health. Matches app-service-slot.bicep default (was asymmetric: prod probed /health → 404 → instances marked unhealthy; G-8 Batch 1 defect #16).')
+param healthCheckPath string = '/healthz'
+
 @description('Tags for the resource')
 param tags object = {}
 
@@ -116,7 +119,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       http20Enabled: true
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      healthCheckPath: '/health'
+      healthCheckPath: healthCheckPath
       appSettings: [for setting in items(appSettings): {
         name: setting.key
         value: setting.value

@@ -796,23 +796,29 @@ function New-BicepArtifact {
 // customer.bicep / model2-full.bicep / model1-shared.bicep instead of
 // declaring KV secrets inline. This is the single canonical source.
 //
+// SKIP-IF-ABSENT semantics (G-8 Batch 1 defect #15): a secret resource is
+// deployed ONLY when the caller supplies a real value via secretValues —
+// every resource carries an `if (contains(secretValues, '<name>'))` guard
+// and NO placeholder value is ever written. Secrets absent from the map are
+// NOT TOUCHED on (re-)deploy, so H3-written ClientId/Audience, H8-written
+// SPE ids, generated webhook keys, and operator-populated values survive
+// every redeploy. (The previous unconditional-ternary emission reset every
+// unsupplied secret to 'placeholder-populate-out-of-band' on re-deploy —
+// a BINDING never-delete violation.)
+//
 // BINDING guard: the two never-delete secrets (Dataverse-ClientSecret,
-// BFF-API-ClientSecret) are emitted as PLACEHOLDER slots with a
-// no-op value assignment — the caller MUST manually populate them
-// out-of-band (they exist on the vault before this module is deployed
-// per the never-delete invariant). If they somehow do not exist, the
-// module creates the slot with a placeholder to prevent App Service
-// startup failure while the operator populates the real value.
+// BFF-API-ClientSecret) are NOT declared as writable ARM resources AT ALL —
+// ARM cannot express "create only if missing" for KV secrets, so their
+// slot pre-creation + population is exclusively out-of-band (data-plane
+// seeder Seed-CustomerKeyVault.generated.ps1 with -SkipExisting, the H4
+// handler, or the operator) per spec.md MUST rules + r3 handoff §4a.
 
 @description('Target Key Vault name (canonical sprk-{env}-kv per §7.9 R3; dev exception spaarke-spekvcert).')
 param keyVaultName string
 
-@description('Optional per-secret value map (secret name -> value). Absent secrets get a placeholder marker.')
+@description('Per-secret value map (secret name -> value). ONLY secrets present in this map are deployed; absent secrets are left untouched (skip-if-absent — no placeholders are ever written).')
 @secure()
 param secretValues object = {}
-
-@description('Placeholder value written for slots not populated via secretValues. Do NOT rely on this in production.')
-param placeholderValue string = 'placeholder-populate-out-of-band'
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
@@ -842,13 +848,22 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
 
         [void]$sb.Append("`n// $canon — $purpose`n")
         if ($nd) {
-            [void]$sb.Append("// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — placeholder value never overwrites real secret if present.`n")
+            # BINDING never-delete secrets are NOT emitted as ARM resources at
+            # all (G-8 Batch 1 defect #15): ARM cannot express skip-if-exists
+            # for KV secrets, so any writable declaration risks clobbering the
+            # live value on re-deploy. Slot creation + population is exclusively
+            # out-of-band (seeder -SkipExisting / H4 handler / operator).
+            [void]$sb.Append("// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — NOT declared as an ARM`n")
+            [void]$sb.Append("// resource: ARM cannot skip-if-exists, so this secret is managed exclusively out-of-band`n")
+            [void]$sb.Append("// (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy`n")
+            [void]$sb.Append("// of this module can therefore NEVER touch the live value.`n")
+            continue
         }
-        [void]$sb.Append("resource kv_$id 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {`n")
+        [void]$sb.Append("resource kv_$id 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, '$canon')) {`n")
         [void]$sb.Append("  parent: keyVault`n")
         [void]$sb.Append("  name: '$canon'`n")
         [void]$sb.Append("  properties: {`n")
-        [void]$sb.Append("    value: contains(secretValues, '$canon') ? secretValues['$canon'] : placeholderValue`n")
+        [void]$sb.Append("    value: secretValues['$canon']`n")
         [void]$sb.Append("    attributes: {`n")
         [void]$sb.Append("      enabled: true`n")
         [void]$sb.Append("    }`n")

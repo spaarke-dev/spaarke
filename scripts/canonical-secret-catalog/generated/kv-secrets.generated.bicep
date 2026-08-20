@@ -12,23 +12,29 @@
 // customer.bicep / model2-full.bicep / model1-shared.bicep instead of
 // declaring KV secrets inline. This is the single canonical source.
 //
+// SKIP-IF-ABSENT semantics (G-8 Batch 1 defect #15): a secret resource is
+// deployed ONLY when the caller supplies a real value via secretValues —
+// every resource carries an if (contains(secretValues, '<name>')) guard
+// and NO placeholder value is ever written. Secrets absent from the map are
+// NOT TOUCHED on (re-)deploy, so H3-written ClientId/Audience, H8-written
+// SPE ids, generated webhook keys, and operator-populated values survive
+// every redeploy. (The previous unconditional-ternary emission reset every
+// unsupplied secret to 'placeholder-populate-out-of-band' on re-deploy —
+// a BINDING never-delete violation.)
+//
 // BINDING guard: the two never-delete secrets (Dataverse-ClientSecret,
-// BFF-API-ClientSecret) are emitted as PLACEHOLDER slots with a
-// no-op value assignment — the caller MUST manually populate them
-// out-of-band (they exist on the vault before this module is deployed
-// per the never-delete invariant). If they somehow do not exist, the
-// module creates the slot with a placeholder to prevent App Service
-// startup failure while the operator populates the real value.
+// BFF-API-ClientSecret) are NOT declared as writable ARM resources AT ALL —
+// ARM cannot express "create only if missing" for KV secrets, so their
+// slot pre-creation + population is exclusively out-of-band (data-plane
+// seeder Seed-CustomerKeyVault.generated.ps1 with -SkipExisting, the H4
+// handler, or the operator) per spec.md MUST rules + r3 handoff §4a.
 
 @description('Target Key Vault name (canonical sprk-{env}-kv per §7.9 R3; dev exception spaarke-spekvcert).')
 param keyVaultName string
 
-@description('Optional per-secret value map (secret name -> value). Absent secrets get a placeholder marker.')
+@description('Per-secret value map (secret name -> value). ONLY secrets present in this map are deployed; absent secrets are left untouched (skip-if-absent — no placeholders are ever written).')
 @secure()
 param secretValues object = {}
-
-@description('Placeholder value written for slots not populated via secretValues. Do NOT rely on this in production.')
-param placeholderValue string = 'placeholder-populate-out-of-band'
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
@@ -38,11 +44,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
 // Canonical secrets (alphabetically-sorted, generator-enforced)
 // -------------------------------------------------------------------------
 // AiSearch--AdminKey — Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-resource kv_aiSearch__AdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_aiSearch__AdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AiSearch--AdminKey')) {
   parent: keyVault
   name: 'AiSearch--AdminKey'
   properties: {
-    value: contains(secretValues, 'AiSearch--AdminKey') ? secretValues['AiSearch--AdminKey'] : placeholderValue
+    value: secretValues['AiSearch--AdminKey']
     attributes: {
       enabled: true
     }
@@ -58,11 +64,11 @@ resource kv_aiSearch__AdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
 }
 
 // AiSearch-Endpoint — Azure AI Search service endpoint.
-resource kv_aiSearch_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_aiSearch_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AiSearch-Endpoint')) {
   parent: keyVault
   name: 'AiSearch-Endpoint'
   properties: {
-    value: contains(secretValues, 'AiSearch-Endpoint') ? secretValues['AiSearch-Endpoint'] : placeholderValue
+    value: secretValues['AiSearch-Endpoint']
     attributes: {
       enabled: true
     }
@@ -78,11 +84,11 @@ resource kv_aiSearch_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // AppInsights-ConnectionString — Application Insights connection string. Fallback surface — Bicep also emits APPLICATIONINSIGHTS_CONNECTION_STRING directly.
-resource kv_appInsights_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_appInsights_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AppInsights-ConnectionString')) {
   parent: keyVault
   name: 'AppInsights-ConnectionString'
   properties: {
-    value: contains(secretValues, 'AppInsights-ConnectionString') ? secretValues['AppInsights-ConnectionString'] : placeholderValue
+    value: secretValues['AppInsights-ConnectionString']
     attributes: {
       enabled: true
     }
@@ -98,11 +104,11 @@ resource kv_appInsights_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023
 }
 
 // AzureOpenAI-ApiKey — Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-resource kv_azureOpenAI_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_azureOpenAI_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AzureOpenAI-ApiKey')) {
   parent: keyVault
   name: 'AzureOpenAI-ApiKey'
   properties: {
-    value: contains(secretValues, 'AzureOpenAI-ApiKey') ? secretValues['AzureOpenAI-ApiKey'] : placeholderValue
+    value: secretValues['AzureOpenAI-ApiKey']
     attributes: {
       enabled: true
     }
@@ -118,11 +124,11 @@ resource kv_azureOpenAI_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
 }
 
 // AzureOpenAI-Endpoint — Azure OpenAI resource endpoint (https://{name}.openai.azure.com/).
-resource kv_azureOpenAI_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_azureOpenAI_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AzureOpenAI-Endpoint')) {
   parent: keyVault
   name: 'AzureOpenAI-Endpoint'
   properties: {
-    value: contains(secretValues, 'AzureOpenAI-Endpoint') ? secretValues['AzureOpenAI-Endpoint'] : placeholderValue
+    value: secretValues['AzureOpenAI-Endpoint']
     attributes: {
       enabled: true
     }
@@ -138,11 +144,11 @@ resource kv_azureOpenAI_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
 }
 
 // BFF-API-Audience — BFF API audience URI (api://{clientId}).
-resource kv_bFF_API_Audience 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_bFF_API_Audience 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BFF-API-Audience')) {
   parent: keyVault
   name: 'BFF-API-Audience'
   properties: {
-    value: contains(secretValues, 'BFF-API-Audience') ? secretValues['BFF-API-Audience'] : placeholderValue
+    value: secretValues['BFF-API-Audience']
     attributes: {
       enabled: true
     }
@@ -158,11 +164,11 @@ resource kv_bFF_API_Audience 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // BFF-API-ClientId — BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
-resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BFF-API-ClientId')) {
   parent: keyVault
   name: 'BFF-API-ClientId'
   properties: {
-    value: contains(secretValues, 'BFF-API-ClientId') ? secretValues['BFF-API-ClientId'] : placeholderValue
+    value: secretValues['BFF-API-ClientId']
     attributes: {
       enabled: true
     }
@@ -178,32 +184,17 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // BFF-API-ClientSecret — BFF API app-registration client secret. Consumed by the OBO confidential-client flow (per OAuth spec — required even under ADR-028 MI-first outbound) and by any shared-lib Dataverse boot path still on client-credentials. BINDING never-delete per r3 handoff §4a.
-// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — placeholder value never overwrites real secret if present.
-resource kv_bFF_API_ClientSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: keyVault
-  name: 'BFF-API-ClientSecret'
-  properties: {
-    value: contains(secretValues, 'BFF-API-ClientSecret') ? secretValues['BFF-API-ClientSecret'] : placeholderValue
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-existing-kv'
-  }
-  tags: {
-    canonicalName: 'BFF-API-ClientSecret'
-    category: 'auth'
-    rotation: '90-days'
-    neverDelete: 'true'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
+// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — NOT declared as an ARM
+// resource: ARM cannot skip-if-exists, so this secret is managed exclusively out-of-band
+// (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
+// of this module can therefore NEVER touch the live value.
 
 // BingSearch-ApiKey — Bing Search v7 API key.
-resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BingSearch-ApiKey')) {
   parent: keyVault
   name: 'BingSearch-ApiKey'
   properties: {
-    value: contains(secretValues, 'BingSearch-ApiKey') ? secretValues['BingSearch-ApiKey'] : placeholderValue
+    value: secretValues['BingSearch-ApiKey']
     attributes: {
       enabled: true
     }
@@ -219,11 +210,11 @@ resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // Communication-DefaultMailbox — Default mailbox address for Communication module (outbound + Approved-Senders default).
-resource kv_communication_DefaultMailbox 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_communication_DefaultMailbox 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Communication-DefaultMailbox')) {
   parent: keyVault
   name: 'Communication-DefaultMailbox'
   properties: {
-    value: contains(secretValues, 'Communication-DefaultMailbox') ? secretValues['Communication-DefaultMailbox'] : placeholderValue
+    value: secretValues['Communication-DefaultMailbox']
     attributes: {
       enabled: true
     }
@@ -239,11 +230,11 @@ resource kv_communication_DefaultMailbox 'Microsoft.KeyVault/vaults/secrets@2023
 }
 
 // Communication-Webhook-SigningKey — HMAC-SHA256 signing key for /api/communications/incoming-webhook (X-Hub-Signature-256 header). Kebab canonical per §7.9 R2 (new secrets are kebab-case; the drift form `compose-webhook-signingkey` run-together is a Phase H alias-collapse target on the sibling Compose secret, not this one — the two just look similar).
-resource kv_communication_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_communication_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Communication-Webhook-SigningKey')) {
   parent: keyVault
   name: 'Communication-Webhook-SigningKey'
   properties: {
-    value: contains(secretValues, 'Communication-Webhook-SigningKey') ? secretValues['Communication-Webhook-SigningKey'] : placeholderValue
+    value: secretValues['Communication-Webhook-SigningKey']
     attributes: {
       enabled: true
     }
@@ -259,11 +250,11 @@ resource kv_communication_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@
 }
 
 // Communication-WebhookClientState — Communication webhook client-state string (constant-time compared against Graph subscription payload's clientState field — defense in depth alongside the HMAC signing key).
-resource kv_communication_WebhookClientState 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_communication_WebhookClientState 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Communication-WebhookClientState')) {
   parent: keyVault
   name: 'Communication-WebhookClientState'
   properties: {
-    value: contains(secretValues, 'Communication-WebhookClientState') ? secretValues['Communication-WebhookClientState'] : placeholderValue
+    value: secretValues['Communication-WebhookClientState']
     attributes: {
       enabled: true
     }
@@ -279,11 +270,11 @@ resource kv_communication_WebhookClientState 'Microsoft.KeyVault/vaults/secrets@
 }
 
 // Communication-WebhookUrl — Communication webhook notification URL (public endpoint on BFF).
-resource kv_communication_WebhookUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_communication_WebhookUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Communication-WebhookUrl')) {
   parent: keyVault
   name: 'Communication-WebhookUrl'
   properties: {
-    value: contains(secretValues, 'Communication-WebhookUrl') ? secretValues['Communication-WebhookUrl'] : placeholderValue
+    value: secretValues['Communication-WebhookUrl']
     attributes: {
       enabled: true
     }
@@ -299,11 +290,11 @@ resource kv_communication_WebhookUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-
 }
 
 // Compose-Webhook-ClientState — Compose webhook client-state constant compared against Graph subscription payload's clientState field. Fail-closed with the HMAC signing key sibling below.
-resource kv_compose_Webhook_ClientState 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_compose_Webhook_ClientState 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Compose-Webhook-ClientState')) {
   parent: keyVault
   name: 'Compose-Webhook-ClientState'
   properties: {
-    value: contains(secretValues, 'Compose-Webhook-ClientState') ? secretValues['Compose-Webhook-ClientState'] : placeholderValue
+    value: secretValues['Compose-Webhook-ClientState']
     attributes: {
       enabled: true
     }
@@ -319,11 +310,11 @@ resource kv_compose_Webhook_ClientState 'Microsoft.KeyVault/vaults/secrets@2023-
 }
 
 // Compose-Webhook-SigningKey — HMAC-SHA256 signing key for /api/compose/webhooks/spe-doc-changed (return-from-Word SPE change notifications). Fail-closed filter.
-resource kv_compose_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_compose_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Compose-Webhook-SigningKey')) {
   parent: keyVault
   name: 'Compose-Webhook-SigningKey'
   properties: {
-    value: contains(secretValues, 'Compose-Webhook-SigningKey') ? secretValues['Compose-Webhook-SigningKey'] : placeholderValue
+    value: secretValues['Compose-Webhook-SigningKey']
     attributes: {
       enabled: true
     }
@@ -339,11 +330,11 @@ resource kv_compose_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-0
 }
 
 // ContentSafety-ApiKey — Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'ContentSafety-ApiKey')) {
   parent: keyVault
   name: 'ContentSafety-ApiKey'
   properties: {
-    value: contains(secretValues, 'ContentSafety-ApiKey') ? secretValues['ContentSafety-ApiKey'] : placeholderValue
+    value: secretValues['ContentSafety-ApiKey']
     attributes: {
       enabled: true
     }
@@ -359,32 +350,17 @@ resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
 }
 
 // Dataverse-ClientSecret — OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track).
-// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — placeholder value never overwrites real secret if present.
-resource kv_dataverse_ClientSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: keyVault
-  name: 'Dataverse-ClientSecret'
-  properties: {
-    value: contains(secretValues, 'Dataverse-ClientSecret') ? secretValues['Dataverse-ClientSecret'] : placeholderValue
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-existing-kv'
-  }
-  tags: {
-    canonicalName: 'Dataverse-ClientSecret'
-    category: 'auth'
-    rotation: 'manual-on-incident'
-    neverDelete: 'true'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
+// BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — NOT declared as an ARM
+// resource: ARM cannot skip-if-exists, so this secret is managed exclusively out-of-band
+// (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
+// of this module can therefore NEVER touch the live value.
 
 // Dataverse-ServiceUrl — Dataverse environment URL (https://{org}.crm.dynamics.com).
-resource kv_dataverse_ServiceUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_dataverse_ServiceUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Dataverse-ServiceUrl')) {
   parent: keyVault
   name: 'Dataverse-ServiceUrl'
   properties: {
-    value: contains(secretValues, 'Dataverse-ServiceUrl') ? secretValues['Dataverse-ServiceUrl'] : placeholderValue
+    value: secretValues['Dataverse-ServiceUrl']
     attributes: {
       enabled: true
     }
@@ -400,11 +376,11 @@ resource kv_dataverse_ServiceUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
 }
 
 // DocumentIntelligence-ApiKey — Azure Document Intelligence API key.
-resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-ApiKey')) {
   parent: keyVault
   name: 'DocumentIntelligence-ApiKey'
   properties: {
-    value: contains(secretValues, 'DocumentIntelligence-ApiKey') ? secretValues['DocumentIntelligence-ApiKey'] : placeholderValue
+    value: secretValues['DocumentIntelligence-ApiKey']
     attributes: {
       enabled: true
     }
@@ -420,11 +396,11 @@ resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-
 }
 
 // DocumentIntelligence-Endpoint — Azure Document Intelligence endpoint.
-resource kv_documentIntelligence_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_documentIntelligence_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-Endpoint')) {
   parent: keyVault
   name: 'DocumentIntelligence-Endpoint'
   properties: {
-    value: contains(secretValues, 'DocumentIntelligence-Endpoint') ? secretValues['DocumentIntelligence-Endpoint'] : placeholderValue
+    value: secretValues['DocumentIntelligence-Endpoint']
     attributes: {
       enabled: true
     }
@@ -440,11 +416,11 @@ resource kv_documentIntelligence_Endpoint 'Microsoft.KeyVault/vaults/secrets@202
 }
 
 // Email-WebhookSecret — Email webhook secret (obsolete-tolerant; consumed by legacy Email:WebhookSecret binding; superseded by Email-WebhookSigningKey but retained to avoid startup-config failures in the shared-lib code that still reads the obsolete key).
-resource kv_email_WebhookSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_email_WebhookSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Email-WebhookSecret')) {
   parent: keyVault
   name: 'Email-WebhookSecret'
   properties: {
-    value: contains(secretValues, 'Email-WebhookSecret') ? secretValues['Email-WebhookSecret'] : placeholderValue
+    value: secretValues['Email-WebhookSecret']
     attributes: {
       enabled: true
     }
@@ -460,11 +436,11 @@ resource kv_email_WebhookSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
 }
 
 // Email-WebhookSigningKey — HMAC-SHA256 signing key for /api/v1/emails/webhook-trigger (Dataverse Service Endpoint webhooks). Fail-closed filter; rotates on incident or every 90 days. Grandfathered PascalCase per §7.9 R2.
-resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Email-WebhookSigningKey')) {
   parent: keyVault
   name: 'Email-WebhookSigningKey'
   properties: {
-    value: contains(secretValues, 'Email-WebhookSigningKey') ? secretValues['Email-WebhookSigningKey'] : placeholderValue
+    value: secretValues['Email-WebhookSigningKey']
     attributes: {
       enabled: true
     }
@@ -480,11 +456,11 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
 }
 
 // LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.
-resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'LlamaParse-ApiKey')) {
   parent: keyVault
   name: 'LlamaParse-ApiKey'
   properties: {
-    value: contains(secretValues, 'LlamaParse-ApiKey') ? secretValues['LlamaParse-ApiKey'] : placeholderValue
+    value: secretValues['LlamaParse-ApiKey']
     attributes: {
       enabled: true
     }
@@ -500,11 +476,11 @@ resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // PromptFlow-Endpoint — AI Foundry Prompt Flow endpoint.
-resource kv_promptFlow_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_promptFlow_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'PromptFlow-Endpoint')) {
   parent: keyVault
   name: 'PromptFlow-Endpoint'
   properties: {
-    value: contains(secretValues, 'PromptFlow-Endpoint') ? secretValues['PromptFlow-Endpoint'] : placeholderValue
+    value: secretValues['PromptFlow-Endpoint']
     attributes: {
       enabled: true
     }
@@ -520,11 +496,11 @@ resource kv_promptFlow_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
 }
 
 // PromptFlow-Key — AI Foundry Prompt Flow API key.
-resource kv_promptFlow_Key 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_promptFlow_Key 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'PromptFlow-Key')) {
   parent: keyVault
   name: 'PromptFlow-Key'
   properties: {
-    value: contains(secretValues, 'PromptFlow-Key') ? secretValues['PromptFlow-Key'] : placeholderValue
+    value: secretValues['PromptFlow-Key']
     attributes: {
       enabled: true
     }
@@ -540,11 +516,11 @@ resource kv_promptFlow_Key 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // Redis-ConnectionString — Azure Cache for Redis connection string.
-resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Redis-ConnectionString')) {
   parent: keyVault
   name: 'Redis-ConnectionString'
   properties: {
-    value: contains(secretValues, 'Redis-ConnectionString') ? secretValues['Redis-ConnectionString'] : placeholderValue
+    value: secretValues['Redis-ConnectionString']
     attributes: {
       enabled: true
     }
@@ -560,11 +536,11 @@ resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01
 }
 
 // ServiceBus-ConnectionString — Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-resource kv_serviceBus_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_serviceBus_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'ServiceBus-ConnectionString')) {
   parent: keyVault
   name: 'ServiceBus-ConnectionString'
   properties: {
-    value: contains(secretValues, 'ServiceBus-ConnectionString') ? secretValues['ServiceBus-ConnectionString'] : placeholderValue
+    value: secretValues['ServiceBus-ConnectionString']
     attributes: {
       enabled: true
     }
@@ -580,11 +556,11 @@ resource kv_serviceBus_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-
 }
 
 // SPE-CommunicationArchiveContainerId — SPE communication-archive container ID (archived email / communication payloads).
-resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-CommunicationArchiveContainerId')) {
   parent: keyVault
   name: 'SPE-CommunicationArchiveContainerId'
   properties: {
-    value: contains(secretValues, 'SPE-CommunicationArchiveContainerId') ? secretValues['SPE-CommunicationArchiveContainerId'] : placeholderValue
+    value: secretValues['SPE-CommunicationArchiveContainerId']
     attributes: {
       enabled: true
     }
@@ -600,11 +576,11 @@ resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secre
 }
 
 // SPE-ContainerTypeId — SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.
-resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-ContainerTypeId')) {
   parent: keyVault
   name: 'SPE-ContainerTypeId'
   properties: {
-    value: contains(secretValues, 'SPE-ContainerTypeId') ? secretValues['SPE-ContainerTypeId'] : placeholderValue
+    value: secretValues['SPE-ContainerTypeId']
     attributes: {
       enabled: true
     }
@@ -620,11 +596,11 @@ resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
 }
 
 // SPE-DefaultContainerId — SPE default container ID (per-customer root container for uploaded files).
-resource kv_sPE_DefaultContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_sPE_DefaultContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-DefaultContainerId')) {
   parent: keyVault
   name: 'SPE-DefaultContainerId'
   properties: {
-    value: contains(secretValues, 'SPE-DefaultContainerId') ? secretValues['SPE-DefaultContainerId'] : placeholderValue
+    value: secretValues['SPE-DefaultContainerId']
     attributes: {
       enabled: true
     }
@@ -640,11 +616,11 @@ resource kv_sPE_DefaultContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01
 }
 
 // Storage-ConnectionString — Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-resource kv_storage_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_storage_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Storage-ConnectionString')) {
   parent: keyVault
   name: 'Storage-ConnectionString'
   properties: {
-    value: contains(secretValues, 'Storage-ConnectionString') ? secretValues['Storage-ConnectionString'] : placeholderValue
+    value: secretValues['Storage-ConnectionString']
     attributes: {
       enabled: true
     }
@@ -660,11 +636,11 @@ resource kv_storage_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-
 }
 
 // TenantId — Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
-resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'TenantId')) {
   parent: keyVault
   name: 'TenantId'
   properties: {
-    value: contains(secretValues, 'TenantId') ? secretValues['TenantId'] : placeholderValue
+    value: secretValues['TenantId']
     attributes: {
       enabled: true
     }

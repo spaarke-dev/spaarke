@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8579013918287939732"
+      "templateHash": "14355353923734186146"
     }
   },
   "parameters": {
@@ -380,7 +380,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9958944522423890649"
+              "templateHash": "15519022507304554186"
             }
           },
           "parameters": {
@@ -608,29 +608,17 @@
                 "logs": [
                   {
                     "categoryGroup": "audit",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 90
-                    }
+                    "enabled": true
                   },
                   {
                     "categoryGroup": "allLogs",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ],
                 "metrics": [
                   {
                     "category": "AllMetrics",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ]
               },
@@ -1621,7 +1609,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14015268074549436645"
+              "templateHash": "7592742079279306541"
             }
           },
           "parameters": {
@@ -1671,6 +1659,13 @@
                 "description": "Subnet ID for VNet integration (outbound traffic). Leave empty to disable."
               }
             },
+            "healthCheckPath": {
+              "type": "string",
+              "defaultValue": "/healthz",
+              "metadata": {
+                "description": "Health check path probed by App Service. Default /healthz — the BFF maps /healthz (Program.cs), NOT /health. Matches app-service-slot.bicep default (was asymmetric: prod probed /health → 404 → instances marked unhealthy; G-8 Batch 1 defect #16)."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -1714,7 +1709,7 @@
                   "http20Enabled": true,
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
-                  "healthCheckPath": "/health"
+                  "healthCheckPath": "[parameters('healthCheckPath')]"
                 }
               }
             }
