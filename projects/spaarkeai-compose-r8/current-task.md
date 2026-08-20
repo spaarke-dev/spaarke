@@ -11,10 +11,48 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **011** — Concurrency: last-writer-wins + warning (retire the 412), `If-Match` at the storage boundary |
-| **Status** | not-started. Task **010 ✅ complete** (2026-08-20) — the client save-error contract now routes on `ApiError.status`. |
-| **Next Action** | Begin Step 0 of task 011 (`tasks/011-concurrency-last-writer-wins.poml`). It supersedes the transitional 412 branch task 010 left in `ComposeWorkspace.tsx`'s save catch. |
-| **Blocked on** | Nothing. Phase 2+ is gated on **PR #690** (Git-LFS corpus fixtures in CI) landing — owner decision 2026-08-19. Track S is NOT blocked. |
+| **Task** | **012** — Save lifecycle hardening (dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery) |
+| **Status** | not-started. |
+| **Next Action** | Begin Step 0 of task 012 (`tasks/012-save-lifecycle-hardening.poml`). Also startable, no dependency on 012: **013**, **014**, **018**. |
+| **Blocked on** | Nothing. |
+| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 050 ✅** (all 2026-08-20) |
+
+### Carried forward from task 011 (read before 012 / 013)
+
+- Every EXISTING-item save now takes the **6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`);
+  the etag-less overload serves only saves with no resolved version. **A new save-path test that mocks
+  the 5-arg overload will fail with a misleading 404** ("drive-item not found or could not be written").
+- **The save route returns no 412.** A sustained concurrent writer is **409 Conflict** after one rebase
+  retry. Task 013's outcome enum should map this to `storage-failed` (or its own member) — it is NOT
+  `refused-stale`, which no longer exists as an outcome.
+- The concurrency warning is `concurrent-external-change`, carried on `degradationWarnings` and rendered
+  as its own banner row (`compose-workspace-concurrency-banner`).
+
+### Phase-0 results (do not re-derive)
+
+- **PR #690 is REDUNDANT — GO for Phase 2.** It never merged, but the `lfs: true` line it proposes is
+  already on master via commit `f7ec5b928` (2026-08-12, from `email-communication-intelligence-r2`),
+  confirmed an ancestor of this worktree. All 10 corpus `.docx` resolve to real bytes (2,666–27,986 B);
+  Compose seam tests 101/101 green on master run `32313454003`. **Recommend closing #690 as superseded.**
+- **Publish baseline: 44.97 MB incl. PDBs / 44.07 MB excl.** (+0.01 vs the 44.96 MB reference), TFM
+  `net10.0`, SDK 10.0.101, at commit `b182f1687`. Far below the 55 MB review threshold.
+- **`/conflict-check`: clean** across 24 open PRs and every other worktree, scoped to the full Compose spine.
+- **PR #266 (OpenXml 3.4.1→3.5.1): HOLD** until after task 031. Keeps the Phase-2 control (023) and the
+  Phase-3 gate (030) on the same serializer so any drift stays attributable.
+
+### Task 050 results — binding on Track C (051–053)
+
+**ADR-043 orthogonal (Path C stands)**; **FR-C05 is NOT an ADR-041 Gate**; **FR-A07 is out of ADR-041**
+(shape it via FR-A07 + ADR-050, task 043); **ADR-013 clean**. Full reasoning + citations:
+[`notes/adr-043-041-assessment.md`](notes/adr-043-041-assessment.md). Constraints **C-1…C-7** there are
+binding — the two most consequential:
+
+- **C-1** — do NOT extend `ContextBinder`'s closed operand vocabulary. The client **already sends**
+  `selectionAnchorStart`/`selectionAnchorEnd`/`targetParaId`, so FR-C01 is a *response + apply* change,
+  not a new request channel.
+- **C-5** — FR-C05's re-ask hazard is **live today** (reopen re-materializes the highest-turn edit; the
+  guard is React state that dies on refresh; accept writes nothing to the ledger). Fix via ADR-040
+  residency, obligations O-1…O-6 — not via the gate engine.
 
 ### Carried forward from task 010 (read before 011)
 
@@ -38,12 +76,12 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 
 | Phase | Track | Status |
 |---|---|---|
-| 0 (001–002) | Coordination + PR #690 dependency | 🔲 |
-| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011–016, **018**, then 017 🔲 |
+| 0 (001–002) | Coordination + PR #690 dependency | ✅ |
+| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 012–016, **018**, then 017 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
-| 5 (050–053) | Track C — AI edit placement | 🔲 |
+| 5 (050–053) | Track C — AI edit placement | 🔄 050 ✅ · 051–053 🔲 |
 | 6 (060–063) | Track B — durable session files *(only parallel-safe track)* | 🔲 |
 | 7 (070–074) | Track D — god-class removal | 🔲 |
 | 8 (090) | Wrap-up | 🔲 |
@@ -76,9 +114,36 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 
 ---
 
-## Files modified this task
+## Files modified — task 011 (complete)
 
-_(task 011 not started — none yet)_
+| File | Change |
+|---|---|
+| `Services/Compose/ComposeService.cs` | 412 refusal DELETED → proceed + `concurrent-external-change` warning; new `ReplaceWithPreconditionAsync` (If-Match + retry-once-on-rebase) |
+| `Api/ComposeEndpoints.cs` | `EtagPreconditionFailedException` maps 412 → **409 Conflict** ("try saving again"); no 412 remains on the save route |
+| `widgets/ComposeBannerStack.tsx` | `concurrent-external-change` copy + its own banner row (partitioned out of the degradation set so that banner's title/trailer stay true) |
+| `widgets/ComposeWorkspace.tsx` | client 412 branch DELETED (unreachable once the server stops refusing) |
+| `ConcurrencySaveSeamTests.cs` | the 412-refusal test REWRITTEN to assert persist + warn + the exact If-Match value |
+| `Def14_ComposeSaveLockedDocumentTests.cs` | two route-layer tests 412 → 409; translation-layer tests unchanged |
+| `ComposeWorkspace.saveErrorRouting.test.tsx` | 412 test replaced by the concurrency-warning + no-refusal pair (NFR-08 client half) |
+
+### Design decisions made (not re-derivable from the POML)
+
+1. **If-Match value = `preWriteETag`**, the LIVE version read at save time — NOT the client's load-time
+   ETag. Sending the load-time value would fail the precondition on every concurrent write and re-create
+   the refusal this task removed. It is correct on both paths: the non-stale path merged against it
+   because it equals the baseline; the stale path merged against it because `ReanchorStaleSaveAsync`
+   re-downloaded exactly those bytes.
+2. **Precondition failure → retry ONCE against a re-read version** (POML step 5's open question). A
+   precondition failure carries nothing the user could act on, and the semantics are already
+   last-writer-wins, so rebasing produces what they asked for. Unbounded retry could spin on a hot
+   document; failing immediately would resurrect the dead end.
+3. **409, not 412, for the exhausted case** — nothing about the caller's state is stale, so "reload and
+   reapply" would be wrong advice. The honest instruction is "try again".
+4. **The warning rides the existing `degradationWarnings` wire field** (no new field, no new prop) but
+   renders as its own banner row, because the degradation banner's "Some formatting was simplified" title
+   and "the original file is unchanged until you save" trailer are both FALSE of a concurrency notice.
+5. **Only the ContentModel path warns.** The op-log path re-anchors ONTO the other writer's bytes — that
+   is a merge, not a supersession, so "your save is now the current version" would be misleading there.
 
 ### Task 010 (complete) — files changed
 

@@ -225,7 +225,22 @@ function writeImportWarningsDismissed(signature: string): void {
 // "Some content was simplified when saving (code ×N)." line. Codes are the server render-side /
 // client mapper vocabulary (ComposeContentModel save path).
 
+/**
+ * FR-S02 (r8 task 011): the concurrency notice's code. It travels in the save response's
+ * `degradationWarnings` array (one wire field, one dismissal), but renders as its own row — see the
+ * partition in the component body for why.
+ */
+export const CONCURRENT_EXTERNAL_CHANGE_CODE = 'concurrent-external-change';
+
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
+  // FR-S02 (r8 task 011): concurrency is LAST-WRITER-WINS with a warning. The save SUCCEEDED; someone
+  // else's version landed between this document being opened and being saved, and this save is now the
+  // current one. Version history is the honest recovery path — their content is not lost, it is the
+  // previous version. Supersedes the 412 refusal shipped 2026-08-18, which left the user with unsaved
+  // work in a browser tab and no way forward.
+  'concurrent-external-change':
+    'Someone else saved a new version of this document while you had it open. Your save is now the ' +
+    'current version — use version history in the document management system to see or restore theirs.',
   'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
   // UAT-23 (2026-08-18): an edit whose anchor drifted during editing so it couldn't be re-anchored on
   // save (a still-valid edit the op-log path had to drop) — surfaced instead of vanishing silently.
@@ -444,7 +459,15 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     writeDismissedFlag(SAVE_DEGRADATION_DISMISS_KEY_PREFIX, saveWarningsSig);
     setSaveWarningsDismissed(true);
   }, [saveWarningsSig]);
-  const showSaveDegradation = saveWarnings.length > 0 && !saveWarningsDismissed;
+
+  // FR-S02 (r8 task 011): the concurrency notice rides the SAME wire field and the same dismissal, but
+  // it is NOT a degradation — nothing was simplified. Partition it out so the degradation banner's
+  // "Some formatting was simplified when saving" title and its "the original file is unchanged until
+  // you save" trailer stay TRUE of what they describe; both would be false of a concurrency notice.
+  const concurrencyNotice = saveWarnings.find(w => w.code === CONCURRENT_EXTERNAL_CHANGE_CODE) ?? null;
+  const degradationOnlyWarnings = saveWarnings.filter(w => w.code !== CONCURRENT_EXTERNAL_CHANGE_CODE);
+  const showSaveDegradation = degradationOnlyWarnings.length > 0 && !saveWarningsDismissed;
+  const showConcurrencyNotice = concurrencyNotice !== null && !saveWarningsDismissed;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
   // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
@@ -806,13 +829,37 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
+      {showConcurrencyNotice ? (
+        // FR-S02 (r8 task 011): concurrency is last-writer-wins with a warning. The save SUCCEEDED and is
+        // now the current version; the other writer's content is the PREVIOUS version, not lost. Version
+        // history is the recovery path, and saying so is the whole point — the 412 refusal this replaces
+        // left the user with unsaved work in a tab and no way forward.
+        <MessageBar intent="warning" data-testid="compose-workspace-concurrency-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Someone else saved this document while you had it open</MessageBarTitle>
+            {SAVE_DEGRADATION_COPY[CONCURRENT_EXTERNAL_CHANGE_CODE]}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-concurrency-dismiss"
+                onClick={dismissSaveWarnings}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
       {showSaveDegradation ? (
         // 026-F5 (task 012, r6): save-time degradation — the save SUCCEEDED but some content was
         // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
         <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
-            {`${summarizeSaveDegradation(saveWarnings)} The original file is unchanged until you save.`}
+            {`${summarizeSaveDegradation(degradationOnlyWarnings)} The original file is unchanged until you save.`}
           </MessageBarBody>
           <MessageBarActions
             containerAction={

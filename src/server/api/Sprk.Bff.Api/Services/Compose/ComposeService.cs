@@ -1231,17 +1231,35 @@ public class ComposeService : IComposeService
                 && !string.IsNullOrEmpty(effectiveBaselineETag)
                 && !string.Equals(effectiveBaselineETag, preWriteETag, StringComparison.Ordinal);
 
-            // UAT-25: the whole-body ContentModel re-author CANNOT re-anchor another writer's changes (unlike
-            // the op-log path below) — so a stale base there would SILENTLY OVERWRITE whatever Word / another
-            // tab wrote. Refuse honestly (412 reload-and-reapply, nothing overwritten) instead of clobbering.
+            // FR-S02 (r8 task 011) — CONCURRENCY IS LAST-WRITER-WINS WITH A WARNING. Owner decision
+            // 2026-08-19, superseding the 412 refusal that shipped 2026-08-18.
+            //
+            // The whole-body ContentModel re-author cannot re-anchor another writer's changes (unlike the
+            // op-log path below), so a moved base here DOES mean this save supersedes theirs. That is
+            // acceptable and it is not data loss: Compose versions every save, so the other writer's
+            // content is the PREVIOUS version, recoverable from version history. The refusal it replaces
+            // was worse in exactly the way that matters — it left the user with unsaved work in a browser
+            // tab and no way forward, and its client-side recovery handler was dead code the day it
+            // shipped (task 010).
+            //
+            // So: proceed, and TELL THE USER. The warning rides the existing degradation-warning channel
+            // (no new wire field, no new client surface) and names version history as the recovery. The
+            // write below additionally carries `If-Match: preWriteETag`, so "last writer wins" is enforced
+            // at the storage boundary rather than merely hoped for — a writer landing between our read and
+            // our PUT is rejected by Graph and retried against the fresh version, never silently lost.
             if (request.ContentModel is not null && baseMoved)
             {
                 _logger.LogWarning(
-                    "Compose save: STALE base on the ContentModel (whole-body) path for driveItem={DocumentSpeId} " +
-                    "(baseline eTag={BaselineETag} [{BaselineSource}], live eTag={CurrentETag}) — refusing (412) to " +
-                    "avoid silently overwriting an external writer; the client reloads + reapplies.",
+                    "Compose save: base moved on the ContentModel (whole-body) path for driveItem={DocumentSpeId} " +
+                    "(baseline eTag={BaselineETag} [{BaselineSource}], live eTag={CurrentETag}) — proceeding " +
+                    "last-writer-wins and warning the user; the superseded content remains in version history.",
                     request.DocumentSpeId, effectiveBaselineETag, saveStamp is not null ? "stamp" : "load-time", preWriteETag);
-                throw new EtagPreconditionFailedException(request.DocumentSpeId!, ifMatch: effectiveBaselineETag);
+
+                renderDegradationWarnings = new List<ComposeProjectionWarning>(
+                    renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+                {
+                    new(ConcurrentExternalChangeCode, 1),
+                };
             }
 
             if (request.ContentModel is null && (hasOperations || hasComments) && baseMoved)
@@ -1503,16 +1521,24 @@ public class ComposeService : IComposeService
             if (string.IsNullOrWhiteSpace(request.DriveId))
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
-            using var contentStream = new MemoryStream(contentToPersist, writable: false);
-            // FR-08 (task 050): the write itself stays the existing etag-less overload (unchanged R1
-            // behavior + write-path signature) — preWriteETag is used above purely for the staleness
-            // ASSERT (comparing our own persisted version stamp to the live eTag) and below to SEED the
-            // next save's stamp when the write's own response carries no eTag. Upgrading this write to a
-            // Graph-level If-Match precondition is a further-hardening candidate, not required by this
-            // task's acceptance criteria (staleness is asserted + re-anchored via OUR OWN stamp, not via
-            // Graph's optimistic-concurrency response).
-            var replaced = await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
+            // FR-S02 (r8 task 011): the write now carries `If-Match` — the "further-hardening candidate"
+            // task 050 deferred. Without it, last-writer-wins is a hope: between reading `preWriteETag`
+            // above and this PUT there is a check-then-act window in which another writer can land a
+            // version that this blind write would erase with no version of theirs ever recorded.
+            //
+            // The precondition value is `preWriteETag` — the LIVE version this save's baseline was
+            // resolved against, which is exactly what the POML requires and is correct on both paths:
+            // the non-stale path merged against it because it equals the load-time baseline, and the
+            // stale path merged against it because ReanchorStaleSaveAsync re-downloaded those very bytes.
+            // Deliberately NOT the client's load-time ETag — sending that would re-create the refusal
+            // this task removed, since a concurrent writer would fail the precondition every time.
+            //
+            // Null preWriteETag (no metadata read — a drive-less or transient path) degrades to the R1
+            // blind PUT, unchanged. `ReplaceFileContentAsUserAsync` already accepts the value and maps a
+            // Graph 412 to a typed EtagPreconditionFailedException (ADR-007: the Graph type never
+            // crosses the facade); the ETag itself crosses as a plain string.
+            var replaced = await ReplaceWithPreconditionAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId!, contentToPersist, preWriteETag, cancellationToken)
                 .ConfigureAwait(false);
 
             if (replaced is null || string.IsNullOrEmpty(replaced.Id))
@@ -1793,6 +1819,74 @@ public class ComposeService : IComposeService
                 unavailable: false);
         }
     }
+
+    /// <summary>
+    /// FR-S02 (r8 task 011): replace the drive-item's content under an `If-Match` precondition, retrying
+    /// ONCE against the freshly-read version if a writer landed inside the check-then-act window.
+    /// </summary>
+    /// <remarks>
+    /// The retry is the deliberate resolution of the POML's step-5 question ("retry once, or report
+    /// storage-failed?"). Retrying is correct here because the precondition failure carries no information
+    /// the user could act on — it means only that our read was microseconds stale, and the save's own
+    /// semantics are already last-writer-wins, so re-issuing against the fresh version produces exactly the
+    /// outcome the user asked for. Retrying UNBOUNDED would be wrong (a hot document could spin), and
+    /// failing immediately would resurrect the dead-end this task exists to remove — so: exactly one retry,
+    /// then an honest typed failure the endpoint maps to a defined outcome.
+    ///
+    /// The second attempt re-reads metadata rather than reusing the failed ETag: reusing it would fail
+    /// identically, and the point of the retry is to rebase onto whatever landed.
+    /// </remarks>
+    private async Task<FileHandleDto?> ReplaceWithPreconditionAsync(
+        HttpContext httpContext,
+        string driveId,
+        string itemId,
+        byte[] content,
+        string? ifMatch,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(ifMatch))
+        {
+            // No resolved version to assert against (no metadata read happened — a drive-less or
+            // transient path). Nothing to precondition on, so this stays the unchanged R1 blind PUT via
+            // the etag-less overload rather than passing an explicit null through the If-Match one.
+            using var blindStream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, blindStream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, stream, ifMatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        // Only reachable with a non-empty `ifMatch` — the guard above returns for the blind-PUT case, so
+        // this catch cannot fire on a request that never carried a precondition.
+        catch (EtagPreconditionFailedException)
+        {
+            var fresh = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogWarning(
+                "Compose save: If-Match precondition failed for driveItem={DocumentSpeId} (sent eTag={SentETag}, " +
+                "live eTag={FreshETag}) — a writer landed inside the read-to-write window. Retrying ONCE against " +
+                "the fresh version (last-writer-wins).",
+                itemId, ifMatch, fresh?.ETag);
+
+            using var retryStream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, driveId, itemId, retryStream, fresh?.ETag, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// FR-S02 (r8 task 011): the degradation-warning code carried when a save superseded a version another
+    /// writer landed while the document was open. Concurrency is last-writer-wins with a warning; this code
+    /// IS the warning, and the client renders it naming version history as the recovery path.
+    /// Mirrored client-side by <c>CONCURRENT_EXTERNAL_CHANGE_CODE</c> in <c>ComposeBannerStack.tsx</c>.
+    /// </summary>
+    internal const string ConcurrentExternalChangeCode = "concurrent-external-change";
 
     /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
     /// re-fetch (versionId + driveId + speId).</summary>

@@ -2246,26 +2246,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           return;
         }
 
-        // UAT-25/26 (2026-08-18): 412 = the server refused the save because the document changed since we
-        // opened it (an external Word/tab writer landed a new version) — nothing was overwritten. Two
-        // dispatches, both onto EXISTING surfaces: `saveFailed` so the user is told the save did not land
-        // (the external-change banner alone reads like an FYI on a save that succeeded), and
-        // `externalChangeDetected` so the explicit Reload affordance appears. `saveFailed` also returns
-        // `status` to 'loaded' — `externalChangeDetected` alone would strand the workspace in 'saving'.
-        //
-        // TRANSITIONAL: task 011 (FR-S02) replaces the server's 412 refusal with last-writer-wins +
-        // `If-Match`, at which point this branch retires with it. Do not build on it.
-        if (failure.kind === 'http' && failure.status === 412) {
-          dispatch({
-            kind: 'saveFailed',
-            errorMessage:
-              'Not saved — this document changed in the document management system since you opened it, so ' +
-              'nothing was overwritten. Reload to pick up the latest version, then reapply your edits.',
-          });
-          dispatch({ kind: 'externalChangeDetected' });
-          return;
-        }
-
+        // FR-S02 (r8 task 011): there is deliberately NO 412 branch here. Concurrency is now
+        // LAST-WRITER-WINS with a warning — the server never refuses a save because the stored version
+        // moved, so a save-path 412 is unreachable. The concurrent-writer case arrives on the SUCCESS
+        // path instead, as a `concurrent-external-change` degradation warning naming version history as
+        // the recovery. Task 010 routed 412 here transitionally; this task removed the reason.
+        // Re-adding a 412 branch would mean a refusal loop came back — check the server first.
         dispatch({ kind: 'saveFailed', errorMessage: saveFailureMessage(failure) });
       }
     },

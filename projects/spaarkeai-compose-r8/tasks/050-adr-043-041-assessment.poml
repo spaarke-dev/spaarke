@@ -4,7 +4,7 @@
     <title>ADR-043 + ADR-041 assessment — does the anchor change touch ActionKind admission? Must FR-C05's "apply anyway?" be an ADR-041 Gate?</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Blocks all Track C code from landing. An incorrect "orthogonal" finding lets a silent ADR violation ship.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -89,8 +89,8 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -177,8 +177,8 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -281,6 +281,13 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict,
             "a batch-level schema refusal is not an anchor refusal — best-effort is meaningless, so it stays a hard failure (UnsupportedSchemaVersion → 409, never a partial 200)");
+        // FR-S02 (r8 task 011): the replace path now routes through the If-Match overload when the save
+        // resolved a live version, and the etag-less overload when it did not — assert NEITHER ran.
+        _fixture.SpeMock.Verify(
+            s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a batch-level refusal must never write partial bytes to SPE");
         _fixture.SpeMock.Verify(
             s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -320,8 +327,8 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -412,8 +419,8 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);

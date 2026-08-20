@@ -38,15 +38,15 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 001 | Land/verify **PR #690** (Git-LFS corpus fixtures in CI); confirm fixtures resolve to real bytes | MINIMAL | sonnet/high | ✅ | — | 🔲 |
-| 002 | Publish-size baseline (vs 44.96 MB) + `/conflict-check` + **PR #266** (OpenXml 3.5.1) sequencing decision | MINIMAL | sonnet/high | ✅ | — | 🔲 |
+| 001 | Land/verify **PR #690** (Git-LFS corpus fixtures in CI); confirm fixtures resolve to real bytes | MINIMAL | sonnet/high | ✅ | — | ✅ |
+| 002 | Publish-size baseline (vs 44.96 MB) + `/conflict-check` + **PR #266** (OpenXml 3.5.1) sequencing decision | MINIMAL | sonnet/high | ✅ | — | ✅ |
 
 ## Phase 1 — Track S: Save reliability · **P0, SHIPS ALONE** (no architecture dependency)
 
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 010 | **Client save-error contract** — route on `ApiError.status`, delete the unreachable `!response.ok` block, rebuild tests on the real thrown path | FR-S01 | FULL | opus/xhigh | ❌ | — | ✅ |
-| 011 | **Concurrency** — last-writer-wins + warning (retire the 412 loop) **and** `If-Match` at the storage boundary | FR-S02, A12 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
+| 011 | **Concurrency** — last-writer-wins + warning (retire the 412 loop) **and** `If-Match` at the storage boundary | FR-S02, A12 | FULL | opus/xhigh | ❌ | 010 | ✅ |
 | 012 | **Save lifecycle hardening** — dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery | FR-S03/04/05 | FULL | opus/xhigh | ❌ | 010 | 🔲 |
 | 013 | **Save-outcome contract + telemetry** — closed enum on the wire; no 200-with-nothing-written; emit the outcome | FR-S06, S10 | FULL | opus/xhigh | ❌ | — | 🔲 |
 | 014 | **Engine-side integrity** — re-anchor download failure must never persist the stale baseline *(the ONE Half-A defect in Track S)* | FR-S07 | FULL | opus/xhigh | ❌ | — | 🔲 |
@@ -93,7 +93,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 050 | **ADR-043 + ADR-041 assessment** (ADR-043 explicitly names "compose edit"; is FR-C05's "apply anyway?" a Gate?). *Escalation trigger* | — | FULL | opus/xhigh | ✅ | — | 🔲 |
+| 050 | **ADR-043 + ADR-041 assessment** (ADR-043 explicitly names "compose edit"; is FR-C05's "apply anyway?" a Gate?). *Escalation trigger* | — | FULL | opus/xhigh | ✅ | — | ✅ |
 | 051 | **Anchor supply** — thread the captured `(paraId, span)` request→response→apply · wire `CitationResolver` · closed-set paraId return for review passes *(three sources, one code path)* | FR-C01/02/03 | FULL | opus/max | ❌ | 050 | 🔲 |
 | 052 | **Retire the text-search path** (`ComposeEditValidator`, `FindAll`, `target_text`/`match_mode`, client matchers) + deterministic stale/deleted outcomes | FR-C04/05 | FULL | opus/xhigh | ❌ | 051 | 🔲 |
 | 053 | **Bounded confirmable fallback** + verify the dead-end is **unreachable**; no UAT-21 regression | FR-C06/07 | FULL | opus/xhigh | ❌ | 052 | 🔲 |

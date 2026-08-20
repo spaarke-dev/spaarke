@@ -52,6 +52,7 @@ type SaveOutcome =
   | { kind: 'auth' }
   | { kind: 'transport' }
   | { kind: 'post-save-throw' }
+  | { kind: 'concurrent-warning' }
   | null;
 
 const config: { saveOutcome: SaveOutcome } = { saveOutcome: null };
@@ -108,6 +109,9 @@ const authenticatedFetchMock = jest.fn(async (url: string): Promise<Response> =>
         eTag: 'etag-2',
         size: 500,
         wasPromotedThisSave: false,
+        // FR-S02: the concurrent-writer outcome is a 200 carrying a warning, not a refusal.
+        degradationWarnings:
+          outcome?.kind === 'concurrent-warning' ? [{ code: 'concurrent-external-change', count: 1 }] : undefined,
       }),
     } as unknown as Response;
   }
@@ -332,17 +336,30 @@ describe('ComposeWorkspace — save errors route on ApiError.status (FR-S01, r8 
     await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
   });
 
-  it('412 says the save did NOT land AND offers the external-change Reload', async () => {
-    config.saveOutcome = { kind: 'api', status: 412, detail: 'The document changed since it was opened.' };
+  it('a concurrent external writer is a SUCCESSFUL save with a warning, never a refusal (FR-S02)', async () => {
+    // Task 011 made concurrency last-writer-wins: the server no longer refuses on a moved base, so the
+    // concurrent-writer case arrives on the SUCCESS path carrying `concurrent-external-change`. This is
+    // the paired client-recovery assertion NFR-08 requires for that outcome.
+    config.saveOutcome = { kind: 'concurrent-warning' };
     await mountAndSave();
 
-    // Distinct, honest message — the save was refused and nothing was overwritten.
+    const banner = await screen.findByTestId('compose-workspace-concurrency-banner');
+    expect(banner).toHaveTextContent('Someone else saved this document while you had it open');
+    expect(banner).toHaveTextContent('version history');
+    // The save SUCCEEDED — no error banner, and the op-log was committed.
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
+    await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('NEGATIVE: a 412 is no longer special-cased — the refusal loop is gone (FR-S02)', async () => {
+    // Defence in depth: if a stale BFF ever returns 412 on the save route, it must render as an ordinary
+    // honest rejection, NOT resurrect the reload-and-reapply refusal flow task 011 deleted.
+    config.saveOutcome = { kind: 'api', status: 412, detail: 'stale base' };
+    await mountAndSave();
+
     const text = await errorBannerText();
-    expect(text).toContain('Not saved');
-    expect(text).toContain('changed in the document management system');
-    // …and the recovery affordance the 412 ProblemDetails describes.
-    expect(await screen.findByTestId('compose-external-change-banner')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-external-change-banner-reload')).toBeInTheDocument();
+    expect(text).toContain('the server rejected this save (HTTP 412)');
+    expect(screen.queryByTestId('compose-external-change-banner')).not.toBeInTheDocument();
   });
 
   it('403 renders the permission message, carrying the server detail', async () => {

@@ -1666,15 +1666,24 @@ public static class ComposeEndpoints
         }
         catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
         {
-            // DEF-14: the drive-item changed under the caller since load (If-Match precondition
-            // failed). Map to 412 rather than clobbering; the client's recovery is reload + reapply.
-            logger.LogWarning(ex, "Compose save: ETag precondition failed (412). TraceId={TraceId}", httpContext.TraceIdentifier);
+            // FR-S02 (r8 task 011): the save route NO LONGER RETURNS 412. Concurrency is last-writer-wins
+            // with a warning — a document whose stored version merely moved since load now SUCCEEDS and
+            // carries a `concurrent-external-change` warning, so the old "reload and reapply" refusal (and
+            // its dead client handler) are gone.
+            //
+            // Reaching here now means something narrower and genuinely transient: a writer landed inside
+            // the read-to-write window AND the single rebase retry in ComposeService.ReplaceWithPreconditionAsync
+            // also lost — i.e. the document is being written continuously by someone else right now. That is
+            // a CONFLICT (409), not a failed precondition the caller can fix by reloading: nothing about the
+            // caller's state is stale, and the honest instruction is simply to try again. Their work is
+            // intact client-side; the save is a no-op.
+            logger.LogWarning(ex, "Compose save: If-Match precondition failed after the rebase retry (409). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
-                statusCode: StatusCodes.Status412PreconditionFailed,
-                title: "Document Changed",
-                detail: "This document changed since you opened it — reload and reapply your changes. " +
-                        "Nothing was overwritten.",
-                type: "https://tools.ietf.org/html/rfc7232#section-4.2");
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Document Busy",
+                detail: "Someone else is saving this document right now, so your save did not go through. " +
+                        "Nothing was overwritten and your changes are still here — try saving again in a moment.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
         catch (ComposePatchException ex)
         {

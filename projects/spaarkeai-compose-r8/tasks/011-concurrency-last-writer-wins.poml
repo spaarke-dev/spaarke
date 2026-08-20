@@ -4,7 +4,7 @@
     <title>FR-S02 + FR-A12 — Concurrency becomes last-writer-wins with a warning, enforced by If-Match at the storage boundary</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Reverses the concurrency semantics on the live save path across both .cs and .tsx; removes a shipped refusal loop; introduces an ETag precondition at the storage boundary.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,4 +115,77 @@
     <criterion>A seam test drives an external concurrent writer and asserts persist + warn; a paired client test asserts the rendered recovery affordance (NFR-08).</criterion>
     <criterion>Publish size reported (absolute + delta vs 44.96 MB); no new NuGet; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-20. All acceptance criteria met.
+
+    **(a) The refusal is gone.** The staleness assert in `ComposeService` no longer throws
+    `EtagPreconditionFailedException` on a moved base — it logs, proceeds, and appends a
+    `concurrent-external-change` warning to `renderDegradationWarnings`. Grep-verified: `ComposeService`
+    now only CATCHES that exception, never throws it, and `Status412PreconditionFailed` no longer appears
+    in `ComposeEndpoints.cs`.
+
+    **(b) The precondition is real.** The replace-path PUT goes through a new private
+    `ReplaceWithPreconditionAsync` using the EXISTING `If-Match` overload (no new upload method).
+
+    **Design decisions (POML step 5 was an open question — these are the answers):**
+
+    1. **If-Match value = `preWriteETag`**, the LIVE version read at save time, NOT the client's load-time
+       ETag. This is the crux: sending the load-time value would fail the precondition on every concurrent
+       write and re-create the refusal this task removes. It is correct on both paths — the non-stale path
+       merged against it because it equals the baseline; the stale path merged against it because
+       `ReanchorStaleSaveAsync` re-downloaded exactly those bytes.
+    2. **Precondition failure → retry ONCE against a re-read version.** A precondition failure carries
+       nothing the user could act on (our read was microseconds stale) and the semantics are already
+       last-writer-wins, so rebasing produces what they asked for. Unbounded retry could spin on a hot
+       document; failing immediately would resurrect the dead end. The second attempt re-reads metadata
+       rather than reusing the failed ETag — reusing it would fail identically.
+    3. **Exhausted case → 409 Conflict, not 412.** Nothing about the caller's state is stale, so "reload
+       and reapply" is wrong advice; "try saving again" is the honest instruction. This also satisfies the
+       no-412-on-the-save-route criterion.
+    4. **Only the ContentModel path warns.** The op-log path re-anchors ONTO the other writer's bytes —
+       that is a merge, not a supersession, so "your save is now the current version, see version history"
+       would be misleading there. Recorded so a future reader does not "fix" the asymmetry.
+    5. **The warning reuses the existing `degradationWarnings` wire field** (no new field, no new prop, no
+       new client prop) but renders as its OWN banner row. Folding it into the degradation banner would
+       have placed it under "Some formatting was simplified when saving" followed by "The original file is
+       unchanged until you save" — both FALSE of a concurrency notice. The partition keeps that banner's
+       existing copy true of what it actually describes.
+
+    **Blast radius, handled:** threading If-Match means EVERY existing-item save now takes the 6-arg
+    overload (such saves always read live metadata). 40 Compose tests mocked only the 5-arg overload and
+    went red with a misleading 404. Fixed by updating 10 Moq setups + 2 Verify expressions across 6 seam
+    files — no assertion, expected status, or test name altered, nothing skipped or deleted. In
+    `ComposePartialApplyRecoverySeamTests` the `Times.Never` "never writes partial bytes" verify was kept
+    on BOTH overloads, since `Times.Never` on one no longer proves no-write-at-all — that strengthens the
+    assertion rather than preserving it.
+
+    **Tests:** `ConcurrencySaveSeamTests.Save_StaleBase_ContentModelPath_...` REWRITTEN in place (extend,
+    don't add) from asserting a 412 refusal to asserting 200 + the write happened + the exact If-Match
+    value sent (`"v2-etag-external"`) + the `concurrent-external-change` warning on the wire. NFR-08
+    pairing: the client half is `ComposeWorkspace.saveErrorRouting.test.tsx` — the concurrency banner
+    naming version history, plus a NEGATIVE test that a stray 412 renders as an ordinary rejection and
+    never resurrects the reload-and-reapply flow. Two route-layer DEF-14 tests moved 412 → 409; the
+    translation-layer tests (Graph 412 → typed exception) are unchanged, because that half is unchanged.
+
+    **Verification:** BFF builds clean (0 errors). Compose suite **1129 passed / 0 failed / 0 skipped**.
+    Release-gating **Compose Fidelity Gate: 11/11 green**. Client: 55 tests green across the three touched
+    suites. No package reference changed; `dotnet list package --vulnerable --include-transitive` reports
+    no vulnerable packages.
+
+    **Publish size: 43.68 MB compressed incl. PDBs** (`dotnet publish -c Release ... -o deploy/api-publish/`,
+    215 files, framework-dependent net10 linux-x64), vs the 60 MB ceiling and 55 MB review threshold.
+    NOTE for whoever reconciles baselines: task 002 measured 44.97 MB on the same tree with different
+    tooling, so the −1.28 MB apparent delta is a measurement-convention difference, NOT an effect of this
+    change — this task adds a few lines and no package. The load-bearing fact is 43.68 MB ≪ 60 MB.
+
+    Quality gates: code-review ✅ (two self-review fixes applied — a single-caller `AppendWarning` helper
+    inlined per §11, and a `when` clause on the retry catch removed as dead given the early return) ·
+    adr-check ✅ (ADR-007: no Graph type crosses the facade — grep-verified the diff introduces no
+    `Microsoft.Graph`/`DriveItem`/`ODataError` reference, and `EtagPreconditionFailedException` is a plain
+    Spaarke domain exception; ADR-009 no new caching; ADR-010 no new DI registration; ADR-021 no new colour
+    and no new surface; ADR-038 seam test extended in place with no banned shapes) · prettier ✅.
+
+    NOT deployed — Track S deploys as a batch at task 017.
+  </notes>
 </task>

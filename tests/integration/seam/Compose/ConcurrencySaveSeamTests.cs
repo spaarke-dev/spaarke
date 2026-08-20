@@ -133,11 +133,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -190,13 +193,24 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
-    // 1b. UAT-25/26 (2026-08-18) — a stale-base save on the WHOLE-BODY ContentModel path CANNOT re-anchor
-    //     (it re-authors the entire body), so it must REFUSE with 412 (reload + reapply — nothing
-    //     overwritten) rather than SILENTLY OVERWRITING the external writer's new version. The honest
-    //     counterpart to test #1: the op-log path re-anchors; the model path refuses.
+    // 1b. FR-S02 (spaarkeai-compose-r8 task 011) — a stale-base save on the WHOLE-BODY ContentModel path
+    //     PERSISTS (last-writer-wins) and WARNS. Owner decision 2026-08-19, superseding the UAT-25/26
+    //     412 refusal this test previously asserted.
+    //
+    //     Why the reversal is the safer behavior, not the laxer one: Compose versions every save, so the
+    //     superseded writer's content is the PREVIOUS version and is recoverable from version history —
+    //     whereas the refusal left the USER with unsaved work in a browser tab and no way forward, and
+    //     its client-side recovery handler was dead code the day it shipped (r8 task 010, FR-S01).
+    //
+    //     This test is also the NFR-08 pairing for the outcome: the server half asserted here, the
+    //     rendered client affordance asserted in ComposeWorkspace.saveErrorRouting.test.tsx.
+    //
+    //     Third assertion, the one that makes "last writer wins" a guarantee rather than a hope: the PUT
+    //     carries `If-Match` set to the LIVE version this save's baseline was resolved against, closing
+    //     the check-then-act window between the metadata read and the write.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     [Fact]
-    public async Task Save_StaleBase_ContentModelPath_Refuses412_WithoutOverwriting_ThroughTheWire()
+    public async Task Save_StaleBase_ContentModelPath_PersistsLastWriterWins_WarnsAndSendsIfMatch_ThroughTheWire()
     {
         const string speId = "spe-item-uat25-stale-model";
         const string driveId = "drive-uat25-stale-model";
@@ -232,12 +246,19 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
 
-        // Track that the refused save NEVER overwrites (no ReplaceFileContentAsUserAsync after the seed).
-        var overwroteAfterSeed = false;
+        // The stale-base save now WRITES (last-writer-wins). Capture the If-Match the write carried — a
+        // resolved live version means the save must go through the PRECONDITIONED overload, never the
+        // blind one, or the read-to-write window is still open.
+        var wroteAfterSeed = false;
+        string? sentIfMatch = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback(() => overwroteAfterSeed = true)
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, _, ifMatch, _) =>
+            {
+                wroteAfterSeed = true;
+                sentIfMatch = ifMatch;
+            })
             .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
 
         // ── Save #2 on the whole-body ContentModel path against the stale base. ──
@@ -251,10 +272,19 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         });
 
         var secondBody = await secondSave.Content.ReadAsStringAsync();
-        secondSave.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
-            $"a stale-base whole-body ContentModel save must refuse (412), never silently overwrite the external writer — body: {secondBody}");
-        overwroteAfterSeed.Should().BeFalse(
-            "nothing may be written on the refused save — the external writer's version stays intact (no silent lost-update)");
+        secondSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"FR-S02: a moved base no longer refuses the save — concurrency is last-writer-wins with a warning — body: {secondBody}");
+
+        wroteAfterSeed.Should().BeTrue("the save must actually persist — last-writer-wins means the write happens");
+
+        sentIfMatch.Should().Be("\"v2-etag-external\"",
+            "the PUT must carry If-Match set to the LIVE version this save's baseline was resolved against — " +
+            "that is what closes the check-then-act window and makes last-writer-wins a guarantee rather than a hope. " +
+            "Sending the client's stale load-time ETag instead would re-create the refusal FR-S02 removed.");
+
+        secondBody.Should().Contain("concurrent-external-change",
+            "the user MUST be told their save superseded another writer's version, with version history as the " +
+            "recovery — a silent supersession is the dishonest half of last-writer-wins");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -299,11 +329,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -423,11 +456,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
