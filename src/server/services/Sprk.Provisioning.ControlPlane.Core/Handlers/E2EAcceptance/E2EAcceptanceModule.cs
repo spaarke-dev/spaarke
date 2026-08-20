@@ -57,13 +57,21 @@ public static class E2EAcceptanceModule
         services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
 
         // Production seam registrations. Placeholder impls for TrapVerifier /
-        // InvariantVerifier / RegistrySetupStatusUpdater surface "not yet
-        // wired" as Resumable per POML deferral note (real Wave-C5/Phase-F
-        // impls swap via DI change only — the H13 handler + tests are
-        // unchanged).
+        // RegistrySetupStatusUpdater surface "not yet wired" as Resumable per
+        // POML deferral note (real Wave-G7 sibling probes swap via DI change
+        // only — the H13 handler + tests are unchanged).
+        //
+        // I1 branch (task 170, Wave G-7 Batch G-7A1): swapped from
+        // PlaceholderInvariantVerifier to PackagedScriptTenantLiteralInvariantVerifier.
+        // The real class returns real Pass/Fail for I1 (packaged-scripts on-disk
+        // grep for tenant-shaped GUID defaults on [string]$*Tenant* Params) and
+        // preserves InfraFault for I2-I5 (their own sibling tasks 173/174/176/179
+        // land those one-by-one). The placeholder file is retained on disk
+        // (unregistered) as reversibility scaffolding — see
+        // PlaceholderInvariantVerifier.cs retirement banner.
         services.AddSingleton<IE2EValidationRunner, ValidateDeployedEnvironmentScriptRunner>();
         services.AddSingleton<IE2ETrapVerifier, PlaceholderTrapVerifier>();
-        services.AddSingleton<IE2EInvariantVerifier, PlaceholderInvariantVerifier>();
+        services.AddSingleton<IE2EInvariantVerifier, PackagedScriptTenantLiteralInvariantVerifier>();
         services.AddSingleton<INamingConformanceChecker, NamingConformanceScriptRunner>();
         services.AddSingleton<ICostEnvelopeChecker, AzCliCostEnvelopeChecker>();
         services.AddSingleton<IRegistrySetupStatusUpdater, DataverseRegistrySetupStatusUpdater>();

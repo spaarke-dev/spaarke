@@ -1,14 +1,30 @@
 // -----------------------------------------------------------------------------
 // PlaceholderInvariantVerifier.cs
 //
-// Wave-C4 production placeholder <see cref="IE2EInvariantVerifier"/> impl —
-// parity with <see cref="PlaceholderTrapVerifier"/>. Returns InfraFault for
-// every invariant so H13 classifies Resumable when invoked against a live
-// customer stamp WITHOUT the full invariant-probe wiring in place.
+// RETIRED (task 170, Wave G-7, 2026-08-20): the DI registration for
+// <see cref="IE2EInvariantVerifier"/> was swapped in
+// <see cref="E2EAcceptanceModule"/> from THIS class to
+// <see cref="PackagedScriptTenantLiteralInvariantVerifier"/> — which returns
+// real Pass/Fail for I1 (packaged-scripts on-disk grep) and preserves
+// InfraFault for I2-I5 pending their own sibling probe tasks
+// (173 / 174 / 176 / 179).
 //
-// Live-Azure probe implementations for I1–I5 belong in the Phase F acceptance
-// suite (task 089). This placeholder satisfies the DI contract + surfaces the
-// "verifier not yet exercisable from L2 host" state cleanly.
+// KEPT ON DISK unregistered, per the uniform Wave-G6 retirement convention
+// (task 125 AzCliKvSecretsWriter, task 160 AzCliKvSecretReader, task 161
+// ExchangePolicyScriptApplier all followed the same "keep on disk with a
+// retirement banner" posture). Rationale: preserves the audit trail of
+// what was replaced + gives operators a one-file diff if the swap ever
+// needs to be reverted (delete the swap line in E2EAcceptanceModule.cs, add
+// back the AddSingleton<IE2EInvariantVerifier, PlaceholderInvariantVerifier>
+// line — no other change needed).
+//
+// ORIGINAL SCOPE (Wave-C4, task 055):
+//   Placeholder impl parity with <see cref="PlaceholderTrapVerifier"/>.
+//   Returned InfraFault for every invariant so H13 classified Resumable
+//   when invoked against a live customer stamp WITHOUT the full invariant-
+//   probe wiring in place. Live-Azure probe implementations for I1-I5 were
+//   originally deferred to Phase F acceptance suite (task 089); the deferral
+//   for I1 has now landed (this task) and I2-I5 are individually deferred.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
