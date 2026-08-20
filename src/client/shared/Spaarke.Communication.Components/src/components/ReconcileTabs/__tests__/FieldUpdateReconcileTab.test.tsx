@@ -328,6 +328,15 @@ describe('FieldUpdateReconcileTab', () => {
     expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
   });
 
+  // Item 2g (owner UAT 2026-08-19) — the "Update other fields" affordance must be present
+  // in the EMPTY state too (a confirmed record with no proposals can still edit other fields).
+  it('item 2g: shows "Update other fields" in the empty state when a record is confirmed', async () => {
+    wireDefault([]);
+    renderTab();
+    expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('field-reconcile-update-other')).toBeInTheDocument();
+  });
+
   // AC1/AC5 — the FormModal dual-use mount renders the proposal (ADR-050) and dark-mode renders cleanly (ADR-021).
   it('renders the proposal inside the FormModal mount under the dark theme without errors', async () => {
     wireDefault();

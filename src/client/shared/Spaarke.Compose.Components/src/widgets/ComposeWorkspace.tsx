@@ -966,8 +966,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // ComposeEditor so it renders in the single ComposeBannerStack rail (above the toolbar) instead of a
   // hand-rolled bar below the toolbar. The editor pushes changes via onRedlineErrorChange; dismissal
   // routes back through editorRef.current.clearRedlineError().
-  const [pendingRedlineError, setPendingRedlineError] =
-    React.useState<import('./hooks/usePendingRedline').PendingRedlineError | null>(null);
+  const [pendingRedlineError, setPendingRedlineError] = React.useState<
+    import('./hooks/usePendingRedline').PendingRedlineError | null
+  >(null);
 
   // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
   // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave

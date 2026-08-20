@@ -423,6 +423,52 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
     expect(banner).toHaveTextContent(/Acme v Beta/);
   });
 
+  it('item 2f: reconcile+confirmed keeps candidate cards switchable — primary card shows Undo, others Confirm (no double-Undo banner)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          variant: 'reconcile',
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
+            cand('sprk_regardingorganization', 'sprk_organization', 'org-1', 'Acme Corp', 0.8, { number: 'ORG-1' }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
+
+    // Cards stay visible after confirm (they were hidden before item 2f) — the compact
+    // card renders "{REC#} : {name}". The primary name also appears in the filed banner,
+    // so match the card's specific "MAT-1 : …" / "ORG-1 : …" form.
+    expect(screen.getByText(/MAT-1 : Acme v Beta/)).toBeInTheDocument();
+    expect(screen.getByText(/ORG-1 : Acme Corp/)).toBeInTheDocument();
+    // The current primary (mtr-1) card carries Undo; the other candidate keeps Confirm (switch).
+    expect(screen.getByTestId('candidate-undo')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
+    // The primary IS represented as a card, so the filed banner's own Undo is suppressed
+    // (no redundant second Undo).
+    expect(screen.queryByTestId('association-undo')).not.toBeInTheDocument();
+  });
+
+  it('item 2f: clicking Undo on the primary card un-files it (clearPrimaryRegarding write path)', async () => {
+    const props = baseProps({
+      variant: 'reconcile',
+      associationStatus: STATUS_RESOLVED,
+      associationProvenanceJson: provenance([
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, { number: 'MAT-1', written: true }),
+      ]),
+      filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+    });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('candidate-undo'));
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+  });
+
   it('the default variant does NOT render the filed banner (email-form layout unchanged)', () => {
     renderWithProvider(
       <EmailConnectionsReview

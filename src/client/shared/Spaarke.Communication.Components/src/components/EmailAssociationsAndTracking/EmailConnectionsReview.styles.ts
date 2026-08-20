@@ -12,6 +12,14 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 export const useConnectionsReviewStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
 
+  // Reconcile variant (owner UAT 2026-08-19, items 2a/2b/2c): the browse-shell tabs
+  // pane is unpadded and the Fields/Tasks tabs self-pad — so the Related-to tab must
+  // pad itself too, else its cards / "Look up another record" field / "New record"
+  // button sit flush against the pane's left edge and read as clipped. Matches the
+  // Field/Task tab roots' `spacingHorizontalM` inset. Default (email-form) variant is
+  // unpadded — its host provides the inset.
+  reconcilePad: { paddingInline: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalM },
+
   // ── Cards + "Link another" on ONE row (link to the right — saves vertical space) ──
   cardsRow: { display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'flex-start', flexWrap: 'wrap' },
 
