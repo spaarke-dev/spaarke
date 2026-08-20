@@ -1,14 +1,39 @@
 // -----------------------------------------------------------------------------
 // ValidateDeployedEnvironmentScriptRunner.cs
 //
-// Production <see cref="IE2EValidationRunner"/> impl — shells out to pwsh +
+// RETIRED (task 181, Phase C'' Wave G-7 Batch G-7B, 2026-08-20): superseded by
+// <see cref="E2EValidationRunner"/> -- a pure-C# port of scripts/Validate-
+// DeployedEnvironment.ps1's actually-shipped check surface (BFF /healthz,
+// /ping, CORS preflight) with ZERO ProcessStartInfo / pwsh dependency. Per
+// DS-4 section 6 this retires the last H13 shell-out so H13 executes cleanly
+// under Option D's zero-shell L2 Worker host without a pwsh prerequisite in
+// the App Service publish layout. The .ps1 script itself remains UNCHANGED on
+// disk as the operator-invokable off-cluster diagnostic tool (the pure-C#
+// port is the L2 runtime path; the .ps1 remains the operator/CI path).
+//
+// Retained on disk (NOT deleted); mirrors NamingConformanceScriptRunner.cs's
+// retirement banner. No longer registered in E2EAcceptanceModule.cs's
+// IE2EValidationRunner DI slot (see the task-181 DI-swap comment there).
+//
+// SILENT-FAIL AUDIT NOTE (why the port did NOT try to be 1:1 with the .ps1's
+// Dataverse-env-var + dev-leakage checks): the .ps1 authenticates against
+// Dataverse via the operator's ambient `pac auth create` session; L2 has no
+// equivalent Dataverse identity on the H13 envelope (H10 provisions the
+// BFF's MI Dataverse App User, not L2's). Rather than plumb a second
+// Dataverse identity through H13 for a partial-port, the C# runner surfaces
+// those checks in the ChecksSkipped list -- an operator grepping the H13
+// outcome sees "dataverse-env-vars-present" in Skipped rather than mistaking
+// silence for verification. Phase F rerun (task 186) closes the extended set.
+//
+// (ORIGINAL SUMMARY -- for historical context)
+// Production <see cref="IE2EValidationRunner"/> impl -- shells out to pwsh +
 // scripts/Validate-DeployedEnvironment.ps1 (Phase B extended). Parses the
 // script's stdout for check-by-check outcomes (the script's summary section
 // emits `PASS: <check>` / `FAIL: <check>` / `SKIP: <check>` lines the wrapper
 // scans).
 //
 // SHELL-OUT PATTERN PARITY:
-//   Mirrors Handlers/IntegrationWiring/ExchangePolicyScriptApplier.cs and
+//   Mirrored Handlers/IntegrationWiring/ExchangePolicyScriptApplier.cs and
 //   Handlers/BffDeploy/DeployBffApiScriptRunner.cs (Process.Start + async
 //   stdout/stderr capture + timeout enforcement + non-zero-exit inspection).
 // -----------------------------------------------------------------------------

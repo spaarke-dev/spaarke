@@ -776,9 +776,12 @@ builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporte
 builder.Services.AddScoped<H9BffDeployHandler>();
 
 // Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams
-// (IE2EValidationRunner = ValidateDeployedEnvironmentScriptRunner wraps the
+// (IE2EValidationRunner = ValidateDeployedEnvironmentScriptRunner wrapped the
 // Phase-B extended scripts/Validate-DeployedEnvironment.ps1 for SC #5 sample
-// checks; IE2ETrapVerifier = PlaceholderTrapVerifier — Wave-C4 stub that
+// checks -- retired 2026-08-20 task 181, now E2EValidationRunner pure-C# port
+// with live BFF /healthz + /ping + CORS effect probes + explicit ChecksSkipped
+// list for the Dataverse-auth-gated + Phase-B extended set (Phase F rerun task
+// 186 closes); IE2ETrapVerifier = PlaceholderTrapVerifier — Wave-C4 stub that
 // returns InfraFault for every T1–T6; IE2EInvariantVerifier =
 // PlaceholderInvariantVerifier — parity stub for I1–I5; INamingConformanceChecker
 // = NamingConformanceScriptRunner shells out to r3 task 063's

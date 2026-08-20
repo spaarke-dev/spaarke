@@ -82,7 +82,24 @@ public static class E2EAcceptanceModule
         //   - task 179 (I5)  — I5GraphTokenTenantScopeProbe.
         // PlaceholderInvariantVerifier.cs is retained on disk unregistered
         // per the Wave G-6 retirement convention.
-        services.AddSingleton<IE2EValidationRunner, ValidateDeployedEnvironmentScriptRunner>();
+        // Task 181 (Phase C'' Wave G-7 Batch G-7B): pure-C# port replaces the
+        // ValidateDeployedEnvironmentScriptRunner shell-out per DS-4 section 6 --
+        // ZERO ProcessStartInfo / pwsh dependency; the port issues live HttpClient
+        // effect probes (BFF /healthz, /ping, CORS preflight) against the customer's
+        // deployed BFF and surfaces the .ps1's Dataverse-env-vars + dev-leakage
+        // checks + Phase-B extended set (sample analysis / doc upload+index /
+        // layout render / wizard field-map) as an explicit ChecksSkipped list per
+        // the interim posture -- see E2EValidationRunner.cs file header for the
+        // silent-fail audit (POML premise mismatch: the .ps1 shipped 5 DIFFERENT
+        // checks than the POML prompt claimed; ported what actually exists +
+        // surfaced the gaps rather than silently mis-implementing the POML's
+        // Phase-B list against a script that never contained it). Named HttpClient
+        // registered below parity with the sibling I2/I4 probe named-client
+        // convention. ValidateDeployedEnvironmentScriptRunner is retained on disk
+        // UNREGISTERED per this project's retirement convention (see its retirement
+        // banner). Registration remains UNCONDITIONAL (ADR-032).
+        services.AddHttpClient(E2EValidationRunner.HttpClientName);
+        services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
         services.AddSingleton<IE2ETrapVerifier, PlaceholderTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
         // I1 adapter (task 173) — preserves task-170's real packaged-scripts
