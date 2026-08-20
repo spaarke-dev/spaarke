@@ -66,6 +66,21 @@
       keys to match .Api's canonical shape), update
       $script:WorkerRequiredConfigKeys to match -- and delete this note.
 
+    keyVaultReferenceIdentity PATCH — OWNED BY THIS SCRIPT (post-authoring
+    audit defect #8, Wave G-8 Batch 4):
+      platform-controlplane.bicep (header "DELIBERATELY OUT OF SCOPE", lines
+      76-80) explicitly defers the keyVaultReferenceIdentity PATCH to
+      "handler H4 (post-deploy)" -- but H4 patches CUSTOMER-stamp App
+      Services, never L2's OWN sites. Nothing else owned this PATCH, so on a
+      fresh stamp every @Microsoft.KeyVault app-setting reference on the L2
+      sites resolves with the (absent) system-assigned identity -> null ->
+      silent downstream failures (T1 family). This script therefore PATCHes
+      keyVaultReferenceIdentity -> the L2 UAMI resourceId on every site it
+      is about to deploy to (.Api production + staging slot, .Worker),
+      BEFORE the code deploy, so restarted sites resolve KV refs with the
+      UAMI from first boot. Idempotent: sites already targeting the UAMI
+      are skipped; each PATCH is read-back-verified.
+
     /healthz ON .Api — DISCOVERED + FIXED AT AUTHOR TIME (task 113):
       Prior to this task, Sprk.Provisioning.ControlPlane.Api only mapped
       GET /ping (Endpoints/HealthEndpoints.cs) — there was NO /healthz route,
@@ -135,6 +150,13 @@
 .PARAMETER WorkerAppServiceName
     .Worker App Service name. Default:
     spaarke-provisioning-controlplane-worker-{Environment}.
+
+.PARAMETER UamiName
+    Name of the L2 control-plane User-Assigned Managed Identity. Used to
+    resolve the UAMI resourceId for the keyVaultReferenceIdentity PATCH
+    (defect #8 -- see .DESCRIPTION). Default:
+    sprk-controlplane-{Environment}-uami (platform-controlplane.bicep
+    convention).
 
 .PARAMETER SkipBuild
     Skip `dotnet publish` for the selected target(s) and deploy the existing
@@ -331,6 +353,9 @@ param(
     [string]$WorkerAppServiceName,
 
     [Parameter(Mandatory = $false)]
+    [string]$UamiName,
+
+    [Parameter(Mandatory = $false)]
     [switch]$SkipBuild,
 
     [Parameter(Mandatory = $false)]
@@ -415,6 +440,7 @@ if (-not $ResourceGroupName) { $ResourceGroupName = "rg-spaarke-platform-$Enviro
 if (-not $ApiAppServiceName) { $ApiAppServiceName = "spaarke-provisioning-controlplane-$Environment" }
 if (-not $WorkerAppServiceName) { $WorkerAppServiceName = "spaarke-provisioning-controlplane-worker-$Environment" }
 if (-not $ServiceBusNamespaceName) { $ServiceBusNamespaceName = "spaarke-servicebus-$Environment" }
+if (-not $UamiName) { $UamiName = "sprk-controlplane-$Environment-uami" }
 
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 $ApiProjectPath = Join-Path -Path $RepoRoot -ChildPath 'src\server\services\Sprk.Provisioning.ControlPlane.Api'
@@ -468,6 +494,7 @@ if ($deployWorker) {
 }
 Write-Host "  Service Bus namespace:  $ServiceBusNamespaceName (rg: $ServiceBusResourceGroupName)" -ForegroundColor Gray
 Write-Host "  Fleet queue:            $QueueName" -ForegroundColor Gray
+Write-Host "  L2 UAMI:                $UamiName (keyVaultReferenceIdentity target)" -ForegroundColor Gray
 Write-Host ''
 
 # -----------------------------------------------------------------------------
@@ -513,6 +540,117 @@ if (-not (Test-Path -Path $WorkerProjectPath) -and $deployWorker) {
     exit 2
 }
 Write-Success 'Project paths resolved.'
+
+# =============================================================================
+# KV-REFERENCE IDENTITY -- PATCH keyVaultReferenceIdentity -> L2 UAMI
+# (post-authoring audit defect #8, Wave G-8 Batch 4)
+#
+# platform-controlplane.bicep deliberately does NOT set
+# keyVaultReferenceIdentity (its header defers the PATCH to "handler H4
+# post-deploy") -- but H4 patches CUSTOMER-stamp App Services, never L2's own
+# sites. Without this PATCH, an L2 site resolves @Microsoft.KeyVault
+# app-setting references with its (absent) system-assigned identity, so every
+# KV-ref setting resolves null -> silent downstream failures (T1 family).
+# This step runs BEFORE the code deploy so the restarted sites resolve KV
+# refs with the UAMI from first boot. Idempotent (already-correct sites are
+# skipped) + read-back-verified. Scoped to -Target: .Api runs patch the
+# production site AND the staging slot; .Worker runs patch the slotless
+# Worker site. A PATCH failure stops the script BEFORE any code deploy.
+# =============================================================================
+
+Write-Section 'KV-REFERENCE IDENTITY -- keyVaultReferenceIdentity -> L2 UAMI (defect #8)'
+
+Write-Step "Resolving L2 UAMI '$UamiName' resourceId"
+$uamiResourceId = az identity show `
+    --resource-group $ResourceGroupName `
+    --name $UamiName `
+    --query 'id' `
+    --output tsv 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($uamiResourceId)) {
+    Write-Fail "Could not resolve L2 UAMI '$UamiName' in resource group '$ResourceGroupName'. The platform-controlplane.bicep stack must be deployed first (prerequisite 5) -- this script deploys CODE onto EXISTING infrastructure."
+    exit 2
+}
+$uamiResourceId = $uamiResourceId.Trim()
+Write-Success "L2 UAMI resolved: $uamiResourceId"
+
+$subscriptionId = $account.id
+$kvRefTargets = @()
+if ($deployApi) {
+    $apiSiteResourceId = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$ApiAppServiceName"
+    $kvRefTargets += [pscustomobject]@{
+        Label      = ".Api production ($ApiAppServiceName)"
+        ResourceId = $apiSiteResourceId
+    }
+    $kvRefTargets += [pscustomobject]@{
+        Label      = ".Api staging slot ($ApiAppServiceName/$SlotName)"
+        ResourceId = "$apiSiteResourceId/slots/$SlotName"
+    }
+}
+if ($deployWorker) {
+    $kvRefTargets += [pscustomobject]@{
+        Label      = ".Worker ($WorkerAppServiceName)"
+        ResourceId = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$WorkerAppServiceName"
+    }
+}
+
+$kvRefFailures = New-Object System.Collections.Generic.List[string]
+
+foreach ($kvRefTarget in $kvRefTargets) {
+    # READ-ONLY probe of the current value. `az resource show --ids` works
+    # uniformly for BOTH Microsoft.Web/sites and Microsoft.Web/sites/slots
+    # (unlike `az webapp show`, which needs distinct --slot plumbing), so the
+    # same code path covers all three targets.
+    $currentIdentity = az resource show `
+        --ids $kvRefTarget.ResourceId `
+        --query 'properties.keyVaultReferenceIdentity' `
+        --output tsv 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $kvRefFailures.Add("$($kvRefTarget.Label): az resource show failed for '$($kvRefTarget.ResourceId)' -- does the site/slot exist? (prerequisite 5: platform-controlplane.bicep must be deployed first)") | Out-Null
+        continue
+    }
+
+    if ($currentIdentity -and ($currentIdentity.Trim() -ieq $uamiResourceId)) {
+        Write-Success "$($kvRefTarget.Label): keyVaultReferenceIdentity already targets the L2 UAMI (no PATCH needed)."
+        continue
+    }
+
+    if ($PSCmdlet.ShouldProcess($kvRefTarget.Label, "PATCH keyVaultReferenceIdentity -> $UamiName")) {
+        Write-Step "PATCHing $($kvRefTarget.Label): keyVaultReferenceIdentity -> L2 UAMI"
+        az resource update `
+            --ids $kvRefTarget.ResourceId `
+            --set "properties.keyVaultReferenceIdentity=$uamiResourceId" `
+            --output none 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $kvRefFailures.Add("$($kvRefTarget.Label): az resource update (keyVaultReferenceIdentity PATCH) failed with exit code $LASTEXITCODE.") | Out-Null
+            continue
+        }
+
+        # Read-back verification -- the PATCH is load-bearing (KV-ref
+        # resolution), so trust-but-verify like every other check here.
+        $verifiedIdentity = az resource show `
+            --ids $kvRefTarget.ResourceId `
+            --query 'properties.keyVaultReferenceIdentity' `
+            --output tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $verifiedIdentity -or ($verifiedIdentity.Trim() -ine $uamiResourceId)) {
+            $kvRefFailures.Add("$($kvRefTarget.Label): post-PATCH verification FAILED -- keyVaultReferenceIdentity reads back as '$verifiedIdentity', expected '$uamiResourceId'.") | Out-Null
+        }
+        else {
+            Write-Success "$($kvRefTarget.Label): keyVaultReferenceIdentity PATCHed + verified."
+        }
+    }
+    else {
+        $currentDisplay = if ($currentIdentity) { $currentIdentity.Trim() } else { '<unset>' }
+        Write-Info "$($kvRefTarget.Label): PATCH skipped (-WhatIf/-DryRun). Current keyVaultReferenceIdentity: $currentDisplay"
+    }
+}
+
+if ($kvRefFailures.Count -gt 0) {
+    Write-Fail "$($kvRefFailures.Count) keyVaultReferenceIdentity failure(s) -- STOPPING before any code deploy (KV-ref app-settings would resolve null on the restarted sites):"
+    foreach ($f in $kvRefFailures) {
+        Write-Host "    - $f" -ForegroundColor Red
+    }
+    exit 1
+}
 
 # -----------------------------------------------------------------------------
 # Helper: publish (dotnet publish -- local, non-Azure; runs even under -WhatIf
