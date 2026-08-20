@@ -234,19 +234,35 @@ export { findCommentAnchorRange, COMMENT_ANCHOR_MARK_NAME } from './commentAncho
 export function composeSessionCommentThreadsToAnchoredComments(
   doc: PMNode,
   threads: readonly ComposeCommentThreadModel[],
-  importedThreadIds: ReadonlySet<string>
+  importedThreadIds: ReadonlySet<string>,
+  // UAT-22 (2026-08-18, honest/safe): optional diagnostics sink invoked ONCE per thread that is
+  // silently dropped from the save payload (its live anchor no longer resolves) — a comment the user
+  // still sees in the gutter that would never reach Word. The save path passes this to COUNT drops and
+  // surface an honest "N comment(s) couldn't be saved" degradation warning. NOT called for the
+  // `importedThreadIds` skip (that thread already rides the retained-original baseline — not a loss).
+  // Optional so every existing 3-arg caller/test is unaffected.
+  onDropped?: (
+    threadId: string,
+    reason: 'anchor-mark-missing' | 'non-paragraph-anchor' | 'cross-paragraph-span'
+  ) => void
 ): ComposeAnchoredComment[] {
   const result: ComposeAnchoredComment[] = [];
   for (const thread of threads) {
     if (importedThreadIds.has(thread.id)) continue;
 
     const span = findCommentAnchorRange(doc, thread.id);
-    if (!span) continue;
+    if (!span) {
+      onDropped?.(thread.id, 'anchor-mark-missing');
+      continue;
+    }
 
     const start = resolveRunAnchor(doc, span.from);
     // The mark starts in a non-paragraph block (e.g. a heading with no paraId) — cannot anchor a
     // single-paragraph comment there. Do NOT guess a different paragraph (I-7). Skip.
-    if (!start) continue;
+    if (!start) {
+      onDropped?.(thread.id, 'non-paragraph-anchor');
+      continue;
+    }
 
     // A ComposeAnchoredComment is single-paragraph (paraId + run-local range). Advisory REVIEW comments,
     // though, routinely span a long multi-sentence excerpt that crosses paragraph boundaries — the old
@@ -260,7 +276,11 @@ export function composeSessionCommentThreadsToAnchoredComments(
     const paraEnd = $from.end($from.depth); // end position of the start paragraph's inline content
     const clampedTo = Math.min(span.to, paraEnd);
     const end = resolveRunAnchor(doc, clampedTo > span.from ? clampedTo : paraEnd);
-    if (!end || start.paraId !== end.paraId) continue; // defensive: the clamp must land in the same paragraph
+    if (!end || start.paraId !== end.paraId) {
+      // defensive: the clamp must land in the same paragraph
+      onDropped?.(thread.id, 'cross-paragraph-span');
+      continue;
+    }
 
     // agreements-r1 UAT round-1 #4: carry the ROBUST task-055 `paraOffset` (the paragraph-relative char
     // offset `resolveRunAnchor` already computes) onto BOTH endpoints, exactly as every text-edit op does

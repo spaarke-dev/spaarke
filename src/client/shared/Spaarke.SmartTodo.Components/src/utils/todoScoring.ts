@@ -17,7 +17,12 @@
  * regression for existing users of `SmartToDo.tsx`):
  *   - Weights: priority 0.50, effort (inverted) 0.20, urgency 0.30
  *   - Urgency tiers: overdue=100, ≤3d=80, ≤7d=50, ≤10d=25, else=0
- *   - DueLabel tiers: overdue / 3d / 7d / 10d / none (matches dueLabelUtils.ts)
+ *   - DueLabel COLOUR tiers: overdue / 3d / 7d / 10d / none (unchanged).
+ *     NOTE (smart-todo-r5 UAT 2026-08-17, item #6): the badge LABEL text is now
+ *     a real calendar-day countdown ("Overdue" / "Today" / "{n}d"), not the
+ *     tier name — so a task due today reads "Today" instead of a misleading
+ *     "3d". Colour tiers (`urgency`) are untouched; only `label` changed. The
+ *     Code Page's `utils/dueLabelUtils.ts` (List/Dismissed views) mirrors this.
  *
  * @see src/solutions/SmartTodo/src/utils/todoScoreUtils.ts (original)
  * @see src/solutions/SmartTodo/src/utils/dueLabelUtils.ts (original)
@@ -56,6 +61,18 @@ export interface IDueLabel {
 /** Parse an ISO date string defensively. Returns null for null/undefined/invalid. */
 export function parseDueDate(isoString: string | undefined | null): Date | null {
   if (!isoString) return null;
+  // Date-only values (`YYYY-MM-DD`, no time component) are CALENDAR dates, not
+  // instants. `new Date("2026-08-17")` parses as UTC midnight, which in western
+  // (negative-offset) timezones lands on the PREVIOUS local calendar day — so a
+  // task due today reads a day early ("Overdue"/off-by-one). Parse the Y-M-D
+  // parts as LOCAL midnight to preserve the intended calendar day. Full ISO
+  // timestamps (with a time component) are matched by neither branch and stay
+  // unchanged. (smart-todo-r5 UAT 2026-08-17 — item #6.)
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoString.trim());
+  if (dateOnly) {
+    const dt = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
   const d = new Date(isoString);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -91,21 +108,32 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
     return { label: '', urgency: 'none' };
   }
 
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  // Compare CALENDAR days (both normalized to local midnight) so the label is a
+  // real countdown, independent of the time-of-day component — a task due today
+  // reads "Today", not "3d". (smart-todo-r5 UAT 2026-08-17 — item #6: the old
+  // labels were the URGENCY-TIER names 3d/7d/10d, which misread as "3 days left"
+  // for anything in the 0–3-day tier, including today.) Math.round absorbs the
+  // ±1h DST skew that makes a "day" 23 or 25 hours. Colour tiers (`urgency`) are
+  // UNCHANGED, so badge colours match the prior behaviour exactly.
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfDue = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
     return { label: 'Overdue', urgency: 'overdue' };
   }
+  if (diffDays === 0) {
+    return { label: 'Today', urgency: '3d' };
+  }
   if (diffDays <= 3) {
-    return { label: '3d', urgency: '3d' };
+    return { label: `${diffDays}d`, urgency: '3d' };
   }
   if (diffDays <= 7) {
-    return { label: '7d', urgency: '7d' };
+    return { label: `${diffDays}d`, urgency: '7d' };
   }
   if (diffDays <= 10) {
-    return { label: '10d', urgency: '10d' };
+    return { label: `${diffDays}d`, urgency: '10d' };
   }
   return { label: '', urgency: 'none' };
 }

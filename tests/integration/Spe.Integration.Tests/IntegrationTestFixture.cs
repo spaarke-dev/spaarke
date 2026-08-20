@@ -89,6 +89,27 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 // A fake URI is sufficient; SecretClient is replaced by test doubles before any calls.
                 ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
 
+                // Ciam — required by CiamGraphClientFactory's CONSTRUCTOR, which throws
+                // InvalidOperationException for each missing key (CiamGraphClientFactory.cs:66-77).
+                // The factory is registered unconditionally (ExternalAccessModule.cs) and resolved
+                // when any /api/v1/external-access/* endpoint's dependency graph is built — i.e.
+                // BEFORE the handler's own request validation runs. Without these keys the ctor
+                // throws during DI resolution and the endpoint returns 500 instead of the 400 the
+                // request-validation tests assert. Fake values are sufficient: no CIAM call is made
+                // on the validation path, and the certificate is fetched lazily from Key Vault on
+                // first real use (CiamGraphClientFactory.cs:154-170).
+                // Root-caused 2026-08-19; matches bff-extensions.md §F.2 (Fixture-Config-FIRST).
+                // The full required set (each throws individually if absent):
+                //   CiamGraphClientFactory.cs:67,69,74,76 -> Instance, TenantId,
+                //                                            GraphProvisioner:ClientId, :CertificateName
+                //   CiamUserProvisioningService.cs:46     -> Domain
+                ["Ciam:Instance"] = "https://testciam.ciamlogin.com/",
+                ["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1",
+                ["Ciam:Domain"] = "testciam.onmicrosoft.com",
+                ["Ciam:Audience"] = "api://00000000-0000-0000-0000-0000000000c2",
+                ["Ciam:GraphProvisioner:ClientId"] = "00000000-0000-0000-0000-0000000000c2",
+                ["Ciam:GraphProvisioner:CertificateName"] = "test-ciam-graph-provisioner-cert",
+
                 // CosmosPersistence — required by AiPersistenceModule (raw config read, not bound to Options class)
                 // Per project sdap-bff.api-test-suite-repair task 062 + integration-test-triage.md Cluster A
                 // (97 cluster-A failures). Fake URI is sufficient; CosmosClient is constructed lazily

@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r4
 
-> **Last Updated**: 2026-08-17 (by task-execute — **024 COMPLETE**; autonomous run reached the owner-gated tail)
-> **Recovery**: Read "Quick Recovery" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
+> **Last Updated**: 2026-08-18 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Full deploy runbook: `notes/deploy-verify.md`.
 
 ---
 
@@ -9,25 +9,35 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarkeai-assistant-enhancements-r4 — autonomous execution (owner "continue"). **15 done; 3 remain, ALL owner-gated.** |
-| **Task** | ✅ **024 COMPLETE** (E2 eval cases, FR-10). Next 🔲 **040** — but it is **NOT autonomous** (needs a `--chrome` live-DOM session + owner). |
-| **Status** | 024 committed locally (PR HELD). **Autonomous progress is complete** — 040/080/090 all require owner involvement (see below). |
-| **Next Action** | Await owner. To resume: `/task-execute 040` in a **`--chrome`** session (D9 live-DOM repro), OR owner runs 080 (deploy) when ready. |
+| **Project** | spaarkeai-assistant-enhancements-r4 — **17 of 17 code tasks done**; 080 deploys EXECUTED; only 090 wrap-up + owner UAT remain |
+| **Task** | ✅ **080** — Deploys executed to dev (2026-08-18) + merged to master (PR #782, commit 62751d84b). 🔲 **090** wrap-up next. |
+| **Status** | Deployed + merged. Owner UAT of the 7 spec DoDs pending (owner-gated, not agent-completable). |
+| **Next Action** | **(A)** Owner runs the 7-DoD UAT per `notes/deploy-verify.md` (P1 grounded task-agenda answer + Tasks tab, no dead-end chips, Briefing/SmartToDo follow-on cards, preference loop, D9 viewport + Refresh-row clip gone). **(B)** Run **090** wrap-up (`/test-diet` gate) to close the project. **(C)** Owner: delete orphan Dataverse column `sprk_grounded_tool_allow_list` in maker portal. |
 
-### 024 outcome (this session)
-FR-04/FR-06 guards were already authored WITH their features (ADR-038-preferred): 021a service off-catalog drop, 021b client untyped/unbacked drop, 023 card open-tab gating, 013 AR4-003 dispatch. Per ADR-038 binding anti-scaffolding + §11, did NOT duplicate. Added the one gate-owed guard — FR-04 no-dead-end CONTRACT fact `SuggestFollowupsAction_IsGroundedTypedTwoKindProposer_NoDeadEndFreeString` (**8/8 R4 eval pass, net10**) — + FR-10 coverage map (`Eval/README.md`), register P2✅, and deferred `D-024-01` (typed-SSE endpoint test needs the live-agent streaming harness). Files: `AssistantEnhancementsR4EvalTests.cs`, `Eval/README.md`, `behavior-gap-register.md`, `notes/defer-issues.md` (new), POML/TASK-INDEX. Test+docs only — no BFF source.
+### Files Modified This Session (ALL COMMITTED — clean tree)
+- `SprkChat.tsx` — 040 fix: collapse pin-to-top trailing spacer once content fills viewport (Refresh-row clip / dead-whitespace). Committed `0702aad7e`.
+- `PreferenceNotPermissionInvariantTests.cs` — rebase-integration fix (AgentToolFilterContext 6→7 params for task-011 AdvisoryToolAllowList). In master via PR #778.
+- `ChatEndpoints.cs` + `ChatEndpointsTypedFollowupsTests.cs` — D-024-01 fix (BuildTypedFollowups extraction + guard). In master (PR #778).
+- `notes/deploy-verify.md` (new) — 080 gates + runbook. Committed `f22a7db83`.
+- `040`/`024` POMLs + TASK-INDEX — statuses ✅.
+- **Dataverse (not git)**: created column `sprk_groundedtoolallowlist` on `sprk_analysisaction` (+ orphan `sprk_grounded_tool_allow_list` to delete in maker portal).
+
+### Critical Context
+**ALL R4 code is MERGED to master (PR #778).** The 040 fix (`0702aad7e`) + the deploy-verify doc (`f22a7db83`) are on THIS worktree branch, ahead of master — merge/push them (or deploy from this branch, which has them) so the code-page deploy carries the 040 fix. 080 gates: **column created ✅, publish 44.96 MB Δ0 ≤60 MB ✅, no new HIGH CVE ✅.** The column MUST exist before the BFF deploy (done) or `AnalysisActionService.$select` 500s.
 
 ---
 
-## Remaining tasks — ALL OWNER-GATED (autonomous run ends here)
+## Full State
 
-| # | Task | Why not autonomous |
-|---|---|---|
-| **040** | D9 host-proof flex-chain fix (Open-in-Compose viewport clip, FR-11) | Needs a **`--chrome` live-DOM session** to first confirm D9 still reproduces after the merged partial fix (`messageList min-height:0`), then fix host-proof (no measured heights). Owner involvement required. |
-| **080** | Deploy + verify (owner-gated) | MUST create the `sprk_groundedtoolallowlist` column on `sprk_analysisaction` + re-seed; deploy BFF + `sprk_spaarkeai` **together**; **021a+021b deploy TOGETHER** (SSE wire string[]→typed); 022 layout GUIDs are spaarkedev1-specific (per-env update). Never deploy BFF from a net8 tree. |
-| **090** | Wrap-up + `/test-diet` gate | Deps 080. `/test-diet` reconciles project tests vs the ADR-038 build-vs-maintain classifier. |
+### Done this session
+- **PR #778 MERGED** to master (all E1–E3 + E2 client + fixes). Rebased 119 commits; fixed 1 real invariant test; merged past the non-blocking `Client Quality` red (repo-wide infra issue, tracked as issue #780).
+- **040 COMPLETE** — D9 owner-confirmed resolved (bounded transcript); fixed the residual Refresh-row clip (spacer-collapse); 374/374 SprkChat tests.
+- **080 PREP COMPLETE** — schema column, publish-size gate, CVE gate all green.
 
-## Standing constraints (unchanged)
-- **PR HELD** — all commits LOCAL only; do NOT push/PR until owner asks. **File the `D-024-01` GitHub Issue at PR time** (defer-issues.md has a `{URL}` placeholder).
-- Measure BFF publish COMPRESSED (≤60 MB); no new HIGH CVE on BFF tasks. ADR-042 memory hard-governance DEFERRED to #616 (trustLevel inert).
+### Remaining (080 deploys — owner-gated)
+See `notes/deploy-verify.md` for the exact runbook. Deploys are last-write-wins on the shared BFF + code page — `/conflict-check` + coordinate with compose-r5/r6 + assistant-r3 first. Never deploy BFF from a net8 tree (SDK is 10.0.101 ✅). Retry code-page publish on transient `0x80071151`. Verify 022 layout GUIDs match this env's `sprk_workspacelayout` rows.
+
+### Standing constraints
 - Commit footer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- ADR-042 memory hard-governance DEFERRED to #616 (trustLevel inert).
+- After 080: **090** (wrap-up + `/test-diet`) is the last task.

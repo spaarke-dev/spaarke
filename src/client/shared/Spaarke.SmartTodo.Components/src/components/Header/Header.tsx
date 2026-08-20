@@ -242,18 +242,18 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <div className={styles.headerColumn}>
-      {/* ── Title row: brand icon + "Smart To Do" text (left cluster,
-            mockup-matched: checkmark glyph + title, left-aligned). */}
-      <div className={styles.titleRow}>
+      {/* ── smart-todo-r5 UAT 2026-08-17 (item #4): title + actions consolidated
+            onto a SINGLE row (reverses the 2026-06-19 two-row split), matching
+            the original mockup: [icon] Smart To Do … [Filter] [+ New Task] [⋮].
+            The brand cluster is the leading toolbar child; the flex spacer
+            pushes the right cluster to the trailing edge. ── */}
+      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
         <div className={styles.titleGroup}>
           <MicrosoftToDoIcon size={20} active />
           <Text size={400} weight="semibold" as="h1" className={styles.title}>
             {title}
           </Text>
         </div>
-      </div>
-
-      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
         <div className={styles.spacer} />
 
         {/* ── Right cluster: selection-aware actions OR Filter / + New Task

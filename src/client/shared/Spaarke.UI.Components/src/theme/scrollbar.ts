@@ -40,3 +40,39 @@ export const thinScrollbarStyle: GriffelStyle = {
   },
   '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
 };
+
+/**
+ * Descendant variant of {@link thinScrollbarStyle}.
+ *
+ * `::-webkit-scrollbar` pseudo-elements do NOT cascade — they only style the
+ * element they are declared on. So `thinScrollbarStyle` alone thins only the
+ * one container it is spread into. Spread THIS object into an app / Code Page
+ * ROOT slot instead to thin EVERY scrollable descendant (`& *`) in one place —
+ * no need to find and annotate each nested scroll container (kanban columns,
+ * dialogs, grids added later). Same semantic tokens, so it stays theme-aware
+ * (light-gray thumb in light theme, lighter-on-dark in dark theme) with no
+ * hardcoded hex.
+ *
+ * Prefer {@link thinScrollbarStyle} on a single known scroller; reach for this
+ * only at a surface root where you want blanket coverage.
+ *
+ * Usage:
+ * ```ts
+ * const useStyles = makeStyles({
+ *   page: { height: '100%', overflow: 'hidden', ...thinScrollbarDescendantStyle },
+ * });
+ * ```
+ */
+export const thinScrollbarDescendantStyle: GriffelStyle = {
+  '& *': {
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+  },
+  '& *::-webkit-scrollbar': { width: '8px', height: '8px' },
+  '& *::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+  '& *::-webkit-scrollbar-thumb': {
+    backgroundColor: tokens.colorNeutralStroke1,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  '& *::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
+};

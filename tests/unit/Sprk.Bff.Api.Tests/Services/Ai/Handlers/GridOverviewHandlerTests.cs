@@ -61,13 +61,24 @@ public sealed class GridOverviewHandlerTests : TypedToolHandlerTestFixture
         "<condition attribute=\"statecode\" operator=\"eq\" value=\"0\" /></filter>" +
         "</entity></fetch>";
 
+    // The grid config carries its query inside sprk_configjson's `source` block — NOT a
+    // top-level sprk_fetchxml column, which does not exist on sprk_gridconfiguration.
+    // Corrected 2026-08-19: these tests still seeded the non-existent column after
+    // fb06291c0 ("grid_overview reads sprk_configjson (savedquery/inline) not
+    // non-existent sprk_fetchxml — P1 grounding (R4 UAT)") changed the handler, so every
+    // test here failed with "has no configuration JSON". Shape is authoritative per
+    // GridOverviewConfigSourceTests + GridOverviewHandler.ParseGridSource.
     private void SetupConfig(string fetchXml, string entity = "sprk_task", string name = "My Overdue Tasks") =>
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_gridconfigurations({ConfigId:D})")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(JsonSerializer.Serialize(new
             {
                 sprk_entitylogicalname = entity,
-                sprk_fetchxml = fetchXml,
+                sprk_configjson = JsonSerializer.Serialize(new
+                {
+                    _version = "1.0",
+                    source = new { type = "inline", fetchXml }
+                }),
                 sprk_name = name
             }))));
 

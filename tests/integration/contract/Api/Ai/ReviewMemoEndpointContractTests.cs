@@ -243,7 +243,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         // machine-detectable `code` and guide the user to the existing promote affordance.
         var problem = await response.Content.ReadAsStringAsync();
         problem.Should().Contain("\"code\":\"session-not-bound\"");
-        problem.Should().Contain("Promote to Analysis");
+        problem.Should().Contain("save the document first"); // UAT 2026-08-18: save-driven, History-free (was "Promote to Analysis")
         problem.Should().NotContain("there is no completed review",
             "the old conflated message wrongly claimed no review had completed — that claim is removed");
     }
@@ -414,7 +414,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var problem = await response.Content.ReadAsStringAsync();
         problem.Should().Contain("\"code\":\"session-not-bound\"");
-        problem.Should().Contain("Promote to Analysis");
+        problem.Should().Contain("save the document first"); // UAT 2026-08-18: save-driven, History-free (was "Promote to Analysis")
         problem.Should().NotContain("there is no completed review");
     }
 

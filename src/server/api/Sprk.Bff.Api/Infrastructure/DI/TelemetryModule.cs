@@ -39,6 +39,11 @@ public static class TelemetryModule
                 // since task 022 but was never AddMeter'd, so eventpath.execution /
                 // eventpath.bound_denial were silently dropped from the App Insights export.
                 metrics.AddMeter(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry.MeterName);
+                // Cosmos persistence write-failure counter (spaarkeai-compose-r7 R-5, 2026-08-18):
+                // cosmos.write_failures{container} makes a SILENT total write outage (swallowed at
+                // Warning per ADR-015 D-06) alertable. Without this, the ttl:null → 400 regression
+                // froze History + memory for 11 days with no failing request and no read signal.
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {

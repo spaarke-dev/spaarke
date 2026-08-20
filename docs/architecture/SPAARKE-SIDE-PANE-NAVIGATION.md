@@ -3,7 +3,7 @@
 > **Audience**: Developers adding the Navigator to a new entity or a new code page, or maintaining the Navigator itself.
 > **Companion doc**: [`DATAGRID-CODE-PAGE-HOST-CONTRACT.md`](../guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md) (the sibling code-page host contract for `<DataGrid>`).
 > **Project**: `spaarke-side-pane-navigation-history-r1`
-> **Last Updated**: 2026-08-14
+> **Last Updated**: 2026-08-18 (post-UAT: access-based Monitored, email→code-page routing, name resolution, outline-icon technique, entity-scoped ribbon ids)
 
 ---
 
@@ -17,7 +17,7 @@ It has four tabs plus a persistent search bar:
 |---|---|
 | **Recent** | Records the user has viewed, captured passively (no click required), most-recent first |
 | **Bookmarks** | Records + saved views + raw weblinks the user has explicitly starred/pinned ("Pin this page") |
-| **Monitored** | Records the user is following (owner-scoped "assigned to me" view — Path A; a BFF membership resolver for Path B remains an open, non-blocking decision) |
+| **Monitored** | `sprk_monitor`-flagged records the user can access — scope is **access-based** (owner ∪ business-unit ∪ team ∪ shared), resolved server-side by Dataverse's own security trimming (the per-entity query carries `sprk_monitor eq true` with **no owner filter**). No BFF membership resolver is needed or built — a host-context `retrieveMultipleRecords` only returns rows the user can read, so the platform *is* the membership resolver. (r1 originally shipped owner-only; changed to access-based post-UAT because production records are BU/team-owned, not user-owned.) |
 | **Views** | The user's personal (`userquery`) saved views, grouped by entity, via `ViewService` |
 | **Search (QuickSwitcher)** | A top-of-pane search bar: local fuzzy-match over the Recent/Bookmarks/Views entries first, escalating to a live `Xrm.WebApi`/`ViewService` lookup on no local hit |
 
@@ -60,6 +60,8 @@ It has four tabs plus a persistent search bar:
 | Data access | `src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts` | `Xrm.WebApi` CRUD for `sprk_navitem` (mirrors `Notepad/src/hooks/useSprkMemoRepository.ts`) |
 | Security trim | `src/solutions/NavigatorPane/src/services/securityTrimService.ts` | Read-time re-validation of cached record names (see below) |
 | Views | `src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts` | Reused (not reimplemented) for the Views tab and QuickSwitcher's live fallback |
+| Record navigation | `src/solutions/NavigatorPane/src/services/recordNavigation.ts` | `openEntityRecord` — the single rule for opening a row's target. Routes `sprk_communication` (Email) to the **Email code page** (`sprk_emailpage`, single-record) via `navigateTo({pageType:'webresource', data:'<id>&single=1'})`; all other entities open the OOB form. Reused by Recent/Bookmarks/QuickSwitcher. |
+| Name resolution | `src/solutions/NavigatorPane/src/services/nameResolution.ts` | Best-effort real record/view name resolution (`resolveRecordName`/`resolveViewName`, host-context, never throws). BookmarksTab upgrades any row still showing a generic auto-label ("Document", "Communication view") to the real name and self-heals it via `renameNavItem`; `bookmarkService.pinCurrentPage` uses it so record pins aren't labeled by bare entity type. |
 
 ### Why `App.tsx` mounts `NavigatorBody` directly, not `SprkSidePaneHost`
 
@@ -134,9 +136,11 @@ A Navigator button is added to an entity's ribbon (both the homepage grid and th
 Plus the matching `LocLabels` (`sprk.Navigator.Button.LabelText` / `.Alt` / `.ToolTipDescription`).
 
 **How-to** (via the `/ribbon-edit` skill):
-1. Export the entity's ribbon solution unmanaged (e.g. `{Entity}Ribbons`).
-2. Insert the 4 blocks above into `customizations.xml`, substituting the entity's schema name for `sprk_matter` in the two `Location` attributes and the two `CustomAction Id`s.
+1. Export the entity's ribbon solution unmanaged (e.g. `{Entity}Ribbons`). If none exists, create it: an unmanaged solution under the **Spaarke** publisher containing only that table (metadata-only) — creatable via the Web API (`POST /solutions` + `AddSolutionComponent` ComponentType 1) when the maker portal isn't handy.
+2. Insert the 4 blocks above into `customizations.xml`, substituting the entity's schema name for `sprk_matter`. **Make every id entity-scoped** — not just the two `Location` attributes and `CustomAction Id`s, but ALSO the `Command`, `EnableRule`, and `LocLabel` ids (e.g. `sprk.Navigator.Todo.Open.Command` / `.Open.EnableRule`, not the shared `sprk.Navigator.Open.Command`). This prevents id collisions when several `{Entity}Ribbons` solutions coexist in the same environment. (The `MatterRibbons` proof above predates this convention and uses the shared `sprk.Navigator.Open.*` ids; `CommunicationRibbons`/`TodoRibbons` and all later ones use entity-scoped ids — copy those.)
 3. `pac solution import --publish-changes`.
+
+**Currently wired (as of 2026-08-18):** entity ribbons on **Matter, Document, Project, Event, Communication, Todo**; code-page registrars in **SpaarkeAi, Email (`sprk_emailpage`), Communication Reconciliation**. Adding a surface = one more `{Entity}Ribbons` import (entity) or one `ensureNavigatorSidePane()` line (code page).
 
 `ApplicationRibbon.customizations.xml` carries the equivalent **global** wiring (`Mscrm.GlobalTab.MainTab.Actions.Controls._children`, `sprk.Global.SidePaneManager.*`) — the same `Spaarke.SidePaneManager.initialize` `EnableRule` pinned once at the application-ribbon level, next to the existing `SprkChat` button. Prefer the global insertion when you want the Navigator on *every* entity's grid/form inside an app without touching each entity's own ribbon; use the per-entity insertion when only specific entities should carry the button (e.g. as a secondary, explicit trigger alongside the global one).
 
@@ -169,7 +173,7 @@ React.useEffect(() => {
 - **No global load hook.** Confirmed by this project's own task-001 spike: the AppModule-level `onload` some legacy customizations relied on is unsupported on current UCI, and a global ribbon enable-rule without a rendered/pinned control never evaluates (see §7 "blank button" incident below).
 - **`navigateTo` view identifiers must be STRING, not numeric.** `Xrm.Navigation.navigateTo`'s `PageInputEntityList.viewType` must be the string `'4230'` (userquery) or `'1039'` (savedquery) — passing a JS number silently falls back to the entity's default view instead of disambiguating. The Navigator's `ViewsTab.tsx` always passes `'4230'` since it only lists `userquery` views. See `xrmContext.ts`'s `PageInput.viewType` doc comment for the full contract.
 - **A per-table "sticky" view selector can override the requested view.** Even with a correct `viewId`/`viewType`, some MDA table configurations remember the user's last-selected grid view and can visually override the one `navigateTo` requested. This is a platform behavior, not a bug in the Navigator's navigation call.
-- **UCI renders rail `imageSrc` icons with its own styling** (sizing/coloring/hover states applied by the platform chrome) — a pane's `imageSrc` (e.g. `WebResources/sprk_navigatorstar.svg`) is a plain SVG reference, not a component; do not expect CSS control over how the platform renders it in the collapsed rail.
+- **UCI applies a monochrome FILL treatment to a pane's header/rail `imageSrc` icon.** A pane's `imageSrc` (e.g. `WebResources/sprk_navigatorstar.svg`) is a plain SVG reference, not a component — the platform sizes/colors/hover-states it and, crucially, **fills the path** with its own foreground color. Consequence (UAT finding): a `fill="none" stroke=…` outline star renders as a **solid** star, because UCI fills the path region regardless of the `fill:none`. You therefore control the *shape* — not via CSS or stroke, but by giving UCI a **filled silhouette shaped the way you want**. The Navigator's star is drawn as a filled **even-odd "ring"** (outer star minus a smaller inner star, `fill="currentColor"` + `fill-rule="evenodd"`), so the platform's fill yields a hollow **outline** star. Rule of thumb: for an outline-look UCI pane icon, draw the outline as a filled evenodd region, never as a stroked path.
 
 ---
 

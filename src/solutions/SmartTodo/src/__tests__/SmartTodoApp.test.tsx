@@ -65,6 +65,10 @@ const MOCK_TODO_REGARDING_CATALOG = [
 jest.mock('@spaarke/ui-components', () => ({
   navigateToEntityRecordSurfaceAsync: mockNavigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG: MOCK_TODO_REGARDING_CATALOG,
+  // The launcher calls getOobModalSize('createForm'); return that size (70 x 80).
+  getOobModalSize: function () {
+    return { width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } };
+  },
 }));
 
 import {
@@ -194,6 +198,37 @@ describe('buildNewTaskDefaultValues', () => {
     expect('sprk_regardingmattername' in result!).toBe(false);
     expect('sprk_regardingrecordname' in result!).toBe(false);
   });
+
+  // smart-todo-r5 UAT 2026-08-17, item #1 — current-user "Assigned To" default.
+  it('pre-seeds the current-user contact as sprk_assignedto (three-key convention) even with no regarding', () => {
+    const result = buildNewTaskDefaultValues(undefined, {
+      contactId: 'contact-guid',
+      contactName: 'Jane Doe',
+    });
+    expect(result).toBeDefined();
+    expect(result!['sprk_assignedto']).toBe('contact-guid');
+    expect(result!['sprk_assignedtoname']).toBe('Jane Doe');
+    expect(result!['sprk_assignedtotype']).toBe('contact');
+  });
+
+  it('merges the assignee default alongside a regarding pre-seed', () => {
+    const launchContext: ILaunchContext = {
+      action: 'openTodos',
+      regardingFilter: { entityType: 'sprk_matter', recordId: 'guid-8', recordName: 'Matter H' },
+    };
+    const result = buildNewTaskDefaultValues(launchContext, { contactId: 'contact-guid-2' });
+    // Both the regarding lookup AND the assignee lookup are present.
+    expect(result!['sprk_regardingmatter']).toBe('guid-8');
+    expect(result!['sprk_assignedto']).toBe('contact-guid-2');
+    expect(result!['sprk_assignedtotype']).toBe('contact');
+    // No name supplied → the assignee display-name key is omitted.
+    expect('sprk_assignedtoname' in result!).toBe(false);
+  });
+
+  it('omits the assignee default when no contactId is available (user has no contact)', () => {
+    // Assignee arg present but empty contactId → treated as absent (plain create).
+    expect(buildNewTaskDefaultValues(undefined, { contactId: '' })).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -211,7 +246,10 @@ describe('launchNewTaskCreateForm (handleNewTask delegate)', () => {
     const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
     expect(callArgs.entityName).toBe('sprk_todo');
     expect('entityId' in callArgs).toBe(false);
-    expect(callArgs.title).toBe('New To Do');
+    // UAT 2026-08-18 #1 — unified dialog title (was 'New To Do').
+    expect(callArgs.title).toBe('Smart To Do Item');
+    // UAT 2026-08-18 — createForm (70%×80%), two steps down from fullCover.
+    expect(callArgs.size).toEqual({ width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } });
   });
 
   it('invokes the refresh callback when the outcome carries a savedEntityReference (user saved)', async () => {

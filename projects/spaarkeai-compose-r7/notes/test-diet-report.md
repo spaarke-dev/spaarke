@@ -93,3 +93,17 @@ Updates to existing maintained tests reflecting the shipped behavior changes (Sa
 ## Industry citation
 
 Build-vs-maintain criteria per ADR-038 §7 (Beck "delete the scaffolding"; Feathers characterization-vs-behavior; Google test-sizes; DHH less-tests). 17-ban classifier B1–B17. Client co-located jest tests classified by behavioral substance (the property the ban-list protects) since ADR-038's literal `tests/**` KEEP-paths address the C# suite only.
+
+---
+
+## Delta reconciliation — sessions 3–4 (2026-08-19)
+
+The original diet (above, 2026-08-17) covered the 20-task set. Sessions 3–4 (R-5 Cosmos fix, banner unification, 1b file re-attach) added/modified 3 r7-owned test surfaces AFTER the wrap-up. Re-classified here (the many other test files touched in the branch since Aug 18 are OTHER projects' tests pulled in via master merges — not r7's, excluded):
+
+| Test | Change | Classification | Verdict |
+|---|---|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CosmosPersistenceSerializerTests.cs` | NEW (R-5) | **MAINTAIN** — behavioral regression guard binding to the PRODUCTION serializer options (`AiPersistenceModule.CosmosJsonSerializerOptions`); locks the `ttl:null`→400 write-outage fix + the test-vs-prod serializer gap. Not a ban-list target (no ctor-null / DI-registration / `Mock<HttpMessageHandler>`; asserts real serialized output). | **KEEP** |
+| `src/solutions/SpaarkeAi/.../__tests__/ConversationPaneChrome.files-availability.test.tsx` | NEW (1b) | **MAINTAIN** — user-facing component behavior (the "no longer available" 24h re-attach chip variant + back-compat); deterministic, no scaffolding. | **KEEP** |
+| `src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.test.tsx` | MODIFIED (banner) | **MAINTAIN** — harness updated so the existing "surfaces the unresolved-target banner" behavior test still exercises the notice end-to-end after it moved to the host rail (`onRedlineErrorChange`). Preserves an existing MAINTAIN test; no new scaffolding. | **KEEP** |
+
+**Delta totals**: +2 new MAINTAIN, 1 modified MAINTAIN, **0 SCAFFOLDING, 0 AMBIGUOUS, 0 deletes**. Combined project total: **MAINTAIN 39, SCAFFOLDING 0**. Net post-diet count unchanged. **Project-close gate: CLEAN** (§7 / ADR-038 §7).

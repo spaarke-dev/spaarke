@@ -57,7 +57,7 @@ Read in this order:
 | Operation | Auth pattern | Where to look |
 |---|---|---|
 | User-initiated read/write of a file | OBO (On-Behalf-Of) — user token | `Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
-| Background indexing, system-level container ops | App-only via **Managed Identity** (`DefaultAzureCredential`) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. `ClientSecretCredential` is local-dev fallback only. | Same factory; MI/app-only path |
+| Background indexing, system-level container ops | App-only via **Managed Identity** (`DefaultAzureCredential`, UAMI-pinned) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. Local dev uses the `DefaultAzureCredential` az-CLI leg, **not** a secret. Per **A4**, delegated/OBO container + file ops authenticate the confidential client with an **MI-FIC assertion or KV certificate** — never `.WithClientSecret` (transitional sites only, exception E-3). | Same factory; MI/app-only path |
 | Container type registration in a new tenant | App-only via PowerShell during onboarding | `RegisterContainer.ps1` |
 | Mailbox-scoped Graph (`Mail.*`) | App-only + Exchange `ApplicationAccessPolicy` scoping MI to allowed mailboxes (Phase C hardening) | See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §7 |
 
