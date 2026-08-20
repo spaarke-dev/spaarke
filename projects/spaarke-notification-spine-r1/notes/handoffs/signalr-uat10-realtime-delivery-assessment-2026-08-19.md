@@ -1,17 +1,24 @@
 # Issue Assessment — Azure SignalR real-time notification delivery fails with 401 (UAT env)
 
 > ## ✅ RESOLVED 2026-08-19 (spaarke-notification-spine-r1)
-> **Confirmed root cause (read-only Azure diagnosis): rotated key.** The BFF app setting
-> `Notifications__SignalR__ConnectionString` on `spaarke-bff-dev` (rg-spaarke-dev) held an `AccessKey=` matching
-> **neither** the current primary nor secondary key of `spaarke-signalr-dev` — the #1 predicted cause. Other suspects
-> **ruled out**: Endpoint already correct; resource **is** in **Serverless** mode (`features[].ServiceMode=Serverless`);
-> `SignalR:Enabled` defaults true. (In dev/UAT the value is a **plaintext App Setting**, not a Key Vault reference.)
-> **Fix applied:** re-copied the resource's current **primary connection string** into the app setting
-> (`az webapp config appsettings set`, auto-restarts). Verified: configured key == current primary; `/healthz` 200;
-> negotiate 401 (auth up), not 503 (SignalR configured). **No code deploy needed.**
-> **Remaining verification (UAT owner):** browser re-test — SDK negotiate should now return **200**, poll-fallback
-> warning gone. **Follow-ups:** deploy the endpoint-host diagnostic log (compose-r7) + move dev to a Key Vault
-> reference (ADR-028) so a rotated key re-syncs in one place.
+> **Confirmed root cause (via read-only Azure diagnosis): rotated key.** The BFF app setting
+> `Notifications__SignalR__ConnectionString` on `spaarke-bff-dev` (rg-spaarke-dev) held an `AccessKey=` that
+> matched **neither** the current primary nor secondary key of `spaarke-signalr-dev` — the assessment's #1 prediction.
+> The other two suspects were **ruled out**: the connection-string **Endpoint** already pointed at the correct
+> resource, and the resource **is** in **Serverless** mode (`features[].ServiceMode = Serverless`). `SignalR:Enabled`
+> defaults true.
+> **Note on config shape:** in dev/UAT this is a **plaintext App Setting**, NOT a Key Vault reference (the ADR-028
+> KV-reference is a production requirement — see follow-up below).
+> **Fix applied:** re-copied `spaarke-signalr-dev`'s **current primary connection string** into the app setting via
+> `az webapp config appsettings set` (which restarted the app). Verified: configured key now == current primary;
+> `/healthz` 200; negotiate returns 401 (auth up), **not** 503 (so SignalR is configured, not null-object). **No code
+> deploy needed** — the token-mint code was always correct.
+> **Remaining verification (UAT owner):** re-test in a browser — the `@microsoft/signalr` negotiate should now return
+> **200** and the client-console poll-fallback warning should disappear (real-time push connects).
+> **Follow-ups (not blocking):** (1) the compose-r7 endpoint-host diagnostic log + this project's idempotency fix are
+> on master but not yet deployed to `spaarke-bff-dev` — deploying makes future drift diagnosable server-side; (2) both
+> keys being stale indicates a rotation happened without updating the app setting — move dev to a **Key Vault
+> reference** (ADR-028) so a rotated key can be re-synced in one place, preventing recurrence.
 
 > **Created**: 2026-08-19
 > **Origin**: `spaarkeai-compose-r7` UAT (item UAT-10). Surfaced during Compose UAT but **not a Compose issue**.
