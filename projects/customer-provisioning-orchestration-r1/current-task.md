@@ -5,6 +5,44 @@
 > **Branch**: `work/customer-provisioning-orchestration-r1` — see git log for latest commit, in sync with `origin/work/customer-provisioning-orchestration-r1`
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE — Phase C'' incomplete; Waves G-4..G-7 remain. Wave G-2.5 (customer.bicep completion) is fully closed. Wave G-3 (130/131/132) is now FULLY COMPLETE.)
 
+## 🎯 Wave G-4 Dispatch Plan (unblocked 2026-08-20 after Wave G-3 close)
+
+**Dependency DAG for Wave G-4 (5 tasks 140-144)**:
+```
+140 (H5, high) ─┬─→ 141 (H6, xhigh) [Web-API import + ZIP packaging]
+                └─→ 143 (H10 verify) ─→ 144 (H11 verify)
+
+142 (H7 STANDARD, high) [independent — dep 126 only]
+```
+
+**Batch G-4A** (parallel-safe now, dispatch immediately): 140 + 142
+- 140: H5 BAP-REST env-create + async-operation-polling port (deps 102/103/123 — all done)
+- 142: H7 credential provisioning + NFR-05 validation (STANDARD rigor; dep 126 — done)
+
+**Batch G-4B** (after 140 lands): 141 + 143 — parallel
+- 141: H6 Web-API import (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging (xhigh — needs deep SDK ground-truthing)
+- 143: H10 live verification post C5.8 grants (5 REST/Graph seams; code already real — verification-focused task)
+
+**Batch G-4C** (after 143 lands): 144 alone
+- 144: H11 live verification (Graph REST + B2B invitation + consent verifier; code already real)
+
+**Rough estimate**: 3 batches × ~30-60 min each = ~2-3 hours wall clock for entire Wave G-4.
+
+---
+
+## Wave G-3 Tally (100% COMPLETE 2026-08-20)
+
+| Task | Commit | Handler | Δ tests | Notable |
+|---|---|---|---|---|
+| 130 | `9702871cb` | H3 Graph app-reg + consent verifier + BFF-API-*/RunParameters + auth-v4 pluggability seam | +13 → 916 | Two Path-C deviations accepted (H10 owns app-role grants + Dataverse app-user; H3 defers). 2 Graph SDK gotchas caught via reflection. |
+| 132 | `ccaf1cad2` | H9 artifact-based rebuild + Kudu zip-deploy + swap + rollback re-swap | +14 → 930 | Rollback-completeness proof (AC15a). Manifest schema verified against task 116's CI. Storage-account risk documented. |
+| 131 | `22c5ff2ba` | H8 Graph containerTypes (v1.0 GA — Beta package eliminated) + T6 cert-from-KV | +8 → 938 | Architectural simplification: SharePoint-REST `applicationPermissions` entirely eliminated by native Graph GA endpoint. Self-caught `BuildEvidence` bug during Step 9.5. Cert-loading gotcha (SecretClient not CertificateClient). 6th documented git-index race handled cleanly. |
+
+Zero code-review criticals, zero ADR violations across all 3 commits. L2 tests: 903 baseline → **938/938** (+35 across Wave G-3).
+
+---
+
+
 ## Task 131 — COMPLETE (2026-08-20)
 
 Ported H8SpeContainerTypeHandler's 3 collaborators (task 011/051 shell-out scripts) to Microsoft.Graph 6.5.0 under `ClientCertificateCredential` (T6 confidential-client, cert loaded from KV). New: `GraphContainerTypeProvisioner.cs` (POST `/storage/fileStorage/containerTypes` + POST `/storage/fileStorage/containerTypeRegistrations` + POST `/storage/fileStorage/containers`), `GraphAppOnlyContainerVerifier.cs` (single GET — "dramatically simplified" per the POML's own framing, replacing the retired script's 123 lines of hand-rolled JWT ceremony), `SecretClientSpeContainerIdKvWriter.cs` (reuses task 125's `SecretClient` idiom, single-secret narrow seam), `SpeConfidentialClientGraphFactory.cs` (shared T6 cert-from-KV + credential-construction helper, CLAUDE.md §11 reuse between the two Graph collaborators). Retired: `CreateNewContainerTypeScriptProvisioner.cs` / `SpeContainerAppOnlyVerifier.cs` / `AzCliSpeContainerIdKvWriter.cs` (kept on disk, unregistered, retirement banners).
