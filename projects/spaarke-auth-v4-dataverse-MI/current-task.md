@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-20 (by task-execute, after task 002)
+> **Last Updated**: 2026-08-20 (by task-execute, after task 003 — Phase 0 complete)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,18 +11,23 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — zero-secret BFF confidential credential (OBO → MI-FIC) |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **003 — Record the credential decision with evidence** (not started) |
-| **Step** | Begin Step 1 of task 003 |
-| **Status** | not-started — **unblocked**, dep 002 is ✅ |
-| **Next Action** | Run `task-execute` on **`tasks/003-record-credential-decision.poml`** — ⚠️ touches `.claude/`, **main-session only** (sub-agent write boundary) |
-| **Portfolio** | [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · **2 of 26 active** (3 deferred) |
+| **Task** | **Group A — 010 + 011** (not started) |
+| **Step** | Begin task 010 and task 011 |
+| **Status** | not-started — **unblocked**, dep 003 is ✅ |
+| **Next Action** | **Both are `parallel-safe: true`.** Per root CLAUDE.md, dispatch in **ONE message with TWO `task-execute` Skill calls**: `tasks/010-fix-mi-flag-gating-defect.poml` + `tasks/011-fix-di-lifetimes.poml` |
+| **Portfolio** | [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · **3 of 26 active** (3 deferred) |
 
-> ## 🎉 THE PROJECT'S CENTRAL PREMISE IS PROVEN
+> ## ✅ PHASE 0 COMPLETE — THE CREDENTIAL DECISION IS RECORDED
 >
-> Task 002 (2026-08-20) demonstrated empirically that **OBO works under a Managed-Identity-issued
-> client assertion** — Graph/SPE, Dataverse `user_impersonation`, and long-running OBO all succeed.
-> **No pivot to a Key Vault certificate.** Risk R-002 (the project's largest) is retired.
-> Evidence: [`notes/decisions/002-spike-results.md`](notes/decisions/002-spike-results.md).
+> **MI-FIC is adopted.** OBO proven on the wire under a Managed-Identity-issued client assertion
+> (Graph/SPE · Dataverse `user_impersonation` with `upn` preserved · long-running OBO), with a
+> negative control that fails loudly. **Option B (KV certificate) not taken.** Risk R-002 retired.
+> ADR-028 A4 now carries an adoption-status block.
+> → [`notes/decisions/003-credential-decision.md`](notes/decisions/003-credential-decision.md)
+>
+> **Two items deliberately recorded as NOT proven** — Power BI (deferred, DEF-001) and the Model 2
+> cross-tenant FIC shape (open, owed by provisioning §9.2). Neither gates a dev-only Model 1 rollout.
+> Do **not** read the decision as having settled Model 2.
 
 ### Repo state
 
@@ -61,6 +66,23 @@ before task 002.
    success criterion 10 is waived-with-reason at 090.
 3. **Autonomous execution authorised** by the owner — "as long as safe and accurate". Escalation triggers and
    the fail-closed gates (022, 032, 033) still stop for judgment.
+
+### Task 003 — COMPLETE (2026-08-20) — Phase 0 decision gate closed
+
+Decision recorded with evidence linked per must-prove item. **ADR-028 A4 upgraded from
+accepted-on-reasoning to verified-on-the-wire.**
+
+**Also corrected A4 itself** — its "Preferred wiring" section recommends Microsoft.Identity.Web's
+declarative ordered `ClientCredentials` JSON, which finding **E4′** shows is **unusable here** (zero
+`EnableTokenAcquisition`/`ITokenAcquisition`/`IDownstreamApi`/`ClientCredentials` in any `.cs`;
+`AddMicrosoftIdentityWebApi` is inbound-only). Left in place as accurate *general* guidance but
+annotated — a reader following it literally would configure the JSON, see nothing happen, and
+reasonably conclude MI-FIC does not work here. **Load-bearing consequence: the ordered fallback must
+be BUILT (task 021), not inherited.**
+
+⚠️ **Cross-project**: open **PR #801** edits this project's `design.md` at the sequencing bullet
+where our branch already carries the same correction in different wording — same substance, textual
+conflict at merge. Flagged on the PR with a proposed resolution.
 
 ### Task 002 — COMPLETE (2026-08-20, FULL / opus / xhigh) — THE DECISION GATE
 

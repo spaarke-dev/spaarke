@@ -131,7 +131,27 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 
 ## Amendment A4 (2026-08-17): Secret-Free Confidential Credential for OBO and BFF-Identity Clients
 
-> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**: [`spaarke-auth-v4-dataverse-MI`](../../projects/spaarke-auth-v4-dataverse-MI/). **Owner-directed** 2026-08-17. Evidence: [`notes/RESEARCH-FINDINGS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md) · inventory: [`notes/CREDENTIAL-INVENTORY.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md) · tenancy: [`notes/TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md).
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**: [`spaarke-auth-v4-dataverse-MI`](../../projects/spaarke-auth-v4-dataverse-MI/). **Owner-directed** 2026-08-17.
+>
+> ### ✅ ADOPTION STATUS — **CONFIRMED EMPIRICALLY 2026-08-20**
+>
+> A4 was accepted on reasoning; it is now **verified on the wire**. `spaarke-auth-v4-dataverse-MI` task 002
+> proved, against a real delegated user token on `spaarke-bff-dev/staging`, that the OBO grant succeeds under a
+> Managed-Identity-issued client assertion:
+>
+> | Proven | Detail |
+> |---|---|
+> | OBO → **Graph / SPE** | full SPE delegated scope set, real IdP exchange |
+> | OBO → **Dataverse `user_impersonation`** | **`upn`/`oid` preserved** — row-level authorization still evaluates as the *user*, not app-only |
+> | **Long-running OBO** | `InitiateLongRunningProcessInWebApi` → retrieval from cache |
+> | **Negative control** | an assertion minted for the wrong identity **fails loudly** at minting time |
+>
+> **MI-FIC is the adopted credential. The KV-certificate alternative was NOT taken** — it remains sanctioned for
+> cases where the same-tenant rule cannot hold (e.g. a cross-tenant Model 2 shape, still unresolved).
+>
+> Evidence: [`notes/decisions/002-spike-results.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md) ·
+> decision: [`notes/decisions/003-credential-decision.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/003-credential-decision.md).
+> `.WithClientSecret` remains in place under transitional exception **E-3** until task 033 removes it. Evidence: [`notes/RESEARCH-FINDINGS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md) · inventory: [`notes/CREDENTIAL-INVENTORY.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md) · tenancy: [`notes/TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md).
 
 ### Why this amendment exists
 
@@ -155,6 +175,17 @@ A4 replaces an unsatisfiable rule with the **required shape**, so the question s
 **Default credential — MI-as-Federated-Identity-Credential (MI-FIC).** GA since 2025-05-08. The app registration carries a federated identity credential trusting the App Service's **user-assigned** managed identity; MSAL presents the MI token as a standard `client_assertion`. Microsoft ranks this "Highest" security with **no rotation** (Azure-managed lifecycle), above certificates, and designates client secrets "Development and testing only."
 
 **Sanctioned alternative — Key Vault certificate.** Use where MI-FIC's same-tenant rule cannot be satisfied (see A4 constraints below and [`TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md)). Precedent already in production: `CiamGraphClientFactory` (`.WithCertificate`, KV PFX, private key ephemeral in-process).
+
+> **⚠️ Correction (2026-08-20, finding E4′): the declarative list below is NOT usable in this codebase.**
+> It only takes effect through `Microsoft.Identity.Web`'s token-acquisition surface, and this repo has **zero**
+> `EnableTokenAcquisition` / `ITokenAcquisition` / `IDownstreamApi` / `ClientCredentials` in any `.cs`.
+> `AddMicrosoftIdentityWebApi` (`AuthorizationModule.cs:36`) is **inbound validation only**, and
+> `Spaarke.Dataverse` has no Identity.Web reference at all. Every confidential client here is built directly via
+> `ConfidentialClientApplicationBuilder`.
+>
+> **Use the direct-MSAL equivalent below, and note the consequence: the ordered fallback that the rollback story
+> depends on must be BUILT, not inherited.** A reader who configures the JSON will observe no effect and may
+> wrongly conclude MI-FIC does not work here. The JSON is retained as accurate *general* Microsoft guidance.
 
 **Preferred wiring — declarative, ordered.** `Microsoft.Identity.Web` `ClientCredentials` supports an ordered fallback list, which is also the local-development answer:
 
