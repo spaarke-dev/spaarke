@@ -1,5 +1,6 @@
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -146,7 +147,8 @@ public class EntityAccessFilter : IEndpointFilter
             UserId = userId,
             ResourceId = resourceId,
             Operation = AssociateOperation,
-            CorrelationId = httpContext.TraceIdentifier
+            CorrelationId = httpContext.TraceIdentifier,
+            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
         };
 
         try

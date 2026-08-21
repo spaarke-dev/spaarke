@@ -36,7 +36,11 @@ public class OperationPolicyCharacterizationTests
     {
         UserId = "user-1",
         ResourceId = "resource-1",
-        Operation = operation
+        Operation = operation,
+        // These tests exercise OperationAccessRule directly (not AuthorizationService), so the token
+        // never reaches a data source — but task 004 made UserAccessToken `required`, which forces
+        // every construction site to state its intent rather than inherit app-only by omission.
+        UserAccessToken = "rule-level-test-token"
     };
 
     // ─────────────────────────────────────────────────────────────────────────────

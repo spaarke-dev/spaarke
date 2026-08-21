@@ -28,7 +28,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 001 | Access-path characterization + negative suite | NFR-07 | — | **P0-W0** | ✅ | sonnet | high |
 | 🔲 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
 | ✅ 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
-| 🔲 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
+| ✅ 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
 | 🔲 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
 | 🔲 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
 | 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
@@ -77,6 +77,17 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > **task 005 MUST map Dataverse `AppendToAccess`** (else `POST /api/office/save` is permanently 403 while
 > *looking* fixed), and **task 018 deletes `AddOfficeDocumentAccessFilter`** alongside A-15. Rationale:
 > [`notes/task-003-operation-rights-decisions.md`](../notes/task-003-operation-rights-decisions.md).
+
+> **Task 004 outcome (2026-08-21)**: token rides on `AuthorizationContext.UserAccessToken`
+> (**`required string?`** — forces every construction site to declare intent, so app-only is a visible
+> `= null`, never a default; produced 7 compile errors across 11 sites). Missing token → DENY with
+> `sdap.access.deny.no_caller_token`, data source **never consulted**. `IHttpContextAccessor` was rejected
+> — `Spaarke.Core` has no ASP.NET Core dep and `LayerDependencyTests` guards that. POML **Step 3 was
+> vacuous** (zero app-only consumers), not skipped.
+> ⚠️ **FR-02's criterion is NOT closed by 004 alone** — `PermissionsEndpoints.cs:76,:159` still pass
+> `userAccessToken: null` because they call `IAccessDataSource` **directly**, bypassing
+> `AuthorizationService`. That is A-4 → **task 006**, which should route them THROUGH the service rather
+> than re-plumb the token. Rationale: [`notes/task-004-caller-scoped-design.md`](../notes/task-004-caller-scoped-design.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

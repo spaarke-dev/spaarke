@@ -4,7 +4,7 @@
     <title>FR-02: Make AuthorizationService evaluate access as the caller, not the application</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001,003,014</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on THE authorization spine (Spaarke.Core/Auth) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,7 +97,33 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-02 + success criterion 2; finding A-2. Design §1/§8 Phase 1 will decide repair-vs-retire for this path — Phase 0 repairs enforcement only; do not consolidate evaluators here. RetrievePrincipalAccess adoption (if chosen as the mechanism) belongs to task 005's rights mapping — coordinate, don't duplicate.</notes>
+  <notes>**COMPLETED 2026-08-21.** Token now rides on `AuthorizationContext.UserAccessToken` (`required string?`);
+  AuthorizationService forwards it and DENIES with `sdap.access.deny.no_caller_token` when absent, never
+  consulting the data source. Suite: BFF 10,625 / ArchTests 36 / Core 45, all green. Publish 43.65 MB
+  compressed (baseline 44.96; no package changes). Lint clean with TreatWarningsAsErrors.
+
+  DESIGN (full rationale: notes/task-004-caller-scoped-design.md): Spaarke.Core has NO ASP.NET Core
+  dependency, so IHttpContextAccessor was rejected (would add a web dep to a non-web shared lib, guarded by
+  LayerDependencyTests) and a second auth service was rejected (ADR-010). Carrying the token on the existing
+  context extends the existing seam. `required` on a NULLABLE is deliberate: it forces every construction
+  site to STATE its intent, so app-only becomes a visible `UserAccessToken = null` rather than the default
+  you get by not thinking — which is how A-2 survived. Produced 7 compile errors across 11 sites.
+
+  STEP 3 WAS VACUOUS, not skipped: the Step-1 classification found ZERO app-only consumers (all six
+  call-sites are caller-scoped), so there was nothing to route to an app-only entry point. `required`
+  delivers the guarantee Step 3 was reaching for. Noted because step mode is prescriptive.
+
+  ⚠️ FR-02's acceptance criterion is NOT fully closed by this task. PermissionsEndpoints.cs:76 and :159
+  still pass `userAccessToken: null` -- they call IAccessDataSource DIRECTLY, bypassing AuthorizationService,
+  so no change here can reach them. That is A-4, owned by **task 006**, which should route those calls
+  THROUGH AuthorizationService rather than re-plumbing the token at the endpoint. Do not credit the
+  criterion to 004.
+
+  Also added TokenHelper.ExtractBearerTokenOrNull -- the existing extractor throws, which would turn a
+  missing credential into a 500 instead of a fail-closed deny. OfficeDocumentAccessFilter was updated only
+  so the solution compiles; it is orphaned (A-23) and task 018 deletes it.
+
+  Spec FR-02 + success criterion 2; finding A-2. Design §1/§8 Phase 1 will decide repair-vs-retire for this path — Phase 0 repairs enforcement only; do not consolidate evaluators here. RetrievePrincipalAccess adoption (if chosen as the mechanism) belongs to task 005's rights mapping — coordinate, don't duplicate.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

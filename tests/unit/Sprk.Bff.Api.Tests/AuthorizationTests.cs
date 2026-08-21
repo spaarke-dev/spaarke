@@ -39,7 +39,10 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read_metadata"
+            Operation = "read_metadata",
+            // task 004 (FR-02): a caller-scoped evaluation requires the caller token; without it
+            // AuthorizationService denies with sdap.access.deny.no_caller_token (fail closed).
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read);
@@ -59,7 +62,10 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read_metadata"
+            Operation = "read_metadata",
+            // task 004 (FR-02): a caller-scoped evaluation requires the caller token; without it
+            // AuthorizationService denies with sdap.access.deny.no_caller_token (fail closed).
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.None);
@@ -79,7 +85,8 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "driveitem.update"
+            Operation = "driveitem.update",
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read | AccessRights.Write);

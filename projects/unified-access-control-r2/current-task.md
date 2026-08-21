@@ -10,34 +10,23 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 004 (next) |
+| **Task** | none |
 | **Status** | not-started |
 | **Phase** | Phase 0 — enforcement remediation |
-| **Next action** | Run **004** — all three deps (001, 003, 014) are ✅. Step 1 (call-site classification) is **already done**: [`notes/task-004-callsite-classification.md`](notes/task-004-callsite-classification.md) |
+| **Next action** | Choose the next wave. **5 of 19 Phase 0 tasks complete**: 001 ✅ 003 ✅ 004 ✅ 014 ✅ 019 ✅ |
 
-**Phase 0 complete: 001 ✅ · 003 ✅ · 014 ✅ · 019 ✅** (4 of 19)
+### Recommended next wave
 
-### Task 004 — pre-loaded context
+| Option | Tasks | Why |
+|---|---|---|
+| **Recommended** | **006** (`parallel-safe:true`) then **005** | Both unblocked by 004. **006 finishes what 004 started**: FR-02's criterion is still open because `PermissionsEndpoints.cs:76,:159` call `IAccessDataSource` directly. Route them THROUGH `AuthorizationService` rather than re-plumbing the token |
+| High value, larger | **005** (lift the Read ceiling) | Carries a **binding obligation from task 003**: MUST map Dataverse `AppendToAccess` → `AccessRights.AppendTo`, or `POST /api/office/save` is permanently 403 *while looking fixed* |
+| Independent | **002** (authorize document download) | A-1, the R1 January-2026 attack scenario. Unblocks 012 |
 
-`opus` @ `xhigh`, `parallel-safe:false`. Highest blast radius in Phase 0: makes `AuthorizationService`
-evaluate as the **caller** rather than the application (A-2 / FR-02).
-
-Classification already established (read-only, done 2026-08-21):
-
-- **Zero app-only consumers.** All six call-sites run inside an HTTP request →
-  **POML Step 3 has no work** (nothing to route to an app-only entry point).
-- "Missing token → Deny" is therefore unambiguous; the POML's ambiguous-classification escalation
-  does **not** fire on the current call graph.
-- `OfficeDocumentAccessFilter:132` is a caller-scoped consumer but **orphaned** (A-23) — leave it;
-  task 018 deletes it. Do not plumb a token into dead code.
-- `ChatDocumentEndpoints:911` is the only non-filter consumer and injects the **interface**
-  `IAuthorizationService`, not the concrete type the filters use. Any signature change must keep
-  that injection working.
-- ⚠️ Trap: the three AI filters declare a field *named* `_authorizationService` whose type is
-  `IAiAuthorizationService`. A grep on the field name makes them look like consumers. They are not —
-  they already pass the caller bearer, which is why they were A-19's evidence base.
-
-After 004: **{005, 006}** unblock (006 is `parallel-safe:true`).
+⚠️ **005 and 006 both depend on 004 and are NOT co-schedulable with each other** — 005 touches
+`Spaarke.Dataverse/DataverseAccessDataSource.cs`, 006 touches `Api/PermissionsEndpoints.cs`; those are
+disjoint, but 006's correct fix routes through `AuthorizationService`, which 005's rights-mapping also
+affects. Run 005 first if pairing.
 
 ## Project State
 
