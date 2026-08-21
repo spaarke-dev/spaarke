@@ -25,7 +25,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 
 | # | Task | FR / finding | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 001 | Access-path characterization + negative suite | NFR-07 | — | **P0-W0** | ✅ | sonnet | high |
+| ✅ 001 | Access-path characterization + negative suite | NFR-07 | — | **P0-W0** | ✅ | sonnet | high |
 | 🔲 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
 | 🔲 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
 | 🔲 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
@@ -46,6 +46,16 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | 🔲 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
 
 **Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 · plus 002 → 012
+
+> **Task 001 outcome (2026-08-21)**: 62 tests green at `tests/integration/auth/UnifiedAccessControl/`
+> (the ADR-038 §2 security-auth KEEP path — **first backfill**; it had zero compiled files and was
+> globbed by no csproj). **9 of 20 Phase 0 findings pinned, 1 partial, 10 not reachable offline.**
+> Tasks 002/003/004/005/006/008/010/011/014 have their baseline and are unblocked. Tasks
+> **007, 012, 013, 015, 016, 017, 018, 019** must supply their own coverage — see
+> [`notes/task-001-untestable-findings.md`](../notes/task-001-untestable-findings.md) §2–3 for why and
+> the recommended approach (extract a query-builder seam inside each fix task).
+> ⚠️ Any task testing `/api/v1/external` MUST use `ExternalCollaborationTestFixture` — the shared
+> fixtures make that group return 500, which silently turns "not 403" assertions into vacuous passes.
 
 ## Phase 1 — One evaluator (10 tasks)
 

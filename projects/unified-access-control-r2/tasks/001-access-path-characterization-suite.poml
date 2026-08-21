@@ -4,7 +4,7 @@
     <title>Access-path characterization + negative test suite (pre-change baseline)</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** — TEST-MODIFYING override (root CLAUDE.md §8) mandates code-review + adr-check unconditionally; also tags include auth/testing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,21 @@
     <criterion testable="true">All new and existing unit tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec NFR-07, findings register design-register.md §A. Caution: .claude/constraints/auth.md and .claude/patterns/auth/uac-access-control.md carry known drift (design-register §G) — trust code over those docs. The Characterization_ prefix is the contract: later tasks grep for it.</notes>
+  <notes>**COMPLETED 2026-08-21.** 62 tests green at `tests/integration/auth/UnifiedAccessControl/`.
+
+  DEVIATION FROM DECLARED OUTPUTS (CLAUDE.md §6.5 path C — pivot to comply): tests were authored at the
+  ADR-038 §2 security-auth KEEP path `tests/integration/auth/**`, NOT at the declared
+  `tests/unit/Sprk.Bff.Api.Tests/AccessControl/` + `tests/unit/Spaarke.Core.Tests/Auth/`. Reason: neither
+  declared path is a KEEP path (only `tests/unit/domain/**` is), and this task's own ADR-038 constraint
+  mislabels `tests/unit/**` as one. `tests/integration/auth/**` had ZERO compiled files and was globbed by
+  no csproj, so this is its first backfill — a `&lt;Compile Include&gt;` glob was added to
+  Sprk.Bff.Api.Tests.csproj following five documented precedents (contract/regression/seam/domain/tenant).
+
+  COVERAGE: 9 of 20 Phase 0 findings fully pinned (A-1, A-2, A-3, A-4, A-6, A-11, A-17, A-19, A-20),
+  A-7 partial (fail-closed gate only), 10 not reachable offline. ESCALATION OPEN — see
+  notes/task-001-untestable-findings.md for the three causes and the recommended resolution.
+
+  Spec NFR-07, findings register design-register.md §A. Caution: .claude/constraints/auth.md and .claude/patterns/auth/uac-access-control.md carry known drift (design-register §G) — trust code over those docs. The Characterization_ prefix is the contract: later tasks grep for it.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

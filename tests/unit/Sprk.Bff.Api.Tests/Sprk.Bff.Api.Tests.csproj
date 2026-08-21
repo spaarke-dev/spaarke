@@ -127,6 +127,22 @@
     <Compile Include="..\..\integration\tenant\**\*.cs" LinkBase="TenantTests" />
   </ItemGroup>
 
+  <!--
+    unified-access-control-r2 task 001 (2026-08-21) — first backfill of the
+    tests/integration/auth/** KEEP category (ADR-038 §2 path #1: authentication / authorization
+    path, token validation, claims handling, OBO exchange). Prior to this task the category had
+    zero compiled test files (tests/integration/auth/README.md: "Bulk move pending") even though
+    it is one of the seven deletion-protected paths — so every access-control test in the repo
+    lived off-KEEP-path. Compiled INTO this assembly for the same fixture-coupling reason as the
+    contract/regression/seam/domain/tenant globs above (reuses CustomWebAppFactory /
+    WorkspaceTestFixture and this project's package refs; no duplicate test project). Namespaces
+    preserved (Sprk.Bff.Api.Tests.*). New auth/authorization tests add files under
+    tests/integration/auth/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\auth\**\*.cs" LinkBase="AuthTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration
