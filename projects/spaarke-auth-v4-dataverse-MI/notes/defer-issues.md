@@ -119,3 +119,89 @@ closed.
 **Blockers**: none — filed by `spaarke-auth-v4-dataverse-MI`, not owned by it
 **Related**: tasks 031/032 now carry pre-checks for this · decision record 001
 
+
+---
+
+### ISS-002 — the ADR-010 1:1-interface ratchet is blind to cross-assembly seams
+
+> **GitHub**: [#809](https://github.com/spaarke-dev/spaarke/issues/809)
+
+> **Filed**: 2026-08-21 by `spaarke-auth-v4-dataverse-MI` task 020 · **Severity**: medium
+> **Owner**: repo-level (architecture / test tooling) — **not** this project
+
+**Reproduced, not hypothesised.** Task 020 introduced `IClientAssertionProvider` (declared in
+`Spaarke.Dataverse`) with exactly one implementation (`ManagedIdentityAssertionProvider`, in the BFF).
+The task instructed raising the ratchet ceiling 153 → 154 on the stated grounds that *"without it the
+build fails."* It does not. Verified twice — once during execution, once independently at the quality
+gate with a throwaway probe that re-ran the counting logic:
+
+| Check | Result |
+|---|---|
+| `ADR010_DITests` at the **unraised** ceiling 153 | pass |
+| Real 1:1 interface count | **151** |
+| `IClientAssertionProvider` in the counted list | **absent** |
+
+**Root cause.** `ServicesShouldBeConcreteUnlessSeamRequired` (`ADR010_DITests.cs:106,109`) enumerates
+`Types.InAssembly(typeof(Program).Assembly)` — the BFF assembly only. An interface declared in
+`Spaarke.Dataverse` or `Spaarke.Core` is never in the candidate set, so **any contract-in-shared-lib /
+implementation-in-BFF pair is invisible to this gate, permanently.** That is precisely the shape the
+CI-enforced layering (`LayerDependencyTests`, FR-14) *forces* on shared-library types, so the gate is
+blind to exactly the seams the architecture requires.
+
+**Two distinct problems:**
+
+1. **The blind spot itself.** One-line fix: union the BFF assembly with `Spaarke.Core` and
+   `Spaarke.Dataverse` before filtering.
+2. **Live slack.** The ceiling is **153** against a real count of **151**, so two in-assembly 1:1
+   interfaces can land today without the justify-or-concrete review the ratchet exists to force. With
+   17 active worktrees the slack is being consumed by someone.
+
+**Why this project did not fix it.** Both are repo-wide detector changes. Tightening the ceiling could
+redden CI for other in-flight projects that legitimately add an interface — that is an owner call, not
+a side effect of an auth task.
+
+**What task 020 did instead**: left the ceiling untouched at 153, recorded the verified numbers in
+`ADR010_DITests.cs:164-173` and in `AuthorizationModule.cs`, and booked the *census* half onto task
+**061** (its credential census must scan all server assemblies, with a negative control that adds a
+scratch confidential-client site in `Spaarke.Dataverse`). **The ratchet itself remains unfixed.**
+
+**Entry-points**
+- `tests/Spaarke.ArchTests/ADR010_DITests.cs:106,109,174`
+- `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/020-assertion-seam.md` §5
+
+**Estimated effort**: 1–2 hours for the blind spot; the ceiling decision is judgement, not effort
+**Blockers**: none
+**Related**: task 061 (census half, booked) · ADR-010
+
+---
+
+### ISS-003 — `LayerDependencyTests` enforces `ProjectReference` but not `PackageReference`
+
+> **GitHub**: [#810](https://github.com/spaarke-dev/spaarke/issues/810)
+
+> **Filed**: 2026-08-21 by `spaarke-auth-v4-dataverse-MI` task 020 · **Severity**: low-medium
+> **Owner**: repo-level (test tooling) — **not** this project
+
+Every task in this project carries the constraint *"`Spaarke.Dataverse` gains NO ProjectReference **and
+no new PackageReference**"*, and FR-14 is cited as the enforcement. Only the first half is actually
+enforced: `LayerDependencyTests.cs:109` `ExtractProjectReferences` parses `<ProjectReference Include=…>`
+and has no `PackageReference` regex at all. **The PackageReference half rests on reviewer attention.**
+
+It holds today — task 020 verified `Spaarke.Dataverse.csproj` is byte-identical, and the new contract
+needed no package because `Microsoft.Identity.Client` 4.87.0 was already referenced. But this task is
+exactly the one that makes the rule salient: a future task adding
+`Microsoft.Identity.Web.Certificateless` to the shared library "to simplify the seam" would sail through
+CI green, silently inverting the layering the gate exists to protect.
+
+**Suggested fix**: extend `ExtractProjectReferences` with a second assertion over `PackageReference`,
+using the negative-control shape already at `LayerDependencyTests.cs:81`. Note it needs an allowlist —
+the shared lib legitimately carries `Azure.Core`, `Azure.Identity`, `Microsoft.Identity.Client`, etc.;
+the rule to enforce is "no NEW package", i.e. a frozen inventory, not "no packages".
+
+**Entry-points**
+- `tests/Spaarke.ArchTests/LayerDependencyTests.cs:81,109`
+- `src/server/shared/Spaarke.Dataverse/Spaarke.Dataverse.csproj`
+
+**Estimated effort**: 2–3 hours including the allowlist baseline
+**Blockers**: none
+**Related**: ISS-002 (sibling detector gap, same file family)

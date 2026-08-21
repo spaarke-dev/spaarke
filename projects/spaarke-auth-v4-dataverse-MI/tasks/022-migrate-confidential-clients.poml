@@ -76,7 +76,14 @@
 
   <acceptance-criteria>
     <criterion>All six sites obtain their credential from the provider; no inline credential construction remains.</criterion>
-    <criterion>ZERO per-class static CCA caches remain: `grep -rn "ConcurrentDictionary&lt;string, IConfidentialClientApplication&gt;" src/` returns only the provider. One process holds ONE confidential client per (tenant|client), not three. This closes task 011's time-boxed A4 exception.</criterion>
+    <!-- AMENDED 2026-08-21 by task 020 (adr-check V1). The original said the grep must return "only the
+         provider", meaning IClientAssertionProvider. That is unsatisfiable as written: the assertion
+         contract cannot own the cache, because ordered selection spans assertion/certificate/secret and
+         only the first yields an assertion. Task 021 now authors the client-level seam that DOES own it.
+         Criterion restated in terms of the SUBSTANCE (one cache, reachable from the shared lib) rather
+         than a mechanism that cannot exist. -->
+    <criterion>ZERO per-class static CCA caches remain: `grep -rn "ConcurrentDictionary&lt;string, IConfidentialClientApplication&gt;" src/` returns exactly ONE site -- the confidential-client cache owned by task 021's client-level provider. One process holds one confidential client per (tenant|client|credential-kind), not three. This CLOSES task 011's time-boxed ADR-028 A4 exception; if this task cannot achieve it, ESCALATE rather than defer, because there is no later task that owns it.</criterion>
+    <criterion>DataverseAccessDataSource obtains its confidential client through the Spaarke.Dataverse contract, not from a private static -- it is the only one of the four sites that cannot inject the cache concretely, and therefore the only reason the contract exists.</criterion>
     <criterion>The secret is still configured and still selectable as the lowest-priority fallback.</criterion>
     <criterion>Both credential orderings work — MI-FIC first and secret first — proving rollback.</criterion>
     <criterion>Negative case: OBO still fails CLOSED for an unauthorised user on every migrated path (AccessRights.None, never error-open).</criterion>

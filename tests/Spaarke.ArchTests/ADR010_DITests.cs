@@ -161,6 +161,16 @@ public class ADR010_DITests
         // ceiling to the current audited count grandfathers the legitimate set and RE-ARMS the ratchet:
         // any NEW 1:1 interface beyond 153 will fail this test and force the same justify-or-concrete
         // review. This is the maintenance procedure this test documents, not a suppression.
+        // ⚠️ auth-v4 task 020 (2026-08-21) DID NOT RAISE THIS, though the task instructed it to.
+        // Empirically verified instead of assumed: the real count is 151, not 153, and the new
+        // IClientAssertionProvider -> ManagedIdentityAssertionProvider pair does NOT appear in the
+        // list at all. Reason: this test scans `typeof(Program).Assembly` — the BFF assembly only —
+        // and IClientAssertionProvider is declared in Spaarke.Dataverse. A CROSS-ASSEMBLY 1:1 seam
+        // (contract in a shared library, implementation in the BFF) is therefore invisible here.
+        // Raising the ceiling would have granted headroom for a future IN-assembly interface to
+        // land unreviewed, which is the opposite of what this ratchet is for. Left at 153.
+        // The blind spot is booked onto tasks 060/061 (the forcing-function tasks), where a
+        // cross-assembly credential census belongs.
         const int knownOneToOneCeiling = 153;
 
         Assert.True(

@@ -38,9 +38,12 @@ public sealed class AgentTokenService
     /// <para>This service is registered singleton (see <c>AgentModule</c>), so the cache is
     /// belt-and-braces for DI — but it is <b>not</b> redundant. It makes client sharing structural
     /// rather than dependent on one registration line, and it covers direct construction (tests,
-    /// tooling). From task 020 the credential becomes a Managed-Identity client assertion whose
-    /// signed assertion caches on the instance, so a per-instance client would re-mint an assertion
-    /// (an IMDS round-trip) per exchange.</para>
+    /// tooling).</para>
+    ///
+    /// <para><b>Correction (task 020 code review, W-4)</b>: an earlier version added "and from task 020
+    /// a per-instance client would re-mint an assertion per exchange (an IMDS round trip)". Measured
+    /// false — MSAL's managed-identity token cache is process-static and keyed by identity. The
+    /// justification above is sufficient without it.</para>
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
         CcaCache = new();
@@ -52,7 +55,9 @@ public sealed class AgentTokenService
     /// ran twice is visible rather than silent.
     ///
     /// <para><b>Non-contractual</b> — test-observability surface, not API. Task 022 relocates it onto
-    /// <c>IClientAssertionProvider</c> when the three per-class caches consolidate.</para>
+    /// the client-level provider <b>task 021 authors</b> when the three per-class caches consolidate —
+    /// NOT onto <c>IClientAssertionProvider</c>, which cannot own the cache (ordered selection spans
+    /// assertion / certificate / secret; only the first yields an assertion). Task 020 finding V1.</para>
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> CcaBuilds = new();
 

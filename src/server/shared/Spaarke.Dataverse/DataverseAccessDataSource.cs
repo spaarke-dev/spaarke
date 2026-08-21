@@ -27,11 +27,17 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// stays intact — MSAL caches OBO tokens per user assertion, not per client.</para>
     ///
     /// <para>Sharing is deliberately <b>structural rather than lifetime-dependent</b>: it must not
-    /// hinge on a DI registration line. From task 020 the credential becomes a Managed-Identity
-    /// client assertion, and <c>ManagedIdentityClientAssertion</c> caches its signed assertion on
-    /// the instance — so a per-request client would also re-mint an assertion (an IMDS round-trip)
-    /// on every call. At that point shared-client-ness is a correctness/cost property of the
-    /// credential, not an optimization.</para>
+    /// hinge on a DI registration line — a future change to that one line must not silently reintroduce
+    /// a per-request MSAL token cache.</para>
+    ///
+    /// <para><b>Correction (task 020 code review, W-4).</b> An earlier version of this comment argued
+    /// that from task 020 a per-request client would also re-mint a client assertion, costing an IMDS
+    /// round trip per call. <b>That is false and was measured</b>: MSAL's managed-identity token cache
+    /// is process-static and keyed by identity, so fresh <c>ManagedIdentityClientAssertion</c> instances
+    /// produce no additional IMDS traffic. The justification for this cache stands entirely on its own
+    /// original grounds — MSAL's <i>OBO</i> token cache lives on the confidential client and is
+    /// discarded with it — and does <b>not</b> need the assertion argument. Task 022 must not lean on
+    /// the retracted premise.</para>
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
         CcaCache = new();
@@ -63,7 +69,10 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// than once.</para>
     ///
     /// <para><b>Non-contractual.</b> This is test-observability surface, not API. Task 022 relocates
-    /// it onto <c>IClientAssertionProvider</c> when the three per-class caches consolidate.</para>
+    /// it onto the client-level provider <b>task 021 authors</b> when the three per-class caches
+    /// consolidate — NOT onto <c>IClientAssertionProvider</c>, which cannot own the cache: ordered
+    /// selection spans assertion / certificate / secret and only the first yields an assertion.
+    /// Corrected 2026-08-21, task 020 finding V1.</para>
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> CcaBuilds = new();
 
@@ -95,21 +104,42 @@ public class DataverseAccessDataSource : IAccessDataSource
     private readonly ILogger<DataverseAccessDataSource> _logger;
     private readonly HttpClient _httpClient;
     private readonly TokenCredential _credential;
+
+    /// <summary>
+    /// MI-FIC assertion provider, held for task 022's migration of <see cref="_cca"/> off the client
+    /// secret. Null outside the BFF DI container (tooling, tests) and, until 022 lands, unused —
+    /// see the constructor's <c>assertion</c> parameter for why it is threaded in early.
+    /// </summary>
+    private readonly IClientAssertionProvider? _assertionProvider;
+
     private readonly IConfidentialClientApplication? _cca;
     private readonly string _apiUrl;
     private readonly string _dataverseScope;
     private AccessToken? _currentToken;
 
+    /// <param name="assertion">
+    /// MI-FIC client-assertion provider (auth-v4 task 020, FR-B1). <b>Accepted but NOT yet used</b> —
+    /// task 022 is what switches the OBO confidential client below from
+    /// <c>.WithClientSecret(...)</c> to <c>.WithClientAssertion(...)</c>. Introducing the parameter
+    /// ahead of the migration keeps that change to a single call site instead of a signature change
+    /// rippling through every caller during the highest-blast-radius task in the project.
+    ///
+    /// <para>Nullable with a null default, deliberately: this mirrors <c>credential</c> above and is
+    /// what keeps all 46 existing test fixtures compiling unchanged (NFR-04). A required parameter
+    /// would break every one of them.</para>
+    /// </param>
     public DataverseAccessDataSource(
         IDataverseService dataverseService,
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseAccessDataSource> logger,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        IClientAssertionProvider? assertion = null)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _assertionProvider = assertion;   // held for task 022; intentionally unused here
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
         var tenantId = configuration["TENANT_ID"];

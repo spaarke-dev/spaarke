@@ -13,7 +13,7 @@
 | 003 | Record the credential decision with evidence | 0 Spike | STANDARD | sonnet/med | 002 | — | ❌ `.claude/` | — | ✅ |
 | 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A1 | ✅ |
 | 011 | Fix DI lifetimes + record the ADR-009 decision | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A2 | ✅ |
-| 020 | `IClientAssertionProvider` seam + raise ADR-010 ceiling | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | 🔲 |
+| 020 | `IClientAssertionProvider` seam (**ceiling NOT raised — see ¹⁴**) | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | ✅ |
 | 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | 🔲 |
 | 022 | Migrate the 6 BFF-identity confidential clients | 2 Provider | FULL | **opus/xhigh** | 021 | **D** | ❌ | FR-B3 | 🔲 |
 | 023 | UAMI ↔ app-reg conflation guard + test | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B4 | 🔲 |
@@ -82,7 +82,7 @@ boundary. A dispatched agent will fail with "Edit denied"; that is the boundary 
 | Task | Risk | Guard |
 |---|---|---|
 | ~~**002**~~ | ~~The whole project's premise. Failure = pivot to certificate~~ | ✅ **RETIRED 2026-08-20 — spike PASSED.** OBO proven under a MI-issued client assertion (Graph/SPE, Dataverse `user_impersonation`, long-running). No pivot needed. Evidence: [`notes/decisions/002-spike-results.md`](../notes/decisions/002-spike-results.md) |
-| **020** | Trips `ADR010_DITests.cs:164` (ceiling 153 → 154) — **reddens CI on the first PR** | Raise the ceiling in the same PR with the FR-14 justification (acceptance criterion) |
+| ~~**020**~~ | ~~Trips `ADR010_DITests.cs:164` (ceiling 153 → 154) — reddens CI on the first PR~~ | ✅ **RETIRED 2026-08-21 — the premise was FALSE.** ArchTests pass at 153; real count is **151**; `IClientAssertionProvider` is **absent** from the counted list because the test scans `typeof(Program).Assembly` (BFF only) and the interface lives in `Spaarke.Dataverse`. **A cross-assembly 1:1 seam is invisible to this ratchet.** Ceiling left untouched — raising it would have widened slack 2→3, letting a future *in-assembly* interface land unreviewed. Both quality gates reproduced it independently. Blind spot → [#809](https://github.com/spaarke-dev/spaarke/issues/809); sibling `PackageReference` gap → [#810](https://github.com/spaarke-dev/spaarke/issues/810) |
 | **022** | ⏳ **Task 011's ADR-028 A4 exception EXPIRES HERE.** Three per-class static CCA caches (`DataverseUserClient`, `DataverseAccessDataSource`, `AgentTokenService`) mean one process can hold three confidential clients for the same `(tenant|client)` — the per-call-site duplication A4 line 207 forbids. Accepted at 011 only because task 020 is about to build the shared provider | Booked as a **constraint + acceptance criterion on both 020 and 022** (not prose in a notes file — that was `adr-check` finding **W2** at task 011). 022 must leave **zero** per-class CCA statics; if it doesn't, escalate rather than defer |
 | **022** | Migrates OBO. **Fails closed** — breakage locks out every user, totally | Secret retained as ordered fallback; slot-only; no swap in this task |
 | **032** | The flip. `#3b` attempt 1 took dev down | Slot swap only; no in-session flips; rollback = swap back |
@@ -153,3 +153,5 @@ Adding boilerplate justification blocks to the other six to silence the linter w
 rationale `project-pipeline` Step 1.7 warns against, so they are left flagged and explained here instead.
 Consider tightening the linter's heuristic to exclude `tests/**` and `notes/**` paths — that is a
 `task-create` improvement, not a change to this project.
+
+¹⁴ **Task 020 did NOT raise the ADR-010 ceiling**, though its POML instructed it to — see the High-Risk row above. It also found that the ordered credential selection task 021 builds (**MI-FIC → certificate → secret**) cannot live behind `IClientAssertionProvider`, because only the first of the three *is* an assertion. Consequence: the shared confidential-client cache belongs to a **client-level seam task 021 must author**, not to the assertion contract and not to task 022. Tasks 021 and 022 were amended accordingly; 022's original criterion required a `grep` result that cannot exist. Full reasoning: [`notes/decisions/020-assertion-seam.md`](../notes/decisions/020-assertion-seam.md).

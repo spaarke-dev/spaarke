@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Identity.Web;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.Routing;
@@ -9,7 +11,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
 /// DI registration module for authentication and authorization services (ADR-008, ADR-010).
-/// Registers Azure AD JWT bearer authentication, authorization handler, and all authorization policies.
+///
+/// <para><b>Inbound</b> — validating tokens presented TO the BFF: Azure AD JWT bearer (workforce),
+/// the CIAM scheme for external users, named API-key schemes, the authorization handler, and all
+/// authorization policies.</para>
+///
+/// <para><b>Outbound</b> — the credential the BFF presents when authenticating AS ITSELF to Entra:
+/// <c>IClientAssertionProvider</c> (ADR-028 Amendment A4, added by auth-v4 task 020). Kept in this
+/// module because it answers the same question as everything else here — how the BFF authenticates —
+/// and because it serves Graph, Dataverse and the Copilot agent alike rather than belonging to any one
+/// of them.</para>
 /// </summary>
 public static class AuthorizationModule
 {
@@ -155,6 +166,43 @@ public static class AuthorizationModule
 
         // Register authorization handler (Scoped to match AuthorizationService dependency)
         services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
+
+        // ─────────────────────────────────────────────────────────────────────────────────────
+        // OUTBOUND credential (auth-v4 task 020 · FR-B1 · ADR-028 A4)
+        //
+        // Everything above this line is INBOUND — validating tokens presented TO the BFF. This is
+        // the first outbound registration in this module: the credential the BFF presents when it
+        // authenticates as ITSELF to Entra (OBO exchanges and app-only confidential clients).
+        //
+        // Placed here rather than in SpaarkeCore because the provider is not a Dataverse concern —
+        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource, DataverseUserClient
+        // and AgentTokenService alike. This module is where a reader looks for "how does the BFF
+        // authenticate", and that question now has both an inbound and an outbound answer.
+        //
+        // NOT registered inline in Program.cs: ADR-010 forbids inline registrations, and the
+        // TokenCredential precedent at Program.cs:46 is itself the anti-pattern, not the model.
+        //
+        // SINGLETON per ADR-028 A4's "reuse the instance" rule. It avoids rebuilding the underlying
+        // managed-identity application and re-entering MSAL's cache per resolution.
+        // NOT because a per-request instance would cost an IMDS round trip — that claim was measured
+        // FALSE at this task's code-review gate (MSAL's managed-identity token cache is process-static
+        // and keyed by identity, so fresh assertion objects issue no extra IMDS traffic). The
+        // registration is right; the reason had to be corrected.
+        //
+        // Registered against the INTERFACE despite one implementation. ADR-010 prefers concrete
+        // registration, but the seam is genuine and structural: Spaarke.Dataverse is the base layer
+        // and cannot reference this assembly (LayerDependencyTests FR-14), so shared-library types
+        // can only receive this by dependency inversion. A4 also names a second implementation —
+        // a Key Vault certificate — as the sanctioned alternative where MI-FIC's same-tenant rule
+        // cannot hold.
+        //
+        // NOTE: ADR010_DITests does NOT see this pair, and its ceiling was NOT raised. That test
+        // scans typeof(Program).Assembly — the BFF only — and the interface is declared in
+        // Spaarke.Dataverse, so a cross-assembly 1:1 seam is invisible to it. Real count is 151
+        // against a ceiling of 153; raising it would have granted headroom for a future IN-assembly
+        // interface to land unreviewed. The blind spot is booked onto task 061.
+        // See ADR010_DITests.cs:164-173 for the verified numbers.
+        services.AddSingleton<IClientAssertionProvider, ManagedIdentityAssertionProvider>();
 
         // BFF `tid`→environment routing (teams-app-r1 task 060 · ADR-028 A2 · spec FR-09).
         // Config-driven map (TenantRouting section; Key Vault refs in prod, mirroring AzureAd/Ciam)

@@ -81,5 +81,7 @@
     <criterion>README, projects/INDEX.md and portfolio Issue #800 updated.</criterion>
     <criterion>Negative case: no graduation criterion is marked complete without evidence.</criterion>
     <criterion>Cross-project close-out confirmed with customer-provisioning-orchestration-r1 and dataverse-access-unification-r1.</criterion>
-  </acceptance-criteria>
+      <!-- Booked 2026-08-21 by task 020 (code review W-8). -->
+    <criterion>/test-diet explicitly adjudicates the three auth files now living under tests/integration/seam/Auth/ (CredentialSelectionSeamTests, ConfidentialClientSharingSeamTests, ClientAssertionProviderSeamTests). ADR-038 defines seam/** as the AI convergence spine (dispatch -&gt; executor -&gt; ledger -&gt; disposition); these are credential-seam tests placed there because tests/integration/auth/** is EMPTY and NOT COMPILED into any csproj -- a test authored there would run never. Resolve deliberately: broaden the seam README with an auth/credential sub-category, or wire auth/** into the csproj and relocate. Either way do not let three files inherit deletion protection by accident.</criterion>
+</acceptance-criteria>
 </task>
