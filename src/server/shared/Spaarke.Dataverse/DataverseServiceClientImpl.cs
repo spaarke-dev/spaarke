@@ -41,9 +41,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// </summary>
     public ServiceClient OrganizationService => _lazyServiceClient.Value;
 
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY in the
+    /// managed-identity-disabled branch, where it replaces the <c>AuthType=ClientSecret</c> connection
+    /// string. Nullable with a null default (NFR-04).
+    /// </param>
     public DataverseServiceClientImpl(
         IConfiguration configuration,
-        ILogger<DataverseServiceClientImpl> logger)
+        ILogger<DataverseServiceClientImpl> logger,
+        IConfidentialClientProvider? confidentialClients = null)
     {
         _logger = logger;
 
@@ -99,23 +105,54 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         else
         {
-            // Fallback: ClientSecret (Graph/SPE parity). Required only when MI is disabled.
+            // auth-v4 task 022 (FR-B3): ordered credential selection replaces the
+            // AuthType=ClientSecret connection string. Same app registration, same client-credentials
+            // grant against the same environment-authority scope — only the credential that proves the
+            // identity changes (MI-FIC → certificate → transitional secret).
             var tenantId = configuration["TENANT_ID"];
             var clientId = configuration["API_APP_ID"];
-            var clientSecret = configuration["API_CLIENT_SECRET"];
 
-            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId))
             {
                 throw new InvalidOperationException(
-                    "Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration " +
+                    "Dataverse authentication requires TENANT_ID and API_APP_ID configuration " +
                     "when Managed Identity is disabled (Graph:ManagedIdentity:Enabled=false).");
             }
 
-            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};TenantId={tenantId};ClientId={clientId};ClientSecret={clientSecret}";
+            if (confidentialClients is null)
+            {
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required when Managed Identity is disabled " +
+                    "(Graph:ManagedIdentity:Enabled=false). Inside the BFF it is registered by " +
+                    "AuthorizationModule.AddCredentialSelection.");
+            }
+
+            var secretFreeCredential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
+            var instanceUri = new Uri(dataverseUrl);
+            // Same env-authority scope derivation as the MI branch, and for the same #3b reason: the
+            // ServiceClient token provider is handed the full SOAP endpoint URL as its resourceUri,
+            // which is not a valid AAD resource.
+            var secretFreeScope = instanceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
+
             connectFactory = () =>
             {
-                _logger.LogInformation("Connecting Dataverse ServiceClient via ClientSecret (local-dev fallback)");
-                return new ServiceClient(connectionString);
+                _logger.LogInformation(
+                    "Connecting Dataverse ServiceClient via the ordered credential provider (scope {Scope})",
+                    secretFreeScope);
+                return new ServiceClient(
+                    instanceUrl: instanceUri,
+                    tokenProviderFunction: (string resourceUri) =>
+                    {
+                        // Synchronous acquisition, exactly like the MI branch above — the #3b SIGABRT
+                        // came from acquiring sync-over-async on the STARTUP thread under
+                        // ValidateOnBuild, and that mitigation is untouched: the connect is still
+                        // deferred behind the Lazy below, so this runs at first use on a request thread
+                        // and at most once per token lifetime.
+                        var token = secretFreeCredential.GetToken(
+                            new TokenRequestContext(new[] { secretFreeScope }), CancellationToken.None);
+                        return Task.FromResult(token.Token);
+                    },
+                    useUniqueInstance: true);
             };
         }
 

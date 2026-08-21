@@ -31,54 +31,21 @@ public sealed class AgentTokenService
     private const int CacheVersion = 1;
 
     /// <summary>
-    /// FR-A2 (auth-v4 task 011) — process-wide MSAL confidential-client cache keyed by
-    /// (tenant|client). Same shape as <c>DataverseUserClient.CcaCache</c> and
-    /// <c>DataverseAccessDataSource.CcaCache</c>; do not introduce a second caching mechanism.
+    /// Ordered credential provider (auth-v4 task 021), injected as the CONCRETE type per ADR-010 —
+    /// only <c>DataverseAccessDataSource</c>, in the base layer, needs the interface.
     ///
-    /// <para>This service is registered singleton (see <c>AgentModule</c>), so the cache is
-    /// belt-and-braces for DI — but it is <b>not</b> redundant. It makes client sharing structural
-    /// rather than dependent on one registration line, and it covers direct construction (tests,
-    /// tooling).</para>
+    /// <para><b>Replaces this type's own static confidential-client cache</b> (task 022). That cache
+    /// was one of three keyed on the same <c>(tenant|client|fingerprint)</c>, so one process could hold
+    /// three confidential clients — and three OBO token caches — for the SAME identity. ADR-028 A4
+    /// forbids exactly that per-call-site duplication; task 011 booked it as a time-boxed exception
+    /// that <b>expires here</b>. The provider now owns the one cache, and its per-key build counter is
+    /// where the sharing seam tests moved to.</para>
     ///
-    /// <para><b>Correction (task 020 code review, W-4)</b>: an earlier version added "and from task 020
-    /// a per-instance client would re-mint an assertion per exchange (an IMDS round trip)". Measured
-    /// false — MSAL's managed-identity token cache is process-static and keyed by identity. The
-    /// justification above is sufficient without it.</para>
+    /// <para>Null only under direct construction outside the BFF container, in which case every
+    /// exchange fails closed with a configuration error rather than silently acquiring nothing.</para>
     /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
-        CcaCache = new();
+    private readonly OrderedCredentialClientProvider? _confidentialClients;
 
-    /// <summary>
-    /// Per-key count of confidential clients BUILT for a given (tenant|client|secret-fingerprint).
-    /// Per-key rather than a process-wide total so the assertion cannot be perturbed by any other
-    /// test that constructs this type. Counts builds, not entries, so a <c>GetOrAdd</c> factory that
-    /// ran twice is visible rather than silent.
-    ///
-    /// <para><b>Non-contractual</b> — test-observability surface, not API. Task 022 relocates it onto
-    /// the client-level provider <b>task 021 authors</b> when the three per-class caches consolidate —
-    /// NOT onto <c>IClientAssertionProvider</c>, which cannot own the cache (ordered selection spans
-    /// assertion / certificate / secret; only the first yields an assertion). Task 020 finding V1.</para>
-    /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> CcaBuilds = new();
-
-    /// <inheritdoc cref="CcaBuilds"/>
-    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-    public static int ConfidentialClientBuildCountFor(string tenantId, string clientId, string clientSecret)
-        => CcaBuilds.TryGetValue(CredentialCacheKey(tenantId, clientId, clientSecret), out var n) ? n : 0;
-
-    /// <summary>
-    /// Cache key including a FINGERPRINT of the secret — never the secret itself. MSAL binds the
-    /// credential at <c>Build()</c> for the client's lifetime, so a (tenant|client)-only key would
-    /// silently reuse a client built with a stale secret after rotation. Task 011, code-review W-1.
-    /// </summary>
-    private static string CredentialCacheKey(string tenantId, string clientId, string clientSecret)
-    {
-        var fingerprint = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(clientSecret)))[..16];
-        return $"{tenantId}|{clientId}|{fingerprint}";
-    }
-
-    private readonly IConfidentialClientApplication _cca;
     private readonly ITenantCache _cache;
     private readonly ILogger<AgentTokenService> _logger;
     private readonly AgentTokenOptions _options;
@@ -86,30 +53,52 @@ public sealed class AgentTokenService
     public AgentTokenService(
         ITenantCache cache,
         IOptions<AgentTokenOptions> options,
-        ILogger<AgentTokenService> logger)
+        ILogger<AgentTokenService> logger,
+        OrderedCredentialClientProvider? confidentialClients = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _confidentialClients = confidentialClients;
 
-        // Build the MSAL confidential client for OBO exchanges.
-        // The BFF app registration is the "middle tier" that exchanges the agent token.
-        // FR-A2: shared per (tenant, client, secret-fingerprint) — see the CcaCache doc comment.
-        _cca = CcaCache.GetOrAdd(
-            CredentialCacheKey(_options.TenantId, _options.ClientId, _options.ClientSecret),
-            k =>
-            {
-                CcaBuilds.AddOrUpdate(k, 1, (_, n) => n + 1);
-                return ConfidentialClientApplicationBuilder
-                    .Create(_options.ClientId)
-                    .WithClientSecret(_options.ClientSecret)
-                    .WithAuthority($"https://login.microsoftonline.com/{_options.TenantId}")
-                    .Build();
-            });
-
+        // No confidential client is built here any more. The provider's contract is async (selection
+        // PROVES a credential before binding it) and a constructor cannot await; the client is fetched
+        // at the moment of each exchange, where the provider's cache makes it a dictionary lookup.
+        //
+        // AgentToken:ClientSecret is deliberately NOT read. See AcquireTokenAsync's remarks and
+        // IdentityConfigurationValidator rule 5 for the reconciliation this required.
         _logger.LogInformation(
             "[AGENT-TOKEN] Initialized: TenantId length={TenantLen}, ClientId length={ClientLen}, AgentAppId length={AgentLen}",
             _options.TenantId.Length, _options.ClientId.Length, _options.AgentAppId.Length);
+    }
+
+    /// <summary>
+    /// Resolves the BFF's confidential client for the agent OBO exchange.
+    ///
+    /// <para><b>The <c>AgentToken:ClientSecret</c> reconciliation (task 022).</b> This service used to
+    /// present <c>AgentToken:ClientSecret</c> specifically, while the provider resolves the transitional
+    /// secret as <c>AzureAd:ClientSecret</c> → <c>API_CLIENT_SECRET</c> → <c>AZURE_CLIENT_SECRET</c>.
+    /// Folding one into the other silently could have changed which secret the agent path presents, so
+    /// it was decided explicitly rather than defaulted: verified on <c>spaarke-bff-dev</c> on
+    /// 2026-08-21 that <c>AgentToken__ClientSecret</c>, <c>API_CLIENT_SECRET</c>,
+    /// <c>AzureAd__ClientSecret</c> and <c>Dataverse__ClientSecret</c> all hold the SAME value —
+    /// <c>BFF-API-ClientSecret</c> — and that <c>AgentToken__ClientId</c> is the BFF app registration.
+    /// <c>Reconcile-DemoEnvironment.ps1:76</c> maps the demo environment the same way.
+    ///
+    /// <para>Because "verified today" is not "true forever", divergence is not left to be discovered as
+    /// an opaque <c>AADSTS7000215</c> on the agent endpoint: <c>IdentityConfigurationValidator</c>
+    /// rule 5 compares the two at startup by fingerprint and reports a mismatch at error level.</para>
+    /// </summary>
+    private Task<IConfidentialClientApplication> GetConfidentialClientAsync(CancellationToken ct)
+    {
+        if (_confidentialClients is null)
+        {
+            throw new InvalidOperationException(
+                "AgentTokenService requires an OrderedCredentialClientProvider for the OBO exchange. "
+                + "Inside the BFF it is registered by AuthorizationModule.AddCredentialSelection.");
+        }
+
+        return _confidentialClients.GetClientAsync(_options.TenantId, _options.ClientId, ct);
     }
 
     /// <summary>
@@ -144,7 +133,8 @@ public sealed class AgentTokenService
 
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            var cca = await GetConfidentialClientAsync(ct).ConfigureAwait(false);
+            var result = await cca.AcquireTokenOnBehalfOf(
                 _options.GraphScopes,
                 new UserAssertion(userToken)
             ).ExecuteAsync(ct);
@@ -214,7 +204,8 @@ public sealed class AgentTokenService
 
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            var cca = await GetConfidentialClientAsync(ct).ConfigureAwait(false);
+            var result = await cca.AcquireTokenOnBehalfOf(
                 new[] { dataverseScope },
                 new UserAssertion(userToken)
             ).ExecuteAsync(ct);

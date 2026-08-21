@@ -1,199 +1,185 @@
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
+using Microsoft.Identity.Client;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Auth;
 
 /// <summary>
-/// FR-A2 (auth-v4 task 011) — confidential-client sharing seam.
+/// FR-A2 (task 011) → FR-B3 (task 022) — confidential-client sharing seam.
 ///
-/// <para><b>The hazard.</b> <c>DataverseAccessDataSource</c> is a transient typed HttpClient
-/// (<c>SpaarkeCore</c>) and <c>AgentTokenService</c> was registered scoped (<c>AgentModule</c>), so
-/// each resolution built a fresh MSAL confidential client and discarded its OBO token cache —
-/// forcing a network token exchange per request. From task 020 the credential becomes a
-/// Managed-Identity client assertion, at which point a per-resolution client ALSO re-mints a signed
-/// assertion (an IMDS round-trip) on every call. Client sharing stops being an optimization and
-/// becomes a cost/correctness property of the credential.</para>
+/// <para><b>MIGRATED, not rewritten from scratch (task 022).</b> These assertions used to be made
+/// against three per-class static caches — one on <c>DataverseAccessDataSource</c>, one on
+/// <c>DataverseUserClient</c>, one on <c>AgentTokenService</c> — each keyed
+/// <c>(tenant|client|secret-fingerprint)</c>. That shape was itself the defect ADR-028 A4 forbids: one
+/// process could hold three confidential clients, and three OBO token caches, for the SAME identity.
+/// Task 011 booked it as a time-boxed A4 exception that <b>expired at task 022</b>. The caches are gone;
+/// <see cref="OrderedCredentialClientProvider"/> owns the one cache, so the same three questions are now
+/// asked of it. <c>tests/integration/seam/**</c> is an ADR-038 KEEP path — this file is migrated in
+/// place rather than deleted and replaced.</para>
 ///
-/// <para><b>How this is asserted, and why this shape.</b> The MSAL client lives in a private field.
-/// Reading it across two instances would require reflection — <b>ADR-038 ban B8</b>; resolving twice
-/// from a container is <b>ban B3</b>. So sharing is asserted through the one thing that is genuinely
-/// observable: a <b>per-key build count</b>. Construct N instances under one key and exactly one
-/// client must have been built. If an instance built its own instead of taking the cached one, the
-/// count grows. That is a real behavioural difference, not a proxy for one.</para>
+/// <para><b>What got STRONGER in the migration, and it is worth stating.</b> The old test could only
+/// count builds: construct five instances of one type, observe one build. It could not say anything
+/// about whether two <i>different</i> consumers shared a client, because each type had its own cache and
+/// they provably did not. The assertions below check reference identity of the returned client, which is
+/// the actual property the consolidation buys — every consumer of one identity gets one object, hence
+/// one MSAL OBO token cache.</para>
 ///
-/// <para><b>Why per-key and not a process-wide total.</b> An earlier version asserted a delta on a
-/// process-wide count, which is genuinely flaky: this assembly holds ~10,500 tests, there is no
-/// <c>xunit.runner.json</c> and no assembly-level <c>CollectionBehavior</c>, so collections run in
-/// parallel by default. Contract fixtures boot the real <c>Program.cs</c> with
-/// <c>TENANT_ID</c> / <c>API_APP_ID</c> / <c>API_CLIENT_SECRET</c> set and do NOT override
-/// <c>IAccessDataSource</c>, so the first such resolution adds an entry — and if that landed inside a
-/// delta window, the assertion failed. Per-key counting is immune: other keys cannot perturb it. The
-/// <c>DataverseCredentialSeam</c> collection is retained as belt-and-braces rather than as the
-/// load-bearing guard it was.</para>
-///
-/// <para><b>What is still deferred to task 060.</b> These assertions prove the constructor consults
-/// the shared cache under a correctly-scoped key. They cannot prove some FUTURE call site does not
-/// bypass it — a bypassing site simply would not touch the counter. That guard is source analysis
-/// over <c>ConfidentialClientApplicationBuilder.Create</c> call sites, which is the shape ADR-038
-/// sanctions and which task 060 already builds. See notes/decisions/011-adr009-token-cache-decision.md.</para>
+/// <para><b>What is still deferred to task 060.</b> These prove the provider shares correctly under a
+/// correctly-scoped key. They cannot prove some FUTURE call site builds its own client instead of asking
+/// — a bypassing site simply would not touch this seam. That guard is source analysis over
+/// <c>ConfidentialClientApplicationBuilder.Create</c> call sites, the shape ADR-038 sanctions and which
+/// task 060 already builds.</para>
 /// </summary>
 [Collection(DataverseCredentialSeamCollection.Name)]
 public class ConfidentialClientSharingSeamTests
 {
-    private const string DataverseUrl = "https://example.crm.dynamics.com";
     private const string Secret = "test-secret-value";
 
     // ---------------------------------------------------------------------------------------------
-    // DataverseAccessDataSource — transient typed HttpClient, shares via the static client cache
+    // One identity → one confidential client, shared by every consumer
     // ---------------------------------------------------------------------------------------------
 
-    private static DataverseAccessDataSource CreateAccessDataSource(
-        string tenantId, string clientId, string clientSecret = Secret)
-    {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Dataverse:ServiceUrl"] = DataverseUrl,
-            ["TENANT_ID"] = tenantId,
-            ["API_APP_ID"] = clientId,
-            ["API_CLIENT_SECRET"] = clientSecret,
-            ["Graph:ManagedIdentity:Enabled"] = "true",
-        }).Build();
-
-        return new DataverseAccessDataSource(
-            Mock.Of<IDataverseService>(),
-            new HttpClient(),
-            config,
-            NullLogger<DataverseAccessDataSource>.Instance);
-    }
-
     [Fact]
-    public void AccessDataSource_ManyInstances_SameCredentials_BuildExactlyOneConfidentialClient()
+    public async Task ManyRequestsForOneIdentity_BuildExactlyOneConfidentialClient()
     {
-        // Unique key per run, so this assertion measures only what this test constructs.
+        // Unique key per run, so this measures only what this test asks for.
         var tenantId = Guid.NewGuid().ToString();
         var clientId = Guid.NewGuid().ToString();
+        var provider = Build();
 
-        // Five resolutions stands in for five requests against a transient typed HttpClient.
+        // Five acquisitions stands in for five requests across the four migrated call sites.
         for (var i = 0; i < 5; i++)
         {
-            CreateAccessDataSource(tenantId, clientId).Should().NotBeNull();
+            (await provider.GetClientAsync(tenantId, clientId)).Should().NotBeNull();
         }
 
-        DataverseAccessDataSource.ConfidentialClientBuildCountFor(tenantId, clientId, Secret)
+        provider.BuildCountFor(tenantId, clientId, CredentialKind.ClientSecret)
             .Should().Be(1,
-                "five instances sharing one credential must build ONE confidential client — one per " +
-                "instance would discard MSAL's OBO token cache on every request");
+                "five acquisitions under one identity must build ONE confidential client — one per "
+                + "call would discard MSAL's OBO token cache on every request");
     }
 
     [Fact]
-    public void AccessDataSource_DifferentTenants_DoNotShareAConfidentialClient()
+    public async Task TwoDifferentConsumers_AskingForTheSameIdentity_GetTheSameClientInstance()
     {
-        // The negative half: sharing must be KEYED, not global. A client shared across tenants would
-        // be a cross-tenant token-cache leak — a far worse defect than the one this task fixes.
+        // THE property task 022 exists to establish, and the one the pre-migration test could not
+        // express: GraphClientFactory, DataverseAccessDataSource, DataverseUserClient and
+        // AgentTokenService all resolve the BFF's identity through this one provider, so they hold ONE
+        // confidential client between them rather than three. MSAL's OBO token cache lives on the
+        // client, so sharing the object is what shares the cache.
+        var tenantId = Guid.NewGuid().ToString();
+        var clientId = Guid.NewGuid().ToString();
+        var provider = Build();
+
+        var first = await provider.GetClientAsync(tenantId, clientId);
+        var second = await provider.GetClientAsync(tenantId, clientId);
+
+        second.Should().BeSameAs(first,
+            "one identity must map to one confidential client object for every consumer in the process");
+    }
+
+    [Fact]
+    public async Task DifferentTenants_DoNotShareAConfidentialClient()
+    {
+        // The negative half: sharing must be KEYED, not global. A client shared across tenants would be
+        // a cross-tenant token-cache leak — a far worse defect than the one this seam fixes.
         var clientId = Guid.NewGuid().ToString();
         var tenantA = Guid.NewGuid().ToString();
         var tenantB = Guid.NewGuid().ToString();
+        var provider = Build();
 
-        CreateAccessDataSource(tenantA, clientId);
-        CreateAccessDataSource(tenantB, clientId);
+        var a = await provider.GetClientAsync(tenantA, clientId);
+        var b = await provider.GetClientAsync(tenantB, clientId);
 
-        DataverseAccessDataSource.ConfidentialClientBuildCountFor(tenantA, clientId, Secret)
-            .Should().Be(1, "tenant A gets its own client");
-        DataverseAccessDataSource.ConfidentialClientBuildCountFor(tenantB, clientId, Secret)
-            .Should().Be(1, "tenant B gets a DIFFERENT client — token caches must not cross tenants");
+        b.Should().NotBeSameAs(a, "token caches must not cross tenants");
+        provider.BuildCountFor(tenantA, clientId, CredentialKind.ClientSecret).Should().Be(1);
+        provider.BuildCountFor(tenantB, clientId, CredentialKind.ClientSecret).Should().Be(1);
     }
 
     [Fact]
-    public void AccessDataSource_RotatedSecret_BuildsANewConfidentialClient_NotTheStaleOne()
+    public async Task RotatedSecret_BuildsANewConfidentialClient_NotTheStaleOne()
     {
-        // MSAL binds the credential at Build() and holds it for the client's lifetime. If the cache
-        // key omitted the secret, a rotation would silently keep handing back a client built with the
-        // OLD secret — presenting as AADSTS7000215 on OBO while the app-only path kept working.
-        // This locks in that the secret participates in the key.
+        // MSAL binds the credential at Build() and holds it for the client's lifetime. If the cache key
+        // omitted the secret, a rotation would silently keep handing back a client built with the OLD
+        // secret — presenting as AADSTS7000215 on OBO while the app-only path kept working, and "fixed"
+        // by a restart nobody could explain. Task 011 code-review W-1, preserved through the migration.
+        //
+        // Rotated on ONE provider through a mutable configuration, deliberately. Building a second
+        // provider would have made this assertion vacuous — two providers hold two caches, so their
+        // clients differ whatever the key is, and the test would pass even if the fingerprint had been
+        // dropped from the key. Only rotating underneath a single cache proves the key moved with the
+        // secret.
         var tenantId = Guid.NewGuid().ToString();
         var clientId = Guid.NewGuid().ToString();
 
-        CreateAccessDataSource(tenantId, clientId, "secret-v1");
-        CreateAccessDataSource(tenantId, clientId, "secret-v2");
+        var config = new MutableConfiguration { ["API_CLIENT_SECRET"] = "secret-v1" };
+        var provider = Build(config);
 
-        DataverseAccessDataSource.ConfidentialClientBuildCountFor(tenantId, clientId, "secret-v1")
-            .Should().Be(1);
-        DataverseAccessDataSource.ConfidentialClientBuildCountFor(tenantId, clientId, "secret-v2")
-            .Should().Be(1, "a rotated secret must produce a NEW client, never reuse the stale one");
+        var stale = await provider.GetClientAsync(tenantId, clientId);
+
+        config["API_CLIENT_SECRET"] = "secret-v2";
+        var fresh = await provider.GetClientAsync(tenantId, clientId);
+
+        fresh.Should().NotBeSameAs(stale, "a rotated secret must produce a NEW client, never the stale one");
+        provider.BuildCountFor(tenantId, clientId, CredentialKind.ClientSecret)
+            .Should().Be(1, "the fresh client is keyed by the NEW fingerprint, so exactly one build stands under it");
     }
 
     // ---------------------------------------------------------------------------------------------
-    // AgentTokenService — now singleton, and shares structurally regardless of DI lifetime
-    // ---------------------------------------------------------------------------------------------
 
-    private static AgentTokenService CreateAgentTokenService(
-        string tenantId, string clientId, string clientSecret = Secret)
-        => new(
-            Mock.Of<ITenantCache>(),
-            Options.Create(new AgentTokenOptions
+    private static OrderedCredentialClientProvider Build(IConfiguration? configuration = null) =>
+        new(
+            Options.Create(new CredentialSelectionOptions
             {
-                TenantId = tenantId,
-                ClientId = clientId,
-                ClientSecret = clientSecret,
-                AgentAppId = Guid.NewGuid().ToString(),
-                DataverseEnvironmentUrl = DataverseUrl,
+                // ClientSecret only: this file is about CACHING, and the secret branch is the one that
+                // needs no network. Credential SELECTION has its own suite (CredentialOrderingSeamTests).
+                Order = new List<string> { nameof(CredentialKind.ClientSecret) },
             }),
-            NullLogger<AgentTokenService>.Instance);
+            configuration ?? new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["API_CLIENT_SECRET"] = Secret,
+            }).Build(),
+            NullLogger<OrderedCredentialClientProvider>.Instance);
 
-    [Fact]
-    public void AgentTokenService_ManyInstances_SameCredentials_BuildExactlyOneConfidentialClient()
+    /// <summary>
+    /// Minimal writable <see cref="IConfiguration"/>. <c>AddInMemoryCollection</c> snapshots at Build(),
+    /// so it cannot express a rotation; the provider re-reads the secret when it describes a credential,
+    /// which is exactly the behaviour the rotation test needs to drive.
+    /// </summary>
+    private sealed class MutableConfiguration : IConfiguration
     {
-        // Asserted by direct construction rather than through a container: ADR-038 ban B3 forbids a
-        // DI-registration test, and the point here is that sharing does NOT depend on the
-        // registration. AgentModule registers this singleton; the static cache is what makes the
-        // guarantee survive a future lifetime regression.
-        var tenantId = Guid.NewGuid().ToString();
-        var clientId = Guid.NewGuid().ToString();
+        private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
 
-        for (var i = 0; i < 5; i++)
+        public string? this[string key]
         {
-            CreateAgentTokenService(tenantId, clientId).Should().NotBeNull();
+            get => _values.TryGetValue(key, out var v) ? v : null;
+            set => _values[key] = value;
         }
 
-        AgentTokenService.ConfidentialClientBuildCountFor(tenantId, clientId, Secret)
-            .Should().Be(1, "five instances sharing one credential must build ONE confidential client");
-    }
-
-    [Fact]
-    public void AgentTokenService_DifferentTenants_DoNotShareAConfidentialClient()
-    {
-        var clientId = Guid.NewGuid().ToString();
-        var tenantA = Guid.NewGuid().ToString();
-        var tenantB = Guid.NewGuid().ToString();
-
-        CreateAgentTokenService(tenantA, clientId);
-        CreateAgentTokenService(tenantB, clientId);
-
-        AgentTokenService.ConfidentialClientBuildCountFor(tenantA, clientId, Secret).Should().Be(1);
-        AgentTokenService.ConfidentialClientBuildCountFor(tenantB, clientId, Secret)
-            .Should().Be(1, "agent OBO clients must be keyed per tenant so token caches cannot cross tenants");
+        public IEnumerable<IConfigurationSection> GetChildren() => Array.Empty<IConfigurationSection>();
+        public Microsoft.Extensions.Primitives.IChangeToken GetReloadToken()
+            => new Microsoft.Extensions.Primitives.CancellationChangeToken(CancellationToken.None);
+        public IConfigurationSection GetSection(string key) => new ConfigurationBuilder().Build().GetSection(key);
     }
 }
 
 /// <summary>
-/// Serialises the seam tests that construct <c>DataverseAccessDataSource</c> /
-/// <c>AgentTokenService</c>.
+/// Serialises the seam tests that exercise confidential-client caching.
 ///
-/// <para><b>No longer load-bearing.</b> Since task 011's code-review pass the sharing assertions
-/// count builds PER KEY, so concurrent construction under other keys cannot perturb them. This
-/// collection is retained as defence in depth. If you add a test class that constructs either type,
-/// joining this collection is good hygiene but is not required for correctness.</para>
+/// <para><b>No longer load-bearing.</b> Since task 011's code-review pass the sharing assertions count
+/// builds PER KEY, and since task 022 each test builds its own provider instance, so concurrent
+/// construction elsewhere cannot perturb them. Retained as defence in depth.</para>
 /// </summary>
 [CollectionDefinition(Name)]
 public class DataverseCredentialSeamCollection

@@ -78,21 +78,37 @@ public class IdentityConflationSeamTests
     // ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Validate_WhenAzureClientIdIsTheManagedIdentityAndManagedIdentityIsDisabled_FailsFast()
+    public void Validate_WhenAzureClientIdIsTheManagedIdentityAndManagedIdentityIsDisabled_ReportsButNoLongerFailsFast()
     {
-        // This is the moment the live trap springs: with the flag off, GraphClientFactory resolves the
-        // app-only clientId as AZURE_CLIENT_ID ?? API_APP_ID and builds a ClientSecretCredential from a
-        // MANAGED IDENTITY paired with the app registration's secret. The resulting AADSTS error names
-        // neither identity, which is why this belongs at startup instead.
+        // AMENDED at task 022 — the trap was REMOVED rather than guarded, so the guard stopped being
+        // fatal.
+        //
+        // Task 023 could only fail fast here: GraphClientFactory resolved the app-only clientId as
+        // AZURE_CLIENT_ID ?? API_APP_ID, so with the flag off it would build a client credential from a
+        // MANAGED IDENTITY paired with the app registration's secret, and the resulting AADSTS error
+        // named neither identity. Changing that fallback was out of task 023's scope. Task 022 owns the
+        // app-only branch and deleted the fallback: AZURE_CLIENT_ID now has ZERO consumers in src/, so
+        // no code path can conflate the two identities regardless of the flag.
+        //
+        // The rule is kept because the SETTING is still wrong — it signals that someone believed this
+        // key meant the app registration — but failing startup over a setting nothing reads would be a
+        // false positive, and this project's own AP-7 rule forbids turning an inert condition into an
+        // outage. Task 031 clears it.
+        var logger = new CapturingLogger<IdentityConfigurationValidator>();
+
         var result = Validate(
+            logger,
             ("Graph:ManagedIdentity:ClientId", Uami),
             ("API_APP_ID", AppRegistration),
             ("AZURE_CLIENT_ID", Uami),
             ("Graph:ManagedIdentity:Enabled", "false"));
 
-        result.Failed.Should().BeTrue();
-        result.FailureMessage.Should().Contain("AZURE_CLIENT_ID")
-            .And.Contain("ClientSecretCredential");
+        result.Succeeded.Should().BeTrue(
+            "since task 022 nothing reads AZURE_CLIENT_ID, so this configuration is inert rather than fatal");
+
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Error && e.Message.Contains("CONFLATION") && e.Message.Contains(Uami),
+            "the setting is still wrong for what it appears to mean and must be reported so it gets cleared");
     }
 
     [Fact]

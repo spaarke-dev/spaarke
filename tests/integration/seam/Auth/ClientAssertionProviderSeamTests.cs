@@ -111,7 +111,7 @@ public class ClientAssertionProviderSeamTests
     }
 
     [Fact]
-    public void SharedLibrary_ConstructsWithABffSuppliedAssertionProvider()
+    public void SharedLibrary_ConstructsWithABffSuppliedCredentialProvider()
     {
         // The seam's whole point: Spaarke.Dataverse is the base layer and cannot reference the BFF,
         // so it takes the contract by dependency inversion. This asserts the half that is NOT
@@ -131,13 +131,24 @@ public class ClientAssertionProviderSeamTests
             ["Graph:ManagedIdentity:Enabled"] = "true",
         }).Build();
 
-        IClientAssertionProvider provider = Create(Config(("Graph:ManagedIdentity:ClientId", UamiClientId)));
+        // Task 022 swapped the parameter this asserts. Task 020 threaded in an IClientAssertionProvider
+        // as a placeholder; the seam the base layer actually needs is the CLIENT-level one, because
+        // ordered selection spans assertion / certificate / secret and only the first of those IS an
+        // assertion. The assertion contract still mints the MI-FIC credential — one level down, inside
+        // the provider, which is what the rest of this file exercises.
+        IConfidentialClientProvider provider = new OrderedCredentialClientProvider(
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.CredentialSelectionOptions
+            {
+                Order = new List<string> { nameof(Sprk.Bff.Api.Configuration.CredentialKind.ClientSecret) },
+            }),
+            config,
+            NullLogger<OrderedCredentialClientProvider>.Instance);
 
         var withProvider = () => new DataverseAccessDataSource(
             Moq.Mock.Of<IDataverseService>(), new System.Net.Http.HttpClient(), config,
-            NullLogger<DataverseAccessDataSource>.Instance, credential: null, assertion: provider);
+            NullLogger<DataverseAccessDataSource>.Instance, credential: null, confidentialClients: provider);
 
-        withProvider.Should().NotThrow("the shared library accepts a BFF-supplied assertion provider");
+        withProvider.Should().NotThrow("the shared library accepts a BFF-supplied credential provider");
     }
 
     [Fact]

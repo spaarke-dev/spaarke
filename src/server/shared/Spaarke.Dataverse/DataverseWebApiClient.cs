@@ -36,10 +36,16 @@ public class DataverseWebApiClient : IDisposable
     /// to be cheapest to configure — and therefore re-broke them whenever that branch changed. Tasks
     /// 020/022/033 are about to rewrite both branches.</para>
     /// </param>
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY when neither
+    /// an explicit <paramref name="credential"/> nor managed identity applies — the branch that used to
+    /// build an inline <c>ClientSecretCredential</c>. Nullable with a null default (NFR-04).
+    /// </param>
     public DataverseWebApiClient(
         IConfiguration configuration,
         ILogger<DataverseWebApiClient> logger,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        IConfidentialClientProvider? confidentialClients = null)
     {
         _logger = logger;
 
@@ -79,19 +85,24 @@ public class DataverseWebApiClient : IDisposable
         else
         {
             var clientId = configuration["API_APP_ID"];
-            var clientSecret = configuration["API_CLIENT_SECRET"];
             var tenantId = configuration["TENANT_ID"];
 
             if (string.IsNullOrEmpty(tenantId))
                 throw new InvalidOperationException("TENANT_ID configuration is required (Managed Identity disabled)");
             if (string.IsNullOrEmpty(clientId))
                 throw new InvalidOperationException("API_APP_ID configuration is required (Managed Identity disabled)");
-            if (string.IsNullOrEmpty(clientSecret))
-                throw new InvalidOperationException("API_CLIENT_SECRET configuration is required (Managed Identity disabled)");
 
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            // auth-v4 task 022 (FR-B3): ordered credential selection replaces the inline
+            // ClientSecretCredential. Same app registration, same client-credentials grant.
+            if (confidentialClients is null)
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required when Managed Identity is disabled "
+                    + "(Graph:ManagedIdentity:Enabled is not true) and no TokenCredential was supplied. "
+                    + "Inside the BFF it is registered by AuthorizationModule.AddCredentialSelection.");
+
+            _credential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
             _logger.LogInformation(
-                "DataverseWebApiClient using ClientSecret credential (local-dev fallback) for {ApiUrl}", _apiUrl);
+                "DataverseWebApiClient using the ordered credential provider (ADR-028 A4) for {ApiUrl}", _apiUrl);
         }
 
         _httpClient = new HttpClient

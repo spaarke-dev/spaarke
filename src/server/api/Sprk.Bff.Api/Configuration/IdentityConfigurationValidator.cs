@@ -101,30 +101,29 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
             && !string.IsNullOrWhiteSpace(appRegistration)
             && !string.Equals(azureClientId, appRegistration, StringComparison.OrdinalIgnoreCase);
 
+        // ── AMENDED at task 022: the trap was REMOVED, so this rule is no longer fatal ─────────────
+        // Task 023 could only guard the hazard because changing GraphClientFactory's app-only branch
+        // was out of its scope. Task 022 owns that branch and deleted the `AZURE_CLIENT_ID ?? API_APP_ID`
+        // fallback outright, so AZURE_CLIENT_ID now has ZERO consumers anywhere in src/ and cannot be
+        // mistaken for an app registration by any code path.
+        //
+        // The rule is deliberately NOT deleted with the trap. The setting is still a genuine
+        // misconfiguration signal — it says an operator (or a script) believed this key meant something
+        // it does not — and reporting it is what gets it cleared at task 031. But it is now reported at
+        // error level in BOTH branches rather than failing startup, because failing startup over a
+        // setting that nothing reads is a false positive, and this project's own AP-7 rule forbids
+        // converting an inert condition into an outage.
         if (azureClientIdIsAManagedIdentity)
         {
-            if (!managedIdentityEnabled)
-            {
-                failures.Add(
-                    $"AZURE_CLIENT_ID is set to '{azureClientId}', which is the MANAGED IDENTITY's "
-                    + $"clientId, but the app registration is '{appRegistration}'. With "
-                    + "Graph:ManagedIdentity:Enabled false, GraphClientFactory resolves the app-only "
-                    + "clientId as AZURE_CLIENT_ID ?? API_APP_ID and would build a ClientSecretCredential "
-                    + "from a managed identity. Either set Graph:ManagedIdentity:Enabled=true, or clear "
-                    + "AZURE_CLIENT_ID so API_APP_ID is used.");
-            }
-            else
-            {
-                _logger.LogError(
-                    "IDENTITY CONFLATION HAZARD (FR-B4), currently inert: AZURE_CLIENT_ID is the "
-                    + "MANAGED IDENTITY clientId {UamiClientId}, while the app registration is "
-                    + "{AppRegistrationClientId}. GraphClientFactory reads AZURE_CLIENT_ID as the "
-                    + "APP-ONLY clientId, so disabling Graph:ManagedIdentity:Enabled would make it "
-                    + "build a ClientSecretCredential from a managed identity and fail with an opaque "
-                    + "AADSTS error. Harmless while managed identity stays enabled. Clear "
-                    + "AZURE_CLIENT_ID to remove the trap.",
-                    azureClientId, appRegistration);
-            }
+            _logger.LogError(
+                "IDENTITY CONFLATION SIGNAL (FR-B4), now INERT: AZURE_CLIENT_ID holds the MANAGED "
+                + "IDENTITY clientId {UamiClientId}, while the app registration is "
+                + "{AppRegistrationClientId} (Graph:ManagedIdentity:Enabled={MiEnabled}). Since auth-v4 "
+                + "task 022 no code reads AZURE_CLIENT_ID, so nothing can conflate the two identities "
+                + "any more — but the setting is wrong for what it appears to mean and should be "
+                + "cleared (task 031). Before task 022, disabling managed identity in this state built "
+                + "a client credential from a managed identity and failed with an opaque AADSTS error.",
+                azureClientId, appRegistration, managedIdentityEnabled);
         }
 
         // ── Rule 3 ─────────────────────────────────────────────────────────────────────────────────
@@ -189,6 +188,52 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
                 + $"{CredentialKind.ManagedIdentityFederated} to {CredentialSelectionOptions.SectionName}:Order.");
         }
 
+        // ── Rule 5 (auth-v4 task 022, FR-B3) ───────────────────────────────────────────────────────
+        // AgentToken:ClientSecret vs the transitional secret the provider actually resolves.
+        //
+        // Before task 022, AgentTokenService built its own confidential client from
+        // AgentToken:ClientSecret specifically. It now takes the client from the ordered provider,
+        // which resolves the transitional secret as AzureAd:ClientSecret → API_CLIENT_SECRET →
+        // AZURE_CLIENT_SECRET — deliberately NOT reading the options-bound AgentToken key. Task 021
+        // excluded it precisely because folding it in silently could change which secret the agent path
+        // presents; task 022's constraint required the question be settled where the change is
+        // observable rather than defaulted.
+        //
+        // It was settled by measurement: on spaarke-bff-dev (2026-08-21) AgentToken__ClientSecret,
+        // API_CLIENT_SECRET, AzureAd__ClientSecret and Dataverse__ClientSecret all hold the same value
+        // — BFF-API-ClientSecret — and AgentToken__ClientId is the BFF app registration.
+        // Reconcile-DemoEnvironment.ps1:76 wires the demo environment identically.
+        //
+        // This rule exists because "identical today" is not "identical forever". If they ever diverge,
+        // the agent OBO would present a different secret than before the migration and fail with
+        // AADSTS7000215 — an error that says nothing about which of two settings is stale. Compared by
+        // FINGERPRINT, never by value, and reported rather than fatal: the divergence is inert while a
+        // secret-free credential is selected, and taking the whole BFF down over the agent endpoint's
+        // credential would be disproportionate.
+        var agentSecret = _configuration["AgentToken:ClientSecret"];
+        var transitionalSecret = FirstNonBlank(
+            _configuration["AzureAd:ClientSecret"],
+            _configuration["API_CLIENT_SECRET"],
+            _configuration["AZURE_CLIENT_SECRET"]);
+
+        if (!string.IsNullOrWhiteSpace(agentSecret)
+            && !string.IsNullOrWhiteSpace(transitionalSecret)
+            && !string.Equals(agentSecret, transitionalSecret, StringComparison.Ordinal))
+        {
+            _logger.LogError(
+                "AgentToken:ClientSecret DIVERGES from the transitional secret the credential provider "
+                + "resolves (fingerprints {AgentFingerprint} vs {ProviderFingerprint}; "
+                + "ClientSecret {InOrder} in {Section}:Order). Since auth-v4 task 022 the agent OBO "
+                + "exchange uses the provider's secret, not this one, so a divergence means the agent "
+                + "path would present a different credential than it did before the migration — "
+                + "surfacing as AADSTS7000215 with no indication of which setting is stale. Reconcile "
+                + "them, or remove AgentToken:ClientSecret (task 033 removes it in any case).",
+                Fingerprint(agentSecret),
+                Fingerprint(transitionalSecret),
+                order.Contains(CredentialKind.ClientSecret) ? "IS" : "is NOT",
+                CredentialSelectionOptions.SectionName);
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;
@@ -196,4 +241,13 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    /// <summary>
+    /// Short SHA-256 prefix, so two secrets can be compared in a log line without either appearing in
+    /// it. Same construction the provider uses for its cache key.
+    /// </summary>
+    private static string Fingerprint(string value)
+        => Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(value)))[..16];
 }

@@ -4,7 +4,7 @@
     <title>Migrate the 6 BFF-identity confidential clients to the provider (FR-B3)</title>
     <phase>2 Provider</phase>
     <gate>021 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs across BFF + shared lib; the highest-blast-radius change in the project.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -94,4 +94,32 @@
     <criterion>DataverseServiceClientImpl edit is confined to the credential block; the exact line range is stated in the PR for the unification interlock.</criterion>
     <criterion>Publish size + delta reported; no new HIGH CVE; Placement Justification in the PR.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-08-21. Full record: notes/decisions/022-migrate-confidential-clients.md
+
+    All four OBO confidential clients + five residual app-only ClientSecretCredential /
+    AuthType=ClientSecret constructions migrated onto ordered credential selection. The booked
+    'lazy first-use construction with a SemaphoreSlim per site' plan was NOT followed and should not
+    be: the provider already owns the cache, the gate and selection EXPIRY, so a call site holding a
+    client would defeat automatic recovery to the preferred credential. Sites ask the provider per
+    exchange instead — simpler and more correct.
+
+    Task 011's time-boxed ADR-028 A4 exception is CLOSED: grep for
+    ConcurrentDictionary&lt;string, IConfidentialClientApplication&gt; returns exactly ONE site.
+
+    AgentToken:ClientSecret reconciled by live measurement (identical to API_CLIENT_SECRET /
+    AzureAd:ClientSecret / Dataverse:ClientSecret on spaarke-bff-dev), with
+    IdentityConfigurationValidator rule 5 added to make future divergence loud by fingerprint.
+
+    Task 023's AZURE_CLIENT_ID trap was REMOVED (its only consumer, GraphClientFactory's
+    AZURE_CLIENT_ID ?? API_APP_ID fallback, is deleted), so rule 2a was downgraded from fatal to
+    error-level reporting — failing startup over a setting nothing reads is a false positive (AP-7).
+
+    Gates: full suite 10,591/0 twice consecutively (97 skipped) · auth seams 55/55 · ArchTests 36/36 ·
+    publish 44.99 MB compressed incl. PDBs / 215 files (+0.01 vs task 024, +0.03 vs baseline, ceiling
+    60) · no vulnerable packages · no package or ProjectReference added (FR-14 unaffected).
+
+    DataverseServiceClientImpl edit confined to lines 44-51 (ctor param + doc) and 108-155 (credential
+    block); nothing else in that file changed.
+  </notes>
 </task>
