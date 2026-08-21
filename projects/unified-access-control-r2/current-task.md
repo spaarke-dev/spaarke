@@ -10,20 +10,34 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none |
+| **Task** | 004 (next) |
 | **Status** | not-started |
 | **Phase** | Phase 0 — enforcement remediation |
-| **Next action** | Choose the next wave (see below). **001 and 003 complete.** |
+| **Next action** | Run **004** — all three deps (001, 003, 014) are ✅. Step 1 (call-site classification) is **already done**: [`notes/task-004-callsite-classification.md`](notes/task-004-callsite-classification.md) |
 
-### Recommended next wave
+**Phase 0 complete: 001 ✅ · 003 ✅ · 014 ✅ · 019 ✅** (4 of 19)
 
-| Option | Tasks | Why |
-|---|---|---|
-| **Critical path (recommended)** | **004** (`parallel-safe:false`, **opus @ xhigh**) | `001 → {003 ✅, 014} → 004 → {005, 006}`. Makes `AuthorizationService` caller-scoped (A-2) — the single change that turns the whole evaluator from app-scoped to caller-scoped. Its dep `014` is not a hard blocker for starting, but 014 should land first if run as a pair |
-| First genuine parallel pair | **014 + 019** (group P0-B) | The only two file-disjoint Phase 0 code tasks — `Infrastructure/Caching/CachedAccessDataSource.cs` vs `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs`. 014 is also a listed dep of 004 |
+### Task 004 — pre-loaded context
 
-Everything else in Phase 0 depends only on 001 but is `parallel-safe:false` — 17 of 19 tasks
-cluster in four contended authorization directories, so they run serially by design.
+`opus` @ `xhigh`, `parallel-safe:false`. Highest blast radius in Phase 0: makes `AuthorizationService`
+evaluate as the **caller** rather than the application (A-2 / FR-02).
+
+Classification already established (read-only, done 2026-08-21):
+
+- **Zero app-only consumers.** All six call-sites run inside an HTTP request →
+  **POML Step 3 has no work** (nothing to route to an app-only entry point).
+- "Missing token → Deny" is therefore unambiguous; the POML's ambiguous-classification escalation
+  does **not** fire on the current call graph.
+- `OfficeDocumentAccessFilter:132` is a caller-scoped consumer but **orphaned** (A-23) — leave it;
+  task 018 deletes it. Do not plumb a token into dead code.
+- `ChatDocumentEndpoints:911` is the only non-filter consumer and injects the **interface**
+  `IAuthorizationService`, not the concrete type the filters use. Any signature change must keep
+  that injection working.
+- ⚠️ Trap: the three AI filters declare a field *named* `_authorizationService` whose type is
+  `IAiAuthorizationService`. A grep on the field name makes them look like consumers. They are not —
+  they already pass the caller bearer, which is why they were A-19's evidence base.
+
+After 004: **{005, 006}** unblock (006 is `parallel-safe:true`).
 
 ## Project State
 

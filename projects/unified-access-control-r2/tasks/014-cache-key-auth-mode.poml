@@ -4,7 +4,7 @@
     <title>FR-13 (A-19): Access cache key must include auth mode (SP vs OBO)</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization caching path — cache poisoning that defeats the OBO check (Medium) — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,7 +83,24 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13; finding A-19. Ordering-critical: MUST merge before task 004. This closes the poisoning window that would otherwise be widened when AuthorizationService starts making real OBO calls.</notes>
+  <notes>Spec FR-13; finding A-19. Ordering-critical: MUST merge before task 004. This closes the poisoning window that would otherwise be widened when AuthorizationService starts making real OBO calls.
+
+COMPLETION (2026-08-21): Added an {authMode} ("sp"|"obo", computed from string.IsNullOrEmpty(userAccessToken))
+segment to the resource-access cache key in CachedAccessDataSource.cs. Escalation trigger evaluated and NOT
+fired: traced both call sites (AuthorizationService.cs:48-52, AiAuthorizationService.cs:63-180) and confirmed
+userId is always the caller's own 'oid' claim sourced from the same ClaimsPrincipal as userAccessToken in a
+single request — so two different OBO callers already have two different userId values, and a boolean mode
+flag is sufficient (no token-identity hash needed). Flipped the 3 Characterization_ tests in
+tests/integration/auth/UnifiedAccessControl/AccessCacheCharacterizationTests.cs (renamed, doc comments updated
+to "FLIPPED BY TASK 014"), added 1 new negative test proving the raw token is not embedded in the key. Kept the
+3 unchanged negative tests (only their shared ProductionCacheKey constant literal changed shape). 6 tests before
+this task -> 7 after. dotnet build clean; targeted test filters green (82/82 AccessControl namespace, 7/7 in
+this file). Publish size 43.67 MB compressed incl. PDBs (baseline ~44.96 MB / prior 43.65 MB — +0.02 MB, noise).
+No vulnerable packages (no .csproj touched). Per orchestrator instruction, TASK-INDEX.md and current-task.md
+were NOT updated by this task run — a parallel agent (task 019) owns those files; the orchestrator applies the
+status flip.
+
+See projects/unified-access-control-r2/notes/task-014-cache-key-auth-mode.md for full detail.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

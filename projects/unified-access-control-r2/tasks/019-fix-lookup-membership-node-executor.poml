@@ -4,7 +4,7 @@
     <title>FR-17b (A-22): Fix LookupUserMembershipNodeExecutor's ["*"] IncludeRelated argument</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on a membership-resolution consumer (AI node executor) that currently throws at runtime — FULL per root CLAUDE.md §8 (modifies .cs; bff-api tag).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,29 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-17 (A-22 part); A-15/A-16 parts are task 018. This is the only Phase 0 code task outside the contended external-access/auth directories — file-disjoint and parallel-safe with task 014 (group P0-B).</notes>
+  <notes>Spec FR-17 (A-22 part); A-15/A-16 parts are task 018. This is the only Phase 0 code task outside the contended external-access/auth directories — file-disjoint and parallel-safe with task 014 (group P0-B).
+
+COMPLETED 2026-08-21: IncludeRelated now maps to null (not "*") when includeRelated:true — the node's
+ConfigJson schema has no field for naming concrete related entities, so there is no well-defined set to
+pass; null is the mapping the goal statement itself sanctions. All 4 stale "accepts-but-ignores"/"task 054
+implements" comment locations corrected. Escalation trigger fired on inspection (original R3 task 041 intent
+for includeRelated:true does look like it meant "all related entities", which the resolver cannot express)
+— resolved by implementing the null mapping (satisfies FR-17's own acceptance wording) and flagging as an
+open, non-blocking product-semantics question in notes/task-019-fix-lookup-membership-node-executor.md §3
+(recommend a future relatedEntities:string[] config field, or removing the dead flag). New KEEP-path suite
+at tests/integration/auth/UnifiedAccessControl/LookupUserMembershipIncludeRelatedCharacterizationTests.cs
+(4 tests) using a hand-written resolver double calibrated to throw on ANY non-empty IncludeRelated entry
+(not a stub that always succeeds) — non-vacuity verified empirically by temporarily reverting the fix and
+confirming 2/4 tests go red, then restoring and confirming 4/4 green. Also corrected 1 pre-existing test in
+tests/unit/.../LookupUserMembershipNodeExecutorTests.cs that pinned the pre-fix buggy behavior (would have
+broken on this fix otherwise) — not in the original file list, done because leaving it red is not a real
+completion. Build green, 21/21 relevant tests + 86/86 full AccessControl namespace pass. Publish size 44.97
+MB incl. PDBs (Δ +0.01 MB vs baseline). Step 9.5 gates (code-review + adr-check) run: 0 Critical, 0
+Violations. Did NOT touch TASK-INDEX.md/current-task.md per orchestrator instruction (task 014 running
+concurrently). Did NOT touch MembershipResolverService.cs (task 015) or CachedAccessDataSource.cs (task
+014). Two stale-comment findings flagged out-of-scope for follow-up: MembershipEndpoints.cs and
+IMembershipResolverService.cs both still say "ACCEPTED-BUT-IGNORED — task 054 implements" (false — task 054
+shipped and the resolver does not ignore the value).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

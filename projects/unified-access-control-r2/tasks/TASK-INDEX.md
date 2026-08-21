@@ -38,12 +38,12 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | 🔲 011 | Reject same-entity self-join | FR-10 / A-17 | 001 | — | ❌ | sonnet | high |
 | 🔲 012 | Track or disable anonymous share links | FR-11 / A-14 | 002 | — | ❌ | sonnet | high |
 | 🔲 013 | Workforce email `oid` no-hijack | FR-12 / A-18 | 001 | — | ❌ | sonnet | high |
-| 🔲 014 | Cache key includes auth mode | FR-13 / A-19 | 001 | **P0-B** | ✅ | sonnet | high |
+| ✅ 014 | Cache key includes auth mode | FR-13 / A-19 | 001 | **P0-B** | ✅ | sonnet | high |
 | 🔲 015 | Deterministic + complete membership paging | FR-14 / A-10 | 001 | — | ❌ | sonnet | high |
 | 🔲 016 | Close-project cascade (contact + org) | FR-15 / A-12 | 001 | — | ❌ | sonnet | high |
 | 🔲 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
 | 🔲 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | — | ❌ | sonnet | high |
-| 🔲 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
+| ✅ 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
 
 **Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 · plus 002 → 012
 
@@ -56,6 +56,19 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > the recommended approach (extract a query-builder seam inside each fix task).
 > ⚠️ Any task testing `/api/v1/external` MUST use `ExternalCollaborationTestFixture` — the shared
 > fixtures make that group return 500, which silently turns "not 403" assertions into vacuous passes.
+
+> **Wave P0-B outcome (2026-08-21)** — 014 + 019 executed **in parallel** (the only file-disjoint pair in
+> Phase 0). No file overlap; post-wave build + full suite verified by the orchestrator.
+> **014**: key is now `sdap:auth:access:{authMode}:{userId}:{resourceId}` (`sp`/`obo`), never the raw token.
+> Escalation evaluated and correctly did NOT fire — `userId` IS the caller's `oid`, so two OBO callers
+> already differ (verified independently). 3 characterizations flipped + 1 new test.
+> **019**: `IncludeRelated` is now always `null`; `includeRelated: true` is a **logged-warning no-op**, not a
+> silent one. Escalation FIRED and is resolved-but-open: the flag is visible in the Playbook Builder canvas
+> and does nothing. **No playbook sets it today** (verified), so this is latent. 019 also corrected a
+> pre-existing test that had pinned the buggy `Contain("*")` behaviour.
+> Follow-ups filed: register **I-4** (no tenant segment in `sdap:auth:*` keys → design task 035's per-user
+> cache tenant-aware from the start); stale "task 054 implements" comments remain in `MembershipEndpoints.cs`
+> + `IMembershipResolverService.cs` → **task 015** owns that directory.
 
 > **Task 003 outcome (2026-08-21)**: 4 keys registered; 15-test source-scanning completeness gate added
 > (`OperationAccessPolicyCompletenessTests`). 8 task-001 characterizations flipped. Sweep **confirmed
