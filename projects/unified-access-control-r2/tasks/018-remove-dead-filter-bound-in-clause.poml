@@ -40,6 +40,7 @@
     <constraint source="project">Before deleting AccessibleRecordSetAuthorizationFilter, re-run the grep to CONFIRM zero call-sites and that HttpContextItemsKey is set nowhere — deletion is safe only if it is truly orphaned. Scope: A-15 removal.</constraint>
     <constraint source="project">Bound the in-clause consistently with the membership service's documented ~500/condition guidance — reuse the existing constant/approach rather than inventing a divergent number. Scope: Tier2ScopeFilterInjector.</constraint>
     <constraint source="project">Both edited files are in the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-15/A-16: A-15: DELETE the orphaned AccessibleRecordSetAuthorizationFilter -- do not write a test for dead code. A-16: the in-clause cap is verified by code review, not a test; state that explicitly in the PR. Task 001 confirmed neither has behaviour to characterize. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>

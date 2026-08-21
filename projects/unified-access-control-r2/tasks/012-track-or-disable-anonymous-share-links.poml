@@ -38,6 +38,7 @@
     <constraint source="project">Default resolution: no scope:"anonymous" with expiration:null may remain in the code. If anonymous scope is retained at all, every minted link MUST be persisted with enough identity to revoke it, and a revoke path MUST exist. Scope: the share-link creation call and any new persistence.</constraint>
     <constraint source="project">If the track-and-revoke path is chosen, it is NEW surface (CLAUDE.md §10/§11): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md; a new store must clear the three-question gate. Scope: this task's PR.</constraint>
     <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-14: Extract sharing-link option construction (FileAccessEndpoints.cs:640-642) so scope and expiration are assertable without Graph. Task 001 could not pin A-14; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>

@@ -125,6 +125,35 @@ already modify the exact files involved, so the seam extraction costs almost not
 forbidden only *here*. Add **A** later for the end-to-end expiry/closure behavior once the UAT
 environment exists. **C** for A-15 (delete it) and A-16 (a cap is a code-review assertion, not a test).
 
+---
+
+## ✅ OWNER DECISION — 2026-08-21: recommendation ACCEPTED
+
+Path **B** for the six wire-format findings; path **C** for A-15 and A-16. Binding for this project.
+
+**What each affected task now owes** (added to each POML as a `<constraint source="task-001">`):
+
+| Task | Finding | Obligation |
+|---|---|---|
+| 007 | A-5 | Extract the grant-query builder from `ExternalParticipationService.QueryGrantSetAsync` (currently inline at `:405-407` before `_httpClient.SendAsync`) into an internal, pure, testable member. Assert the built `$filter`/`$select` includes `sprk_expiresdate` **and** that an expired grant confers no access |
+| 012 | A-14 | Extract sharing-link option construction (`FileAccessEndpoints.cs:640-642`) so `scope`/`expiration` are assertable without Graph |
+| 013 | A-18 | Extract the contact-by-email resolution decision from `IdentityNormalizationService:242-281` so the no-hijack `oid` check is assertable without Dataverse |
+| 015 | A-10 | Extract `MembershipResolverService.BuildFetchXml` assertions: `<order>` present, and no row lost at a page boundary |
+| 016 | A-12 | Extract the closure-cascade query builder (`ProjectClosureEndpoint.cs:181`); assert `_sprk_contact_value` and that org rows are included |
+| 017 | A-13 | Extract the SPE permission matcher (`RevokeExternalAccessEndpoint.cs:222-235`) so email-vs-GUID matching is assertable without Graph |
+| 018 | A-15, A-16 | **A-15: delete the orphaned filter, do not test it.** A-16: the cap is verified by code review, not a test — state so in the PR |
+
+**Rules for the extraction** (applies to 007, 012, 013, 015, 016, 017):
+
+- The seam must be a **pure** function of its inputs (no I/O), reachable via the existing
+  `InternalsVisibleTo("Sprk.Bff.Api.Tests")`. Extract only — do **not** change behaviour in the same
+  commit as the fix, so the characterization test can pin the pre-fix state first.
+- Tests go at `tests/integration/auth/**` (the KEEP path task 001 backfilled), following the
+  `Characterization_` + `FLIPPED BY` convention already established there.
+- `Mock<HttpMessageHandler>` remains banned (ADR-038 B1). If a task concludes it cannot avoid transport
+  mocking, that is a **§6.5 path A** escalation, not a silent exception.
+- Each task states the extraction in its PR description as part of its Placement Justification (§10).
+
 **This does not block Phase 0.** Tasks 002, 003, 004, 005, 006, 008, 010, 011, 014 all have their
 baseline pinned and can proceed now.
 

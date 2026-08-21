@@ -40,6 +40,7 @@
     <constraint source="project">NFR-03: when the resolved set is capped at MaxLimit, the cap MUST be surfaced (a flag the caller can render as "Only N records displayed"), never a silent truncation. Scope: the composer return contract.</constraint>
     <constraint source="project">Use a stable, total sort key in &lt;order&gt; (e.g. the primary id) so page boundaries are deterministic; do not order by a non-unique column. Scope: BuildFetchXml.</constraint>
     <constraint source="project">Both edited files are consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-10: Assert on MembershipResolverService.BuildFetchXml directly: an <order> element is present, and no row is lost at a page boundary. Task 001 could not pin A-10; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>

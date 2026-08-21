@@ -40,6 +40,7 @@
     <constraint source="project">Match on the SAME key SPE membership is written with (contactEmail per SpeContainerMembershipService.cs:75) — verify the write key before trusting it; if the write key changed, match the current one. Scope: the matcher predicate.</constraint>
     <constraint source="project">Remove the WebRoleRemoved Power Pages relic (:182) and reconcile the best-effort SPE path so it is coherent with the broker-only grant model — do not leave dead branches that imply container members are added on grant. Scope: the H-8b cleanup.</constraint>
     <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-13: Extract the SPE permission matcher (RevokeExternalAccessEndpoint.cs:222-235) so email-vs-GUID matching is assertable without Graph. Task 001 could not pin A-13; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>

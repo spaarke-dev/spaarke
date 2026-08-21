@@ -40,6 +40,7 @@
     <constraint source="ADR-003">Fail closed: ambiguity (multiple contacts match the email, or binding state cannot be read) DENIES — it does not pick one contact. Scope: the resolution path.</constraint>
     <constraint source="project">Do NOT auto-write an oid binding as a side effect of a denied match; only an oid-verified resolution may create/confirm a binding. Scope: any binding write in the changed path.</constraint>
     <constraint source="project">Both edited files are consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-18: Extract the contact-by-email resolution decision from IdentityNormalizationService:242-281 so the no-hijack oid check is assertable without Dataverse. Task 001 could not pin A-18; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>
