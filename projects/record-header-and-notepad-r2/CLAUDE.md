@@ -25,8 +25,15 @@ Stale references to the withdrawn plan still exist in the repo and will mislead 
 | [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) | Teaches the retired per-entity recipe end-to-end. **Rewriting it is an R2 deliverable** (design.md §3.1). Its bundle-optimization triad section (§6) is still correct and still mandatory. |
 | [`projects/record-header-and-notepad-r1/plan-extension.md`](../record-header-and-notepad-r1/plan-extension.md) DEF-05 | Describes R2 as "four per-entity PCFs". Historical record — do not edit. |
 | [`projects/record-header-and-notepad-r1/CLAUDE.md`](../record-header-and-notepad-r1/CLAUDE.md) | Same. Historical — do not edit. |
+| [`projects/record-header-and-notepad-r1/design.md`](../record-header-and-notepad-r1/design.md) §1 + architecture diagram | Same. Historical — do not edit. |
 
-[`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) was corrected on this branch and now warns against the retired approach.
+**Corrected on this branch** (all three previously steered agents toward the retired approach):
+
+- [`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) — now warns against it
+- [`.claude/patterns/ui/INDEX.md`](../../.claude/patterns/ui/INDEX.md) — the row description said "Authoring a new per-entity Record Header PCF". Highest-traffic of the three: this is the index agents scan to choose a pattern.
+- [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../.claude/patterns/pcf/xrm-webapi-related-count.md) — "future `ProjectHeaderPcf` / `InvoiceHeaderPcf`" in its Typical-uses list
+
+**Not stale — do not "fix"**: `docs/architecture/finance-intelligence-architecture.md` mentions an `InvoiceHeader`, but that is a C# model class in `Sprk.Bff.Api/Services/Finance/Models/`, unrelated to this PCF.
 
 ---
 
