@@ -1,19 +1,72 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-21 — **H-3 SOLUTION SCOPING COMPLETE ✅. SpaarkeMaster.zip v1.1.0.0 produced (24 MB, 412 root components, 23 CCs). Ready to hand off to H6 pipeline. Wave H-4 first live E2E is next.**
+> **Last Updated**: 2026-08-21 (context-handoff for fresh session) — **H-3 SOLUTION SCOPING COMPLETE ✅. SpaarkeMaster.zip v1.1.0.0 produced (24 MB, 412 root components, 23 CCs). Ready to hand off to H6 pipeline. Wave H-4 first live E2E is next.**
 
-## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
+## 🎯 QUICK RECOVERY (READ THIS FIRST on fresh session)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | (pending commit + push — see git log) |
+| **HEAD** | `88c330dc7` — clean tree, in sync with origin |
 | **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT) |
-| **Working tree** | modifications to commit: Assemble script `-ExcludedPCFs` wiring + follow-on `pcf-legacy-retirement-r1` scaffold + current-task.md update; SpaarkeMaster.zip at `out/` (24 MB — NOT committed; will upload to blob storage in Wave H-3 step 7) |
+| **Working tree** | CLEAN. All H-3 work committed. |
 | **Phase status** | Wave G-8 COMPLETE ✅ + H-3 SOLUTION SCOPING COMPLETE ✅ (SpaarkeMaster.zip produced). Next: Wave H-3 live deploy sequence + Wave H-4 E2E |
 | **r1 E2E goal (FR-18 / SC #5)** | UNBLOCKED — SpaarkeMaster.zip in hand |
-| **IN-FLIGHT** | None |
+| **SpaarkeMaster.zip location** | `out/SpaarkeMaster.zip` (24,678,365 bytes = 24 MB) — LOCAL ONLY, gitignored; NOT in origin |
+| **IN-FLIGHT** | None. All destructive DV changes complete + verified. |
 | **Owner decision needed** | Proceed to Wave H-3 live deploy sequence (13 steps starting with SB queue recreate) OR pause for review |
+
+### 🚀 FRESH SESSION RECOVERY (paste these commands)
+
+```powershell
+# 1. Verify state matches this checkpoint
+git log --oneline -3      # Should show 88c330dc7 at HEAD
+git status                # Should be clean
+
+# 2. Verify SpaarkeMaster.zip still present locally (24 MB)
+ls -la out/SpaarkeMaster.zip
+
+# 3. If ZIP missing (fresh worktree), regenerate:
+#    (Prereq: pac auth SPAARKE DEV 1 + az account set to Spaarke Development Env)
+#    pac solution export --name SpaarkeMaster --path out/SpaarkeMaster.zip --managed --overwrite
+
+# 4. Verify pac/az auth is set to spaarkedev1
+pac auth list             # Should show SPAARKE DEV 1 as active [3]
+az account show           # Should show Spaarke Development Environment sub
+```
+
+### 📍 What to say to resume
+
+Any of these will pick up where we left off:
+- **"continue with wave H-3"** → 13-step live deploy sequence (see §"Waves after G-8" below)
+- **"where was I?"** → project-continue skill loads full context
+- **"start wave H-4"** → skip live deploy, go straight to E2E (WON'T work; H-3 must complete first)
+- **"pick up where we left off"** → same as "where was I?"
+
+### 🧠 Critical context for next session
+
+1. **SpaarkeMaster.zip is DONE** — 24 MB managed export, v1.1.0.0, 412 root components. Located at `out/SpaarkeMaster.zip` (gitignored). Blob upload happens in Wave H-3 step 7.
+2. **UDG was DELETED from spaarkedev1** (destructive, owner-approved Option A on 2026-08-21). Cascade removed 2 orphan customcontrolresource rows + all solution memberships. UDG had 0 live deps; ships nothing to customers. If ever needed, rebuild from `src/client/shared/Spaarke.UI.Components/` (DataGrid framework superseded it anyway).
+3. **7 PCFs excluded via `-ExcludedPCFs`** — still deployed in spaarkedev1 dedicated solutions but not shipped to customers. Retirement deferred to `projects/pcf-legacy-retirement-r1/`.
+4. **5 form-bound REDs ship in SpaarkeMaster** — AssociationResolver (owner removed from Matter form 2026-08-20; will be excluded from next release), RegardingLink (6 sprk_event views), SpeDocumentViewer (Document form), EventAutoAssociate (Event quick create), EventFormController (2 Event forms + hardcoded GUID in `EventDetailSidePane/src/services/sidePaneService.ts:119`). These need proper form migration in `pcf-legacy-retirement-r1` before they can be retired.
+5. **Environment health note**: 477 env-wide orphan customcontrolresource rows in spaarkedev1 (mostly Microsoft platform metadata debt). Leave alone unless blocking. Documented in follow-on project.
+
+### 📦 Files modified this session (all committed to `88c330dc7`)
+
+- `scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1` — wired `-ExcludedPCFs` parameter (was no-op at line 319)
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — H-3 outcome + this Quick Recovery
+- `projects/pcf-legacy-retirement-r1/README.md` — NEW project scaffold with 4-class debt inventory
+- `projects/pcf-legacy-retirement-r1/notes/audit-findings-from-r1.md` — NEW; full audit trail from r1
+
+### 🧨 Destructive DV changes this session (all owner-approved, all applied)
+
+- `AddSolutionComponent` × 200 to SpaarkeMaster (via Apply run)
+- SpaarkeMaster version PATCH: 1.0.0.0 → 1.1.0.0
+- `delete_record customcontrolresource 9338842c-…` (attempted; auto-recreated)
+- `delete_record customcontrolresource 459de3c0-…` (attempted; auto-recreated)
+- `delete_record customcontrol 88dbb4ef-…` (**UDG deletion** — cascade removed 3 ccr rows + all solution memberships)
+
+None of these are reversible without redeploying UDG from source.
 
 ## 📦 H-3 SOLUTION SCOPING — 2026-08-21 outcome
 
