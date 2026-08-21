@@ -1019,6 +1019,45 @@ public static class ComposeSaveOutcomes
 }
 
 /// <summary>
+/// FR-S08 (spaarkeai-compose-r8 task 015) — THE Compose document-size limit. One number, one place.
+///
+/// <para>Every consumer derives from <see cref="MaxDocumentBytes"/>: the request-body cap on the two save
+/// routes, the server-side refusal, the number quoted in the refusal message, and the number the client
+/// receives (on the Load/Upload responses) for its pre-flight. Two constants is how "your file is fine"
+/// becomes an unexplained 413, so the client is NEVER given a compiled-in copy to drift from — when the
+/// server does not advertise a limit the client does no numeric pre-flight and lets the server refuse
+/// honestly, rather than guessing.</para>
+///
+/// <para><b>25 MB</b> matches the established Spaarke document ceiling — `DocumentUploadWizard`,
+/// `OfficeService` and the chat attachment policy all sit there (docs/standards/CHAT-ATTACHMENT-POLICY.md
+/// §"Why 25 MB binary cap"). A Compose document that the user could upload through the Documents pane must
+/// not be one Compose refuses to save.</para>
+///
+/// <para><b>Not a storage limit.</b> Graph's simple upload (`PUT .../content`) has accepted up to 250 MB
+/// since October 2023 (raised from 4 MB; confirmed for SharePoint Embedded containers in the SPE
+/// "Upload, download, and manage files" guidance), and SPE's own per-file ceiling is 250 GB. This number
+/// is a deliberate product limit on what Compose will carry through a JSON+base64 request body, not a
+/// platform boundary — which is why raising it is a config-shaped decision, not an architecture one.</para>
+/// </summary>
+public static class ComposeSaveLimits
+{
+    /// <summary>Largest document Compose will save, in bytes. See the type remarks before changing.</summary>
+    public const long MaxDocumentBytes = 25L * 1024 * 1024;
+
+    /// <summary>
+    /// Base64 inflates by 4/3 and the document rides inside a JSON envelope, so the REQUEST BODY cap has
+    /// to exceed <see cref="MaxDocumentBytes"/> or the transport refuses the request before the honest
+    /// document-size check can run — which is exactly the unexplained-413 failure this design removes.
+    /// The 1.5x factor covers base64 (1.34x) plus the model/op-log/comment fields with headroom.
+    /// </summary>
+    public const long MaxRequestBodyBytes = (long)(MaxDocumentBytes * 1.5);
+
+    /// <summary>The limit as a human number for user-facing copy — one formatting site, so the message
+    /// and the enforcement can never disagree.</summary>
+    public static string MaxDocumentDisplay => $"{MaxDocumentBytes / (1024 * 1024)} MB";
+}
+
+/// <summary>
 /// FR-S07 (spaarkeai-compose-r8 task 014) — the stale-base re-anchor could not obtain the CURRENT bytes,
 /// so this save has no valid basis and is refused before any write is attempted.
 ///

@@ -695,6 +695,126 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         payload.Should().NotContain("This document changed since you opened it", "an unrelated failure must NOT be misclassified as the 412 precondition copy");
     }
 
+    // ════════════════════════════════════════
+    // 4. FR-S08 (spaarkeai-compose-r8 task 015) — the document-size ceiling is a STATED limit, not a
+    //    transport rejection.
+    //
+    //    Two ceilings used to sit on this path and neither told the user anything:
+    //      - `UploadSmallAsUserAsync` threw an ArgumentException above 4 MB, enforcing a Graph limit that
+    //        has not existed since October 2023 (simple upload is 250 MB, SPE-confirmed). A first save of
+    //        any document over 4 MB failed outright.
+    //      - Kestrel's 30 MB default request-body cap rejected the base64+JSON envelope from about 22 MB
+    //        of document up, at the transport layer, before any handler ran.
+    //
+    //    Now: ONE limit (`ComposeSaveLimits.MaxDocumentBytes`), enforced on the shared save path with a
+    //    ProblemDetails that names it, and a request-body cap derived from the same constant so the
+    //    transport can never pre-empt the honest refusal.
+    // ════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_DocumentOverTheLimit_RefusedWithTheStatedLimit_NoRawTransportRejection()
+    {
+        const string speId = "spe-item-frs08-oversize";
+        const string driveId = "drive-frs08-oversize";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // Nothing may be written. BOTH overloads are watched: a refusal that still touched storage would
+        // be a refusal in name only.
+        var wrote = false;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, 1, "\"v1\""));
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, 1, "\"v1\""));
+
+        // One byte over the limit — the boundary IS the contract, so test at the boundary.
+        var oversize = new byte[ComposeSaveLimits.MaxDocumentBytes + 1];
+        oversize[0] = 0x50; oversize[1] = 0x4B; oversize[2] = 0x03; oversize[3] = 0x04;
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = oversize,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            $"an oversize document is refused as invalid — retrying it unchanged cannot succeed. Body: {body}");
+        response.StatusCode.Should().NotBe(HttpStatusCode.RequestEntityTooLarge,
+            "a raw 413 carries no body and tells the user nothing about what to do");
+
+        // The message must state the ACTUAL enforced number. This assertion is what keeps the advertised
+        // limit and the enforced limit the same thing: it reads the very constant the endpoint enforces,
+        // so changing one without the other fails here.
+        body.Should().Contain(ComposeSaveLimits.MaxDocumentDisplay,
+            "the refusal must name the real limit, not a stale hard-coded number");
+        body.Should().Contain("Document Too Large");
+        body.Should().Contain("still here", "and must say the user's work survives");
+
+        wrote.Should().BeFalse("an oversize document is refused before any render or byte transfer");
+    }
+
+    [Fact]
+    public async Task Save_DocumentOverFourMegabytes_Succeeds_TheStaleGraphCeilingIsGone()
+    {
+        const string speId = "spe-item-frs08-6mb";
+        const string driveId = "drive-frs08-6mb";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // A real, openable docx padded past the retired 4 MB boundary. Padding a custom part (rather than
+        // appending junk to the zip) keeps it a document the save path genuinely processes, so this
+        // exercises the real pipeline instead of an early parse rejection.
+        // 12 MB of filler, not 6: GUID hex still deflates by roughly half inside the OPC zip, so the
+        // request is pre-compression and the assertion below is what actually holds the contract.
+        var large = BuildDocxPaddedTo(12 * 1024 * 1024);
+        large.Length.Should().BeGreaterThan(4 * 1024 * 1024, "the fixture must clear the OLD 4 MB ceiling");
+        large.Length.Should().BeLessThan((int)ComposeSaveLimits.MaxDocumentBytes, "and stay under the current limit");
+
+        var wrote = false;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, large.Length, "\"v1-large\""));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = large,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a 6 MB document sits far inside both Graph's 250 MB simple-upload limit and Compose's own {ComposeSaveLimits.MaxDocumentDisplay}. Body: {body}");
+        wrote.Should().BeTrue("the document must actually reach storage — a 200 that wrote nothing is the FR-S06 defect");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Shared arrange + OOXML helpers.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -755,6 +875,34 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     /// document has (every editor id is client-minted at load and travels only in the save's paraIdMap,
     /// never physically in the bytes). Used by the Seam A stale-comment test to prove the re-anchor path
     /// stamps those minted ids into the current bytes so an advisory comment bakes instead of orphaning.</summary>
+    /// <summary>A VALID docx padded to at least <paramref name="targetBytes"/> via a custom XML part —
+    /// still openable by the save pipeline, unlike appending raw bytes to the zip. Used to clear the
+    /// retired 4 MB simple-upload ceiling with a document the server will genuinely process.</summary>
+    private static byte[] BuildDocxPaddedTo(int targetBytes)
+    {
+        var baseDoc = BuildDocxWithParaIds(Paragraphs, ParaIds);
+        using var ms = new MemoryStream();
+        ms.Write(baseDoc, 0, baseDoc.Length);
+        ms.Position = 0;
+        using (var doc = WordprocessingDocument.Open(ms, isEditable: true))
+        {
+            var part = doc.MainDocumentPart!.AddCustomXmlPart(CustomXmlPartType.CustomXml);
+            using var writer = new StreamWriter(part.GetStream(FileMode.Create));
+            writer.Write("<padding>");
+            // Fresh GUIDs, not repeated characters: repeated text deflates to a few KB and the fixture
+            // would silently stay under 4 MB, quietly testing nothing.
+            var written = 0;
+            while (written < targetBytes)
+            {
+                var piece = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+                writer.Write(piece);
+                written += piece.Length;
+            }
+            writer.Write("</padding>");
+        }
+        return ms.ToArray();
+    }
+
     private static byte[] BuildDocxWithoutParaIds(IReadOnlyList<string> paragraphs)
     {
         using var stream = new MemoryStream();

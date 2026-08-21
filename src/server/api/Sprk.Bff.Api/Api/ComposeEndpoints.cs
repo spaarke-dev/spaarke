@@ -99,6 +99,12 @@ public static class ComposeEndpoints
         group.MapPost("/documents/{documentSpeId}/save", Save)
             .WithName("ComposeSaveDocument")
             .WithSummary("Save DOCX bytes to SPE (idempotent first-Save promotion per FR-06)")
+            // FR-S08 (r8 task 015): raise the request-body cap above the document limit. The document
+            // rides base64-encoded inside a JSON envelope, so Kestrel's 30 MB default rejected documents
+            // from about 22 MB up — at the TRANSPORT layer, before any handler ran, which is why the user
+            // saw an unexplained failure with no message instead of the honest size refusal in
+            // ExecuteSaveAsync. Both numbers derive from ComposeSaveLimits so they cannot drift apart.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             // SPE persistence → ai-persist (20/min) per its documented purpose, not the 5/min upload bucket.
             .RequireRateLimiting("ai-persist")
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
@@ -137,6 +143,9 @@ public static class ComposeEndpoints
         // GET `{documentSpeId}` (2) — different segment counts / verbs.
         group.MapPost("/documents/create-on-save", CreateOnSave)
             .WithName("ComposeCreateOnSaveDocument")
+            // FR-S08: the SAME cap as the replace route above — a first save of a large document is the
+            // case that hit the old ceiling hardest, since create-on-save always carries the full bytes.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
             // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
             .RequireRateLimiting("ai-persist")
@@ -1583,6 +1592,29 @@ public static class ComposeEndpoints
         HttpContext httpContext,
         CancellationToken ct)
     {
+        // FR-S08 (r8 task 015): the document-size gate, on the ONE path both save routes share so the
+        // replace and create-on-save routes can never diverge on it. Checked BEFORE SaveAsync, so an
+        // oversize document costs no render, no baseline fetch and no byte transfer to storage.
+        //
+        // `refused-invalid`, correctly: retrying the same request cannot succeed — something about the
+        // request has to change first, which is exactly that outcome member's defining property. And it
+        // is a ProblemDetails naming the actual limit, never a bare 400/413: the failure this replaces
+        // was a transport-level rejection with no body, which told the user nothing about what to do.
+        if (request.Content.Length > ComposeSaveLimits.MaxDocumentBytes)
+        {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseTooLarge);
+            logger.LogWarning(
+                "Compose save refused: document is {Size} bytes, over the {Limit}-byte limit (session={SessionId}). TraceId={TraceId}",
+                request.Content.Length, ComposeSaveLimits.MaxDocumentBytes, request.SessionId, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Document Too Large",
+                detail: $"This document is {request.Content.Length / (1024 * 1024)} MB, and Compose can save documents up to " +
+                        $"{ComposeSaveLimits.MaxDocumentDisplay}. Nothing was saved and your changes are still here. " +
+                        "Remove or compress large embedded images, or split the document, then save again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
         try
         {
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);

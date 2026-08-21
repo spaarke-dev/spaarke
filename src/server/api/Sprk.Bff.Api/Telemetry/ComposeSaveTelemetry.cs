@@ -81,6 +81,9 @@ public static class ComposeSaveTelemetry
     public const string CauseWordLock = "word-lock";
     /// <summary>A malformed or unsupported request (missing field, PDF replace target).</summary>
     public const string CauseBadRequest = "bad-request";
+    /// <summary>FR-S08: the document exceeded <c>ComposeSaveLimits.MaxDocumentBytes</c> and was refused
+    /// before any render or transfer (task 015).</summary>
+    public const string CauseTooLarge = "too-large";
     /// <summary>The patch engine refused the operation log or comments.</summary>
     public const string CausePatchRefusal = "patch-refusal";
     /// <summary>The caller lacks permission on the target.</summary>

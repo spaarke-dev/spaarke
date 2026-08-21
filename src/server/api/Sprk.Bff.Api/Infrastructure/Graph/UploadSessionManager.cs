@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -225,7 +225,11 @@ public class UploadSessionManager
     // =============================================================================
 
     /// <summary>
-    /// Uploads a small file (< 4MB) as the user (OBO flow).
+    /// Uploads a file as the user (OBO flow) via Graph's SIMPLE upload — a single
+    /// <c>PUT .../content</c>. Named "small" for the R1-era 4 MB boundary that no longer applies:
+    /// Graph raised the simple-upload limit to 250 MB in October 2023 and SharePoint Embedded confirms
+    /// the same figure for containers, so this method now covers every document size Spaarke carries.
+    /// Callers enforce their own product limits (see <c>ComposeSaveLimits</c>); this method enforces none.
     /// </summary>
     public async Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
@@ -240,12 +244,19 @@ public class UploadSessionManager
 
             _logger.LogInformation("Uploading file as user to container {ContainerId}, path {Path}", containerId, path);
 
-            // Validate content size (small upload < 4MB)
-            if (content.CanSeek && content.Length > 4 * 1024 * 1024)
-            {
-                _logger.LogWarning("Content too large for small upload: {Size} bytes (max 4MB)", content.Length);
-                throw new ArgumentException("Content size exceeds 4MB limit for small uploads. Use chunked upload instead.");
-            }
+            // FR-S08 (spaarkeai-compose-r8 task 015): the 4 MB guard that stood here is DELETED — it
+            // enforced a Graph limit that no longer exists. `PUT .../content` has accepted files up to
+            // 250 MB since October 2023 (the 4 MB figure comes from the retired OneDrive REST docs, which
+            // now redirect to the Graph page carrying the new number), and SharePoint Embedded confirms
+            // the same 250 MB simple-upload boundary for containers. The guard's advice — "use chunked
+            // upload instead" — therefore sent callers to a resumable session they do not need, and it
+            // failed a Compose create-on-save of any document over 4 MB outright.
+            //
+            // It is NOT replaced with a 250 MB guard: the caller that cares (Compose) enforces its own
+            // product limit at the endpoint, from ComposeSaveLimits, and a second threshold here would be
+            // the "two constants" divergence that turns a stated limit into an unexplained failure. If a
+            // future caller genuinely needs >250 MB, that caller routes to a resumable session — which is
+            // a decision about that caller, not a guard on this method.
 
             // For SharePoint Embedded: Container ID = Drive ID (per Microsoft documentation)
             // Use container ID directly with OBO credentials (user has access, App-Only might not)
