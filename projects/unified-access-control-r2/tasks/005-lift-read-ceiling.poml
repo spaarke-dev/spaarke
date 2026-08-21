@@ -41,6 +41,7 @@
     <constraint source="ADR-028">Rights are derived from the caller-scoped Dataverse answer (OBO), consistent with the task-004 model. Scope: the rights-derivation mechanism chosen here.</constraint>
     <constraint source="project">The snapshot must never EXCEED the caller's actual Dataverse rights on the record. Scope: all mapping code added by this task.</constraint>
     <constraint source="project">Spaarke.Dataverse is consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-003">BINDING: task 003 registered "entity.associate_document" requiring AccessRights.AppendTo -- the FIRST use of that flag in OperationAccessPolicy. When lifting the Read ceiling in DataverseAccessDataSource.QueryUserPermissionsAsync:305-379 you MUST map Dataverse AppendToAccess -> AccessRights.AppendTo (and AppendAccess -> AccessRights.Append). Mapping only Read/Write/Delete/Create/Share leaves POST /api/office/save permanently 403 while LOOKING fixed: the operation resolves, so the denial reads as a legitimate insufficient_rights rather than the loud unknown_operation it replaced -- a silent failure that is worse than the bug it succeeded. Add a test asserting a caller with AppendTo on the target entity is ALLOWED entity.associate_document. Rationale: notes/task-003-operation-rights-decisions.md section 2. Scope: the rights-mapping change.</constraint>
   </constraints>
 
   <knowledge>

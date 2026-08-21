@@ -27,7 +27,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 |---|---|---|---|---|---|---|---|
 | ✅ 001 | Access-path characterization + negative suite | NFR-07 | — | **P0-W0** | ✅ | sonnet | high |
 | 🔲 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
-| 🔲 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
+| ✅ 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
 | 🔲 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
 | 🔲 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
 | 🔲 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
@@ -56,6 +56,14 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > the recommended approach (extract a query-builder seam inside each fix task).
 > ⚠️ Any task testing `/api/v1/external` MUST use `ExternalCollaborationTestFixture` — the shared
 > fixtures make that group return 500, which silently turns "not 403" assertions into vacuous passes.
+
+> **Task 003 outcome (2026-08-21)**: 4 keys registered; 15-test source-scanning completeness gate added
+> (`OperationAccessPolicyCompletenessTests`). 8 task-001 characterizations flipped. Sweep **confirmed
+> A-20's list complete** (22 `Add*Filter` extensions exist; only 7 consult the policy) and filed **A-23**
+> (a second orphaned filter → task 018). Two new obligations recorded as POML constraints:
+> **task 005 MUST map Dataverse `AppendToAccess`** (else `POST /api/office/save` is permanently 403 while
+> *looking* fixed), and **task 018 deletes `AddOfficeDocumentAccessFilter`** alongside A-15. Rationale:
+> [`notes/task-003-operation-rights-decisions.md`](../notes/task-003-operation-rights-decisions.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

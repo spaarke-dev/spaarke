@@ -13,14 +13,14 @@
 | **Task** | none |
 | **Status** | not-started |
 | **Phase** | Phase 0 — enforcement remediation |
-| **Next action** | Choose the next wave (see below). **001 is complete, so all of Phase 0 is unblocked.** |
+| **Next action** | Choose the next wave (see below). **001 and 003 complete.** |
 
 ### Recommended next wave
 
 | Option | Tasks | Why |
 |---|---|---|
-| **Critical path (recommended)** | **003** alone (`parallel-safe:false`) | `001 → {003, 014} → 004 → {005, 006}` is the longest chain. 003 adds the missing `OperationAccessPolicy` keys and flips 8 pinned assertions |
-| First genuine parallel pair | **014 + 019** (group P0-B) | The only two file-disjoint Phase 0 code tasks — `Infrastructure/Caching/CachedAccessDataSource.cs` vs `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs` |
+| **Critical path (recommended)** | **004** (`parallel-safe:false`, **opus @ xhigh**) | `001 → {003 ✅, 014} → 004 → {005, 006}`. Makes `AuthorizationService` caller-scoped (A-2) — the single change that turns the whole evaluator from app-scoped to caller-scoped. Its dep `014` is not a hard blocker for starting, but 014 should land first if run as a pair |
+| First genuine parallel pair | **014 + 019** (group P0-B) | The only two file-disjoint Phase 0 code tasks — `Infrastructure/Caching/CachedAccessDataSource.cs` vs `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs`. 014 is also a listed dep of 004 |
 
 Everything else in Phase 0 depends only on 001 but is `parallel-safe:false` — 17 of 19 tasks
 cluster in four contended authorization directories, so they run serially by design.

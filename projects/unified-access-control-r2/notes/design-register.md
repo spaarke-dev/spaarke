@@ -49,6 +49,19 @@ Full evidence + failure scenarios: [`notes/investigation/10-finding-confirmation
 | A-21 | AI-search security trimming is a pass-through — `privilege_group_ids` never populated at index time | `RecordSyncJob.cs:557` |
 | A-22 | `LookupUserMembershipNodeExecutor` passes `["*"]` under a stale comment → throws depth-exceeded | `LookupUserMembershipNodeExecutor.cs:234` |
 
+### A.3 Discovered during execution (post-design)
+
+| # | Finding | Evidence | Severity | Owner |
+|---|---|---|---|---|
+| A-23 | **`AddOfficeDocumentAccessFilter` is a second orphaned authorization filter** (alongside A-15). Defined at `OfficeDocumentAccessFilter.cs:22`, uses the core `AuthorizationService` with a caller-supplied operation; doc-comment examples `"share"` / `"attach"` are **not** policy keys. Grep finds **zero call-sites**, so it is not an active always-deny — but attaching it later would 403 unconditionally | Filed by task 003 sweep 2026-08-21; `notes/task-003-operation-rights-decisions.md` §4 | Low | **task 018** (delete alongside A-15) |
+
+**Also confirmed by the task-003 sweep** (worth keeping, since it bounds every future policy-key question):
+of **22** `Add*Filter` extensions in the BFF, only **7** reach `AuthorizeAsync`, and only those consult
+`OperationAccessPolicy`. The three AI filters route through `IAiAuthorizationService`, which checks
+`AccessRights.Read` directly (`AiAuthorizationService.cs:176-183`) and never touches the policy;
+`DataverseAuthorizationFilter` uses `IDataversePrivilegeChecker`. **A-20's call-site list was confirmed
+complete for active sites.**
+
 ---
 
 ## B. Settled design decisions

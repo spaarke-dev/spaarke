@@ -165,40 +165,49 @@ public class EndpointAuthorizationCharacterizationTests
     }
 
     /// <summary>
-    /// A-3 — CURRENT (BROKEN) BEHAVIOR, and the mirror image of A-1. The <c>eml-render</c> route DOES
-    /// attach <c>AddDocumentAuthorizationFilter("read")</c> (FileAccessEndpoints.cs:117-118), but
-    /// <c>"read"</c> is not a key in OperationAccessPolicy, so <c>OperationAccessRule</c> denies with
-    /// <c>unknown_operation</c> for EVERY caller regardless of their actual access.
+    /// ✅ FLIPPED BY TASK 003 (FR-03) — was the A-3 characterization.
     ///
-    /// The pair is the point: on the same resource, one route authorizes nobody and its sibling
-    /// authorizes everybody. Both are wrong, in opposite directions.
+    /// The <c>eml-render</c> route attaches <c>AddDocumentAuthorizationFilter("read")</c>
+    /// (FileAccessEndpoints.cs:117-118). Before task 003, <c>"read"</c> was not a policy key, so
+    /// <c>OperationAccessRule</c> denied with <c>unknown_operation</c> for every caller regardless of
+    /// access — an unconditional 403 that was indistinguishable from a real denial.
     ///
-    /// FLIPPED BY: task 003 (FR-03) — once "read" resolves, this route MUST decide on real rights
-    /// rather than denying unconditionally.
+    /// It now makes a genuine rights decision. This caller holds no access to the document, so the
+    /// answer is still 403 — but the reason code proves WHY, which is the whole content of the flip.
+    /// Asserting the reason (not just the status) is what stops this test from passing for the old,
+    /// broken reason.
     /// </summary>
     [Fact]
-    public async Task Characterization_GetEmlRender_ForAnyAuthenticatedCaller_IsDeniedByUnknownOperation()
+    public async Task GetEmlRender_ForCallerWithoutDocumentAccess_DeniedForInsufficientRights()
     {
-        // Arrange — the same authenticated caller as the download test above.
+        // Arrange
         using var client = _fixture.CreateAuthenticatedClient();
 
         // Act
         var response = await client.GetAsync($"/api/documents/{DocumentId}/eml-render");
 
-        // Assert — CURRENT behavior: unconditional 403 from the unknown-operation path.
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "A-3 pins the CURRENT broken state: the filter's operation string \"read\" is absent from " +
-            "OperationAccessPolicy, so OperationAccessRule denies every caller. Task 003 adds the key " +
-            "so this route decides on real rights.");
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("sdap.access.deny.insufficient_rights",
+            "task 003 registered \"read\", so the denial must now be a RIGHTS decision");
+        body.Should().NotContain("unknown_operation",
+            "an unknown_operation denial here would mean the \"read\" key regressed out of " +
+            "OperationAccessPolicy — findings A-3/A-20 re-opened");
     }
 
     /// <summary>
-    /// A-1 / A-3 stated as the contrast that makes both findings unmistakable: two routes on the SAME
-    /// document, reached by the SAME caller in the SAME request context, disagree about authorization
-    /// because one has no filter and the other has a filter that can never succeed.
+    /// A-1 — the contrast that makes the remaining hole unmistakable. Two routes on the SAME document,
+    /// reached by the SAME caller in the SAME request context, still disagree: <c>eml-render</c>
+    /// evaluates authorization and denies, while <c>download</c> never evaluates it at all and
+    /// proceeds to stream app-only.
     ///
-    /// FLIPPED BY: tasks 002 + 003 together — afterwards both routes MUST reach the same decision for
-    /// the same caller on the same document.
+    /// Task 003 fixed the eml-render half (the denial is now a real rights decision rather than
+    /// <c>unknown_operation</c>). The disagreement that remains is purely A-1: download has no filter.
+    ///
+    /// FLIPPED BY: task 002 (FR-01) — afterwards both routes MUST reach the same decision for the same
+    /// caller on the same document.
     /// </summary>
     [Fact]
     public async Task Characterization_DownloadAndEmlRender_DisagreeOnAuthorizationForSameCallerAndDocument()
@@ -208,9 +217,13 @@ public class EndpointAuthorizationCharacterizationTests
         var download = await client.GetAsync($"/api/documents/{DocumentId}/download");
         var emlRender = await client.GetAsync($"/api/documents/{DocumentId}/eml-render");
 
-        // CURRENT behavior: eml-render forbids, download does not.
+        // eml-render now denies on rights (correct); download is never authorized at all (A-1).
         emlRender.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        download.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+        download.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+            "A-1: FileAccessEndpoints.cs:101-109 attaches no per-document filter, so this route reaches " +
+            "the handler for a caller the sibling route just denied. Task 002 closes this.");
+        ((int)download.StatusCode).Should().BeLessThan(500,
+            "guard against a vacuous pass — the download request must genuinely reach the handler");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

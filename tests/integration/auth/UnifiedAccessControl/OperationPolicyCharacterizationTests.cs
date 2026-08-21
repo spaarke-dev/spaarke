@@ -71,9 +71,9 @@ public class OperationPolicyCharacterizationTests
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-3 / A-20 — CURRENT (BROKEN) BEHAVIOR. Each of these strings is passed by a live
-    /// enforcement site, and none is a key in OperationAccessPolicy, so each site returns 403
-    /// for every caller no matter what rights they hold:
+    /// ✅ FLIPPED BY TASK 003 (FR-03) — was a Characterization_ test pinning A-3/A-20.
+    ///
+    /// Each of these strings is passed by a live enforcement site:
     ///   "read"                       → DataverseDocumentsEndpoints.cs:443,
     ///                                  FileAccessEndpoints.cs:118 (eml-render),
     ///                                  ChatDocumentEndpoints.cs:915
@@ -81,45 +81,87 @@ public class OperationPolicyCharacterizationTests
     ///   "finance.confirm"            → FinanceEndpoints.cs:23, :37
     ///   "entity.associate_document"  → EntityAccessFilter.cs:64 (OfficeEndpoints.cs:173)
     ///
-    /// FLIPPED BY: task 003 (FR-03) — after that task these operations MUST be supported, and this
-    /// test inverts to Should().BeTrue().
+    /// Before task 003 none was a policy key, so each site returned 403 for every caller regardless
+    /// of rights. They now resolve. The general forcing function preventing recurrence lives in
+    /// <see cref="OperationAccessPolicyCompletenessTests"/>.
     /// </summary>
     [Theory]
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
     [InlineData("entity.associate_document")]
-    public void Characterization_LiveOperationString_IsAbsentFromPolicy(string operation)
+    public void LiveOperationString_ResolvesInPolicy(string operation)
     {
-        OperationAccessPolicy.IsOperationSupported(operation).Should().BeFalse(
-            "A-3/A-20 pins the CURRENT broken state: '{0}' is passed by a live enforcement site but " +
-            "is not a policy key, so that site denies unconditionally. Task 003 adds the key and " +
-            "flips this assertion.", operation);
+        OperationAccessPolicy.IsOperationSupported(operation).Should().BeTrue(
+            "'{0}' is passed by a live enforcement site; if it does not resolve, that site denies " +
+            "every caller unconditionally (findings A-3/A-20, closed by task 003)", operation);
     }
 
     /// <summary>
-    /// A-3 / A-20 — the consequence of the above at the rule seam: a caller holding FULL rights is
-    /// still denied, because the denial is keyed on the operation being unknown rather than on rights.
+    /// ✅ FLIPPED BY TASK 003 (FR-03) — was the consequence half of A-3/A-20: a caller holding every
+    /// right was still denied, because the denial keyed on the operation being unknown rather than on
+    /// rights. The decision is now rights-based, so a fully-privileged caller is allowed.
     ///
-    /// FLIPPED BY: task 003 (FR-03).
+    /// Note <see cref="AccessRights.AppendTo"/> in the rights set: task 003 assigned
+    /// <c>entity.associate_document</c> → <c>AppendTo</c> (attaching a document TO the target entity),
+    /// so a set that omits it does NOT satisfy that operation. The original task-001 version of this
+    /// test omitted AppendTo and would have mis-reported this as still-denied.
     /// </summary>
     [Theory]
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
     [InlineData("entity.associate_document")]
-    public async Task Characterization_LiveOperationString_DeniesEvenWithFullRights(string operation)
+    public async Task LiveOperationString_WithFullRights_IsAllowed(string operation)
     {
-        // Arrange — every right the model can express.
+        // Arrange — every right the model can express, AppendTo included.
         var allRights = AccessRights.Read | AccessRights.Write | AccessRights.Delete
-                        | AccessRights.Create | AccessRights.Append | AccessRights.Share;
+                        | AccessRights.Create | AccessRights.Append | AccessRights.AppendTo
+                        | AccessRights.Share;
 
         // Act
         var result = await Rule().EvaluateAsync(Context(operation), Snapshot(allRights));
 
-        // Assert — CURRENT behavior: unconditional deny.
+        // Assert
+        result.Decision.Should().Be(AuthorizationDecision.Allow);
+        result.ReasonCode.Should().Be($"sdap.access.allow.operation.{operation}");
+    }
+
+    /// <summary>
+    /// The other side of the flip, and the part that matters for security: now that these operations
+    /// resolve, they must be decided on RIGHTS rather than waved through. A Read-only caller must
+    /// still be denied the two mutating operations — with <c>insufficient_rights</c>, not
+    /// <c>unknown_operation</c>.
+    ///
+    /// This is what makes task 003 a fix rather than a loosening: registering a key converts an
+    /// unconditional deny into a real decision, and this test proves the decision still says no when
+    /// it should.
+    /// </summary>
+    [Theory]
+    [InlineData("finance.confirm")]            // requires Write
+    [InlineData("entity.associate_document")]  // requires AppendTo
+    public async Task MutatingOperation_WithReadOnlyRights_DeniedForInsufficientRights(string operation)
+    {
+        var result = await Rule().EvaluateAsync(Context(operation), Snapshot(AccessRights.Read));
+
         result.Decision.Should().Be(AuthorizationDecision.Deny);
-        result.ReasonCode.Should().Be("sdap.access.deny.unknown_operation");
+        result.ReasonCode.Should().Be("sdap.access.deny.insufficient_rights",
+            "the operation is now known, so the denial must be a rights decision — a lingering " +
+            "unknown_operation would mean the key never registered");
+    }
+
+    /// <summary>
+    /// Read-only operations ARE satisfied by a Read-only caller. Pins that task 003 did not
+    /// over-restrict the two read operations while registering them.
+    /// </summary>
+    [Theory]
+    [InlineData("read")]
+    [InlineData("finance.read")]
+    public async Task ReadOperation_WithReadOnlyRights_IsAllowed(string operation)
+    {
+        var result = await Rule().EvaluateAsync(Context(operation), Snapshot(AccessRights.Read));
+
+        result.Decision.Should().Be(AuthorizationDecision.Allow);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

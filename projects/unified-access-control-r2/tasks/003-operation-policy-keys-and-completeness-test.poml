@@ -4,7 +4,7 @@
     <title>FR-03: Register missing OperationAccessPolicy keys + call-site completeness test</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (Spaarke.Core/Auth) and adds tests — FULL per root CLAUDE.md §8 (auth tag + TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,32 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-03; findings A-3 + A-20 (policy-key half — the Read-ceiling half is task 005). The endpoints remain functionally broken for Write+ callers until 004/005 land; this task only guarantees key resolution and least-privilege requirements.</notes>
+  <notes>**COMPLETED 2026-08-21.** 4 keys registered; 15-test source-scanning completeness gate; 8 task-001
+  characterizations flipped. Suite: BFF 10,617 / ArchTests 36 / Core 45, all green. Publish 43.65 MB
+  compressed incl. PDBs (baseline 44.96 -- DOWN 1.31 MB; no package changes). 0 HIGH/CRITICAL CVE.
+
+  RIGHTS DECISIONS (full rationale: notes/task-003-operation-rights-decisions.md):
+  read -&gt; Read | finance.read -&gt; Read | finance.confirm -&gt; Write (NOT Create -- the sprk_invoice is a
+  different entity than the authorized document) | entity.associate_document -&gt; **AppendTo** (the filter
+  authorizes the TARGET entity and the operation attaches a document TO it; NOT Write -- saving an email
+  to a matter does not modify the matter's own fields).
+
+  ⚠️ AppendTo is the FIRST use of that flag in the policy, so it creates a binding obligation on TASK 005:
+  map Dataverse AppendToAccess, or POST /api/office/save is permanently 403 while LOOKING fixed
+  (insufficient_rights reads as legitimate). Recorded as a &lt;constraint source="task-003"&gt; on 005.
+
+  SWEEP: re-derived the call-site list rather than trusting A-20 -- 22 Add*Filter extensions exist but only
+  7 reach AuthorizeAsync; the 3 AI filters use IAiAuthorizationService (checks AccessRights.Read directly)
+  and DataverseAuthorizationFilter uses IDataversePrivilegeChecker, so all are correctly out of scope.
+  A-20's list CONFIRMED COMPLETE for active call-sites. Filed NEW finding **A-23** (escalation trigger 2):
+  AddOfficeDocumentAccessFilter is a second orphaned filter (zero call-sites, doc examples "share"/"attach"
+  unregistered) -- Low severity, delete alongside A-15 in task 018 (&lt;constraint source="task-003"&gt; added).
+
+  DEVIATION: tests authored at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001),
+  not the POML's declared tests/unit/Sprk.Bff.Api.Tests/AccessControl/ -- same CLAUDE.md 6.5 path C
+  reasoning as task 001.
+
+  Spec FR-03; findings A-3 + A-20 (policy-key half — the Read-ceiling half is task 005). The endpoints remain functionally broken for Write+ callers until 004/005 land; this task only guarantees key resolution and least-privilege requirements.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
