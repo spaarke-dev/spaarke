@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -175,15 +176,11 @@ public static class ContainerTypePermissionEndpoints
                 "Graph API error getting permissions for container type {TypeId}, config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 typeId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve container type permissions from the Graph API. Check the app registration credentials in the config.",
+            return ex.ToProblemDetails(
+                summary: $"Could not retrieve permissions for container type '{typeId}'.",
+                errorCode: "spe.containertypes.permissions.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.permissions.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -193,7 +190,7 @@ public static class ContainerTypePermissionEndpoints
                 typeId, configGuid, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving container type permissions.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving container type permissions.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>

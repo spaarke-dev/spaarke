@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -211,13 +212,12 @@ public static class ContainerEndpoints
                 ex, "ListContainers: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -227,7 +227,7 @@ public static class ContainerEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while listing containers.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while listing containers.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -333,13 +333,12 @@ public static class ContainerEndpoints
                 "GetContainer: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -349,7 +348,7 @@ public static class ContainerEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while retrieving the container.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the container.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -468,13 +467,12 @@ public static class ContainerEndpoints
                 "CreateContainer: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -484,7 +482,7 @@ public static class ContainerEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while creating the container.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while creating the container.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -599,13 +597,12 @@ public static class ContainerEndpoints
                 "PatchContainer: Graph error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -615,7 +612,7 @@ public static class ContainerEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while updating the container.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating the container.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -779,11 +776,12 @@ public static class ContainerEndpoints
                 "{Operation}: Graph returned 409 for container '{ContainerId}' — invalid state transition, TraceId={TraceId}",
                 operationName, containerId, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Conflict",
-                detail: ex.Message ?? "The container is already in the requested state or the state transition is not permitted.",
+            return ex.ToProblemDetails(
+                summary: "The container is already in the requested state or the state transition is not permitted.",
+                errorCode: "spe.containers.graph_error",
                 statusCode: StatusCodes.Status409Conflict,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                traceId: context.TraceIdentifier,
+                title: "Conflict");
         }
         catch (SpaarkeStorageException ex)
         {
@@ -791,13 +789,12 @@ public static class ContainerEndpoints
                 "{Operation}: Graph error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 operationName, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

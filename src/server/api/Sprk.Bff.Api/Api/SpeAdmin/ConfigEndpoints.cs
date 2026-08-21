@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -143,7 +144,7 @@ public static class ConfigEndpoints
                 context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to retrieve container type configs.",
+                detail: ProblemDetailsHelper.Explain("Failed to retrieve container type configs.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
@@ -203,7 +204,7 @@ public static class ConfigEndpoints
                 id, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to retrieve the container type config.",
+                detail: ProblemDetailsHelper.Explain("Failed to retrieve the container type config.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
@@ -291,7 +292,7 @@ public static class ConfigEndpoints
                 request.Name, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to create the container type config.",
+                detail: ProblemDetailsHelper.Explain("Failed to create the container type config.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
@@ -375,7 +376,7 @@ public static class ConfigEndpoints
                 id, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to update the container type config.",
+                detail: ProblemDetailsHelper.Explain("Failed to update the container type config.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
@@ -445,7 +446,7 @@ public static class ConfigEndpoints
                 id, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to delete the container type config.",
+                detail: ProblemDetailsHelper.Explain("Failed to delete the container type config.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });

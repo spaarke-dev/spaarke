@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -135,7 +136,7 @@ public static class AuditLogEndpoints
                 configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to retrieve audit log entries from Dataverse.",
+                detail: ProblemDetailsHelper.Explain("Failed to retrieve audit log entries from Dataverse.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Audit Log Query Failed",
                 extensions: new Dictionary<string, object?>

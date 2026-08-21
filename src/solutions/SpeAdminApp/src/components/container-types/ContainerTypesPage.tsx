@@ -46,7 +46,7 @@ import {
   DocumentBulletList20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { ContainerType } from "../../types/spe";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
@@ -342,9 +342,7 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
       setContainerTypes(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load container types. Please try again.";
+        describeApiError(err, "Failed to load container types. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -391,9 +389,7 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
         await loadContainerTypes();
       } catch (err) {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to create container type.";
+          describeApiError(err, "Failed to create container type.");
         setActionError(message);
       } finally {
         setCreateSaving(false);

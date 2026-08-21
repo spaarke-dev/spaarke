@@ -69,7 +69,7 @@ import {
   CloudDatabase20Regular,
   StarFilled,
 } from "@fluentui/react-icons";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { SpeEnvironment, SpeEnvironmentUpsert, ActiveStatus } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -695,9 +695,7 @@ export const EnvironmentConfig: React.FC = () => {
       setEnvironments(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load environments. Please try again.";
+        describeApiError(err, "Failed to load environments. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -742,7 +740,7 @@ export const EnvironmentConfig: React.FC = () => {
         await loadEnvironments();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to add environment.";
+          describeApiError(err, "Failed to add environment.");
         setActionError(message);
       } finally {
         setIsSaving(false);
@@ -782,7 +780,7 @@ export const EnvironmentConfig: React.FC = () => {
         await loadEnvironments();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to update environment.";
+          describeApiError(err, "Failed to update environment.");
         setActionError(message);
       } finally {
         setIsSaving(false);
@@ -813,7 +811,7 @@ export const EnvironmentConfig: React.FC = () => {
       await loadEnvironments();
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to delete environment.";
+        describeApiError(err, "Failed to delete environment.");
       setActionError(message);
       setDeleteOpen(false);
     } finally {

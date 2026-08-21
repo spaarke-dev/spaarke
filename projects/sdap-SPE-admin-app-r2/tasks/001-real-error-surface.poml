@@ -4,7 +4,7 @@
     <title>Replace hardcoded error strings with the real Graph/Dataverse error via ProblemDetails</title>
     <phase>1 Workstream A — Make failures visible</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs across the BFF SpeAdmin surface + the client app; tags include bff-api. Root CLAUDE.md §8 FULL trigger.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -138,6 +138,15 @@
   </acceptance-criteria>
 
   <notes>Spec FR-A01. This task gates 002-005 — do not start them until the error surface exists, because their diagnoses depend on seeing real errors. The 70 `catch (ODataError)` sites are task 002's job, not this one: here, fix the message surface; there, fix the absent-vs-failed conflation.</notes>
+
+
+  <completion>
+    <date>2026-08-21</date>
+    <summary>60 SpeAdmin error sites routed through the existing helpers (23 via GraphErrorTranslator.ToProblemDetails, 37 via ProblemDetailsHelper.Explain). Scope was 60, not the 41 first inventoried: error-shaping helper methods and 13 unredacted `detail: ex.Message` sites were found by later checks. No new error type, service, or package.</summary>
+    <verified>dotnet build 0 errors; 10,564 unit tests pass (+28 new); ArchTests 36/36; no vulnerable packages; publish 43.68 MB compressed (baseline ~44.96, ceiling 60); zero misleading cause-assertions and zero unredacted ex.Message payloads remain in Api/SpeAdmin/**.</verified>
+    <not-verified>POML step 7 and all four ui-tests NOT run: the SpeAdminApp code page does not build in this worktree due to a PRE-EXISTING missing dependency (@microsoft/applicationinsights-web, imported by the shared Spaarke.UI.Components AppInsightsService). Reproduced with this task's client changes stashed. Substituted a before/after tsc comparison (42 -> 38 errors) plus payload-level assertions of the strings the UI renders.</not-verified>
+    <notes>projects/sdap-SPE-admin-app-r2/notes/task-001-completion.md and notes/error-surface-inventory.md</notes>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

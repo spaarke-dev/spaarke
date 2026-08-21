@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.Errors;
@@ -14,8 +15,85 @@ namespace Sprk.Bff.Api.Infrastructure.Errors;
 /// <c>catch</c> block — a local variable, so the catch site itself stays ADR-007-clean) extract the
 /// fields before calling. Renamed extraction responsibility, zero behavior change.
 /// </remarks>
-public static class ProblemDetailsHelper
+public static partial class ProblemDetailsHelper
 {
+    #region Truthful upstream-error surface (sdap-SPE-admin-app-r2 task 001 / spec FR-A01)
+
+    // Secret-shaped substrings that must never reach a response payload. Secret NAMES are fine and
+    // diagnostically useful; VALUES are not. Applied to every upstream message this class surfaces.
+    [GeneratedRegex(@"\bBearer\s+[A-Za-z0-9\-._~+/]+=*", RegexOptions.IgnoreCase)]
+    private static partial Regex BearerTokenPattern();
+
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*")]
+    private static partial Regex JwtPattern();
+
+    // The optional quote in <sep> matters: Graph and MSAL report these both as query-string style
+    // (client_secret=…) and as JSON ("access_token":"…"), and only the latter closes the key with a quote.
+    [GeneratedRegex(@"(?<key>client_secret|password|access_token|id_token|refresh_token|assertion|api[_-]?key)(?<sep>""?\s*[=:]\s*""?)(?<val>[^""&,\s}]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex SecretAssignmentPattern();
+
+    /// <summary>
+    /// Strips secret-shaped values (bearer tokens, JWTs, <c>client_secret=…</c>-style assignments) from a
+    /// message before it is placed in a response payload.
+    /// </summary>
+    /// <remarks>
+    /// Surfacing the real upstream error (spec FR-A01) means putting third-party message text in front of
+    /// an admin. This is the guard that keeps that safe: secret NAMES survive (an admin needs to know
+    /// <i>which</i> secret is wrong), secret VALUES do not. Task 001 acceptance criterion:
+    /// "an error payload contains no secret VALUE".
+    /// </remarks>
+    public static string? Redact(string? message)
+    {
+        if (string.IsNullOrEmpty(message))
+        {
+            return message;
+        }
+
+        var redacted = BearerTokenPattern().Replace(message, "Bearer [redacted]");
+        redacted = JwtPattern().Replace(redacted, "[redacted-token]");
+        redacted = SecretAssignmentPattern().Replace(redacted, "${key}${sep}[redacted]");
+        return redacted;
+    }
+
+    /// <summary>
+    /// Appends what actually failed to a summary that does not assert a cause, producing the <c>detail</c>
+    /// of a ProblemDetails response. Use in a <c>catch</c> whose exception type does NOT establish why the
+    /// operation failed.
+    /// </summary>
+    /// <param name="summary">
+    /// What the caller was doing, stated WITHOUT asserting why it failed (e.g. "An unexpected error
+    /// occurred while listing containers."). Never name a cause here — that is the defect this exists to
+    /// remove.
+    /// </param>
+    /// <param name="ex">The caught exception. Its type name and redacted message are appended.</param>
+    /// <returns>The summary followed by the real exception type and message, secrets redacted.</returns>
+    /// <remarks>
+    /// <para>
+    /// Added 2026-08-21 by <c>sdap-SPE-admin-app-r2</c> task 001 (spec FR-A01). Deliberately shaped as a
+    /// <b>string</b> helper rather than an <c>IResult</c> factory: the 33 SpeAdmin generic-catch sites this
+    /// replaces use three different argument orderings for <c>Results.Problem</c> plus a mix of inline and
+    /// block <c>extensions</c> dictionaries. Rebuilding those calls would churn every line and risk
+    /// silently altering a status code or dropping an extension key; wrapping only the <c>detail</c>
+    /// argument is order-independent, formatting-independent, and reviewable at a glance.
+    /// </para>
+    /// <para>
+    /// Graph failures do NOT come through here — they arrive as <c>SpaarkeStorageException</c> and route
+    /// through <c>GraphErrorTranslator.ToProblemDetails</c>, which additionally carries the Graph error
+    /// code, upstream status, and request id.
+    /// </para>
+    /// </remarks>
+    public static string Explain(string summary, Exception ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+
+        var cause = Redact(ex.Message);
+        return string.IsNullOrWhiteSpace(cause)
+            ? $"{summary} ({ex.GetType().Name})"
+            : $"{summary} {ex.GetType().Name}: {cause}";
+    }
+
+    #endregion
+
     /// <summary>
     /// Builds a ProblemDetails response for a Graph API failure from its extracted fields.
     /// </summary>
@@ -31,7 +109,7 @@ public static class ProblemDetailsHelper
         var detail = (status == 403 && code.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase))
             ? "missing graph app role (filestoragecontainer.selected) for the api identity."
             : status == 403 ? "api identity lacks required container-type permission for this operation."
-            : errorMessage ?? "Graph API error";
+            : Redact(errorMessage) ?? "Graph API error";
 
         return Results.Problem(
             title: title,

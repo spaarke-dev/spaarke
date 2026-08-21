@@ -22,7 +22,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 
 | # | Task | Phase | FR | Rigor | Model | Effort | Wave | ∥-safe | Deps | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 001 | [Real error surface via ProblemDetails](001-real-error-surface.poml) | 1 A | A01 | FULL | sonnet | high | W0 | ❌ | — | 🔲 |
+| 001 | [Real error surface via ProblemDetails](001-real-error-surface.poml) | 1 A | A01 | FULL | sonnet | high | W0 | ❌ | — | ✅ |
 | 002 | [Audit 70 `catch (ODataError)` sites](002-odata-error-audit.poml) | 1 A | A02 | FULL | sonnet | xhigh | W1 | ❌ | 001 | 🔲 |
 | 003 | [Sync Status reflects real outcomes](003-sync-status-truth.poml) | 1 A | A03 | FULL | sonnet | high | W1 | ✅ | 001 | 🔲 |
 | 005 | [Diagnose + fix Audit Log](005-fix-audit-log.poml) | 1 A | A05 | FULL | sonnet | xhigh | W1 | ✅ | 001 | 🔲 |
@@ -61,7 +61,7 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 
 | Wave | Tasks | Prerequisite | Concurrency | Notes |
 |---|---|---|---|---|
-| **W0** | 001 | — | 1 (serial) | Foundational. Touches GraphService + most endpoint files + client. Gates all of Phase 1 |
+| **W0** | 001 ✅ | — | 1 (serial) | **Done 2026-08-21.** 60 error sites routed; endpoint-layer only (no GraphService change needed). ⚠️ UI verification blocked — SpeAdminApp build broken by a pre-existing missing dep; see `notes/task-001-completion.md` |
 | **W1** | **002**, 003, 005 | 001 ✅ | 3 | 002 owns GraphService; 003 owns DashboardSync; 005 owns AuditService |
 | **W2** | **004**, 010, 040 | 001 ✅ | 3 | 004 owns GraphService; 010 is notes-only; 040 is test-project-only. 🔔 **010 may reopen the ADR gate** |
 | **W3** | **011**, 012, 013 | 010 ✅ **WORKABLE** | 3 | 011 owns TokenProvider + GraphService; 012 owns filter + client; 013 is Azure config |

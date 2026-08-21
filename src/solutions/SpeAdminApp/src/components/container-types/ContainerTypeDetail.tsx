@@ -65,7 +65,7 @@ import {
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import {
   ContainerTypeSettingsForm,
   type ContainerTypeSettings,
@@ -422,9 +422,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       })
       .catch((err) => {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to load container type details. Please try again.";
+          describeApiError(err, "Failed to load container type details. Please try again.");
         setError(message);
       })
       .finally(() => {
@@ -447,9 +445,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       setPermissionsLoaded(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load permissions. Please try again.";
+        describeApiError(err, "Failed to load permissions. Please try again.");
       setPermissionsError(message);
     } finally {
       setPermissionsLoading(false);
@@ -492,9 +488,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       setSaveSuccess(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to save settings. Please try again.";
+        describeApiError(err, "Failed to save settings. Please try again.");
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -708,7 +702,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                           })
                           .catch((err) => {
                             setError(
-                              err instanceof ApiError ? err.message : "Failed to load."
+                              describeApiError(err, "Failed to load.")
                             );
                           })
                           .finally(() => setLoading(false));

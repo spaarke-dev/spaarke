@@ -24,7 +24,7 @@ import {
   shorthands,
 } from "@fluentui/react-components";
 import type { ContainerType, SpeContainerTypeConfig } from "../../../types/spe";
-import { speApiClient, ApiError } from "../../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../../services/speApiClient";
 import { useBuContext } from "../../../contexts/BuContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,9 +156,7 @@ export const SelectContainerTypeStep: React.FC<SelectContainerTypeStepProps> = (
       .catch((err) => {
         if (cancelled) return;
         setLoadError(
-          err instanceof ApiError
-            ? err.message
-            : "Failed to load container types."
+          describeApiError(err, "Failed to load container types.")
         );
       })
       .finally(() => {

@@ -59,7 +59,7 @@ import {
   Warning20Regular,
   People20Regular,
 } from "@fluentui/react-icons";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type {
   ConsumingTenant,
   RegisterConsumingTenantRequest,
@@ -257,7 +257,7 @@ export const ConsumingTenantsPanel: React.FC<ConsumingTenantsPanelProps> = ({
       const result = await speApiClient.containerTypes.listConsumers(containerTypeId, configId);
       setConsumers(result.items);
     } catch (err) {
-      const message = err instanceof ApiError ? err.detail ?? err.message : String(err);
+      const message = describeApiError(err);
       setError(message || "Failed to load consuming tenant registrations.");
     } finally {
       setIsLoading(false);
@@ -300,7 +300,7 @@ export const ConsumingTenantsPanel: React.FC<ConsumingTenantsPanelProps> = ({
       setAddDialogOpen(false);
       await loadConsumers();
     } catch (err) {
-      const message = err instanceof ApiError ? err.detail ?? err.message : String(err);
+      const message = describeApiError(err);
       setDialogError(message || "Failed to register consuming app.");
     } finally {
       setIsSaving(false);
@@ -336,7 +336,7 @@ export const ConsumingTenantsPanel: React.FC<ConsumingTenantsPanelProps> = ({
       setEditDialogOpen(false);
       await loadConsumers();
     } catch (err) {
-      const message = err instanceof ApiError ? err.detail ?? err.message : String(err);
+      const message = describeApiError(err);
       setDialogError(message || "Failed to update permissions.");
     } finally {
       setIsSaving(false);
@@ -364,7 +364,7 @@ export const ConsumingTenantsPanel: React.FC<ConsumingTenantsPanelProps> = ({
       setRemoveDialogOpen(false);
       await loadConsumers();
     } catch (err) {
-      const message = err instanceof ApiError ? err.detail ?? err.message : String(err);
+      const message = describeApiError(err);
       setDialogError(message || "Failed to remove consuming app.");
     } finally {
       setIsSaving(false);

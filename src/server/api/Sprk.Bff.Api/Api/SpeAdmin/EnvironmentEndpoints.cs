@@ -145,7 +145,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while listing SPE environments.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while listing SPE environments.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -191,7 +191,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while retrieving the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -266,7 +266,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while creating the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while creating the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -342,7 +342,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while updating the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -424,7 +424,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while deleting the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while deleting the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
