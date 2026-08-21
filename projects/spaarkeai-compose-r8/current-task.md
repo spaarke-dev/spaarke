@@ -1,9 +1,10 @@
 # Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-19 (project initialized via `/project-pipeline`)
+> **Last Updated**: 2026-08-20 (by `context-handoff` — end of session; ready for `/compact`)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: branch `work/spaarkeai-compose-r8` @ `a7874030d`, 0 behind master, clean
+> **Git**: branch `work/spaarkeai-compose-r8` @ `18ebc525e`, **10 ahead of `origin/master`, 0 behind, working tree CLEAN**.
+> Draft **PR #806** is open for the branch. Nothing is uncommitted; nothing is at risk across compaction.
 
 ---
 
@@ -12,10 +13,48 @@
 | Field | Value |
 |---|---|
 | **Task** | **012** — Save lifecycle hardening (dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery) |
-| **Status** | not-started. |
-| **Next Action** | Begin Step 0 of task 012 (`tasks/012-save-lifecycle-hardening.poml`). Also startable: **014**, **015**, **016** (015/016 unblocked by 013), **018**. |
+| **Status** | **not-started** — no work in progress, no partial edits. A clean starting point. |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 012` — which invokes `task-execute` on `tasks/012-save-lifecycle-hardening.poml` (FULL rigor · opus @ xhigh · steps `directional`). |
 | **Blocked on** | Nothing. |
 | **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 013 ✅ · 050 ✅** (all 2026-08-20) |
+
+### Startable now — pick any; all are `parallel-safe: false`, so run them ONE AT A TIME
+
+| # | Task | Why it is startable |
+|---|---|---|
+| **012** | Save lifecycle hardening | deps 010 ✅ — **recommended next** (see below) |
+| **014** | Engine-side integrity — re-anchor download failure must never persist the stale baseline | deps none. The ONE Half-A defect in Track S |
+| **015** | Document size ceilings — route to the existing chunked upload | deps 013 ✅ (**unblocked this session**) |
+| **016** | Honest-failure set — the eight silent-drop modes | deps 010 ✅, 013 ✅ (**unblocked this session**) |
+| **018** | Track S CI gate — run the Compose client suite in CI | deps 010 ✅. Must land BEFORE 017 |
+
+**Why 012 first**: task 013 handed it a concrete input. Its `AbortSignal` work falls in the same class as
+the transport-failure gap task 010 surfaced — an aborted request never reaches an HTTP status, so it needs
+the non-status handling the save-outcome contract now has vocabulary for. Doing 012 next means that
+handling is designed once. **Nothing forces this order** — 014/015/016/018 are equally valid.
+
+**The entire Compose spine is `parallel-safe: false`** (project CLAUDE.md). Do NOT dispatch these to
+parallel agents — 012/014/015/016 all touch `ComposeService.cs` and/or `ComposeWorkspace.tsx`.
+
+### Traps that will bite a fresh session (all learned the hard way this session)
+
+1. **Every EXISTING-item save now takes the 6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`).
+   A new save-path test that mocks only the 5-arg overload fails with a MISLEADING
+   `404 "SPE drive-item ... was not found or could not be written"`. Mock the 6-arg overload — or both.
+2. **A 200 no longer means the document was written.** Read `payload.outcome`. `storage-failed` arrives
+   on a 200 (the container-failure path returns rather than throws).
+3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. Any new client test
+   that mocks a resolved `{ok:false}` is testing a shape the transport cannot produce (this is exactly
+   what let a dead code path pass its tests for three releases).
+4. **`SaveComposeDocumentResult.Outcome` is `required`** — a new construction site is a COMPILE error
+   until it says what happened. That is intentional; set it, do not work around it.
+5. **`Spaarke.Compose.Components` is NOT in CI** and ~39 of its 88 jest suites cannot run without a prior
+   SharedLibs `dist/` build. Locally: `npx jest` from that package dir; `--runInBand` for determinism
+   (parallel workers produce 2–14 spurious failures). Task 018 fixes this.
+6. **Two `renderOnSave.test.tsx` create-on-save tests FAIL on clean HEAD** — pre-existing, NOT caused by
+   this session's work, reproduced by stashing. Do not chase them; task 018 root-causes them.
+7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and will
+   look like a catastrophic regression; the real figure is **43.68 MB** against a 60 MB ceiling.
 
 ### Carried forward from task 011 (read before 012 / 013)
 
@@ -31,10 +70,11 @@
 
 ### Phase-0 results (do not re-derive)
 
-- **PR #690 is REDUNDANT — GO for Phase 2.** It never merged, but the `lfs: true` line it proposes is
-  already on master via commit `f7ec5b928` (2026-08-12, from `email-communication-intelligence-r2`),
-  confirmed an ancestor of this worktree. All 10 corpus `.docx` resolve to real bytes (2,666–27,986 B);
-  Compose seam tests 101/101 green on master run `32313454003`. **Recommend closing #690 as superseded.**
+- **PR #690: CLOSED as superseded 2026-08-20 — GO for Phase 2.** Its `lfs: true` line was already on
+  master via commit `f7ec5b928` (2026-08-12, from `email-communication-intelligence-r2`), confirmed an
+  ancestor of this worktree. All 10 corpus `.docx` resolve to real bytes (2,666–27,986 B); Compose seam
+  tests 101/101 green on master run `32313454003`. Closed with that evidence in the PR comment.
+  **Phase 2 is no longer gated on anything.**
 - **Publish baseline: 44.97 MB incl. PDBs / 44.07 MB excl.** (+0.01 vs the 44.96 MB reference), TFM
   `net10.0`, SDK 10.0.101, at commit `b182f1687`. Far below the 55 MB review threshold.
 - **`/conflict-check`: clean** across 24 open PRs and every other worktree, scoped to the full Compose spine.
@@ -100,8 +140,37 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 5. **Track C stays in R8**, P1, "MUST be completely addressed".
 6. **Durable file bytes → blob** (infrastructure already provisioned).
 7. **Concurrency = last-writer-wins with warning** (supersedes the 412 shipped 2026-08-18).
-8. **PR #690 lands first**, then the gate is built.
+8. ~~**PR #690 lands first**, then the gate is built.~~ → **SATISFIED 2026-08-20**: #690 was closed as
+   superseded (the fix was already on master via `f7ec5b928`). Phase 2 is ungated.
 9. **Initialize-only** — no auto-execution.
+10. **(2026-08-20) Task 018 added** — the Compose client suite gets a self-contained CI gate, sequenced
+    BEFORE the 017 deploy, so Track S ships with enforcement on the client save contract rather than a
+    promise of one.
+
+---
+
+## Session log — 2026-08-20
+
+Six tasks completed: **001, 002, 010, 011, 013, 050**. One task authored: **018**. PR #690 closed.
+Five commits on the branch (`a20943d7b`, `b182f1687`, `03cf36e2e`, `18ebc525e` + the earlier planning
+commits); working tree clean; draft PR #806 open.
+
+**The through-line.** Every defect fixed this session was the same shape: *the code said one thing and
+the system did another, and nothing could tell the difference.* Task 010 found status-routing that could
+never execute. Task 011 found a refusal whose client handler was dead the day it shipped. Task 013 found
+a total write failure that rendered as "Saved ✓". Each had passing tests. This is the Half-B thesis
+holding up under contact.
+
+**Verification standard used** (keep it): every claim re-run in the main session rather than taken from
+an agent report; `--runInBand` for determinism; baselines captured by stashing to a clean HEAD so
+"pre-existing" is proven, not asserted.
+
+**Two corrections made to my own earlier notes** — recorded because the pattern matters more than the
+instances: after task 011 I wrote that the post-retry 409 should map to `storage-failed` and that
+`refused-stale` had no producer. Task 013's terminal-state enumeration disproved both. A guess written
+into a handoff reads exactly like a finding to the next session; these were corrected in place.
+
+**Not deployed.** Track S deploys as a batch at task 017, after 018.
 
 ---
 
