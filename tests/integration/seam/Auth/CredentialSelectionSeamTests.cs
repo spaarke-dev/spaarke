@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Seam.Auth;
 /// source analysis — the shape ADR-038 sanctions for exactly this, and the shape task 060 already
 /// builds. See notes/decisions/010-credential-gating.md.</para>
 /// </summary>
+[Collection(DataverseCredentialSeamCollection.Name)]
 public class CredentialSelectionSeamTests
 {
     private const string Tenant = "11111111-1111-1111-1111-111111111111";

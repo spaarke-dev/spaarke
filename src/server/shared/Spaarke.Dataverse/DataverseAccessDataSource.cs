@@ -15,6 +15,82 @@ namespace Spaarke.Dataverse;
 /// </summary>
 public class DataverseAccessDataSource : IAccessDataSource
 {
+    /// <summary>
+    /// FR-A2 (auth-v4 task 011) — process-wide MSAL confidential-client cache keyed by
+    /// (tenant|client). Same shape as <c>DataverseUserClient.CcaCache</c>; do not introduce a
+    /// second caching mechanism.
+    ///
+    /// <para>This type is a <b>typed HttpClient</b> (transient by construction — see
+    /// <c>SpaarkeCore.AddSpaarkeCore</c>), so a CCA built per instance would be discarded on every
+    /// request along with MSAL's OBO token cache, forcing a fresh network token exchange per
+    /// authorization check. Sharing the client amortizes those exchanges while per-user isolation
+    /// stays intact — MSAL caches OBO tokens per user assertion, not per client.</para>
+    ///
+    /// <para>Sharing is deliberately <b>structural rather than lifetime-dependent</b>: it must not
+    /// hinge on a DI registration line. From task 020 the credential becomes a Managed-Identity
+    /// client assertion, and <c>ManagedIdentityClientAssertion</c> caches its signed assertion on
+    /// the instance — so a per-request client would also re-mint an assertion (an IMDS round-trip)
+    /// on every call. At that point shared-client-ness is a correctness/cost property of the
+    /// credential, not an optimization.</para>
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
+        CcaCache = new();
+
+    /// <summary>
+    /// APP-ONLY credential cache, same key. Separate from <see cref="CcaCache"/> because it holds a
+    /// different credential type for a different flow — but it exists for the same reason: this type
+    /// is transient, and <c>ClientSecretCredential</c> caches its app-only token PER INSTANCE, so a
+    /// per-request instance re-hits Entra with <c>client_credentials</c> on every authorization check.
+    ///
+    /// <para>Only the secret branch needs this. In the managed-identity branch the credential is the
+    /// DI-injected singleton <c>TokenCredential</c> (<c>Program.cs:46</c>) and was never per-request.
+    /// Added at task 011 after code review (finding W-3) caught the original comment here claiming
+    /// the app-only path had no per-request rebuild at all — true of the MI branch, false of this one.</para>
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, TokenCredential>
+        SecretCredentialCache = new();
+
+    /// <summary>
+    /// Per-key count of how many confidential clients this process has BUILT for a given
+    /// (tenant|client|secret-fingerprint). Exposed so client sharing is verifiable as behaviour —
+    /// construct N instances, observe one build — without reflecting on private state (ADR-038 ban
+    /// B8) or resolving from a container (ban B3).
+    ///
+    /// <para>Deliberately per-key rather than a process-wide total: the total is perturbed by any
+    /// other test that constructs this type (contract fixtures boot the real <c>Program.cs</c> and do
+    /// resolve <c>IAccessDataSource</c>), which made an earlier total-delta assertion genuinely
+    /// flaky. Counts builds, not entries, so it also detects a <c>GetOrAdd</c> factory that ran more
+    /// than once.</para>
+    ///
+    /// <para><b>Non-contractual.</b> This is test-observability surface, not API. Task 022 relocates
+    /// it onto <c>IClientAssertionProvider</c> when the three per-class caches consolidate.</para>
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> CcaBuilds = new();
+
+    /// <inheritdoc cref="CcaBuilds"/>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static int ConfidentialClientBuildCountFor(string tenantId, string clientId, string clientSecret)
+        => CcaBuilds.TryGetValue(CredentialCacheKey(tenantId, clientId, clientSecret), out var n) ? n : 0;
+
+    /// <summary>
+    /// Cache key for credential-bearing caches. Includes a FINGERPRINT of the secret — never the
+    /// secret itself, which in a dictionary key would widen its memory-dump surface and leak through
+    /// any future key-listing diagnostic.
+    ///
+    /// <para>The secret must participate in the key: MSAL binds the credential at <c>Build()</c> and
+    /// holds it for the client's lifetime, so a (tenant|client)-only key would silently hand back a
+    /// client built with a STALE secret after a rotation — presenting as <c>AADSTS7000215</c> on OBO
+    /// while the app-only path keeps working, "fixed" only by a restart nobody can explain.
+    /// Task 011, code-review finding W-1.</para>
+    /// </summary>
+    private static string CredentialCacheKey(string tenantId, string clientId, string clientSecret)
+    {
+        var fingerprint = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(clientSecret)))[..16];
+        return $"{tenantId}|{clientId}|{fingerprint}";
+    }
+
     private readonly IDataverseService _dataverseService;
     private readonly ILogger<DataverseAccessDataSource> _logger;
     private readonly HttpClient _httpClient;
@@ -98,7 +174,11 @@ public class DataverseAccessDataSource : IAccessDataSource
             if (string.IsNullOrEmpty(clientSecret))
                 throw new InvalidOperationException("API_CLIENT_SECRET configuration is required (Graph:ManagedIdentity:Enabled is not true)");
 
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            // FR-A2: shared, for the same reason as the OBO client below — ClientSecretCredential
+            // caches its app-only token per instance, and this type is transient.
+            _credential = SecretCredentialCache.GetOrAdd(
+                CredentialCacheKey(tenantId, clientId, clientSecret),
+                _ => new ClientSecretCredential(tenantId, clientId, clientSecret));
             _logger.LogInformation(
                 "DataverseAccessDataSource app-only auth: ClientSecret credential (local-dev fallback)");
         }
@@ -108,11 +188,23 @@ public class DataverseAccessDataSource : IAccessDataSource
         //     client assertion via the shared provider, and task 033 removes the secret entirely.
         if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret))
         {
-            _cca = ConfidentialClientApplicationBuilder
-                .Create(clientId)
-                .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
-                .WithClientSecret(clientSecret)
-                .Build();
+            // FR-A2: shared per (tenant, client, secret-fingerprint) so MSAL's OBO token cache
+            // survives this type's transient typed-HttpClient lifetime — see the CcaCache and
+            // CredentialCacheKey doc comments.
+            var cacheKey = CredentialCacheKey(tenantId, clientId, clientSecret);
+            _cca = CcaCache.GetOrAdd(cacheKey, k =>
+            {
+                // GetOrAdd MAY invoke this factory more than once under contention; only one value
+                // is stored and every caller receives that winner, so there is no split-brain token
+                // cache. Counting builds here (rather than entries) is what makes a double
+                // invocation visible instead of silent.
+                CcaBuilds.AddOrUpdate(k, 1, (_, n) => n + 1);
+                return ConfidentialClientApplicationBuilder
+                    .Create(clientId)
+                    .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+                    .WithClientSecret(clientSecret)
+                    .Build();
+            });
             _logger.LogInformation("DataverseAccessDataSource delegated auth: OBO available");
         }
         else

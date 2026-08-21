@@ -4,7 +4,7 @@
     <title>Fix the DI-lifetime hazard and record the ADR-009 cache decision (FR-A2)</title>
     <phase>1 Prerequisites</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs + DI registrations; blocks the credential swap.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,12 +77,53 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion>Resolving DataverseAccessDataSource twice from DI yields the same underlying CCA instance.</criterion>
-    <criterion>Resolving AgentTokenService twice yields the same underlying CCA instance.</criterion>
+    <!-- AMENDED 2026-08-20 during execution, per CLAUDE.md 8.5 closed-set rule: the original pair read
+         "resolving X twice FROM DI yields the same underlying CCA instance". Neither half is provable
+         as authored -- resolving from a container is ADR-038 ban B3, and comparing the private _cca
+         field across instances is ban B8. Amending the criteria to what IS provable, rather than
+         marking the originals complete against different evidence. The substitute is stronger: it
+         counts BUILDS per key, so it also catches a GetOrAdd factory that ran twice. -->
+    <criterion>Constructing DataverseAccessDataSource N times with one (tenant|client|secret) builds EXACTLY ONE confidential client, asserted per-key so concurrent tests cannot perturb it.</criterion>
+    <criterion>Constructing AgentTokenService N times with one (tenant|client|secret) builds EXACTLY ONE confidential client.</criterion>
+    <criterion>Negative: two different tenants get two different clients -- sharing is keyed, so token caches cannot cross a tenant boundary.</criterion>
+    <criterion>Negative: a ROTATED secret builds a new client rather than silently reusing the stale one (the secret participates in the cache key).</criterion>
     <criterion>The ADR-009 decision is written down with its reason.</criterion>
     <criterion>No behaviour change beyond token-cache reuse; the existing test suite stays green.</criterion>
     <criterion>Negative case: no captive-dependency error at startup; the app boots cleanly.</criterion>
     <criterion>Negative case: OBO still fails CLOSED for an unauthorised user.</criterion>
     <criterion>Publish size reported; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-20. FULL rigor. Full suite 10,549/0; ArchTests 36/36; publish 43.68 MB compressed
+    incl. PDBs (+0.01, 1.28 MB below the 44.96 baseline, ceiling 60); CVE clean.
+
+    TWO AUTHORED STEPS WERE WRONG FOR THE CODE AND WERE ADAPTED (steps mode=directional):
+    (1) SpaarkeCore.cs:39 was NOT changed. It is AddHttpClient&lt;T&gt; -- promoting a typed HttpClient to
+    singleton pins one HttpMessageHandler for process lifetime AND, decisively, this type holds mutable
+    per-instance auth state (_currentToken, the Authorization header), so a singleton is a data race
+    that can bleed a token between users. Sharing is achieved by a static cache instead.
+    (2) The app-only credential was assumed safe because Program.cs:46 registers TokenCredential
+    singleton. True of the MI branch ONLY -- the secret branch built a ClientSecretCredential per
+    request. Caught at code review (W-3); now cached.
+
+    ADR-009 DECIDED: application-level caches stay authoritative; NOT wiring AddDistributedTokenCache
+    (a serialized MSAL cache carries refresh-token material -- a security-posture change that must not
+    ride along with a DI-lifetime fix). Consequences, two revisit triggers and the preferred remedy per
+    trigger are recorded. Escalation trigger 2 fired and was handled as prescribed: recorded, not built.
+
+    ALSO FIXED HERE: a task-010 regression. Its fail-fast validation broke 13 ExternalAccess contract
+    tests via a stub relying on the removed silent fallback. Generalised into .claude/FAILURE-MODES.md
+    AP-7.
+
+    BOOKED ONWARD: task 060 gets the source-analysis guard that no call site bypasses the cache (2nd
+    such obligation, alongside 010's). Tasks 020 AND 022 carry the CCA-consolidation obligation as a
+    constraint + acceptance criterion -- task 011 leaves three per-class caches, accepted only as a
+    TIME-BOXED ADR-028 A4 path-A exception EXPIRING AT 022.
+
+    Acceptance criteria 1-2 were amended during execution per CLAUDE.md 8.5: as authored they required
+    proof by DI resolution (ADR-038 ban B3) or private-field comparison (ban B8), neither provable.
+
+    Record: notes/decisions/011-adr009-token-cache-decision.md
+  </notes>
 </task>

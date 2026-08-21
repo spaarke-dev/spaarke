@@ -23,7 +23,23 @@ public class DataverseWebApiClient : IDisposable
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
-    public DataverseWebApiClient(IConfiguration configuration, ILogger<DataverseWebApiClient> logger)
+    /// <param name="credential">
+    /// Optional pre-built credential. When supplied, credential SELECTION is bypassed entirely —
+    /// neither the managed-identity nor the client-secret branch runs, and no credential
+    /// configuration is required.
+    ///
+    /// <para>Mirrors the <c>TokenCredential? credential = null</c> parameter its sibling
+    /// <see cref="DataverseAccessDataSource"/> already takes (nullable with a null default, so no
+    /// existing caller or test fixture changes). Added at task 011 per code-review finding W-6: test
+    /// doubles that override every virtual seam and issue no HTTP still had to satisfy credential
+    /// config purely to get through this constructor, which coupled them to whichever branch happened
+    /// to be cheapest to configure — and therefore re-broke them whenever that branch changed. Tasks
+    /// 020/022/033 are about to rewrite both branches.</para>
+    /// </param>
+    public DataverseWebApiClient(
+        IConfiguration configuration,
+        ILogger<DataverseWebApiClient> logger,
+        TokenCredential? credential = null)
     {
         _logger = logger;
 
@@ -42,7 +58,14 @@ public class DataverseWebApiClient : IDisposable
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (useManagedIdentity)
+        if (credential is not null)
+        {
+            // Explicitly supplied — selection is bypassed. See the ctor's <param> doc.
+            _credential = credential;
+            _logger.LogInformation(
+                "DataverseWebApiClient using an injected TokenCredential (selection bypassed) for {ApiUrl}", _apiUrl);
+        }
+        else if (useManagedIdentity)
         {
             var managedIdentityClientId = configuration["ManagedIdentity:ClientId"]
                 ?? configuration["Graph:ManagedIdentity:ClientId"];

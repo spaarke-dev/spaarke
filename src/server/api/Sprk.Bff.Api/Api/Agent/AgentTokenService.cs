@@ -30,6 +30,49 @@ public sealed class AgentTokenService
     private const string AgentDataverseTokenResource = "agent-dataverse-token";
     private const int CacheVersion = 1;
 
+    /// <summary>
+    /// FR-A2 (auth-v4 task 011) — process-wide MSAL confidential-client cache keyed by
+    /// (tenant|client). Same shape as <c>DataverseUserClient.CcaCache</c> and
+    /// <c>DataverseAccessDataSource.CcaCache</c>; do not introduce a second caching mechanism.
+    ///
+    /// <para>This service is registered singleton (see <c>AgentModule</c>), so the cache is
+    /// belt-and-braces for DI — but it is <b>not</b> redundant. It makes client sharing structural
+    /// rather than dependent on one registration line, and it covers direct construction (tests,
+    /// tooling). From task 020 the credential becomes a Managed-Identity client assertion whose
+    /// signed assertion caches on the instance, so a per-instance client would re-mint an assertion
+    /// (an IMDS round-trip) per exchange.</para>
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
+        CcaCache = new();
+
+    /// <summary>
+    /// Per-key count of confidential clients BUILT for a given (tenant|client|secret-fingerprint).
+    /// Per-key rather than a process-wide total so the assertion cannot be perturbed by any other
+    /// test that constructs this type. Counts builds, not entries, so a <c>GetOrAdd</c> factory that
+    /// ran twice is visible rather than silent.
+    ///
+    /// <para><b>Non-contractual</b> — test-observability surface, not API. Task 022 relocates it onto
+    /// <c>IClientAssertionProvider</c> when the three per-class caches consolidate.</para>
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> CcaBuilds = new();
+
+    /// <inheritdoc cref="CcaBuilds"/>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static int ConfidentialClientBuildCountFor(string tenantId, string clientId, string clientSecret)
+        => CcaBuilds.TryGetValue(CredentialCacheKey(tenantId, clientId, clientSecret), out var n) ? n : 0;
+
+    /// <summary>
+    /// Cache key including a FINGERPRINT of the secret — never the secret itself. MSAL binds the
+    /// credential at <c>Build()</c> for the client's lifetime, so a (tenant|client)-only key would
+    /// silently reuse a client built with a stale secret after rotation. Task 011, code-review W-1.
+    /// </summary>
+    private static string CredentialCacheKey(string tenantId, string clientId, string clientSecret)
+    {
+        var fingerprint = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(clientSecret)))[..16];
+        return $"{tenantId}|{clientId}|{fingerprint}";
+    }
+
     private readonly IConfidentialClientApplication _cca;
     private readonly ITenantCache _cache;
     private readonly ILogger<AgentTokenService> _logger;
@@ -46,11 +89,18 @@ public sealed class AgentTokenService
 
         // Build the MSAL confidential client for OBO exchanges.
         // The BFF app registration is the "middle tier" that exchanges the agent token.
-        _cca = ConfidentialClientApplicationBuilder
-            .Create(_options.ClientId)
-            .WithClientSecret(_options.ClientSecret)
-            .WithAuthority($"https://login.microsoftonline.com/{_options.TenantId}")
-            .Build();
+        // FR-A2: shared per (tenant, client, secret-fingerprint) — see the CcaCache doc comment.
+        _cca = CcaCache.GetOrAdd(
+            CredentialCacheKey(_options.TenantId, _options.ClientId, _options.ClientSecret),
+            k =>
+            {
+                CcaBuilds.AddOrUpdate(k, 1, (_, n) => n + 1);
+                return ConfidentialClientApplicationBuilder
+                    .Create(_options.ClientId)
+                    .WithClientSecret(_options.ClientSecret)
+                    .WithAuthority($"https://login.microsoftonline.com/{_options.TenantId}")
+                    .Build();
+            });
 
         _logger.LogInformation(
             "[AGENT-TOKEN] Initialized: TenantId length={TenantLen}, ClientId length={ClientLen}, AgentAppId length={AgentLen}",

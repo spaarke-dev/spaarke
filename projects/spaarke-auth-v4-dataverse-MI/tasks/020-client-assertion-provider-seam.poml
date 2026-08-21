@@ -48,6 +48,7 @@
     <constraint source="ADR-028">Scope: use ManagedIdentityClientAssertion and REUSE the instance — it caches the signed assertion until expiry.</constraint>
     <constraint source="project">Scope: shared-lib constructors take IClientAssertionProvider? assertion = null with a NULL DEFAULT. Adding a required parameter breaks all 46 test fixtures (NFR-04).</constraint>
     <constraint source="project">Scope: do NOT migrate any call site in this task — that is task 022. This task only creates and registers the seam.</constraint>
+    <constraint source="ADR-028">Scope: DESIGN THE PROVIDER AS THE HOME FOR A SINGLE SHARED CONFIDENTIAL-CLIENT CACHE. Booked by task 011 (adr-check finding W2, 2026-08-20). After task 011 there are THREE separate per-class static CCA caches keyed (tenant|client) -- DataverseUserClient.cs:55, DataverseAccessDataSource.cs (CcaCache), AgentTokenService.cs (CcaCache) -- so one process can hold three distinct confidential clients, and three distinct token caches, for the SAME (tenant|client). Each is individually correct; collectively they are exactly the per-call-site duplication ADR-028 A4 line 207 was written against ("seven call sites each rolling their own credential handling is what made the previous state unfixable in one place"). This task must not leave that unaddressed by design: the provider's shape must be able to own the shared cache so task 022 can collapse all three onto it. Task 011 accepted this as a time-boxed A4 path-A exception EXPIRING AT TASK 022 -- if 022 does not consolidate, it becomes a standing A4 violation with no owner.</constraint>
   </constraints>
 
   <knowledge>
@@ -92,6 +93,7 @@
     <criterion>The provider is registered in a feature module; Program.cs gains no new inline AddSingleton.</criterion>
     <criterion>All 46 existing test fixtures compile and pass unchanged.</criterion>
     <criterion>Negative case: resolving the provider twice returns the same singleton and the same cached assertion instance.</criterion>
+    <criterion>The provider's shape can host ONE shared confidential-client cache keyed (tenant|client), so task 022 can collapse the three existing per-class CcaCache statics onto it. State explicitly in the PR description whether the provider owns the cache or task 022 adds it -- silence here is what turns task 011's time-boxed A4 exception into a permanent one.</criterion>
     <criterion>Negative case: with no managed identity present (local dev), the provider fails gracefully rather than throwing at startup.</criterion>
     <criterion>Publish size + delta reported vs 44.96 MB; no new HIGH CVE; Placement Justification stated in the PR.</criterion>
   </acceptance-criteria>
