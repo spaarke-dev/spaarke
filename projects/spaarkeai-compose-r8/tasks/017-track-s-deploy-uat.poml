@@ -76,6 +76,32 @@
     <step order="4">Deploy BFF and `sprk_spaarkeai` together via `bff-deploy` + `code-page-deploy`.</step>
     <step order="5">Write the UAT checklist: one row per FR-S01…S10, each with the exact steps to reproduce and the expected user-visible outcome.</step>
     <step order="6">Run the UAT with the owner. Record PASS/FAIL per row with observed behavior, not just a mark.</step>
+    <step order="6.5" name="Concurrency observation (owner decision B, added 2026-08-21 by task 016)">
+      TWO-USER CONCURRENT SAVE — the one UAT row that settles whether `If-Match` on `PUT .../content` is
+      honored by Graph. The header is UNDOCUMENTED for that endpoint (only delete/update/move/
+      createUploadSession document `if-match`), and task 011's "last-writer-wins is ENFORCED, not hoped
+      for" rests on it. There is no code fix to make — the question is what the platform does.
+
+      Steps: two users open the SAME Compose document. User A edits and saves. User B — who loaded
+      BEFORE A's save — then edits and saves.
+
+      Expected (correct behavior either way): B's save SUCCEEDS and B sees the
+      `concurrent-external-change` warning ("Someone else saved a new version… use version history").
+      That warning comes from the PRE-write eTag comparison, which is ours and works regardless.
+
+      What to watch for, and what it means:
+        • B sees the warning, A's version is in SPE version history  -> the design works. Whether
+          `If-Match` fired is not yet distinguished; that is acceptable.
+        • B sees NO warning and A's content is simply gone from the current version -> the pre-write
+          comparison missed it, which is a REAL defect and a FAIL row.
+        • A "Document Busy" (409) appears -> `If-Match` DID fire. That single observation proves the
+          header is honored and closes owner decision B outright.
+
+      If no 409 is ever observed across the whole UAT while concurrent saves are exercised, record that
+      as an OPEN observation rather than a pass: the 409 handler may be dead code for a status the
+      platform never returns, which is precisely the defect class Track S exists to remove. File it as a
+      follow-up against task 011 rather than blocking the ship.
+    </step>
     <step order="7">Record a GO/NO-GO for Phase 2 and file any FAIL as a follow-up task against the owning Track S task.</step>
   </steps>
 
