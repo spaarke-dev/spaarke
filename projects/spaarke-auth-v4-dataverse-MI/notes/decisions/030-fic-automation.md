@@ -27,22 +27,37 @@ deliberately **no dot-source mode** — see §10.
 
 ---
 
-## 2. The central design decision: structural check **before** the retry loop
+## 2. The structural check runs **before** the retry loop
 
-Two acceptance criteria look independent and are not:
+> ⚠️ **This section originally gave a reason that is false, and the correction is instructive.**
+>
+> The original claim: criterion 3 (detect a subject set to the clientId) and criterion 4 (retry
+> `AADSTS70021`) collide because *"both produce the same `AADSTS70021` at exchange"*, so a retry loop
+> alone cannot tell "wrong forever" from "right in thirty seconds".
+>
+> **Measured 2026-08-21 against the live tenant: they are different codes.** A FIC whose subject is
+> the clientId returns **`AADSTS700213`** (`invalid_client`), not `AADSTS70021` — verified by building
+> exactly that credential on a throwaway app registration and exchanging against it from a container
+> carrying the UAMI (§11). The two cases are distinguishable at the exchange after all.
+>
+> The claim was **mine**, not PHASE-0's. PHASE-0 §7 says only that a misconfigured FIC "fails at
+> exchange with a generic error" — it never said the code was the same. I inferred the collision and
+> then built an argument on it, which is the same shape of error as the one this whole project exists
+> to correct.
 
-- **Criterion 3** — a FIC whose subject is the UAMI's *clientId* must be **detected**
-- **Criterion 4** — `AADSTS70021` immediately after creation must be **retried**
+**The ordering is still correct — for three reasons that survive the correction:**
 
-**Both produce the same `AADSTS70021` at exchange.** A retry-on-70021 loop therefore cannot, on its
-own, distinguish *wrong forever* from *right in thirty seconds*. Implemented naively, a permanently
-misconfigured credential looks like slow propagation until the timeout expires, and then reports a
-timeout — the least useful of the available diagnoses.
+1. **It is the only verification available off-Azure.** A managed-identity assertion can only be
+   minted from inside Azure on compute carrying the identity, so on a workstation the exchange cannot
+   run *at all*. Without the structural check a workstation run would have no verification whatsoever,
+   only "create returned success" — which proves nothing. This was always the strongest reason.
+2. **It names the fault.** The exchange can say the credential was rejected; only this check can say
+   *the subject is the clientId instead of the principalId*, which is the mistake people actually make.
+3. **It does not depend on Entra's error codes.** Those are undocumented implementation detail — and,
+   as above, they were not what this project's notes assumed.
 
-**Resolution**: `Test-SpaarkeFederatedCredentialShape` runs first, comparing the subject against the
-`principalId` read from the identity resource itself. Once it passes, `AADSTS70021` has exactly one
-remaining explanation, and retrying it is correct rather than merely hopeful. The timeout message says
-so explicitly and lists what is left to check.
+`AADSTS700213` is now called out by name in the failure message, so an operator who does hit it is
+pointed at the subject rather than at a generic "credential rejected".
 
 This is why `$script:PropagationErrorCodes` contains exactly one code and carries a comment telling
 future maintainers not to widen it. Every other AADSTS code here is a configuration fault that retrying
@@ -247,6 +262,90 @@ Each was a plausible defect and each was checked: UTF-8 BOM in the `--parameters
 `utf-8-sig` first — verified against the installed CLI), `ConvertTo-Json` single-element array
 unwrapping, unbounded retry loop, `$LASTEXITCODE` clobbering, and **secret/token logging** — the
 exchange response is discarded and Entra error bodies carry no assertion material.
+
+---
+
+## 11. End-to-end verification — done, not deferred
+
+An earlier revision of this record deferred exchange verification to task 031 on the grounds that a
+workstation cannot mint a managed-identity assertion. That was true but not a reason to stop: **the
+resources needed already existed, and the one that did not was ours to create.**
+
+- the dev **staging slot** exists and **carries `mi-bff-api-dev`** (created task 001)
+- the operator holds **Global Administrator**, so app registrations and FICs are creatable
+  (an earlier note in this record blamed a missing Application Administrator role for a failed
+  create — wrong twice: it was a *validation* error, and the role was never absent)
+
+The only genuine gap was **compute carrying the UAMI that can run a command**. The App Service SCM /
+Kudu container is a *separate* container from the app on Linux and has no identity endpoint
+(`IDENTITY_ENDPOINT=UNSET`, verified), so a throwaway **Azure Container Instance** with the UAMI
+assigned was created for the probe and deleted afterwards.
+
+### Fixtures built for the probe (all deleted afterwards)
+
+| Resource | Purpose |
+|---|---|
+| `sprk-fic-e2e-probe-20260821` | app registration with **no** existing FIC — exercises the real create path |
+| `sprk-fic-e2e-negative-20260821` | app registration with a FIC whose subject is the UAMI's **clientId** — the conflation, built deliberately |
+| `sprk-fic-e2e` / `sprk-fic-prop` (ACI) | compute carrying `mi-bff-api-dev`, to mint and exchange |
+
+### Results
+
+| Check | Result |
+|---|---|
+| Assertion minted from the UAMI via IMDS | ✅ `assertion_len=1996` |
+| Assertion's `sub` claim | ✅ **`9fd47efb…` = the UAMI's principalId** — the design premise, measured rather than assumed |
+| Assertion's `iss` | ✅ `https://login.microsoftonline.com/{tenant}/v2.0` |
+| **FIC created by this script → token exchange** | ✅ **token issued** — criterion 1 satisfied end-to-end |
+| **Wrong-subject FIC (clientId) → token exchange** | ✅ **rejected**, `invalid_client` / **`AADSTS700213`** — criterion 3 satisfied *by exchange*, not only structurally |
+| **Existing dev BFF FIC → token exchange** | ✅ **token issued** |
+
+That last row is worth calling out: PHASE-0 §4 listed "OBO → Graph/SPE under MI-FIC" as **the remaining
+spike** and noted it needed code on compute carrying the UAMI. The *credential half* of that spike is
+now closed — the BFF app registration can obtain tokens via its MI-FIC. What remains for task 031 is
+the **OBO** half (delegated user tokens through that credential), which genuinely does need the BFF
+deployed.
+
+### Propagation, measured — and the second bug it exposed
+
+A FIC was deleted and recreated on the throwaway app registration while a container carrying the UAMI
+polled the token endpoint every 2 s for 240 s:
+
+| t | Outcome |
+|---|---|
+| 0 s | `issued=1` |
+| **42 s** | `issued=0` — **`invalid_client` / `AADSTS70025`** (the delete/recreate) |
+| 46–170 s | **flaps** between success and `70025` — 8 failures scattered across ~130 s |
+| 170 s+ | steady `issued=1` |
+
+**Two things follow, and neither was what this project's notes said.**
+
+1. **The propagation code is `AADSTS70025`, not `AADSTS70021`.** `70021` was never observed, despite
+   being what PHASE-0 §7, this script's comments, and the task's own acceptance criterion all called
+   "the propagation code". The retry list contained only `70021` — so a genuine post-creation
+   propagation failure would have been classified as a **credential fault and failed fast**, the exact
+   opposite of criterion 4. `70025` is now in the list; `70021` is retained on Microsoft's
+   documentation rather than on evidence, since this is one tenant's observation.
+
+2. **Propagation flaps; it does not fail-then-succeed.** Eight failures interleaved with successes over
+   ~130 s as Entra replicas converged. So a single failure immediately after create means nothing —
+   and, more importantly for deployment, **a single success does not prove the window has closed**.
+   Booked onto tasks 031 and 032, where "deploy, verify once, proceed" would be exactly the wrong
+   reading of a green check.
+
+This is the finding that most justifies the user's instruction not to defer E2E verification. Both
+criterion 3's and criterion 4's real-world error codes differ from what every document in this project
+asserted, and neither could have been discovered by reasoning.
+
+### The finding that changed the design rationale
+
+`AADSTS700213` — **not** `AADSTS70021` — is what a wrong subject actually returns. See §2 for the
+correction. It also makes code-review finding **C1 materially worse than diagnosed**: the reviewer's
+example was the hypothetical `AADSTS700211`, but the buggy `-match "AADSTS70021"` substring test would
+equally have matched **`AADSTS700213`** — the code the *real* wrong-subject case produces. Under the
+original matcher, the single most likely misconfiguration in this whole mechanism would have been
+retried for the full 600-second budget and then reported with a diagnosis stating it had been ruled
+out. The fix (numeric `error_codes`, exact match) removes that whole class.
 
 ---
 

@@ -79,6 +79,11 @@
     <criterion>Negative case: an unauthorised user is denied on every surface — fail-closed confirmed, never error-open.</criterion>
     <criterion>Negative case: an expired or malformed user token is rejected at the inbound layer, not at the OBO exchange.</criterion>
     <criterion>The production slot was not deployed to and not swapped.</criterion>
+    <criterion>Task 030 carry-forward (MEASURED 2026-08-21): after a FIC is created or changed, Entra
+      token acquisition FLAPS for roughly two minutes — 8 failures interleaved with successes over
+      ~130s as replicas converge, returning AADSTS70025 (NOT 70021, which was never observed). A single
+      green check within that window therefore proves nothing. Any verification here must either wait
+      out the window or sample repeatedly before declaring the credential good.</criterion>
     <criterion>Task 030 carry-forward (ADR-check W-7): re-exercise task 030 acceptance criteria 3 and 4 here,
       where a real managed-identity assertion IS mintable. (3) a FIC whose subject is the UAMI's clientId is
       rejected at exchange, and (4) AADSTS70021 immediately after creation is retried, not surfaced as failure.

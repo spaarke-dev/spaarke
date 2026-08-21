@@ -246,17 +246,30 @@ function Store-SecretInKeyVault {
 # `az cloud show --query endpoints`, not just parameterising this one value.
 $script:DefaultExchangeAudience = "api://AzureADTokenExchange"
 
-# The ONLY error code that means "propagation delay", as a NUMBER matched against Entra's
-# structured `error_codes` array. Deliberately narrow: AADSTS700211 (unrecognised issuer) and
-# AADSTS7000215 (invalid secret) are configuration faults that retrying only delays.
+# Error codes that mean "the credential is fine, the directory has not caught up yet", as NUMBERS
+# matched exactly against Entra's structured `error_codes` array.
 #
-# ⚠️ THESE ARE NUMBERS, AND THE MATCH IS EXACT, FOR A REASON. An earlier version of this file
-# held them as the STRING "AADSTS70021" and tested with `-match`, which is a regex substring
-# test — so "AADSTS700211: No matching federated identity record found" matched, and the
-# unrecognised-issuer fault the comment above explicitly excludes was retried for the entire
-# budget before reporting a diagnosis that asserted the opposite of the truth. Caught at task
-# 030's code-review gate. Do not reintroduce substring matching here.
-$script:PropagationErrorCodes = @(70021)
+# 70025 IS HERE BECAUSE IT WAS MEASURED, NOT BECAUSE IT WAS DOCUMENTED. On 2026-08-21 a FIC was
+# deleted and recreated on a throwaway app registration while a container carrying the UAMI polled
+# the token endpoint every 2 s. The propagation window produced **AADSTS70025**, and did so
+# INTERMITTENTLY — eight failures scattered across ~130 s, flapping between success and failure as
+# Entra replicas converged, not a clean fail-then-succeed. AADSTS70021 — the code this project's
+# notes, this file's comments and the task's own acceptance criterion all named as "the propagation
+# code" — was **never observed**. Had the list stayed at 70021 alone, a genuine post-creation
+# propagation failure would have been classified as a credential fault and failed fast: the exact
+# opposite of the required behaviour. 70021 is retained because Microsoft documents it and this is
+# one tenant's observation, not a proof of the complete set.
+#
+# ⚠️ NUMBERS, MATCHED EXACTLY, FOR A REASON. An earlier version held these as the STRING
+# "AADSTS70021" and tested with `-match` — a regex SUBSTRING test. That matched AADSTS700211
+# (unrecognised issuer) and, worse, AADSTS700213, which is what a wrong SUBJECT actually returns
+# (also measured 2026-08-21). The single most likely misconfiguration in this whole mechanism was
+# therefore being retried for the full budget and then reported as "ruled out". Caught at task 030's
+# code-review gate. Do not reintroduce substring matching here.
+#
+# Explicitly NOT retried: 700211 (unrecognised issuer), 700213 (no FIC matches the assertion's
+# subject), 7000215 (invalid secret) — all configuration faults that retrying only delays.
+$script:PropagationErrorCodes = @(70021, 70025)
 
 # OAuth2 `error` values that mean the CLIENT CREDENTIAL itself was rejected.
 $script:CredentialLayerErrors = @("invalid_client", "unauthorized_client")
@@ -455,24 +468,29 @@ function Test-SpaarkeFederatedCredentialShape {
         UAMI actually requires?
 
     .DESCRIPTION
-        THIS IS NOT DECORATION AND IT IS NOT OPTIONAL. It exists to break a genuine collision
-        between two requirements that look independent but are not:
+        THIS IS NOT DECORATION AND IT IS NOT OPTIONAL, for three reasons — none of which is the
+        reason an earlier version of this comment gave.
 
-          * a FIC whose subject is WRONG produces AADSTS70021 at exchange
-          * a FIC that is merely still PROPAGATING produces AADSTS70021 at exchange
+        1. IT IS THE ONLY VERIFICATION AVAILABLE OFF-AZURE. A managed-identity assertion can only
+           be minted from inside Azure on compute carrying the identity, so on a workstation the
+           token exchange cannot run at all. Without this check, a workstation run would have no
+           verification whatsoever — only "create returned success", which proves nothing.
 
-        Identical symptom. So a retry-on-70021 loop, on its own, cannot tell "wrong forever"
-        from "right in thirty seconds" — it just makes a permanent misconfiguration look like
-        slow propagation until the timeout expires, and then reports a timeout instead of the
-        actual fault.
+        2. IT NAMES THE FAULT. The exchange can tell you the credential was rejected; only this
+           check can tell you the subject was set to the UAMI's clientId instead of its
+           principalId, which is the specific mistake people actually make.
 
-        Running this check FIRST resolves the ambiguity: it compares the subject against the
-        principalId read from the identity resource itself, so by the time the exchange runs,
-        AADSTS70021 has exactly one remaining explanation — propagation — and retrying it is
-        correct rather than merely hopeful.
+        3. IT DOES NOT DEPEND ON ENTRA'S ERROR CODES. Those are undocumented implementation
+           detail and they are NOT what this project's own notes assumed — see below.
 
-        It also catches the specific conflation (subject = clientId) by name, because a generic
-        "subject mismatch" is not what an operator needs at 2am.
+        ⚠️ CORRECTION, measured 2026-08-21 against the live tenant. An earlier version of this
+        comment claimed a wrong subject and ordinary propagation both surface as AADSTS70021 —
+        "identical symptom" — and that breaking that tie was this function's purpose. That is
+        FALSE. A FIC whose subject is the clientId returns **AADSTS700213** (`invalid_client`),
+        not AADSTS70021; verified by building exactly that credential on a throwaway app
+        registration and exchanging against it from a container carrying the UAMI. The two cases
+        are distinguishable at the exchange after all. The ordering below is still correct, for
+        the three reasons above — but not for the reason originally given.
     #>
     [CmdletBinding()]
     param(
@@ -596,11 +614,18 @@ function Test-SpaarkeFicTokenExchange {
           token issued
               -> PASS.
 
-        RETRY. AADSTS70021 is retried, because immediately after creation it means propagation
-        (TENANCY-AND-CREDENTIALS.md 1; PHASE-0 7). It is safe to retry it here ONLY because the
-        structural check has already ruled out the wrong-subject explanation for the same code.
-        Do not widen $script:PropagationErrorCodes — every other code is a configuration fault
-        that retrying merely delays.
+        RETRY. Propagation-class codes are retried because immediately after creation the directory
+        has not converged. MEASURED 2026-08-21 rather than assumed: the real window produces
+        **AADSTS70025**, INTERMITTENTLY, for roughly two minutes — it flaps between success and
+        failure as Entra replicas catch up, so a single failure right after create means nothing and
+        a single success does not prove the window has closed. AADSTS70021 was never observed despite
+        being what every note in this project called "the propagation code"; it is retained on
+        Microsoft's documentation, not on evidence.
+
+        Do not widen $script:PropagationErrorCodes casually — 700211 (unrecognised issuer) and 700213
+        (no FIC matches the subject) are configuration faults, and 700213 in particular is the
+        wrong-subject signature that must fail fast. Widen it only on the basis 70025 was added: an
+        observation, recorded.
     #>
     [CmdletBinding()]
     param(
@@ -696,7 +721,13 @@ function Test-SpaarkeFicTokenExchange {
                 }
             }
 
-            $layer = if ($oauthError -and ($script:CredentialLayerErrors -contains $oauthError)) {
+            # AADSTS700213 is what Entra actually returns when no federated credential on this app
+            # matches the assertion's subject — the wrong-subject case. Named explicitly because the
+            # generic "credential rejected" message sends an operator looking in the wrong place.
+            $layer = if ($errorCodes -contains 700213) {
+                "AADSTS700213: no federated credential on this app matches the assertion's SUBJECT. The assertion was minted by a different identity than the one this credential trusts, or the credential's subject is not this UAMI's principalId."
+            }
+            elseif ($oauthError -and ($script:CredentialLayerErrors -contains $oauthError)) {
                 "The OAuth2 error '$oauthError' means the credential itself was rejected."
             } else {
                 "The OAuth2 error '$oauthError' is not a known propagation or authorization-layer code, so it is treated as a credential fault."
@@ -711,10 +742,11 @@ function Test-SpaarkeFicTokenExchange {
         $elapsed = ((Get-Date) - $started).TotalSeconds
         if ($elapsed + $delay -gt $MaxWaitSeconds) {
             $timeoutDetail = @"
-AADSTS70021 persisted for $([int]$elapsed)s across $attempt attempt(s) (limit ${MaxWaitSeconds}s).
+A propagation-class error (AADSTS70021 / 70025) persisted for $([int]$elapsed)s across $attempt attempt(s) (limit ${MaxWaitSeconds}s).
 
-The structural check already confirmed issuer, subject and audience match this UAMI, so the
-usual explanation — subject set to the clientId instead of the principalId — is ruled out.
+This is the propagation code specifically, and the structural check already confirmed issuer,
+subject and audience match this UAMI. (A subject set to the clientId surfaces as AADSTS700213,
+not this code — measured 2026-08-21 — so that mistake is doubly ruled out here.)
 Remaining candidates, in order of likelihood:
   1. Propagation genuinely slower than the configured limit. Re-run with a larger
      -PropagationRetrySeconds before investigating anything else.
@@ -733,7 +765,7 @@ $errorBody
             }
         }
 
-        Write-Info "AADSTS70021 (propagation) — attempt $attempt, retrying in ${delay}s (elapsed $([int]$elapsed)s of ${MaxWaitSeconds}s)..."
+        Write-Info "Propagation-class error (codes: $($errorCodes -join ',')) — attempt $attempt, retrying in ${delay}s (elapsed $([int]$elapsed)s of ${MaxWaitSeconds}s)..."
         Start-Sleep -Seconds $delay
         $delay = [Math]::Min($delay * 2, 30)
     }

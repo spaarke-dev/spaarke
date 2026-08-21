@@ -66,6 +66,11 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion>Task 030 carry-forward (MEASURED 2026-08-21): if any FIC is created or modified as part
+      of this swap, expect ~2 minutes of INTERMITTENT AADSTS70025 failures while Entra replicas
+      converge — successes and failures interleaved, not a clean transition. Do not read an early
+      success as "the window closed", and do not read an early failure as a broken credential. Sample
+      across the window before making the swap/rollback decision.</criterion>
     <criterion>Pre-swap: keyVaultReferenceIdentity and the managed-identity assignment are verified correct on BOTH slots, since site properties do not swap.</criterion>
     <criterion>Dev runs on MI-FIC as the first-priority credential.</criterion>
     <criterion>The full §6.1 checklist passes post-swap.</criterion>

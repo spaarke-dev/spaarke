@@ -100,12 +100,32 @@
         replacing their $TenantId with this script's production default (wrong tenant = wrong issuer =
         a credential that creates cleanly and never works). Mode REMOVED; consumers invoke -FicOnly.
 
-    NOT verified, deliberately and stated in the decision record: creating a genuinely NEW FIC
-    end-to-end, and a successful token exchange. Every candidate (issuer, subject) on the dev app
-    registration already exists, and a workstation cannot mint a managed-identity assertion at all.
-    The payload is proven good — it reached Entra's uniqueness validation, not a schema error.
-    Exchange verification is booked onto task 031 (slot, -AssertionToken), which also re-exercises
-    criteria 3 and 4 as the only repeatable regression protection they get.
+    END-TO-END VERIFIED 2026-08-21 (this task, NOT deferred to 031). An earlier revision deferred
+    exchange verification on the grounds that a workstation cannot mint a managed-identity assertion.
+    True, but not a reason to stop: the staging slot already carried the UAMI, the operator holds
+    Global Administrator, and the only missing piece — compute carrying the UAMI that can run a
+    command — was created as a throwaway Azure Container Instance and deleted afterwards. (The
+    App Service SCM/Kudu container is separate from the app container on Linux and has NO identity
+    endpoint; verified IDENTITY_ENDPOINT=UNSET.)
+
+    Built two throwaway app registrations, both deleted after: one with no FIC (to exercise the real
+    create path) and one carrying a deliberately WRONG subject (the UAMI's clientId). Results:
+      * assertion minted from the UAMI, sub claim = the principalId (design premise, measured)
+      * FIC created by this script  -> TOKEN ISSUED   (criterion 1, end-to-end)
+      * wrong-subject FIC           -> REJECTED, invalid_client / AADSTS700213
+                                       (criterion 3 satisfied BY EXCHANGE, not only structurally)
+      * existing dev BFF FIC        -> TOKEN ISSUED
+    The last one closes the credential half of PHASE-0 §4's "remaining spike". The OBO half still
+    needs the BFF deployed, which is task 031's actual job.
+
+    FINDING THAT CORRECTED THE DESIGN RATIONALE: a wrong subject returns AADSTS700213, NOT
+    AADSTS70021. This record and the code previously asserted both cases produce the same code and
+    that breaking that tie was the structural check's purpose — that was my inference, never
+    PHASE-0's claim, and it is false. The ordering is still right for three other reasons (it is the
+    only verification possible off-Azure; it names the fault; it does not depend on undocumented
+    error codes). It also makes code-review C1 worse than diagnosed: the buggy substring matcher
+    would have matched AADSTS700213 — the code the REAL wrong-subject case produces — and retried the
+    single most likely misconfiguration for the full 600s budget.
 
     Cross-project: delivered to customer-provisioning-orchestration-r1 (PROVISIONING-CHANGE-REQUEST
     §10). Their PR #779 rewrites this same file; merge simulated = 2 additive hunks. Their branch has

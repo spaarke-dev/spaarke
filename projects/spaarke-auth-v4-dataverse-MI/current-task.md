@@ -47,16 +47,36 @@ substring matching cannot return by accident.
 replacing a consumer's `$TenantId` with this script's production default. Wrong tenant = wrong issuer
 = a credential that creates cleanly and never works. Mode **removed**; consumers invoke `-FicOnly`.
 
+### Task 030 — E2E verified, and two error codes this project had wrong
+
+Verified against the live tenant on 2026-08-21 using a throwaway ACI carrying `mi-bff-api-dev`, plus
+two throwaway app registrations (all deleted; nothing left behind):
+
+- FIC created by the script → **token issued**
+- wrong-subject FIC → **rejected**, `AADSTS700213`
+- existing dev BFF FIC → **token issued** (closes the credential half of PHASE-0's "remaining spike")
+
+**Two corrections that matter downstream:**
+
+| Case | This project said | Actually |
+|---|---|---|
+| Wrong subject | `AADSTS70021` | **`AADSTS700213`** |
+| Propagation | `AADSTS70021` | **`AADSTS70025`**, and it **flaps** ~2 min |
+
+The propagation one was a live bug: the retry list held only `70021`, so a real propagation failure
+would have failed fast — the opposite of criterion 4. Both corrected in the script, in PHASE-0 §7 at
+source, and booked onto tasks 031/032 (a single green check inside the flap window proves nothing).
+
 ### Task 030 — three things a fresh session must not re-derive
 
 1. **Idempotency is keyed on `(issuer, subject, audience)`, NOT the credential name.** Entra enforces that
    triple's uniqueness itself and *rejects* a duplicate — so a name-only check does not create a duplicate,
    it produces a **failed run against an already-correct credential**. Verified live 2026-08-21.
-2. **The structural check must run BEFORE the AADSTS70021 retry loop.** A wrong subject and ordinary
-   propagation produce the *same* error code; the structural check is the only thing that separates them.
-3. **Exit `2` ≠ failure.** It means structurally correct but not exchange-provable from this host (a
-   workstation cannot mint a managed-identity assertion). Exchange verification completes in **task 031**
-   on the slot, via `-AssertionToken`.
+2. **The structural check runs BEFORE the retry loop** — but *not* for the reason first written. The two
+   cases have different error codes (above). It runs first because it is the **only verification possible
+   off-Azure**, because it names the fault, and because it does not depend on undocumented error codes.
+3. **Exit `2` ≠ failure.** Structurally correct but not exchange-provable from *this host* — a workstation
+   cannot mint a managed-identity assertion. Not a deferral: the exchange itself is now verified E2E.
 
 ### Task 030 — open item carried forward
 

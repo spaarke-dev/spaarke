@@ -166,6 +166,14 @@ there is no window in which removal breaks a running path.
 
 ## 7. Known behaviour to expect
 
+> ⚠️ **CORRECTED 2026-08-21 (task 030, measured).** The bullet below names `AADSTS70021` as the
+> propagation code. Against this tenant it is **`AADSTS70025`**, and `70021` was never observed.
+> Propagation also **flaps** — 8 failures interleaved with successes over ~130 s — rather than failing
+> cleanly then succeeding. Separately, a **wrong subject** returns **`AADSTS700213`**, not `70021`, so
+> the two cases are distinguishable at the exchange (an assumption to the contrary was built into task
+> 030's first design and had to be corrected). Evidence:
+> [`decisions/030-fic-automation.md`](decisions/030-fic-automation.md) §11.
+
 - **`AADSTS70021` for the first few minutes** after FIC creation is normal propagation delay, **not** evidence
   that MI-FIC and OBO are incompatible. Retry before concluding anything. This credential was created
   2026-08-19; by the time the spike runs, propagation is long settled.
