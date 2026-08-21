@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-G01/G02/G03 — The gate contract: preservation oracle + outcome-honesty assertion + two comparison levels with normalization</title>
     <phase>2 Oracle &amp; Corpus</phase>
-    <gate>blocked-on-001</gate>
-    <status>pending</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Builds the measurement the entire project's architecture decision rests on. If the oracle is wrong, the Phase-3 gate is meaningless and R9 follows.</rigor-reason>
     <model-tier>opus</model-tier>

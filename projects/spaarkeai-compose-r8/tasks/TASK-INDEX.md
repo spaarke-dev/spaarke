@@ -71,10 +71,20 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 020 | **The gate contract** — preservation oracle + outcome-honesty assertion + two comparison levels with normalization *(all one harness file)* | FR-G01/02/03 | FULL | opus/max | ❌ | 001, 013 | 🔲 |
+| 020 | **The gate contract** — preservation oracle + outcome-honesty assertion + two comparison levels with normalization *(all one harness file)* | FR-G01/02/03 | FULL | opus/max | ❌ | 001, 013 | ✅ |
 | 021 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds · interior text boxes · multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
 | 022 | Corpus: near-tier owner documents (char formatting · court spacing · footnotes · `REF` · content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
 | 023 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | opus/high | ❌ | 020–022 | 🔲 |
+
+> **✅ 020 CLOSED — the control is published, 2026-08-21.** The gate now measures what SURVIVES, not just
+> whether the save crashed. On current master: **6.53% overall block preservation, 2.55% near-tier**, across
+> 245 comparable blocks in 10 documents. Every save reports `persisted` and **none of them lies** — Track S's
+> outcome contract holds corpus-wide. Three findings for Phase 3: (a) **block counts are stable** (109→109,
+> 50→50) so the loss is INSIDE blocks, not structural — exactly the shape "clone the untouched blocks" is
+> built for; (b) the loss lands on `pPr/spacing`, `pPr/pStyle`, `pPr/ind`, `r/rPr`, `pPr/tabs` — the owner's
+> dev banner, itemised; (c) `AppligentNDA_Signed.docx` **already** carries duplicate `w14:paraId`s, so task
+> 021 should check coverage before synthesizing that R4-breaker.
+> Evidence: [`notes/gate-contract.md`](../notes/gate-contract.md).
 
 ## Phase 3 — Model proof · **THE GATE**
 
