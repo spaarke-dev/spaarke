@@ -45,7 +45,7 @@ Task 005 carries **two** binding constraints, both filed as `<constraint>` eleme
 | `6393acba8` | wave P0-B — 014 (auth-mode cache key) + 019 (membership `["*"]`) |
 | `ac9d78c85` | task 004 — `AuthorizationService` caller-scoped; `TokenHelper.ExtractBearerTokenOrNull` |
 | `4a695ce02` | checkpoint — context handoff after task 004 |
-| _(this task)_ | task 006 — caller-scoped `PermissionsEndpoints`; `GetCallerAccessAsync`; removed body-supplied `UserId` |
+| `93b506a66` | task 006 — caller-scoped `PermissionsEndpoints`; `GetCallerAccessAsync`; removed body-supplied `UserId` |
 
 ### Critical Context
 
