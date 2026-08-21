@@ -22,8 +22,8 @@ unless `-CreateFederatedCredential` / `-FicOnly` / `-ExportFunctionsOnly` is pas
 | `Test-SpaarkeFicTokenExchange` | The real exchange, with bounded 70021 retry (§2) |
 | `New-SpaarkeFederatedCredential` | Orchestrates 1→5 |
 
-Provisioning consumes it either as `-FicOnly` (exit-coded) or by dot-sourcing with
-`-ExportFunctionsOnly` and calling `New-SpaarkeFederatedCredential` directly.
+Provisioning consumes it by **invoking** the script with `-FicOnly` (exit-coded). There is
+deliberately **no dot-source mode** — see §10.
 
 ---
 
@@ -147,6 +147,10 @@ opt-in.
 | 9 | Propagation: retries 5→10 s, respects budget, disambiguating timeout | ✅ live Entra |
 | 10 | Create payload shape accepted by `az` / Graph | ✅ reached Entra validation |
 | 11 | Existing behaviour unchanged without the new flags | ✅ **byte-identical** `-DryRun` output |
+| 12 | `AADSTS700211` is NOT retried as propagation (C1 regression guard) | ✅ 14/14 harness |
+| 13 | FIC args without the mode switch are refused, not silently run | ✅ live |
+| 14 | `-DryRun` placeholder app id previews instead of failing | ✅ live |
+| 15 | Combined mode prints the summary, then exits 2 | ✅ live |
 
 **NOT verified — stated plainly:**
 
@@ -160,6 +164,92 @@ opt-in.
 
 ---
 
+## 10. Code-review gate — two criticals, both real, both fixed
+
+Neither was architectural; both sat directly on what this task exists to deliver.
+
+### C1 — `-match` is a substring test, so `AADSTS700211` was retried as propagation
+
+```powershell
+$script:PropagationErrorCodes = @("AADSTS70021")
+if ($errorBody -match $code) { $isPropagation = $true }   # regex substring!
+```
+
+`'AADSTS700211: ...' -match 'AADSTS70021'` is **True**. `AADSTS700211` is *unrecognised issuer* — a
+configuration fault the comment three lines above the declaration explicitly says must never be
+retried. The matcher retried it for the whole 600 s budget, then printed the timeout diagnosis, which
+**asserts the opposite of the truth**: *"the structural check already confirmed issuer ... so the usual
+explanation is ruled out."* Ten minutes burned, then an actively misleading conclusion.
+
+This is exactly the ambiguity §2's ordering exists to remove — reintroduced one layer down, in the
+matcher rather than the design. It sat on task 031's critical path: 031 mints a real assertion, and a
+wrong-issuer assertion is precisely what produces `AADSTS700211`.
+
+**Fix**: parse the body once and classify on Entra's structured fields — `error_codes` (numeric,
+exact) and the OAuth2 `error` field — instead of substring-matching AADSTS numbers. The non-JSON
+fallback uses a negative lookahead. Codes are now stored as **numbers**, so substring matching cannot
+be reintroduced by accident.
+
+**Fixed alongside (W3)**: the "authorization-layer means PASS" rule special-cased exactly one code,
+`AADSTS500011` — which for Graph essentially never fires, since the Graph service principal always
+exists. A freshly provisioned app registration with no grants returns a different code and would have
+been reported as a credential fault: the exact false negative the docstring claims the design avoids.
+Now classified on the OAuth2 `error` field.
+
+### C2 — the dot-source mode silently overwrote the consumer's `$TenantId`
+
+`-ExportFunctionsOnly` let a consumer dot-source this script for the functions. Dot-sourcing executes
+the `param()` block **in the caller's scope**, so it:
+
+1. replaced the caller's `$TenantId` with this script's hard-coded production default — and for FIC
+   work a wrong tenant is a wrong **issuer**, i.e. a credential that creates cleanly and never works;
+2. flipped the caller's `$ErrorActionPreference` from `Continue` to `Stop`;
+3. clobbered same-named `Write-*` helpers — and because they are simple functions, a caller's call with
+   different parameter names did **not** error; surplus arguments fell into `$args` and vanished.
+
+The designated consumer is `customer-provisioning-orchestration-r1` — a *provisioning* script, where
+`$TenantId` almost certainly exists. Harm 1 cannot be fixed while keeping the affordance: `param()` has
+already run by the time any guard could execute.
+
+**Fix**: the mode was **removed**. Consumers invoke with `-FicOnly`, which runs in its own child scope
+and leaks nothing. The correct form for an in-process contract is a real module
+(`scripts/lib/SpaarkeFic.psm1` + `Import-Module`); not done inline because the `Write-*` output helpers
+would have to move with it, colliding with PR #779's rewrite of exactly that region. Offered to
+provisioning rather than assumed.
+
+> The affordance was **mine** — added for convenience, never required by the task — and I had already
+> advertised it in `scripts/README.md` and in the delivery notice. Both are corrected.
+
+### Other findings applied
+
+| # | Fix |
+|---|---|
+| W1/S3/S9 | `#Requires -Version 7.0` (under 5.1, `az` stderr became a terminating error — orphaning temp files and making every friendly message unreachable); `try/finally` around create/update |
+| W2 | Resolve app **object ID → appId** before the exchange — the token endpoint accepts appId only, so the documented object-ID form would have declared a *working* credential broken |
+| W4 | `-DryRun -Force` previewed the repair, then hard-failed on the drifted shape it was about to fix |
+| W5 | `-DryRun` with no existing app registration hard-failed on the placeholder GUID |
+| W6 | `Find-SpaarkeEquivalentFederatedCredential` swallowed an `az` **read failure** as "no match" — degrading idempotency to name-based and surfacing the resulting rejection as a permissions error |
+| W8 | Null read-back after a successful create (Graph reads are eventually consistent) gave an opaque parameter-binding error |
+| W9 | `$_` shadowed in a nested catch, replacing Entra's real response with a PowerShell message |
+| W12 | FIC parameters **without** the mode switch ran the full app-registration path — minting a secret and writing four Key Vault entries — then exited 0 having never created the FIC |
+| W13 | `[ValidateRange(0,3600)]` on the retry budget; `-TimeoutSec 30` on the exchange |
+| S7 | `az login --identity --username` → `--client-id` (deprecated flag, inside the recovery instructions) |
+
+**Deferred, with reasons**: W7 (a near-duplicate audience set routes to a permissions message rather
+than the drift path), W10 (`-AssertionToken` as a plain string is visible in the process table — task
+031 should prefer an env var), W11 (sovereign-cloud issuer hard-coded; annotated, not enforced), W14
+(pre-existing `az account set --subscription $TenantId` is wrong but usually harmless because
+`az identity show --ids` carries its own subscription).
+
+### Cleared explicitly
+
+Each was a plausible defect and each was checked: UTF-8 BOM in the `--parameters` file (azure-cli tries
+`utf-8-sig` first — verified against the installed CLI), `ConvertTo-Json` single-element array
+unwrapping, unbounded retry loop, `$LASTEXITCODE` clobbering, and **secret/token logging** — the
+exchange response is discarded and Entra error bodies carry no assertion material.
+
+---
+
 ## 7. Conflict check (POML criterion 6)
 
 🛑→⚠️ **Hard warn, downgraded after inspection.** `customer-provisioning-orchestration-r1` (PR **#779**,
@@ -168,8 +258,12 @@ app-registration path.
 
 Three-way merge simulation (`base` = master, `ours` = task 030, `theirs` = #779):
 
-- **1 conflict hunk** — both sides append to `param()`. Resolution: keep both (their
-  `$SecretExpiryMonths` + the FIC parameters). Mechanically obvious.
+- **2 conflict hunks**, both additive and mechanically obvious (re-measured after the code-review
+  fixes; it was 1 before `#Requires` and the deferred exit were added):
+  1. `param()` — both sides append. Keep both (their `$SecretExpiryMonths` + the FIC parameters).
+  2. End of file — ours adds the deferred-exit check, theirs adds an explicit `exit 0`. These
+     **compose**: keep the deferred check first (it exits non-zero only when set), then their
+     `exit 0`. The combined result is better than either side alone.
 - All seven functions, the execution section, and both mode guards survive **exactly once**.
 - The `-FicOnly` Key Vault skip lands correctly on their restructured pre-flight — checked
   specifically, because a clean *textual* merge can still be semantically wrong.

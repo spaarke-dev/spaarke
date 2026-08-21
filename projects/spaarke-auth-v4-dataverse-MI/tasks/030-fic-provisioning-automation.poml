@@ -4,7 +4,7 @@
     <title>Extend Register-EntraAppRegistrations.ps1 with FIC creation (FR-C4)</title>
     <phase>3 Rollout</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag; provisioning automation another project is blocked on; silent failure mode.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -76,4 +76,43 @@
     <criterion>The script's existing behaviour is unchanged when the new function is not invoked.</criterion>
     <criterion>/conflict-check run against customer-provisioning-orchestration-r1 before the PR.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-21. `scripts/Register-EntraAppRegistrations.ps1` +~900/-3 additive: 8 FIC functions
+    + execution section + 11 params, all inert without -CreateFederatedCredential / -FicOnly. Existing
+    behaviour verified BYTE-IDENTICAL via -DryRun diff against origin/master.
+
+    Two design points that are load-bearing and must survive future edits:
+    (1) the structural check runs BEFORE the AADSTS70021 retry loop — a wrong subject and ordinary
+        propagation produce the SAME error code, so the retry loop alone cannot tell them apart;
+    (2) idempotency is keyed on the (issuer, subject, audience) TRIPLE, not the credential name. Entra
+        enforces that triple's uniqueness itself, so a name-only check does not create a duplicate — it
+        produces a FAILED run against an already-correct credential. Found by running it live.
+
+    Quality gates: adr-check 0 violations / 7 warnings (all applied or booked onto 031 + 033).
+    code-review 2 CRITICAL + 14 warnings; both criticals fixed —
+    C1: `-match "AADSTS70021"` is a regex SUBSTRING test and also matched AADSTS700211
+        (unrecognised issuer), retrying a configuration fault for the full budget and then printing a
+        diagnosis asserting the opposite of the truth. Now classified on Entra's structured
+        `error_codes` / OAuth2 `error` fields; codes stored as NUMBERS so substring matching cannot
+        return by accident.
+    C2: the -ExportFunctionsOnly dot-source mode executed param() in the CALLER's scope, silently
+        replacing their $TenantId with this script's production default (wrong tenant = wrong issuer =
+        a credential that creates cleanly and never works). Mode REMOVED; consumers invoke -FicOnly.
+
+    NOT verified, deliberately and stated in the decision record: creating a genuinely NEW FIC
+    end-to-end, and a successful token exchange. Every candidate (issuer, subject) on the dev app
+    registration already exists, and a workstation cannot mint a managed-identity assertion at all.
+    The payload is proven good — it reached Entra's uniqueness validation, not a schema error.
+    Exchange verification is booked onto task 031 (slot, -AssertionToken), which also re-exercises
+    criteria 3 and 4 as the only repeatable regression protection they get.
+
+    Cross-project: delivered to customer-provisioning-orchestration-r1 (PROVISIONING-CHANGE-REQUEST
+    §10). Their PR #779 rewrites this same file; merge simulated = 2 additive hunks. Their branch has
+    ZERO FIC code, so the duplicate-work risk did not materialise.
+
+    OPEN: PROVISIONING-CHANGE-REQUEST §9.2 (Model 2 cross-tenant FIC issuer) is still unanswered. The
+    script now REFUSES cross-tenant pairs at runtime, so the failure is loud rather than silent — but
+    it must be answered before their Wave G-3 task 130 executes.
+  </notes>
 </task>

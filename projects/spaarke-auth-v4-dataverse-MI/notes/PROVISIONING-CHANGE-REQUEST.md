@@ -372,10 +372,20 @@ Two entry points, both on the existing script (no new file):
   -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>" `
   -TenantId <tenant>
 
-# 2. Dot-source the functions into Provision-Customer.ps1 without executing anything
-. .\Register-EntraAppRegistrations.ps1 -ExportFunctionsOnly
-New-SpaarkeFederatedCredential -AppId $appId -UamiResourceId $uami -TenantId $tenant
+# 2. Preview without changing anything
+.\Register-EntraAppRegistrations.ps1 -DryRun -CreateFederatedCredential `
+  -FederatedCredentialAppId <app-reg-id> -UamiResourceId <arm-id> -TenantId <tenant>
 ```
+
+⚠️ **Invoke it; do not dot-source it.** An earlier draft of this notice offered a
+`-ExportFunctionsOnly` dot-source mode for `Provision-Customer.ps1`. **That has been removed** — our
+code-review gate proved it silently overwrote the *caller's* `$TenantId` with this script's
+hard-coded production default (dot-sourcing executes `param()` in your scope), flipped your
+`$ErrorActionPreference` to `Stop`, and replaced any same-named `Write-*` helpers you had, dropping
+surplus arguments without erroring. For FIC work a wrong tenant is a wrong issuer — a credential that
+creates cleanly and never works, which is the failure class this whole project exists to remove. If
+you need an in-process contract rather than a subprocess call, tell us and we will extract a proper
+`.psm1` module; the output helpers would have to move with it, which is why we did not do it inline.
 
 `-UamiResourceId` is an **ARM resource ID, not a name** — five UAMIs exist in dev and
 `spaarke-bff-identity` is a decoy that is not attached to the BFF.

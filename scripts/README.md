@@ -335,9 +335,15 @@ before it, every federated credential in the tenant was created by hand.
   -FederatedCredentialAppId <app-reg-id> `
   -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>"
 
-# Import the FIC functions into another provisioning script without running anything
-. .\Register-EntraAppRegistrations.ps1 -ExportFunctionsOnly
+# Preview without changing anything
+.\Register-EntraAppRegistrations.ps1 -DryRun -CreateFederatedCredential `
+  -FederatedCredentialAppId <app-reg-id> -UamiResourceId <arm-id>
 ```
+
+> **Integrate by INVOKING it, never by dot-sourcing it.** A dot-source runs the script's `param()`
+> block in *your* scope, silently replacing your `$TenantId` with this script's production default —
+> and a wrong tenant means a wrong FIC issuer, i.e. a credential that creates cleanly and never
+> works. `-FicOnly` runs in its own child scope and leaks nothing.
 
 - **Idempotent on the `(issuer, subject, audience)` triple, not the name** — a credential that already
   carries the required triple under a different name is a no-op, not a duplicate or an error.

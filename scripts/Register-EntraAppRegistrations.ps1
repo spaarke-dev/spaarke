@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Creates the production Entra ID app registration for the Spaarke BFF API.
@@ -90,11 +91,6 @@
       -FederatedCredentialAppId 1e40baad-e065-4aea-a8d4-4b7ab273458c `
       -UamiResourceId "/subscriptions/<sub>/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-bff-api-dev"
 
-.EXAMPLE
-    # Import the FIC functions into another provisioning script without running anything
-    . .\Register-EntraAppRegistrations.ps1 -ExportFunctionsOnly
-    New-SpaarkeFederatedCredential -AppId $appId -UamiResourceId $uami -TenantId $tenant
-
 .NOTES
     Project: production-environment-setup-r1
     Task: 021 — Create Entra ID app registrations
@@ -114,19 +110,29 @@ param(
     # All inert by default. Existing invocations behave exactly as before.
     [switch]$CreateFederatedCredential,
     [switch]$FicOnly,
-    [switch]$ExportFunctionsOnly,
     [string]$UamiResourceId = "",
     [string]$FederatedCredentialAppId = "",
     [string]$FederatedCredentialName = "",
     [string]$FederatedCredentialAudience = "api://AzureADTokenExchange",
     [string]$AssertionToken = "",
     [string]$ExchangeScope = "https://graph.microsoft.com/.default",
-    [int]$PropagationRetrySeconds = 600,
+    [ValidateRange(0, 3600)][int]$PropagationRetrySeconds = 600,
     [switch]$ForceFederatedCredentialUpdate,
     [switch]$AllowUnverified
 )
 
 $ErrorActionPreference = "Stop"
+
+# Supplying FIC parameters without the mode switch used to run the FULL app-registration path --
+# creating an app registration, minting a 24-month client secret and writing four Key Vault
+# entries -- then exit 0 with a summary that reads like success, having never created the FIC.
+# Forgetting the switch is a plausible typo, so refuse rather than silently do something else.
+$ficArgsSupplied = @($UamiResourceId, $FederatedCredentialAppId, $FederatedCredentialName, $AssertionToken) |
+    Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count
+if (($ficArgsSupplied -gt 0 -or $ForceFederatedCredentialUpdate -or $AllowUnverified) -and
+    -not ($CreateFederatedCredential -or $FicOnly)) {
+    throw "Federated-credential parameters were supplied without -CreateFederatedCredential or -FicOnly. Refusing to run the full app-registration path (which would mint a client secret and write to Key Vault) when a FIC run was clearly intended."
+}
 
 # -FicOnly is a mode, not an extra step: it turns this into a federated-credential-only run.
 if ($FicOnly) {
@@ -240,10 +246,27 @@ function Store-SecretInKeyVault {
 # `az cloud show --query endpoints`, not just parameterising this one value.
 $script:DefaultExchangeAudience = "api://AzureADTokenExchange"
 
-# The ONLY error code that means "propagation delay". Deliberately narrow: AADSTS700211
-# (unrecognised issuer) and AADSTS7000215 (invalid secret) are configuration faults that
-# retrying only delays. See Test-SpaarkeFicTokenExchange for why this list must not grow.
-$script:PropagationErrorCodes = @("AADSTS70021")
+# The ONLY error code that means "propagation delay", as a NUMBER matched against Entra's
+# structured `error_codes` array. Deliberately narrow: AADSTS700211 (unrecognised issuer) and
+# AADSTS7000215 (invalid secret) are configuration faults that retrying only delays.
+#
+# ⚠️ THESE ARE NUMBERS, AND THE MATCH IS EXACT, FOR A REASON. An earlier version of this file
+# held them as the STRING "AADSTS70021" and tested with `-match`, which is a regex substring
+# test — so "AADSTS700211: No matching federated identity record found" matched, and the
+# unrecognised-issuer fault the comment above explicitly excludes was retried for the entire
+# budget before reporting a diagnosis that asserted the opposite of the truth. Caught at task
+# 030's code-review gate. Do not reintroduce substring matching here.
+$script:PropagationErrorCodes = @(70021)
+
+# OAuth2 `error` values that mean the CLIENT CREDENTIAL itself was rejected.
+$script:CredentialLayerErrors = @("invalid_client", "unauthorized_client")
+
+# OAuth2 `error` values that mean the credential was ACCEPTED and Entra then objected to the
+# requested resource/scope. Entra evaluates the resource only after accepting the credential,
+# so these are positive evidence the FIC works. Classifying on this field rather than on a
+# list of AADSTS numbers is what keeps verification working on a freshly provisioned app
+# registration whose grants do not exist yet.
+$script:AuthorizationLayerErrors = @("invalid_scope", "invalid_resource", "invalid_target", "access_denied", "insufficient_scope")
 
 function Resolve-SpaarkeUserAssignedIdentity {
     <#
@@ -409,7 +432,13 @@ function Find-SpaarkeEquivalentFederatedCredential {
     )
 
     $all = az ad app federated-credential list --id $AppId --output json 2>$null | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or -not $all) { return $null }
+    # Throw on a FAILED read, exactly as Get-SpaarkeFederatedCredential does. Returning $null here
+    # would report "no equivalent" on a throttle or token blip, degrade idempotency to name-based
+    # for that run, and surface the resulting Entra uniqueness rejection as a permissions error.
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list federated credentials on app registration '$AppId' while checking for an equivalent credential. This is a read failure, not evidence that none exists -- not proceeding to create."
+    }
+    if (-not $all) { return $null }
 
     return ($all | Where-Object {
         $_.issuer -eq $Issuer -and
@@ -600,8 +629,10 @@ function Test-SpaarkeFicTokenExchange {
         $errorBody = $null
 
         try {
+            # -TimeoutSec is explicit: without it a blackholed endpoint adds the ~100 s default to
+            # EVERY attempt, silently blowing past the caller's stated budget.
             $null = Invoke-RestMethod -Method Post -Uri $tokenUri -Body $body `
-                -ContentType "application/x-www-form-urlencoded" -ErrorAction Stop
+                -ContentType "application/x-www-form-urlencoded" -TimeoutSec 30 -ErrorAction Stop
 
             return [pscustomobject]@{
                 Accepted = $true
@@ -610,42 +641,70 @@ function Test-SpaarkeFicTokenExchange {
             }
         }
         catch {
-            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                $errorBody = $_.ErrorDetails.Message
+            # Capture the outer error first -- inside the nested catch below, $_ is rebound to the
+            # INNER failure, which would replace Entra's real response with a PowerShell message
+            # about a missing method and get that classified as a credential rejection.
+            $outer = $_
+            if ($outer.ErrorDetails -and $outer.ErrorDetails.Message) {
+                $errorBody = $outer.ErrorDetails.Message
             }
-            elseif ($_.Exception.Response) {
+            elseif ($outer.Exception.Response -is [System.Net.HttpWebResponse]) {
                 try {
-                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $reader = New-Object System.IO.StreamReader($outer.Exception.Response.GetResponseStream())
                     $errorBody = $reader.ReadToEnd()
                     $reader.Dispose()
                 }
-                catch { $errorBody = $_.Exception.Message }
+                catch { $errorBody = $outer.Exception.Message }
             }
             else {
-                $errorBody = $_.Exception.Message
+                $errorBody = $outer.Exception.Message
             }
         }
+
+        # Parse ONCE and classify on structure. Entra returns a JSON body carrying `error` and a
+        # numeric `error_codes` array; both are exact where substring matching is not.
+        $parsed = $null
+        try { $parsed = $errorBody | ConvertFrom-Json -ErrorAction Stop } catch { $parsed = $null }
+        $errorCodes = if ($parsed -and $parsed.error_codes) { @($parsed.error_codes) } else { @() }
+        $oauthError = if ($parsed) { $parsed.error } else { $null }
 
         $isPropagation = $false
         foreach ($code in $script:PropagationErrorCodes) {
-            if ($errorBody -match $code) { $isPropagation = $true; break }
+            if ($errorCodes -contains $code) { $isPropagation = $true; break }
+        }
+        # Fallback for a non-JSON body (proxy error page, CLI wrapper text). The negative lookahead
+        # is what stops AADSTS700211 from masquerading as AADSTS70021 — see the declaration comment.
+        if (-not $isPropagation -and -not $parsed) {
+            foreach ($code in $script:PropagationErrorCodes) {
+                if ($errorBody -match "AADSTS$code(?![0-9])") { $isPropagation = $true; break }
+            }
         }
 
         if (-not $isPropagation) {
-            # Entra evaluates the resource only after accepting the client credential, so an
-            # authorization-layer error is positive evidence the assertion was accepted.
-            if ($errorBody -match "AADSTS500011") {
+            if ($oauthError -and ($script:AuthorizationLayerErrors -contains $oauthError)) {
                 return [pscustomobject]@{
                     Accepted = $true
                     Attempts = $attempt
-                    Detail   = "Assertion ACCEPTED. Entra rejected the requested scope '$Scope' (AADSTS500011: resource principal not found), which it evaluates only after accepting the client credential. The federated credential itself is valid."
+                    Detail   = "Assertion ACCEPTED. Entra accepted the client credential and then rejected the requested scope '$Scope' (OAuth2 error '$oauthError'), which it evaluates only afterwards. The federated credential itself is valid; the app registration simply lacks that grant."
+                }
+            }
+            if ($errorCodes -contains 500011) {
+                return [pscustomobject]@{
+                    Accepted = $true
+                    Attempts = $attempt
+                    Detail   = "Assertion ACCEPTED. Entra rejected the requested scope '$Scope' (AADSTS500011: resource principal not found in tenant), which it evaluates only after accepting the client credential. The federated credential itself is valid."
                 }
             }
 
+            $layer = if ($oauthError -and ($script:CredentialLayerErrors -contains $oauthError)) {
+                "The OAuth2 error '$oauthError' means the credential itself was rejected."
+            } else {
+                "The OAuth2 error '$oauthError' is not a known propagation or authorization-layer code, so it is treated as a credential fault."
+            }
             return [pscustomobject]@{
                 Accepted = $false
                 Attempts = $attempt
-                Detail   = "Entra REJECTED the assertion. This is a credential fault, not propagation — retrying would only delay the report.`n$errorBody"
+                Detail   = "Entra REJECTED the assertion. $layer This is not propagation — retrying would only delay the report.`n$errorBody"
             }
         }
 
@@ -712,7 +771,7 @@ function New-SpaarkeFederatedCredential {
         [string]$Audience = $script:DefaultExchangeAudience,
         [string]$AssertionToken,
         [string]$ExchangeScope = "https://graph.microsoft.com/.default",
-        [int]$PropagationRetrySeconds = 600,
+        [ValidateRange(0, 3600)][int]$PropagationRetrySeconds = 600,
         [switch]$Force,
         [switch]$WhatIfDryRun
     )
@@ -781,19 +840,28 @@ function New-SpaarkeFederatedCredential {
             Write-Warn "Existing credential '$Name' does not match the desired shape. -ForceFederatedCredentialUpdate specified; updating."
             foreach ($p in $shape.Problems) { Write-Warn "  $p" }
             if ($WhatIfDryRun) {
+                # Report the DESIRED shape, mirroring the dry-run create branch. Reporting $existing
+                # (the drifted object) would flow into the unconditional structural check below and
+                # hard-fail the preview of an operation that would actually have succeeded.
                 Write-Info "DRY RUN: would update federated credential '$Name' to subject $($identity.PrincipalId)"
-                $result.Credential = $existing
+                $result.Credential = [pscustomobject]$desired
+                $result.StructurallyValid = $true
+                $result.Verification = "Unverified"
+                Write-Info "DRY RUN: nothing was changed and no exchange was attempted."
+                return $result
             }
             else {
                 $paramPath = [System.IO.Path]::GetTempFileName()
-                ($desired | ConvertTo-Json -Depth 4) | Out-File -FilePath $paramPath -Encoding utf8
-                # Capture az's own stderr rather than discarding it — the CLI's message is the
-                # only thing that distinguishes a permissions failure from a malformed payload,
-                # and a caller debugging a provisioning run needs to see it verbatim.
-                $azOutput = az ad app federated-credential update --id $AppId `
-                    --federated-credential-id $existing.id --parameters "@$paramPath" 2>&1
-                $updateExit = $LASTEXITCODE
-                Remove-Item $paramPath -ErrorAction SilentlyContinue
+                try {
+                    ($desired | ConvertTo-Json -Depth 4) | Out-File -FilePath $paramPath -Encoding utf8
+                    # Capture az's own stderr rather than discarding it — the CLI's message is the
+                    # only thing that distinguishes a permissions failure from a malformed payload,
+                    # and a caller debugging a provisioning run needs to see it verbatim.
+                    $azOutput = az ad app federated-credential update --id $AppId `
+                        --federated-credential-id $existing.id --parameters "@$paramPath" 2>&1
+                    $updateExit = $LASTEXITCODE
+                }
+                finally { Remove-Item $paramPath -ErrorAction SilentlyContinue }
                 if ($updateExit -ne 0) {
                     throw "Failed to update federated credential '$Name' on app '$AppId'.`nAzure CLI reported:`n$($azOutput -join [Environment]::NewLine)"
                 }
@@ -834,14 +902,16 @@ deliberately, or delete it first:
         }
 
         $paramPath = [System.IO.Path]::GetTempFileName()
-        ($desired | ConvertTo-Json -Depth 4) | Out-File -FilePath $paramPath -Encoding utf8
-        # Capture az's own stderr rather than discarding it. "Requires Application Administrator"
-        # is the LIKELIEST cause but not the only one — a malformed payload, a missing app, or a
-        # duplicate (issuer, subject) pair all land here too, and guessing on the caller's behalf
-        # is what makes a provisioning failure take an afternoon instead of a minute.
-        $azOutput = az ad app federated-credential create --id $AppId --parameters "@$paramPath" 2>&1
-        $createExit = $LASTEXITCODE
-        Remove-Item $paramPath -ErrorAction SilentlyContinue
+        try {
+            ($desired | ConvertTo-Json -Depth 4) | Out-File -FilePath $paramPath -Encoding utf8
+            # Capture az's own stderr rather than discarding it. "Requires Application Administrator"
+            # is the LIKELIEST cause but not the only one — a malformed payload, a missing app, or a
+            # duplicate (issuer, subject) pair all land here too, and guessing on the caller's behalf
+            # is what makes a provisioning failure take an afternoon instead of a minute.
+            $azOutput = az ad app federated-credential create --id $AppId --parameters "@$paramPath" 2>&1
+            $createExit = $LASTEXITCODE
+        }
+        finally { Remove-Item $paramPath -ErrorAction SilentlyContinue }
 
         if ($createExit -ne 0) {
             throw "Failed to create federated credential '$Name' on app '$AppId'. Creating a FIC usually requires Application Administrator (or ownership of the app registration).`nAzure CLI reported:`n$($azOutput -join [Environment]::NewLine)"
@@ -851,6 +921,12 @@ deliberately, or delete it first:
         Write-Warn "Creation success proves NOTHING about whether it works — a misconfigured FIC creates cleanly. Verifying."
         $result.Created = $true
         $result.Credential = Get-SpaarkeFederatedCredential -AppId $AppId -Name $Name
+        if (-not $result.Credential) {
+            # Graph directory reads are eventually consistent, so a just-created credential can be
+            # missing from the immediate read-back. Say that, rather than letting $null flow into
+            # the structural check and produce a parameter-binding error that mentions no FIC at all.
+            throw "Federated credential '$Name' was created successfully but is not yet readable back from the directory (Graph reads are eventually consistent). Nothing is wrong with the credential — re-run this command in a few seconds to verify it."
+        }
     }
 
     # ── Structural verification. Runs before the exchange, always. ────────────────────────────
@@ -885,7 +961,7 @@ identity — a workstation cannot produce one at all. Structure is verified; fun
 
 To complete verification, mint an assertion on compute carrying UAMI '$($identity.Name)':
 
-  az login --identity --username $($identity.ClientId)
+  az login --identity --client-id $($identity.ClientId)
   az account get-access-token --resource $Audience --query accessToken -o tsv
 
 then re-run with -AssertionToken <token>. Nothing consumes this credential until the provider
@@ -896,7 +972,21 @@ anything works.
         return $result
     }
 
-    $exchange = Test-SpaarkeFicTokenExchange -TenantId $TenantId -AppClientId $AppId `
+    # `az ad app federated-credential --id` accepts the appId OR the object ID, and this function's
+    # contract advertises both. The TOKEN endpoint accepts the appId only. Passing an object ID
+    # straight through as client_id returns AADSTS700016 ("application not found"), which is not a
+    # propagation code — so a perfectly good credential would be declared broken, and the operator's
+    # natural next move would be -ForceFederatedCredentialUpdate against something needing no repair.
+    $appClientId = az ad app show --id $AppId --query appId -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $appClientId) {
+        Write-Warn "Could not resolve '$AppId' to an application (client) ID; using it as-is for the exchange."
+        $appClientId = $AppId
+    }
+    elseif ($appClientId -ne $AppId) {
+        Write-Info "Resolved app object ID '$AppId' to application (client) ID '$appClientId' for the token exchange."
+    }
+
+    $exchange = Test-SpaarkeFicTokenExchange -TenantId $TenantId -AppClientId $appClientId `
         -Assertion $assertion -Scope $ExchangeScope -MaxWaitSeconds $PropagationRetrySeconds
 
     if ($exchange.Accepted) {
@@ -913,10 +1003,19 @@ anything works.
     return $result
 }
 
-# -ExportFunctionsOnly lets a provisioning script dot-source this file to obtain the FIC
-# functions without executing any of the registration flow. Must come after the function
-# definitions and before the first side effect.
-if ($ExportFunctionsOnly) { return }
+# WARNING: THERE IS DELIBERATELY NO DOT-SOURCE / "export functions" MODE HERE (removed at task
+# 030's code-review gate). Dot-sourcing a script that carries a param() block executes that block
+# in the CALLER's scope, which silently overwrote the consumer's own $TenantId with this script's
+# hard-coded production default -- and for federated-credential work a wrong tenant is a wrong
+# issuer, i.e. a credential that creates cleanly and never works. It also flipped the caller's
+# $ErrorActionPreference to Stop and replaced any same-named Write-* helpers they had.
+#
+# Consumers integrate by INVOKING this script with -FicOnly, which runs in its own child scope and
+# leaks nothing. See the exit-code contract in the FIC section below.
+#
+# If an in-process import contract is ever genuinely needed, the correct form is a real module
+# (scripts/lib/SpaarkeFic.psm1 + Import-Module) -- note that the Write-* output helpers would have
+# to move with it, which is why it was not done inline here.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pre-flight Checks
@@ -1223,10 +1322,20 @@ if ($CreateFederatedCredential) {
     if (-not $ficAppId) {
         throw "No app registration to federate. Pass -FederatedCredentialAppId, or run without -SkipBffApi so the app registration is created first."
     }
+    # In dry-run, Step 1 hands back an all-zero placeholder when no app registration exists yet.
+    # Querying Graph for it fails, which would make the flagship "preview a fresh production run"
+    # invocation exit 1 from a mode whose whole purpose is to be side-effect-free and informative.
+    $ficPreviewOnly = $false
+    if ($DryRun -and $ficAppId -eq "00000000-0000-0000-0000-000000000000") {
+        Write-Info "DRY RUN: no real app registration exists yet, so the credential cannot be previewed against Graph."
+        Write-Info "DRY RUN: would create a FIC on the new app registration, subject = the principalId of the UAMI at $UamiResourceId."
+        $ficPreviewOnly = $true
+    }
     if (-not $UamiResourceId) {
         throw "-UamiResourceId is required with -CreateFederatedCredential. Pass the ARM resource ID of the user-assigned managed identity (resource ID, never name)."
     }
 
+    if (-not $ficPreviewOnly) {
     $ficResult = New-SpaarkeFederatedCredential `
         -AppId $ficAppId `
         -UamiResourceId $UamiResourceId `
@@ -1251,7 +1360,12 @@ if ($CreateFederatedCredential) {
     Write-Host "    Verification:  $($ficResult.Verification)" -ForegroundColor White
     Write-Host ""
 
-    if ($DryRun) {
+    }
+
+    if ($ficPreviewOnly) {
+        Write-Info "DRY RUN: preview only — nothing was queried, created or verified."
+    }
+    elseif ($DryRun) {
         # Note the asymmetry, which is deliberate: a dry run never CREATES, but it does still
         # verify a credential that already exists. A token exchange writes nothing, and
         # "does the credential I already have actually work?" is exactly what an operator

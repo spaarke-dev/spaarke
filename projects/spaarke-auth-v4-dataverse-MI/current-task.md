@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 (task 030 — implementation + verification complete, quality gates running)
+> **Last Updated**: 2026-08-21 (task **030 COMPLETE** — both quality gates passed)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,12 +11,12 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **030 — FIC provisioning automation** (`Register-EntraAppRegistrations.ps1` extension) — **implementation + verification COMPLETE**; Step 9.5 gates in flight |
+| **Task** | **021 — Ordered credential selection** (MI-FIC → KV certificate → dev secret) — not started |
 | **Task file** | `projects/spaarke-auth-v4-dataverse-MI/tasks/030-fic-provisioning-automation.poml` |
-| **Status** | in-progress — code done, 11 of 11 verification checks pass, decision record + provisioning notification written |
-| **Next Action** | **1)** apply any code-review / adr-check findings · **2)** mark POML + TASK-INDEX ✅ · **3)** commit + push · **4)** next task is **021** (ordered credential selection — read `notes/decisions/020-assertion-seam.md` first; its scope GREW) |
+| **Status** | not-started. **030 complete** (adr-check 0 violations; code-review 2 criticals found + fixed) |
+| **Next Action** | `task-execute` on `tasks/021-ordered-credential-selection.poml`. **Read `notes/decisions/020-assertion-seam.md` FIRST — 021's scope GREW.** Ordered selection is MI-FIC → certificate → secret, and only the FIRST is an assertion, so it cannot live behind `IClientAssertionProvider`; 021 must author a second, client-level contract |
 | **Why 030 first** | ⏩ Owner pulled it forward 2026-08-19 for `customer-provisioning-orchestration-r1`'s Wave G-3. **Delivered** — their PR #779 has zero FIC code, so the duplicate-work risk did not materialise |
-| **Progress** | **6 of 26 active complete** (001, 002, 003, 010, 011, 020); **030 pending gate sign-off** · 20 remaining · 3 deferred |
+| **Progress** | **7 of 26 active complete** (001, 002, 003, 010, 011, 020, **030**) · **19 remaining** · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
 
 ### Task 030 — files modified this session
@@ -28,6 +28,24 @@
 | `projects/.../notes/decisions/030-fic-automation.md` | **NEW** — design rationale + 11-check verification table + what was NOT verified |
 | `projects/.../notes/PROVISIONING-CHANGE-REQUEST.md` | **§10 appended** — delivery notice, invocation contract, exit codes, §9.2 re-raise, merge note |
 | `projects/.../CLAUDE.md` | Corrected the stale "raise the ADR-010 ceiling to 154" instruction that task 020 disproved |
+
+### Task 030 — quality gates
+
+| Gate | Result |
+|---|---|
+| `adr-check` | **0 violations**, 7 warnings — all applied, or booked onto the tasks that own them (031, 033) |
+| `code-review` | **2 CRITICAL** + 14 warnings. Both criticals **fixed**; 10 warnings applied, 4 deferred with reasons |
+| Verification | 15 live/offline checks + a 14-assertion regression harness, all passing |
+
+**C1** — `-match "AADSTS70021"` is a regex *substring* test, so it also matched `AADSTS700211`
+(unrecognised issuer): a configuration fault retried for the full 600 s budget, then reported with a
+diagnosis asserting the opposite of the truth. Sat on task 031's critical path. Now classified on
+Entra's structured `error_codes` / OAuth2 `error` fields, with codes stored as **numbers** so
+substring matching cannot return by accident.
+
+**C2** — the `-ExportFunctionsOnly` dot-source mode ran `param()` in the **caller's** scope, silently
+replacing a consumer's `$TenantId` with this script's production default. Wrong tenant = wrong issuer
+= a credential that creates cleanly and never works. Mode **removed**; consumers invoke `-FicOnly`.
 
 ### Task 030 — three things a fresh session must not re-derive
 
@@ -50,7 +68,7 @@ must be answered **before `customer-provisioning-orchestration-r1` Wave G-3 task
 
 | Check | Value |
 |---|---|
-| Working tree | **5 files modified, uncommitted** (see below) |
+| Working tree | clean at task-030 close |
 | Pushed through | `0e73c014d` |
 | Behind `origin/master` | **0** — merged `418718295` at task-030 start |
 | Slot `/healthz` | **200** (`spaarke-bff-dev-staging`) |
