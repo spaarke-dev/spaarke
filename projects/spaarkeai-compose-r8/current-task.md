@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-21 (task-execute — 017, 020, 021, 022 all closed)
+> **Last Updated**: 2026-08-21 (task-execute — **Phase 2 COMPLETE**)
 > **Recovery**: Read "Quick Recovery" first.
 
 ---
@@ -9,63 +9,84 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **023** — Control measurement: run the oracle on master, publish today's real loss numbers |
-| **Phase** | 2 — Oracle & Corpus (**critical path**: 023 → 030 → **031 GATE**) |
-| **Rigor / Tier** | STANDARD · `opus` @ `high` · `parallel-safe: false` |
-| **Status** | not-started — **startable now** (deps 020 ✅, 021 ✅, 022 ✅) |
-| **Next Action** | Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --filter "FullyQualifiedName~ComposeFidelityGateHarnessTests"`, read `fidelity-gate-result.json`, and publish the 18-document control per the 023 POML. Most of the measurement already exists in [`notes/gate-contract.md`](notes/gate-contract.md). |
+| **Task** | **030** — Merge prototype + measurement: stamp → re-project → per-block compare → clone unchanged |
+| **Phase** | 3 — Model proof · **THE GATE** |
+| **Rigor / Tier** | FULL · `opus` @ **`max`** · `parallel-safe: false` |
+| **Status** | not-started — **startable now** (dep 023 ✅) |
+| **Next Action** | Read `tasks/030-merge-prototype-measurement.poml`. It answers spec §5.3 and includes FR-G06 (heavy restructure) + FR-G07 (N-cycle Word round trip, no compounding drift). |
+| **Then** | **031 — GATE DECISION.** A miss is an **owner escalation**, not an improvisation (root §6/§6.5). |
+
+### The control 030 must beat
+
+| | Master today | Gate requires |
+|---|---:|---|
+| Near tier (lenient) | **6.67%** | **100%**, on every single document |
+| Overall (lenient) | **18.08%** | **≥95%** corpus-wide |
+| Overall (strict) | **12.18%** | no-regression ratchet — **not** a gate |
+
+18 documents · 271 comparable blocks · 210 near-tier-relevant. Full analysis, per-loss classification and the
+**MISS condition** (defined in advance): [`notes/control-measurement.md`](notes/control-measurement.md).
+
+**100% near-tier is reachable by construction** — a verbatim block clone is identical to its original by
+definition. If the merge model is right the number is 100%; if it is below 100%, a block that should have
+been cloned was not. The bar is a binary correctness check on the mechanism, not a quality percentage.
 
 ### Critical context
 
-**Phase 1 (Track S) is CLOSED** — owner UAT GO 2026-08-21. **Phase 2 is 3/4 done.**
+- **Phase 1 (Track S) CLOSED** — owner UAT GO. **Phase 2 COMPLETE** — oracle, corpus, control all published.
+- **The loss is INSIDE blocks, not structural.** Block counts are stable on every document (109→109, 50→50).
+  The merge model has no re-alignment problem to solve.
+- **The content model carries justification, bold and italic and essentially nothing else.** An *edited*
+  block is still rebuilt from it, so FR-A04 property inheritance (task 041) is not optional — it is all that
+  stands between an edited paragraph and total formatting loss.
 
-The control on current master: **8.86% overall block preservation, 2.37% near-tier**, 18 documents /
-271 comparable blocks. Every save reports `persisted` and none of them lies — Track S's outcome contract
-holds corpus-wide. The loss is **inside blocks, not structural** (block counts stable: 109→109, 50→50), which
-is exactly the shape "clone the untouched blocks verbatim" is built for.
+### What the owner still sees in dev
 
-### What the owner still sees in dev, and who owns it
+| Banner | Track | Owner | Gated on 031? |
+|---|---|---|---|
+| "Some formatting was simplified when saving" | **A** | 040–044 | **Yes** |
+| "wording differs slightly from this document" | **C** | **051–053** | **No — startable now** |
 
-| Banner | Track | Owner |
-|---|---|---|
-| "Some formatting was simplified when saving" | **A** | Phases 2→3→4 (040–044), gated on 031 |
-| "wording differs slightly from this document" | **C** | **051–053 — startable NOW**, not gated on 031 |
-
-Owner standing directive: *"we NEVER should get the 'wording differs slightly'."* Track C is the shortest
-path to removing the second banner and does not wait for the Phase-3 gate.
+Owner standing directive: *"we NEVER should get the 'wording differs slightly'."*
 
 ### Completed this session
 
 | Task | Outcome |
 |---|---|
-| **017** | Track S UAT **GO**. Fixed the save-degradation banner that claimed *"the original file is unchanged until you save"* **after** the bytes were written. |
-| **020** | The preservation oracle + outcome-honesty + two comparison levels. Ten `Oracle_*` facts prove the instrument. |
-| **021** | Three R4-breaker fixtures (dup paraId in `mc:AlternateContent`, interior text boxes, multi-part paraId collision). |
-| **022** | Five near-tier fixtures (char formatting, court spacing, footnotes, `REF`, content controls). |
+| **017** | Track S UAT **GO** + fixed the banner that claimed the file was unchanged after it was written |
+| **020** | Preservation oracle, outcome honesty, two comparison levels; 12 `Oracle_*` facts prove the instrument |
+| **021** | 3 R4-breaker fixtures |
+| **022** | 5 near-tier fixtures |
+| **023** | **The control** + 2 oracle artifacts found and fixed + thresholds ratified + MISS condition defined |
 
 ### Defects found and fixed beyond task scope
 
-1. **`NdaSaveNo422RegressionTests` mocked the etag-less `ReplaceFileContentAsUserAsync`** — task 011 moved the
-   save path to the `If-Match` overload; both still exist, so the stale setup compiled, never matched, and the
-   save reported 404. **A Track S regression**, invisible because per-task runs were filtered to `Seam.Compose`.
-2. **`ComposeReadFidelityHarnessSeamTests`' golden model dropped `w:fldSimple`** — the cached result never
-   entered the golden, so a correct projection read as a failure. The fix *tightens* the assertion.
-3. **`w14:paraId` must be 8 hex digits ≤ `0x7FFFFFFF`** — my first fixture draft used non-hex mnemonics.
+1. `NdaSaveNo422RegressionTests` mocked the etag-less `ReplaceFileContentAsUserAsync` — **a Track S
+   regression** (task 011 moved to the `If-Match` overload), invisible behind a `--filter`.
+2. `ComposeReadFidelityHarnessSeamTests`' golden model dropped `w:fldSimple` cached results.
+3. Oracle artifact A1 — empty `<w:pPr/>` counted as near-tier loss (**9 points** of headline).
+4. Oracle artifact A2 — a dropped repeated child read as 100% near-tier while losing a footnote reference.
 
-### Traps (carried forward — all still live)
+### Findings recorded, NOT fixed (per 023's no-`src/` constraint)
 
-- `git checkout <commit> -- <path>` writes the **INDEX**; a follow-up `git checkout -- <path>` restores the OLD
-  version and silently reverts work. Safe A/B form: **`git show <commit>:<path> > <path>`**.
-- **Run the FULL test project before closing a task**, not `--filter`. Defect 1 above hid behind a filter for
-  two tasks.
-- `refs/stash` lives in the **common git dir** — 60+ worktrees share one stash list.
+| Finding | Owner task |
+|---|---|
+| Content model carries only `jc` + `b` + `i` | 040 / 041 |
+| Dropped footnote reference orphans its footnote in `footnotes.xml` | 041 |
+| Run-property loss emits **no degradation warning at all** | 044 |
+| `w14:textId` dropped unconditionally, unwarned | 042 |
+
+### Traps (all still live)
+
+- `git checkout <commit> -- <path>` writes the **INDEX**; the safe A/B form is `git show <commit>:<path> > <path>`.
+- **Run the FULL test project before closing a task**, never `--filter`. Defect 1 hid behind a filter for two tasks.
+- Bash heredocs mangle ``-style escapes inside quoted Python — write patch scripts to the scratchpad and run them.
+- `refs/stash` is shared across all 60+ worktrees.
 - SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before every build.
-- `/api/documents/{id:guid}` returns **404 for a non-GUID id** — a healthy route can look unregistered.
-- Use `pwsh`, not `powershell`, for the deploy hash-verify step.
-- Bash heredocs in this harness mangle ``-style escapes inside quoted Python — write patch scripts to a file
-  in the scratchpad and run them instead.
+- `/api/documents/{id:guid}` returns 404 for a non-GUID id — a healthy route can look unregistered.
+- Use `pwsh`, not `powershell`, for the deploy hash-verify.
 
 ### Not yet deployed
 
-The task 017 banner fix (`ComposeBannerStack.tsx`) is **committed but not deployed** — client-only, ships with
-the next `sprk_spaarkeai` deploy. No BFF change is pending.
+Task 017's banner fix (`ComposeBannerStack.tsx`) is committed but **not deployed** — client-only, ships with
+the next `sprk_spaarkeai` deploy. No BFF change pending.
