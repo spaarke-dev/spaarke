@@ -1,22 +1,29 @@
 # Notifications & Proactive Suggestions — User & Admin Guide
 
 > **Audience**: End users (what you see), and admins/operators (how to turn it on per environment).
-> **Feature**: The Spaarke Assistant can now **proactively** surface things worth your attention — it no longer only reacts to what you type.
+> **Feature**: Spaarke can **proactively** surface things worth your attention — it no longer only reacts to what you type.
 > **Architecture**: [SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md](../architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md) · **Rules**: [ADR-047](../adr/ADR-047-notification-action-spine.md).
+
+> **⚠️ Status (2026-08-20) — read before Part 1.** The in-Assistant **suggestion card** described below was **removed** from the Assistant by a later change (`spaarkeai-assistant-enhancements-r2`). Today:
+> - **Communication notifications DO work** (unread badge / list in the Communication Workspace).
+> - **Proactive suggestions are temporarily NOT surfaced in the UI.** The backend still produces them (they persist in the outbox), but no on-screen card renders them.
+> - They are being **reintroduced as native Dataverse notifications** (the OOB **bell** in the app header), where clicking opens the record in a modal — scoped in [`spaarke-notification-spine-r2`](../../projects/spaarke-notification-spine-r2/README.md). The "suggestion card" subsection below documents the *former* and *planned* behavior, not what renders today.
 
 ---
 
 ## Part 1 — What you see (end users)
 
-### Proactive suggestions
-When your **Daily Briefing** flags a high-priority matter (or another important item), the Spaarke Assistant shows a small **suggestion card** at the **top of the Assistant pane** — without you asking. It looks like the "Suggested next steps" cards you already see after the assistant does something, e.g.:
+### Proactive suggestions — ⚠️ temporarily not surfaced (see status banner above)
+The intent: when your **Daily Briefing** flags a high-priority matter (or another important item), Spaarke proactively surfaces it — without you asking — as a small nudge you can act on:
 
 > 💡 **Review Acme v. Beta** →
 
-**Clicking the card opens that record in a pop-up (modal) dialog** — you stay in the Assistant; it does not navigate you away. Review the record, close the dialog, and you're back where you were.
+**Acting on the nudge opens that record in a pop-up (modal) dialog** — you stay where you are; it does not navigate you away.
+
+**What renders this today:** *nothing* — the former in-Assistant suggestion card was removed. The nudge is being rebuilt as a native Dataverse **bell** notification in [`spaarke-notification-spine-r2`](../../projects/spaarke-notification-spine-r2/README.md); this subsection describes that former/planned behavior.
 
 - Suggestions **expire** — a stale one simply stops appearing (it is never shown-but-broken).
-- If a suggestion becomes stale or you've lost access to the record between the card appearing and your click, it opens nothing and shows a brief, calm message instead of an error.
+- If a suggestion becomes stale or you've lost access to the record between it appearing and your click, it opens nothing and shows a brief, calm message instead of an error.
 - A suggestion only appears if it's genuinely actionable (it always has a real record to open).
 
 ### Communication notifications
@@ -38,13 +45,13 @@ The feature is **off by default** and **degrades gracefully**: with nothing conf
 | # | Requirement | Why it's non-negotiable |
 |---|---|---|
 | 1 | **`sprk_notificationoutbox` table exists in the target Dataverse environment** | It's the durable store — producers write to it, the client reads `/api/notifications/pending` from it. No table → nothing persists → nothing shows (even via polling). |
-| 2 | **The SpaarkeAi code page is deployed** (current master build) | It ships the notifications consumer + suggestion renderer; the client auto-starts (negotiate → connect, else poll). Builds clean from tip. |
+| 2 | **The SpaarkeAi code page is deployed** (current master build) | It ships the notifications client (auto-starts: negotiate → connect, else poll) and the **live `communication-arrived` consumer**. ⚠️ It NO LONGER ships a suggestion renderer (removed by `spaarkeai-assistant-enhancements-r2`) — so with only requirements 1–3 met, `suggestion` rows are produced and pollable but **not shown**. The visible suggestion surface returns via `spaarke-notification-spine-r2` (OOB bell). |
 | 3 | **`Notifications:Suggestions:Enabled = true`** | Master switch for proactive suggestions (defaults **false** — deny-by-default). |
 
 > **Schema note (dev today):** `sprk_notificationoutbox` (and, for communication notifications, `systemuser.sprk_isexternal` + `sprk_communicationrule`) currently exist in the **dev** environment where they were created directly. They must exist in whatever environment you're lighting up. (No production packaging is needed yet — revisit a managed-solution export when a non-dev deploy is planned.)
 
-### Tier 0 — Suggestions, poll-only (~30 s), no Azure needed
-Requirements 1–3 above. That's the entire setup. Suggestions appear on the **poll fallback** with no Azure SignalR at all — just on a short delay instead of instantly.
+### Tier 0 — Suggestions produced, poll-only (~30 s), no Azure needed
+Requirements 1–3 above. That's the entire setup for **producing** suggestions (they're written to the outbox and are pollable at `/api/notifications/pending`). ⚠️ **They will not be visible on screen** until the OOB-bell surface from `spaarke-notification-spine-r2` ships — the former in-Assistant card was removed. Communication notifications (Tier 2) render today; suggestions do not.
 
 ### Tier 1 — Real-time push (add on top of Tier 0)
 
@@ -91,7 +98,7 @@ Needed by the **Communication Workspace**, *not* by suggestions.
 | `systemuser.sprk_isexternal` backfill | Communication fan-out silent-zero for those users — **suggestions unaffected**. |
 | `Notifications:Suggestions:Enabled=false` | No suggestions produced (silent, safe). |
 
-**Shortest path to seeing a suggestion:** deploy `sprk_notificationoutbox` + the SpaarkeAi code page, set `Notifications:Suggestions:Enabled=true`, and make sure the Daily Briefing runs. Real-time push and communication notifications layer on after.
+**Shortest path to *producing* a suggestion:** deploy `sprk_notificationoutbox` + the SpaarkeAi code page, set `Notifications:Suggestions:Enabled=true`, and make sure the Daily Briefing runs. ⚠️ This produces rows but does not display them yet (no renderer today — see the status banner); verify production by polling `GET /api/notifications/pending?kind=suggestion`. Real-time push and communication notifications layer on after.
 
 ---
 
@@ -109,16 +116,14 @@ Both checks run **before** anything is stored or pushed — nothing ungrounded o
 
 | Symptom | Likely cause & fix |
 |---|---|
-| No suggestions ever appear | `Notifications:Suggestions:Enabled` is `false` (default) — set it `true`. Then confirm the hard requirements: `sprk_notificationoutbox` exists in the env, the SpaarkeAi page is deployed, and the Daily Briefing is running and producing high-priority items. |
-| Suggestions appear but on a delay (not instant) | Live SignalR isn't connected — check Tier 1 (`Notifications:SignalR:ConnectionString` present + CSP allows `wss://*.service.signalr.net`). The client is on the poll fallback (working, just slower). |
+| No suggestions ever appear (on screen) | **Expected today** — the in-Assistant suggestion renderer was removed; there is no visible suggestion surface until `spaarke-notification-spine-r2` (OOB bell) ships. To confirm suggestions are being *produced*, poll `GET /api/notifications/pending?kind=suggestion` (also confirm `Notifications:Suggestions:Enabled=true`, `sprk_notificationoutbox` exists, and the Daily Briefing is running with high-priority items). |
 | Some users get communication notifications, others get none | The silent users are missing the `systemuser.sprk_isexternal` backfill (Tier 2) — fan-out fails closed for them. Backfill the flag. |
-| Clicking a suggestion shows "no longer available" | The suggestion expired or the record's access changed between the card appearing and the click — expected, safe behavior. Nothing opened by design. |
-| A record opens by *navigating away* instead of a modal | The surface used `openRecord` (navigate-away) instead of `openRecordModal` (Layout 1 modal). Suggestion cards use the modal; report any surface that doesn't. |
+| Communication notifications appear on a delay (not instant) | Live SignalR isn't connected — check Tier 1 (`Notifications:SignalR:ConnectionString` present + CSP allows `wss://*.service.signalr.net`). The client is on the poll fallback (working, just slower). |
 
 ---
 
 ## Part 5 — For makers extending this
 
-- To surface a NEW kind of proactive suggestion, add a **producer** that grounds + gates and writes a `kind=suggestion` outbox row — the Assistant renders it and the "open the record in a modal" behavior for free. See the architecture doc §4 "How to extend".
+- To produce a NEW kind of proactive suggestion, add a **producer** that grounds + gates and writes a `kind=suggestion` outbox row. ⚠️ **There is no automatic renderer today** — the former in-Assistant card was removed. The forthcoming OOB-bell surface (`spaarke-notification-spine-r2`) is what will display these rows (and give you the "open the record in a modal" behavior). Until then a producer's rows are produced-but-unrendered. See the architecture doc §4 "How to extend".
 - Do **not** build a second push channel, a second confirmation gate, or a per-app notification pipeline — there is exactly one spine (ADR-047).
 - Related reading: [MODAL-DECISION-CRITERIA.md](../standards/MODAL-DECISION-CRITERIA.md) (why acting opens a Layout-1 modal), [SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md](../architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md) (the component model).

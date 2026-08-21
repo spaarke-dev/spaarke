@@ -31,6 +31,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 - **Fixed — [`src/server/api/Sprk.Bff.Api/CLAUDE.md`](../src/server/api/Sprk.Bff.Api/CLAUDE.md)** (task 002, listed here for the auth-surface trail; not a `.claude/` file): removed the assertion that OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"* — the exact false sentence that caused three audits to conclude the secret was permanent — and replaced it with the A4 shape plus the empirical evidence.
 
+### Removed / Changed (2026-08-20 — God-class LOC ratchet RETIRED; replaced by complexity guidance)
+
+- **Removed — `tests/Spaarke.ArchTests/GodClassGuardTests.cs`** (the hard CI gate on `src/server` file LOC). It gated on line count — the wrong instrument for a gradual, judgment-laden signal — froze existing large files at arbitrary values, and blocked normal feature work on active files (Compose, Chat) with a build failure that had to be hand-waivered. Per ADR-038's own "coverage = observation, never a gate" precedent, **size is now observed and complexity is evaluated by humans where the work is authored.**
+- **Added — [`docs/standards/COMPONENT-COMPLEXITY.md`](../docs/standards/COMPONENT-COMPLEXITY.md)** — the standard: evaluate complexity/cohesion (responsibilities, coupling, ctor deps, branching), not LOC; when a large *cohesive* file is legitimate; decompose when responsibilities diverge. Wired into **root `CLAUDE.md` §11.5** (new) + **§17 pointer** (replaces the god-class-ratchet row), **`task-create` §3.5.6** (component-complexity check), **`code-review`** (maintainability dimension — complexity *direction*, not size), and a **non-blocking observation report** `scripts/report-large-server-files.ps1`. `.claude/patterns/testing/god-class-ratchet.md` converted to a RETIRED redirect stub; pattern INDEXes + project memory updated.
 
 ### Added (2026-08-18 — Navigator side-pane architecture pointer · spaarke-side-pane-navigation-history-r1 close-out)
 

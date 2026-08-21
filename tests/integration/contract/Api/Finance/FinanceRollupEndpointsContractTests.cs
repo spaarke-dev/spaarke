@@ -117,7 +117,9 @@ public sealed class FinanceRollupEndpointsTestFixture : IAsyncLifetime, IDisposa
         // 401 tests (auth fails first), but registering the concrete type makes minimal-API
         // treat the parameter as a service and lets the app build.
         builder.Services.AddSingleton(new FinanceRollupService(
-            DataverseMock.Object, NullLogger<FinanceRollupService>.Instance));
+            DataverseMock.Object,
+            new Mock<IFieldMappingDataverseService>().Object,
+            NullLogger<FinanceRollupService>.Instance));
 
         builder.WebHost.UseTestServer();
 

@@ -21,8 +21,11 @@
 | `IDocumentDataverseService`, `IAnalysisDataverseService`, `IGenericEntityService`, `IProcessingJobService`, `IKpiDataverseService`, `ICommunicationDataverseService`, `IDataverseHealthService` | **SDK** (forward to `IDataverseService`) | |
 | **`IEventDataverseService`** | **WebApi** | SDK impl STUBS events |
 | **`IFieldMappingDataverseService`** | **WebApi** | SDK impl STUBS field-mapping |
-| `IImpersonatedCommunicationQuery` (concrete `DataverseWebApiService`) | **WebApi** | NFR-06 row-level security |
-| `IDataverseAccessGrantService` (concrete `DataverseWebApiService`) | **WebApi** | POA grants |
+| `IImpersonatedCommunicationQuery` (concrete `DataverseWebApiService`) | **WebApi** | NFR-06 row-level security. Registered in **`CommunicationModule.cs`** (~`:272`), not `GraphModule` |
+| `IDataverseAccessGrantService` (concrete `DataverseWebApiService`) | **WebApi** | POA grants. Registered in **`CommunicationModule.cs`** (~`:648`), not `GraphModule` |
+
+> **`UpdateRecordFieldsAsync` is single-impl as of 2026-08-20** (trap 2a below): `IFieldMappingDataverseService`
+> → WebApi is the only live route. The SDK impl throws. Never call it through the composite.
 
 ## The rule (do this to avoid the trap)
 
@@ -39,9 +42,26 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    returns empty. Fix: inject `IEventDataverseService` (→ WebApi) for the event query. **Behavior change
    (starts returning real events) — validate the todo-generation side effects before enabling.** Tracked in
    `projects/code-quality-and-assurance-r3/notes/defer-issues.md`.
+2a. **✅ FIXED (B3 completion, 2026-08-20) — `UpdateRecordFieldsAsync` is now SINGLE-impl.** It was the last
+   `IFieldMappingDataverseService` member live in **both** impls, so the same operation ran on a different
+   implementation depending on which alias the consumer injected. The composite route had exactly one caller,
+   `FinanceRollupService`, now switched to `IFieldMappingDataverseService`; the SDK impl's copy is a fail-loud
+   stub like its 7 siblings. **This completes interim-hardening item B3** ("ONE live impl; route through the
+   narrow interface"), which RED-4 B left open by fixing only the `GetEntitySetNameAsync` half.
+   **A live defect was found and fixed in the same change**: `FinanceRollupService` passed SDK Entity-model
+   `Money` wrappers for its 5 currency fields, which serialize to `{"Value":…,"ExtensionData":null}` — an
+   object. The Web API PATCH takes a bare number, so **every matter/project recalculate had been failing with
+   HTTP 400 since `b7b0d4011` (2026-03-03)** converted the impl from the Entity model to OData PATCH without
+   updating this caller. Payload extracted to `FinanceRollupService.BuildRollupFields` and pinned by
+   `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FinanceRollupPayloadTests.cs` (4 tests, incl. a negative
+   control proving the guard is not vacuous). Impersonation capability is unchanged — the live impersonated
+   write (email-intelligence task 031 / FR-10) always ran through `UpdateRecordActionCore` →
+   `IFieldMappingDataverseService` → WebApi (`MSCRMCallerID` on the PATCH); the SDK impl's `Clone()`+`CallerId`
+   branch was never reached and is recoverable from git (`4aca6d65a`).
 2. **✅ FIXED (RED-4 B, 2026-08-16) — WebApi field-mapping no longer throws (DEF-2).** `UpdateRecordFieldsAsync`
-   is live in BOTH impls (`FinanceRollupService` via composite → SDK; `InvoiceReviewService`/
-   `ScorecardCalculatorService`/handlers via `IFieldMappingDataverseService` → WebApi). RED-4 B found the WebApi
+   was at that time live in BOTH impls (`FinanceRollupService` via composite → SDK; `InvoiceReviewService`/
+   `ScorecardCalculatorService`/handlers via `IFieldMappingDataverseService` → WebApi) — see 2a for the
+   completion. RED-4 B found the WebApi
    half was worse than "duplicate": its first call was the WebApi impl's `GetEntitySetNameAsync`, a stub that
    **threw `NotImplementedException`** — so field-mapping read/child-query/write via the WebApi path threw (the
    landmine that surfaced in the compose cold-session UAT, `ComposeOutputsColdSessionTests`). **Fixed** by
