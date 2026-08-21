@@ -1,6 +1,6 @@
 ﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-20 (012 · 014 · 018 complete; 015 server half landed — client half remains)
+> **Last Updated**: 2026-08-21 (012 · 014 · 015 · 018 complete — **016 is the last Track S task before deploy**)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Git**: branch `work/spaarkeai-compose-r8`, 12 ahead of `origin/master`, 0 behind, working tree CLEAN.
@@ -12,11 +12,27 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **015 (finish the client half)**, then **016**. Both own `ComposeWorkspace.tsx` — one pass over that file does both. |
-| **Status** | 015 is **PARTIAL**: the server half is committed (`06b370995`); the client pre-flight is not written. The design for it is already decided — see [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md) "What remains". |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then finish task 015's client pre-flight` — or start **016**, which owns the same file. Doing both in ONE pass over `ComposeWorkspace.tsx` is cheaper than two. |
+| **Task** | **016** — the honest-failure set (eight silent-drop modes). The LAST Track S task before **017** (deploy). |
+| **Status** | not started. Clean starting point. |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 016` |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014 ✅ · 018 ✅ · 050 ✅** · 015 🔄 partial. Track S remainder: **015-client, 016**, then **017** (deploy). |
+| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 018 · 050** ✅ — Track S is 016, then 017. |
+
+### Two owner decisions still open (do not let these ship silently)
+
+1. **Task 015 deviates from its POML** — it does NOT route to the chunked upload path. Graph's simple
+   upload has been **250 MB since Oct 2023** (the 4 MB guard enforced a limit that no longer exists), and
+   the chunked path **cannot carry an end-to-end `If-Match`**, so routing there would have silently
+   weakened task 011's concurrency guarantee. Reasoning + citations:
+   [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
+2. **`If-Match` on `PUT .../content` is UNDOCUMENTED** in the Graph v1.0 reference (only
+   delete/update/move/createUploadSession document it). Task 011's guarantee rests on it. Needs an
+   **empirical probe against a real SPE container** — stale `If-Match` → expect 412 — before the 017
+   deploy. Only the owner can run it; the probe itself is cheap to write.
+
+Also outstanding, not this project's file: **the god-class ratchet is RED on
+`DataverseServiceClientImpl.cs`** (2,975 vs frozen 2,864, from `a76e7e714`/`e3e72af91`). Red before task
+014 and still red. The two Compose waivers WERE re-baselined with reasons pointing at Track D 070/073.
 
 ### Working tree
 
@@ -96,8 +112,10 @@ Full write-ups: [`notes/reanchor-baseline-integrity.md`](notes/reanchor-baseline
   old fallback persisted the LOAD-TIME baseline over a version already known to be newer. Do not
   reintroduce any "proceed with what we have" branch on that path.
 - **`ComposeSaveLimits.MaxDocumentBytes` (25 MB) is THE limit.** It drives the request-body cap, the
-  refusal, and the number in the message. **Never add a second size constant** — especially not a
-  client-side copy; the client must receive the number from the server or do no numeric pre-flight.
+  server refusal, the number in the message, AND the `maxDocumentBytes` field the Load/Upload responses
+  advertise to the client. **Never add a second size constant** — especially not a client-side copy.
+  The client pre-flights against the advertised number, and when none was advertised it does NO numeric
+  check (`state.maxDocumentBytes === null` means "do not guess", never "unlimited").
 - **The 4 MB Graph guard is gone** from `UploadSmallAsUserAsync`. Simple upload is 250 MB (since Oct
   2023, SPE-confirmed). If you see a 4 MB threshold anywhere else, it is stale too.
 - **`refused-invalid` = "retrying this unchanged cannot succeed"**; `refused-stale` = "the base moved and
