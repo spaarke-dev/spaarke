@@ -225,3 +225,72 @@ it is another project's file and was red before this project touched anything.
 LOC ratchet → `docs/standards/COMPONENT-COMPLEXITY.md` + a non-blocking report). `GodClassGuardTests.cs`
 is expected to disappear on merge, and **owner decision C is resolved by that commit**, not by us. The
 re-baseline is recorded anyway: "the gate is going away" is not a reason to leave it red while it exists.
+
+---
+
+# The sweep (owner directive, 2026-08-21)
+
+> *"we need Compose to 100% work without errors. so whether there are 8 or 10 or 100 issues that need
+> to be fixed we need to fix them all"* — which retires the POML's "closed set of eight" boundary.
+
+## What a mechanical scan found
+
+A detector was written for the precise defect — **any `.ok` / `.status` read on a value returned by
+`authenticatedFetch`** — and run over all of `src/client`. Because that function returns only on 2xx and
+throws otherwise, every such read is either a branch that cannot execute or a condition that cannot be
+false. Both are the same defect.
+
+**Result: 176 reads across 48 files.** Not eight. Not ten. The pattern is repo-wide.
+
+(The first version of the detector under-reported at 106 because it collapsed repeated
+`const response = await authenticatedFetch(...)` bindings within a file and skipped everything before
+the last one. Fixed; the number above is the corrected one.)
+
+## Compose: all 9 fixed
+
+| Site | Was | Now |
+|---|---|---|
+| `ComposeWorkspace.tsx` load path | "Document not found. It may have been deleted or moved." and "You do not have permission to open this document." **unreachable** — every failed load said `Failed to load document: HTTP 404` | routed on the thrown `ApiError.status`, plus an honest transport-failure branch |
+| `ComposeWorkspace.tsx` annotation sync | `if (response.ok && !aborted)` — unfalsifiable | abort check only |
+| `ComposeWorkspace.tsx` `fetchReviewMemo` | FR-14's two negatives ("generate the memo first" / "promote to an Analysis first") **both dead** | split on the thrown error via `memoNegativeFromError` |
+| `ComposeWorkspace.tsx` `handleGenerateMemo` | same | same |
+| `ComposeWorkspace.tsx` compose-outputs materialize | a guard whose own comment admitted it could not execute | deleted; the catch already routes the 404 |
+| `ComposeWorkspace.tsx` browse projection | `if (response.ok)` — unfalsifiable | unconditional block |
+| `ComposeWorkspace.tsx` uploaded-file open | "the session may have expired — re-upload it in the Assistant" **unreachable** | routed on the thrown status |
+| `ComposeWorkspace.tsx` drafted-document mount | same, and also self-described as unreachable | deleted; the catch carries the copy |
+| `useComposeHeartbeatGate.ts` | a swallow-and-log branch that could not run, beside a catch that did the same thing | one description instead of two, one of them fictional |
+
+`readMemoProblemCode` was deleted outright — it read a ProblemDetails body off a non-OK `Response`, a
+shape the transport never produces, so it could only ever have been called from dead code.
+
+**A test went red, and that is the point.** `ComposeWorkspace.upload.test.tsx` mocked
+`{ ok: false, status: 404 }` — the impossible shape — and passed *only because the dead code existed*.
+Deleting the dead branch exposed it. Both it and the file's default mock now model a thrown `ApiError`.
+
+## Beyond Compose — 46 files still carry it
+
+Not fixed here, and deliberately: they are other features' correctness (SprkChat, the wizards, several
+PCFs, the AI widgets, the code pages), and folding an unbounded cross-feature change into a P0
+save-reliability deploy that "ships alone" is how a focused fix becomes an unbounded one.
+
+**The dangerous subset — 11 sites where a designed SOFT-FAIL was inverted into a hard throw**, which is
+a behaviour change, not just a worse message:
+
+| File | Sites |
+|---|---|
+| `code-pages/DocumentRelationshipViewer/src/App.tsx` | 334, 354, 373 |
+| `code-pages/DocumentRelationshipViewer/src/services/FilePreviewServiceAdapter.ts` | 24, 36 |
+| `Spaarke.AI.Widgets/.../DocumentViewerWidget.tsx` | 345 |
+| `Spaarke.AI.Widgets/.../ReconciliationWorkspaceWidget.tsx` | 157, 170 |
+| `Spaarke.UI.Components/.../CreateRecordWizard/useHandoffFileLeg.ts` | 98 |
+| `Spaarke.UI.Components/.../EmailComposer/createXrmEmailComposeHandlers.ts` | 362 |
+| `Spaarke.UI.Components/src/services/analysisFileResolution.ts` | 118 |
+
+Each wrote `if (!res.ok) return null / return undefined / continue` — "on failure, skip this quietly and
+carry on". Because the call throws instead, the error propagates and takes the whole operation with it.
+The remaining ~142 reads are the milder class: a specific message replaced by the generic `ApiError`
+one.
+
+**Recommendation**: one dedicated task, with the detector kept as a CI check so this cannot re-accrete.
+The detector lives at `scripts/ci/` if it is promoted; today it is a scratch script whose logic is
+reproduced above.

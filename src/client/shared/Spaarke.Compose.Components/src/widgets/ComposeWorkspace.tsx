@@ -1283,17 +1283,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
 
-        if (!response.ok) {
-          const msg =
-            response.status === 404
-              ? 'Document not found. It may have been deleted or moved.'
-              : response.status === 403
-                ? 'You do not have permission to open this document.'
-                : `Failed to load document (HTTP ${response.status}).`;
-          dispatch({ kind: 'loadFailed', errorMessage: msg });
-          return;
-        }
-
         const payload = (await response.json()) as {
           documentSpeId: string;
           driveId: string;
@@ -1424,10 +1413,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
       } catch (err) {
         if (ac.signal.aborted) return;
+        // FR-S09 sweep (r8 task 016): status routing lives HERE, because this is where every non-2xx
+        // arrives. `authenticatedFetch` (ADR-028) RETURNS only when `response.ok` and THROWS a typed
+        // `ApiError` otherwise — so the `if (!response.ok)` block that used to sit above the parse,
+        // carrying "Document not found. It may have been deleted or moved." and "You do not have
+        // permission to open this document.", could never execute. Every failed load rendered the
+        // generic `Failed to load document: HTTP 404` instead. Same defect as FR-S01 removed from the
+        // save path and FR-S09 item 4 removed from the checkout path; this is the load path's copy.
+        const status = (err as { status?: unknown } | null | undefined)?.status;
+        const httpStatus = typeof status === 'number' && status >= 100 && status <= 599 ? status : null;
         const message = err instanceof Error ? err.message : String(err);
         dispatch({
           kind: 'loadFailed',
-          errorMessage: `Failed to load document: ${message}`,
+          errorMessage:
+            httpStatus === 404
+              ? 'Document not found. It may have been deleted or moved.'
+              : httpStatus === 403
+                ? 'You do not have permission to open this document.'
+                : httpStatus !== null
+                  ? `Failed to load document (HTTP ${httpStatus}).`
+                  : `Failed to load document: ${message}`,
         });
       }
     })();
@@ -1471,7 +1476,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           body: JSON.stringify({ tenantId, anchoredAnnotations, definedTermsTracking }),
           signal: ac.signal,
         });
-        if (response.ok && !ac.signal.aborted) {
+        // FR-S09 sweep (r8 task 016): `response.ok` is necessarily TRUE here — a non-2xx threw into
+        // the catch below. The condition was not wrong, it was unfalsifiable, which is the same defect
+        // as a dead branch wearing the opposite sign. The abort check is the real guard.
+        if (!ac.signal.aborted) {
           // Mark this state as server-synced so we don't re-POST it on the next unrelated render.
           syncedAnnotationsRef.current = snapshot;
         }
@@ -2887,18 +2895,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [memoEmailBody, setMemoEmailBody] = React.useState('');
 
   /**
-   * Reads the ProblemDetails `code` extension from a non-OK memo response (agreements-r1 UAT round-1 #2)
-   * so the toolbar can tell "session not bound to an Analysis" (promote first — the review is NOT lost)
-   * apart from "no memo persisted yet" (generate first). Never throws — a missing/unparseable body
-   * yields `null`, so a genuine transport/server error still falls through to generic handling.
+   * FR-S09 sweep (r8 task 016): translate a THROWN memo failure into FR-14's negative message, if it is
+   * one — "session not bound to an Analysis" (promote first — the review is NOT lost) vs. "no memo
+   * persisted yet" (generate first).
+   *
+   * This REPLACES `readMemoProblemCode`, which read the ProblemDetails `code` extension off a non-OK
+   * `Response` — a shape `authenticatedFetch` never returns. Both of its call sites therefore sat
+   * inside unreachable `if (!response.ok)` blocks, and BOTH of FR-14's negative messages were dead:
+   * a user with no memo yet, and a user on the direct-Compose door, got the same generic failure. The
+   * same `code` is already parsed onto `ApiError.problemDetails`, so no second body read is needed.
+   *
+   * Returns null for a genuine transport/server error, which keeps its own generic handling.
    */
-  const readMemoProblemCode = React.useCallback(async (response: Response): Promise<string | null> => {
-    try {
-      const body = (await response.clone().json()) as { code?: unknown } | null;
-      return typeof body?.code === 'string' ? body.code : null;
-    } catch {
-      return null;
-    }
+  const memoNegativeFromError = React.useCallback(async (err: unknown): Promise<string | null> => {
+    const status = (err as { status?: unknown } | null | undefined)?.status;
+    if (typeof status !== 'number') return null;
+    const details = (err as { problemDetails?: Record<string, unknown> | null } | null | undefined)?.problemDetails;
+    const code = typeof details?.['code'] === 'string' ? (details['code'] as string) : null;
+    return selectMemoNegativeMessage(status, code);
   }, []);
 
   /**
@@ -2914,17 +2928,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     { kind: 'ok'; memo: ReviewMemoReadResponse } | { kind: 'negative'; message: string }
   > => {
     if (!bffBaseUrl || !state.sessionId) return { kind: 'negative', message: MEMO_NO_MEMO_MESSAGE };
-    const response = await authenticatedFetch(
-      `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
-      { method: 'GET' }
-    );
-    if (response.ok) {
-      return { kind: 'ok', memo: (await response.json()) as ReviewMemoReadResponse };
+    let response: Response;
+    try {
+      response = await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+        { method: 'GET' }
+      );
+    } catch (err) {
+      // FR-S09 sweep (r8 task 016): the negative split happens on the THROWN ApiError. The
+      // `if (response.ok)` / fallthrough that used to follow the call was unreachable.
+      const negative = await memoNegativeFromError(err);
+      if (negative) return { kind: 'negative', message: negative };
+      throw err;
     }
-    const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
-    if (negative) return { kind: 'negative', message: negative };
-    throw new ApiError(`Failed to read the review memo (${response.status})`, response.status);
-  }, [bffBaseUrl, state.sessionId, readMemoProblemCode]);
+    return { kind: 'ok', memo: (await response.json()) as ReviewMemoReadResponse };
+  }, [bffBaseUrl, state.sessionId, memoNegativeFromError]);
 
   /**
    * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
@@ -2940,17 +2958,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo/docx`,
         { method: 'GET' }
       );
-      if (!response.ok) {
-        // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
-        // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
-        const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
-        if (negative) {
-          setMemoActionMessage(negative);
-          return;
-        }
-        throw new ApiError(`Failed to generate the review memo (${response.status})`, response.status);
-      }
-
+      // FR-S09 sweep (r8 task 016): the `if (!response.ok)` split-negatives block that used to sit
+      // here was unreachable. The split now happens in the catch, on the thrown ApiError.
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
       const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
@@ -2968,11 +2977,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         URL.revokeObjectURL(url);
       }
     } catch (err) {
-      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not generate the review memo.');
+      // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
+      // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
+      const negative = await memoNegativeFromError(err);
+      setMemoActionMessage(negative ?? (err instanceof ApiError ? err.message : 'Could not generate the review memo.'));
     } finally {
       setMemoActionInFlight(false);
     }
-  }, [bffBaseUrl, state.sessionId, memoActionInFlight, readMemoProblemCode]);
+  }, [bffBaseUrl, state.sessionId, memoActionInFlight, memoNegativeFromError]);
 
   /**
    * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
@@ -3184,14 +3196,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET' });
-        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
-        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
-        // safety net should that behaviour ever change.
-        if (!response.ok) {
-          if (response.status === 404) return; // no compose outputs yet — nothing to materialize
-          setComposeDraftError(`Failed to load the drafted content (HTTP ${response.status}).`);
-          return;
-        }
+        // FR-S09 sweep (r8 task 016): the "defensive" guard that stood here is DELETED. It could not
+        // execute — its own comment said so — and a safety net that cannot deploy is not a safety net,
+        // it is a second description of the contract that can silently drift from the first. The catch
+        // below already routes the 404 ("nothing drafted yet") as a silent no-op.
 
         const outputs = (await response.json()) as ComposeLedgerOutput[];
         const composeOutputs = Array.isArray(outputs)
@@ -3722,7 +3730,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
               });
-              if (response.ok) {
+              // FR-S09 sweep (r8 task 016): necessarily TRUE — a non-2xx threw into the catch below,
+              // which already falls through to `mountTransient` with `projection: null`.
+              {
                 const payload = (await response.json()) as {
                   projection?: RawComposeProjectionPayload;
                   // task 012 (r6): canonical model + optional minted-byte echo (commit 70be80006).
@@ -4044,15 +4054,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           signal: ac.signal,
         });
 
-        if (!response.ok) {
-          const msg =
-            response.status === 404
-              ? 'The uploaded file is no longer available (the session may have expired). Re-upload it in the Assistant and try again.'
-              : `Failed to open the uploaded file (HTTP ${response.status}).`;
-          dispatch({ kind: 'loadFailed', errorMessage: msg });
-          return;
-        }
-
         const payload = (await response.json()) as {
           content: string;
           fileName?: string;
@@ -4144,8 +4145,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }
       } catch (err) {
         if (ac.signal.aborted) return;
+        // FR-S09 sweep (r8 task 016): the 404 copy — "the session may have expired, re-upload it in
+        // the Assistant" — used to live in an `if (!response.ok)` block above the parse, and could not
+        // execute. An expired session rendered `Failed to open the uploaded file: HTTP 404`, which
+        // tells the user nothing about the one action that fixes it.
+        const status = (err as { status?: unknown } | null | undefined)?.status;
+        const httpStatus = typeof status === 'number' && status >= 100 && status <= 599 ? status : null;
         const message = err instanceof Error ? err.message : String(err);
-        dispatch({ kind: 'loadFailed', errorMessage: `Failed to open the uploaded file: ${message}` });
+        dispatch({
+          kind: 'loadFailed',
+          errorMessage:
+            httpStatus === 404
+              ? 'The uploaded file is no longer available (the session may have expired). Re-upload it in the Assistant and try again.'
+              : httpStatus !== null
+                ? `Failed to open the uploaded file (HTTP ${httpStatus}).`
+                : `Failed to open the uploaded file: ${message}`,
+        });
       }
     })();
 
@@ -4212,19 +4227,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
-        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
-        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
-        // safety net should that behaviour ever change.
-        if (!response.ok) {
-          dispatch({
-            kind: 'loadFailed',
-            errorMessage:
-              response.status === 404
-                ? 'The drafted document is no longer available (the session may have expired). Try drafting it again.'
-                : `Failed to load the drafted document (HTTP ${response.status}).`,
-          });
-          return;
-        }
+        // FR-S09 sweep (r8 task 016): the unreachable "defensive" guard is DELETED — the catch below
+        // already carries the 404 copy, and two descriptions of one contract drift apart.
 
         // GET /compose-outputs → ComposeLedgerOutputDto[]: { key, bindingId, turn, disposition, payload }.
         // The nested `payload` is passed through opaquely (snake_case body_html preserved).
