@@ -1,4 +1,4 @@
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Telemetry;
@@ -69,6 +69,14 @@ public static class ComposeSaveTelemetry
     public const string CauseContainerStep = "container-step";
     /// <summary>The If-Match precondition failed and the single rebase retry also lost (FR-S02).</summary>
     public const string CausePrecondition = "precondition";
+    /// <summary>
+    /// FR-S07: the stale-base re-anchor could not re-download the current bytes, so the save had no valid
+    /// basis and was refused before any write (task 014). Paired with <c>refused-stale</c>: the OUTCOME is
+    /// a refusal (nothing written, nothing overwritten) while the CAUSE is a failed storage read — which
+    /// is exactly the distinction this second dimension exists to carry. A sustained nonzero rate here
+    /// means users are being blocked by SPE read failures, not by each other.
+    /// </summary>
+    public const string CauseBaselineDownload = "baseline-download";
     /// <summary>A Word-for-the-web co-authoring lock (HTTP 423).</summary>
     public const string CauseWordLock = "word-lock";
     /// <summary>A malformed or unsupported request (missing field, PDF replace target).</summary>

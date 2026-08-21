@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
@@ -1719,6 +1719,32 @@ public static class ComposeEndpoints
                 title: "Document Busy",
                 detail: "Someone else is saving this document right now, so your save did not go through. " +
                         "Nothing was overwritten and your changes are still here — try saving again in a moment.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
+        }
+        catch (Sprk.Bff.Api.Services.Compose.ComposeStaleBaselineUnavailableException ex)
+        {
+            // FR-S07 (r8 task 014): the document's base moved AND the re-anchor could not re-download the
+            // current bytes, so the operation log had nothing valid to rebase onto. The save is refused
+            // before any write — this replaces a fallback that persisted the LOAD-TIME baseline instead,
+            // silently overwriting a newer version with pre-edit content and reporting HTTP 200.
+            //
+            // `refused-stale`, not `storage-failed`: no write was attempted, so nothing about the storage
+            // ATTEMPT failed, and the stored version is untouched. Telling the user their document may be
+            // damaged when it is provably intact would be its own dishonest outcome. The failed READ is
+            // carried on the telemetry `cause` dimension instead, which is what it is for.
+            //
+            // 409 rather than 412: nothing about the CALLER's state is stale — reloading would not help,
+            // and a re-download failure is usually transient. The honest instruction is to try again.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedStale, ComposeSaveTelemetry.CauseBaselineDownload);
+            logger.LogWarning(ex,
+                "Compose save: stale base could not be rebased (reason={Reason}) — refused, nothing written. TraceId={TraceId}",
+                ex.Reason, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Could Not Save Onto the Newer Version",
+                detail: "This document changed since you opened it, and we could not read the newer version to " +
+                        "merge your changes into it, so nothing was saved and nothing was overwritten. Your " +
+                        "changes are still here — try saving again in a moment.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
         catch (ComposePatchException ex)

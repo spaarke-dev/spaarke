@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -938,9 +938,22 @@ public enum ComposeSaveOutcome
     PersistedWithWarnings,
 
     /// <summary>
-    /// The save was refused because the document kept changing under it: the If-Match precondition failed
-    /// AND the single rebase retry also lost (FR-S02, task 011). Nothing was written and nothing was
-    /// overwritten. NOT a storage fault — the storage layer worked exactly as asked.
+    /// The save was refused because this request's base had moved and could not be rebased onto the
+    /// current version. Nothing was written and — the defining property — nothing was OVERWRITTEN.
+    ///
+    /// <para>Two producers, both of which are a refusal on staleness grounds rather than a failed write:</para>
+    /// <list type="number">
+    ///   <item>the If-Match precondition failed AND the single rebase retry also lost — the document is
+    ///   being written continuously by someone else right now (FR-S02, task 011);</item>
+    ///   <item>the stale-base re-anchor could not re-download the current bytes, so there was no valid
+    ///   basis to rebase the operation log against (FR-S07, task 014).</item>
+    /// </list>
+    ///
+    /// <para>Producer (2) is triggered by a storage READ that failed, which is why the telemetry
+    /// <c>cause</c> dimension carries that distinction — but the OUTCOME is still a refusal, not a
+    /// <see cref="StorageFailed"/>: no write was attempted, so nothing about the storage attempt failed.
+    /// Reporting it as a storage failure would tell the user their document may be damaged when the
+    /// stored version is in fact untouched.</para>
     /// </summary>
     RefusedStale,
 
@@ -1003,6 +1016,39 @@ public static class ComposeSaveOutcomes
         // returning a silent default here would be the "unknown member" the enum exists to forbid.
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unmapped ComposeSaveOutcome."),
     };
+}
+
+/// <summary>
+/// FR-S07 (spaarkeai-compose-r8 task 014) — the stale-base re-anchor could not obtain the CURRENT bytes,
+/// so this save has no valid basis and is refused before any write is attempted.
+///
+/// <para>What this replaces: the re-download failure used to fall back to the LOAD-TIME baseline and let
+/// the save proceed. That branch runs only when the base has already been observed to MOVE, so the
+/// fallback bytes are by definition older than the version they were about to replace — it silently
+/// overwrote a newer document with pre-edit content and reported HTTP 200. It was the only
+/// data-destroying path in Track S.</para>
+///
+/// <para>Deleted rather than guarded, deliberately: a conditional destructive path is still a destructive
+/// path. A re-anchor with no current bytes cannot produce a correct save under any condition, so there is
+/// no version of this fallback worth keeping.</para>
+///
+/// <para>Maps to <see cref="ComposeSaveOutcome.RefusedStale"/> at the endpoint. It is NOT an HTTP 422
+/// content refusal — ADR-049 forbids reintroducing that failure mode on the save path.</para>
+/// </summary>
+public sealed class ComposeStaleBaselineUnavailableException : Exception
+{
+    public ComposeStaleBaselineUnavailableException(string documentSpeId, string reason, Exception? innerException = null)
+        : base($"Compose save: the stale-base re-anchor could not obtain the current bytes for drive-item '{documentSpeId}' ({reason}). The save was refused — nothing was written.", innerException)
+    {
+        DocumentSpeId = documentSpeId;
+        Reason = reason;
+    }
+
+    /// <summary>The drive-item whose current bytes could not be read.</summary>
+    public string DocumentSpeId { get; }
+
+    /// <summary>Bounded diagnostic discriminator — never free text from an external system (ADR-015).</summary>
+    public string Reason { get; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>

@@ -1,4 +1,4 @@
-// Task 054 (spaarkeai-compose-r4, NFR-06/NFR-08, Success Criterion 4) — the THROUGH-THE-WIRE seam
+﻿// Task 054 (spaarkeai-compose-r4, NFR-06/NFR-08, Success Criterion 4) — the THROUGH-THE-WIRE seam
 // evidence for the Phase-5 concurrency behaviors tasks 050/051/052 built into `ComposeService.SaveAsync`:
 //
 //   (1) STALE-BASE save re-anchors WITHOUT an eTag 500 (task 050): a second save of the SAME
@@ -522,6 +522,131 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Select(t => t.Text)
             .Should().Contain(t => t.Contains("broader than the firm standard", StringComparison.Ordinal),
                 "the advisory comment body must be emitted natively — the whole point of 'comments travel with the file'");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 1c. FR-S07 (spaarkeai-compose-r8 task 014) — a stale-base re-anchor that CANNOT re-download the
+    //     current bytes must write NOTHING.
+    //
+    //     The defect this replaces: the re-download failure returned the LOAD-TIME baseline as the bytes
+    //     to persist, and the save proceeded. Because this branch runs only when the base has ALREADY
+    //     been observed to move, those bytes are by definition older than the version about to be
+    //     overwritten — so the fallback silently replaced a newer document with pre-edit content, and
+    //     reported HTTP 200. It is the only data-destroying path in Track S, and the only one on the
+    //     engine side rather than the client contract.
+    //
+    //     The fallback is deleted, not guarded: a re-anchor with no current bytes has no valid basis for
+    //     a save. The refusal is a defined terminal outcome (`refused-stale`, FR-S06), never an HTTP 422
+    //     content-refusal (ADR-049).
+    //
+    //     Two arrangements, because the SPE facade can fail either way and both took the same fallback:
+    //     the download THROWS, and the download returns NULL.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData(true)]   // DownloadFileAsUserAsync throws
+    [InlineData(false)]  // DownloadFileAsUserAsync returns null
+    public async Task Save_StaleBase_ReanchorDownloadFails_WritesNothing_RefusesStale_ThroughTheWire(bool downloadThrows)
+    {
+        var speId = $"spe-item-frs07-{(downloadThrows ? "throw" : "null")}";
+        var driveId = $"drive-frs07-{(downloadThrows ? "throw" : "null")}";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // ── Save #1 seeds the version stamp at "v1-etag" (the assert-baseline for the next save). ──
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the seeding save must succeed — body: {await firstSave.Content.ReadAsStringAsync()}");
+
+        // ── An EXTERNAL writer lands a new version, so this save's base has moved and the op log must be
+        //    re-anchored against the CURRENT bytes... which we then make unobtainable. ──────────────────
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
+
+        if (downloadThrows)
+        {
+            _fixture.SpeMock
+                .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Simulated SPE download failure on the re-anchor path."));
+        }
+        else
+        {
+            _fixture.SpeMock
+                .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Stream?)null);
+        }
+
+        // Capture ANY write attempted after the seed, on EITHER overload, along with the bytes it carried.
+        // Capturing the bytes rather than only a flag is deliberate: when this assertion failed against the
+        // pre-fix code it showed WHICH document would have been written, which is the evidence that the
+        // fallback was destructive rather than merely wasteful.
+        byte[]? persistedAfterSeed = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persistedAfterSeed = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
+
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[FR-S07]" },
+            },
+        };
+
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments = (object?)null,
+        });
+
+        var body = await secondSave.Content.ReadAsStringAsync();
+
+        // (a) NOTHING was written. This is the assertion that matters — the stored version must be exactly
+        //     what the external writer left, not our pre-edit copy of it.
+        persistedAfterSeed.Should().BeNull(
+            "a re-anchor that could not obtain the current bytes has no valid basis for a save; writing the " +
+            "load-time baseline would overwrite a version we already know is newer");
+
+        // (b) The failure is a DEFINED refusal the user can act on — not a 200, and not a 422 content
+        //     refusal (ADR-049 forbids reintroducing that failure mode on this path).
+        secondSave.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            $"the save is refused because the base moved and could not be rebased — body: {body}");
+        secondSave.StatusCode.Should().NotBe(HttpStatusCode.UnprocessableEntity,
+            "ADR-049: the outcome is a defined save outcome, never a content refusal");
+        body.Should().Contain("could not", "the detail must say plainly why the save did not happen");
+        body.Should().Contain("still", "and that the user's changes survive for a retry");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════

@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
@@ -2127,9 +2127,22 @@ public class ComposeService : IComposeService
         bool trackChanges,
         CancellationToken cancellationToken)
     {
-        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
-        // download miss fails closed: every op/comment surfaces as ORPHAN (never a silent apply onto a
-        // baseline we could not verify).
+        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against.
+        //
+        // FR-S07 (r8 task 014): a download miss REFUSES THE SAVE. It previously returned `originalBaseline`
+        // — the LOAD-TIME bytes — and let the caller persist them. This method is only ever reached when
+        // the base has already been observed to MOVE, so those bytes are by definition older than the
+        // version they were about to replace: the fallback silently overwrote a newer document with
+        // pre-edit content and reported HTTP 200. It was the only data-destroying path in Track S.
+        //
+        // Its comment claimed it "fails closed" because every op surfaced as ORPHAN — and that was true of
+        // the OPS. It was the BYTES that were wrong. Surfacing the ops honestly while writing a stale
+        // document is precisely the Half-A/Half-B confusion this project exists to remove.
+        //
+        // Deleted rather than guarded: a re-anchor with no current bytes cannot produce a correct save
+        // under any condition, so there is no version of this fallback worth keeping. The throw is caught
+        // at the endpoint and reported as `refused-stale` (FR-S06) — a defined terminal outcome, never an
+        // HTTP 422 content refusal (ADR-049).
         Stream? stream;
         try
         {
@@ -2139,14 +2152,17 @@ public class ComposeService : IComposeService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — REFUSING the save; nothing written, stored version untouched.",
                 request.DocumentSpeId);
-            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+            throw new ComposeStaleBaselineUnavailableException(request.DocumentSpeId!, "download-faulted", ex);
         }
 
         if (stream is null)
         {
-            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+            _logger.LogWarning(
+                "Compose save: stale-base re-anchor got no content stream for driveItem={DocumentSpeId} — REFUSING the save; nothing written, stored version untouched.",
+                request.DocumentSpeId);
+            throw new ComposeStaleBaselineUnavailableException(request.DocumentSpeId!, "download-empty");
         }
 
         byte[] currentBytes;
