@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>SPIKE — prove the owning-app delegated path can obtain a Graph-audienced token</title>
+    <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
+    <gate>startable — §6.5 ADR decision is on record (path C); this spike can REOPEN it</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive auth work; tags include auth. Root CLAUDE.md §6 escalation territory and §8 FULL trigger.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural auth decision with an ADR gate attached. High blast radius: the outcome determines whether Workstream B proceeds as planned or the §6.5 gate reopens.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth, oauth, authorization, bff-api, spike</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Establish empirically whether a delegated Microsoft Graph token carrying FileStorageContainerType.Manage.All can be obtained via the per-customer owning app against the Spaarke Dev tenant. This is a SPIKE: produce evidence and a documented token-acquisition shape, not production code. Two verified defects mean the existing path cannot work as written — determine whether they are fixable within the owning-app model.</prompt>
+
+  <role>SPAARKE platform developer. Expert in MSAL confidential clients, the OAuth 2.0 On-Behalf-Of flow, Entra app registrations, token audiences, and Microsoft Graph SPE permissions. Follow ADRs strictly.</role>
+
+  <goal>A documented, evidenced answer to: can the per-customer owning app obtain a Graph-audienced delegated token for containerTypes? Either a working token-acquisition shape recorded for task 011 to implement, or an evidenced determination that the shape is unworkable — which reopens the §6.5 ADR gate.</goal>
+
+  <context>
+    <background>Spec §3.1, ADR Tensions, and Unresolved Question 1 — the project's highest-risk unknown. GET /storage/fileStorage/containerTypes does not support application permissions at all, so Container Types cannot work under the current app-only posture regardless of credentials. The §6.5 gate is resolved as path C (comply under ADR-028 E-1), because ADR-028 A4 exempts per-customer owning apps from the no-client-secret rule and spaarke-auth-v4-dataverse-MI explicitly scopes SpeAdminTokenProvider/SpeAdminGraphService out of its migration (its design.md:149).
+
+BUT two verified defects mean the existing owning-app OBO path cannot currently succeed:
+(1) SpeAdminTokenProvider.cs:142 requests scope api://{OwningAppId}/.default — an owning-app audience — while the resulting token is handed to a Graph client pointed at graph.microsoft.com (SpeAdminGraphService.cs:4212). Graph rejects on audience. Corroborated independently by projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md:22.
+(2) SpeAdminTokenProvider.cs:306 builds the confidential client as Create(config.OwningAppId), but MSAL OBO requires the incoming user assertion to be audienced to that same client — while the SPE Admin code page authenticates against the BFF (api://{bff-client-id}/SDAP.Access).
+
+Together these indicate the SPE-084 multi-app OBO path has likely NEVER executed successfully, consistent with spec §1's finding that no test makes a real Graph call.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/design.md</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/obo-spike-findings.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task prerequisites. Requires the Spaarke Dev tenant and its owning-app registration.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this task is a SPIKE. Produce evidence and a documented shape. Do NOT ship the production implementation — that is task 011.</constraint>
+    <constraint source="ADR-028">Scope: the credential for the delegated exchange. Stay on the PER-CUSTOMER OWNING APP identity (exception E-1). MUST NOT route the exchange through the BFF app registration — that lands in Amendment A4 territory (MI-FIC or KV certificate required, never a client secret), trips E-3's "does not license expansion" clause, and contradicts auth-v4's scoping decision.</constraint>
+    <constraint source="ADR-028">Scope: any NEW confidential client. MUST NOT add a new .WithClientSecret site for a client authenticating as the BFF identity. The existing owning-app secret usage is covered by E-1 and is not being expanded by this spike.</constraint>
+    <constraint source="project">Scope: secrets. Do NOT write any secret VALUE, token, or assertion into notes, logs, or the repo. Record shapes, audiences, scopes, claim names, and error codes only.</constraint>
+    <constraint source="project">Scope: tenant safety. Read-only Graph calls only. This spike MUST NOT create, modify, or delete a container type.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO flow, token audiences, SPE container-type permissions</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="obo-flow" location=".claude/patterns/auth/obo-flow.md">Canonical OBO exchange shape and its audience requirements.</pattern>
+      <pattern name="oauth-scopes" location=".claude/patterns/auth/oauth-scopes.md">Scope construction — .default vs individual scopes.</pattern>
+      <pattern name="token-caching" location=".claude/patterns/auth/token-caching.md">Per-(config + user) cache keying and TTL.</pattern>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Which Graph endpoints support delegated vs application permissions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-028 (all amendments, especially A4 + exceptions E-1/E-3), spec ADR Tensions, and the two defect sites.</step>
+    <step order="1">Confirm defect (1) by reading SpeAdminTokenProvider.cs:142 and SpeAdminGraphService.cs:4212. Record the actual scope requested and the actual Graph base URL used.</step>
+    <step order="2">Confirm defect (2) by reading SpeAdminTokenProvider.cs:306 and determining the audience of the token the SPE Admin code page actually sends to the BFF.</step>
+    <step order="3">Determine which app registration can legitimately perform the OBO exchange given the incoming assertion's audience. Document the constraint precisely — this is the crux.</step>
+    <step order="4">Verify the Spaarke Dev owning app's delegated permission state: is FileStorageContainerType.Manage.All granted and admin-consented? Record the finding (do NOT grant it from this task).</step>
+    <step order="5">Attempt to obtain a Graph-audienced delegated token via the owning app. Try the corrected scope (https://graph.microsoft.com/.default) and record the exact result — success, or the precise MSAL/Entra error code.</step>
+    <step order="6">If a token is obtained: call GET /storage/fileStorage/containerTypes (v1.0) with it and record the HTTP status and payload shape.</step>
+    <step order="7">Also verify the §4.2b claim empirically: does container-type LIST work for a non-admin owning-tenant user (ownership-filtered), and does CREATE genuinely need no admin role? The Graph reference page and the conceptual doc contradict each other — record which is correct.</step>
+    <step order="8">Write projects/sdap-SPE-admin-app-r2/notes/obo-spike-findings.md: the working shape (if found), the exact client/audience/scope triple, the permission prerequisites, and any residual risk. No secret values.</step>
+    <step order="9">Decide the outcome: WORKABLE (hand the shape to task 011) or UNWORKABLE (fire the escalation trigger and reopen the §6.5 gate).</step>
+    <step order="10">Update TASK-INDEX.md: set task 010 status to ✅ and record the outcome verdict beside it.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owning-app shape CANNOT obtain a Graph-audienced delegated token, STOP. Do NOT fall back to the BFF app registration on your own initiative. Re-run the CLAUDE.md §6.5 ADR Conflict block with the new evidence — the fallback lands in ADR-028 A4 territory and requires coordination with spaarke-auth-v4-dataverse-MI plus a named human path A/B decision. Write BLOCKED.md and stop.</trigger>
+    <trigger>If making the owning-app shape work would require the SPE Admin code page to acquire a second, owning-app-audienced token (a client-side auth change), STOP and escalate — that is a change to the client auth contract under ADR-028 and is a scope decision, not a task-level choice.</trigger>
+    <trigger>If the Spaarke Dev owning app lacks the required delegated permission or consent, STOP and escalate with the exact permission named. Granting Entra permissions is an operator action, not a task action.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SpeAdminTokenProvider.cs already implements an OBO exchange with per-(configId + sha256(userToken)) caching (SpeAdminGraphService.cs:448-498). Grep confirms no second OBO implementation exists for SpeAdmin.</existing>
+    <extension>Yes — the intent is to REPAIR the existing provider, not add a parallel path. This spike determines whether repair is possible within the owning-app model before any code is written.</extension>
+    <cost-of-doing-nothing>Container Types returns an error permanently: GET /storage/fileStorage/containerTypes does not support application permissions at all, so no credential value fixes it. Without this spike, task 011 would be built on an assumption that two verified defects contradict.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/run a scratch verification harness</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/obo-spike-findings.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both defects are confirmed or refuted against the code, with file:line evidence recorded.</criterion>
+    <criterion testable="true">The question "which app registration can perform the OBO exchange given the incoming assertion's audience" is answered precisely and recorded.</criterion>
+    <criterion testable="true">Given the corrected scope, when a token acquisition is attempted via the owning app, then either a Graph-audienced token is obtained (recorded with its audience claim) or the exact MSAL/Entra error code is recorded.</criterion>
+    <criterion testable="true">If a token was obtained, GET /storage/fileStorage/containerTypes (v1.0) returns 200 and the payload shape is recorded.</criterion>
+    <criterion testable="true">The §4.2b contradiction (reference page vs conceptual doc on whether create needs an admin role) is resolved empirically and recorded.</criterion>
+    <criterion testable="true">notes/obo-spike-findings.md contains no secret value, token, or assertion — only shapes, audiences, scopes, claim names, and error codes.</criterion>
+    <criterion testable="true">Negative: no container type was created, modified, or deleted during the spike.</criterion>
+    <criterion testable="true">A WORKABLE or UNWORKABLE verdict is recorded. If UNWORKABLE, BLOCKED.md exists and the §6.5 gate is flagged for re-run.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-B01. THE highest-risk task in the project (spec Unresolved Question 1). Tasks 011 and 012 depend on its outcome; task 004 may hand off to it. Parallel-safe: produces notes only, no source modification — runs alongside task 004 in Wave 2.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

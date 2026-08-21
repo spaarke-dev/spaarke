@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Replace hardcoded error strings with the real Graph/Dataverse error via ProblemDetails</title>
+    <phase>1 Workstream A — Make failures visible</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs across the BFF SpeAdmin surface + the client app; tags include bff-api. Root CLAUDE.md §8 FULL trigger.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified mechanical change across a known set of call sites; no architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/Graph/SpeAdminGraphService.cs broadly plus most Api/SpeAdmin/** endpoint files. Foundational for tasks 002-005 — runs alone in Wave 0.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, endpoints, error-handling, frontend</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The SPE Admin app tells admins the wrong thing when a call fails. Replace the hardcoded error strings in the SpeAdmin surface with the actual underlying Graph or Dataverse error — code, message, and request id — surfaced through ProblemDetails per ADR-019. Keep a friendly summary, but stop asserting a cause the code has not established.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, ProblemDetails, and the Microsoft Graph SDK v5 error model (ODataError). Follow ADRs strictly.</role>
+
+  <goal>Every SpeAdmin failure path returns the real underlying error through ProblemDetails. No user-visible message names a cause that is not present in the caught exception. This is the error surface tasks 002-005 consume.</goal>
+
+  <context>
+    <background>Spec §2.4 — the systemic defect this project exists to correct. The Container Types screen reports "Failed to retrieve container types from the Graph API. Check the app registration credentials in the config." That message is a hardcoded string and it is misleading: the same credentials serve the Containers screen successfully. The real cause is that the API does not support application permissions at all (spec §3.1). An admin sent to check correct credentials wastes the entire diagnosis. Until the app tells the truth, every later task starts from a false premise — which is why this task gates the rest of Workstream A.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/RecycleBinEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchContainersEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SecurityEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/AuditLogEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/services/speApiClient.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites — this is the foundation task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Scope: every SpeAdmin endpoint failure path. Errors MUST be returned as ProblemDetails; MUST NOT return raw exception messages or bare strings.</constraint>
+    <constraint source="ADR-007">Scope: the error-mapping layer. Do NOT let Graph SDK types (ODataError, ServiceException) leak above the service facade into endpoint or client code — map to a Spaarke error shape first.</constraint>
+    <constraint source="project">Scope: user-visible message text. A message MUST NOT assert a cause unless that cause is established by the caught exception. Preserve a friendly summary line, but the Graph error code, message, and request id MUST be present in the ProblemDetails payload for diagnosis.</constraint>
+    <constraint source="project">Scope: secrets. Do NOT include client secrets, bearer tokens, or Key Vault secret VALUES in any error payload. Secret NAMES are acceptable.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. State the Placement Justification in the PR and verify publish size (≤60 MB ceiling; ~44.96 MB baseline incl. PDBs).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF error handling + Graph SDK error model</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Canonical BFF error-to-ProblemDetails mapping.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">ODataError structure — Error.Code, Error.Message, and the request-id response header.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-019, ADR-007, the error-handling pattern, and spec §2.4 / §3.1.</step>
+    <step order="1">Inventory every hardcoded user-visible error string in Api/SpeAdmin/** and SpeAdminGraphService.cs. Record each with file:line in projects/sdap-SPE-admin-app-r2/notes/error-surface-inventory.md.</step>
+    <step order="2">For each, determine whether the asserted cause is established by the caught exception. Mark MISLEADING where it is not — the Container Types "check credentials" message is the known example.</step>
+    <step order="3">Introduce a single mapping helper that converts an ODataError (and the Dataverse equivalent) into ProblemDetails carrying: Graph error code, Graph message, request id, and a friendly summary. Extend ProblemDetailsHelper rather than adding a parallel error type.</step>
+    <step order="4">Route every SpeAdmin failure path through that helper. Remove the hardcoded cause assertions.</step>
+    <step order="5">Update the client (speApiClient.ts + the screens' error display) to render the real error detail, not a generic fallback that discards it.</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ — must be 0 errors.</step>
+    <step order="7">Verify against the Spaarke Dev tenant: the Container Types screen now reports the actual Graph error rather than the credentials message.</step>
+    <step order="8">Measure publish size and record it in the task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set task 001 status to ✅.</step>
+    <step order="10">Document any deviation in projects/sdap-SPE-admin-app-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If surfacing the real error would expose a secret VALUE (token, client secret, Key Vault secret content) that cannot be redacted without losing diagnostic value, STOP and escalate per CLAUDE.md §6 rather than choosing between leaking it and hiding the error.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Container Types reports the real cause">
+      <steps>
+        <step>Open the Container Types screen against the Spaarke Dev tenant</step>
+        <step>Inspect the error message rendered on failure</step>
+      </steps>
+      <expected>The message reports the actual Graph error code and message. It does NOT say "Check the app registration credentials in the config".</expected>
+    </test>
+    <test name="Error detail is not discarded by the client">
+      <steps>
+        <step>Force a Graph failure on any SpeAdmin screen</step>
+        <step>Inspect the rendered error and the network response</step>
+      </steps>
+      <expected>The ProblemDetails error code, message, and request id reach the UI — the client does not replace them with a generic fallback.</expected>
+    </test>
+    <test name="No secret leaks into the error surface">
+      <steps>
+        <step>Force a Key Vault failure</step>
+        <step>Inspect the rendered error and the raw response payload</step>
+      </steps>
+      <expected>Secret NAMES may appear; no secret VALUE, token, or assertion appears anywhere in the payload or the UI.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Inspect the error display in both themes</step>
+      </steps>
+      <expected>Error surfaces use Fluent v9 semantic tokens per ADR-021; contrast remains legible; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page (npm install --legacy-peer-deps)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/*.cs (error paths routed through the helper)</output>
+    <output type="code">src/solutions/SpeAdminApp/src/services/speApiClient.ts</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/error-surface-inventory.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Container Types screen fails, when the error renders, then it reports the actual Graph error code and message — not "Check the app registration credentials in the config".</criterion>
+    <criterion testable="true">Given any SpeAdmin endpoint failure, when the response is inspected, then it is a ProblemDetails payload containing the Graph/Dataverse error code, message, and request id.</criterion>
+    <criterion testable="true">No user-visible message asserts a cause absent from the caught exception; the inventory in notes/ records the classification for every string found.</criterion>
+    <criterion testable="true">Negative: an error payload contains no secret VALUE (token, client secret, Key Vault secret content) — verified by inspecting a forced Key Vault failure.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to a SpeAdmin endpoint still returns 401 ProblemDetails, not an unhandled error.</criterion>
+    <criterion testable="true">Graph SDK types (ODataError, ServiceException) do not appear in endpoint signatures or client-facing payloads (ADR-007).</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with 0 errors; publish size recorded and within the 60 MB ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-A01. This task gates 002-005 — do not start them until the error surface exists, because their diagnoses depend on seeing real errors. The 70 `catch (ODataError)` sites are task 002's job, not this one: here, fix the message surface; there, fix the absent-vs-failed conflation.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

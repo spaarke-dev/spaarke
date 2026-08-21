@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Audit the 70 catch (ODataError) sites — distinguish "legitimately absent" from "call failed"</title>
+    <phase>1 Workstream A — Make failures visible</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs across a 4,911-LOC hot-path file; tags include bff-api. Brownfield root-cause work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical classification over a known, enumerable set of call sites — but 70 of them, each needing a judgment call.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Heavy modification of Infrastructure/Graph/SpeAdminGraphService.cs. Only one task per wave may touch this file — see plan.md §3.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, error-handling, refactor</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>SpeAdminGraphService.cs has exactly 70 `catch (ODataError)` sites that swallow the failure and return null, false, or an empty collection. That conflates "the resource legitimately does not exist" with "the call failed" — which is why a broken screen renders as an empty grid instead of an error. Classify every site and make the code match its classification.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Microsoft Graph SDK v5 error model and defensive-code refactoring. Follow ADRs strictly.</role>
+
+  <goal>All 70 sites are classified in a written inventory as absent-tolerant or failure-propagating, and the code at each site matches its classification. A failed Graph call never renders as an empty result.</goal>
+
+  <context>
+    <background>Spec §2.4 / FR-A02. This is the mechanism behind the systemic defect: the app reports success when it is not succeeding. A `catch (ODataError) { return null; }` is correct when Graph returns 404 for an optional resource, and is a silent data-loss bug when Graph returns 403 or 500. Today the code cannot tell them apart, so the operator cannot either. Task 001 built the error surface; this task makes the failures actually reach it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/odata-catch-inventory.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The ProblemDetails error surface that failure-propagating sites route into.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: all 70 catch sites. Every site MUST be classified in the inventory before its code is changed. An unclassified site left as-is is an incomplete task, not an acceptable default.</constraint>
+    <constraint source="project">Scope: classification rule. Treat 404 (and 403 ONLY where the resource is genuinely optional for the caller) as potentially absent-tolerant. Treat 401, 429, 5xx, and any auth/permission failure on a required resource as failure-propagating. When genuinely ambiguous, default to PROPAGATE — a spurious error is recoverable, a silent empty grid is not.</constraint>
+    <constraint source="ADR-019">Scope: propagating sites. Failures surface as ProblemDetails through the task-001 helper, not as thrown raw ODataError.</constraint>
+    <constraint source="ADR-007">Scope: the facade boundary. Graph SDK types MUST NOT leak above the service.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph SDK error semantics + BFF error handling</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Canonical error mapping.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">ODataError status codes and how to read them.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-019, ADR-007, spec §2.4.</step>
+    <step order="1">Enumerate all 70 sites: grep -n "catch (ODataError" on SpeAdminGraphService.cs. Confirm the count is 70; if it differs, record the actual number and proceed.</step>
+    <step order="2">For each site, record in notes/odata-catch-inventory.md: line number, enclosing method, what it currently returns, the resource involved, and the classification (ABSENT-TOLERANT or PROPAGATE) with a one-line reason.</step>
+    <step order="3">Apply the classification rule from constraints. Default ambiguous cases to PROPAGATE.</step>
+    <step order="4">Change PROPAGATE sites to surface the error through the task-001 ProblemDetails helper.</step>
+    <step order="5">For ABSENT-TOLERANT sites, narrow the catch to the specific status code(s) that justify tolerance — do not leave a blanket catch that also swallows 5xx.</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors.</step>
+    <step order="7">Verify empirically: force a Graph failure on a list endpoint (e.g. an invalid container type id) and confirm it renders as an error, not an empty grid.</step>
+    <step order="8">Measure publish size; record in task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set task 002 status to ✅.</step>
+    <step order="10">Document deviations in projects/sdap-SPE-admin-app-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a site's correct classification depends on Graph behaviour that cannot be determined from the code or the docs (e.g. whether Graph returns 404 or an empty collection for a specific optional resource), STOP and record it as an open question rather than guessing. Guessing here re-creates the exact defect this task removes.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Extends the ProblemDetails helper delivered by task 001 (src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs) — no new error type is introduced.</existing>
+    <extension>Yes — this task only reclassifies existing catch blocks and routes them into the task-001 helper. The one NEW file is a notes/ inventory document, not code.</extension>
+    <cost-of-doing-nothing>A failed Graph call renders as an empty grid, so an admin concludes "no containers exist" when the real answer is "the call was rejected". This is the mechanism behind the silent-failure defect in spec §2.4.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/odata-catch-inventory.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 70 sites appear in notes/odata-catch-inventory.md with a classification and a one-line reason; zero unclassified.</criterion>
+    <criterion testable="true">Given a forced Graph 403 or 500 on a list endpoint, when the screen renders, then an error is shown — not an empty grid.</criterion>
+    <criterion testable="true">Given a Graph 404 for a genuinely optional resource, when the call completes, then the absent-tolerant path still returns null/empty without surfacing a spurious error.</criterion>
+    <criterion testable="true">No ABSENT-TOLERANT site retains a blanket catch that would also swallow a 5xx — each is narrowed to the justifying status code(s).</criterion>
+    <criterion testable="true">Graph SDK types do not leak above the facade (ADR-007).</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-A02. Verified 2026-08-21: exactly 70 `catch (ODataError` occurrences in SpeAdminGraphService.cs. The inventory is a durable artifact — the decomposition follow-on (speadmingraphservice-decomposition-r1) will use it to understand each concern's failure semantics.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

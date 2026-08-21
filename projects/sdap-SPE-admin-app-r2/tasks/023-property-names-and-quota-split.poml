@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Fix container-type PATCH property names and split quota-ceiling from consumption</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>020 complete, 040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph hot path plus a request DTO; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Known defect at known lines with verified correct names; the semantic split is well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>020, 040</deps>
+    <tags>bff-api, api, testing, frontend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Container-type settings writes appear to succeed but are near-certain no-ops: the PATCH body writes majorVersionLimit and storageUsedInBytes, while the real v1.0 properties are itemMajorVersionLimit and maxStoragePerContainerInBytes. The second also carries a semantic error — maxStoragePerContainerInBytes is a quota CEILING, not consumption. Fix both names and split the semantics.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph PATCH semantics and the fileStorageContainerType settings model. Follow ADRs strictly.</role>
+
+  <goal>Settings writes verifiably persist, confirmed by read-back against a live tenant. A quota ceiling control and a consumption metric are separate concepts that never share a field.</goal>
+
+  <context>
+    <background>Spec FR-C04 + FR-C05 / §3.2. Verified sites: SpeAdminGraphService.cs:3940 (majorVersionLimit) and :3945 (storageUsedInBytes), both written into patchBody.AdditionalData. The method signature at :3907-3908 carries the wrong names too, so the fix reaches the parameter names and the request DTO. The semantic error is the deeper one: the code models a LIMIT as a METRIC, which is why the storage story never cohered — this is the root of the confusion task 024 resolves on the consumption side.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/UpdateContainerTypeSettingsRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeSettingsEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/settings</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">v1.0 migration — property names are v1.0 names.</dependency>
+      <dependency task="040" status="pending">WireMock fixture to assert the PATCH body shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the PATCH body. Property names MUST be verified against the current v1.0 schema before use. The correct names are itemMajorVersionLimit and maxStoragePerContainerInBytes — re-verify rather than trusting this text.</constraint>
+    <constraint source="project">Scope: the semantic split. A quota CEILING control and a consumption METRIC MUST NOT share a field, a DTO property, a parameter, or a UI control. Rename through the whole chain — parameters, DTO, endpoint, UI label — so the confusion cannot recur.</constraint>
+    <constraint source="project">Scope: verification. "The PATCH returned 200" is NOT proof of persistence. Every settings write MUST be confirmed by reading the value back.</constraint>
+    <constraint source="ADR-019">Scope: failure paths. Errors surface as ProblemDetails with the real Graph error.</constraint>
+    <constraint source="ADR-021">Scope: the settings UI. Fluent v9 semantic tokens; dark-mode correct; labels must distinguish ceiling from usage.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph container-type settings PATCH semantics</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">PATCH with AdditionalData.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §3.2 and the research note §3.</step>
+    <step order="1">Re-verify the correct v1.0 property names against current Graph docs. Record the verification.</step>
+    <step order="2">Fix the PATCH body at :3940 and :3945 and the method signature at :3907-3908.</step>
+    <step order="3">Rename through the chain — parameter names, UpdateContainerTypeSettingsRequest, the endpoint, and the UI label — so a ceiling is never called "storage used".</step>
+    <step order="4">Add WireMock tests asserting the exact PATCH body property names. These are the regression guard for the defect class.</step>
+    <step order="5">Add a read-back verification path so a write is confirmed, not assumed.</step>
+    <step order="6">Build BFF and code page; run tests.</step>
+    <step order="7">Verify against Spaarke Dev: set itemMajorVersionLimit, read it back, confirm it persisted. Repeat for the ceiling.</step>
+    <step order="8">Measure publish size; record. Update TASK-INDEX.md: task 023 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a settings write returns 200 but read-back shows the value did NOT persist, STOP and escalate rather than assuming replication lag. Distinguishing "pending replication (up to 24h)" from "silently rejected" is task 026's job and it needs a real answer here first — assuming lag is how this defect stayed invisible.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Ceiling and usage are distinct">
+      <steps>
+        <step>Open container-type Settings</step>
+        <step>Inspect the storage-related controls and labels</step>
+      </steps>
+      <expected>A quota ceiling control is labelled as a limit. No control or label presents a ceiling as consumption.</expected>
+    </test>
+    <test name="Settings write persists">
+      <steps>
+        <step>Change itemMajorVersionLimit and save</step>
+        <step>Reload the screen</step>
+      </steps>
+      <expected>The new value is shown after reload — the write persisted.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the settings controls</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/UpdateContainerTypeSettingsRequest.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (PATCH body assertions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The PATCH body uses itemMajorVersionLimit and maxStoragePerContainerInBytes, verified against the current v1.0 schema.</criterion>
+    <criterion testable="true">Given a settings write, when the value is read back from the live tenant, then it matches what was written.</criterion>
+    <criterion testable="true">No field, DTO property, parameter, or UI control shares a name or meaning between quota ceiling and consumption — verified by grep for the old names, which must return nothing.</criterion>
+    <criterion testable="true">A WireMock test asserts the exact PATCH property names and fails if either reverts.</criterion>
+    <criterion testable="true">Negative: a settings write that Graph rejects surfaces as ProblemDetails with the real error — not a silent success.</criterion>
+    <criterion testable="true">Negative: an out-of-range ceiling value is rejected with a validation error rather than silently truncated.</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C04 + FR-C05. Satisfies spec success criteria 5 and 15. The semantic split feeds task 024 (consumption) and task 051 (ceiling as a first-class capability).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

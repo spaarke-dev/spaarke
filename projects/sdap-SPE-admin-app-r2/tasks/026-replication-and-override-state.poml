@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Show replication-pending state and consuming-tenant override state</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>025 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs and .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI/state addition on top of the settings surface delivered by task 025.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>025</deps>
+    <tags>bff-api, api, frontend, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Container-type settings replicate to consuming tenants over up to 24 hours, and consuming-tenant overrides persist. Without showing this, an admin saves a setting, sees no change, and concludes the tool is broken — a direct instance of the systemic defect this project exists to correct.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 state presentation and the Graph container-type replication model. Follow ADRs strictly.</role>
+
+  <goal>After a settings save, the UI shows replication is pending with the 24-hour expectation; settings overridden by a consuming tenant are visibly marked as such.</goal>
+
+  <context>
+    <background>Spec FR-C08 / §4.2b. The research note calls this a "direct hit on §2.4". Task 025 exposed consumingTenantOverridables as metadata; this task renders what it means. Note the distinction that matters: "saved but not yet replicated" and "saved but overridden downstream" are different states, and neither is "failed".</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeSettingsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/settings</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/container-types</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="pending">The full settings surface including consumingTenantOverridables.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: state vocabulary. Three states MUST be distinguishable — saved-and-replicated, saved-pending-replication (up to 24h), and overridden-by-consuming-tenant. Collapsing any two reproduces the confusion this task removes.</constraint>
+    <constraint source="project">Scope: honesty. Do NOT fabricate a replication timestamp or progress bar if Graph does not expose replication state. If it does not, show the expectation ("changes may take up to 24 hours to reach consuming tenants") without implying live tracking.</constraint>
+    <constraint source="NFR-06">Scope: this UI. A pending state MUST NOT read as success, and an override MUST NOT read as a failed save.</constraint>
+    <constraint source="ADR-021">Scope: state indicators. Fluent v9 semantic tokens; dark-mode correct; no hex literals.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Container-type replication + consuming-tenant overrides</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Distinguishing states from failures.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.2b.</step>
+    <step order="1">Determine whether Graph exposes any replication-state signal. Record the finding — this decides between live state and a stated expectation.</step>
+    <step order="2">Model the three states in the DTO returned to the client.</step>
+    <step order="3">Render post-save feedback that names the pending state and the 24-hour expectation.</step>
+    <step order="4">Mark settings overridden by a consuming tenant, showing both the owner value and the effective override.</step>
+    <step order="5">Build BFF and code page.</step>
+    <step order="6">Verify against Spaarke Dev: save a setting and confirm the pending state renders rather than a bare success.</step>
+    <step order="7">Measure publish size; record. Update TASK-INDEX.md: task 026 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Graph exposes no way to distinguish "not yet replicated" from "overridden downstream", STOP and escalate — presenting a guess as either state would reintroduce the misleading-state defect, and choosing which to show is a product decision.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Pending replication is visible">
+      <steps>
+        <step>Change a container-type setting and save</step>
+        <step>Observe the post-save feedback</step>
+      </steps>
+      <expected>The UI states the change is pending replication and may take up to 24 hours. It does not present a bare "Saved" that implies immediate effect.</expected>
+    </test>
+    <test name="Override state is visible">
+      <steps><step>View a setting overridden by a consuming tenant</step></steps>
+      <expected>The setting is marked as overridden, showing both the owner value and the effective value. It is not presented as a failed save.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the state indicators</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; contrast legible; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/settings</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a settings save, when the UI updates, then it names the pending-replication state and the up-to-24-hour expectation.</criterion>
+    <criterion testable="true">Given a setting overridden by a consuming tenant, when it renders, then both the owner value and the effective override are shown and labelled.</criterion>
+    <criterion testable="true">The three states (replicated / pending / overridden) are distinguishable in the UI.</criterion>
+    <criterion testable="true">Negative: a pending state does not render as plain success (NFR-06).</criterion>
+    <criterion testable="true">Negative: an override does not render as a failed save.</criterion>
+    <criterion testable="true">Negative: no fabricated replication timestamp or progress indicator is shown if Graph exposes no such signal.</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C08. Parallel-safe: owns the settings endpoint, DTO, and client screens — does NOT modify SpeAdminGraphService.cs.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

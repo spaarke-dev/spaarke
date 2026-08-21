@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Retire scaffolding-class SpeAdmin tests per ADR-038</title>
+    <phase>4 Workstream D — Build the harness</phase>
+    <gate>040 complete, 041 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): unconditional code-review + adr-check. Tags include testing and deletion.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Classification against a documented 17-ban criteria list; mechanical once the criteria are applied.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W14</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040, 041</deps>
+    <tags>testing, unit-test, deletion, integration-test</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retire the DTO-shape tests and the manual-test-plan-as-passing-test per ADR-038's scaffolding bans. Phase2IntegrationTests.cs:1315 contains a passing test whose stated purpose is "only to make the manual test plan visible in the test runner" — that is not a test.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ADR-038's build-vs-maintain classifier and test-suite hygiene. Follow ADR-038 strictly.</role>
+
+  <goal>Scaffolding-class tests are removed; genuine coverage is retained or replaced. The suite's pass count now means something.</goal>
+
+  <context>
+    <background>Spec FR-D03. The 359 tests across 14 SpeAdmin files assert DTO property shapes, auth-filter behaviour in isolation, and validation constraints — while the Graph interaction has zero coverage. The suite was green throughout an app that had never worked. Tasks 040 and 041 have now built real coverage, so the scaffolding can go without losing signal. ADR-038 deletion-safety requires same-PR replacement for anything removed under a KEEP path.</background>
+    <relevant-files>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Integration/SpeAdmin/Phase2IntegrationTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">WireMock coverage — real replacement for the mapping surface.</dependency>
+      <dependency task="041" status="pending">Live coverage — real replacement for the flows the manual plan described.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: deletion safety. Removal under a KEEP path requires same-PR replacement. Do NOT delete a test whose behaviour has no replacement in the 040/041 suites.</constraint>
+    <constraint source="ADR-038">Scope: the bans. Retire DTO-shape-only tests, DI-registration tests, and constructor null-check tests. The manual-test-plan-as-passing-test is retired outright.</constraint>
+    <constraint source="project">Scope: the manual test plan CONTENT. The plan text itself may be genuinely useful — relocate it to notes/ or a README before deleting the test that carried it. Delete the fake test, not the knowledge.</constraint>
+    <constraint source="project">Scope: ambiguity. Where a test's class is unclear, retain it and mark it AMBIGUOUS for reviewer judgment. /test-diet at task 090 is the final classifier — do not force a call here.</constraint>
+    <constraint source="project">Scope: verification. After removal, the suite MUST still build and pass. A reduced pass count is expected and correct; a failing suite is not.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-038 build-vs-maintain classification</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">What a maintainable test looks like.</pattern>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Mock-boundary rules.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL (TEST-MODIFYING override). Load ADR-038 §7 build-vs-maintain criteria.</step>
+    <step order="1">Inventory all 14 SpeAdmin test files and classify each test MAINTAIN / SCAFFOLDING / AMBIGUOUS against ADR-038 §7.</step>
+    <step order="2">For each SCAFFOLDING test, confirm its behaviour is covered by the 040 or 041 suites, or that it asserted nothing meaningful.</step>
+    <step order="3">Relocate the manual-test-plan CONTENT to notes/ or a fixtures README before deleting Phase2IntegrationTests.cs:1315 and its siblings.</step>
+    <step order="4">Delete the SCAFFOLDING tests. Retain AMBIGUOUS ones with a marker for /test-diet at task 090.</step>
+    <step order="5">Run the full test suite — build green, all remaining tests pass.</step>
+    <step order="6">Record the before/after counts and the classification inventory in notes/test-retirement-inventory.md.</step>
+    <step order="7">Update TASK-INDEX.md: task 042 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a test classified SCAFFOLDING turns out to be the ONLY coverage of a real behaviour — i.e. neither 040 nor 041 replaces it — STOP and escalate rather than deleting it. ADR-038 deletion-safety requires same-PR replacement; deleting unreplaced coverage is a regression disguised as hygiene.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Integration/SpeAdmin/ (scaffolding removed)</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/test-retirement-inventory.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every test across the 14 SpeAdmin files is classified MAINTAIN / SCAFFOLDING / AMBIGUOUS in notes/test-retirement-inventory.md.</criterion>
+    <criterion testable="true">The manual-test-plan-as-passing-test (Phase2IntegrationTests.cs:1315) is removed and its content relocated, not lost.</criterion>
+    <criterion testable="true">Negative: no test was deleted whose behaviour lacks replacement in the 040 or 041 suites (ADR-038 deletion safety).</criterion>
+    <criterion testable="true">Negative: AMBIGUOUS tests were retained and marked, not force-classified.</criterion>
+    <criterion testable="true">The suite builds and all remaining tests pass; before/after counts are recorded.</criterion>
+    <criterion testable="true">dotnet build 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-D03. /test-diet at task 090 is the final classifier and will re-examine anything marked AMBIGUOUS.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
