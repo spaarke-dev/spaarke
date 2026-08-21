@@ -22,12 +22,14 @@ This document covers the **reactive** path: the user asks, the agent selects a c
 | | **Reactive surface launch** (this doc) | **Proactive push** (the notification spine) |
 |---|---|---|
 | Trigger | user message → agent selects a Binding | server-initiated typed signal (e.g. Daily Briefing) |
-| Path | `consumerType` → `surfaceLaunchRegistry` → open surface | outbox row → SignalR ping → `useSuggestionCards` → suggestion card |
-| "Open a record/thing" | wizard / form / grid via registry `kind` | `openRecordModal` on the regarding record |
+| Path | `consumerType` → `surfaceLaunchRegistry` → open surface | outbox row → SignalR ping → client handler → (⚠️ renderer removed — see note) |
+| "Open a record/thing" | wizard / form / grid via registry `kind` | `openRecordModal` on the regarding record (former card; planned OOB-bell `navigationTarget:"dialog"`) |
 | Mechanism owner | `surfaceLaunchRegistry` (code) | `@spaarke/notifications` client + `OutboxService` (one spine) |
 | Doc | *(this doc)* | [SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md](SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md) |
 
-They are complementary and must stay distinct: a suggestion card's click opens a **record modal** (`openRecordModal`), which is the standard record-open — *not* a surface-launch-registry entry. If you need the Assistant to *proactively* surface something, add a **producer** to the spine (ADR-047), never a new channel here.
+> **⚠️ 2026-08-20**: the in-Assistant suggestion renderer (`useSuggestionCards.tsx`) was **removed** by `spaarkeai-assistant-enhancements-r2` (FR-E1). The proactive spine's `suggestion` rows are produced-but-unrendered today; the live UI consumer is `communication-arrived`. The proactive record-open surface is being rebuilt as OOB Dataverse bell notifications (`spaarke-notification-spine-r2`). The mechanism distinction below still holds — only the specific renderer changed.
+
+They are complementary and must stay distinct: proactively acting on a suggestion opens a **record modal** (`openRecordModal` / the OOB `navigationTarget:"dialog"` equivalent), which is the standard record-open — *not* a surface-launch-registry entry. If you need the Assistant to *proactively* surface something, add a **producer** to the spine (ADR-047), never a new channel here.
 
 ## 2. End-to-end flow
 

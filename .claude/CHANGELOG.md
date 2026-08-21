@@ -23,6 +23,11 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Removed / Changed (2026-08-20 — God-class LOC ratchet RETIRED; replaced by complexity guidance)
+
+- **Removed — `tests/Spaarke.ArchTests/GodClassGuardTests.cs`** (the hard CI gate on `src/server` file LOC). It gated on line count — the wrong instrument for a gradual, judgment-laden signal — froze existing large files at arbitrary values, and blocked normal feature work on active files (Compose, Chat) with a build failure that had to be hand-waivered. Per ADR-038's own "coverage = observation, never a gate" precedent, **size is now observed and complexity is evaluated by humans where the work is authored.**
+- **Added — [`docs/standards/COMPONENT-COMPLEXITY.md`](../docs/standards/COMPONENT-COMPLEXITY.md)** — the standard: evaluate complexity/cohesion (responsibilities, coupling, ctor deps, branching), not LOC; when a large *cohesive* file is legitimate; decompose when responsibilities diverge. Wired into **root `CLAUDE.md` §11.5** (new) + **§17 pointer** (replaces the god-class-ratchet row), **`task-create` §3.5.6** (component-complexity check), **`code-review`** (maintainability dimension — complexity *direction*, not size), and a **non-blocking observation report** `scripts/report-large-server-files.ps1`. `.claude/patterns/testing/god-class-ratchet.md` converted to a RETIRED redirect stub; pattern INDEXes + project memory updated.
+
 ### Added (2026-08-18 — Navigator side-pane architecture pointer · spaarke-side-pane-navigation-history-r1 close-out)
 
 - **Added — root `CLAUDE.md` §17 pointer** to [`docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`](../docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md) (the docked "Navigator" pane). Makes the reusable feature discoverable — most importantly the `ensureNavigatorSidePane()` code-page registrar, which the doc designates a **standard code-page build step**. Doc itself refreshed post-UAT (not a `.claude/` file, no changelog obligation, noted here for context): access-based Monitored (Dataverse security trim, no owner filter — no BFF), `sprk_communication`→Email-code-page routing, name-resolution for bookmarks, the filled-evenodd-ring technique for outline pane icons, and entity-scoped ribbon ids.

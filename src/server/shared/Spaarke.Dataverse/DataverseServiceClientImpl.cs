@@ -1915,68 +1915,38 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryChildRecordIdsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public async Task UpdateRecordFieldsAsync(
+    /// <summary>
+    /// Not implemented here by design — <see cref="DataverseWebApiService"/> is the SINGLE live
+    /// implementation of this method. Inject <see cref="IFieldMappingDataverseService"/>, not the
+    /// composite <see cref="IDataverseService"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Completes interim-hardening item <b>B3</b> ("ONE live impl; route through the narrow interface"),
+    /// which RED-4 B left unfinished: this method was the last <see cref="IFieldMappingDataverseService"/>
+    /// member live in BOTH impls, so the same operation ran on a different implementation depending on
+    /// which alias the consumer injected — the drift class that produced the DEF-2 landmine. The composite
+    /// route had exactly one caller (<c>FinanceRollupService</c>), now on the narrow interface.
+    /// </para>
+    /// <para>
+    /// The deleted body was an OData PATCH via <c>ExecuteWebRequest</c>, including a <c>Clone()</c>+
+    /// <c>CallerId</c> impersonation branch added for email-intelligence task 031 (FR-10). That branch was
+    /// never reached: the live impersonated write goes <c>UpdateRecordActionCore</c> →
+    /// <see cref="IFieldMappingDataverseService"/> → <see cref="DataverseWebApiService"/>, which stamps
+    /// <c>MSCRMCallerID</c> on the PATCH. Impersonation capability is therefore unchanged. Recover the
+    /// implementation from git (<c>4aca6d65a</c>) if the SDK path is ever made primary — see
+    /// <c>projects/dataverse-access-unification-r1/</c> (PAUSED).
+    /// </para>
+    /// </remarks>
+    public Task UpdateRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null)
     {
-        if (fields.Count == 0)
-        {
-            _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
-            return;
-        }
-
-        // Use OData Web API PATCH via ServiceClient.ExecuteWebRequest.
-        // The Web API handles all Dataverse field types natively — OptionSet/Choice
-        // fields accept plain int, currency accepts decimal, @odata.bind works for
-        // lookups — unlike the SDK's Entity model which requires typed wrappers
-        // (OptionSetValue, Money, EntityReference).
-        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
-        var apiPath = $"{entitySetName}({recordId})";
-        var body = System.Text.Json.JsonSerializer.Serialize(fields);
-
-        // Job B apply (task 031): when a caller systemuserid is supplied, run the PATCH AS that user via a cloned
-        // ServiceClient with CallerId set (the SDK stamps MSCRMCallerID) — mirrors UserPrivilegeChecker's read-path
-        // impersonation. Null/empty = app-only (existing callers byte-unchanged). Fail-closed: if impersonation is
-        // requested but the clone cannot be established, the write throws rather than silently running app-only.
-        var impersonate = impersonateSystemUserId is { } imp && imp != Guid.Empty;
-        ServiceClient? impersonatedClient = impersonate ? _serviceClient.Clone() : null;
-        try
-        {
-            if (impersonatedClient is not null)
-                impersonatedClient.CallerId = impersonateSystemUserId!.Value;
-
-            var client = impersonatedClient ?? _serviceClient;
-
-            _logger.LogDebug(
-                "PATCH {ApiPath} with {FieldCount} fields{Impersonation}",
-                apiPath, fields.Count, impersonate ? $" (impersonating {impersonateSystemUserId})" : string.Empty);
-
-            var response = await Task.Run(() =>
-                client.ExecuteWebRequest(
-                    HttpMethod.Patch,
-                    apiPath,
-                    body,
-                    null,
-                    "application/json"), ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogError(
-                    "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
-                    entityLogicalName, recordId, response.StatusCode, errorBody);
-                response.EnsureSuccessStatusCode();
-            }
-        }
-        finally
-        {
-            impersonatedClient?.Dispose();
-        }
-
-        _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields via Web API", entityLogicalName, recordId, fields.Count);
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     // ========================================
