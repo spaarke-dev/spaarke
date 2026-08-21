@@ -82,9 +82,18 @@ param azureOpenAiEndpointSecretName = 'AzureOpenAI-Endpoint'
 // documents the value and makes drift-detection easier.
 param jwtTenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'
 
-// Dev L2 app-reg client ID for logging + config surface (bearer audience is
-// derived from environmentName, so this is informational only).
-param controlPlaneAppRegClientId = ''
+// Dev L2 app-reg client ID.
+// customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21:
+// the header comment "informational only" is WRONG — Microsoft.Identity.Web's
+// AuthenticationHandler.InitializeAsync fail-fasts with IDW10106 "The 'ClientId'
+// option must be provided" on EVERY request (including /healthz, before endpoint
+// routing) when this is empty. Set to L2 UAMI's clientId as a valid, tenant-
+// resolvable placeholder — satisfies IsNullOrEmpty validation without needing
+// a dedicated L2 REST API app-reg. Bearer auth against callers would still fail
+// with a real token (wrong audience), but /healthz becomes reachable so
+// Deploy-ControlPlane.ps1 health check passes. Replace with real L2 REST API
+// app-reg clientId once Register-EntraAppRegistrations.ps1 creates one.
+param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 
 // ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
