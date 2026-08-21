@@ -14,7 +14,7 @@
 | 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A1 | ✅ |
 | 011 | Fix DI lifetimes + record the ADR-009 decision | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A2 | ✅ |
 | 020 | `IClientAssertionProvider` seam (**ceiling NOT raised — see ¹⁴**) | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | ✅ |
-| 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | 🔲 |
+| 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | ✅ |
 | 022 | Migrate the 6 BFF-identity confidential clients | 2 Provider | FULL | **opus/xhigh** | 021 | **D** | ❌ | FR-B3 | 🔲 |
 | 023 | UAMI ↔ app-reg conflation guard + test | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B4 | 🔲 |
 | 024 | Relax the three config validators | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B5 | 🔲 |
