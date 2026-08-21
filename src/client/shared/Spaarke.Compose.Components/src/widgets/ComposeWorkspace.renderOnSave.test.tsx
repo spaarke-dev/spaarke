@@ -25,6 +25,13 @@
  *      `buildContentModel()` and NO separate `comments` field (the editor folds threads into the
  *      model now).
  *
+ * 7. NAME GATE (UAT-03, r8 task 018) — every create-on-save of a never-persisted document (born-in-
+ *    editor AND assistant-upload) is gated by the first-save name modal: `requestSave` posts NOTHING
+ *    until it is confirmed, and the confirmed name threads into `displayName`. Added when this suite's
+ *    two create-on-save tests were found red on HEAD — commit `cdb1dbcb4` (2026-08-18) widened
+ *    `saveNeedsName` to every never-persisted doc and did not update them. A second save on the
+ *    now-persisted doc must NOT re-prompt.
+ *
  * ADR-038: a client behavior test at the save-orchestration seam; mocks the network at the
  * `@spaarke/auth` boundary + stubs a heavy child — NOT a banned Mock<HttpMessageHandler>/DI test.
  */
@@ -180,75 +187,60 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   throw new ApiError('Not found', 404);
 });
 
-jest.mock(
-  '@spaarke/auth',
-  () => ({
+jest.mock('@spaarke/auth', () => ({
+  authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
+  useAuth: () => ({
+    isAuthenticated: true,
+    getAccessToken: async () => 'test-token',
     authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-    ApiError: class ApiError extends Error {
-      status: number;
-      constructor(message: string, status: number) {
-        super(message);
-        this.status = status;
-      }
-    },
-    useAuth: () => ({
-      isAuthenticated: true,
-      getAccessToken: async () => 'test-token',
-      authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-      tenantId: 'test-tenant',
-      logout: jest.fn(),
-    }),
-    // `virtual` lets this suite run even when the sibling lib's `dist/` is not built locally (the
-    // pre-existing condition that stops the other ComposeWorkspace.*.test suites in a fresh clone);
-    // with dist built (CI) the mock behaves identically.
+    tenantId: 'test-tenant',
+    logout: jest.fn(),
   }),
-  { virtual: true }
-);
+}));
 
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-    SendEmailDialog: () => null,
-    SprkModal: () => null,
-    RichFilePreviewDialog: () => null,
-    // FR-02 (task 030): ComposeWorkspace now mounts <ComposeSaveNameDialog/> (a FormModal preset) for
-    // the first create-on-save of an unnamed draft AND every Save As. Behavioral stub mirroring the
-    // preset contract (open gate, children, submit gated by submitDisabled/busy) so the fork test can
-    // drive the name modal to completion. Closed → renders nothing (the dialog itself returns <></>).
-    FormModal: (props: {
-      open: boolean;
-      onClose: () => void;
-      onSubmit: () => void;
-      title?: string;
-      submitLabel?: string;
-      submitDisabled?: boolean;
-      busy?: boolean;
-      children?: React.ReactNode;
-    }) =>
-      props.open ? (
-        <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
-          {props.children}
-          <button
-            onClick={props.onSubmit}
-            disabled={props.busy || props.submitDisabled}
-            data-testid="mock-form-modal-submit"
-          >
-            {props.submitLabel ?? 'Save'}
-          </button>
-        </div>
-      ) : null,
-  }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/document-operations',
-  () => ({
-    useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ui-components', () => ({
+  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+  SendEmailDialog: () => null,
+  SprkModal: () => null,
+  RichFilePreviewDialog: () => null,
+  // FR-02 (task 030): ComposeWorkspace now mounts <ComposeSaveNameDialog/> (a FormModal preset) for
+  // the first create-on-save of an unnamed draft AND every Save As. Behavioral stub mirroring the
+  // preset contract (open gate, children, submit gated by submitDisabled/busy) so the fork test can
+  // drive the name modal to completion. Closed → renders nothing (the dialog itself returns <></>).
+  FormModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    onSubmit: () => void;
+    title?: string;
+    submitLabel?: string;
+    submitDisabled?: boolean;
+    busy?: boolean;
+    children?: React.ReactNode;
+  }) =>
+    props.open ? (
+      <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+        {props.children}
+        <button
+          onClick={props.onSubmit}
+          disabled={props.busy || props.submitDisabled}
+          data-testid="mock-form-modal-submit"
+        >
+          {props.submitLabel ?? 'Save'}
+        </button>
+      </div>
+    ) : null,
+}));
+jest.mock('@spaarke/document-operations', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
+}));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),
   usePaneEvent: () => undefined,
@@ -399,6 +391,27 @@ async function waitForEditor(): Promise<void> {
 async function clickSave(): Promise<void> {
   await act(async () => {
     editorProps.current.onSave?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+/**
+ * UAT-03 (owner 2026-08-18, commit cdb1dbcb4) — the name-modal gate on a FIRST create-on-save.
+ *
+ * `requestSave` (what the toolbar's onSave is wired to) opens `ComposeSaveNameDialog` and returns
+ * WITHOUT posting whenever the document has never been persisted (no `speDriveItemId` AND no
+ * `sprkDocumentId`) — that is every born-in-editor draft and every assistant-upload mount. The POST
+ * only happens when the modal submits. The modal seeds its field with the document's current file
+ * name, so `submitDisabled` is already false and confirming needs no typing.
+ *
+ * The PDF suite's forkNew test performs this same drive inline; this is that drive, named.
+ */
+async function confirmSaveName(): Promise<void> {
+  const submit = await screen.findByTestId('mock-form-modal-submit');
+  await act(async () => {
+    fireEvent.click(submit);
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -617,10 +630,17 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await waitForEditor();
 
     await clickSave();
+    // UAT-03: an uploaded file has no sprk_document row yet, so this first save is name-gated —
+    // nothing is posted until the modal is confirmed.
+    expect(screen.getByTestId('compose-save-name-dialog')).toBeInTheDocument();
+    expect(saveRequests).toHaveLength(0);
+    await confirmSaveName();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const body = saveRequests[0].body;
     expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');
+    // The confirmed name threads into displayName (→ server ResolveFileName + sprk_documentname).
+    expect(body.displayName).toBe('uploaded.docx');
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
     expect(body.containerId).toBe('bu-container-1');
@@ -639,10 +659,15 @@ describe('ComposeWorkspace — born-in-editor branches unchanged except the comm
     await waitForEditor();
 
     await clickSave();
+    // UAT-03: a born-in-editor draft is never-persisted → the first save is name-gated.
+    expect(screen.getByTestId('compose-save-name-dialog')).toBeInTheDocument();
+    expect(saveRequests).toHaveLength(0);
+    await confirmSaveName();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const body = saveRequests[0].body;
     expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');
+    expect(body.displayName).toBe('draft.docx');
     expect(body.contentModel).toEqual(BORN_MODEL);
     // Amendment: buildContentModel folds threads into the model — the separate field is GONE even
     // though the editor handle reports a non-empty anchored-comment set.
@@ -653,8 +678,11 @@ describe('ComposeWorkspace — born-in-editor branches unchanged except the comm
     // The imported-model mapper is NEVER consulted for a born-in-editor doc.
     expect(buildImportedContentModelMock).not.toHaveBeenCalled();
 
-    // Second save → replace route, still contentModel-only, still no comments/baseline.
+    // Second save → replace route, still contentModel-only, still no comments/baseline. The doc now
+    // carries an SPE id, so `saveNeedsName` is false and the modal does NOT re-open (UAT-03 gates the
+    // FIRST save only — a name prompt on every save would be the regression).
     await clickSave();
+    expect(screen.queryByTestId('compose-save-name-dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(saveRequests).toHaveLength(2));
     expect(saveRequests[1].url).toContain('/api/compose/documents/spe-created-1/save');
     expect(saveRequests[1].body.contentModel).toEqual(BORN_MODEL);

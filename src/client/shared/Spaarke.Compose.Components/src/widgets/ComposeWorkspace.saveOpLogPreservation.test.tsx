@@ -110,77 +110,66 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   throw new (apiErrorClass())('Not found', 404);
 });
 
-// `virtual: true` lets this suite run even when the sibling lib's `dist/` is not built locally (a
-// fresh clone); with dist built the mock behaves identically. Same pattern + rationale as
-// ComposeWorkspace.renderOnSave.test.tsx.
-jest.mock(
-  '@spaarke/auth',
-  () => {
-    // Mirrors the real `@spaarke/auth` ApiError (message = ProblemDetails.detail, plus `.status`).
-    // Declared INSIDE the factory so the class the workspace imports and the class the fetch mock
-    // throws are the same object.
-    class ApiError extends Error {
-      public readonly status: number;
-      constructor(message: string, status: number) {
-        super(message);
-        this.name = 'ApiError';
-        this.status = status;
-      }
+// NO `virtual: true` on the sibling-lib mocks below — deliberately, and it is load-bearing. The flag
+// registers the specifier in jest's RESOLVER, which is shared by every suite a worker runs, so one
+// suite's virtual registration changes how a LATER suite resolves the same specifier. See the
+// "Sibling `@spaarke/*` resolution" note in jest.config.js for the measurement and the contract.
+jest.mock('@spaarke/auth', () => {
+  // Mirrors the real `@spaarke/auth` ApiError (message = ProblemDetails.detail, plus `.status`).
+  // Declared INSIDE the factory so the class the workspace imports and the class the fetch mock
+  // throws are the same object.
+  class ApiError extends Error {
+    public readonly status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
     }
-    return {
-      ApiError,
+  }
+  return {
+    ApiError,
+    authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+    useAuth: () => ({
+      isAuthenticated: true,
+      getAccessToken: async () => 'test-token',
       authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-      useAuth: () => ({
-        isAuthenticated: true,
-        getAccessToken: async () => 'test-token',
-        authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-        tenantId: 'test-tenant',
-        logout: jest.fn(),
-      }),
-    };
-  },
-  { virtual: true }
-);
+      tenantId: 'test-tenant',
+      logout: jest.fn(),
+    }),
+  };
+});
 
 // `@spaarke/ui-components` + `@spaarke/document-operations` resolve to built `dist/` bundles in this jest
 // project whose own transitive `@spaarke/auth` require is unresolvable without a full sibling-package
 // build (the same pre-existing condition that stops the other ComposeWorkspace.*.test suites from running
 // here). Mock them to the tiny surface ComposeWorkspace actually consumes so this test is self-contained.
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-    // FR-14 (task 051) — ComposeWorkspace mounts <SendEmailDialog/> unconditionally (controlled via its
-    // own `open` prop, mirroring ComposeConflictDialog); a no-op stub keeps this mock complete.
-    SendEmailDialog: () => null,
-    // spaarke-modal-system task 040 — ComposeConflictDialog is re-based onto the shared
-    // `SprkModal` shell (imported from `@spaarke/ui-components`) instead of a raw Fluent
-    // `Dialog`, and is ALSO mounted unconditionally (controlled via its own `open` prop,
-    // same pattern as SendEmailDialog above). A no-op stub keeps this mock complete —
-    // without it, `SprkModal` resolves to `undefined` under this mock and React throws
-    // "Element type is invalid" the moment `ComposeConflictDialog` renders.
-    SprkModal: () => null,
-    // Task 075 (FR-13) flake/breakage fix — ComposeWorkspace also mounts
-    // <RichFilePreviewDialog/> once a document is promoted (`canPreviewDocument`), same
-    // unconditional-mount-under-its-own-`open`-prop pattern as SendEmailDialog/SprkModal
-    // above. A missing stub here resolved to `undefined` and threw the identical "Element
-    // type is invalid" error the moment a promoted-document scenario rendered it.
-    RichFilePreviewDialog: () => null,
+jest.mock('@spaarke/ui-components', () => ({
+  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+  // FR-14 (task 051) — ComposeWorkspace mounts <SendEmailDialog/> unconditionally (controlled via its
+  // own `open` prop, mirroring ComposeConflictDialog); a no-op stub keeps this mock complete.
+  SendEmailDialog: () => null,
+  // spaarke-modal-system task 040 — ComposeConflictDialog is re-based onto the shared
+  // `SprkModal` shell (imported from `@spaarke/ui-components`) instead of a raw Fluent
+  // `Dialog`, and is ALSO mounted unconditionally (controlled via its own `open` prop,
+  // same pattern as SendEmailDialog above). A no-op stub keeps this mock complete —
+  // without it, `SprkModal` resolves to `undefined` under this mock and React throws
+  // "Element type is invalid" the moment `ComposeConflictDialog` renders.
+  SprkModal: () => null,
+  // Task 075 (FR-13) flake/breakage fix — ComposeWorkspace also mounts
+  // <RichFilePreviewDialog/> once a document is promoted (`canPreviewDocument`), same
+  // unconditional-mount-under-its-own-`open`-prop pattern as SendEmailDialog/SprkModal
+  // above. A missing stub here resolved to `undefined` and threw the identical "Element
+  // type is invalid" error the moment a promoted-document scenario rendered it.
+  RichFilePreviewDialog: () => null,
+}));
+jest.mock('@spaarke/document-operations', () => ({
+  useDocumentActions: () => ({
+    openInWeb: jest.fn(),
+    openInDesktop: jest.fn(),
+    isActing: false,
   }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/document-operations',
-  () => ({
-    useDocumentActions: () => ({
-      openInWeb: jest.fn(),
-      openInDesktop: jest.fn(),
-      isActing: false,
-    }),
-  }),
-  { virtual: true }
-);
+}));
 
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),

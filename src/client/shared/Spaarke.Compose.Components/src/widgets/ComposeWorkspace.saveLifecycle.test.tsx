@@ -123,61 +123,51 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   throw new (authModule().ApiError)('Not found', 404);
 });
 
-// `virtual: true` — same pattern + rationale as ComposeWorkspace.saveErrorRouting.test.tsx: the suite
-// runs without the sibling libs' `dist/` being built.
-jest.mock(
-  '@spaarke/auth',
-  () => {
-    class ApiError extends Error {
-      public readonly status: number;
-      constructor(message: string, status: number) {
-        super(message);
-        this.name = 'ApiError';
-        this.status = status;
-      }
+// NO `virtual: true` on the sibling-lib mocks below — deliberately, and it is load-bearing. The flag
+// registers the specifier in jest's RESOLVER, which is shared by every suite a worker runs, so one
+// suite's virtual registration changes how a LATER suite resolves the same specifier. See the
+// "Sibling `@spaarke/*` resolution" note in jest.config.js for the measurement and the contract.
+jest.mock('@spaarke/auth', () => {
+  class ApiError extends Error {
+    public readonly status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
     }
-    class AuthError extends Error {
-      public readonly code: string;
-      constructor(message: string, code = 'auth_failed') {
-        super(message);
-        this.name = 'AuthError';
-        this.code = code;
-      }
+  }
+  class AuthError extends Error {
+    public readonly code: string;
+    constructor(message: string, code = 'auth_failed') {
+      super(message);
+      this.name = 'AuthError';
+      this.code = code;
     }
-    return {
-      ApiError,
-      AuthError,
+  }
+  return {
+    ApiError,
+    AuthError,
+    authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+    useAuth: () => ({
+      isAuthenticated: true,
+      getAccessToken: async () => 'test-token',
       authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-      useAuth: () => ({
-        isAuthenticated: true,
-        getAccessToken: async () => 'test-token',
-        authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-        tenantId: 'test-tenant',
-        logout: jest.fn(),
-      }),
-    };
-  },
-  { virtual: true }
-);
+      tenantId: 'test-tenant',
+      logout: jest.fn(),
+    }),
+  };
+});
 
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-    SendEmailDialog: () => null,
-    SprkModal: () => null,
-    RichFilePreviewDialog: () => null,
-  }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/document-operations',
-  () => ({
-    useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ui-components', () => ({
+  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+  SendEmailDialog: () => null,
+  SprkModal: () => null,
+  RichFilePreviewDialog: () => null,
+}));
+jest.mock('@spaarke/document-operations', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
+}));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),
   usePaneEvent: () => undefined,

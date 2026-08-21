@@ -4,7 +4,7 @@
     <title>Track S enforcement — run the Compose client test suite in CI as a self-contained blocking gate (the Half-B counterpart to compose-fidelity-gate)</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.github/workflows/sdap-ci.yml` (a hot-path surface), fixes failing `.tsx` tests, and creates a merge-blocking gate. A wrong gate is worse than no gate.</rigor-reason>
     <model-tier>opus</model-tier>

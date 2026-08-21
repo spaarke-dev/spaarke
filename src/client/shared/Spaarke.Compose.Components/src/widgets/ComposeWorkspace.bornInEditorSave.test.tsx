@@ -23,7 +23,7 @@
  */
 
 import * as React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Fluent's MessageBar (the saveFailed error banner) uses ResizeObserver, which jsdom lacks.
@@ -113,6 +113,33 @@ jest.mock('@spaarke/ui-components', () => ({
   // above. A missing stub here resolved to `undefined` and threw the identical "Element
   // type is invalid" error the moment a promoted-document scenario rendered it.
   RichFilePreviewDialog: () => null,
+  // UAT-03 (commit cdb1dbcb4) — ComposeWorkspace mounts <ComposeSaveNameDialog/> (a FormModal preset)
+  // for the FIRST create-on-save of any never-persisted document, which is exactly what this suite
+  // drives. Behavioral stub (open gate + children + submit) rather than a no-op: the test has to be
+  // able to confirm the name, because nothing is POSTed until it does. Without the stub `FormModal`
+  // resolves to `undefined` and React throws the same "Element type is invalid" as the three above.
+  FormModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    onSubmit: () => void;
+    title?: string;
+    submitLabel?: string;
+    submitDisabled?: boolean;
+    busy?: boolean;
+    children?: React.ReactNode;
+  }) =>
+    props.open ? (
+      <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+        {props.children}
+        <button
+          onClick={props.onSubmit}
+          disabled={props.busy || props.submitDisabled}
+          data-testid="mock-form-modal-submit"
+        >
+          {props.submitLabel ?? 'Save'}
+        </button>
+      </div>
+    ) : null,
 }));
 jest.mock('@spaarke/document-operations', () => ({
   useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
@@ -205,6 +232,21 @@ async function clickSave(): Promise<void> {
   });
 }
 
+/**
+ * UAT-03: the FIRST create-on-save of a never-persisted document is gated by the name modal —
+ * `requestSave` opens it and posts nothing until it is confirmed. The modal seeds from the draft's
+ * file name, so submit is already enabled.
+ */
+async function confirmSaveName(): Promise<void> {
+  const submit = await screen.findByTestId('mock-form-modal-submit');
+  await act(async () => {
+    fireEvent.click(submit);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe('ComposeWorkspace — born-in-editor 2nd save re-authors via contentModel (task 039 BUG A)', () => {
   it('first save is create-on-save with contentModel; second save hits replace and STILL sends contentModel (no op-log/baseline)', async () => {
     renderWorkspace();
@@ -212,8 +254,10 @@ describe('ComposeWorkspace — born-in-editor 2nd save re-authors via contentMod
     await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
     await waitFor(() => expect(editorProps.current.canSave).toBe(true));
 
-    // ---- First save → create-on-save ----
+    // ---- First save → create-on-save (name-gated, UAT-03) ----
     await clickSave();
+    expect(saveRequests).toHaveLength(0);
+    await confirmSaveName();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');

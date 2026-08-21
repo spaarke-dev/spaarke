@@ -26,13 +26,11 @@ import { render, screen, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
 
-// `@spaarke/auth` is mocked WITHOUT `virtual: true`, unlike the sibling mocks below, and that
-// difference is load-bearing: a virtual registration here was observed corrupting the resolution of
+// `@spaarke/auth` is mocked WITHOUT `virtual: true` — as every `@spaarke/*` mock in this package now
+// is (r8 task 018). A virtual registration here was observed corrupting the resolution of
 // `@spaarke/auth` for LATER suites in a full-package run (`useComposeWordShuttle.test.tsx`, whose own
-// ordinary mock stopped being applied, failed with "Auth not initialized"). This suite is the only
-// one that both virtual-mocks that module AND loads the real ComposeEditor graph, which imports it
-// for real. The plain mock is enough — nothing in this file calls the transport. Same shape as
-// ComposeEditor.aiToolbarTriggers.test.tsx.
+// ordinary mock stopped being applied, failed with "Auth not initialized"). The plain mock is enough —
+// nothing in this file calls the transport. Same shape as ComposeEditor.aiToolbarTriggers.test.tsx.
 jest.mock('@spaarke/auth', () => ({
   useAuth: () => ({
     isAuthenticated: true,
@@ -44,40 +42,32 @@ jest.mock('@spaarke/auth', () => ({
   authenticatedFetch: jest.fn(),
 }));
 
-// `virtual: true` on the sibling-lib mocks (same pattern + rationale as
-// ComposeWorkspace.saveErrorRouting.test.tsx): this suite exercises the REAL ComposeEditor, whose
-// import graph reaches `@spaarke/ui-components` + `@spaarke/ai-widgets/events` through
-// ComposeAiToolbar. Without the virtual flag the suite can only run when those siblings' `dist/` is
-// already built — which is why the existing real-editor suites (e.g. ComposeEditor.dirtyOnMount)
-// cannot run on a fresh clone. FR-S03 is the contract that decides whether a user keeps their work;
-// its guard must run everywhere, including the task-018 CI gate.
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    createConsumerDispatcher: () => async () => ({ status: 'ok' }),
-    FormModal: () => null,
-    SprkModal: () => null,
-    RichFilePreviewDialog: () => null,
-    SendEmailDialog: () => null,
-    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-  }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+// NO `virtual: true` on the sibling-lib mocks below — deliberately, and it is load-bearing. The flag
+// registers the specifier in jest's RESOLVER, which is shared by every suite a worker runs, so one
+// suite's virtual registration changes how a LATER suite resolves the same specifier. See the
+// "Sibling `@spaarke/*` resolution" note in jest.config.js for the measurement and the contract.
+// This suite exercises the REAL ComposeEditor, whose import graph reaches `@spaarke/ui-components`
+// and `@spaarke/ai-widgets/events` through ComposeAiToolbar. FR-S03 is the contract that decides
+// whether a user keeps their work; its guard must run everywhere, including `compose-client-gate`.
+jest.mock('@spaarke/ui-components', () => ({
+  createConsumerDispatcher: () => async () => ({ status: 'ok' }),
+  FormModal: () => null,
+  SprkModal: () => null,
+  RichFilePreviewDialog: () => null,
+  SendEmailDialog: () => null,
+  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+}));
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 // `ComposeAiToolbar` is the ONE component in the editor's graph that calls `useAuth()`, which throws
 // outside a real `initAuth()` bootstrap. Mocking the module (rather than relying on the
-// `@spaarke/auth` mock above winning) is what makes this suite order-independent: run on its own the
-// virtual `@spaarke/auth` mock is used, but in a full-package run the real `Spaarke.Auth/dist` was
-// observed loading instead and every test in this file failed with "Auth not initialized". The AI
+// `@spaarke/auth` mock above winning) is belt-and-braces against the same class of resolution leak:
+// run on its own the suite's own mock is used, but a full-package run was observed loading the real
+// `Spaarke.Auth/dist` instead and every test in this file failed with "Auth not initialized". The AI
 // toolbar has no bearing on the dirty-flag contract under test, so removing it from the tree is both
 // the smaller surface and the deterministic one. Runtime exports only — the types are erased.
 jest.mock('./ComposeAiToolbar', () => ({
