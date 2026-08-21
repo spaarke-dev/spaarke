@@ -1,6 +1,6 @@
 ﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-20 (tasks 012 + 014 complete; 015 server half landed; 018 in flight)
+> **Last Updated**: 2026-08-20 (012 · 014 · 018 complete; 015 server half landed — client half remains)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Git**: branch `work/spaarkeai-compose-r8`, 12 ahead of `origin/master`, 0 behind, working tree CLEAN.
@@ -12,23 +12,34 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **015 (finish the client half)** — then **016**. **018** may already be done — CHECK `git status` and `notes/compose-client-ci-gate.md` FIRST. |
+| **Task** | **015 (finish the client half)**, then **016**. Both own `ComposeWorkspace.tsx` — one pass over that file does both. |
 | **Status** | 015 is **PARTIAL**: the server half is committed (`06b370995`); the client pre-flight is not written. The design for it is already decided — see [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md) "What remains". |
 | **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then finish task 015's client pre-flight` — or start **016**, which owns the same file. Doing both in ONE pass over `ComposeWorkspace.tsx` is cheaper than two. |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014 ✅ · 050 ✅** · 015 🔄 partial · 018 in flight |
+| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014 ✅ · 018 ✅ · 050 ✅** · 015 🔄 partial. Track S remainder: **015-client, 016**, then **017** (deploy). |
 
-### ⚠️ FIRST THING: reconcile the working tree
+### Working tree
 
-A background agent was running **task 018** (CI gate) concurrently and its edits may be uncommitted.
-`git status` will show `.github/workflows/sdap-ci.yml`, `jest.config.js`, several `*.test.tsx`,
-`projects/INDEX.md`, `scripts/ci/summarize-jest-results.js` and
-`projects/spaarkeai-compose-r8/notes/compose-client-ci-gate.md`. **Read that notes file first** — it
-carries 018's baseline measurements and its blocking-vs-advisory decision. Verify its work (run the
-package suite) before committing it; do not assume it is finished or correct.
+Clean except `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` (untracked) — researcher
+subagent memory written during task 015, in an odd location inside the BFF project. Harmless; commit or
+delete as you prefer.
 
-Also untracked: `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` — researcher-subagent
-memory, written during task 015. Harmless; decide whether to commit or delete it.
+### The client test suite IS in CI now (task 018) — what changed for you
+
+- **All 90 suites run** (was 51 of 90); 1,103 tests (was 802). Verified in the main session at CI
+  concurrency AND serially before commit.
+- **The suite needs the sibling `dist/` built** — `Spaarke.Auth → Spaarke.SdapClient →
+  Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. The mapper-to-`src` shortcut was
+  tried and REJECTED (it needs ~11 undeclared packages in Compose's `package.json`). On a fresh clone
+  without the build, 38 suites run.
+- **Never write `jest.mock(..., { virtual: true })` in this package.** The flag registers the specifier
+  in jest's shared resolver, so one suite's registration changes how a LATER suite resolves the same
+  module. All 16 were removed; the rule is in `jest.config.js`.
+- **`compose-client-gate` is ADVISORY**, with a written flip condition in the job comment: three green
+  runs on `ubuntu-latest` (all evidence so far is a Windows dev box). Flipping it = delete one
+  `continue-on-error: true` line.
+- The 2 `renderOnSave` failures were a **test bug**, root-caused to `cdb1dbcb4` (UAT-03 name-gate, which
+  shipped touching no test). Fixed by driving the modal; assertions went 127 → 134.
 
 ### Startable now — all `parallel-safe: false`; run ONE AT A TIME
 
