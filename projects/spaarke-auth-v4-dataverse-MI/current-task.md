@@ -1,6 +1,7 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 (task 020, quality gates in flight)
+> **Last Updated**: 2026-08-21 (by `context-handoff`, after task 020)
+> **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
 
@@ -8,87 +9,200 @@
 
 | Field | Value |
 |---|---|
-| **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; OBO → MI-FIC |
+| **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **020 — `IClientAssertionProvider` seam** — implementation + verification DONE; Step 9.5 gates running |
-| **Status** | in-progress |
-| **Next Action** | Apply gate findings → mark 020 ✅ → **task 030 (PULLED FORWARD, run before 021/022)** |
-| **Progress** | 5 of 26 complete (001, 002, 003, 010, 011) · 020 closing · 3 deferred |
+| **Task** | **030 — FIC provisioning automation** (`Register-EntraAppRegistrations.ps1` extension) — not started |
+| **Task file** | `projects/spaarke-auth-v4-dataverse-MI/tasks/030-fic-provisioning-automation.poml` |
+| **Status** | not-started — **unblocked** (dep 020 ✅) |
+| **Next Action** | **1)** `git merge origin/master` (1 behind, docs-only) · **2)** `task-execute` on `tasks/030-fic-provisioning-automation.poml` |
+| **Why 030, not 021** | ⏩ **Owner pulled it forward 2026-08-19** — `customer-provisioning-orchestration-r1`'s Wave G-3 is soft-blocked on it. Run it **before** 021/022; do not let phase order carry it |
+| **Progress** | **6 of 26 active complete** (001, 002, 003, 010, 011, 020) · **20 remaining** · 3 deferred |
+| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
 
-### Verification (all green)
+### Repo + live state (verified at handoff)
 
 | Check | Value |
 |---|---|
-| Full BFF suite | **10,553 / 0** (97 skipped) — NFR-04: all 46 fixtures unchanged |
-| Seam tests | **17 / 17** (4 new for the provider) |
+| Working tree | **clean**, 0 uncommitted |
+| Pushed through | `0e73c014d` |
+| Behind `origin/master` | **1** — `418718295 docs(spe-admin)`, docs-only, no conflict risk |
+| Slot `/healthz` | **200** (`spaarke-bff-dev-staging`) |
+| Production `/healthz` | **200** — **never swapped**, untouched all project |
+| Full BFF suite | **10,554 / 0** (97 skipped) |
 | ArchTests | **36 / 36** |
-| Publish | **43.68 MB** compressed incl. PDBs — **zero delta**; ceiling 60 |
+| Publish | **43.68 MB** compressed incl. PDBs (`Compress-Archive`, 215 files) · ceiling 60 |
 | CVE | clean |
-| `Spaarke.Dataverse.csproj` | **zero diff** — FR-14 layer rule intact |
 
-### Files modified (task 020, uncommitted)
+### Critical context (read before touching code)
 
-- `src/server/shared/Spaarke.Dataverse/IClientAssertionProvider.cs` — NEW, the contract
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs` — NEW, MI-FIC impl
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs` — extracted `ResolveUamiClientId`
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` — singleton registration + inbound/outbound doc split
-- `src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs` — nullable `assertion` param (accepted, unused until 022)
-- `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` — `Microsoft.Identity.Web.Certificateless` 4.14.2
-- `tests/Spaarke.ArchTests/ADR010_DITests.cs` — **comment only**, ceiling NOT raised (see below)
-- `tests/integration/seam/Auth/ClientAssertionProviderSeamTests.cs` — NEW, 4 tests
-- `projects/.../tasks/061-credential-census-test.poml` — blind-spot criteria booked
+**The premise is PROVEN.** Task 002 demonstrated on the wire that OBO works under a Managed-Identity-issued
+client assertion — Graph/SPE, Dataverse `user_impersonation` (with `upn` preserved, so row-level
+authorization still evaluates as the *user*), and long-running OBO. **No pivot to a certificate.**
+Three prior audits concluded the secret could never be removed, on one false sentence. **Do not re-derive
+"OBO needs a secret" from any stale doc — fix the doc.**
 
-### ⚠️ ESCALATION — prescriptive-step deviation, awaiting owner acknowledgement
+**OBO fails CLOSED.** A bad change locks out every user instantly and totally. The `staging` slot exists so
+the credential mechanism is the only variable under test. **Never swap outside task 032.**
 
-**Task 020 step 6 said: raise `ADR010_DITests` ceiling 153 → 154, "without it the build fails."
-The premise is FALSE and the ceiling was NOT raised.**
+---
 
-Verified empirically, not assumed:
-- ArchTests **pass at 153** (unraised)
-- Actual 1:1 interface count is **151** — the ceiling already had 2 slack
-- `IClientAssertionProvider` appears **0 times** in the counted list
+## ⚠️ Open owner decisions (nothing is blocked on these)
 
-Cause: the test scans `typeof(Program).Assembly` — the BFF only — and the interface is declared in
-`Spaarke.Dataverse`. **A cross-assembly 1:1 seam is structurally invisible to this ratchet.** Raising
-it would have granted headroom for a future *in-assembly* interface to land unreviewed.
+1. **ADR-010 ratchet** — [#809](https://github.com/spaarke-dev/spaarke/issues/809). The gate is **blind to
+   cross-assembly seams** (scans the BFF assembly only), and its ceiling is **153 against a real count of
+   151**, so two in-assembly interfaces can land unreviewed today. Both are one-line detector fixes with
+   repo-wide blast radius. Tightening could redden CI for other in-flight projects — owner's call.
+2. **`LayerDependencyTests`** — [#810](https://github.com/spaarke-dev/spaarke/issues/810). Enforces
+   `ProjectReference` but **not** `PackageReference`, so half the constraint every task in this project
+   cites rests on reviewer attention.
+3. **CLAUDE.md §10 publish-size baseline is not method-qualified.** Two honest measurements of one tree
+   differed by ~1.3 MB purely on compression method — more than the +5 MB escalation threshold.
 
-**Two follow-ups:**
-1. **Blind spot** — booked onto task **061** as an acceptance criterion + negative control (a scratch
-   confidential-client site in `Spaarke.Dataverse`; an assembly-scoped detector passes only by accident).
-2. **OWNER DECISION OPEN** — ceiling is 153 against a real count of 151. Tightening to 151 re-arms the
-   ratchet properly but could redden CI for other in-flight projects. Not done; out of scope here.
+---
 
-### Key decisions (task 020)
+## Completed (6 of 26)
 
-1. **Contract in `Spaarke.Dataverse`, impl in BFF** — dependency inversion is the ONLY legal seam
-   (base layer; `Spaarke.Core` placement is circular, CI-blocked by FR-14).
-2. **Contract exposes no MSAL types** — `Task<string> GetAssertionAsync(CancellationToken)`. Keeps a
-   future Key Vault certificate implementation possible without a contract change.
-3. **Registered in `AuthorizationModule`**, not `SpaarkeCore` and NOT inline in `Program.cs` (whose
-   `TokenCredential` registration the task explicitly names as the anti-pattern). Rationale: the
-   provider serves Graph + Dataverse + Agent alike, so it is not a Dataverse concern.
-4. **Construction is network-free by design** — failure surfaces at first call as a catchable
-   `MsalServiceException`. This is what makes task 021's ordered fallback possible; a constructor that
-   probed IMDS would fail BFF startup on every workstation.
-5. **`ResolveUamiClientId` extracted** from `ManagedIdentityCredentialFactory` so the provider and every
-   app-only consumer read the same setting through one code path (ADR-028 A4 line 208).
-6. **Acceptance criterion "resolving twice returns the same singleton" NOT asserted** — ADR-038 ban B3.
-   Second time this project's authored criteria specified a banned shape (task 011 was the first).
+| Task | Outcome |
+|---|---|
+| **001** | `staging` slot on `spaarke-bff-dev`, UAMI-assigned, healthy, **not swapped** |
+| **002** | **OBO PROVEN under MI-FIC.** T0–T4 pass; T5 negative control fails as required |
+| **003** | Credential decision recorded; ADR-028 A4 adoption status + E4′ correction |
+| **010** | MI-flag gating fixed; **app-only decoupled from OBO** in `DataverseAccessDataSource` |
+| **011** | Confidential clients shared process-wide; **ADR-009 token-cache decision made** |
+| **020** | `IClientAssertionProvider` seam; **ADR-010 ceiling deliberately NOT raised** |
 
-### Carried-forward obligations
+Decision records: [`notes/decisions/`](notes/decisions/) — `001-slot-creation.md`, `002-spike-results.md`,
+`003-credential-decision.md`, `010-credential-gating.md`, `011-adr009-token-cache-decision.md`,
+`020-assertion-seam.md`. **Read `020` before task 021 — it changes 021's scope.**
+
+---
+
+## The three findings that change downstream work
+
+### 1. Task 021's scope grew (task 020 decision record §3)
+
+Ordered selection is **MI-FIC → KV certificate → dev secret**. Only the **first** is an assertion —
+a certificate uses `.WithCertificate(x509)`, a secret uses `.WithClientSecret(...)`. So ordered selection
+**cannot live behind `IClientAssertionProvider`** (`Task<string> GetAssertionAsync`), and neither can the
+shared confidential-client cache.
+
+**Task 021 must author a second, client-level contract** in `Spaarke.Dataverse` that returns a configured
+`IConfidentialClientApplication`, owns the ordered selection, and owns the ONE shared cache keyed
+`(tenant|client|credential-kind)`. Only `DataverseAccessDataSource` needs the contract — the three BFF-side
+sites can inject the cache **concretely** (ADR-010 prefers that). Both 021 and 022 POMLs are already amended.
+
+### 2. The ADR-010 ratchet cannot see this project's central seam
+
+Task 020's POML said "raise the ceiling 153 → 154, without it the build fails." **False**, verified twice
+and reproduced independently by the quality gate: ArchTests pass at 153, the real count is **151**, and
+`IClientAssertionProvider` is **absent** from the counted list because `ADR010_DITests` scans
+`typeof(Program).Assembly` while the interface lives in `Spaarke.Dataverse`. Ceiling left untouched.
+
+### 3. Task 010 shipped a regression that only a full-suite run caught
+
+Its fail-fast validation broke **13 `ExternalAccess` contract tests** via a stub relying on the removed
+silent fallback. Fixed at task 011. Generalised into
+[`.claude/FAILURE-MODES.md` **AP-7**](../../.claude/FAILURE-MODES.md): *converting a silent fallback into
+fail-fast has unbounded blast radius by construction — callers relying on it supplied nothing, so there is
+nothing to grep for, and a targeted test run excludes them by definition.* **Run the full suite for that
+change class.** Also: stash and re-run before calling failures pre-existing.
+
+---
+
+## Carried-forward obligations (booked in POMLs, not just here)
 
 | Onto | Obligation |
 |---|---|
-| **030** | ⏩ **PULLED FORWARD — run NEXT**, before 021/022 (provisioning Wave G-3 soft-blocked) |
-| **021** | Ordered fallback; catch `MsalServiceException` + branch on `ErrorCode` |
-| **022** | Collapse the THREE per-class CCA caches onto the provider — task 011's A4 exception EXPIRES here; also migrate `ConfidentialClientSharingSeamTests` when the diagnostics move |
-| **060** | `_cca`-decoupling source guard (010) + no-call-site-bypasses-the-cache guard (011) |
-| **061** | Census must scan ALL server assemblies, not just the BFF (020's blind-spot finding) |
-| **024** | Workstation user-secret `API_CLIENT_SECRET` is STALE → `AADSTS7000215` |
-| **031/041** | `az account get-access-token --resource "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"` yields a real delegated user token |
-| **090** | Power BI criterion 10 waived with reason |
+| **030** | ⏩ **RUN NEXT** — before 021/022; provisioning Wave G-3 soft-blocked. Verify by performing a **real token exchange**, not just script output |
+| **021** | Author the **client-level seam** (see finding 1) · one `IsFallThroughEligible(MsalServiceException)` predicate — `managed_identity_request_failed` is the FR-B4 wrong-identity signature and MUST **fail loud**, not fall through to the secret · short-TTL **negative memo** (a failing mint costs ~80 ms *per request* otherwise) · decide whether the contract widens to a Spaarke-owned request record |
+| **022** | Collapse the three per-class CCA caches — **task 011's A4 exception EXPIRES HERE**; escalate rather than defer · migrate `ConfidentialClientSharingSeamTests` when the diagnostics move · converge the **UAMI precedence** (four shared-lib sites read the two keys in the OPPOSITE order and don't call the shared resolver) |
+| **024** | Workstation user-secret `API_CLIENT_SECRET` is **STALE** → `AADSTS7000215` |
+| **031** | Verify slot `keyVaultReferenceIdentity` **before** the OBO checklist · do **not** use `Deploy-BffApi.ps1 -UseSlotDeploy` (it always swaps) · needs a second test principal for the fails-closed case |
+| **032** | Site properties **do not swap** — verify identity + `keyVaultReferenceIdentity` on **both** slots first |
+| **033** | Purge the secret from **BOTH** slots; on dev these are **plaintext app settings**, not KV references · the lowercase `bff-api-client-secret` KV alias breaks the Office add-in if missed |
+| **060** | `_cca`-decoupling source guard (010) · no-call-site-bypasses-the-cache guard (011) · `ManagedIdentityClientAssertion` constructed only in a ctor/static-init, never in a method body (020) · Power BI allowlist entry **with the deferral reason** |
+| **061** | Census must scan **ALL server assemblies**, not just the BFF (020's blind spot) · keep both Power BI sites as **secret-backed** entries |
+| **090** | Power BI criterion 10 **waived with reason** · `/test-diet` must adjudicate the three auth files under `seam/Auth/` — note `tests/integration/auth/**` is **empty AND not compiled into any csproj**, so a test authored there would run never |
 
-### Owner directives (standing)
+---
 
-Autonomous + parallel agents where safe · CI issues handled separately (god-class one already fixed on
-master) · PR #801 fixed + closed · `dataverse-access-unification-r1` INACTIVE, interlock cleared.
+## Owner directives (standing)
+
+1. **Autonomous execution + parallel task agents where safe.** Escalation triggers and fail-closed gates
+   (022, 031, 032, 033) still stop for judgment.
+2. **CI issues handled separately.** The god-class ratchet one was already fixed on master
+   (`866f9c101` retired it → complexity guidance).
+3. **Power BI deferred** (tasks 040/041/042 ⏭️) — [DEF-001 / #804](https://github.com/spaarke-dev/spaarke/issues/804).
+   `PowerBi:ClientSecret` stays. Made visible not silent via the 060/061/090 obligations above.
+4. **`dataverse-access-unification-r1` is INACTIVE / not scheduled** — interlock cleared everywhere.
+   Consequence: `DataverseWebApiService` + `DataverseWebApiClient` are **not** being deleted.
+5. **PR #801** — fixed as recommended and closed.
+
+---
+
+## Live environment (verified 2026-08-19)
+
+| | |
+|---|---|
+| Tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
+| App registration | `SDAP-BFF-SPE-API` · `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
+| UAMI | `mi-bff-api-dev` · clientId `5967251e-…` · **principalId `9fd47efb-…`** ← the FIC subject |
+| FIC | `mi-bff-api-dev-assertion` · audience `api://AzureADTokenExchange` |
+| App Service | `spaarke-bff-dev` in `rg-spaarke-dev` — **UserAssigned only**, plan P1v3 |
+
+**Five UAMIs exist in the dev subscription; `spaarke-bff-identity` is named like the BFF's but is NOT
+attached to it. Resolve by resource ID, never by name.**
+
+### Reusable recipe (tasks 031 / 041)
+
+The BFF app registration pre-authorizes the Azure CLI, so this yields a **real delegated user token**:
+
+```bash
+az account get-access-token --resource "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+```
+
+### Distinguishable auth failure modes (hard-won)
+
+| Condition | Error |
+|---|---|
+| No MI present (workstation) | `managed_identity_unreachable_network` — fails in **~80 ms**, not a timeout |
+| Wrong identity requested | `managed_identity_request_failed` — "No User Assigned … found". **FR-B4 signature: fail loud, never fall through** |
+| Wrong/stale **secret** | `AADSTS7000215` — opaque; no hint the value is merely wrong |
+| Fresh FIC not yet propagated | `AADSTS70021` — **retry before concluding anything** |
+| Slot missing `keyVaultReferenceIdentity` | container exit **134 / SIGABRT** — looks like a crash, is a KV-reference failure |
+| Project pins `linux-x64` | `dotnet run` on Windows fails "not a valid application for this OS platform" — **not** a code fault |
+
+---
+
+## Cross-project
+
+| Direction | Item |
+|---|---|
+| **We owe** `customer-provisioning-orchestration-r1` | **Task 030** before their Wave G-3 — this is why it is next |
+| **They owe us** | Model 2 FIC issuer tenancy — `PROVISIONING-CHANGE-REQUEST.md` §9.2. **Still open**; may be structurally impossible (A4 same-tenant rule) |
+| **Watch** | PR #293 — `Azure.Identity` 1.17.1→1.21.0 affects `ClientAssertionCredential` |
+
+## Open questions
+
+1. **`Analysis:PromptFlowKey`** — still in use? Task 055.
+2. **Model 2 FIC issuer tenancy** — with provisioning; does not gate this project (dev-only, Model 1).
+3. **Power BI service-principal profiles under a managed identity** — deferred with DEF-001, **still
+   unanswered**, travels with task 040 and gates 041/042.
+
+---
+
+## Recovery commands
+
+```bash
+cd c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI
+git merge origin/master                     # 1 behind, docs-only
+cat projects/spaarke-auth-v4-dataverse-MI/tasks/TASK-INDEX.md
+cat projects/spaarke-auth-v4-dataverse-MI/notes/decisions/020-assertion-seam.md   # changes 021's scope
+curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev-staging.azurewebsites.net/healthz  # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.net/healthz          # 200
+# then: task-execute on tasks/030-fic-provisioning-automation.poml
+```
+
+## Blockers
+
+**None.** Task 030 is startable immediately after the merge.
