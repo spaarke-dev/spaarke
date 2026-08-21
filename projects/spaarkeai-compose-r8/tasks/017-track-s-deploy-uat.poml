@@ -4,7 +4,7 @@
     <title>Track S ship gate — anti-clobber deploy (BFF + sprk_spaarkeai together) + owner UAT</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment mechanics + UAT coordination; no new source logic. The code was reviewed in tasks 010–016.</rigor-reason>
     <model-tier>sonnet</model-tier>

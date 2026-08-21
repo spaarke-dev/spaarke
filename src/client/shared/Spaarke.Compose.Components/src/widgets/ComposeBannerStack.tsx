@@ -470,8 +470,16 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   // FR-S02 (r8 task 011): the concurrency notice rides the SAME wire field and the same dismissal, but
   // it is NOT a degradation — nothing was simplified. Partition it out so the degradation banner's
-  // "Some formatting was simplified when saving" title and its "the original file is unchanged until
-  // you save" trailer stay TRUE of what they describe; both would be false of a concurrency notice.
+  // "Some formatting was simplified when saving" title and its version-history trailer stay TRUE of
+  // what they describe; both would be false of a concurrency notice.
+  //
+  // UAT-S-01 (2026-08-21, owner UAT of task 017): the trailer previously read "The original file is
+  // unchanged until you save." That is FALSE everywhere this banner renders. `saveDegradationWarnings`
+  // is dispatched from the SERVER's response to a COMPLETED save (ComposeWorkspace triggerSave, and
+  // the post-save re-mount carry) — the bytes are already written and the simplification the banner
+  // describes is already IN them. Telling the user their original is untouched at the exact moment it
+  // was overwritten is the misreporting class Track S exists to remove (FR-S06/FR-S09). The trailer now
+  // names the real recovery: version history, same safety net FR-S02's concurrency notice points at.
   const concurrencyNotice = saveWarnings.find(w => w.code === CONCURRENT_EXTERNAL_CHANGE_CODE) ?? null;
   const degradationOnlyWarnings = saveWarnings.filter(w => w.code !== CONCURRENT_EXTERNAL_CHANGE_CODE);
   const showSaveDegradation = degradationOnlyWarnings.length > 0 && !saveWarningsDismissed;
@@ -867,7 +875,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
-            {`${summarizeSaveDegradation(degradationOnlyWarnings)} The original file is unchanged until you save.`}
+            {`${summarizeSaveDegradation(degradationOnlyWarnings)} These changes are in the version you just saved. The previous version is still available in version history.`}
           </MessageBarBody>
           <MessageBarActions
             containerAction={

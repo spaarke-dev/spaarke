@@ -53,7 +53,14 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 015 | **Document size ceilings** — route to the existing chunked upload; remove the ~22 MB body ceiling; honest oversize pre-flight | FR-S08 | FULL | opus/xhigh | ❌ | 013 | ✅ |
 | 016 | **Honest-failure set** — silent guard drops · name-modal gate · tenant precondition · checkout force-close · promote-after-write · 429 mapping · filesize/filepath refresh · per-document draft slot | FR-S09 | FULL | opus/xhigh | ❌ | 010, 013 | ✅ |
 | 018 | **Track S enforcement** — run the Compose client suite in CI as a self-contained gate (the Half-B counterpart to `compose-fidelity-gate`); fix sibling-resolution + non-determinism | — | FULL | opus/xhigh | ❌ | 010 | ✅ |
-| 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016, **018** | 🔲 |
+| 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016, **018** | ✅ |
+
+> **✅ Phase 1 CLOSED — owner UAT GO, 2026-08-21.** Save works; zero Track S failure modes observed. The UAT
+> surfaced one genuine Track S defect (the save-degradation banner told the user *"the original file is
+> unchanged until you save"* **after** the bytes were written) — fixed + regression-tested the same day; ships
+> with the next `sprk_spaarkeai` deploy. The two banners the owner still sees are **not** Track S: the
+> formatting-simplified banner is **Track A** (Phases 2–4) and *"wording differs slightly"* is **Track C**
+> (051–053, startable now — not gated on 031). Evidence: [`notes/track-s-uat.md`](../notes/track-s-uat.md).
 
 > **Ordering note**: 018 runs **before** 017 — the deps column is authoritative, not the number. 018 was added
 > 2026-08-20 after task 010 found that `Spaarke.Compose.Components` (88 suites / 786 tests) is not in CI at

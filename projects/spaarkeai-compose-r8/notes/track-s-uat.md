@@ -212,21 +212,69 @@ outcome + cause.
 
 ## Result
 
+**Owner verdict, 2026-08-21: GO.** Recorded verbatim: *"017 is UAT - can mark complete. note that still get
+attached errors."*
+
+### What the owner ran, and what this record can honestly claim
+
+The owner exercised Compose against dev and accepted the gate. **Per-row observations were not individually
+recorded** — the result is an owner attestation plus one screenshot, and this file says so rather than
+back-filling ten rows of observations nobody wrote. What the evidence directly supports:
+
+| Evidence | Reading |
+|---|---|
+| Toolbar reads **"Saved · Auto Save On"** with the Compose tab live | The save path completes and reports success honestly. This is the Track S deliverable — the "can't save" failure that defined R7 is closed. |
+| Two **warning** banners, no error banner, no refusal, no stuck "Saving…" | No Track S failure mode is firing. Both banners are working-as-designed honest reporting of a real loss — which is the R7 degradation-copy layer doing its job, not a save defect. |
+
+**Rows FR-S01–S10 are therefore recorded as owner-accepted in aggregate, not row-by-row.** The seam- and
+client-test evidence behind each row is unchanged and is cited in the deploy header above: 1,139 Compose
+server tests, 91 client suites / 1,124 client tests, of which 12 of the 14 new Track S tests were verified to
+FAIL against unfixed code. That is the durable evidence; the UAT was the confirmation that it holds in a real
+environment.
+
+### The two banners the owner reported — neither is Track S
+
+Both were traced to source before being classified. Neither is a save-reliability defect; both are the
+failures the *remaining* R8 phases exist to fix.
+
+| Banner | Source | Track | Where it gets fixed |
+|---|---|---|---|
+| **"Some formatting was simplified when saving"** — indentation, internal links, line breaks, paragraph styles, section breaks, tab stops, table formatting; plus a dropped hyperlink target and 2 dropped line breaks | [`ComposeBannerStack.tsx:869`](../../../src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx#L869), fed by the server's `degradationWarnings` | **Track A** (FR-A01…A06) | Phase 2 → 3 → 4. This is the *headline* R8 defect: the renderer rebuilds the whole body from a five-node editor view, so every property it cannot represent is dropped. Tasks 020–023 measure it, 030/031 gate the fix, 040–044 implement it. |
+| **"Suggested edit couldn't be placed — its wording differs slightly from this document"** | [`ComposeBannerStack.tsx:898`](../../../src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx#L898), fed by `usePendingRedline` | **Track C** (FR-C01…C06) | Tasks **051–053**. The AI edit is located by matching prose instead of using the `(paraId, span)` anchor already captured at request time — invariant 7, "deterministic information available at capture time MUST be carried, not re-derived." Owner standing directive: *"we NEVER should get the 'wording differs slightly'."* **051 is startable now** (dep 050 ✅); Track C is **not** gated on the Phase-3 decision. |
+
+### One genuine Track S defect the screenshot exposed — FIXED
+
+**UAT-S-01 — the save-degradation banner claimed the file had not been written.** Its trailer read
+*"The original file is unchanged until you save."* That banner renders **only** from the server's response to
+a **completed** save (`ComposeWorkspace` dispatches `saveDegradationWarnings` on the success branch, and the
+post-save re-mount carries it forward), so the sentence was false at every moment it was on screen: the bytes
+were already written and already carried the simplification the banner was describing.
+
+This is precisely the misreporting class Track S exists to remove (FR-S06/FR-S09) — the UI telling the user
+something about the stored file that is not true. Fixed 2026-08-21: the trailer now names the real recovery,
+*"These changes are in the version you just saved. The previous version is still available in version
+history."* — the same safety net FR-S02's concurrency notice points at. Guarded by a regression test that
+asserts both the new copy AND the absence of the old claim; **verified to fail against the unfixed copy**.
+
+Ships with the next Compose deploy (`sprk_spaarkeai` only — no server change).
+
+### Tally
+
 | | |
 |---|---|
-| Rows PASS | |
-| Rows FAIL | |
-| Rows N/A (seam-covered) | |
-| **GO / NO-GO for Phase 2** | |
-
-**GO** means "can't save" is closed and the fidelity architecture work (Phase 2 — oracle + corpus) can
-begin. **NO-GO** means a Track S failure mode is still live; file it as a follow-up against the owning
-task (010–016) rather than starting Phase 2 on top of it.
+| Owner verdict | **GO** |
+| Track S failure modes observed | **0** |
+| Rows individually recorded | 0 — accepted in aggregate; see the caveat above |
+| Defects found by UAT and fixed | **1** (UAT-S-01, above) |
+| Non-Track-S defects observed | **2** — one Track A, one Track C, both already scoped |
+| **GO / NO-GO for Phase 2** | **GO** |
 
 ### Open observations (not failures)
 
-- **`If-Match` on `PUT …/content` is undocumented** in the Graph v1.0 reference. FR-S02's row records
-  whether a 409 was ever seen. See task 017 step 6.5.
+- **`If-Match` on `PUT …/content` is undocumented** in the Graph v1.0 reference. The two-user concurrent-save
+  row was not exercised, so **no 409 was observed and none was ruled out** — this stays open exactly as
+  step 6.5 specified, as a follow-up against task 011 rather than a blocker. It is settled the first time two
+  users save the same document in anger.
 - **Metadata refresh writes unconditionally** on every replace save (correct, but adds a Dataverse audit
   entry per save). Follow-up: make it conditional by selecting the two columns in the alt-key read that
   already runs. Raised at code review 2026-08-21; deliberately not changed pre-deploy.

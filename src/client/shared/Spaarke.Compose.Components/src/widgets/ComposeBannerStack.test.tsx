@@ -360,6 +360,23 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     expect(banner.textContent).toContain("A comment's anchor could not be placed; the comment text was kept. (×2)");
   });
 
+  // UAT-S-01 (2026-08-21, owner UAT of task 017). This banner renders ONLY from the server's response
+  // to a COMPLETED save (ComposeWorkspace dispatches `saveDegradationWarnings` from `payload.degradation‑
+  // Warnings` on the success branch, and the post-save re-mount carries it forward). Its trailer used to
+  // read "The original file is unchanged until you save." — false at every moment it was on screen: the
+  // bytes were already written and already carried the simplification being described. The owner saw
+  // exactly this in dev. Assert the honest trailer AND assert the false claim is gone, so the old copy
+  // cannot come back.
+  it('does NOT claim the original file is unchanged — this banner only renders AFTER a completed save', () => {
+    renderStack({ saveDegradationWarnings: SAVE_WARNINGS });
+
+    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).not.toMatch(/original file is unchanged/i);
+    expect(banner.textContent).not.toMatch(/until you save/i);
+    expect(banner.textContent).toContain('These changes are in the version you just saved.');
+    expect(banner.textContent).toMatch(/version history/i);
+  });
+
   it('falls back to the generic "(code ×N)" copy for an unknown code', () => {
     renderStack({ saveDegradationWarnings: [{ code: 'mystery-degradation', count: 3 }] });
 
