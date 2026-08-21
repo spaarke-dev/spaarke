@@ -1,10 +1,10 @@
-# Record Header + Notepad — R2
+# Configurable Record Header — R2
 
-> **Status**: DRAFT — starter design document, seeded during R1 wrap-up 2026-07-05.
-> **Project ID**: `record-header-and-notepad-r2`
-> **Positioning**: Extend the R1 record-header pattern to four additional entities (Project, Invoice, Work Assignment, Event) using the R1 primitives as the canonical pattern. Bundle DEF-06 (shared-lib `exports` field) and DEF-08 (`useSprkMemoRepository` promotion to shared lib) as structural improvements delivered as part of the same effort.
+> **Status**: DRAFT — re-scoped 2026-08-21. Supersedes the 2026-07-05 seed (four per-entity PCFs).
+> **Project ID**: `record-header-and-notepad-r2` (folder/ID retained for continuity with R1 cross-links; the deliverable is no longer Notepad work)
+> **Positioning**: Replace the "one thin PCF per entity" plan with **ONE configuration-driven `RecordHeader` PCF** that works on any entity's main form. Title area + toolbar (AI summary / To Do / Notepad) stay identical everywhere; the field payload and its placement are configured per form via a JSON manifest property.
 > **Owner**: Ralph Schroeder
-> **Created**: 2026-07-05 (seeded during R1 close-out — NOT yet run through `/design-to-spec`)
+> **Created**: 2026-07-05 · **Re-scoped**: 2026-08-21
 
 <hot-path-declaration>
   <bff>N</bff>
@@ -15,27 +15,30 @@
 </hot-path-declaration>
 
 <!--
-Hot-path declaration inherited from R1: pure host-context surface + shared lib + PCFs. No BFF, no SpaarkeAi widgets, no workflow/skill/root-CLAUDE.md touches. If the shared-lib `exports` field change (§7.1) forces `pcf-scripts/tsconfig_base.json` updates across every PCF, the ci-workflows flag may need to flip to Y depending on CI implications — evaluate during `/design-to-spec`.
+Pure host-context surface: one PCF + shared-lib additions. No BFF, no SpaarkeAi widgets, no
+workflow changes. The 2026-07-05 seed flagged ci-workflows as possibly-Y because of the DEF-06
+`exports` migration; DEF-06 is dropped from R2 scope (§7.1), so that risk is gone.
+Docs touched: `docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md` (rewrite) and
+`.claude/patterns/ui/record-header-composition.md` (pointer refresh) — neither is a skill directive.
 -->
 
 ---
 
 ## 1. Purpose
 
-**Bring the R1 record-header + Notepad pattern to Project, Invoice, Work Assignment, and Event entities**, using the same shared primitives that ship v1.0.19 of `MatterHeaderPcf`. Bundle two structural improvements that reduce ecosystem friction:
+R1 shipped `MatterHeaderPcf` v1.0.20 and, more importantly, shipped **the primitives underneath it as entity-agnostic shared code**. The 2026-07-05 R2 seed proposed cloning the Matter PCF four more times. That plan is withdrawn. R2 instead **generalizes the existing control** so a single deployed component serves Matter, Project, Work Assignment, Invoice, Event, and anything after them.
 
-1. **Shared-lib `exports` field migration** (DEF-06 reforward) so downstream PCFs and Code Pages get clean subpath imports without the fragile `dist/*` deep-path convention R1 lands with.
-2. **Promotion of `useSprkMemoRepository` to `@spaarke/ui-components`** (DEF-08) — a second consumer emerges as soon as any of the four new entity PCFs ships, satisfying the CLAUDE.md §11 "extend existing when a second consumer appears" trigger.
+The re-scope rests on three findings from the 2026-08-21 code review of [`src/client/pcf/MatterHeader/`](../../src/client/pcf/MatterHeader/):
 
-The R1 architecture explicitly forecast this: v1 shipped Matter; v2 brings up Project / Invoice / Work Assignment / Event by shipping a *new thin PCF per entity* (~80 LOC each), all composing the same shared primitives and calling the same shared toolbar-actions hook.
+1. **The toolbar is already generic.** [`useRecordHeaderToolbarActions`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts) takes `{ entity, recordId, title }` and resolves To Do / Memo badges from the [`SUPPORTED_TODO_PARENTS` (11 entities) / `SUPPORTED_MEMO_PARENTS` (6 entities)](../../src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts) maps. The "same toolbar on every entity" requirement needs **zero** new work.
+2. **The manifest is already generic.** `boundField` is documented as "any SingleLine.Text field on the host entity" and the record id comes from `context.mode.contextInfo.entityId`. Nothing in [`ControlManifest.Input.xml`](../../src/client/pcf/MatterHeader/control/ControlManifest.Input.xml) is Matter-specific.
+3. **Only ~40 of `MatterHeaderView.tsx`'s 326 lines are configuration.** `ENTITY`, the `FIELDS` array, `LOOKUP_META`, the JSX layout, and the summary field name. The other ~180 lines — form-buffer staging, the pending-changes buffer, `projectLookup()`, the OData lookup-search builder — are **generic machinery that the withdrawn plan would have copy-pasted four times**.
 
 ---
 
-## 2. Product Statement
+## 2. Product statement
 
-Every main-record entity in scope gets the same compact record-header experience as Matter: **a card of configured fields plus three consistent toolbar actions (AI summary / related to-dos / notepad) with live badge counts.** The Notepad UX and SmartTodo openTodos filter continue to behave identically across every entity — no per-entity Notepad or per-entity Kanban.
-
-**Cross-environment portability** is a first-class R2 requirement. The R1 deployment package (MatterHeaderPcf solution ZIP + Notepad webresource + SmartTodo webresource + `sprk_gridconfiguration` records) transferred cleanly between environments during UAT because R1 avoided all hardcoded environment-specific values (record GUIDs, environment names, tenant IDs). R2 MUST preserve that guarantee across four new PCF solutions and any shared-lib repackaging that ships.
+A maker adds **one** component — "Spaarke Record Header" — to any entity's main form, pastes a small JSON layout into its property, and gets: the record's key fields laid out in a grid with inline editing, plus the standard toolbar (AI summary sparkle, related To Dos with live count, Notepad with live count). With no JSON at all, the control still renders a sensible default derived from the form. Adding the header to a new entity requires **no code, no build, no new solution** — only a form edit.
 
 ---
 
@@ -43,287 +46,316 @@ Every main-record entity in scope gets the same compact record-header experience
 
 ### 3.1 In scope
 
-**Per-entity PCFs** (in shipping-priority order — reviewer confirms with `/design-to-spec`):
+**One PCF**: `Spaarke.Records.RecordHeader` — generalized from `MatterHeader`, driven by a `layoutJson` manifest property with metadata-derived fallbacks (§5).
 
-1. **`ProjectHeaderPcf`** — for `sprk_project`
-2. **`InvoiceHeaderPcf`** — for `sprk_invoice`
-3. **`WorkAssignmentHeaderPcf`** — for `sprk_workassignment`
-4. **`EventHeaderPcf`** — for `sprk_event`
+**Entity rollout** (owner decision 2026-08-21):
 
-Each PCF is a thin composition of the R1 primitives — target ~80 LOC per PCF as R1 demonstrated with `MatterHeaderPcf`.
-
-**Structural improvements** (bundle in same R2 effort):
-
-- **DEF-06 reforward** — `exports` field on `@spaarke/ui-components/package.json` + `pcf-scripts/tsconfig_base.json` migration to `moduleResolution: "bundler"`. R1 attempted this and reverted because the migration ripples across every PCF in the repo. R2 embraces the ripple — the four new PCFs land alongside the migration.
-- **DEF-08** — promote `useSprkMemoRepository` from `src/solutions/Notepad/src/hooks/` to `@spaarke/ui-components/hooks/` once a second consumer emerges. All four new entity PCFs need this consumer surface if they inherit R1's annotation icon behavior.
-
-**Cross-environment portability requirements** (universal MUST):
-
-- No hardcoded record GUIDs anywhere in shipped PCF bundles / webresources.
-- Any `sprk_gridconfiguration` records or similar env-scoped Dataverse rows MUST be created by the deployment procedure, not implicit.
-- Deployment package MUST work against a brand-new environment with only the R2 solution ZIP + accompanying webresource files + a documented `sprk_gridconfiguration` seed.
-- All environment-dependent values (BFF URL, tenant ID, etc. — none currently in R1 scope but future-proof against R3+) MUST be sourced from Power Apps configuration surfaces, not baked in.
-
-### 3.2 Out of scope for R2
-
-- BFF endpoints of any kind (NFR-07 continues to hold — sparkle refresh still renders unwired; see R2 sequencing note in §7.3).
-- Retiring or replacing any existing header component beyond what R1 already retired.
-- VisualHost `CardChrome` migration to consume `HeaderToolbar` (DEF-03 — remains in-code pointer only; separate R2B project when someone touches VisualHost).
-- EventDetailSidePane `MemoSection` adoption of the promoted `useSprkMemoRepository` (DEF-04 — remains documented; separate R2B project when someone touches EventDetailSidePane).
-- Rich-text formatting, attachments, mentions, or sharing on the Notepad (out of R1 too; still out).
-
-### 3.3 Not-in-scope — natural boundary
-
-- Any entity beyond the four listed here. The pattern makes adding future entities easy; a future R3 / R4 handles those on demand.
-
----
-
-## 4. R1 primitives consumed (canonical pattern)
-
-All R2 PCFs consume the following R1 outputs verbatim. **No forking, no per-entity re-implementations of primitives.** If a primitive is missing behavior, that behavior lands in the shared lib, then all four PCFs pick it up.
-
-### 4.1 Shared library — `@spaarke/ui-components`
-
-| Primitive | Purpose | R1 file |
+| Wave | Entity | Why this order |
 |---|---|---|
-| `HeaderToolbar` | Generic title + icon slots with badges | [`src/components/HeaderToolbar/HeaderToolbar.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx) |
-| `RecordHeaderShell` | Card chrome wrapping toolbar + field grid | [`src/components/RecordHeader/RecordHeaderShell.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx) |
-| `FieldGrid` | 5-field grid layout | [`src/components/RecordHeader/FieldGrid.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx) |
-| Field renderers (`TextField`, `LookupField`, `OptionSetField`, `TextareaField`) | Type-safe read-only cells | [`src/components/RecordHeader/fields/*.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields) |
-| `useRecordFieldValues` | Batched Xrm.WebApi field-value fetcher | [`src/hooks/useRecordFieldValues.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts) |
-| `useRelatedCount` | Related-record count for badges — reads `entities.length` (NOT `@odata.count`; see [pattern doc](../../.claude/patterns/pcf/xrm-webapi-related-count.md)) | [`src/hooks/useRelatedCount.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts) |
-| `useRecordHeaderToolbarActions` | Fully-wired toolbar props for the three canonical actions | [`src/hooks/useRecordHeaderToolbarActions.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts) |
-| `toolbarLaunchDefaults` | `SUPPORTED_MEMO_PARENTS`, `SUPPORTED_TODO_PARENTS`, LAYOUT constants | [`src/hooks/toolbarLaunchDefaults.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts) |
-| `AiSummaryPopover` | Shared AI-summary popover for sparkle icon | [`src/components/AiSummaryPopover/`](../../src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover) |
-| `themeStorage` (dark mode) | Cross-frame theme resolution | [`src/utils/themeStorage.ts`](../../src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts) |
+| 1 | `sprk_project` | Text / lookup / option-set only — covered by existing renderers |
+| 1 | `sprk_workassignment` | Same shape; validates the config path on a second entity |
+| 2 | `sprk_invoice` | **Forces the currency + date renderer work** (§6). Explicitly required, not optional. |
+| 2 | `sprk_event` | Forces datetime rendering |
+| — | `sprk_matter` | Migrated from `MatterHeaderPcf` to the generic control (§8); must render pixel-identically |
 
-### 4.2 Standalone code pages
+**Shared-library additions** (§6): date/datetime, number/currency, and boolean field renderers; editable option-set; metadata-driven lookup resolution; the config resolver.
 
-| Code page | Purpose | R1 file |
+**Documentation**: rewrite [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) from "how to write a new per-entity PCF" to "how to configure the header for a new entity" — the old recipe becomes actively wrong the day this ships. Refresh [`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) accordingly.
+
+### 3.2 Out of scope
+
+- **A `sprk_headerconfiguration` Dataverse table.** Explicitly rejected — see §5.4.
+- **DEF-06** (shared-lib `exports` field + `moduleResolution: bundler`) — dropped from R2; see §7.1.
+- **DEF-08** (`useSprkMemoRepository` promotion) — dropped from R2; see §7.2.
+- Any BFF surface. The sparkle refresh icon stays unwired (R1 FR-08a / NFR-07 continue to hold).
+- VisualHost `CardChrome` migration (DEF-03) and EventDetailSidePane `MemoSection` (DEF-04) — remain in-code pointers.
+- Changes to the Notepad or SmartTodo code pages. Both are already entity-agnostic and this project launches them with the same URL contracts R1 established (`regardingEntity`/`regardingId`; `action=openTodos&regardingType=…&regardingId=…`) — **NFR-09 external-API status unchanged**.
+
+### 3.3 Natural boundary
+
+Entities beyond the five above need no project — they need a form edit. That is the point of R2.
+
+---
+
+## 4. What R2 consumes unchanged
+
+All R1 primitives are consumed verbatim. **No forking.** Missing behavior lands in the shared lib, and every entity picks it up at once.
+
+| Primitive | R1 file | Change in R2 |
 |---|---|---|
-| Notepad (`sprk_notepad`) | Entity-agnostic note-taking modal | [`src/solutions/Notepad/`](../../src/solutions/Notepad) |
-| SmartTodo (`sprk_smarttodo`) with openTodos filter | Kanban modal pre-filtered by regarding record | [`src/solutions/SmartTodo/`](../../src/solutions/SmartTodo) |
-
-Both code pages are **entity-agnostic**. R2's per-entity PCFs launch them with the same URL contracts R1 uses — no per-entity modifications.
-
-### 4.3 Reference PCF (canonical R1 implementation)
-
-- **`MatterHeaderPcf` v1.0.19** — [`src/client/pcf/MatterHeader/`](../../src/client/pcf/MatterHeader) — the ~80-LOC composition each R2 PCF mirrors.
-
-### 4.4 Reference documents
-
-- **Authoring guide** — [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) — the step-by-step recipe for a new entity PCF.
-- **Pattern pointer** — [`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) — 25-line pointer into the R1 code.
-- **PCF build scaffold** — [`.claude/patterns/pcf/pcf-build-scaffold.md`](../../.claude/patterns/pcf/pcf-build-scaffold.md) — the 10 build gotchas captured across R1 UAT.
-- **Related-count pattern** — [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../.claude/patterns/pcf/xrm-webapi-related-count.md) — the `@odata.count` trap + client-side counting fix.
-- **R1 lessons-learned** — [`../record-header-and-notepad-r1/notes/lessons-learned.md`](../record-header-and-notepad-r1/notes/lessons-learned.md) — 12 lessons captured through v1.0.19 including the 6 Phase-6 addendum lessons.
-- **R1 spec** — [`../record-header-and-notepad-r1/spec.md`](../record-header-and-notepad-r1/spec.md) — 21 FRs / 9 NFRs; the R2 spec inherits/extends this.
+| `HeaderToolbar` | [`components/HeaderToolbar/`](../../src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/) | None |
+| `RecordHeaderShell` | [`RecordHeaderShell.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx) | None |
+| `FieldGrid` | [`FieldGrid.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx) | None (2/3 columns, span 1–3 is sufficient — see §10 risk) |
+| `TextField` / `TextareaField` / `LookupField` | [`RecordHeader/fields/`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields) | None |
+| `OptionSetField` | same | **Extended** — gains edit mode (§6.1) |
+| `useRecordFieldValues` | [`useRecordFieldValues.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts) | None |
+| `useRelatedCount` | [`useRelatedCount.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts) | None |
+| `useRecordHeaderToolbarActions` | [`useRecordHeaderToolbarActions.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts) | Minor — auto-hide Notepad slot for unsupported parents (§6.4) |
+| `AiSummaryPopover` | [`components/AiSummaryPopover/`](../../src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover) | None |
+| `themeStorage` | [`utils/themeStorage.ts`](../../src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts) | None |
+| Notepad + SmartTodo code pages | [`src/solutions/Notepad/`](../../src/solutions/Notepad) · [`src/solutions/SmartTodo/`](../../src/solutions/SmartTodo) | None |
 
 ---
 
-## 5. Per-PCF requirements
+## 5. Configuration model
 
-The following four subsections are the **starter requirement set per entity**. Each entity's `sprk_recordsummary` field, related-record entities (`sprk_todo`, `sprk_memo`), and layout preferences will be fully specified during `/design-to-spec`.
+### 5.1 Mechanism — JSON on the manifest (owner decision 2026-08-21)
 
-### 5.1 `ProjectHeaderPcf` — `sprk_project`
+A new manifest property carries the layout:
 
-- **Bound entity**: `sprk_project`
-- **Fields to display** (5-field card, TBD-CONFIRM in `/design-to-spec`):
-  - `sprk_projectname` (primary name)
-  - `sprk_projectstatus` (option set)
-  - `sprk_projectowner` (lookup → systemuser)
-  - `sprk_startdate` (date)
-  - `sprk_targetenddate` (date)
-- **Sparkle popover source**: `sprk_recordsummary` field on `sprk_project` (verify field exists in target env during discovery)
-- **Checkmark badge**: `sprk_todo` count where `_sprk_regardingproject_value eq <projectId>` (ADR-024 lookup — already supported by R1's `SUPPORTED_TODO_PARENTS`)
-- **Annotation badge**: `sprk_memo` count where `_sprk_regardingproject_value eq <projectId>` (already supported)
-- **Notepad launch**: `regardingEntity=sprk_project&regardingId=<id>`
-- **SmartTodo launch**: `action=openTodos&regardingType=sprk_project&regardingId=<id>`
-- **Form binding target**: main form of `sprk_project`
-- **Estimated effort**: 4–6 hours (per R1 authoring-guide estimate)
+```xml
+<property name="layoutJson" display-name-key="Header layout (JSON)"
+          description-key="JSON layout for this form's header. Leave blank to derive a default from the form."
+          of-type="Multiple" usage="input" required="false" />
+```
 
-### 5.2 `InvoiceHeaderPcf` — `sprk_invoice`
+**Why JSON-on-manifest over a Dataverse config table** (the VisualHost / DataGrid precedent):
 
-- **Bound entity**: `sprk_invoice`
-- **Fields to display** (5-field card, TBD-CONFIRM):
-  - `sprk_name` (primary name — verify per R1's task-001 pattern before locking scope)
-  - `sprk_invoicenumber` (text)
-  - `sprk_invoiceamount` (currency)
-  - `sprk_invoicestatus` (option set)
-  - `sprk_duedate` (date)
-- **Sparkle popover source**: `sprk_recordsummary` field on `sprk_invoice`
-- **Checkmark badge**: `_sprk_regardinginvoice_value eq <invoiceId>` (supported by R1)
-- **Annotation badge**: same
-- **Notepad launch**: `regardingEntity=sprk_invoice&regardingId=<id>`
-- **SmartTodo launch**: `action=openTodos&regardingType=sprk_invoice&regardingId=<id>`
-- **Form binding target**: main form of `sprk_invoice`
-- **Estimated effort**: 4–6 hours
+| | JSON on manifest (chosen) | `sprk_headerconfiguration` table (rejected) |
+|---|---|---|
+| Instances to author | One per form — a handful, ever | Same, but with a table's overhead |
+| Cross-environment portability | **Config travels inside the form XML** — solution import carries it | Config records must be seeded per environment |
+| New Dataverse surface | None | New entity + solution + seed procedure |
+| Extra query on form load | None | One per form load (cacheable) |
+| Edit without publishing the form | No — accepted trade-off | Yes |
 
-### 5.3 `WorkAssignmentHeaderPcf` — `sprk_workassignment`
+The deciding factor is volume. VisualHost and DataGrid justify a table because makers author *many* configurations across dashboards; a record header is 1:1 with a form section and there will be a handful in total. Per CLAUDE.md §11 cost-of-doing-nothing, nothing concretely fails without the table today.
 
-- **Bound entity**: `sprk_workassignment`
-- **Fields to display** (5-field card, TBD-CONFIRM):
-  - `sprk_name` (primary name — verify)
-  - `sprk_assignmentstatus` (option set)
-  - `sprk_assignedto` (lookup)
-  - `sprk_startdate` (date)
-  - `sprk_estimatedhours` (number)
-- **Sparkle popover source**: `sprk_recordsummary` field on `sprk_workassignment`
-- **Checkmark badge**: `_sprk_regardingworkassignment_value eq <id>` (supported by R1)
-- **Annotation badge**: same
-- **Notepad launch**: `regardingEntity=sprk_workassignment&regardingId=<id>`
-- **SmartTodo launch**: `action=openTodos&regardingType=sprk_workassignment&regardingId=<id>`
-- **Form binding target**: main form of `sprk_workassignment`
-- **Estimated effort**: 4–6 hours
+**Reversibility**: the resolver (§5.3) is a pure function over `(manifestJson, derivedDefaults)`. If a second consumer surface later needs shared layouts (a Code Page record header, a side pane), a config-record tier slots in above `manifestJson` without touching renderers — the same three-tier shape as [`configResolution.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts).
 
-### 5.4 `EventHeaderPcf` — `sprk_event`
+### 5.2 Schema — `RecordHeaderConfiguration` v1.0
 
-- **Bound entity**: `sprk_event`
-- **Fields to display** (5-field card, TBD-CONFIRM):
-  - `sprk_eventname` (primary name)
-  - `sprk_eventtype` (option set or lookup — verify)
-  - `sprk_eventstart` (date+time)
-  - `sprk_eventend` (date+time)
-  - `sprk_eventlocation` (text)
-- **Sparkle popover source**: `sprk_recordsummary` field on `sprk_event`
-- **Checkmark badge**: `_sprk_regardingevent_value eq <id>` (supported by R1)
-- **Annotation badge**: same
-- **Notepad launch**: `regardingEntity=sprk_event&regardingId=<id>`
-- **SmartTodo launch**: `action=openTodos&regardingType=sprk_event&regardingId=<id>`
-- **Form binding target**: main form of `sprk_event`
-- **Estimated effort**: 4–6 hours
+```json
+{
+  "_version": "1.0",
+  "title": "Matter",
+  "columns": 3,
+  "summaryField": "sprk_mattersummary",
+  "fields": [
+    { "name": "sprk_matternumber",      "span": 1, "required": true },
+    { "name": "sprk_mattername",        "span": 2 },
+    { "name": "sprk_mattertype",        "span": 1 },
+    { "name": "sprk_practicearea",      "span": 1 },
+    { "name": "sprk_matterdescription", "span": 3, "maxLines": 10 }
+  ]
+}
+```
 
-### 5.5 Common per-PCF acceptance criteria
+| Key | Required | Meaning |
+|---|---|---|
+| `_version` | yes | Discriminator. Non-`"1.0"` → treated as unconfigured, `console.warn`, fall through to derived defaults. |
+| `title` | no | Toolbar title. Default: entity display name from metadata. |
+| `columns` | no | `2` or `3`. Default `3`. |
+| `summaryField` | no | Field backing the sparkle popover. Omitted → sparkle icon hidden (**not** shown-and-empty; see §10). |
+| `fields[].name` | yes | Logical name. For lookups, the **lookup attribute** name (`sprk_mattertype`), not `_sprk_mattertype_value`. |
+| `fields[].span` | no | `1`–`3`. Default derived from renderer (textarea → `columns`, else `1`). |
+| `fields[].label` | no | Override. Default: the form control's label. |
+| `fields[].renderer` | no | Override: `text` \| `textarea` \| `lookup` \| `optionset` \| `date` \| `datetime` \| `number` \| `currency` \| `boolean`. Default: derived from attribute type. |
+| `fields[].readOnly` | no | Suppress inline editing for this cell. Default `false`. |
+| `fields[].required` | no | Renders the `*` marker. Default: derived from attribute requirement level. |
 
-Each of the four PCFs MUST:
+**Invalid JSON never throws.** Parse failure → `console.warn` + derived defaults, mirroring [`isValidDataGridConfiguration`](../../src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts) and [`parseOptionsJson`](../../src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts). A malformed paste must never blank a production form.
 
-- Consume the R1 shared-lib primitives verbatim (no forked field renderers, no reimplemented toolbar hook).
-- Bundle-size ceiling: same as `MatterHeaderPcf` — ≤250 KB minified (R1 shipped 62.4 KiB; per-entity should hit the same order of magnitude).
-- Emit a version footer identical to `MatterHeaderPcf`'s convention.
-- Ship a solution ZIP that imports cleanly to a fresh environment with only the R1 shared-lib dist prerequisites already imported.
+### 5.3 Resolution — two tiers
 
----
+1. **`layoutJson`** on the manifest (when present and valid)
+2. **Derived defaults** — primary name field first (span 2), then up to four further non-system fields **in form order**, skipping `createdon`/`modifiedon`/`createdby`/`modifiedby`/`ownerid`/`statecode`/`statuscode`/`versionnumber` and the primary id. Same shape as `synthesizeColumnsFromMetadata` in [`configResolution.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts).
 
-## 6. Structural improvements bundled
+Tier 2 is what makes "drop it on a new form and it works" true, and it is why the control can never render blank.
 
-### 6.1 DEF-06 reforward — `exports` field + `moduleResolution: bundler`
+### 5.4 Metadata source — form context first
 
-**Why now**: R2 ships four new PCFs at once. Doing the `exports` migration once, before the four new PCFs land, means all four benefit from clean subpath imports (e.g., `@spaarke/ui-components/hooks/useRelatedCount` instead of `@spaarke/ui-components/dist/hooks/useRelatedCount`). Retrofitting after the four ship is 5× the work.
+The control is **form-embedded**, and the R1 write path already requires every editable field to be present on the form (`Xrm.Page.getAttribute(name)` → `throw new Error("Field '…' not on form")`, [MatterHeaderView.tsx:186](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L186)). That existing constraint is an asset: the form context can supply almost everything config would otherwise have to state.
 
-**Scope of change**:
-1. `@spaarke/ui-components/package.json` — add `exports` map covering every consumer-facing subpath. Fully enumerated (no wildcard fallback — R1's attempted wildcard collided with Webpack's directory-index resolution).
-2. `pcf-scripts/tsconfig_base.json` — bump `moduleResolution` from `"node"` to `"bundler"` (or `"node16"`). This propagates to every PCF in the repo.
-3. Every existing PCF's imports of `@spaarke/ui-components/dist/*` — migrate to the clean subpath.
-4. Every existing Code Page's imports of `@spaarke/ui-components/dist/*` — same.
+| Needed | Source | Fallback |
+|---|---|---|
+| Entity logical name | `context.mode.contextInfo.entityTypeName` | — (proven in [VisualHostRoot.tsx:253](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx#L253), [TrackingFieldTrio](../../src/client/pcf/TrackingFieldTrio/index.ts#L346)) |
+| Field label | `formContext.getControl(n).getLabel()` | `EntityDefinitions` DisplayName → humanized logical name |
+| Attribute type → renderer | `getAttribute(n).getAttributeType()` | `EntityDefinitions` `AttributeType` |
+| Option-set options | `getAttribute(n).getOptions()` | `EntityDefinitions` `OptionSet` |
+| Required marker | `getAttribute(n).getRequiredLevel()` | config `required` |
+| Lookup target entity | `EntityDefinitions/ManyToOneRelationships` | — |
+| Lookup id/name fields | target's `PrimaryIdAttribute` / `PrimaryNameAttribute` | — |
 
-**Rollout risk**: touches every PCF in the repo. Before merging, ALL PCF solution ZIPs must be rebuilt + smoke-tested. Coordinate with any other active worktrees so nobody's mid-flight when the migration lands.
+**This is what deletes `LOOKUP_META`.** Matter's lookups point at non-conventional `*_ref` entities (`sprk_mattertype_ref` / `sprk_mattertype_refid` / `sprk_mattertypename`), which is exactly why R1 hard-coded them — but those three values are the relationship target plus its own primary id and primary name attributes, all readable from metadata. The `ManyToOneRelationships` query pattern already exists in the repo at [PolymorphicResolverService.ts:481](../../src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts#L481) and [TodoRegardingUpdateBuilder.ts:292](../../src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts#L292).
 
-**Reference**: R1's attempt is documented in `../record-header-and-notepad-r1/plan-extension.md` § "DEF-06 reverted 2026-07-04" and the R1 lessons-learned. Read those before starting.
-
-### 6.2 DEF-08 — promote `useSprkMemoRepository` to `@spaarke/ui-components`
-
-**Why now**: The four new PCFs need Notepad launch behavior — but do they need the *repository hook* directly? Only IF they render inline memo display (like the retired R1 CreatedByPopover). If not, this promotion may be premature.
-
-**Decision to confirm during `/design-to-spec`**: Do any of the four PCFs render memo content inline? If YES, promote the hook. If NO, defer to the next second-consumer emergence.
-
-**Alternative trigger**: EventDetailSidePane's `MemoSection.tsx` (DEF-04). If EventDetailSidePane refactor lands in the same window, that IS the second consumer.
-
-**Scope of change if promoted**:
-1. Move `src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts` → `src/client/shared/Spaarke.UI.Components/src/hooks/useSprkMemoRepository.ts`.
-2. Move `src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts` → same shared-lib target.
-3. Update Notepad to import from the shared lib.
-4. Add exports to shared-lib `index.ts` (and, if §6.1 lands first, the `exports` map).
-5. Cover with shared-lib tests (currently the tests live in `src/solutions/Notepad/src/hooks/__tests__/`).
+> **Discovery task (blocking, before `/design-to-spec` locks §9)**: confirm via Dataverse MCP that `sprk_mattertype_ref.PrimaryIdAttribute === 'sprk_mattertype_refid'` and `PrimaryNameAttribute === 'sprk_mattertypename'`. If either differs, `fields[].lookup: { entity, idField, nameField }` returns to the schema as an optional escape hatch. Everything else in this design is unaffected either way.
 
 ---
 
-## 7. Cross-environment portability (BINDING for every deliverable)
+## 6. Shared-library work
 
-### 7.1 Universal rule
+These are required regardless of config mechanism — and note that **the withdrawn four-PCF plan needed most of them too**: its own §5.2 Invoice field list (currency amount, due date, status) cannot render correctly with today's renderer set. Today a Money value renders as `12500` and a DateTime as `2026-08-21T00:00:00Z`, because `TextField` does `String(value)`.
 
-**No hardcoded environment-specific identifiers in any shipped bundle or webresource.** R1 was already clean on this axis — R2 preserves it. Concretely:
+### 6.1 New / extended field renderers
 
-- No literal record GUIDs (e.g., matter IDs used as test data during dev).
-- No literal environment names (e.g., "dev-spaarke", "prod-spaarke").
-- No literal tenant IDs or subscription IDs.
-- No literal user IDs, contact IDs, or business unit IDs.
+| Renderer | Covers | Notes |
+|---|---|---|
+| `DateField` | `DateTime` (`DateOnly` + `DateAndTime`) | Locale-formatted display; date picker on edit. Blocks Invoice + Event. |
+| `NumberField` | `Integer`, `Decimal`, `Double`, `Money` | Currency symbol + precision from metadata; right-aligned per `defaultAlignFor`. Blocks Invoice. |
+| `BooleanField` | `Boolean`, `TwoOptions` | Read = Yes/No label; edit = Fluent `Switch`. |
+| `OptionSetField` **(extend)** | `Picklist`, `Status`, `State` | Currently display-only ([OptionSetField.tsx](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx)). Add edit via Fluent `Dropdown` fed by `getOptions()`. |
 
-### 7.2 Configuration surface
+Every renderer follows the established contracts: owns its own `gridColumn: span N`, em-dash for null, Fluent v9 semantic tokens only (ADR-021), React 16/17-safe (ADR-022), and `onSave` optional → omit for read-only.
 
-Where per-environment values are genuinely needed (currently none in R2 scope), source them from:
+### 6.2 Hoist the generic machinery out of the view
 
-- Power Apps environment variables (`sprk_variableName`) — the canonical Dataverse-hosted config surface.
-- PCF manifest parameters exposed to the maker at form-binding time.
-- Runtime discovery via `Xrm.Utility.getGlobalContext()`.
+Move from `MatterHeaderView.tsx` into the shared library so it exists once:
 
-**Not acceptable**: `window.SPAARKE_*` globals baked into the bundle, or `.env` files inlined at build time.
+- Form-buffer staging (`saveText` / `saveLookup` via `Xrm.Page.getAttribute().setValue()`) — the R1 v1.0.7 dirty-state pattern, which must be preserved exactly (it exists because writing straight to Dataverse re-rendered the whole PCF on every edit)
+- The pending-changes buffer and `pendingX[name] ?? values?.[name]` display resolution
+- `projectLookup()` (`_field_value` + `@OData.Community.Display.V1.FormattedValue` → `ILookupItem`)
+- The lookup OData search builder, generalized over metadata-resolved target/id/name
 
-### 7.3 Deployment package portability check
+Proposed home: `hooks/useRecordHeaderFields.ts` + `components/RecordHeader/RecordHeaderFields.tsx`. Exact split is a `/design-to-spec` decision.
 
-Every R2 deliverable ships with a portability check step in its `/task-execute` protocol:
+### 6.3 Config resolver
 
-- Take the produced solution ZIP + webresource files + any accompanying `sprk_gridconfiguration` seed records.
-- Import to a fresh (or refreshed) environment.
-- Verify the PCF renders, toolbar actions launch, badge counts fetch — with no additional environment-specific configuration.
-- If ANY step of that verification fails without a fresh manual configuration, that deliverable has hardcoded state and MUST be fixed before merge.
+`resolveHeaderConfig(manifestJson, formMetadata) → ResolvedHeaderConfig` — pure, no React, no I/O, exhaustively unit-testable. Deliberately mirrors [`configResolution.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts), which is the proven in-repo shape for this problem.
 
----
+### 6.4 Toolbar slot auto-hide
 
-## 8. Applicable ADRs (inherited from R1 + new considerations)
-
-Inherited from R1 spec:
-- **ADR-006** — Prefer PCF over webresources.
-- **ADR-011** — Dataset PCF over subgrids (principle only; not directly applicable to these thin PCFs).
-- **ADR-012** — Shared component library — all primitives + hooks in `@spaarke/ui-components`.
-- **ADR-021** — Fluent UI v9 semantic tokens only.
-- **ADR-022** — PCF platform libraries; shared lib stays React 16/17-safe.
-- **ADR-024** — Polymorphic resolver pattern; `sprk_memo` uses ADR-024 Path C dual-field.
-- **ADR-028** — Spaarke Auth v2 (N/A — host-context only).
-- **ADR-038** — Testing strategy; integration-heavy pyramid.
-
-New potential ADR touch (evaluate during `/design-to-spec`):
-- If §6.1 forces a `moduleResolution` bump across every PCF, that may warrant its own ADR documenting the migration decision. Not a violation of any existing ADR; just enshrines the choice.
+`sprk_todo` supports 11 parents; `sprk_memo` supports 6. On an entity with To Dos but no Memo lookup (Contact, Document, Organization, Analysis, Communication), the annotation icon currently still renders and opens a Notepad that cannot save. `useRecordHeaderToolbarActions` must omit the slot when `buildMemoFilterForParent` returns `null`. Same for the sparkle when no `summaryField` resolves.
 
 ---
 
-## 9. Explicit non-goals
+## 7. Structural items from the 2026-07-05 seed — both dropped
 
-- No changes to the R1 shipped surface (MatterHeaderPcf v1.0.19). R2 adds; it does not modify R1 code.
-- No changes to SmartTodo internals beyond what R1 already did (openTodos consumer wiring).
-- No introduction of any BFF surface (NFR-07 continues).
-- No modification of VisualHost or EventDetailSidePane (see §3.2 Out of scope — those remain R2B candidates).
+### 7.1 DEF-06 (`exports` field + `moduleResolution: bundler`) — DROPPED
+
+The seed's rationale was "four new PCFs land at once, so do the migration once for all of them." R2 now ships **one** PCF, so the leverage is gone while the cost — a repo-wide `pcf-scripts/tsconfig_base.json` bump requiring every PCF solution ZIP to be rebuilt and smoke-tested — is unchanged. R1 already attempted and reverted this (see [plan-extension.md](../record-header-and-notepad-r1/plan-extension.md) task 063). It should be its own migration project when someone wants it, not a passenger here.
+
+**Consequence**: R2 keeps R1's `@spaarke/ui-components/dist/*` deep-path import convention, which is also **mandatory** for bundle size per the authoring guide's optimization triad (`featureconfig.json` + `webpack.config.js` + deep-path imports — ~40 KB vs 1.6 MB without). Do not "clean up" those imports.
+
+### 7.2 DEF-08 (promote `useSprkMemoRepository`) — DROPPED
+
+The seed made promotion conditional on "does any PCF render memo content inline?" The answer for a configurable header is **no** — it launches the Notepad, it does not embed it. No second consumer, so per CLAUDE.md §11 the promotion is unjustified. The trigger remains where R1 left it: whenever `EventDetailSidePane/MemoSection.tsx` is next touched (DEF-04).
 
 ---
 
-## 10. Risks & Mitigations (starter set)
+## 8. Control identity + migration
+
+The deployed control is `Spaarke.Records.MatterHeader` v1.0.20 (solution `sprk_Spaarke.Records.MatterHeader`), bound to the Matter main form.
+
+Changing `constructor=` in the manifest creates a **new** control and orphans that binding — it is not a rename. Two options:
+
+| Option | Cost | Verdict |
+|---|---|---|
+| Keep `constructor="MatterHeader"` | Zero migration; the control is called "MatterHeader" on Invoice and Event forever | ❌ |
+| Ship `Spaarke.Records.RecordHeader`, re-bind the single Matter form, retire `MatterHeader` | One form edit, once | ✅ **Recommended** |
+
+Migration sequence: ship `RecordHeader` → bind it to the Matter form with a `layoutJson` reproducing R1's five-field layout → **verify pixel-identical rendering against v1.0.20** → remove the old control from the form → retire the old solution. The version footer (kept, per `src/client/pcf/CLAUDE.md`) is the in-UI check that the swap took.
+
+Matter is therefore both the last migration and the strongest regression test: R1's live-QA behaviors — form-buffer dirty state with no re-render flash, 25%×35% Notepad modal, `openTodos` SmartTodo filter, `sprk_mattersummary` sparkle, dark/high-contrast theming — must all survive unchanged.
+
+---
+
+## 9. Per-entity requirements
+
+Field lists below are **inherited unverified** from the 2026-07-05 seed. Every one is `TBD-CONFIRM`.
+
+> **Blocking discovery task**: verify via Dataverse MCP, per entity, before `/design-to-spec` locks acceptance criteria — primary name attribute, each listed field's logical name and attribute type, and whether a summary field exists **and is actually populated**. R1 lost a release to exactly this: v1.0.20 fixed a sparkle popover that had been silently empty on every Matter in production because `sprk_recordsummary` is written on zero records while `sprk_mattersummary` holds the real data. Do not assume `sprk_recordsummary` on any of these four.
+
+| Entity | Draft fields (unverified) | New renderers needed | Memo/To Do support |
+|---|---|---|---|
+| `sprk_project` | name, status (optionset), owner (lookup), start date, target end date | date | both ✅ |
+| `sprk_workassignment` | name, status (optionset), assigned to (lookup), start date, estimated hours | date, number | both ✅ |
+| `sprk_invoice` | name, invoice number, **amount (currency)**, status (optionset), **due date** | **currency, date** | both ✅ |
+| `sprk_event` | name, type, **start (datetime)**, **end (datetime)**, location | **datetime** | both ✅ |
+| `sprk_matter` | as R1 v1.0.20 | none | both ✅ |
+
+All five are in both `SUPPORTED_TODO_PARENTS` and `SUPPORTED_MEMO_PARENTS`, so no toolbar map changes are needed for this rollout — §6.4's auto-hide is for entities added later.
+
+**Per-form acceptance criteria** (each binding):
+
+- Renders configured fields at configured spans; inline edit stages to the form buffer and goes dirty without a PCF re-render
+- Toolbar identical to Matter's: title, sparkle, To Do badge, Notepad badge
+- To Do opens SmartTodo filtered to this record; Notepad opens scoped to this record
+- Bundle ≤250 KB minified (R1 shipped 62.4 KiB; shared-lib footprint dominates, so the ceiling should hold — but §10 tracks it as the one thing that could regress)
+- Malformed / absent `layoutJson` degrades to derived defaults, never blank, never thrown
+- Version footer present
+
+---
+
+## 10. Risks
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| The four entities' `sprk_recordsummary` field is not populated by any current process | Sparkle popover shows empty state on every record | Med | Verify during `/design-to-spec` per-entity discovery; either seed data OR document as follow-on. |
-| DEF-06 migration breaks a PCF outside R2 scope | Regression in an unrelated PCF | Med | Full rebuild + smoke of every PCF in the repo before merge (formalized in the task-execute protocol). |
-| Per-entity form binding requires maker access we don't have during dev | PCF ships but nobody sees it | Low | R1 already handled this with the maker checklist (`../record-header-and-notepad-r1/notes/matter-form-binding-instructions.md`). Replicate per entity. |
-| One of the four entities' `sprk_recordsummary` semantics differs from Matter's | Sparkle refresh behavior needs per-entity awareness | Low | R1 sparkle refresh is intentionally UNWIRED; no per-entity behavior differs today. When Insights Engine wires refresh, per-entity nuance is that project's problem. |
-| Bundle-size ceiling hit by some entity's field set | PCF exceeds NFR-04 250 KB | Very low | R1 shipped 62.4 KiB; the shared-lib footprint is dominant, not per-entity code. |
+| **Single control = shared blast radius.** A regression breaks every bound entity at once. | High | Med | Partly pre-existing — all header PCFs already share one library, so a shared-lib bug breaks all of them today regardless. Mitigate with staged form binding (wave 1 → soak → wave 2), version footer, and Matter migrated **last**. |
+| **Bundle growth from four new renderers** breaches the 250 KB ceiling. | Med | Low–Med | Measure per wave, not at the end. The optimization triad (§7.1) is mandatory and must not be disturbed. |
+| **Metadata-derived lookups fail on a non-conventional target** (§5.4 discovery). | Med | Med | Escape hatch already designed: optional `fields[].lookup: { entity, idField, nameField }`. Cheap to add if discovery says so. |
+| **Summary field absent or unpopulated** on Project / Work Assignment / Invoice / Event. | Med | **High** — this already happened on Matter | Sparkle hidden when `summaryField` is absent (§5.2), so the failure mode is a missing icon rather than a broken one. Confirm per entity in discovery. |
+| **Layout change requires a form publish** (the accepted cost of JSON-on-manifest). | Low | Certain | Accepted 2026-08-21. Reversible via the resolver's tier design (§5.1). |
+| **`FieldGrid` caps at 2–3 columns, span 1–3.** If a form wants a 4-column header or explicit row breaks, config cannot express it. | Low | Low | Not in R2. Revisit only if a real form needs it. |
+| Form binding needs maker access the dev session lacks. | Low | Low | Replicate R1's maker checklist ([`matter-form-binding-instructions.md`](../record-header-and-notepad-r1/notes/matter-form-binding-instructions.md)) per entity. |
 
 ---
 
-## 11. Next steps (from R1 → R2 pipeline)
+## 11. Component justification (CLAUDE.md §11)
 
-1. **Discovery pass** — verify each entity's schema via Dataverse MCP:
-   - Primary name field, primary-key field, `sprk_recordsummary` field existence, related-entity lookups.
-2. **Run `/design-to-spec`** on this document — produces `spec.md` with numbered FRs / NFRs and per-entity acceptance criteria.
-3. **Run `/project-pipeline`** to seed the R2 worktree + task list.
-4. **Confirm §6.2 DEF-08 promotion decision** during `/design-to-spec` — does any of the four PCFs render memo content inline?
-5. **Schedule §6.1 DEF-06 migration** as the FIRST task in R2, since it affects every subsequent PCF build.
-
----
-
-## 12. Related projects / deferrals
-
-- **DEF-01** (sparkle refresh → BFF regen endpoint) — absorbed by future **Insights Engine / AI Summary** project. Not in R2 scope.
-- **DEF-03** (VisualHost CardChrome migration) — R2B candidate when someone touches VisualHost. In-code pointer added to R1's pattern doc during wrap-up.
-- **DEF-04** (EventDetailSidePane MemoSection adoption) — R2B candidate when someone touches EventDetailSidePane. In-code pointer added to `useSprkMemoRepository.ts` JSDoc during R1 wrap-up.
+| New surface | Existing overlap | Why not extend it | Cost of doing nothing |
+|---|---|---|---|
+| `RecordHeader` control | `MatterHeader` PCF | This **is** the extension — same control, generalized, old one retired (§8) | Four more PCF solutions to version, deploy, bind, and fix in parallel; ~180 lines of edit machinery duplicated four times |
+| `DateField` / `NumberField` / `BooleanField` | `TextField` | `TextField` does `String(value)` — it cannot format a Money value by currency/precision or a DateTime by user locale | Invoice amount renders `12500`; due date renders `2026-08-21T00:00:00Z`. Invoice ships broken. |
+| `OptionSetField` edit mode | `OptionSetField` | Direct extension of the existing component | Project / Work Assignment / Invoice status become read-only, unlike every other field in the header |
+| `layoutJson` property | `title`, `showVersion` properties | Same manifest surface, one more input | Field payload stays compiled in; a new entity needs a code change and a redeploy |
+| `resolveHeaderConfig` | `configResolution.ts` (DataGrid) | Different domain object (fields/spans vs columns/views); deliberately mirrors its structure and test approach | Config precedence spreads through the render path untested |
+| ~~`sprk_headerconfiguration` table~~ | — | **Rejected** — §5.4. No concrete failure without it. | n/a |
 
 ---
 
-*Seeded 2026-07-05 by R1 wrap-up. Author elaborates via `/design-to-spec` when starting R2 execution.*
+## 12. ADR posture
+
+Inherited and unchanged: **ADR-006** (PCF for form-bound UI), **ADR-012** (shared library), **ADR-021** (Fluent v9 semantic tokens only), **ADR-022** (React 16/17-safe shared components), **ADR-024** (`sprk_memo` Path C dual-field), **ADR-038** (testing strategy). **ADR-028** is N/A — host-context `Xrm` only, no `@spaarke/auth`, no BFF.
+
+**No ADR conflict, and no §6.5 escalation.** Worth stating explicitly because R1's project CLAUDE.md paraphrases ADR-011 as "typed components > runtime schemas," which reads like a blocker for a configuration-driven control. [ADR-011](../../.claude/adr/ADR-011-dataset-pcf.md) contains no such rule; its actual MUSTs — "reuse shared components from `@spaarke/ui-components`", "MUST NOT duplicate UI primitives" — point toward this design. The repo's own configuration-driven frameworks (VisualHost `sprk_chartdefinition`, DataGrid `sprk_gridconfiguration`) are established precedent for the pattern.
+
+Also unchanged: **NFR-07** (no BFF) and **NFR-09** (Notepad launch-contract URL params are external API — do not rename).
+
+---
+
+## 13. Cross-environment portability (binding)
+
+R1 shipped clean on this axis and R2 must preserve it: no literal record GUIDs, environment names, tenant/subscription ids, or user/contact/business-unit ids in any shipped bundle. `window.SPAARKE_*` globals and build-time-inlined `.env` values remain unacceptable.
+
+The JSON-on-manifest decision **strengthens** this position: layout configuration lives in form XML and travels with the solution, so there are no config records to seed per environment. Portability check per deliverable: import the solution ZIP into a fresh environment and verify the header renders, toolbar actions launch, and badges fetch — with no additional environment-specific configuration.
+
+---
+
+## 14. Rough effort
+
+| Work | Estimate |
+|---|---|
+| Generic view + entity self-detection + config resolver (§5, §6.3) | 1–2 d |
+| Hoist generic machinery to shared lib (§6.2) | 1 d |
+| Four new/extended renderers (§6.1) | 2–3 d |
+| Metadata-driven lookup resolution (§5.4) | 1 d |
+| Control rename + Matter migration + parity QA (§8) | 0.5–1 d |
+| Per-entity config + form binding + QA | 0.5 d × 4 |
+| Guide rewrite + pattern refresh (§3.1) | 0.5 d |
+| **Total** | **~8–11 dev-days** |
+
+The withdrawn four-PCF plan estimated 4–6 h × 4 ≈ 3 days — but that number excluded the renderer work it also needed (§6), and left five controls to maintain instead of one.
+
+---
+
+## 15. Next steps
+
+1. **Discovery pass (blocking)** — Dataverse MCP, per entity: primary name attribute; each field's logical name + attribute type; summary-field existence **and population**; the `sprk_mattertype_ref` primary id/name check from §5.4.
+2. **`/design-to-spec`** on this document → numbered FRs/NFRs with per-entity acceptance criteria.
+3. **`/project-pipeline`** → worktree + task list + `projects/INDEX.md` registration.
+4. Sequence tasks: shared-lib renderers and the resolver land **before** any form binding; Matter migrates **last**.
+
+---
+
+## 16. Related deferrals
+
+- **DEF-01** (sparkle refresh → BFF regen endpoint) — absorbed by the future Insights Engine / AI Summary project. Not R2.
+- **DEF-03** (VisualHost `CardChrome` → `HeaderToolbar`) — in-code pointer; R2B when someone touches VisualHost.
+- **DEF-04** (EventDetailSidePane `MemoSection`) — in-code pointer; R2B when someone touches it. Also the trigger for DEF-08.
+- **DEF-06** (`exports` field migration) — dropped from R2 (§7.1); standalone migration project when wanted.
+- **DEF-08** (`useSprkMemoRepository` promotion) — dropped from R2 (§7.2); trigger stays on DEF-04.
+
+---
+
+*Re-scoped 2026-08-21 from the 2026-07-05 four-PCF seed, per owner decision: one configurable control; Project + Work Assignment first; Invoice explicitly required; JSON over config table.*

@@ -2,7 +2,12 @@
 
 > **Last Reviewed**: 2026-07-03
 > **Status**: Current (project: `record-header-and-notepad-r1`)
-> **Load when**: authoring a new per-entity Record Header PCF (`ProjectHeaderPcf`, `InvoiceHeaderPcf`, `EventHeaderPcf`, etc.); modifying `MatterHeaderPcf`; consuming `@spaarke/ui-components` header primitives from any surface.
+> **Load when**: modifying `MatterHeaderPcf`; consuming `@spaarke/ui-components` header primitives from any surface.
+
+> ⚠️ **Do NOT author a new per-entity Record Header PCF.** That approach was withdrawn 2026-08-21.
+> R2 replaces it with ONE configuration-driven `RecordHeader` control serving every entity — see
+> [`projects/record-header-and-notepad-r2/design.md`](../../../projects/record-header-and-notepad-r2/design.md).
+> The authoring guide below still documents the retired per-entity recipe; it is rewritten as part of R2.
 
 ## Canonical code
 
@@ -40,10 +45,16 @@ that is the "extend existing when there anyway" trigger from CLAUDE.md §11.
 
 ## Follow-on project
 
-The four per-entity PCFs (Project, Invoice, Work Assignment, Event) are
-scoped in [`projects/record-header-and-notepad-r2/design.md`](../../../projects/record-header-and-notepad-r2/design.md).
-That project also bundles the shared-lib `exports` field migration (DEF-06)
-and the `useSprkMemoRepository` promotion decision (DEF-08).
+[`projects/record-header-and-notepad-r2/design.md`](../../../projects/record-header-and-notepad-r2/design.md)
+— **re-scoped 2026-08-21**. Generalizes `MatterHeaderPcf` into ONE configuration-driven
+`Spaarke.Records.RecordHeader` control (layout supplied as JSON on a manifest property, with
+defaults derived from form metadata), rolling out to Project + Work Assignment first, then
+Invoice + Event, with Matter migrated last. Adds date / number-currency / boolean renderers and
+an editable option set to the shared lib.
+
+The earlier plan — four cloned per-entity PCFs, plus the shared-lib `exports` migration (DEF-06)
+and the `useSprkMemoRepository` promotion (DEF-08) — is **withdrawn**. DEF-06 and DEF-08 are both
+out of R2 scope; DEF-08's trigger remains DEF-04 below.
 
 ## See also
 
