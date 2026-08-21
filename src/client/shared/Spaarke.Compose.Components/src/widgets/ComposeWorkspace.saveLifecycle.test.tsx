@@ -48,16 +48,26 @@ const SAVE_TIMEOUT_MS = 120000;
  * the signal aborts (the production timeout is the only thing that can end it); `'deferred'` settles
  * when the test releases it, which is what makes the in-flight window observable.
  */
-type SaveBehavior = 'ok' | 'hang' | 'deferred';
+type SaveBehavior = 'ok' | 'hang' | 'deferred' | 'throttled';
 
 /**
  * FR-S08 (task 015): the size limit the mocked server advertises on its Load response. `null` = the
  * server advertises nothing (an older BFF), which must switch the client's numeric pre-flight OFF
  * rather than make it guess.
  */
-const config: { behavior: SaveBehavior; advertisedLimit: number | null } = {
+const config: {
+  behavior: SaveBehavior;
+  advertisedLimit: number | null;
+  /**
+   * FR-S09 item 1 (task 016): whether the ComposeEditor stub attaches its imperative handle.
+   * `'detached'` reproduces the real render race the workspace guards against — the editor is mounted
+   * and the Save button is enabled, but `editorRef.current` is still null.
+   */
+  editorHandle: 'attached' | 'detached';
+} = {
   behavior: 'ok',
   advertisedLimit: null,
+  editorHandle: 'attached',
 };
 
 let saveCallCount = 0;
@@ -100,6 +110,14 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(abortError()));
       });
+    }
+    if (config.behavior === 'throttled') {
+      // What a Graph throttle now looks like on the wire: 429 + the server's own detail naming the wait.
+      throw new (authModule().ApiError)(
+        'The document service is busy right now, so nothing was saved and nothing was overwritten. ' +
+          'Your changes are still here — try again in about 17 seconds.',
+        429
+      );
     }
     if (config.behavior === 'deferred') {
       return new Promise<Response>(resolve => {
@@ -174,6 +192,18 @@ jest.mock('@spaarke/ui-components', () => ({
   SendEmailDialog: () => null,
   SprkModal: () => null,
   RichFilePreviewDialog: () => null,
+  // FR-S09 item 2 (task 016): ComposeSaveNameDialog renders a FormModal. The stub exposes the two
+  // things the test drives — that the modal is OPEN, and the dismiss the user actually performs.
+  FormModal: (props: { open?: boolean; children?: unknown; onClose?: () => void }) => {
+    const ReactLib = require('react');
+    if (!props.open) return null;
+    return ReactLib.createElement(
+      'div',
+      { 'data-testid': 'form-modal-stub' },
+      props.children,
+      ReactLib.createElement('button', { 'data-testid': 'form-modal-dismiss', onClick: props.onClose }, 'Cancel')
+    );
+  },
 }));
 jest.mock('@spaarke/document-operations', () => ({
   useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
@@ -202,38 +232,53 @@ jest.mock('./ComposeToolbar', () => ({
 
 // ── ComposeEditor stub — a dirty document with one captured op (mirrors the saveErrorRouting stub). ──
 const commitSavedMock = jest.fn();
-const editorProps: { current: { onSave?: () => void; canSave?: boolean } } = { current: {} };
+const editorProps: {
+  current: { onSave?: (mode?: 'version' | 'new') => void; canSave?: boolean; saveDisabledReason?: string };
+} = {
+  current: {},
+};
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
     ComposeEditor: ReactLib.forwardRef(
       (
-        props: { onSave?: () => void; canSave?: boolean; onDirtyChange?: (d: boolean) => void },
+        props: {
+          onSave?: (mode?: 'version' | 'new') => void;
+          canSave?: boolean;
+          saveDisabledReason?: string;
+          onDirtyChange?: (d: boolean) => void;
+        },
         ref: React.Ref<unknown>
       ) => {
         editorProps.current = props;
         ReactLib.useEffect(() => {
           props.onDirtyChange?.(true);
         }, []);
-        ReactLib.useImperativeHandle(ref, () => ({
-          isDirty: () => true,
-          serializeOperationLog: () => ({
-            orderedOps: [
-              {
-                operation: { type: 'insertText', paraId: 'AAAA0001', at: { runIndex: 0, offset: 3 }, text: 'x' },
-                deletedContentFlag: false,
-              },
-            ],
-            baseVersion: 'v-load',
-          }),
-          commitSaved: commitSavedMock,
-          getBaselineParaIdMap: () => [],
-          getAnchoredComments: () => [],
-          getRedlineAnnotations: () => [],
-          hasPendingRedlines: () => false,
-          buildContentModel: () => ({ paragraphs: [] }),
-          getCounts: () => ({ characters: 0, words: 0 }),
-        }));
+        // FR-S09 item 1: `null` leaves `editorRef.current` unset while the editor is still MOUNTED and
+        // the Save button still enabled — the exact shape of the render race the guard exists for.
+        ReactLib.useImperativeHandle(ref, () =>
+          config.editorHandle === 'detached'
+            ? null
+            : {
+                isDirty: () => true,
+                serializeOperationLog: () => ({
+                  orderedOps: [
+                    {
+                      operation: { type: 'insertText', paraId: 'AAAA0001', at: { runIndex: 0, offset: 3 }, text: 'x' },
+                      deletedContentFlag: false,
+                    },
+                  ],
+                  baseVersion: 'v-load',
+                }),
+                commitSaved: commitSavedMock,
+                getBaselineParaIdMap: () => [],
+                getAnchoredComments: () => [],
+                getRedlineAnnotations: () => [],
+                hasPendingRedlines: () => false,
+                buildContentModel: () => ({ paragraphs: [] }),
+                getCounts: () => ({ characters: 0, words: 0 }),
+              }
+        );
         return <div data-testid="compose-editor-stub" />;
       }
     ),
@@ -244,15 +289,24 @@ jest.mock('./ComposeEditor', () => {
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
 
-function renderWorkspace() {
+function renderWorkspace(overrides?: {
+  tenantId?: string;
+  initialDocumentRef?: { speDriveItemId: string; sprkDocumentId?: string; fileName?: string; transientKey?: string };
+}) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <ComposeWorkspace
-        initialDocumentRef={{ speDriveItemId: SPE_ID, sprkDocumentId: 'sprk-doc-1', fileName: 'contract.docx' }}
+        initialDocumentRef={
+          overrides?.initialDocumentRef ?? {
+            speDriveItemId: SPE_ID,
+            sprkDocumentId: 'sprk-doc-1',
+            fileName: 'contract.docx',
+          }
+        }
         initialSessionId={DOC_SESSION}
         bffBaseUrl="https://bff.example.test"
         driveId={DRIVE_ID}
-        tenantId="tenant-1"
+        tenantId={overrides?.tenantId ?? 'tenant-1'}
       />
     </FluentProvider>
   );
@@ -265,6 +319,7 @@ beforeEach(() => {
   releaseDeferredSave = null;
   config.behavior = 'ok';
   config.advertisedLimit = null;
+  config.editorHandle = 'attached';
   editorProps.current = {};
 });
 
@@ -465,5 +520,110 @@ describe('ComposeWorkspace — FR-S05: a save cannot hang forever and cannot dou
     const init = saveCall?.[1] as RequestInit | undefined;
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(init?.signal?.aborted).toBe(false);
+  });
+});
+
+describe('ComposeWorkspace — FR-S09: no save-path guard drops in silence', () => {
+  it('item 1 — Save with the editor handle not attached SAYS SO instead of doing nothing', async () => {
+    // The defect: `if (!state.documentRef || !editorRef.current) return;` — a bare return, with the
+    // editor on screen and the Save button enabled. Pressing Save did nothing at all, repeatedly, and
+    // was indistinguishable from a dead button.
+    config.editorHandle = 'detached';
+    renderWorkspace();
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    await waitFor(() => expect(editorProps.current.canSave).toBe(true));
+
+    await clickSave();
+
+    expect(saveCallCount).toBe(0);
+    const text = await errorBannerText();
+    expect(text).toMatch(/did not run/i);
+    expect(text).toMatch(/editor was not ready/i);
+    // And it must promise what is true: the work survives.
+    expect(text).toMatch(/still here/i);
+  });
+
+  it('item 3 — losing tenantId disables Save AND states why, instead of failing after the press', async () => {
+    // `tenantId` was already required by `triggerSave` and by every save request body — but not by the
+    // GATE, so the button stayed enabled on a workspace that could not possibly save and only said so
+    // after the user pressed it. Observed by re-rendering a LOADED workspace without the tenant (the
+    // host's config going away mid-session); mounting without it never reaches the editor at all,
+    // because the load path refuses first — which is the same precondition, stated one layer earlier.
+    const view = renderWorkspace();
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    await waitFor(() => expect(editorProps.current.canSave).toBe(true));
+
+    view.rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeWorkspace
+          initialDocumentRef={{ speDriveItemId: SPE_ID, sprkDocumentId: 'sprk-doc-1', fileName: 'contract.docx' }}
+          initialSessionId={DOC_SESSION}
+          bffBaseUrl="https://bff.example.test"
+          driveId={DRIVE_ID}
+          tenantId=""
+        />
+      </FluentProvider>
+    );
+
+    await waitFor(() => expect(editorProps.current.canSave).toBe(false));
+    expect(editorProps.current.saveDisabledReason).toMatch(/connection settings/i);
+    expect(saveCallCount).toBe(0);
+  });
+
+  it('item 3 NEGATIVE — a configured workspace enables Save and offers no reason', async () => {
+    await mountLoaded();
+    expect(editorProps.current.canSave).toBe(true);
+    expect(editorProps.current.saveDisabledReason).toBeUndefined();
+  });
+
+  it('item 2 — dismissing the name modal reports that the save did not happen', async () => {
+    // Save As ALWAYS routes through the name modal (`saveNeedsName(mode)` returns true for 'new'), so it
+    // is the reachable form of the same gate a first create-on-save hits. Dismissing it used to abandon
+    // the requested save in silence — press Save As, press Esc, believe you saved.
+    await mountLoaded();
+
+    await act(async () => {
+      editorProps.current.onSave?.('new');
+      await Promise.resolve();
+    });
+
+    // The gate is visible...
+    const modal = await screen.findByTestId('compose-save-name-dialog');
+    expect(modal).toBeInTheDocument();
+    expect(saveCallCount).toBe(0);
+
+    // ...and dismissing it is now an accounted-for refusal, not silence.
+    await act(async () => {
+      screen.getByTestId('form-modal-dismiss').click();
+      await Promise.resolve();
+    });
+
+    expect(saveCallCount).toBe(0);
+    const text = await errorBannerText();
+    expect(text).toMatch(/not saved/i);
+    expect(text).toMatch(/needs a name/i);
+  });
+
+  it('item 6 — a 429 reads as "busy, try again", never as a server error', async () => {
+    await mountLoaded();
+    config.behavior = 'throttled';
+
+    await clickSave();
+
+    const text = await errorBannerText();
+    // The server's own detail carries the wait; the client must surface it rather than overwrite it.
+    expect(text).toMatch(/busy/i);
+    expect(text).toMatch(/17 seconds/);
+    expect(text).toMatch(/still here/i);
+    // THE discriminator. Before task 016 a 429 fell through to `saveFailureMessage`'s default arm and
+    // was announced as "Not saved — the server rejected this save (HTTP 429): ...". Nothing rejected
+    // anything: the request was fine and will succeed shortly. Asserting the ABSENCE of that framing is
+    // what makes this test fail against the unfixed code rather than passing on the server's detail.
+    expect(text).not.toMatch(/rejected this save/i);
+    expect(text).not.toMatch(/HTTP 429/);
+    expect(text).not.toMatch(/server hit an error/i);
+    expect(text).not.toMatch(/InvalidOperationException/);
+    // Nothing was written, so the editor must NOT have been told the save committed.
+    expect(commitSavedMock).not.toHaveBeenCalled();
   });
 });

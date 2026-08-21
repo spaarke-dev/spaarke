@@ -233,6 +233,14 @@ function writeImportWarningsDismissed(signature: string): void {
 export const CONCURRENT_EXTERNAL_CHANGE_CODE = 'concurrent-external-change';
 
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
+  // FR-S09 item 7 (r8 task 016): the document saved completely; only the Dataverse columns that DESCRIBE
+  // it (size, SharePoint path) could not be brought up to date with it. Kept calm on purpose — the
+  // user's work is fine and there is nothing for them to redo — but not silent, because those columns
+  // are what the Documents grid shows and what "Open in SharePoint" follows, so a stale value is a wrong
+  // number displayed rather than a hidden one. It clears itself on the next successful save.
+  'document-metadata-stale':
+    "Saved. The document's size and location details in Spaarke could not be refreshed just now, so " +
+    'they may look out of date elsewhere until the next save.',
   // FR-S02 (r8 task 011): concurrency is LAST-WRITER-WINS with a warning. The save SUCCEEDED; someone
   // else's version landed between this document being opened and being saved, and this save is now the
   // current one. Version history is the honest recovery path — their content is not lost, it is the

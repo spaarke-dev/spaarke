@@ -152,3 +152,76 @@ wire outcome — they map to the enum **member whose meaning they share**, and s
 | 6 — Graph 429 | `storage-failed`, cause `throttled` | server |
 | 7 — metadata refresh | `persisted-with-warnings` when the refresh fails | server |
 | 8 — draft slot | n/a — local draft store, never a save | client |
+
+---
+
+## What landed
+
+### Server
+
+| Item | Change |
+|---|---|
+| **5(a)** | `recordSignal` is DERIVED from `promotion.DocumentRecordId`, not a hardcoded `CompletedSignal`. The very next statement already branched on `.HasValue` for the profile step — the two lines contradicted each other three lines apart. |
+| **5(b)** | The outcome decision reads the record step. It previously consulted the partial-apply summary and the warning list and nothing else, so a save whose completion aggregate was Failed still reported `persisted`. |
+| **5(c)** | `PromoteIfEphemeralAsync` is guarded. A throw after a successful write returns `BuildRecordFailedResult` → **`partially-recorded`** on a 200 (the same shape `BuildContainerFailedResult` uses). The two Dataverse **identity-key** faults are RETHROWN so the endpoint's existing 409/503 handler stays reachable — swallowing them would have dead-coded it, which is the defect this task exists to remove. |
+| **6** | `GraphThrottledException` (sibling of `EtagPreconditionFailedException` / `DocumentLockedByWordException`, same file) carries Graph's `Retry-After`, which all four throttle sites were discarding. Endpoint → **429 + the header**, `storage-failed` + cause `throttled`. |
+| **7** | The idempotent existing-row branch refreshes `sprk_filesize` + `sprk_filepath` — those two only; identity fields stay the create branch's business. A failed refresh sets `MetadataRefreshFailed` → `document-metadata-stale` on `persisted-with-warnings`. |
+| **4** (server half) | The checkout 409 body advertises `status`/`title` so `authenticatedFetch` parses it as ProblemDetails. Without that the thrown `ApiError` carried no body and no caller could name the lock holder. Additive superset — existing readers untouched. |
+
+### Client
+
+| Item | Change |
+|---|---|
+| **1** | The two bare `return`s are three explicit cases. `saveFailed` no longer forces `status: 'loaded'` — a refusal must not move the state machine (it fires while the document is still LOADING). |
+| **2** | Dismissing the name modal dispatches an honest refusal. |
+| **3** | `canSaveNow` requires `tenantId`; a disabled Save carries `saveDisabledReason` (the `applyTemplateDisabledReason` convention already in that toolbar). |
+| **4** | Status routing moved into the `catch`, where non-2xx actually arrives. All three dead blocks gone — including the necessarily-TRUE `if (probeResponse.ok)`, because a condition that cannot be false is the same defect wearing the opposite sign. |
+| **6** | A 429 renders as a wait, not a rejection. |
+| **8** | Per-document draft keys + bounded retention (10, by age) + legacy-slot read-through. |
+
+## Component justification (root CLAUDE.md §11)
+
+| New surface | Existing overlap | Why not extend | Concrete failure without it |
+|---|---|---|---|
+| `GraphThrottledException` | `EtagPreconditionFailedException`, `DocumentLockedByWordException` — same file, same purpose (typed facade translations of Graph errors) | This IS the extension: a third member of an established family. Reusing either would mean a throttle claiming to be a lock or a precondition | A Graph 429 renders as HTTP 500 "Save failed: InvalidOperationException…", and `Retry-After` is discarded |
+| `ComposeSaveLimits`-style constants — **none added** | — | — | — |
+| `saveDisabledReason` prop | `applyTemplateDisabledReason` on the same toolbar | Same convention, different button; one prop cannot serve two controls | A disabled Save with no account of itself |
+| `composeDraftKey()` | `COMPOSE_DRAFT_CONTENT_KEY` | The constant is now the LEGACY read-path; the function derives the live per-document key | Two documents share one slot and destroy each other's work |
+| `document-metadata-stale` code | `SAVE_DEGRADATION_COPY` | Added to that map — no new banner surface | A failed metadata refresh is silent again |
+| Causes `throttled`, `record-promotion` | `ComposeSaveTelemetry` cause set | Added to the existing closed set | A throttling spike is indistinguishable from a real storage outage; a record fault indistinguishable from a partial apply |
+
+No new DI registration, no new NuGet, no new endpoint, no new banner component.
+
+## Verification
+
+- **Seam** `ConcurrencySaveSeamTests` **13/13**. **3 of the 4 new ones FAIL on the unfixed code**:
+  item 5 → `500 "Save failed: TimeoutException: Dataverse request timed out."` (the exact lie — the bytes
+  were already in storage), item 7 → the row was never updated, item 6 → 500.
+- **Client** `ComposeWorkspace.saveLifecycle.test.tsx` 13/13, **4 new, all 4 fail pre-fix**;
+  `useComposeCheckoutLifecycle.honestFailure.test.tsx` 6/6, **5 of 6 fail** against the dead-code hook
+  (the 6th is the healthy-path negative, which must pass both ways).
+- Full Compose client suite **91 suites / 1,121 tests**; all Compose server tests **1,139**.
+- Publish **43.68 MB** compressed incl. PDBs — **0.00 MB delta**. No vulnerable packages. No new NuGet.
+- Typecheck: 9 errors before, the same 9 after (unbuilt `@spaarke/ai-widgets` dist + four pre-existing
+  implicit-`any`s). Prettier clean. ESLint is not configured for this package — the known gap task 018
+  drafted an issue for.
+
+### One fixture gap, found the right way
+
+`ComposeServiceImportedRenderSaveTests.SaveAsync_CleanImportedRender_ReportsNoDegradations` went red.
+Per `bff-extensions.md` § F.2 (Fixture-Config-FIRST), the fixture was inspected before the code was
+blamed — and the fixture was the problem: its `IGenericEntityService` mock is `MockBehavior.Strict`, the
+replace path now legitimately calls `UpdateAsync`, and an unconfigured strict call throws, which the
+best-effort catch correctly recorded as a failed refresh. Setup added to `ArrangeReplaceExisting`. The
+production path was right; the mock had not been told about a new, intended call.
+
+### God-class ratchet
+
+`ComposeService.cs` 3,785 → **3,979** — waiver re-baselined with a reason, per the pattern (never
+silently). `ComposeEndpoints.cs` 2,930 is inside its grace. `DataverseServiceClientImpl.cs` remains red;
+it is another project's file and was red before this project touched anything.
+
+**Note for the merge**: `origin/master` **retired this gate entirely** on 2026-08-20 (`866f9c101` —
+LOC ratchet → `docs/standards/COMPONENT-COMPLEXITY.md` + a non-blocking report). `GodClassGuardTests.cs`
+is expected to disappear on merge, and **owner decision C is resolved by that commit**, not by us. The
+re-baseline is recorded anyway: "the gate is going away" is not a reason to leave it red while it exists.

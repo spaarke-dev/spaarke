@@ -1,10 +1,9 @@
 ﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-21 (by `context-handoff` — end of session; ready for `/compact`)
+> **Last Updated**: 2026-08-21 (task 016 complete — **Track S is code-complete; 017 is the deploy**)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: branch `work/spaarkeai-compose-r8` @ `f3ea3e48a`, **19 ahead of `origin/master`, 0 behind,
-> working tree CLEAN.** Draft **PR #806** open. Nothing uncommitted; nothing at risk across compaction.
+> **Git**: branch `work/spaarkeai-compose-r8`. Draft **PR #806** open.
 
 ---
 
@@ -12,86 +11,81 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **016** — the honest-failure set (eight silent-drop modes). **The last Track S task before 017 (deploy).** |
-| **Status** | **not started** — no partial edits, no in-flight agents. A clean starting point. |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 016` → invokes `task-execute` on `tasks/016-honest-failure-set.poml` (FULL · opus @ xhigh · steps `directional`). |
-| **Blocked on** | Nothing. |
-| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 018 · 050** ✅ |
-| **Then** | **017** — Track S deploy (BFF + `sprk_spaarkeai` TOGETHER, NFR-05) + owner UAT. |
+| **Task** | **017** — Track S deploy (BFF + `sprk_spaarkeai` **together**, NFR-05) + owner UAT. |
+| **Status** | not started. **Track S is CODE-COMPLETE** — 010–016 + 018 all ✅. |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 017` → `task-execute` on `tasks/017-track-s-deploy-uat.poml`. |
+| **Blocked on** | Owner decision **B** below — see "Settle before deploying". |
+| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 016 · 018 · 050** ✅ |
 
-**016 touches three files** — `ComposeWorkspace.tsx`, `ComposeEndpoints.cs`, `ComposeService.cs` — all of
-which tasks 010–015 have been in. `parallel-safe: false`: do NOT dispatch it to a sub-agent alongside any
-other spine task. (018 was the one exception this session, because it was genuinely file-disjoint.)
+### Settle before deploying (task 017)
+
+**`If-Match` on `PUT .../content` is UNDOCUMENTED** in the Graph v1.0 reference — only
+`delete`/`update`/`move`/`createUploadSession` document an `if-match` header. Task 011's concurrency
+guarantee ("last-writer-wins is *enforced*, not hoped for") rests on it, and task 015's decision not to
+route through the chunked path was made partly to preserve it. The probe: PUT with a deliberately stale
+`If-Match` against a real SPE container, as the user — **412, or silent overwrite?** Cheap to write;
+only the owner can run it against a live tenant. Full note:
+[`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
+
+### Resolved since the last handoff
+
+| # | Decision | Status |
+|---|---|---|
+| **A** | Task 015 does NOT route to the chunked upload path | ✅ **RATIFIED by the owner 2026-08-21**. Do not re-litigate. |
+| **B** | `If-Match` on `PUT .../content` undocumented | 🟡 **OPEN** — see above. |
+| **C** | God-class ratchet RED on `DataverseServiceClientImpl.cs` | ✅ **MOOT** — `origin/master` **retired the LOC ratchet entirely** on 2026-08-20 (`866f9c101`), replacing it with `docs/standards/COMPONENT-COMPLEXITY.md` + a non-blocking report. `GodClassGuardTests.cs` is expected to disappear on merge. |
+
+### Merge note (master moved)
+
+`origin/master` is **11 commits ahead** of this branch's base. File overlap with our diff is exactly
+three: `tests/Spaarke.ArchTests/GodClassGuardTests.cs` (master DELETES the gate — resolve in master's
+favour; our two re-baselines simply go away), `projects/INDEX.md`, and
+`.claude/agent-memory/researcher/MEMORY.md`. **None of the Compose source files collide.**
 
 ### Working tree
 
 Clean except `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` (untracked) — researcher
-subagent memory written during task 015, in an odd spot inside the BFF project. Harmless; commit or
-delete as you prefer. It is NOT part of any task's deliverable.
-
----
-
-## Owner decisions — status
-
-| # | Decision | Status |
-|---|---|---|
-| **A** | **Task 015 does NOT route to the chunked upload path**, deviating from its POML's acceptance criterion | ✅ **RATIFIED by the owner 2026-08-21** ("your changes are fine"). Do not re-litigate; do not "fix" it back. |
-| **B** | `If-Match` on `PUT .../content` is **undocumented** in the Graph v1.0 reference, yet task 011's concurrency guarantee rests on it | 🟡 **OPEN** — needs an empirical probe the owner must run |
-| **C** | The god-class ratchet is **RED** on `DataverseServiceClientImpl.cs` (2,975 vs frozen 2,864) | 🟡 **OPEN** — not this project's file; needs an owner |
-
-**On A** — the reasoning is preserved in [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md):
-Graph's simple upload has been **250 MB since Oct 2023** (so the chunked path is unnecessary), and the
-chunked path **cannot carry an end-to-end `If-Match`** (so using it would have silently weakened task
-011's guarantee). Both facts are cited to Microsoft Learn there. A future reviewer who only reads the
-POML will think this criterion was missed — point them at the note.
-
-**On B** — of the v1.0 driveItem APIs, only `delete`/`update`/`move`/`createUploadSession` document an
-`if-match` header; `put-content` does not, and never did. The probe: PUT with a deliberately stale
-`If-Match` against a real SPE container, as the user — 412, or silent overwrite? **Worth settling before
-the 017 deploy**, since task 011's "last-writer-wins is *enforced*, not hoped for" claim depends on it.
-Cheap to write; only the owner can run it against a live tenant.
-
-**On C** — red BEFORE task 014 (proven by stashing to clean HEAD), from `a76e7e714` / `e3e72af91`
-(Dataverse MI migration). The two **Compose** waivers WERE re-baselined with documented reasons pointing
-at Track D 070/073. Re-baselining another team's waiver was deliberately left to them.
+subagent memory from task 015, in an odd spot inside the BFF project. Harmless; not part of any
+deliverable.
 
 ---
 
 ## Traps that will bite a fresh session
 
-Corrected 2026-08-21 — items 5 and 6 of the previous list are now **fixed** by task 018 and have been
-replaced. Do not act on an older copy of this list.
-
 1. **Every EXISTING-item save takes the 6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`). A new
    save-path test that mocks only the 5-arg overload fails with a MISLEADING
    `404 "SPE drive-item ... was not found or could not be written"`. Mock the 6-arg overload — or both.
-2. **A 200 does not mean the document was written.** Read `payload.outcome`. `storage-failed` arrives on
-   a 200 (the container-failure path returns rather than throws).
+2. **A 200 does not mean the document was written.** Read `payload.outcome`. `storage-failed` AND
+   `partially-recorded` both arrive on a 200 (those paths return rather than throw).
 3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. A new client test
-   mocking a resolved `{ok:false}` is testing a shape the transport cannot produce; that is exactly how a
-   dead code path passed its tests for three releases.
+   mocking a resolved `{ok:false}` is testing a shape the transport cannot produce; that is exactly how
+   dead code passed its tests for three releases. **Task 016 found two MORE instances** (the load path
+   and the review-memo path) and deliberately did NOT fix them — see
+   [`notes/honest-failure-set.md`](notes/honest-failure-set.md) "Beyond the eight".
 4. **`SaveComposeDocumentResult.Outcome` is `required`** — a new construction site is a COMPILE error
    until it says what happened. Intentional; set it, do not work around it.
 5. **The client suite needs the sibling `dist/` built** — `Spaarke.Auth → Spaarke.SdapClient →
-   Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. The mapper-to-`src` shortcut was
-   tried in 018 and REJECTED (it needs ~11 undeclared packages in Compose's `package.json`). With dists
-   built: **90/90 suites, 1106 tests**. Without: 38 suites run.
-6. **Never write `jest.mock(..., { virtual: true })` in `Spaarke.Compose.Components`.** The flag
-   registers the specifier in jest's **shared resolver**, so one suite's registration changes how a LATER
-   suite resolves the same module — 8 suites failed a full run while passing in isolation. All 16 were
-   removed in 018; the rule is written into `jest.config.js`.
-7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and look
-   catastrophic; the real figure is **43.68 MB** against a 60 MB ceiling.
+   Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. With dists built: **91 suites,
+   1,121 tests**. Without: 38 suites run.
+6. **Never write `jest.mock(..., { virtual: true })` in `Spaarke.Compose.Components`** — it poisons
+   jest's SHARED resolver, so one suite changes how a LATER suite resolves the same module.
+7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB; the real
+   figure is **43.68 MB** against a 60 MB ceiling.
 8. **Seam tests live in `tests/unit/Sprk.Bff.Api.Tests/`**, not the integration project —
-   `tests/integration/seam/**` is compiled INTO it. `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests`
-   reports "No test matches" and looks like a passing run.
-9. **`compose-client-gate` is ADVISORY**, with a written flip condition in the job comment: three green
-   runs on `ubuntu-latest` (all current evidence is a Windows dev box). Flipping it = delete one
-   `continue-on-error: true` line.
+   `tests/integration/seam/**` is compiled INTO it. `dotnet test tests/integration/...` reports
+   "No test matches" and looks like a passing run.
+9. **`ComposeServiceImportedRenderSaveTests` uses `MockBehavior.Strict`.** Any NEW Dataverse call the
+   save path makes must be `Setup(...)` there, or the strict mock throws, a best-effort catch swallows
+   it, and the symptom presents as a spurious degradation warning — a fixture gap wearing a production
+   defect's clothes. (`bff-extensions.md` § F.2 exists for exactly this.)
+10. **`git stash push -- <paths>` on files with NO local changes stashes NOTHING** — and a following
+    `git stash pop` then pops somebody ELSE'S pre-existing stash. This worktree shares a stash list with
+    28 other entries from other projects. To A/B a committed change, use
+    `git checkout <commit> -- <paths>`, never stash.
 
 ---
 
-### Carried forward from tasks 014 + 015 (read before 016)
+### Carried forward from tasks 014 + 015
 
 Full write-ups: [`notes/reanchor-baseline-integrity.md`](notes/reanchor-baseline-integrity.md) ·
 [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
@@ -111,7 +105,7 @@ Full write-ups: [`notes/reanchor-baseline-integrity.md`](notes/reanchor-baseline
   we could not rebase; nothing written, nothing overwritten"; `storage-failed` = "the write itself
   failed". Pick on that axis, not on which subsystem threw.
 
-### Carried forward from task 012 (read before 014 / 015 / 016 / 018)
+### Carried forward from task 012
 
 Full write-up: [`notes/save-lifecycle-hardening.md`](notes/save-lifecycle-hardening.md).
 

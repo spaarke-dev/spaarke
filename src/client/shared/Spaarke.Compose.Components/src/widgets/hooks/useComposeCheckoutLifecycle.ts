@@ -270,30 +270,29 @@ export function useComposeCheckoutLifecycle(
         });
         if (ac.signal.aborted) return;
 
-        // FR-S09 item 4 (r8 task 016): `probeResponse.ok` is necessarily true here (a non-2xx would have
-        // thrown into the catch below, which already logs and leaves `probeSucceeded` false). The `else`
-        // branch that used to follow was unreachable; its removal changes no behaviour, and leaving it
-        // would have kept implying a code path that does not exist.
-        if (probeResponse.ok) {
-          probeSucceeded = true;
-          try {
-            const probeBody = (await probeResponse.json()) as {
-              isCheckedOut?: boolean;
-              checkedOutBy?: { id?: string; name?: string } | null;
-              checkedOutAt?: string | null;
-              isCurrentUser?: boolean;
-            };
-            probeIsCurrentUser = probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
-            probeCheckedOutAt = probeBody.checkedOutAt ?? null;
-            // eslint-disable-next-line no-console
-            console.info('[ComposeWorkspace] SPE check-out probe result', {
-              sprkDocumentId,
-              isCheckedOut: probeBody.isCheckedOut,
-              isCurrentUser: probeBody.isCurrentUser,
-            });
-          } catch {
-            probeSucceeded = false;
-          }
+        // FR-S09 item 4 (r8 task 016): reaching this line means 2xx — the only thing authenticatedFetch
+        // returns. The `if (probeResponse.ok) { ... } else { ... }` that used to wrap this block is gone
+        // in both halves: the `else` could not execute, and a condition that is necessarily true is the
+        // same defect wearing the opposite sign. A non-2xx lands in the catch below, which logs and
+        // leaves `probeSucceeded` false — the soft-fail this probe has always wanted.
+        probeSucceeded = true;
+        try {
+          const probeBody = (await probeResponse.json()) as {
+            isCheckedOut?: boolean;
+            checkedOutBy?: { id?: string; name?: string } | null;
+            checkedOutAt?: string | null;
+            isCurrentUser?: boolean;
+          };
+          probeIsCurrentUser = probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
+          probeCheckedOutAt = probeBody.checkedOutAt ?? null;
+          // eslint-disable-next-line no-console
+          console.info('[ComposeWorkspace] SPE check-out probe result', {
+            sprkDocumentId,
+            isCheckedOut: probeBody.isCheckedOut,
+            isCurrentUser: probeBody.isCurrentUser,
+          });
+        } catch {
+          probeSucceeded = false;
         }
       } catch (err) {
         if (ac.signal.aborted) return;

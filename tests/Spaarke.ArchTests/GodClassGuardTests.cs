@@ -56,7 +56,19 @@ public class GodClassGuardTests
         // file's save path. Decomposing mid-track would churn the exact methods tasks 015/016 still have
         // to edit. Track D task 070 (`070-decompose-compose-service.poml`) OWNS the split and DELETES this
         // waiver — this number is a way-station, not an acceptance of the size.
-        ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs"] = 3_785,
+        //
+        // RE-BASELINED AGAIN 2026-08-21 by task 016 (FR-S09), 3,785 -> 3,979. Reason: the honest-failure
+        // set's server half lands in this same save path — the promote-after-write guard, the derived
+        // record signal, the outcome decision that now reads it, and the replace-path metadata refresh.
+        // +194 lines, of which roughly half are the comments recording WHY each branch exists, which is
+        // the artifact this project keeps needing and keeps not having.
+        //
+        // NOTE for whoever merges: `origin/master` RETIRED this whole gate on 2026-08-20 (866f9c101 —
+        // "retire God-class LOC ratchet -> complexity guidance"), replacing it with
+        // docs/standards/COMPONENT-COMPLEXITY.md + a non-blocking observation report. This file is
+        // expected to disappear on merge; the re-baseline is recorded anyway rather than left red,
+        // because "the gate is going away" is not a reason to stop keeping it honest while it exists.
+        ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs"] = 3_979,
         ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs"] = 3_085,
         ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs"] = 2_999,
         ["src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs"] = 2_864,          // RED-4
