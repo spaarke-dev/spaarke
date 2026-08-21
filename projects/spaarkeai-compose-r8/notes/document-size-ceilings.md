@@ -46,7 +46,7 @@ unnecessary for any document Compose will ever carry. The guarantee is preserved
 removed. That is a Path-C resolution (comply with the invariant by a different route), not an accepted
 deviation from it — but it **does** contradict the POML's acceptance criterion "a ≥4 MB first save
 succeeds through the EXISTING chunked-upload path", which is why it is flagged here and in the commit
-message rather than quietly satisfied. **The owner should ratify this at review.**
+message rather than quietly satisfied. **RATIFIED by the owner 2026-08-21** ("your changes are fine"). Binding: do not restore chunked routing without a new decision.
 
 ## What landed (server)
 

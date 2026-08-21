@@ -1,10 +1,10 @@
 ﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-21 (012 · 014 · 015 · 018 complete — **016 is the last Track S task before deploy**)
+> **Last Updated**: 2026-08-21 (by `context-handoff` — end of session; ready for `/compact`)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: branch `work/spaarkeai-compose-r8`, 12 ahead of `origin/master`, 0 behind, working tree CLEAN.
-> Draft **PR #806** is open for the branch. Nothing is uncommitted; nothing is at risk across compaction.
+> **Git**: branch `work/spaarkeai-compose-r8` @ `f3ea3e48a`, **19 ahead of `origin/master`, 0 behind,
+> working tree CLEAN.** Draft **PR #806** open. Nothing uncommitted; nothing at risk across compaction.
 
 ---
 
@@ -12,95 +12,84 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **016** — the honest-failure set (eight silent-drop modes). The LAST Track S task before **017** (deploy). |
-| **Status** | not started. Clean starting point. |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 016` |
+| **Task** | **016** — the honest-failure set (eight silent-drop modes). **The last Track S task before 017 (deploy).** |
+| **Status** | **not started** — no partial edits, no in-flight agents. A clean starting point. |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 016` → invokes `task-execute` on `tasks/016-honest-failure-set.poml` (FULL · opus @ xhigh · steps `directional`). |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 018 · 050** ✅ — Track S is 016, then 017. |
+| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 018 · 050** ✅ |
+| **Then** | **017** — Track S deploy (BFF + `sprk_spaarkeai` TOGETHER, NFR-05) + owner UAT. |
 
-### Two owner decisions still open (do not let these ship silently)
-
-1. **Task 015 deviates from its POML** — it does NOT route to the chunked upload path. Graph's simple
-   upload has been **250 MB since Oct 2023** (the 4 MB guard enforced a limit that no longer exists), and
-   the chunked path **cannot carry an end-to-end `If-Match`**, so routing there would have silently
-   weakened task 011's concurrency guarantee. Reasoning + citations:
-   [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
-2. **`If-Match` on `PUT .../content` is UNDOCUMENTED** in the Graph v1.0 reference (only
-   delete/update/move/createUploadSession document it). Task 011's guarantee rests on it. Needs an
-   **empirical probe against a real SPE container** — stale `If-Match` → expect 412 — before the 017
-   deploy. Only the owner can run it; the probe itself is cheap to write.
-
-Also outstanding, not this project's file: **the god-class ratchet is RED on
-`DataverseServiceClientImpl.cs`** (2,975 vs frozen 2,864, from `a76e7e714`/`e3e72af91`). Red before task
-014 and still red. The two Compose waivers WERE re-baselined with reasons pointing at Track D 070/073.
+**016 touches three files** — `ComposeWorkspace.tsx`, `ComposeEndpoints.cs`, `ComposeService.cs` — all of
+which tasks 010–015 have been in. `parallel-safe: false`: do NOT dispatch it to a sub-agent alongside any
+other spine task. (018 was the one exception this session, because it was genuinely file-disjoint.)
 
 ### Working tree
 
 Clean except `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` (untracked) — researcher
-subagent memory written during task 015, in an odd location inside the BFF project. Harmless; commit or
-delete as you prefer.
+subagent memory written during task 015, in an odd spot inside the BFF project. Harmless; commit or
+delete as you prefer. It is NOT part of any task's deliverable.
 
-### The client test suite IS in CI now (task 018) — what changed for you
+---
 
-- **All 90 suites run** (was 51 of 90); 1,103 tests (was 802). Verified in the main session at CI
-  concurrency AND serially before commit.
-- **The suite needs the sibling `dist/` built** — `Spaarke.Auth → Spaarke.SdapClient →
-  Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. The mapper-to-`src` shortcut was
-  tried and REJECTED (it needs ~11 undeclared packages in Compose's `package.json`). On a fresh clone
-  without the build, 38 suites run.
-- **Never write `jest.mock(..., { virtual: true })` in this package.** The flag registers the specifier
-  in jest's shared resolver, so one suite's registration changes how a LATER suite resolves the same
-  module. All 16 were removed; the rule is in `jest.config.js`.
-- **`compose-client-gate` is ADVISORY**, with a written flip condition in the job comment: three green
-  runs on `ubuntu-latest` (all evidence so far is a Windows dev box). Flipping it = delete one
-  `continue-on-error: true` line.
-- The 2 `renderOnSave` failures were a **test bug**, root-caused to `cdb1dbcb4` (UAT-03 name-gate, which
-  shipped touching no test). Fixed by driving the modal; assertions went 127 → 134.
+## Owner decisions — status
 
-### Startable now — all `parallel-safe: false`; run ONE AT A TIME
-
-| # | Task | Why |
+| # | Decision | Status |
 |---|---|---|
-| **015 (client half)** | the pre-flight; design already decided | `ComposeWorkspace.tsx` |
-| **016** | honest-failure set — the eight silent-drop modes | same file + `ComposeEndpoints.cs` + `ComposeService.cs` |
-| **018** | verify/finish whatever the background agent left | CI YAML + client tests |
+| **A** | **Task 015 does NOT route to the chunked upload path**, deviating from its POML's acceptance criterion | ✅ **RATIFIED by the owner 2026-08-21** ("your changes are fine"). Do not re-litigate; do not "fix" it back. |
+| **B** | `If-Match` on `PUT .../content` is **undocumented** in the Graph v1.0 reference, yet task 011's concurrency guarantee rests on it | 🟡 **OPEN** — needs an empirical probe the owner must run |
+| **C** | The god-class ratchet is **RED** on `DataverseServiceClientImpl.cs` (2,975 vs frozen 2,864) | 🟡 **OPEN** — not this project's file; needs an owner |
 
-**Do NOT run 015-client and 016 in parallel** — both own `ComposeWorkspace.tsx`. 018 IS file-disjoint
-from both (that is why it was safe to run it alongside 014, which was server-only).
+**On A** — the reasoning is preserved in [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md):
+Graph's simple upload has been **250 MB since Oct 2023** (so the chunked path is unnecessary), and the
+chunked path **cannot carry an end-to-end `If-Match`** (so using it would have silently weakened task
+011's guarantee). Both facts are cited to Microsoft Learn there. A future reviewer who only reads the
+POML will think this criterion was missed — point them at the note.
 
-### Owner decisions needed at review (do not let these pass silently)
+**On B** — of the v1.0 driveItem APIs, only `delete`/`update`/`move`/`createUploadSession` document an
+`if-match` header; `put-content` does not, and never did. The probe: PUT with a deliberately stale
+`If-Match` against a real SPE container, as the user — 412, or silent overwrite? **Worth settling before
+the 017 deploy**, since task 011's "last-writer-wins is *enforced*, not hoped for" claim depends on it.
+Cheap to write; only the owner can run it against a live tenant.
 
-1. **Task 015 deviates from its POML.** It does NOT route to the chunked upload path. Reason: Graph's
-   simple upload has been **250 MB since Oct 2023** (the 4 MB guard was enforcing a limit that no longer
-   exists), and the chunked path **cannot carry an end-to-end `If-Match`** — so routing there would have
-   silently weakened task 011's concurrency guarantee for exactly the large documents it was meant to
-   help. Full reasoning + citations: [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
-2. **`If-Match` on `PUT .../content` is UNDOCUMENTED in the Graph v1.0 reference.** Task 011's
-   concurrency guarantee rests on it. Worth an empirical probe (stale `If-Match` → expect 412) against a
-   real SPE container **before the 017 deploy**. One test settles it.
-3. **The god-class ratchet is RED on `DataverseServiceClientImpl.cs`** (2,975 vs frozen 2,864) — NOT this
-   project's file (`a76e7e714` / `e3e72af91`). It was red before task 014 and still is. The two Compose
-   waivers WERE re-baselined with documented reasons pointing at Track D 070/073. This one needs an owner.
+**On C** — red BEFORE task 014 (proven by stashing to clean HEAD), from `a76e7e714` / `e3e72af91`
+(Dataverse MI migration). The two **Compose** waivers WERE re-baselined with documented reasons pointing
+at Track D 070/073. Re-baselining another team's waiver was deliberately left to them.
 
-### Traps that will bite a fresh session (all learned the hard way this session)
+---
 
-1. **Every EXISTING-item save now takes the 6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`).
-   A new save-path test that mocks only the 5-arg overload fails with a MISLEADING
+## Traps that will bite a fresh session
+
+Corrected 2026-08-21 — items 5 and 6 of the previous list are now **fixed** by task 018 and have been
+replaced. Do not act on an older copy of this list.
+
+1. **Every EXISTING-item save takes the 6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`). A new
+   save-path test that mocks only the 5-arg overload fails with a MISLEADING
    `404 "SPE drive-item ... was not found or could not be written"`. Mock the 6-arg overload — or both.
-2. **A 200 no longer means the document was written.** Read `payload.outcome`. `storage-failed` arrives
-   on a 200 (the container-failure path returns rather than throws).
-3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. Any new client test
-   that mocks a resolved `{ok:false}` is testing a shape the transport cannot produce (this is exactly
-   what let a dead code path pass its tests for three releases).
+2. **A 200 does not mean the document was written.** Read `payload.outcome`. `storage-failed` arrives on
+   a 200 (the container-failure path returns rather than throws).
+3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. A new client test
+   mocking a resolved `{ok:false}` is testing a shape the transport cannot produce; that is exactly how a
+   dead code path passed its tests for three releases.
 4. **`SaveComposeDocumentResult.Outcome` is `required`** — a new construction site is a COMPILE error
-   until it says what happened. That is intentional; set it, do not work around it.
-5. **`Spaarke.Compose.Components` is NOT in CI** and ~39 of its 88 jest suites cannot run without a prior
-   SharedLibs `dist/` build. Locally: `npx jest` from that package dir; `--runInBand` for determinism
-   (parallel workers produce 2–14 spurious failures). Task 018 fixes this.
-6. **Two `renderOnSave.test.tsx` create-on-save tests FAIL on clean HEAD** — pre-existing, NOT caused by
-   this session's work, reproduced by stashing. Do not chase them; task 018 root-causes them.
-7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and will
-   look like a catastrophic regression; the real figure is **43.68 MB** against a 60 MB ceiling.
+   until it says what happened. Intentional; set it, do not work around it.
+5. **The client suite needs the sibling `dist/` built** — `Spaarke.Auth → Spaarke.SdapClient →
+   Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. The mapper-to-`src` shortcut was
+   tried in 018 and REJECTED (it needs ~11 undeclared packages in Compose's `package.json`). With dists
+   built: **90/90 suites, 1106 tests**. Without: 38 suites run.
+6. **Never write `jest.mock(..., { virtual: true })` in `Spaarke.Compose.Components`.** The flag
+   registers the specifier in jest's **shared resolver**, so one suite's registration changes how a LATER
+   suite resolves the same module — 8 suites failed a full run while passing in isolation. All 16 were
+   removed in 018; the rule is written into `jest.config.js`.
+7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and look
+   catastrophic; the real figure is **43.68 MB** against a 60 MB ceiling.
+8. **Seam tests live in `tests/unit/Sprk.Bff.Api.Tests/`**, not the integration project —
+   `tests/integration/seam/**` is compiled INTO it. `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests`
+   reports "No test matches" and looks like a passing run.
+9. **`compose-client-gate` is ADVISORY**, with a written flip condition in the job comment: three green
+   runs on `ubuntu-latest` (all current evidence is a Windows dev box). Flipping it = delete one
+   `continue-on-error: true` line.
+
+---
 
 ### Carried forward from tasks 014 + 015 (read before 016)
 
@@ -213,7 +202,7 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 | Phase | Track | Status |
 |---|---|---|
 | 0 (001–002) | Coordination + PR #690 dependency | ✅ |
-| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014–016, **018**, then 017 🔲 |
+| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010–015 ✅ · 018 ✅ · **016** 🔲, then **017** (deploy) 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
@@ -238,9 +227,54 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 8. ~~**PR #690 lands first**, then the gate is built.~~ → **SATISFIED 2026-08-20**: #690 was closed as
    superseded (the fix was already on master via `f7ec5b928`). Phase 2 is ungated.
 9. **Initialize-only** — no auto-execution.
-10. **(2026-08-20) Task 018 added** — the Compose client suite gets a self-contained CI gate, sequenced
+10. **(2026-08-21) Task 015's POML deviation RATIFIED** — Compose does NOT route to the chunked upload
+    path. Graph's simple upload has been 250 MB since Oct 2023 (so it is unnecessary) and the chunked
+    path cannot carry an end-to-end `If-Match` (so it would have weakened task 011's guarantee). Owner:
+    "your changes are fine". Binding — do not restore chunked routing without a new decision.
+11. **(2026-08-20) Task 018 added** — the Compose client suite gets a self-contained CI gate, sequenced
     BEFORE the 017 deploy, so Track S ships with enforcement on the client save contract rather than a
     promise of one.
+
+---
+
+## Session log — 2026-08-20 / 08-21
+
+**Five tasks completed: 012, 014, 015, 018** (plus the earlier 001/002/010/011/013/050). Track S now has
+exactly **016** left before the **017** deploy. Seven commits; working tree clean.
+
+**The through-line held, and widened.** Every Track S defect has been the same shape — *the code said one
+thing and the system did another, and nothing could tell the difference.* This session found three more
+instances, in three different layers:
+
+- **012 (client state)**: the dirty flag was cleared before the POST, so a failed save left the editor
+  believing it was clean — Save disabled, `beforeunload` disarmed, work one tab-close from gone.
+- **014 (engine)**: a re-anchor whose download failed persisted the LOAD-TIME baseline over a version it
+  had *already observed* to be newer, and reported 200. The only data-destroying path in Track S. Its own
+  comment claimed it "failed closed" — true of the OPS, false of the BYTES.
+- **015 (platform assumption)**: a 4 MB guard enforcing a Graph limit that stopped existing in Oct 2023,
+  and a transport-layer body cap that rejected large saves before any handler could explain why.
+
+And 018 found the meta-instance: **a deliberate product change shipped 2026-08-18, two tests went red the
+same day, and nobody saw it for two days — because nothing ran them.** The project's thesis reproducing
+itself inside the task built to stop it.
+
+**Verification standard used (keep it).** Every claim re-run in the main session rather than taken from an
+agent's report — 018's numbers were re-measured independently before its work was committed. Baselines
+captured by stashing to clean HEAD so "pre-existing" is proven, not asserted (that is how the god-class
+ratchet was shown red BEFORE task 014). New tests run against the unfixed code first: 012's suites fail
+4/5 on HEAD, 014's reproduced a real 1,286-byte `.docx` being written over a newer version, 015's
+pre-flight test fails when the pre-flight is reverted.
+
+**Parallelism, honestly scoped.** Only 018 was safe to run alongside another task — verified by comparing
+actual file sets, not by trusting the `parallel-safe` flags. 015 and 016 collide on two files each; 014
+and 016 collide on `ComposeService.cs`. A researcher subagent (read-only) settled the Graph platform facts
+that redirected 015.
+
+**One correction to my own work**: I first made `commitSaved()` unconditional in 012, which broke a test
+asserting that a clean passthrough save touches no editor state. That test was defending a real invariant;
+I tightened the gate instead of rewriting the test.
+
+**Not deployed.** Track S deploys as a batch at 017, after 016.
 
 ---
 
@@ -278,6 +312,42 @@ into a handoff reads exactly like a finding to the next session; these were corr
 - `ComposeShadowPatchEngine` was already demoted by R6 to the transitional path; R8 finishes that retirement.
 
 ---
+
+## Files modified — task 018 (complete)
+
+| File | Change |
+|---|---|
+| `.github/workflows/sdap-ci.yml` | NEW `compose-client-gate` job (append-only, single hunk; the four owned jobs untouched). ADVISORY with a written flip condition |
+| `scripts/ci/summarize-jest-results.js` | NEW — step-summary table + `::error::` annotations naming each failed suite |
+| `Spaarke.Compose.Components/jest.config.js` | comment-only: the sibling-resolution contract + the no-`virtual` rule (mapper table byte-identical) |
+| 8 × `*.test.tsx` | all 16 `{ virtual: true }` arguments removed; `renderOnSave` + `bornInEditorSave` fixed to drive the name modal (assertions 127 → 134) |
+| `projects/INDEX.md` | narrative refresh (`ci-workflows: Y` was already declared) |
+
+Runnable suites **51 → 90 of 90**; tests **802 → 1,103** (1,106 after 015's client tests).
+
+## Files modified — task 015 (complete)
+
+| File | Change |
+|---|---|
+| `Services/Compose/IComposeService.cs` | NEW `ComposeSaveLimits` — the ONE limit (25 MB) + the derived body cap + the single display-formatting site |
+| `Infrastructure/Graph/UploadSessionManager.cs` | the stale 4 MB guard DELETED (Graph simple upload is 250 MB since Oct 2023); XML doc corrected |
+| `Api/ComposeEndpoints.cs` | oversize gate on the SHARED save path → `refused-invalid` + cause `too-large` + a ProblemDetails naming the limit; `RequestSizeLimitAttribute` on both save routes; `maxDocumentBytes` advertised on the Load + Upload responses |
+| `Telemetry/ComposeSaveTelemetry.cs` | NEW bounded cause `too-large` |
+| `widgets/ComposeWorkspace.types.ts` | `maxDocumentBytes` state + action field, set atomically at mount |
+| `widgets/ComposeWorkspace.tsx` | the pre-flight — against the SERVER's advertised number, never a compiled-in copy; absent limit ⇒ no numeric check |
+| `ConcurrencySaveSeamTests.cs` | oversize refused with the stated limit + nothing written; a 6 MB document saves and reaches storage |
+| `ComposeWorkspace.saveLifecycle.test.tsx` | 3 client tests incl. "no advertised limit → the client does not invent one" |
+
+## Files modified — task 014 (complete)
+
+| File | Change |
+|---|---|
+| `Services/Compose/ComposeService.cs` | both destructive `return (originalBaseline, …)` fallbacks DELETED → typed refusal throw |
+| `Services/Compose/IComposeService.cs` | NEW `ComposeStaleBaselineUnavailableException`; `RefusedStale` doc corrected to list BOTH producers |
+| `Api/ComposeEndpoints.cs` | catch → telemetry(`refused-stale`, `baseline-download`) → 409 ProblemDetails |
+| `Telemetry/ComposeSaveTelemetry.cs` | NEW bounded cause `baseline-download` |
+| `ConcurrencySaveSeamTests.cs` | NEW `[Theory]` — both download-failure modes; asserts no write, 409, honest detail |
+| `tests/Spaarke.ArchTests/GodClassGuardTests.cs` | two **Compose** waivers re-baselined WITH reasons pointing at Track D 070/073 |
 
 ## Files modified — task 012 (complete)
 
