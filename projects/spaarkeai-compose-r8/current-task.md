@@ -1,9 +1,10 @@
 ﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-21 (task 016 complete — **Track S is code-complete; 017 is the deploy**)
+> **Last Updated**: 2026-08-21 (by `context-handoff` — **Track S is DEPLOYED; 017 waits on owner UAT**)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: branch `work/spaarkeai-compose-r8`. Draft **PR #806** open.
+> **Git**: branch `work/spaarkeai-compose-r8` @ `85a63d083` — **28 ahead of `origin/master`, 0 behind,
+> 0 unpushed, working tree CLEAN.** Draft **PR #806** open.
 
 ---
 
@@ -25,9 +26,10 @@ Both artifacts from **`e5815e862`**, same window (NFR-05 anti-clobber pairing):
 | BFF | `spaarke-bff-dev` (`DOTNETCORE\|10.0`) | 44.98 MB package · **SHA-256 verified on 4 critical files** · `/healthz` 200 · Compose + checkout routes **401 = registered** |
 | `sprk_spaarkeai` | `spaarkedev1`, resource `5206a442-3451-f111-bec7-7ced8d1dc988` | 5,694 KB published · **7 Track S strings + the per-document draft key verified present in the built HTML** |
 
-**Branch tip is now `7e6b17a71`, one commit ahead of what was deployed.** The delta is
-`2366b4ccd` — CI's Prettier bot re-wrapping a 2-line type union in `ComposeEditor.tsx`. **Formatting
-only; the deployed artifact is functionally identical.** No redeploy needed for UAT.
+**Branch tip is now `85a63d083`, ahead of what was deployed.** The delta is
+`2366b4ccd` (CI's Prettier bot re-wrapping a 2-line type union in `ComposeEditor.tsx`) plus two
+docs/handoff commits. **No source behaviour changed since the deploy — the deployed artifact is
+functionally identical.** No redeploy needed for UAT.
 
 **Gates run before deploying** (task 017 step 3 asked for evidence they ran in 010-016; there was none,
 so they were run against the cumulative diff rather than asserted): `adr-check` **0 violations /
@@ -43,18 +45,19 @@ so they were run against the cumulative diff rather than asserted): `adr-check` 
 | **B** | `If-Match` on `PUT .../content` undocumented | 🟡 **OPEN** — see above. |
 | **C** | God-class ratchet RED on `DataverseServiceClientImpl.cs` | ✅ **MOOT** — `origin/master` **retired the LOC ratchet entirely** on 2026-08-20 (`866f9c101`), replacing it with `docs/standards/COMPONENT-COMPLEXITY.md` + a non-blocking report. `GodClassGuardTests.cs` is expected to disappear on merge. |
 
-### Merge note (master moved)
+### Master: MERGED (2026-08-21) — do not re-plan this
 
-`origin/master` is **11 commits ahead** of this branch's base. File overlap with our diff is exactly
-three: `tests/Spaarke.ArchTests/GodClassGuardTests.cs` (master DELETES the gate — resolve in master's
-favour; our two re-baselines simply go away), `projects/INDEX.md`, and
-`.claude/agent-memory/researcher/MEMORY.md`. **None of the Compose source files collide.**
+`origin/master` was merged in at `e5815e862`. **0 behind.** The one conflict was
+`tests/Spaarke.ArchTests/GodClassGuardTests.cs` — modify/delete, resolved in **master's favour**
+(master retired the whole LOC ratchet in `866f9c101`). Our two re-baselines went away with the file.
+NetArchTest is now **36/36** and there is no god-class gate to satisfy.
+
+The stray researcher agent-memory under `src/server/api/Sprk.Bff.Api/.claude/` is now **tracked** (it
+came in with the merge). Odd location, harmless, not a deliverable — leave it.
 
 ### Working tree
 
-Clean except `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` (untracked) — researcher
-subagent memory from task 015, in an odd spot inside the BFF project. Harmless; not part of any
-deliverable.
+**Clean. Nothing uncommitted, nothing unpushed.**
 
 ---
 
@@ -65,16 +68,19 @@ deliverable.
    `404 "SPE drive-item ... was not found or could not be written"`. Mock the 6-arg overload — or both.
 2. **A 200 does not mean the document was written.** Read `payload.outcome`. `storage-failed` AND
    `partially-recorded` both arrive on a 200 (those paths return rather than throw).
-3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. A new client test
-   mocking a resolved `{ok:false}` is testing a shape the transport cannot produce; that is exactly how
-   dead code passed its tests for three releases. **Task 016 found two MORE instances** (the load path
-   and the review-memo path) and deliberately did NOT fix them — see
-   [`notes/honest-failure-set.md`](notes/honest-failure-set.md) "Beyond the eight".
+3. **`authenticatedFetch` THROWS on every non-2xx** — it never returns `{ok:false}`. A client test that
+   mocks a resolved `{ok:false}` is testing a shape the transport cannot produce; that is how dead code
+   passed its tests for three releases. **Compose is now clean of this** (task 016's sweep — 9 sites,
+   including the load path and the review-memo path). **46 files elsewhere still carry it**, 11 of them
+   the dangerous class (`if (!res.ok) return null/undefined/continue` — a designed soft-fail inverted
+   into a hard throw). Enumerated in [`notes/honest-failure-set.md`](notes/honest-failure-set.md)
+   "Beyond Compose". The detector that found them is reproduced there; promote it to CI when that task
+   is filed.
 4. **`SaveComposeDocumentResult.Outcome` is `required`** — a new construction site is a COMPILE error
    until it says what happened. Intentional; set it, do not work around it.
 5. **The client suite needs the sibling `dist/` built** — `Spaarke.Auth → Spaarke.SdapClient →
    Spaarke.UI.Components → Spaarke.DocumentOperations`, in that order. With dists built: **91 suites,
-   1,121 tests**. Without: 38 suites run.
+   1,124 tests**. Without: 38 suites run.
 6. **Never write `jest.mock(..., { virtual: true })` in `Spaarke.Compose.Components`** — it poisons
    jest's SHARED resolver, so one suite changes how a LATER suite resolves the same module.
 7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB; the real
@@ -86,10 +92,28 @@ deliverable.
    save path makes must be `Setup(...)` there, or the strict mock throws, a best-effort catch swallows
    it, and the symptom presents as a spurious degradation warning — a fixture gap wearing a production
    defect's clothes. (`bff-extensions.md` § F.2 exists for exactly this.)
-10. **`git stash push -- <paths>` on files with NO local changes stashes NOTHING** — and a following
-    `git stash pop` then pops somebody ELSE'S pre-existing stash. This worktree shares a stash list with
-    28 other entries from other projects. To A/B a committed change, use
-    `git checkout <commit> -- <paths>`, never stash.
+10. **Never A/B a committed change with `git stash` OR `git checkout <commit> -- <path>`.** Both bit me
+    on 2026-08-21, and the second one is the trap the first one's "fix" walked into:
+    - `git stash push -- <paths>` on files with **no local changes** stashes NOTHING, and the following
+      `git stash pop` then pops **another project's** stash. (This worktree shares one `refs/stash` with
+      **63 worktrees** — `refs/stash` lives in the common git dir. It held 28 entries; now 2.)
+    - `git checkout <commit> -- <path>` writes the **INDEX** as well as the working tree, so the
+      follow-up `git checkout -- <path>` "restore" silently brings back the OLD version. It wiped a
+      completed sweep; only an idempotency assert in the re-run script caught it.
+
+    **The safe form is `git show <commit>:<path> > <path>`** — working tree only, index untouched.
+
+11. **`src/solutions/SpaarkeAi` is VITE, and its `vite.config.ts` aliases shared-library SOURCE**
+    (line ~55: `Spaarke.Compose.Components/src`). Two consequences: (a) a Compose edit needs **no**
+    shared-lib `tsc` build to reach the bundle, but (b) it DOES need a SpaarkeAi rebuild + redeploy.
+    **Clear the cache first — `rm -rf dist/ node_modules/.vite/ .vite/` — every time.** Skipping it is
+    the documented stale-bundle incident, and I skipped it on the first attempt. Verify afterwards by
+    grepping the built `dist/spaarkeai.html` for a string you just added.
+12. **The checkout route group carries a `:guid` constraint** (`/api/documents/{documentId:guid}`).
+    Probing it with a non-GUID id returns **404** and looks exactly like an unregistered route / broken
+    deploy. Probe with a real GUID; expect **401**.
+13. **Deploy scripts must be invoked with `pwsh`**, not `powershell` — `Deploy-BffApi.ps1`'s hash-verify
+    uses `Get-FileHash`, which Windows PowerShell 5.x does not auto-load in some harnesses.
 
 ---
 
@@ -239,6 +263,42 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 
 ---
 
+## Session log — 2026-08-21 (task 016 + the sweep + deploy)
+
+**Task 016 completed, then its boundary was deliberately removed, then Track S shipped.**
+
+**016 as specified** closed the eight named failure modes. Two were worse than the POML described:
+item 5 was not "indistinguishable from success" but the *opposite* lie — the SPE write lands, Dataverse
+promotion throws, and the user is told `500 Save failed: TimeoutException` while their bytes sit safely
+in storage; AND the record step's completion signal was a hardcoded `CompletedSignal` that the outcome
+decision never read anyway. Item 4's force-close 400 ("lock already released") is the SUCCESS case, and
+being dead code it reported failure every time it actually worked, inside a dialog with no dismiss.
+
+**Then the owner retired the "closed set of eight"**: *"whether there are 8 or 10 or 100 issues that
+need to be fixed we need to fix them all."* So a detector was written for the exact defect — any
+`.ok`/`.status` read on an `authenticatedFetch` result — and run across `src/client`. **176 reads in 48
+files.** All 9 in Compose fixed; 46 files elsewhere enumerated and deliberately left (11 of them the
+dangerous soft-fail-inverted class), because folding an unbounded cross-feature change into a P0 deploy
+that ships alone is how a focused fix stops being focused.
+
+**A test went red during the sweep, and that was the payoff.** `ComposeWorkspace.upload.test.tsx` mocked
+`{ ok: false, status: 404 }` — the shape the transport cannot produce — and passed *only because the
+dead code existed*.
+
+**Deployed** (task 017 steps 1–5): both artifacts from `e5815e862` in one window. Step 3 asked for
+evidence that `code-review` + `adr-check` had run in 010–016; **there was none**, so both were run
+against the cumulative diff rather than asserted. 0 violations, 0 warnings, NetArchTest 36/36.
+
+**Two self-inflicted git mistakes**, both now traps #10: a `stash pop` that took another project's
+stash, and a `git checkout <commit> -- <path>` A/B that silently reverted a completed sweep. Neither
+lost work; both were caught and repaired. The lesson is in the trap, not in the apology.
+
+**Also**: stash list 28 → 2 (all 28 archived as patches at
+`C:/code_files/spaarke/.git/stash-archive-2026-08-21/` with an INDEX before dropping); `origin/master`
+merged (0 behind); the god-class ratchet gone with it.
+
+---
+
 ## Session log — 2026-08-20 / 08-21
 
 **Five tasks completed: 012, 014, 015, 018** (plus the earlier 001/002/010/011/013/050). Track S now has
@@ -314,6 +374,33 @@ into a handoff reads exactly like a finding to the next session; these were corr
 - `ComposeShadowPatchEngine` was already demoted by R6 to the transitional path; R8 finishes that retirement.
 
 ---
+
+## Files modified — task 016 + the sweep (complete)
+
+| File | Change |
+|---|---|
+| `Services/Compose/ComposeService.cs` | promote guarded → `partially-recorded` (identity-key faults RETHROWN so the endpoint's honest handler stays live); `recordSignal` derived not hardcoded; the outcome decision now reads the record step; replace-path `sprk_filesize`/`sprk_filepath` refresh |
+| `Services/Compose/IComposeService.cs` | `PromoteComposeDocumentResult.MetadataRefreshFailed` |
+| `Api/ComposeEndpoints.cs` | 429 catch → `Retry-After` + honest copy; `partially-recorded` telemetry cause disambiguated (partial APPLY vs failed record PROMOTION) |
+| `Api/DocumentOperationsEndpoints.cs` | checkout 409 body advertises `status`/`title` so it parses as ProblemDetails — without it no caller could name the lock holder |
+| `Infrastructure/Graph/SpeConcurrencyExceptions.cs` | NEW `GraphThrottledException` carrying Graph's `Retry-After` |
+| `Infrastructure/Graph/UploadSessionManager.cs` | 4 throttle sites → the typed exception; `ReadRetryAfter` helper |
+| `Telemetry/ComposeSaveTelemetry.cs` | causes `throttled`, `record-promotion` |
+| `widgets/ComposeWorkspace.tsx` | items 1/2/3/6 + **the 8-site sweep** (load path, memo ×2, uploaded-file, drafted-doc, compose-outputs, browse, annotation sync); `readMemoProblemCode` DELETED → `memoNegativeFromError` |
+| `widgets/ComposeWorkspace.types.ts` | `saveFailed` no longer forces `status: 'loaded'` |
+| `widgets/hooks/useComposeCheckoutLifecycle.ts` | item 4 — all dead blocks gone, status routing in the catch |
+| `widgets/hooks/useComposeHeartbeatGate.ts` | the unreachable swallow-and-log branch deleted |
+| `widgets/composeDraftStore.ts` | per-document keys + bounded retention + legacy read-through |
+| `widgets/ComposeBannerStack.tsx` | `document-metadata-stale` copy |
+| `widgets/ComposeFormatToolbar.tsx`, `ComposeEditor.tsx` | `saveDisabledReason` prop + forward |
+| `ConcurrencySaveSeamTests.cs` | §5 — 4 tests (3 fail pre-fix) |
+| `ComposeWorkspace.saveLifecycle.test.tsx` | 4 FR-S09 tests (all 4 fail pre-fix) |
+| `useComposeCheckoutLifecycle.honestFailure.test.tsx` | NEW — 6 tests (5 fail pre-fix) |
+| `ComposeWorkspace.upload.test.tsx` | the impossible-shape mock fixed + 3 load-routing tests |
+| `composeDraftStore.test.ts` | the "single-slot" test INVERTED — it asserted the bug |
+| `ComposeServiceImportedRenderSaveTests.cs` | strict-mock fixture gap (§ F.2 protocol) |
+| `notes/honest-failure-set.md` | NEW — the full enumeration + what was left and why |
+| `notes/track-s-uat.md` | NEW — the ten-row UAT checklist |
 
 ## Files modified — task 018 (complete)
 
