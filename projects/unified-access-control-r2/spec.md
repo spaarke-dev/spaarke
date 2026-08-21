@@ -65,7 +65,7 @@ All findings independently confirmed; evidence at [`notes/investigation/10-findi
 15. **FR-15** (Medium, A-12): the close-project cascade must deactivate contact **and** organization grant rows — Acceptance: closure returns 200 and all active grants for the project are deactivated.
 16. **FR-16** (Medium, A-13): the SPE membership revoke matcher must match on the same key membership is written with — Acceptance: a revoke removes the corresponding container permission, verified by test.
 17. **FR-17** (Low, A-15/A-16/A-22): remove the orphaned `AccessibleRecordSetAuthorizationFilter`; bound the `in`-clause per FR-25; fix `LookupUserMembershipNodeExecutor`'s `["*"]` argument — Acceptance: no dead filter; node executes without throwing.
-18. **FR-18** (Blocking): restructure the business-unit tree per design §5.2 — Acceptance: `Spaarke Operations` and `Secure Projects` exist as Level-1 siblings; no non-admin user remains in root; root-owned core records are re-homed to Operations; a user in the Operations subtree cannot read a record owned in `Secure Projects`.
+18. **FR-18** — ⚠️ **RECLASSIFIED 2026-08-21 (owner decision): NOT a project task.** The business-unit restructure (design §5.2) is Dataverse **environment configuration**, not code. It is addressed **separately, as part of UAT**, and is neither a spike nor a Phase 0 deliverable. See [§ UAT & Environment Setup](#uat--environment-setup). Nothing in Phases 0–3 or 5 depends on it; Phase 4's *live-dev verification* criteria do, and those move to UAT with it.
 
 ### Phase 1 — One evaluator
 
@@ -171,10 +171,24 @@ No new NuGet packages. Publish-size delta expected ≈0.
 8. [ ] Contact with Project access sees its invoices, events, communications and To Dos — Verify: live dev test
 9. [ ] Point-in-time attestation answerable — Verify: replay a historical date
 
+## UAT & Environment Setup
+
+**Not project tasks** (owner decision 2026-08-21). Dev is the only live environment, so the Dataverse security topology is configured and validated during **UAT**, separately from the code phases. Recorded here so it is not lost — it is a precondition for *trusting* Secure Project, not for *building* it.
+
+| Item | Detail |
+|---|---|
+| **BU restructure** | Create `Spaarke Operations` and `Secure Projects` as Level-1 siblings under root; Level-2 BUs under Operations (design §5.2) |
+| **User migration** | Move all non-admin users out of the root BU into the Operations subtree — Deep from root reaches `Secure Projects` |
+| **Record re-homing** | Re-home root-owned core records to Operations; BU depth reaches only downward |
+| **Role config** | Security roles assigned at the **Operations** level (owner decision); no per-Level-2 roles |
+| **Non-admin test user** | In the Operations subtree, Operations-level role, **no Global-read role**. Isolation is not verifiable from an admin account |
+| **Verification** | A user in the Operations subtree cannot read a `Secure Projects`-owned record; a shared user reads it in **both** MDA and SPA |
+
+Phase 4 code ships and unit/integration-tests independently of this; its **live-dev acceptance** is gated on it.
+
 ## Dependencies
 
 ### Prerequisites
-- BU restructure + user migration + record re-homing (FR-18) — **blocking for Phase 4**
 - `prvActOnBehalfOfAnotherUser` granted to the BFF application user, recorded in the deployment runbook
 - BFF application user remains Org-scoped (impersonated privileges are the intersection)
 - `sprk_accesspermissiongrant` populated for existing contacts and organizations

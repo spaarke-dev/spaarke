@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="unified-access-control-r2">
+  <metadata>
+    <title>AccessGrantModal "+ User": system-user picker writing Dataverse shares (FR-29 client half)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 063 (share endpoints, delegation-gated) merged. HARD RULE: this button must never ship against ungated endpoints.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend on an authorization surface (grants Full Access to records); tags pcf/frontend + auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI addition mirroring the modal's existing "+ Contact"/"+ Organization" picker pattern against a frozen endpoint contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches AccessGrantModal/** + TrackingFieldTrio/** only — file-disjoint from 064 (BFF) in the same wave. NOT safe alongside 066/067 (same component files) — they are in later waves.</parallel-reason>
+    <deps>063</deps>
+    <tags>pcf, frontend, fluent-ui, auth</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the "+ User" capability to AccessGrantModal: a system-user picker (native Xrm advanced lookup, mirroring the existing pickContact/pickOrganization injection) that grants an internal user a Dataverse share at a chosen level via the task-063 BFF endpoints, lists existing user shares in Current Access, and supports revoke. Also surface the secure-project service-user owner and BU alignment read-only per design §6.</prompt>
+  <role>SPAARKE platform developer. Fluent v9, PCF host integration (TrackingFieldTrio), @spaarke/auth authenticatedFetch. Follow ADRs strictly.</role>
+  <goal>The modal gains a "+ User" header action (same row as "+ Contact" / "+ Organization"): picker -> level dropdown -> POST share; user-share rows appear in Current Access with revoke; on secure records the service-account owner + BU are displayed; all writes via authenticatedFetch to the 063 endpoints; 403 from the delegation gate renders a clear "you need Write access on this record to manage access" state, not a raw error.</goal>
+
+  <context>
+    <background>spec.md FR-29; design.md §6. The delegation prerequisite (FR-07 + 063 gating) is what makes this button safe: the modal itself CANNOT verify the caller's Write privilege (app-only BFF), so the server gate is the control and the UI must handle its 403 as a first-class state. The modal already unions standing rows into Current Access and distinguishes provenance 'standing'/'organization' (AccessGrantModal.tsx:286-303, 780-800) — user-share rows join that list with provenance 'share' (full provenance rendering is task 066; here the row just needs to exist, be labeled, and be revocable).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts (inject pickUser via Xrm.Utility.lookupObjects, mirroring pickContact)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase4-access-report-contract.md (DTO shapes, once 064 lands; for this task only the 063 share DTOs bind)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/ (component tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="063" status="pending">Share grant/revoke/list endpoints, delegation-gated — HARD prerequisite.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">All BFF calls via authenticatedFetch from @spaarke/auth; no token props, no direct MSAL. Scope: every new network call.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only (no hardcoded colors); dark mode must resolve. Scope: all new UI.</constraint>
+    <constraint source="ADR-012">Component stays in @spaarke/ui-components; host-specific pickers injected as props (pickUser follows pickContact's injection contract). Scope: component API.</constraint>
+    <constraint source="project">The 403 delegation deny is a designed UI state (banner + disabled actions), not a toast/console error; scope: all three write actions (user share, revoke, and the existing grant actions when the server starts 403ing them under FR-07).</constraint>
+    <constraint source="project">No client-side privilege inference: the modal must not try to predict Write access (e.g. via Xrm privileges) to pre-hide the button — server truth only, disabled-on-403. Scope: gating logic.</constraint>
+    <constraint source="pcf-CLAUDE.md">TrackingFieldTrio version bump (4 locations) + npm run build:prod. Scope: release steps.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Manage Access modal</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="modal-shell" location=".claude/patterns/ui/modal-shell.md">SprkModal conventions the modal already follows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Extend types.ts: user-share row shape (systemuserId, name, level, provenance 'share'), pickUser prop, endpoint DTOs per 063.</step>
+    <step order="2">Inject pickUser from TrackingFieldTrio (systemuser lookup); add the "+ User" header action + level selection flow mirroring the contact flow.</step>
+    <step order="3">Load user shares (GET) alongside grants/standing on modal open; render rows in Current Access with a 'User (share)' badge and Revoke.</step>
+    <step order="4">Handle 401/403 as designed states; secure records: show service-account owner + BU (read-only) from the record/report data available.</step>
+    <step order="5">Component tests: picker flow issues POST with chosen level; revoke issues unshare; 403 renders the deny state with actions disabled; rows merge without duplicating contact rows.</step>
+    <step order="6">Version bump + npm run build:prod; jest green. Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the modal's host (TrackingFieldTrio) cannot inject a systemuser lookup (Xrm.Utility.lookupObjects entity restrictions in this host), STOP and escalate the picker mechanism per CLAUDE.md §6 — do not build a custom search UI as a workaround.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Grant and revoke an internal user">
+      <steps>
+        <step>Open https://{org}.crm.dynamics.com, open a matter record as a user WITH Write; open Manage Access (person icon).</step>
+        <step>Click "+ User", pick an internal user, choose Collaborate, confirm.</step>
+        <step>Observe Current Access; then revoke the new row.</step>
+      </steps>
+      <expected>Row appears labeled as a user share at Collaborate; after revoke it disappears; Dataverse POA reflects both transitions.</expected>
+    </test>
+    <test name="Delegation deny state">
+      <steps>
+        <step>Open the same record as a user WITHOUT Write (read-only); open Manage Access; attempt "+ User".</step>
+      </steps>
+      <expected>The modal shows the needs-Write banner and grant/revoke actions are disabled; no share is created (server 403 handled as designed state).</expected>
+    </test>
+    <test name="ADR-021 dark mode">
+      <steps>
+        <step>Switch the app to dark theme; open the modal; inspect the new "+ User" action, badges and banner.</step>
+      </steps>
+      <expected>All new surfaces use semantic tokens — legible in dark mode, no hardcoded light-theme colors.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"+ User" pick -> level -> confirm issues exactly one POST to the 063 share endpoint and the new row renders on success.</criterion>
+    <criterion testable="true">Revoke on a user-share row issues unshare and removes the row on success.</criterion>
+    <criterion testable="true">Negative: server 403 (no Write) renders the needs-Write banner with actions disabled — no raw error, no retry loop.</criterion>
+    <criterion testable="true">Negative: network/5xx failure leaves existing rows intact and surfaces a non-destructive error message.</criterion>
+    <criterion testable="true">Secure record: service-account owner + BU visible read-only.</criterion>
+    <criterion testable="true">Jest suite + shared-lib build + npm run build:prod green; TrackingFieldTrio version bumped in 4 locations.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-29; design.md §6. Provenance rendering across ALL rows is task 066 — do not partially implement it here beyond the 'share' badge.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

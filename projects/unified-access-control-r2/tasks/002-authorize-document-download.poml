@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-01: Authorize the caller against the document before download streams</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (auth + bff-api tags) — FULL per root CLAUDE.md §8, no exceptions in Phase 0.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Attach an existing authorization mechanism to one endpoint; the fix shape is fully specified by A-1 evidence and existing filter patterns.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/FileAccessEndpoints.cs is also modified by task 012 (FR-11 share links); serialized — 012 depends on this task.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, endpoints, security</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-1 (spec FR-01, High): GET /api/documents/{id}/download must authorize the caller against the specific document before streaming it. Today the route group carries only RequireAuthorization() and then streams via app-only SPE — any authenticated user downloads any document by GUID. This is R1's January 2026 attack scenario, still open.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal API endpoint filters and the Spaarke authorization seams (ADR-003/ADR-008). Follow ADRs strictly.</role>
+  <goal>The download endpoint denies (403) an authenticated caller who lacks access to the requested document, and streams unchanged for a caller who has access. The task-001 characterization test for A-1 is flipped to the fixed expectation.</goal>
+
+  <context>
+    <background>Confirmed finding A-1 (design-register §A.1): "GET /api/documents/{id}/download has no authorization filter — group RequireAuthorization() only, then app-only SPE stream" — evidence Api/FileAccessEndpoints.cs:101-109 (route registration) and :865 (app-only stream). Effect: any authenticated user downloads any document by GUID. FR-01 acceptance: an authenticated user without access to document X receives 403; the R1 attack scenario fails. Reuse the existing document-authorization mechanism (ResourceAccessRequirement / EntityAccessFilter-style endpoint filter wired in AuthorizationModule.cs:182-247) — do not invent a new authorization layer. Note: until task 004/005 land, the underlying data source is app-scoped with a Read ceiling; scope THIS task to attaching per-document authorization with the strongest currently-correct check (document-level access evaluated for the caller, fail-closed), and record any residual gap that 004/005 close.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the current unauthorized-download behavior, to be flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">The authorization check MUST be an endpoint filter attached at route registration in FileAccessEndpoints.cs, not inline logic inside the download handler body. Scope: the download route changed by this task.</constraint>
+    <constraint source="ADR-003">Fail closed: any error resolving the document, the caller, or the access answer denies with 403/404 — never falls through to the app-only stream. Scope: the new filter path.</constraint>
+    <constraint source="ADR-010">No new service abstractions — reuse the existing ResourceAccessRequirement/filter mechanism and existing DI registrations. Scope: any DI change this task makes.</constraint>
+    <constraint source="project">CLAUDE.md §10: no new endpoints/services are added, but this is a BFF-touching task — run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline in the PR; ceiling 60 MB (NFR-06). If any new surface IS added, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md. Scope: this task's PR.</constraint>
+    <constraint source="project">NFR-01: no path in the changed code may fail open. Scope: all code changed by this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>endpoint authorization filters</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">How Spaarke attaches authorization filters at route registration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read FileAccessEndpoints.cs:81-120 (route registrations) and :865 (stream) plus AuthorizationModule.cs:182-247 to identify the existing document-operation filter used by comparable routes (e.g. preview/upload).</step>
+    <step order="2">Attach the document-authorization endpoint filter to GET /api/documents/{id}/download with the correct operation key (verify the key exists in OperationAccessPolicy; "candownloadfiles"-class semantics). If the required key is missing, coordinate with task 003 rather than adding an unregistered key.</step>
+    <step order="3">Verify fail-closed ordering: the filter runs before any SPE call; a deny never opens the stream.</step>
+    <step order="4">Flip the task-001 Characterization_ test for A-1 to assert 403 for a caller without access, and add the positive case (caller with access still streams 200).</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document residual gap (app-scoped data source until 004/005) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no existing operation key correctly expresses "download this document" and adding one would change semantics for other routes, STOP and escalate per CLAUDE.md §6 — do not repurpose an unrelated key.</trigger>
+    <trigger>If the only way to authorize is caller-token plumbing that belongs to task 004 (FR-02), STOP and escalate scope rather than partially implementing 004 here.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test BFF</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authenticated user WITHOUT access to document X, GET /api/documents/X/download returns 403 and no bytes are streamed.</criterion>
+    <criterion testable="true">Given an authenticated user WITH access to document X, the download returns 200 with the file stream (existing behavior preserved).</criterion>
+    <criterion testable="true">Negative: an unauthenticated request returns 401 (unchanged).</criterion>
+    <criterion testable="true">Negative: when the access lookup errors or the document id resolves to nothing, the endpoint denies (403/404), never streams.</criterion>
+    <criterion testable="true">The authorization runs as an endpoint filter attached at route registration (code review confirms; no inline handler check).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01; finding A-1 (design-register §A.1). The R1 attack scenario reference lives in the register. Do NOT touch the share-link code at FileAccessEndpoints.cs:640-668 — that is task 012.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

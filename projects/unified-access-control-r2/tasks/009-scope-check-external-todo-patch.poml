@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-08: Scope-check PATCH /api/v1/external/todos/{id} (+ H-8a comment cleanup)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (external write endpoint) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Apply the existing record∈accessible-set check pattern (already used by the sibling read path) to one write endpoint; fully specified by A-7 evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** — known contended path (sibling files modified by tasks 008/010/011/016/017/018).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, endpoints, security</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-7 (spec FR-08, High): PATCH /api/v1/external/todos/{id} must scope-check the record before writing. Today the handler acknowledges in a comment that it performs no record-scope check — any resolvable external caller can modify any To Do by GUID. Verify the target To Do resolves within the caller's accessible root set before applying the update; deny otherwise. Also remove the stale comments naming the deleted ExternalCallerAuthorizationFilter/ExternalCallerContext in the same file (register H-8a).</prompt>
+  <role>SPAARKE platform developer. Expert in the external-access scoped-read pipeline (CallerPrincipal, AccessibleRecordSetService, ExternalModuleRegistry). Follow ADRs strictly.</role>
+  <goal>The PATCH endpoint denies (403/404) any caller whose accessible root set does not cover the target To Do; a caller with zero accessible roots can modify nothing. The write goes through the same scoping model the scoped read path already enforces.</goal>
+
+  <context>
+    <background>Finding A-7 (design-register §A.1): "PATCH /api/v1/external/todos/{id} has no record-scope check (self-acknowledged in comment)" — evidence Api/ExternalAccess/ExternalProjectDataEndpoints.cs:328-345. Effect: any resolvable caller modifies any To Do by GUID. The scoped READ path shows the enforcement pattern to mirror: ExternalModuleDataEndpoints.GetScopedRecordAsync:266-273 (CallerPrincipal path + ExecuteScopedFetchAsync + ExternalModuleRegistry) — per the A-15 confirmation, this is where live Tier-2 enforcement actually runs. H-8a (design-register §H.8): stale comments at ExternalProjectDataEndpoints.cs:13, :24, :339 name the deleted ExternalCallerAuthorizationFilter / ExternalCallerContext — remove while in the file. Design §8 note: A-7 becomes a genuine vulnerability the moment To Dos become an access-scoped child module (Phase 3) — this must land in Phase 0.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the unscoped PATCH behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: if the To Do cannot be read, has no resolvable root, or the accessible-set lookup errors, DENY — never apply the PATCH. Scope: the scope check added here.</constraint>
+    <constraint source="ADR-034">Root-set resolution reuses the existing CallerPrincipal/AccessibleRecordSetService composition — do not build a parallel membership query. Scope: the lookup mechanism chosen.</constraint>
+    <constraint source="ADR-008">Prefer expressing the check as an endpoint filter consistent with the route group's pattern; inline service-call acceptable only if the sibling scoped routes do the same — match the file's live convention. Scope: the PATCH route.</constraint>
+    <constraint source="project">Respond 404 (not 403) when hiding record existence is the established convention on the external plane — match what the scoped read path returns for out-of-scope records. Scope: the deny response shape.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external plane record scoping</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Filter attachment pattern</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read ExternalProjectDataEndpoints.cs:300-360 and the scoped-read enforcement at ExternalModuleDataEndpoints.cs:266-273; determine how the To Do's root (project) is resolved on the read side.</step>
+    <step order="2">Before the update: read the target To Do's root lookup, resolve the caller's accessible set for that root entity, and deny (matching the read path's out-of-scope response) when the root is not in the set.</step>
+    <step order="3">Restrict the PATCH surface to the fields the endpoint intends to update (no open property bag pass-through) — verify current behavior and pin it.</step>
+    <step order="4">Delete the stale H-8a comments at :13, :24, :339.</step>
+    <step order="5">Flip the task-001 characterization test; add negative tests (zero-root caller, out-of-scope To Do, nonexistent To Do).</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document response-shape choice (403 vs 404) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the To Do's root cannot be resolved through an existing accessible-set entity (A-9: only 3 root sets exist — project/matter/WA), STOP and escalate: scoping to "todo regarding project only" vs denying todos with other parents is a product decision, not an implementation detail.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller with zero accessible roots cannot modify a To Do by GUID — the PATCH is denied (FR-08 acceptance).</criterion>
+    <criterion testable="true">A caller whose accessible set covers the To Do's root can still PATCH it (no over-denial).</criterion>
+    <criterion testable="true">Negative: a To Do whose root is OUTSIDE the caller's accessible set is denied with the same response shape the scoped read path uses for out-of-scope records.</criterion>
+    <criterion testable="true">Negative: a nonexistent To Do id denies (404), never errors unhandled.</criterion>
+    <criterion testable="true">The stale ExternalCallerAuthorizationFilter/ExternalCallerContext comments (:13, :24, :339) are removed.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08; finding A-7; H-8a rider. Phase 3 will make sprk_todo a scoped child module — this fix is the Phase 0 stopgap on the write path; keep the mechanism aligned with the read path so Phase 3 can subsume it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

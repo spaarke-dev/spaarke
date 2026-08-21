@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="unified-access-control-r2">
+  <metadata>
+    <title>Access event log: sprk_accessevent table schema + data-model doc (FR-32)</title>
+    <phase>5 Attestation</phase>
+    <gate>startable after Phase 1 merges (the event vocabulary mirrors the evaluator's grant/deny state changes)</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Schema + docs creation; no .cs/.ts behaviour change (write hooks are task 081).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema authoring per the dataverse-create-schema skill with a fully enumerated column list.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase5-wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches schema scripts + docs only; no BFF/PCF source files.</parallel-reason>
+    <deps>032, 038</deps>
+    <tags>dataverse, schema, auth, documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the append-only access event log table (sprk_accessevent) that records GRANT and DENY state changes — explicit grants, revokes, POA shares/unshares, deny-list adds/removes, secure/restricted flag flips — with enough shape for point-in-time replay anchoring. Derived access is NEVER written here (evaluator replay reconstructs it, task 082). Smallest possible table per design §3.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema via Web API/PowerShell (dataverse-create-schema patterns). Follow ADRs strictly.</role>
+  <goal>Idempotent schema script creating sprk_accessevent with: event type (closed choice: grant-created, grant-revoked, share-granted, share-revoked, deny-added, deny-removed, secure-flag-changed, restricted-flag-changed, standing-grant-changed), subject principal (kind + id + name snapshot), target record (entity logical name + id + name snapshot), level/mask where applicable, acting user, occurred-on, evaluator-version string, correlation id, and a free-form details JSON column; plus the docs/data-model entry. Organization-owned, create-only privileges model documented (append-only posture).</goal>
+
+  <context>
+    <background>spec.md FR-32 + Placement table ("Access event log — new; sprk_externalrecordaccess is current-state only, no history, no derived rows"); design.md §7 ("few, exact, legally defensible"). Retention: inherits environment Dataverse audit retention (owner decision — no bespoke retention). The GDPR tension is recorded as a known gap; do not build erasure.</background>
+    <relevant-files>
+      <file role="new">scripts/ (schema script per dataverse-create-schema conventions — follow the repo's existing schema-script naming)</file>
+      <file role="new">docs/data-model/ (sprk_accessevent schema doc)</file>
+      <file role="canonical-reference">docs/data-model/ (existing entity docs as format reference)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">FR-19 evaluator — the version-string anchor for replay.</dependency>
+      <dependency task="038" status="pending">FR-23 deny-list store shape (deny events mirror it).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-MUST">NO derived-access rows: the schema must not include columns that invite materialization (no "effective level" / "computed access" columns). Scope: column list.</constraint>
+    <constraint source="project">Append-only posture: document that application code only ever Creates (no update/delete paths); the doc states the posture and the 081 write hook enforces it. Scope: schema doc + privileges section.</constraint>
+    <constraint source="project">Name snapshots (principal/record display names at event time) are included deliberately — attestation must survive later renames; scope: column list, with the rationale in the doc.</constraint>
+    <constraint source="dataverse-create-schema">Schema via the skill's Web API/PowerShell patterns; idempotent re-run; solution-aware. Scope: the script.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>attestation schema</topic>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Entity conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Draft the column list + choice values; review against every 081 hook site (grant/revoke endpoints, 060 seam, deny endpoints, secure/restricted flag writers) so no event kind lacks a column it needs.</step>
+    <step order="2">Author the idempotent schema script; run against dev; verify via metadata query.</step>
+    <step order="3">Write the data-model doc (columns, choice values, append-only posture, retention inheritance, GDPR known-gap note).</step>
+    <step order="4">Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Dataverse audit configuration on the flag columns (sprk_issecure, sprk_accesspermission, standing-grant columns) is found DISABLED in dev, record it as a blocking prerequisite for 082 replay in notes and escalate — replay over field audit needs audit enabled BEFORE history accrues.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_externalrecordaccess (current-state grants, no history) — cited in spec Placement table; Dataverse audit logs exist but cannot answer grant/deny state-change queries with principal/record/level shape.</existing>
+    <extension>No — extending sprk_externalrecordaccess with history rows would mix live authorization state with immutable log rows in one table read by the evaluator on every request.</extension>
+    <cost-of-doing-nothing>"Who could see record X on date D" is unanswerable for grant/deny changes — the concrete attestation contract FR-32's acceptance names; privilege-log and breach-inquiry obligations fail.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">scripts/ (sprk_accessevent schema script)</output>
+    <output type="docs">docs/data-model/ (sprk_accessevent doc)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Running the script against dev creates sprk_accessevent with the full column + choice set; re-running is a no-op (idempotent).</criterion>
+    <criterion testable="true">Every event kind 081 must write has the columns it needs (cross-checked list in the doc; no free-form-JSON-only event kinds for core fields).</criterion>
+    <criterion testable="true">Negative: no column exists that stores computed/derived access (reviewed against the spec MUST).</criterion>
+    <criterion testable="true">The data-model doc states append-only posture, retention inheritance, and the GDPR known gap.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-32; design.md §7. Write hooks: 081. Replay: 082.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

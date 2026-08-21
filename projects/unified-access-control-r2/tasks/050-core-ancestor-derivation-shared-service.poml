@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="unified-access-control-r2">
+  <metadata>
+    <title>Core-ancestor derivation in the shared resolver service (FR-26, client write path)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>startable (Phase 0-2 not required for the shared-lib derivation contract; taxonomy is spec-fixed)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-relevant .ts in the shared write path every child record's access stamp depends on; wrong derivation silently grants or hides records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FR-26 ancestor-denormalization correctness under reparent is the load-bearing security invariant of Phase 3; the derivation rules (child-of-child, ancestor-vs-clear interplay) require judgment beyond literal spec-following.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>phase3-wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches ONLY src/client/shared/Spaarke.UI.Components TS services + tests — file-disjoint from BFF task 052 in the same wave.</parallel-reason>
+    <deps>none</deps>
+    <tags>shared-components, typescript, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the shared PolymorphicResolverService so that when a child record's regarding target is ITSELF a child-class entity, the service derives and stamps the target's ultimate CORE-record ancestor onto the child being written. This is what keeps every access chain 1 hop (ADR-034 cap holds unamended) — a To Do regarding an Email regarding a Matter must carry sprk_regardingmatter directly.</prompt>
+  <role>SPAARKE platform developer. Shared TypeScript component-library services, Dataverse Web API, polymorphic regarding model (ADR-024). Follow ADRs strictly.</role>
+  <goal>PolymorphicResolverService (and its catalog module TodoRegardingUpdateBuilder) exports a single core/child taxonomy constant and an ancestor-derivation step: given a selected regarding target, resolve the target's own core-ancestor lookups via Web API read and include the core-ancestor stamp(s) in the returned payload; the clear-and-set pre-clear logic never nulls a stamp the same payload is setting. Unit tests pin the taxonomy and every derivation case.</goal>
+
+  <context>
+    <background>spec.md FR-26; design.md §4.3 ("One hop, by construction"). Core = sprk_project, sprk_matter, sprk_workassignment, sprk_servicerequest (direct grants). Child = sprk_invoice, sprk_communication, sprk_document, sprk_event, sprk_todo, analysis (inherit). The adversarial critique (06 §F1) proved child-of-child chains (todo -> communication -> matter) are inexpressible in the ScopeDimension model UNLESS the core ancestor is denormalized onto the child. This task builds the derivation in the ONE shared write service (ADR-024 mandates all resolver field-write logic lives here — the PCF must not reimplement it).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts</file>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/__tests__ (add/extend resolver service tests at the existing test location for these services)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Taxonomy fixed by spec.md Owner Clarifications (record taxonomy row) — no upstream code dependency.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">All resolver field-write logic (including this new ancestor-derivation step) lives in the shared PolymorphicResolverService; scope: no consumer (PCF, webresource, wizard) may reimplement derivation.</constraint>
+    <constraint source="ADR-034">Derivation MUST NOT traverse more than 1 lookup hop at write time per level: read the selected target's OWN core-ancestor lookup columns (which are themselves FR-26 stamps) — never walk grandparent chains recursively at read time. Scope: the applyResolverFields payload builder.</constraint>
+    <constraint source="project">Matter does NOT inherit from Project: when the target is sprk_matter, do NOT stamp its sprk_project association as an access-conferring ancestor. Both are core; selecting a core target stamps only that target. Scope: derivation rules table.</constraint>
+    <constraint source="project">The pre-clear step (null all other entity-specific lookups) MUST be computed AFTER derivation so an ancestor stamp set by this payload is never nulled by the same payload. Scope: applyRegardingSelection payload assembly in consumers — export the combined payload from the shared service so ordering cannot be wrong per-consumer.</constraint>
+    <constraint source="ADR-012">Export via the module path (dist/services/...), not new barrel exports that break PCF webpack builds. Scope: any new exported symbol.</constraint>
+    <constraint source="NFR-01">Fail closed on derivation errors: if the target's ancestor read fails, the write MUST surface an error result — never silently write the child without a stamp when the target is child-class. Scope: error path of the new derivation read.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>polymorphic regarding + child inheritance</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">The regarding catalog + applyResolverFields contract this task extends.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5.</step>
+    <step order="1">Read PolymorphicResolverService.ts + TodoRegardingUpdateBuilder.ts end to end; map the current applyResolverFields payload contract and the TODO_REGARDING_CATALOG entry shape.</step>
+    <step order="2">Add an exported CORE_RECORD_ENTITIES / CHILD_RECORD_ENTITIES taxonomy constant (single source; catalog entries reference it, e.g. an isCore flag per entry). Exactly: core = sprk_project, sprk_matter, sprk_workassignment, sprk_servicerequest; child = sprk_invoice, sprk_communication, sprk_document, sprk_event, sprk_todo, sprk_analysis.</step>
+    <step order="3">Implement deriveCoreAncestorStamps(webApi, targetEntity, targetId): for a CORE target return the target itself as the stamp; for a CHILD target, $select the target row's core-ancestor lookup columns (sprk_regardingproject / sprk_regardingmatter / sprk_regardingworkassignment / sprk_regardingservicerequest — only those that exist on that entity, via the nav-prop table already passed in) and return the non-null ones. Error or all-null on a child target = explicit result state, not a silent empty.</step>
+    <step order="4">Integrate into applyResolverFields (or a wrapping function consumed by all callers): returned payload includes the ancestor @odata.bind stamps; ensure the exported combined payload orders derivation before pre-clear exclusion so stamps survive; clearRegarding continues to null ancestor stamps (a cleared child has no inherited access).</step>
+    <step order="5">Unit tests (closed set): core target stamps itself only; matter target does NOT stamp its project; todo->communication-with-matter stamps sprk_regardingmatter; todo->communication-with-nothing yields explicit no-ancestor result; reparent (payload from target A then target B) leaves exactly B's stamps; derivation read failure returns error result; taxonomy constant pinned literally.</step>
+    <step order="6">Build the shared lib (npm run build in Spaarke.UI.Components) green; run its test suite.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status. Document design decisions (derivation rules table) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any target child entity lacks the core-ancestor lookup columns in live metadata (e.g. sprk_event has no sprk_regardingservicerequest), record the real column set in notes and proceed with the columns that exist. If the DERIVATION CONTRACT itself cannot hold (a child class with NO core-ancestor lookups at all), STOP and escalate per CLAUDE.md §6 — do not invent a 2-hop traversal.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/__tests__/ (resolver ancestor-derivation tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase3-derivation-rules.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a To Do whose selected regarding target is a Communication carrying sprk_regardingmatter = M, when applyResolverFields builds the payload, then the payload binds the To Do's sprk_regardingmatter to M in the same write.</criterion>
+    <criterion testable="true">Given a target that is sprk_matter, when the payload is built, then NO sprk_regardingproject stamp is added (Matter does not inherit from Project) and the matter lookup itself is the only regarding bind.</criterion>
+    <criterion testable="true">Given a reparent from target A (ancestor M1) to target B (ancestor M2), when the second payload is applied, then exactly M2's stamp remains — the pre-clear nulls M1's stamp and does not null M2's.</criterion>
+    <criterion testable="true">Negative: given a child-class target whose ancestor read throws, the result is success=false with an error message — no payload write occurs.</criterion>
+    <criterion testable="true">Negative: given a child-class target with all core-ancestor lookups null, the result explicitly reports no ancestor (distinct state) and stamps nothing.</criterion>
+    <criterion testable="true">Taxonomy test pins the literal core/child sets from spec.md; changing either set fails a test.</criterion>
+    <criterion testable="true">Shared lib build and full existing resolver test suite green (no regression to the 11-target clear-and-set behaviour).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26; design.md §4.3. Consumers are updated in tasks 051 (PCF) and 052 (server/webresource). Do NOT modify RegardingResolver PCF files in this task (051 owns them — parallel-wave file boundary).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-07: Enforce the delegation rule (Write-on-target) on all external-access mutation endpoints</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path and adds a new authorization filter (new surface) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The rule is a single crisp owner decision (B-14: Write on target ⇒ may grant) applied uniformly to an enumerated endpoint list; escalation triggers cover the genuinely ambiguous route (provision-project).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** — known contended path (tasks 009, 010, 011, 016, 017, 018 modify sibling files; the group-level route registration in ExternalAccessEndpoints.cs is shared surface).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, endpoints, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-6 (spec FR-07, High): grant, revoke, invite, invite-and-grant, close-project, and provision-project sit behind bare RequireAuthorization() — ANY authenticated user can mint external grants and provision business units. Enforce the delegation rule (owner decision B-14): a caller may perform these mutations on a record only if they hold WRITE on that record, checked as the caller (OBO), in an endpoint filter. A caller without Write on the target receives 403.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal API endpoint filters, Dataverse OBO access checks, and the external-access endpoint surface. Follow ADRs strictly.</role>
+  <goal>A reusable delegation endpoint filter that resolves the target record from the request, checks the CALLER's Write access via OBO, and denies 403 otherwise — attached to all six mutation routes. Ships BEFORE any Manage Access UI expansion (design §6 blocking prerequisite).</goal>
+
+  <context>
+    <background>Finding A-6 (design-register §A.1): evidence Api/ExternalAccess/ExternalAccessEndpoints.cs:109-111 — the route group carries RequireAuthorization() only; no per-record privilege is consulted (all writes run app-only). Effect: "any authenticated user can mint external grants and provision business units." Design §6 marks this the blocking prerequisite for the Manage Access PCF: "Rule: you may grant access to a record if you have Write on that record, enforced by an OBO check in the endpoint. This must ship before the + User button, or a read-only user gains a one-click path to Full Access on a confidential matter." B-14 is the owner decision. The six routes: grant, revoke, invite, invite-and-grant, close-project, provision-project (spec FR-07). The target record: for grant/revoke/invite/invite-and-grant it is the record being shared; for close-project it is the project; for provision-project there may be no existing target record — see escalation.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning the bare-RequireAuthorization behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">The delegation check is an endpoint filter attached at route registration — not inline in each handler. Scope: all six mutation routes.</constraint>
+    <constraint source="ADR-003">Fail closed: if the target record cannot be resolved from the request, or the OBO access check errors, DENY 403 — never proceed app-only. Scope: the filter's every exit path.</constraint>
+    <constraint source="ADR-028">The Write check runs AS THE CALLER via OBO — an app-only Write probe would answer "can the app write", recreating A-2. Scope: the access check inside the filter.</constraint>
+    <constraint source="ADR-010">One filter type parameterized by target-resolution, not six bespoke filters; no new service layer. Scope: new types added by this task.</constraint>
+    <constraint source="project">NEW surface (CLAUDE.md §10/§11): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md; report publish size vs ~44.96 MB baseline; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>delegation authorization</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Filter attachment at route registration</pattern>
+      <pattern name="dataverse-obo" location=".claude/patterns/auth/dataverse-obo.md">Caller-scoped Dataverse access checks</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Map the six mutation routes in ExternalAccessEndpoints.cs:109-111 and their request DTOs; identify how each names its target record (id field per route). Record the mapping.</step>
+    <step order="2">Implement DelegationRuleFilter: resolve target (entity + id) from the request per-route; check the caller's Write right on it via the caller-scoped access path (OBO); 403 on absence or error.</step>
+    <step order="3">Attach the filter to grant, revoke, invite, invite-and-grant, and close-project. For provision-project, apply the escalation decision (step E) before wiring.</step>
+    <step order="4">Flip the task-001 characterization tests; add per-route positive (Write-holder passes) and negative (no-Write caller 403) tests.</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the route→target mapping and the provision-project decision in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>provision-project may have no existing target record to check Write against (it creates infrastructure). STOP and escalate the correct gate for it (e.g. a privileged-role requirement) per CLAUDE.md §6 — do NOT leave it on bare RequireAuthorization, and do NOT invent a role model silently.</trigger>
+    <trigger>If revoke-by-AccessRecordId cannot be mapped to a target record without an extra read, and that read materially changes request cost, escalate the design (pre-read vs deny) rather than skipping the check.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>EntityAccessFilter.cs (Api/Filters) is the closest neighbor — an endpoint filter resolving an entity target and consulting AuthorizationService. It is document/association-specific and app-scoped today.</existing>
+    <extension>No — extending EntityAccessFilter would couple external-access target resolution (six heterogeneous DTOs) into an Office-path filter; a sibling filter in Api/ExternalAccess following the same pattern is the smaller change. Pattern reused, type new.</extension>
+    <cost-of-doing-nothing>Any authenticated caller can grant Full Access to any record and provision business units (A-6); the Manage Access "+ User" button (Phase 4) would hand a read-only user one-click Full Access on confidential matters.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller WITHOUT Write on the target record receives 403 from grant, revoke, invite, invite-and-grant, and close-project (FR-07 acceptance) — one test per route.</criterion>
+    <criterion testable="true">A caller WITH Write on the target record succeeds on each route (no over-denial).</criterion>
+    <criterion testable="true">Negative: an unresolvable target (missing/garbage id) yields 403/404, never an app-only write.</criterion>
+    <criterion testable="true">Negative: an OBO access-check error yields 403, never fall-through.</criterion>
+    <criterion testable="true">provision-project is gated per the escalation decision — it is NOT left on bare RequireAuthorization (test asserts a non-Write caller is denied).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size + Placement Justification in PR; ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 (see FR-20 cross-ref for the caller-scoped read model); finding A-6; owner decision B-14; design §6 "blocking prerequisite". The Write check may reuse AuthorizationService if task 004 has merged; otherwise implement the OBO check directly against the caller-scoped Dataverse read — do not wait on 004 (independent mechanism, same rule).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

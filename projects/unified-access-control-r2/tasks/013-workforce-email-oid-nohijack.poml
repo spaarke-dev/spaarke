@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-12 (A-18): Workforce contact-by-email resolution must apply the CIAM no-hijack oid check</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an identity-binding authorization path — an account-takeover vector under the multitenant workforce model (High) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The correct guard already exists on the CIAM path and must be mirrored onto the workforce path; A-18 gives the exact source and target lines. Well-specified, but security-sensitive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs — a known-contended directory (Infrastructure/ExternalAccess/**). Merge serially with /conflict-check.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-18 (spec FR-12, High): the workforce contact-by-email fallback binds a caller to a contact by raw emailaddress1 match with NO check of whether that contact is already bound to a DIFFERENT oid — the CIAM path already enforces this no-hijack guard, the workforce path does not. Under the multitenant workforce model a token's email claim is not domain-verified across a foreign tenant, so a caller carrying email=victim@firm.com inherits the victim's contact and grants. Apply the same oid no-hijack check on the workforce path: an email matching a contact bound to a different oid is denied.</prompt>
+  <role>SPAARKE platform developer. Expert in Entra/CIAM identity claims, contact↔oid binding, and the Spaarke identity-normalization path. Follow ADRs strictly.</role>
+  <goal>The workforce contact-by-email resolution denies (does not resolve) when the matched contact is already bound to a different oid, mirroring the CIAM guard. A caller whose email matches a contact bound to another person's oid gets no principal and no grants.</goal>
+
+  <context>
+    <background>Finding A-18 (10-finding-confirmations.md, ranked #4 High): workforce contact-only branch WorkforcePrincipalResolver.cs:148-160 calls _identity.TryResolveContactByWorkforceIdentityAsync(callerOid, verifiedEmail, ct). That method (IdentityNormalizationService.cs:242-281) tries oid cross-ref first (:252-262) then falls back to a raw emailaddress1 match (:268-278 → TryResolveContactIdByEmailAsync:331-372) that returns the contact id with NO check of whether the contact is already bound to a DIFFERENT oid, and no oid-binding write. Contrast the CIAM path ExternalParticipationService.ResolveExternalContactAsync:211-258 which DENIES an email match on a contact already bound to a different oid (:247-257, "no email hijack of a bound Contact"). The trust hinge is cross-tenant verifiability of the email claim (WorkforcePrincipalResolver.ExtractVerifiedEmail:178-186). FR-12 acceptance: an email matching a contact bound to a different oid is denied.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/WorkforceEmailNoHijackTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the unguarded email fallback, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The no-hijack rule mirrors the CIAM path exactly (ExternalParticipationService.ResolveExternalContactAsync:247-257): a raw email match on a contact bound to a DIFFERENT oid is denied. Scope: the workforce contact-by-email fallback.</constraint>
+    <constraint source="ADR-003">Fail closed: ambiguity (multiple contacts match the email, or binding state cannot be read) DENIES — it does not pick one contact. Scope: the resolution path.</constraint>
+    <constraint source="project">Do NOT auto-write an oid binding as a side effect of a denied match; only an oid-verified resolution may create/confirm a binding. Scope: any binding write in the changed path.</constraint>
+    <constraint source="project">Both edited files are consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>identity binding no-hijack</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Canonical v2 identity binding</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read the CIAM guard (ExternalParticipationService.ResolveExternalContactAsync:211-258) and the unguarded workforce fallback (IdentityNormalizationService.cs:242-281, :331-372).</step>
+    <step order="2">Add the no-hijack check to the workforce email fallback: when a contact matches by email, verify it is not bound to a different oid; if it is, return no-resolution (deny). Prefer centralizing the check so both call-sites share one implementation.</step>
+    <step order="3">Ensure WorkforcePrincipalResolver.cs:148-160 treats a denied resolution as no principal (fail-closed), not a partial principal.</step>
+    <step order="4">Author WorkforceEmailNoHijackTests + flip the task-001 characterization test: email matching a contact bound to a different oid → denied; email matching an unbound contact or the caller's own bound contact → resolves.</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the shared no-hijack helper (if introduced) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If legitimate workforce onboarding RELIES on the unguarded email fallback to first-bind a contact (no prior oid), STOP and escalate: distinguishing "unbound contact, safe to bind" from "bound to another oid, deny" is the crux — get the binding-state semantics confirmed before shipping.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test covers the workforce contact-by-email no-hijack guard (the CIAM path has the guard; the workforce path was found unguarded by A-18).</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without the test, the account-takeover path (email matching a contact bound to a different oid) can regress silently under the multitenant workforce model (FR-12).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/WorkforceEmailNoHijackTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An email matching a contact bound to a DIFFERENT oid is denied on the workforce path (FR-12 acceptance) — no principal resolved, no grants inherited.</criterion>
+    <criterion testable="true">An email matching an unbound contact, or the caller's own oid-bound contact, still resolves (no over-denial of legitimate callers).</criterion>
+    <criterion testable="true">Negative: multiple contacts matching the email, or unreadable binding state, DENIES rather than picking one.</criterion>
+    <criterion testable="true">Negative: a denied match does not write an oid binding as a side effect.</criterion>
+    <criterion testable="true">The workforce and CIAM paths apply the same no-hijack rule (code review confirms shared logic or exact mirror).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12; finding A-18 (register §A.2 rank 4). Related prerequisite E-6 (multitenant app registration) is environment work, out of Phase 0 code scope — this task hardens the code path that E-6 makes reachable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

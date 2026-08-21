@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-14 (A-10): Deterministic, complete membership paging</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (accessible-set resolution) where silent truncation causes fail-closed under-grant — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three concrete defects (missing &lt;order&gt;, off-by-one at page boundary, options:null ignoring continuation) with exact line evidence in A-10; the fix is bounded FetchXML + continuation-token plumbing.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (known-contended dir) and Services/Ai/Membership/MembershipResolverService.cs (shared with task 019's membership area). Merge serially with /conflict-check.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-10 (spec FR-14, Medium): membership paging is non-deterministic and lossy. The built FetchXML has no &lt;order&gt; (paging not guaranteed consistent across pages), an off-by-one drops one row per page boundary, and the composers pass options:null (limit 500) and ignore the computed continuation token — so a caller with more than ~500 memberships silently loses access to the overflow (fail-closed under-grant). Add a stable &lt;order&gt;, fix the boundary arithmetic, and make the composers follow continuation tokens.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse FetchXML paging semantics (page/count vs top, paging cookies) and the membership-resolver/accessible-set composition. Follow ADRs strictly.</role>
+  <goal>Membership FetchXML carries a stable order; no row is skipped at page boundaries; the composers resolve ALL memberships by following continuation tokens (bounded by the documented MaxLimit). A caller with more than 500 memberships resolves all of them.</goal>
+
+  <context>
+    <background>Finding A-10 (10-finding-confirmations.md): (1) No &lt;order&gt; in MembershipResolverService.BuildFetchXml:637-755. (2) Off-by-one: top='{limit+1}' (:647) as has-more sentinel, but when skip>0 it also emits page='{(skip/limit)+1}' count='{limit+1}' (:648-654); MaterializeResults keeps `limit` ids and reports hasMore = allIds.Count > limit (:837), truncating the (limit+1)th row (:840); next token = skip+effectiveLimit (:305) → page 2 starts at row limit+2, so the (limit+1)th row page 1 dropped is never returned. Also mixing top with page/count is malformed FetchXML paging. (3) Truncation via options:null: AccessibleRecordSetService.ComposeForSystemUserAsync:192-196 calls _membership.ResolveAsync(..., options:null, ct) and takes only membership.Ids, never following ContinuationToken; null options → ClampLimit(0) → DefaultLimit 500. ComposeForContactAsync:276-278 does the same for the standing-grant term. Continuation tokens ARE computed (:302-306) but no composer consumes them. Impact: fail-closed under-grant (correctness/availability), not a leak. FR-14 acceptance: FetchXML carries an &lt;order&gt;; page N+1 returns no skipped rows; a caller with >500 memberships resolves all. Cross-ref NFR-03: caps must be user-visible ("Only 5,000 records displayed") — the completeness bound is separate from silent truncation.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/MembershipPagingTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the truncation-at-500 behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">Reuse the existing MembershipResolverService paging + continuation machinery — fix it in place; do not add a parallel resolver. Scope: BuildFetchXml + MaterializeResults + the composers.</constraint>
+    <constraint source="ADR-003">Fail closed but complete: the fix must not over-grant — following continuation tokens must terminate at the documented MaxLimit and surface the cap, not loop unbounded. Scope: the composer loops.</constraint>
+    <constraint source="project">NFR-03: when the resolved set is capped at MaxLimit, the cap MUST be surfaced (a flag the caller can render as "Only N records displayed"), never a silent truncation. Scope: the composer return contract.</constraint>
+    <constraint source="project">Use a stable, total sort key in &lt;order&gt; (e.g. the primary id) so page boundaries are deterministic; do not order by a non-unique column. Scope: BuildFetchXml.</constraint>
+    <constraint source="project">Both edited files are consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>membership paging</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="membership-consumer" location=".claude/patterns/api/membership-consumer.md">How consumers call the membership resolver</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Add a stable &lt;order&gt; on the primary id to BuildFetchXml; remove the malformed top+page/count mixing and adopt a single correct paging scheme (page/count with paging cookie, or top with a proper sentinel — pick one).</step>
+    <step order="2">Fix MaterializeResults so no row is dropped at the boundary (the has-more detection must not consume a data row that the next page will not re-serve).</step>
+    <step order="3">Change ComposeForSystemUserAsync and ComposeForContactAsync to pass real options and LOOP over continuation tokens until exhausted or MaxLimit, aggregating Ids; surface a capped flag at MaxLimit.</step>
+    <step order="4">Author MembershipPagingTests: >500 memberships resolve fully across pages; no row skipped at boundaries (test with a count that straddles a page edge); cap at MaxLimit surfaces the flag.</step>
+    <step order="5">Flip the task-001 characterization test.</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the paging scheme chosen and the cap-surfacing contract in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If following continuation tokens materially increases Dataverse round trips beyond the NFR-02 budget for large memberships, STOP and escalate the cap/paging trade-off with measurements rather than silently capping low.</trigger>
+    <trigger>If MembershipResolverService is consumed by AI-scoping paths that depend on the current (buggy) paging shape, STOP and list those consumers before changing the shared method.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test exercises membership paging across page boundaries or beyond the 500 limit (A-10 was found by manual code read).</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without boundary/overflow tests, the silent truncation (fail-closed under-grant above ~500 memberships) can regress undetected (FR-14).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/MembershipPagingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The built membership FetchXML carries an &lt;order&gt; on a unique key (FR-14 acceptance) — asserted by inspecting the query.</criterion>
+    <criterion testable="true">Page N+1 returns no rows skipped by page N (boundary test with a straddling count).</criterion>
+    <criterion testable="true">A caller with >500 memberships resolves ALL of them (composer follows continuation tokens).</criterion>
+    <criterion testable="true">Negative: at MaxLimit the result is flagged as capped (NFR-03), not silently truncated.</criterion>
+    <criterion testable="true">Negative: a paging/continuation error denies (returns fail-closed) rather than returning a partial set as if complete.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14; finding A-10; related C-1 (>5000 in-clause bound) and NFR-03. The in-clause bound in the scope injector is a separate defect (A-16, task 018) — do not conflate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

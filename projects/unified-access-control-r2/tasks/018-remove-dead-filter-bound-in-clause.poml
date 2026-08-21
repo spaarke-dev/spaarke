@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-17a (A-15 + A-16): Remove orphaned AccessibleRecordSetAuthorizationFilter + bound the scope-injector in-clause</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the external-access authorization surface (dead-code removal on an auth filter + a robustness bound on the scope injector) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Both are low-severity, precisely-scoped fixes (delete an unattached filter; chunk an unbounded in-clause to the ~500/condition Dataverse guidance). Contained reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/ExternalAccess/AccessibleRecordSetAuthorizationFilter.cs and Api/ExternalAccess/Tier2ScopeFilterInjector.cs — a known-contended directory (Api/ExternalAccess/**). Merge serially with /conflict-check.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, refactoring</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the A-15 and A-16 parts of finding FR-17 (Low): (A-15) remove the orphaned AccessibleRecordSetAuthorizationFilter that is defined but attached to no route (dead enforcement point; live enforcement runs via the CallerPrincipal path), so no future route mistakes it for an active gate; and (A-16) bound the uncapped in-clause the Tier-2 scope injector emits so a large accessible set cannot produce a FetchXML in-clause that exceeds Dataverse limits and fails/500s — chunk to the ~500-values-per-condition guidance the membership service already applies to itself.</prompt>
+  <role>SPAARKE platform developer. Expert in FetchXML condition limits, the Tier-2 scope injection path, and safe dead-code removal. Follow ADRs strictly.</role>
+  <goal>The dead AccessibleRecordSetAuthorizationFilter is removed (with its unused HttpContext.Items key), and the scope injector chunks the in-clause so a large accessible set no longer produces a malformed/oversized query; a caller with a large composed set gets a correct, bounded, fail-closed result.</goal>
+
+  <context>
+    <background>Finding A-15 (10-finding-confirmations.md): AddAccessibleRecordSetAuthorizationFilter&lt;T&gt;() defined at AccessibleRecordSetAuthorizationFilter.cs:45; grep finds only the definition + a doc-comment example (:15) — no route calls it. It reads WorkforcePrincipal.HttpContextItemsKey (:102), a key SET nowhere. Header says the record-scoped endpoints "are added by task 030" — never wired. Live enforcement runs via ExternalModuleDataEndpoints.GetScopedRecordAsync:266-273 (CallerPrincipal path). Removal is safe; the risk it prevents is a future route assuming this gate is active. Finding A-16: Tier2ScopeFilterInjector.Inject:76-86 adds one &lt;condition operator='in'&gt; per dimension with one &lt;value&gt; per id (:81-84) — no cap on dim.AccessibleIds. The membership service caps itself: MembershipResolverService.BuildTransitiveFetchXml:1030-1040 truncates to MaxLimit (5000) with a comment (:1022-1028) documenting ~500-values-per-in-condition Dataverse guidance. A very large composed set → an in-clause that exceeds limits → the module fetch fails/500s or returns empty (fail-closed availability). Spec FR-17 "bound the in-clause per FR-25" — the bound should be user-visible when it caps (NFR-03). See escalation re: the FR-25 cross-reference.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/AccessibleRecordSetAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ScopeInjectorBoundTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the current behavior (dead filter present; unbounded in-clause), flipped/added here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: when the accessible set exceeds the chunk bound, the injector MUST NOT silently drop ids in a way that OVER-grants; it must either chunk across multiple conditions correctly or cap and surface the cap (NFR-03). Scope: the in-clause construction.</constraint>
+    <constraint source="project">Before deleting AccessibleRecordSetAuthorizationFilter, re-run the grep to CONFIRM zero call-sites and that HttpContextItemsKey is set nowhere — deletion is safe only if it is truly orphaned. Scope: A-15 removal.</constraint>
+    <constraint source="project">Bound the in-clause consistently with the membership service's documented ~500/condition guidance — reuse the existing constant/approach rather than inventing a divergent number. Scope: Tier2ScopeFilterInjector.</constraint>
+    <constraint source="project">Both edited files are in the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>scope injection bounds + dead-code removal</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Test the injector with large id sets, no live Dataverse</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Re-grep for AddAccessibleRecordSetAuthorizationFilter and WorkforcePrincipal.HttpContextItemsKey across src; confirm zero live call-sites and that the key is set nowhere.</step>
+    <step order="2">Remove the orphaned filter (and the now-unused HttpContextItemsKey if nothing else reads it); ensure the build has no dangling references.</step>
+    <step order="3">Bound the in-clause in Tier2ScopeFilterInjector: chunk dim.AccessibleIds into ≤~500-value conditions (reuse the membership service's constant/approach) so a large set produces valid FetchXML; if a hard cap is applied, surface it per NFR-03.</step>
+    <step order="4">Author ScopeInjectorBoundTests: a >500-id set produces valid, bounded FetchXML (no single oversized in-condition); the cap (if any) is surfaced, not silent.</step>
+    <step order="5">Flip/extend the task-001 characterization tests.</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the chunk bound + the FR-25 cross-reference resolution in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Spec FR-17 says "bound the in-clause per FR-25" but FR-25 is a Phase 2 Standing-Grant requirement — if the intended bound semantics are unclear, STOP and confirm whether "per FR-25" means the NFR-03 cap-visibility rule or something Phase-2-specific, rather than guessing.</trigger>
+    <trigger>If the grep finds ANY live reference to AccessibleRecordSetAuthorizationFilter, STOP — it is not orphaned; removal would delete a real (if misconfigured) gate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test exercises the Tier-2 scope injector with a large id set (A-16 was found by manual code read).</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without the bound test, an oversized in-clause can regress and fail/500 the module fetch for large accessible sets (FR-17 A-16 part).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/AccessibleRecordSetAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ScopeInjectorBoundTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The orphaned AccessibleRecordSetAuthorizationFilter is removed; the solution builds with no dangling references (FR-17 A-15 part).</criterion>
+    <criterion testable="true">A composed accessible set larger than the ~500 bound produces valid, chunked FetchXML — no single oversized in-condition (FR-17 A-16 part).</criterion>
+    <criterion testable="true">Negative: an over-large set is capped-and-surfaced (NFR-03) or correctly chunked — it is NOT silently dropped in a way that over- or under-grants without signal.</criterion>
+    <criterion testable="true">Negative: an empty accessible set still produces a fail-closed (deny/empty) scope, not an unfiltered query.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17 (A-15 + A-16 parts); A-22 node-executor part is task 019. Do NOT change the membership resolver here — only reuse its bound constant.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

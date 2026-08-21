@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-20 — ImpersonatedRootSetSource: thin source over the live impersonated-read primitive, with per-user cache</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-031</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs implementation; tags bff-api/auth; new surface on the row-level-security path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-OPEN risk on row-level security (orchestrator directive for FR-20): app-only is the silent default of the whole Dataverse client — a wrong default parameter here is an org-wide disclosure.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Spaarke.Dataverse/DataverseWebApiService.cs (overload, if needed — orchestrator hot-file list) and Infrastructure/DI/ExternalAccessModule.cs (contended DI file, also edited by 038/042).</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build ImpersonatedRootSetSource — the NEW thin source that answers "which root-record ids can systemuser U read" by asking Dataverse itself: one app-only impersonated id-only query per root entity type via the ALREADY BUILT AND LIVE DataverseWebApiService.RetrieveMultipleImpersonatedAsync (which refuses Guid.Empty). 3 round trips per composition — identical to today's membership queries (NFR-02). Redis-cached per (systemUserId, entityType, version), ≤5-min TTL, mirroring the membership precedent. This task builds and registers the source; task 036 swaps it into the evaluator behind a flag.</prompt>
+  <role>SPAARKE platform developer, C#/.NET + Dataverse Web API + Redis caching. Follow ADRs strictly.</role>
+  <goal>New src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs (+ interface as the ADR-010 testing seam) returning IReadOnlySet&lt;Guid&gt; for (systemUserId, entityType ∈ {sprk_project, sprk_matter, sprk_workassignment}); registered in ExternalAccessModule; unit tests covering the fail-closed contract.</goal>
+
+  <context>
+    <background>Design §4.4 / spec FR-20: Dataverse applies ownership, role depth, BU, teams, POA shares and hierarchy natively — fixing BOTH error directions of pattern-matching (BU-column over-grant; POA-share under-grant) and removing the need for a systemuser allow-list. Investigation 08 §6 T1 sizes this exact task. The primitive is live on the messaging read path (CommunicationModule wiring); the entity-set names and $select id columns are: sprk_projects/sprk_projectid, sprk_matters/sprk_matterid, sprk_workassignments/sprk_workassignmentid. Investigation 08 §3a-3: a cache key omitting systemUserId serves one user's set to another — MembershipResolverService.cs:66-84 is the correct key template.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ImpersonatedRootSetSourceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">ADR-028 A2 amendment sanctioning impersonated derivation (cite it in this PR).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec MUST rules">Scope: every Dataverse call in this class. MUST NOT issue an app-only query on this access-scoped read path: every read goes through RetrieveMultipleImpersonatedAsync with the caller's systemuserid — never a helper whose impersonation parameter is optional-defaulted. Guid.Empty propagates the primitive's throw; NEVER catch-and-degrade to app-only or to an empty-but-200 answer that hides the fault.</constraint>
+    <constraint source="spec NFR-02">Scope: request cost. Exactly one impersonated round trip per (uncached) entity type — id-only $select, bounded $top; no N+1, no eager multi-entity fan-out beyond the three root types.</constraint>
+    <constraint source="ADR-009 + investigation 08 §6 condition 4">Scope: caching. Redis key MUST include systemUserId + entityType + a schema/invalidation version segment; TTL ≤ 5 minutes (membership precedent). Cache DATA (the id set), never a decision. Cache read/write faults fall through to a live query (fail-open on the CACHE only, never on the ANSWER).</constraint>
+    <constraint source="ADR-010">Scope: DI shape. One interface as the testing seam (mirror IImpersonatedCommunicationQuery's precedent); concrete registration in ExternalAccessModule; no speculative abstraction beyond the seam.</constraint>
+    <constraint source="investigation 08 §6 condition 7">Scope: mechanism choice. Stay on the Web API header path (RetrieveMultipleImpersonatedAsync). Do NOT resurrect ServiceClient.Clone()+CallerId — it was deleted unreached and lacks parity tests.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse impersonation, root-set composition, Redis caching</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+    <patterns>
+      <pattern name="impersonated read seam" location="src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs">The proven seam wrapping RetrieveMultipleImpersonatedAsync — copy its shape (interface + thin concrete + explicit caller-id plumbing).</pattern>
+      <pattern name="per-user cache key" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs">Key shape {systemUserId}:{entityType}:{version} + 5-min TTL — the template investigation 08 §3a-3 names as correct.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the primitive (DataverseWebApiService.cs:932-989), DataverseImpersonation.cs, IImpersonatedCommunicationQuery, and the membership cache block.</step>
+    <step order="1">Determine how the BFF resolves the Dataverse client for this seam (how CommunicationModule injects the impersonated query) and whether a $select-only overload on DataverseWebApiService is genuinely needed — prefer ZERO changes to Spaarke.Dataverse; add the overload only if the existing signature cannot express an id-only query.</step>
+    <step order="2">Implement the source: per root type, impersonated GET {entitySet}?$select={idColumn}&amp;$top={cap}; parse ids; return set + a Truncated indicator when the $top cap was hit (consumed by task 036 for NFR-03).</step>
+    <step order="3">Add the Redis cache layer per the caching constraint.</step>
+    <step order="4">Register in ExternalAccessModule with an ADR-010-compliant comment. Do NOT consume it from AccessibleRecordSetService yet (task 036).</step>
+    <step order="5">Unit tests: happy path per entity type; Guid.Empty throws (propagated, not swallowed); Dataverse fault propagates (no empty-set masking); cache hit skips the query; cache fault falls through to live query; unsupported entityType throws.</step>
+    <step order="6">Build + tests; publish-size measurement per §10.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the only way to reach RetrieveMultipleImpersonatedAsync from this layer requires widening a shared abstraction (e.g. adding impersonation to IDataverseService), STOP and escalate — that surface change affects every consumer and needs explicit review, not a drive-by.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DataverseWebApiService.RetrieveMultipleImpersonatedAsync (Spaarke.Dataverse/DataverseWebApiService.cs:953-989, live) is the primitive; MembershipResolverService overlaps as a root-id source but is pattern-matching, not Dataverse's answer, and serves other consumers (briefing, todo, ACS reconcile) that need byRole — investigation 08 §4 watch-item 1: do not replace the resolver, add a parallel source.</existing>
+    <extension>No — extending MembershipResolverService would entangle an authorization answer with an AI-scoping service consumed by non-auth callers; the spec Placement table row 1 mandates a thin new source over the existing primitive.</extension>
+    <cost-of-doing-nothing>Type 1 SPA access keeps disagreeing with the MDA in both directions: BU-matched records leak to users whose role does not cover them, and POA-shared records stay invisible (spec Placement table; FR-20 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ImpersonatedRootSetSourceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GetAsync(systemUserId, "sprk_matter") issues exactly one impersonated id-only query against sprk_matters with MSCRMCallerID = systemUserId and returns the parsed id set; same for sprk_project and sprk_workassignment.</criterion>
+    <criterion testable="true">Negative: GetAsync(Guid.Empty, …) throws (the primitive's guard propagates); no code path catches it into an empty set or an app-only query.</criterion>
+    <criterion testable="true">Negative: a Dataverse fault (non-success status) propagates as an exception — the source NEVER returns a partial/empty set on error.</criterion>
+    <criterion testable="true">Negative: an entityType outside the three root types throws ArgumentException.</criterion>
+    <criterion testable="true">Cache: second call within TTL for the same (user, entityType) issues zero Dataverse queries; a DIFFERENT user's call never sees the first user's set (key includes systemUserId — unit-tested).</criterion>
+    <criterion testable="true">When row count hits the $top cap, the result carries a Truncated indicator (never silent — NFR-03 groundwork).</criterion>
+    <criterion testable="true">AccessibleRecordSetService is byte-unchanged in this task; build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20 + Placement table row 1; investigation 08 §6 T1/T3 (this task folds T3's caching in). PR must cite the ADR-028 A2 amendment (task 031). The swap and the canary gate are task 036's obligations.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

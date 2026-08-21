@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-11 (A-14): Anonymous share links must be tracked and revocable, or disabled</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-002</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs producing an unrevocable anonymous exfiltration artifact (High) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect and its two acceptable resolutions (disable, or track+revoke) are precisely scoped by A-14; the default (disable/expire) is a small, well-bounded change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/FileAccessEndpoints.cs, shared with task 002 (download authorization); serialized after 002.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api, auth, security, endpoints</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-14 (spec FR-11, High): POST /api/documents/{documentId}/share-link mints an anonymous, non-expiring, untracked, unrevocable SharePoint link — a permanent "Anyone-with-the-link" URL that circulates outside all Spaarke controls and survives any later access revocation. Resolve it so no code path mints a permanent, unrevocable anonymous link: default to DISABLING anonymous scope (require an authenticated/organization-scoped link with an expiry), unless the owner elects the track-and-revoke path.</prompt>
+  <role>SPAARKE platform developer. Expert in Microsoft Graph sharing-link creation and the Spaarke file-access surface. Follow ADRs strictly.</role>
+  <goal>The share-link endpoint no longer produces a permanent anonymous link: either anonymous scope is removed (organization/authenticated scope + mandatory expiry), or every minted link is persisted with a revoke path. FR-11 acceptance: no code path mints a permanent, unrevocable anonymous link.</goal>
+
+  <context>
+    <background>Finding A-14 (10-finding-confirmations.md, ranked #3 High): FileAccessEndpoints.cs:640-642 calls CreateSharingLinkAsUserAsync(..., linkType: "view", scope: "anonymous", expiration: null, ...); comment at :637-639 "Non-expiring for now"; URL returned at :653 and NOT persisted to any Spaarke store; grep shows no tracking table and no revoke path. Route: POST /api/documents/{documentId}/share-link (:81). The link is OBO-authorized (caller must already have SPE access) — so this is not an unauth mint; the risk is the artifact's permanence + anonymity + untracked/unrevocable nature. FR-11 offers two acceptable outcomes: (a) tracked + revocable, or (b) disabled. DEFAULT to the smaller safe change: replace scope:"anonymous"+expiration:null with organization/authenticated scope and a bounded expiration; if the product genuinely needs anonymous links, escalate the track-and-revoke build. Note task 002 (also FileAccessEndpoints.cs) lands first — rebase.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ShareLinkPolicyTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Download authorization already merged into FileAccessEndpoints.cs — rebase this change on it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: if a bounded, revocable link cannot be created (e.g. Graph rejects the requested scope), the endpoint returns an error — it MUST NOT fall back to an anonymous non-expiring link. Scope: the share-link handler.</constraint>
+    <constraint source="project">Default resolution: no scope:"anonymous" with expiration:null may remain in the code. If anonymous scope is retained at all, every minted link MUST be persisted with enough identity to revoke it, and a revoke path MUST exist. Scope: the share-link creation call and any new persistence.</constraint>
+    <constraint source="project">If the track-and-revoke path is chosen, it is NEW surface (CLAUDE.md §10/§11): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md; a new store must clear the three-question gate. Scope: this task's PR.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph sharing links</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/graph-endpoints-catalog.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Graph sharing-link scopes and expiration</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm task 002 merged; rebase.</step>
+    <step order="1">Read FileAccessEndpoints.cs:630-668; confirm the anonymous/non-expiring call and that the returned URL is not persisted.</step>
+    <step order="2">Apply the default resolution: set scope to organization/authenticated and expiration to a bounded value (config-driven default). Remove any "anonymous"+null path.</step>
+    <step order="3">Author ShareLinkPolicyTests: the endpoint never requests scope:"anonymous" with null expiration; a link is created with a bounded expiry; a Graph rejection surfaces as an error, not an anonymous fallback.</step>
+    <step order="4">Run full test suite; build green.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document the resolution chosen (disable vs track-and-revoke) and rationale in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a real consumer depends on anonymous links (grep SPA/Teams/PCF for the share-link route), STOP and escalate: removing anonymous scope breaks them; building track-and-revoke is a larger, new-surface change requiring the §11 gate and owner sign-off.</trigger>
+    <trigger>If the tenant sharing policy forbids the chosen scope (Graph 502 per :660-668), STOP and escalate the scope choice rather than reverting to anonymous.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test asserts the share-link scope/expiration policy (A-14 was found by manual code read). The default resolution modifies FileAccessEndpoints.cs only; a tracking store is created ONLY if the track-and-revoke path is chosen, which is escalation-gated and would carry its own §11 gate.</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code. Any new store is deferred behind an explicit escalation, not introduced by default.</extension>
+    <cost-of-doing-nothing>Without the policy test, the endpoint can regress back to anonymous+non-expiring links (A-14) — a permanent unrevocable exfiltration artifact (FR-11).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ShareLinkPolicyTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No code path mints a permanent, unrevocable anonymous link (FR-11 acceptance) — asserted by inspecting the sharing-link request built by the endpoint.</criterion>
+    <criterion testable="true">A created link carries a bounded expiration (not null).</criterion>
+    <criterion testable="true">Negative: when the sharing-link creation fails/rejected, the endpoint returns an error and creates no anonymous fallback link.</criterion>
+    <criterion testable="true">If anonymous scope is retained, every minted link is persisted with a working revoke path (test creates then revokes) — otherwise anonymous scope is absent from the code.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size (+ Placement Justification if a store is added) in PR; ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11; finding A-14 (register §A.2 rank 3). Depends on task 002 (same file). Prefer the disable/expire resolution to keep Phase 0 tight; the track-and-revoke build is a candidate for a later phase if the product needs anonymous sharing.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

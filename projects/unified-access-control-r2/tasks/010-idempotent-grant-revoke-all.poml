@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-09: Make /grant idempotent and /revoke deactivate ALL matching active rows</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the grant lifecycle (authorization path) — FULL per root CLAUDE.md §8; a wrong fix silently retains privilege.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Grant idempotency + revoke-all semantics carry real judgment: the matching key (contact vs org vs root vs level), duplicate-row races, the read-side GroupBy masking, and the /revoke request contract — a wrong fix silently retains privilege after revocation.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** (Grant + Revoke endpoints) — known contended path; task 017 modifies RevokeExternalAccessEndpoint.cs afterwards and depends on this task.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-11 (spec FR-09, High — "silent privilege retention after revoke"): /grant unconditionally CREATES a new sprk_externalrecordaccess row on every call, and /revoke deactivates exactly ONE row by AccessRecordId — so granting twice and revoking once leaves an active grant the participation surface cannot even display (read-side GroupBy masks duplicates). Make /grant idempotent per logical grant key, and make /revoke deactivate ALL active rows matching the revocation target. Granting twice then revoking once must leave zero active grants and effective access None.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse Web API write semantics, idempotency design, and the external grant lifecycle. Follow ADRs strictly.</role>
+  <goal>The grant lifecycle is duplicate-proof in both directions: /grant upserts against the logical key (root record × grantee (contact or organization) — level updates in place), and /revoke queries and deactivates every active row for the logical grant being revoked. After grant→grant→revoke, effective access is None.</goal>
+
+  <context>
+    <background>Finding A-11 (10-finding-confirmations.md, ranked #1): /grant creates unconditionally — GrantExternalAccessEndpoint.cs:147 (CreateAsync) via CreateGrantAsync:130-147, no pre-existence/upsert check anywhere in GrantAccessAsync:62-118. /revoke deactivates one row by request.AccessRecordId — RevokeExternalAccessEndpoint.cs:96-97 (UpdateAsync statecode=1) — root- and grantee-agnostic, never queries sibling active rows. Read-side masking: ExternalParticipationService.QueryGrantSetAsync:469-472 GroupBy(ProjectId).Max(level); matter/WA HashSets (:439,:443) also collapse duplicates; AccessRecordIds are never surfaced. Failure scenario: R1+R2 both active, revoke R1, R2 persists — undetectable. Org-grant note: rows with empty ContactId (org grants) flow through the same GroupBy, increasing duplicate likelihood — the logical key MUST treat (contact) and (organization) grantees distinctly.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning duplicate-row + single-row-revoke behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: if the pre-existence query or the sibling-row sweep errors, the operation FAILS loudly — /revoke must never report success while any matching active row remains unqueried. Scope: both endpoints' error paths.</constraint>
+    <constraint source="project">The logical grant key is (root record id × grantee identity), where grantee is exactly one of contact-id or organization-id — an org grant and a person grant on the same root are DISTINCT logical grants and must not revoke each other. Scope: both the upsert match and the revoke sweep.</constraint>
+    <constraint source="project">Do not change the read-side GroupBy semantics in ExternalParticipationService in this task (Phase 1 rebuilds the evaluator); fix the write side so duplicates stop being created and stop surviving revocation. Scope boundary of this task.</constraint>
+    <constraint source="project">Preserve wire compatibility for existing callers of /grant and /revoke (AccessGrantModal PCF + SPA): request shapes may gain fields but must not break existing payloads. Scope: both endpoint contracts.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>grant lifecycle idempotency</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Endpoint conventions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read both endpoints end-to-end plus ExternalParticipationService's read paths; write down the logical-key definition (root × contact-or-org) and confirm it against the sprk_externalrecordaccess columns actually written by CreateGrantAsync.</step>
+    <step order="2">/grant: before create, query active rows for the logical key. Exact match → no-op success (idempotent); same key different level → update level in place; no match → create. Handle the create race (two concurrent grants) — at minimum, re-query after create and collapse duplicates, or document the accepted race window.</step>
+    <step order="3">/revoke: from the revocation target, derive the logical key (via the AccessRecordId's row), then query ALL active rows matching that key and deactivate every one. Report how many rows were deactivated.</step>
+    <step order="4">Flip the task-001 characterization tests: grant-twice-revoke-once now leaves zero active rows; effective access None via GetGrantSetAsync.</step>
+    <step order="5">Add negative tests: revoking a nonexistent/already-revoked grant is a safe no-op with explicit response; an org grant is NOT swept by revoking a person grant on the same root, and vice versa.</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the logical-key definition, race handling, and any pre-existing duplicate-row data implications in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Pre-existing duplicate active rows in dev data: this task fixes behavior going forward and sweeps duplicates AT revoke time; if a proactive data-cleanup script seems needed, STOP and escalate scope (data migration is not authorized here).</trigger>
+    <trigger>If deriving the logical key from AccessRecordId is impossible for some rows (e.g. legacy rows missing the root lookup), STOP and escalate: fail the revoke loudly vs best-effort sweep is a security judgment call.</trigger>
+    <trigger>If idempotency requires a request-contract change that breaks the AccessGrantModal PCF or SPA callers, STOP and list affected consumers before changing the contract.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Granting the same (root, grantee, level) twice yields exactly one active row; the second call is a no-op success (FR-09 acceptance).</criterion>
+    <criterion testable="true">Granting the same (root, grantee) at a different level updates the existing row's level — no second active row.</criterion>
+    <criterion testable="true">Granting twice then revoking once leaves ZERO active grants; effective access for the grantee on that root is None (FR-09 acceptance).</criterion>
+    <criterion testable="true">Negative: revoking a person grant does not deactivate an org grant on the same root (and vice versa) — the other grantee's access is retained.</criterion>
+    <criterion testable="true">Negative: revoke of an already-inactive or nonexistent grant returns an explicit no-op result, not an error and not silent success-with-rows-remaining.</criterion>
+    <criterion testable="true">Negative: if the sibling-row query fails, /revoke returns an error — it never reports success.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09; finding A-11 (severity rank #1). Task 017 (SPE revoke matcher, same file) depends on this task — do NOT fix the UPN matcher here; keep the diff scoped to row lifecycle. If task 008 (delegation) merges first, its filter sits in front of these routes — tests must authenticate as a Write-holder.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

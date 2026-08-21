@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-05: PermissionsEndpoints returns caller-scoped capabilities</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-004</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (capability disclosure) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Rewire one endpoint onto the caller-scoped evaluation landed by task 004; fully specified by A-4 evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Api/PermissionsEndpoints.cs is touched by no other Phase 0 task and is NOT in a contended directory — independently mergeable. No co-scheduled safe partner in its wave (it runs after 004; the only other safe tasks run in earlier waves).</parallel-reason>
+    <deps>001, 004</deps>
+    <tags>bff-api, auth, endpoints, security</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-4 (spec FR-05, High): the permissions/capabilities endpoint must return CALLER-scoped capabilities. Today PermissionsEndpoints.cs:76 computes capabilities app-scoped, so any authenticated user learns any document's capabilities (and clients render enabled actions the server would only later reject — or worse, not reject, per A-1).</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and the Spaarke authorization seams. Follow ADRs strictly.</role>
+  <goal>GET capabilities responds per-caller: a user without access to the document receives CanPreview=false (and all other capabilities false); a user with access receives capabilities matching their actual rights. The endpoint leaks nothing about documents the caller cannot access.</goal>
+
+  <context>
+    <background>Finding A-4 (design-register §A.1): "PermissionsEndpoints returns app-scoped capabilities" — evidence Api/PermissionsEndpoints.cs:76. Effect: any authenticated user learns any document's capabilities. FR-05 acceptance: a user without access receives CanPreview=false. Task 004 landed caller-scoped evaluation in AuthorizationService and task 005 (parallel, same group) lifts the rights ceiling — compute capabilities FROM the caller-scoped snapshot, mapping rights → capability booleans consistently with OperationAccessPolicy requirements (e.g. CanWrite requires Write, CanPreview requires Read).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/PermissionsEndpoints.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning app-scoped capability disclosure, flipped here.</dependency>
+      <dependency task="004" status="pending">Caller-scoped AuthorizationService to source the per-caller snapshot.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: any error resolving the caller's access yields all-false capabilities (or 403), never app-scoped capabilities. Scope: the capabilities computation changed here.</constraint>
+    <constraint source="ADR-008">Per-document authorization/scoping logic stays in the endpoint filter / service seam, not duplicated inline per capability flag. Scope: PermissionsEndpoints changes.</constraint>
+    <constraint source="project">Capability booleans MUST derive from the same rights snapshot the enforcement path uses — no second, divergent capability calculus. Scope: the mapping introduced by this task.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>capability disclosure</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint conventions</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm task 004 is merged.</step>
+    <step order="1">Read PermissionsEndpoints.cs fully; identify every capability flag returned and its intended rights requirement (cross-reference OperationAccessPolicy).</step>
+    <step order="2">Replace the app-scoped computation at :76 with the caller-scoped snapshot from AuthorizationService; map rights → capabilities in one table-driven place.</step>
+    <step order="3">Decide and implement the no-access response shape: all-false capabilities body (not 403) unless existing clients require otherwise — record the decision.</step>
+    <step order="4">Flip the task-001 characterization test; add positive (Write-holder sees CanWrite=true once 005 lands) and negative (no-access → CanPreview=false) tests.</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Note the capability→rights mapping table in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If SPA/PCF clients break when capabilities become caller-scoped (e.g. UI relies on always-true CanPreview), STOP and report the affected consumers before merging — do not soften the endpoint to keep a client green.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/PermissionsEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A user WITHOUT access to document X receives CanPreview=false and every other capability false for X (FR-05 acceptance).</criterion>
+    <criterion testable="true">A user WITH Read access receives CanPreview=true; capabilities requiring Write remain false unless the caller holds Write.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request returns 401.</criterion>
+    <criterion testable="true">Negative: an access-resolution error yields all-false capabilities (or 403) — never app-scoped values.</criterion>
+    <criterion testable="true">Capabilities derive from the same snapshot as enforcement (code review confirms single source).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05; finding A-4. If 005 has not merged when this lands, CanWrite-class flags will be false for everyone (Read ceiling) — acceptable interim, note it in the PR.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

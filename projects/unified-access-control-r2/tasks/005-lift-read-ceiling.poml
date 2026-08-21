@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-04: Lift the AccessRights.Read ceiling so Write+ policies can pass</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-004</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (rights derivation in Spaarke.Dataverse) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Rights mapping against a documented ceiling defect with the caller-scoped plumbing already landed by task 004; the fix shape is specified by A-20 evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Rights derivation may require a RetrievePrincipalAccess-style call added to Spaarke.Dataverse/DataverseWebApiService.cs (a known-contended file); conservatively serialized. Even if the fix stays inside DataverseAccessDataSource.cs, this touches the auth-rights spine — merge with /conflict-check.</parallel-reason>
+    <deps>001, 004</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the Read-ceiling half of finding A-20 (spec FR-04, High): DataverseAccessDataSource.QueryUserPermissionsAsync returns at most AccessRights.Read on success, so EVERY policy requiring more than Read (upload_file = Write|Create, create_container = Create|Write, candownloadfiles, cansharefiles, …) unconditionally denies. Make the snapshot carry the caller's ACTUAL Dataverse rights (Read/Write/Create/Delete/Share/Append) so Write+ policies pass for genuinely authorized users — without over-granting anyone.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse Web API access evaluation (RetrievePrincipalAccess semantics) and the Spaarke IAccessDataSource seam. Follow ADRs strictly.</role>
+  <goal>An authorized user's access snapshot carries their real rights; canwritefiles / canmanagecontainers succeed for a user with Write/Create in Dataverse; a read-only user is still denied Write+ operations. The rights ceiling defect is gone.</goal>
+
+  <context>
+    <background>Finding A-20 Read-ceiling half (10-finding-confirmations.md): DataverseAccessDataSource.QueryUserPermissionsAsync:305-379 returns at most a single PermissionRecord(..., AccessRights.Read) on success (:368-372, comment "Grant Read access… Dataverse will enforce Write/Delete separately"); it never returns Write/Create/Delete/Share. upload_file = Write|Create (AuthorizationModule.cs:244-245, OperationAccessPolicy.cs:141) and create_container = Create|Write (:246-247, :147) therefore always deny: (Read &amp; required) != required. Affected endpoints: UploadEndpoints.cs:108,159,214; DocumentsEndpoints.cs:61,106,149,192,245,304,365,418. Task 004 has landed: the data source now receives the caller's token on caller-scoped paths — so real per-principal rights are obtainable (e.g. via RetrievePrincipalAccess or an equivalent caller-scoped rights read). CRITICAL direction: the fix must derive rights from Dataverse's answer FOR THE CALLER; it must not blanket-elevate the app-only path (that would convert a fail-closed defect into an over-grant).</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="modify">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning the Read-ceiling denials, flipped here.</dependency>
+      <dependency task="004" status="pending">Caller token reaches the data source — real per-principal rights are queryable.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: an error resolving rights yields NO rights (deny), never a default grant. On the app-only path, rights above Read MUST NOT be granted by inference from app visibility. Scope: QueryUserPermissionsAsync and every path it feeds.</constraint>
+    <constraint source="ADR-028">Rights are derived from the caller-scoped Dataverse answer (OBO), consistent with the task-004 model. Scope: the rights-derivation mechanism chosen here.</constraint>
+    <constraint source="project">The snapshot must never EXCEED the caller's actual Dataverse rights on the record. Scope: all mapping code added by this task.</constraint>
+    <constraint source="project">Spaarke.Dataverse is consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse principal rights mapping</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-obo" location=".claude/patterns/auth/dataverse-obo.md">OBO access to Dataverse Web API</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm task 004 is merged.</step>
+    <step order="1">Read QueryUserPermissionsAsync:305-379 and GetUserAccessAsync:159-227; identify where the Read cap is applied in both SP and OBO modes.</step>
+    <step order="2">Implement caller-scoped rights derivation: query Dataverse for the caller's actual AccessRights on the record (RetrievePrincipalAccess or equivalent) and map the full flag set into the snapshot. Preserve the OBO/SP mode split from task 004.</step>
+    <step order="3">Verify the app-only mode does NOT gain rights above what it had — app visibility must not imply Write.</step>
+    <step order="4">Flip characterization tests; add positive tests (Write-holder passes upload_file / create_container policy evaluation) and negative tests (Read-only holder denied).</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the rights-mapping table (Dataverse right → AccessRights flag) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If deriving real rights adds Dataverse round trips beyond the existing per-request budget (NFR-02 spirit), STOP and escalate with measurements before adding a per-operation query.</trigger>
+    <trigger>If any existing consumer DEPENDS on the Read ceiling (i.e., would newly grant Write somewhere unaudited), STOP and list those consumers for review before merging.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</output>
+    <output type="test">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller holding Write/Create on the record passes canwritefiles (upload_file = Write|Create) and canmanagecontainers (create_container = Create|Write) policy evaluation (FR-04 acceptance).</criterion>
+    <criterion testable="true">Negative: a caller holding only Read is denied upload_file and create_container.</criterion>
+    <criterion testable="true">Negative: a caller with NO access to the record receives an empty/deny snapshot (no rights).</criterion>
+    <criterion testable="true">Negative: an error during rights resolution denies — no default rights are granted.</criterion>
+    <criterion testable="true">The snapshot never exceeds the caller's actual Dataverse rights (asserted by test with a mocked Dataverse answer).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; finding A-20 Read-ceiling half (policy keys are task 003). File-disjoint from task 006 (PermissionsEndpoints) but conservatively parallel-safe:false because the rights read may extend DataverseWebApiService.cs.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

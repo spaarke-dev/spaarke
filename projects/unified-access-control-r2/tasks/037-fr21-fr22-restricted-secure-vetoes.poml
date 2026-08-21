@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-21 + FR-22 — Restricted post-max veto and Secure pre-max suppression, for every principal kind</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-032</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs implementation of two security vetoes; tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified veto semantics (design §4.5 + spec FR-21/22 give exact behavior and negative cases); default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list).</parallel-reason>
+    <deps>032</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fill two of the task-032 veto seams. FR-21: sprk_accesspermission = Restricted (raw value 100000002 on sprk_project — VERIFY against live metadata per step 1) vetoes EVERY contact-sourced contribution after the max, regardless of grant source — a contact with an explicit Full Access grant is still denied. FR-22: sprk_issecure = true suppresses the derived-member and org-expansion terms BEFORE the max for EVERY principal kind — including a Type 1 systemuser whose linked contact holds a standing or organization grant. Direct personal explicit grants and the Dataverse-answer term survive Secure; nothing survives Restricted for contact principals. "No Access" is NEVER a level: both vetoes remove entries; they never feed the max.</prompt>
+  <role>SPAARKE platform developer, C#/.NET authorization internals. Follow ADRs strictly.</role>
+  <goal>A root-record flag read (sprk_issecure + sprk_accesspermission for candidate root ids, app-only, batched) feeding: (a) the pre-max Secure suppression hook — standing-grant membership term and org-derived grant contributions dropped for secure records on every plane; (b) the post-max Restricted veto — all contact-sourced rights removed on Restricted records. Closed-set unit tests including both spec negative cases.</goal>
+
+  <context>
+    <background>Design §4.5 vetoes 7-8 and §5.1: "The veto must apply regardless of principal kind: a Type 1 user whose contact holds a standing or org grant would otherwise derive access through the contact term, which Dataverse knows nothing about. The Secure BU covers the Dataverse half; the veto covers the grant half. Both are required." Register B-9/B-10; C-10 resolved: Secure applies to Type 1 too. sprk_accesspermission raw values per TrackingFieldTrio/index.ts:136-138 — STANDARD 100000000, LIMITED 100000001, RESTRICTED 100000002 (on sprk_project; verify per-entity presence for matter/WA). Restricted semantics per register F-4: "only system users may have access" — the systemuser's own Dataverse-answer/membership term survives; every contact-sourced term is vetoed.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">The rights-map evaluator with named pre-max suppression hook + ordered post-max veto slots.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 (as amended by task 030)">Scope: veto mechanics. Restricted is evaluated post-max, AFTER the deny-list slot (order: deny-list → Restricted); Secure is pre-max suppression. Neither may be expressed as a rights level anywhere — a veto removes map entries. A test MUST prove max() cannot resurrect a vetoed record.</constraint>
+    <constraint source="spec FR-21">Scope: Restricted semantics. Denies ALL contact principals regardless of grant source (explicit grant, org grant, standing membership) AND removes contact-sourced contributions from a SystemUser principal's map; the systemuser plane's own Dataverse/membership term survives.</constraint>
+    <constraint source="spec FR-22">Scope: Secure semantics. Suppresses derived-member (standing-grant membership) and org-expansion (org-inherited grant) terms for EVERY principal kind BEFORE the max. Survivors: the Dataverse-answer/membership term (term 1) and DIRECT personal explicit grants (rows whose contact FK is the caller's own contact). Suppression must be structural (the term never contributes for that record), not a post-hoc subtraction.</constraint>
+    <constraint source="spec NFR-01">Scope: flag reads. A failed or ambiguous flag read for a record DENIES that record for contact-sourced terms (treat unreadable as Secure+Restricted, not as open). Missing access data denies.</constraint>
+    <constraint source="spec NFR-02">Scope: request cost. Flag reads are batched (one query per root entity type over candidate ids, or joined into an existing read) — no per-record round trip.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Secure/Restricted veto semantics, evaluator term suppression</topic>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md</file>
+    </files>
+    <patterns>
+      <pattern name="batched root read" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">The OData batched-filter style (or-joined id filters, $select minimal columns) used for grant reads is the shape for the flag read.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the post-032 evaluator, design §4.5/§5.1, register B-9/B-10/C-10/F-4.</step>
+    <step order="1">Verify flag columns against live metadata: sprk_issecure and sprk_accesspermission on sprk_project; determine whether sprk_matter / sprk_workassignment carry them (grep schema docs + query EntityDefinitions). Record which root types each veto applies to. If sprk_accesspermission's Restricted raw value differs from 100000002, use the live value and note it.</step>
+    <step order="2">Implement the batched flag read for candidate root ids (app-only; per-request, no cross-request caching of the decision — cache raw flag DATA only if a TTL ≤ 60s precedent is followed and keyed by record id).</step>
+    <step order="3">Fill the pre-max Secure suppression hook: for records flagged secure, the standing-membership term and org-inherited grant contributions are excluded on BOTH planes; direct personal grants + term 1 unaffected. Split the grant partitioning in ExternalParticipationService (or downstream) so direct-vs-org-inherited provenance is distinguishable — required for suppression AND for later FR-30 provenance.</step>
+    <step order="4">Fill the Restricted post-max veto slot per the FR-21 constraint, ordered after the (still no-op) deny-list slot.</step>
+    <step order="5">Tests (closed set below), including provenance-split regression on the existing grant tests.</step>
+    <step order="6">Build + tests; publish-size measurement per §10.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document flag-column verification results + any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_matter / sprk_workassignment lack the sprk_issecure or sprk_accesspermission columns, STOP and escalate the scoping question (vetoes on projects only vs. schema addition) per CLAUDE.md §6 — do not silently narrow the veto to projects.</trigger>
+    <trigger>If distinguishing direct-vs-org-inherited grant provenance requires restructuring ExternalGrantSet beyond an additive provenance field, STOP and coordinate with task 032's shape before proceeding.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-21 negative: a contact holding an explicit FullAccess grant on a Restricted record → RightsFor(record) == None (denied regardless of grant source).</criterion>
+    <criterion testable="true">FR-21: a SystemUser principal on a Restricted record keeps its term-1/membership rights but loses all contact-grant-sourced contributions (test with a dual-identity user).</criterion>
+    <criterion testable="true">FR-22 negative: a Type 1 systemuser whose linked contact holds a STANDING grant does not derive access to a secure project (spec FR-22 acceptance).</criterion>
+    <criterion testable="true">FR-22 negative: a contact whose access to a secure record comes ONLY via an org-inherited grant → None; the SAME contact with a direct personal grant on the same secure record → the grant's mapped rights (survivor case).</criterion>
+    <criterion testable="true">Ordering: with a test-double deny entry AND Restricted both applicable, the deny veto evaluates first (observable via veto-reason provenance or seam instrumentation); Secure suppression demonstrably occurs BEFORE the max (a suppressed Collaborate term cannot outbid a surviving ViewOnly grant — result is exactly Read).</criterion>
+    <criterion testable="true">Never-a-level: no ExternalAccessLevel / AccessRights value represents "No Access"; a vetoed record is ABSENT from Rights and RecordIds — pinned by test.</criterion>
+    <criterion testable="true">Fail-closed negative: a faulted flag read yields denial of contact-sourced terms for the affected records (test with a throwing flag reader).</criterion>
+    <criterion testable="true">Non-secure, non-restricted records: full existing suite behavior unchanged; build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21/FR-22; design §4.5 (vetoes 7-8) + §5.1; register B-9/B-10, C-10, F-4. The deny-list slot stays a no-op here — task 039 fills it. The org-EXPANSION membership term (Phase 2, task 043) must route through the same suppression hook; leave the hook plane-agnostic.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

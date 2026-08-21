@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="unified-access-control-r2">
+  <metadata>
+    <title>Access-path characterization + negative test suite (pre-change baseline)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** — TEST-MODIFYING override (root CLAUDE.md §8) mandates code-review + adr-check unconditionally; also tags include auth/testing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified test authoring against enumerated, already-confirmed behaviors; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, unit-test, auth, bff-api, security</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the characterization and negative test suite for the Spaarke access-control path BEFORE any Phase 0 behavior change ships (spec NFR-07 — the current baseline is near-zero). Pin CURRENT behavior (including currently-broken behavior) with clearly-labeled characterization tests, and add negative/authorization tests that must already pass, so every subsequent Phase 0 fix flips a pinned expectation deliberately instead of changing behavior invisibly.</prompt>
+  <role>SPAARKE platform developer. Expert in xUnit, WebApplicationFactory in-proc endpoint testing, and ASP.NET Core authorization. Follow ADRs strictly.</role>
+  <goal>A green test suite under tests/unit/Sprk.Bff.Api.Tests/AccessControl/ (new folder) and tests/unit/Spaarke.Core.Tests/Auth/ that (a) characterizes current behavior of every endpoint/service Phase 0 tasks 002–019 will change, using a Characterization_ name prefix, and (b) asserts the negative cases that already hold (401 unauthenticated, fail-closed denials). Every task 002–019 will later update the corresponding Characterization_ test to the fixed expectation.</goal>
+
+  <context>
+    <background>Spec NFR-07: "Phase 0 builds the characterization suite for the access path before Phase 1 changes behaviour. The current baseline is near-zero." All 22 findings are confirmed with file:line evidence in notes/investigation/10-finding-confirmations.md and design-register §A.1. This task pins that evidence as executable tests. Examples of behavior to pin: GET /api/documents/{id}/download streams with no per-document authorization (FileAccessEndpoints.cs:101-109, :865 — finding A-1); AuthorizationService passes userAccessToken: null (AuthorizationService.cs:48-52 — A-2); "read"/"finance.read"/"finance.confirm"/"entity.associate_document" are unconditional 403 via OperationAccessRule unknown-operation denial (OperationAccessPolicy.cs:25-149, OperationAccessRule.cs:35-46 — A-3/A-20); /grant creates duplicate active rows and /revoke deactivates one row (GrantExternalAccessEndpoint.cs:130-147, RevokeExternalAccessEndpoint.cs:96-97 — A-11); sprk_expiresdate is never read (ExternalParticipationService.cs:405-407 — A-5); PATCH /api/v1/external/todos/{id} has no record-scope check (ExternalProjectDataEndpoints.cs:328-345 — A-7); the FetchXML guard admits same-entity self-joins (ExternalModuleDataEndpoints.cs:160-172 — A-17); CachedAccessDataSource key omits auth mode (CachedAccessDataSource.cs:65 — A-19).</background>
+    <relevant-files>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationPolicyCharacterizationTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</file>
+      <file role="new">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">All tests added by this task are MAINTAIN-class at KEEP paths (tests/unit/**). Banned in every file this task creates: Mock&lt;HttpMessageHandler&gt;, DI-registration assertions, ctor null-check tests.</constraint>
+    <constraint source="ADR-038">Fixture config first: when a test cannot reach the code under test, inspect fixture claims/config per docs/procedures/test-fixture-contracts.md before Skip-ing. Scope: every test in this suite.</constraint>
+    <constraint source="ADR-003">Characterization tests MUST NOT weaken fail-closed behavior to make a test pass — pin the deny, do not relax it. Scope: all assertions in this suite.</constraint>
+    <constraint source="project">This task changes ZERO production code. Scope: nothing under src/** may be modified; if a production change seems required to make a path testable, STOP and escalate.</constraint>
+    <constraint source="project">Every Characterization_ test that pins currently-broken behavior MUST carry a comment naming the finding (A-nn) and the Phase 0 task id that will flip it. Scope: all Characterization_ tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>access-control testing baseline</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">Naming + arrange/act/assert conventions</pattern>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Mock at the IDataverseClient / IAccessDataSource seam, never HttpMessageHandler</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read 10-finding-confirmations.md end-to-end; list every Phase 0 finding with its file:line and the behavior to pin.</step>
+    <step order="2">Study CustomWebAppFactory + AuthorizationTests.cs for the established in-proc endpoint test pattern and auth fixture claims.</step>
+    <step order="3">Author the characterization tests per file layout above: pin current behavior (e.g. download returns 200 for an authenticated caller with no document access; unknown operation strings deny; duplicate grant rows both active; expired grant still confers access at the service seam).</step>
+    <step order="4">Author the negative tests that must already pass: 401 for unauthenticated callers on each Phase 0 endpoint; OperationAccessRule denies unknown operations (fail-closed); RetrieveMultipleImpersonatedAsync refuses Guid.Empty.</step>
+    <step order="5">Run the suite; all tests green. Run the full existing test suite; no regressions.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any path that proved untestable without production change in projects/unified-access-control-r2/notes/ and escalate it.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If pinning a behavior requires modifying production code (e.g. an internal seam is unreachable), STOP and escalate per CLAUDE.md §6 rather than changing src/** in this task.</trigger>
+    <trigger>If a confirmed finding cannot be reproduced by a test (behavior differs from 10-finding-confirmations.md), STOP and report the discrepancy — do not silently pin the different behavior.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs + FileOperationsTests.cs exist but cover none of the 22 confirmed findings (verified by the investigation passes; spec NFR-07 states the access-path baseline is near-zero).</existing>
+    <extension>Yes — new test files extend the existing Sprk.Bff.Api.Tests / Spaarke.Core.Tests projects; no new test project is created.</extension>
+    <cost-of-doing-nothing>Tasks 002–019 change authorization outcomes with no pinned baseline; a wrong fix (e.g. FR-09 revoke leaving an active row) ships undetected because no test observes the current or intended behavior.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">dotnet test tests/unit/Sprk.Bff.Api.Tests tests/unit/Spaarke.Core.Tests</tool></tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationPolicyCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every finding remediated by tasks 002–019 (A-1…A-22 subset in Phase 0 scope) has at least one Characterization_ test pinning the current behavior, commented with the finding id and the flipping task id.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to GET /api/documents/{id}/download, GET permissions, POST /grant, POST /revoke, and PATCH /api/v1/external/todos/{id} returns 401 — asserted by tests.</criterion>
+    <criterion testable="true">Negative: OperationAccessRule denies an operation string absent from OperationAccessPolicy (fail-closed) — asserted by test.</criterion>
+    <criterion testable="true">Zero files under src/** are modified by this task (git diff confirms).</criterion>
+    <criterion testable="true">No test in the new suite uses Mock&lt;HttpMessageHandler&gt;, asserts DI registrations, or tests ctor null-checks.</criterion>
+    <criterion testable="true">All new and existing unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-07, findings register design-register.md §A. Caution: .claude/constraints/auth.md and .claude/patterns/auth/uac-access-control.md carry known drift (design-register §G) — trust code over those docs. The Characterization_ prefix is the contract: later tasks grep for it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
