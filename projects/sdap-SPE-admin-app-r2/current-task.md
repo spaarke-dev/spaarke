@@ -9,18 +9,22 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **005** — Diagnose + fix Audit Log ([`tasks/005-fix-audit-log.poml`](tasks/005-fix-audit-log.poml)) |
+| **Task** | **Wave W2** — 004 (owns GraphService) · 010 (auth spike) · 040 (WireMock harness) |
 | **Status** | not-started |
-| **Phase** | 1 — Workstream A · Wave W1 (last of three) |
-| **Rigor** | FULL · sonnet @ **xhigh** · owns `SpeAuditService` |
+| **Phase** | 2 — Workstream B/D · Wave W2 |
+| **Rigor** | FULL · 010 is **opus** @ xhigh and can reopen the ADR gate |
 | **Started** | — |
 
 ## Next Action
 
-Run task **005**. It is the last W1 task; 002 ✅ and 003 ✅ are done. Then Wave W2 (004, 010, 040).
+**Wave W1 is complete** (002 ✅ · 003 ✅ · 005 ✅). Next is **Wave W2**: 004, 010, 040.
 
-⚠️ **005 is uncapped** — the Audit Log root cause is not isolated. Its `<escalation>` trigger is a legitimate
-stop if the cause turns out to be outside the task's scope.
+🔔 **Task 010 is the project's highest-risk node.** Opus tier, xhigh. An `UNWORKABLE` verdict blocks 011 —
+and everything from 020 onward depends on 011. **Do not fall back to BFF-identity OBO silently**; re-run the
+CLAUDE.md §6.5 gate.
+
+Task **040** (WireMock harness) also lands here, and it is what would finally let tasks 002/005 prove their
+deferred empirical criteria.
 
 ---
 
@@ -51,6 +55,19 @@ aliases. Fixed in `753c9ebc1`. The page builds (`✓ built in 23.24s`).
 ---
 
 ## Session Context
+
+### 🔑 The recurring defect shape — now confirmed THREE times
+
+A lower layer collapses a failure into an **absent/empty result** that an upper layer reads as success:
+
+| Task | Where truth was lost |
+|---|---|
+| 003 | `LoadContainerTypeConfigsAsync` returned `Array.Empty<>()` on a Dataverse exception → indistinguishable from "none registered" → `SyncSucceeded = true` |
+| 005 | `SpeAuditService` swallowed every write failure → audit table silently empty (0 rows) for the life of the app |
+| 002 | `BulkOperationService` caught raw `ODataError` (ADR-007 leak, fixed) |
+
+**Look for this shape first** in 004 and the remaining screens — not for error swallowing in the Graph
+service, which task 002 proved is already correct.
 
 ### 🔑 The load-bearing correction from task 002
 

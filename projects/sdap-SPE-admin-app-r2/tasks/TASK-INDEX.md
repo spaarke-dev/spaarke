@@ -25,7 +25,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 001 | [Real error surface via ProblemDetails](001-real-error-surface.poml) | 1 A | A01 | FULL | sonnet | high | W0 | ❌ | — | ✅ |
 | 002 | [Audit 70 `catch (ODataError)` sites](002-odata-error-audit.poml) | 1 A | A02 | FULL | sonnet | xhigh | W1 | ❌ | 001 | ✅ |
 | 003 | [Sync Status reflects real outcomes](003-sync-status-truth.poml) | 1 A | A03 | FULL | sonnet | high | W1 | ✅ | 001 | ✅ |
-| 005 | [Diagnose + fix Audit Log](005-fix-audit-log.poml) | 1 A | A05 | FULL | sonnet | xhigh | W1 | ✅ | 001 | 🔲 |
+| 005 | [Diagnose + fix Audit Log](005-fix-audit-log.poml) | 1 A | A05 | FULL | sonnet | xhigh | W1 | ✅ | 001 | ✅ |
 | 004 | [Diagnose + fix Search](004-fix-search.poml) | 1 A | A04 | FULL | sonnet | xhigh | W2 | ❌ | 001 | 🔲 |
 | 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | 🔲 |
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | 🔲 |
@@ -62,7 +62,7 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 | Wave | Tasks | Prerequisite | Concurrency | Notes |
 |---|---|---|---|---|
 | **W0** | 001 ✅ | — | 1 (serial) | **Done 2026-08-21.** 60 error sites routed; endpoint-layer only (no GraphService change needed). ⚠️ UI verification blocked — SpeAdminApp build broken by a pre-existing missing dep; see `notes/task-001-completion.md` |
-| **W1** | **002** ✅, 003 ✅, 005 | 001 ✅ | 3 | **002 done 2026-08-21** — premise did not hold; the 70 sites were already correct (404-filtered + translating wrappers). One real ADR-007 defect found + fixed in `BulkOperationService`. 003 owns DashboardSync; 005 owns AuditService |
+| **W1** ✅ | **002** ✅, 003 ✅, 005 ✅ | 001 ✅ | 3 | **002 done 2026-08-21** — premise did not hold; the 70 sites were already correct (404-filtered + translating wrappers). One real ADR-007 defect found + fixed in `BulkOperationService`. 003 owns DashboardSync; 005 owns AuditService |
 | **W2** | **004**, 010, 040 | 001 ✅ | 3 | 004 owns GraphService; 010 is notes-only; 040 is test-project-only. 🔔 **010 may reopen the ADR gate** |
 | **W3** | **011**, 012, 013 | 010 ✅ **WORKABLE** | 3 | 011 owns TokenProvider + GraphService; 012 owns filter + client; 013 is Azure config |
 | **W4** | **020**, 030 | 011, 040 ✅ | 2 | 020 owns GraphService; 030 is client-only |

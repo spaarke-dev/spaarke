@@ -4,7 +4,7 @@
     <title>Diagnose and fix the Audit Log screen (Dataverse-side)</title>
     <phase>1 Workstream A — Make failures visible</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF; brownfield root-cause work; tags include bff-api and dataverse.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,6 +98,18 @@
   </acceptance-criteria>
 
   <notes>Spec FR-A05. Owner decision OC-02 makes this an uncapped commitment to fix. Parallel-safe: owns AuditLogEndpoints.cs + SpeAuditService.cs, does NOT touch SpeAdminGraphService.cs — runs alongside task 002 in Wave 1.</notes>
+
+
+  <completion>
+    <date>2026-08-21</date>
+    <summary>Classification (b) - the code queried columns that do not exist. Established EMPIRICALLY against the live Spaarke Dev org via Dataverse MCP: `SELECT sprk_targetresource FROM sprk_speauditlog` returns "'sprk_SPEAuditLog' entity doesn't contain attribute with Name = 'sprk_targetresource'". That is the error behind the screen's message. Root cause recorded BEFORE any fix, per the binding constraint.</summary>
+    <bigger-finding>The WRITE path is broken the same way and swallows its own failures, so there is nothing to read even once the read is fixed. `SELECT COUNT(*) FROM sprk_speauditlog` = 0 rows despite the app having been exercised. Five independent write defects, each fatal to the create: sprk_name (NOT NULL) never written; sprk_targetresource does not exist; two @odata.bind nav properties wrong; sprk_category written as a string when it is a CHOICE (and only one of the nine caller categories even matches an option name). This is the THIRD instance in this project of the same shape - a lower layer collapsing a failure into an absent/empty result an upper layer reads as success.</bigger-finding>
+    <read-fixes>$select targetresource -> targetresourceid + targetresourcename; lookup _sprk_containertypeconfigid_value -> _sprk_containertypeconfig_value; GUID unquoted (Edm.Guid, bare-lowercase per ADR-044); category filtered as option-set int; DTO Category -> int? plus derived categoryLabel. The false comment asserting that lookup GUIDs "require single quotes" is replaced - it was the only place in the codebase saying so; 29 of the other 30 lookup filters in src/ already used a bare literal.</read-fixes>
+    <escalation-triggers>Both evaluated, NEITHER fires. Not a privilege or audit-setting problem (so no operator action needed). Not an imagined TABLE - the table is real and well-shaped; the code was built against imagined COLUMN NAMES on it, which is fixable in code, so removing the screen is not warranted.</escalation-triggers>
+    <verified>Corrected column set executes cleanly against live Dataverse; dotnet build 0 errors; 10,592 unit tests pass (+19 new); ArchTests 36/36; publish 43.68 MB compressed (unchanged); read-only - no schema change, no privilege grant.</verified>
+    <not-verified>End-to-end "the screen renders entries" NOT verified: no deployed app/BFF, AND the table has 0 rows so even a perfect read renders empty until the fixed write path runs in a real environment. Confirmation once deployed: perform any audited operation, then re-run the COUNT - it should be non-zero for the first time.</not-verified>
+    <notes>projects/sdap-SPE-admin-app-r2/notes/audit-log-root-cause.md</notes>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
