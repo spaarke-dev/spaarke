@@ -364,14 +364,29 @@ not worked around per task.
   logged MI-FIC as risk **R23** with the 20-FIC cap. **Minimum ask**: keep the "configure BFF confidential
   credential" step pluggable, and contribute Model-1/Model-2 constraints as first-class Phase 0 input. Auth-v4's
   outcome will land as a change request against shipped handlers.
-- **`dataverse-access-unification-r1` (RED-4 C)** — **not a prerequisite; expect parallel execution.** The earlier
-  "let it land first" framing is **retracted** (rationale in [`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md) §2).
-  It does not touch `GraphClientFactory`, and the two files it deletes (`DataverseWebApiService`,
-  `DataverseWebApiClient`) are **app-only** — none of auth-v4's OBO risk depends on it. The overlap is **four
-  files** with an explicit contract (§4 of that note); `DataverseServiceClientImpl.cs` is the only one needing real
-  sequencing, since their decomposition relocates the credential block we edit in place. Merging the projects is
-  considered and rejected in §3 of that note — it would couple a fail-closed credential migration to a ~5,600-LOC
-  security-semantics refactor under one rollback boundary.
+- **`dataverse-access-unification-r1` (RED-4 C)** — ⛔ **INACTIVE / NOT SCHEDULED** (owner, 2026-08-20:
+  investigation determined it was not valuable to do). **There is no sequencing question left, and no interlock.**
+
+  The correction history is kept because the *reasoning* still matters, and PR #801 was opened to fix it:
+
+  1. The original framing — *"let it land first; it deletes a secret consumer for free"* — was **wrong on the
+     mechanism**. It deletes `DataverseWebApiService` + `DataverseWebApiClient`, both of which read the secret, but
+     **both already degrade to Managed Identity when the secret is absent** (`DataverseWebApiService` is flag-gated
+     and never reads it with MI on; `DataverseWebApiClient` falls through to `DefaultAzureCredential` at `:50-52`).
+     **Neither ever blocked removal of `BFF-API-ClientSecret`.**
+  2. The actual blockers are the paths with **no working fallback**, and none of them are that project's:
+     `DataverseOptions.ClientSecret` (`[Required]` + `ValidateOnStart` ⇒ startup crash), `GraphClientFactory`,
+     `DataverseAccessDataSource`, `DataverseUserClient`, `AgentTokenService`.
+  3. The genuine reasons to sequence were only ever **contention** on `Spaarke.Dataverse` and avoiding churn on
+     classes about to be deleted — a convenience argument, not a dependency.
+
+  **What the shelving changes for us**: the two classes are **not** being deleted, so task 010's `DataverseWebApiClient`
+  gating fix is **permanent value rather than churn**, and `DataverseServiceClientImpl.cs` no longer needs
+  cross-project sequencing. Their §4 four-file contract and the merge-the-projects rejection in §3 of
+  [`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md) are
+  now moot; the note is retained as the record of the analysis.
+
+  Full analysis: [`projects/dataverse-access-unification-r1/notes/auth-v4-coordination-memo.md`](../dataverse-access-unification-r1/notes/auth-v4-coordination-memo.md) §4.
 - **Open PR #293** (`Azure.Identity` 1.17.1→1.21.0) is directly relevant — newer `ClientAssertionCredential` /
   `ManagedIdentityCredential` behavior. Coordinate rather than conflict.
 - **`speadmin-decomposition-r1`** decomposes `SpeAdminGraphService` — out of auth-v4's scope but adjacent; confirm

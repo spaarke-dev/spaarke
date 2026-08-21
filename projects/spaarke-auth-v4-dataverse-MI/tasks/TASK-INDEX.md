@@ -95,7 +95,7 @@ boundary. A dispatched agent will fail with "Edit denied"; that is the boundary 
 |---|---|---|
 | **We owe them** | `customer-provisioning-orchestration-r1` | **Task 030** before their Wave G-3, else their task 130 builds a duplicate |
 | **They owe us** | `customer-provisioning-orchestration-r1` | Confirm Model 2's FIC issuer is not cross-tenant (`PROVISIONING-CHANGE-REQUEST.md` §9.2) |
-| **Interlock** | `dataverse-access-unification-r1` | 4 files; `DataverseServiceClientImpl.cs` needs real sequencing (tasks 010, 011, 022) |
+| ~~Interlock~~ | `dataverse-access-unification-r1` | ⛔ **CLEARED 2026-08-20 — project INACTIVE / not scheduled** (owner: investigation found it not valuable). No sequencing, no shared-file contention. `DataverseWebApiService` + `DataverseWebApiClient` are **not** being deleted, so task 010's gating fix on the latter is permanent, and `DataverseServiceClientImpl.cs` needs no cross-project sequencing in 010/011/022 |
 | **Watch** | Open PR #293 | `Azure.Identity` 1.17.1→1.21.0 affects `ClientAssertionCredential` |
 
 ## Deferred scope — Phase 4 (Power BI), owner decision 2026-08-19

@@ -127,8 +127,9 @@ MAINTAIN-class so `/test-diet` at wrap-up does not delete the mechanism this pro
 - **`customer-provisioning-orchestration-r1`** — change request accepted + applied. **We owe them task 030**
   (the `Register-EntraAppRegistrations.ps1` FIC extension) before their Wave G-3, or their task 130 builds a
   duplicate. One item raised back: `PROVISIONING-CHANGE-REQUEST.md` §9.2 (Model 2 FIC issuer tenancy).
-- **`dataverse-access-unification-r1`** — parallel, **not** a prerequisite. Four-file interlock in
-  `COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md` §4. `DataverseServiceClientImpl.cs` needs real sequencing.
+- **`dataverse-access-unification-r1`** — ⛔ **INACTIVE / NOT SCHEDULED** (owner, 2026-08-20). The four-file
+  interlock in `COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md` §4 is **cleared** — no sequencing, no contention.
+  `DataverseWebApiService` + `DataverseWebApiClient` are **not** being deleted, so edits to them are permanent.
 - Run `/conflict-check` on every PR. `.claude/` tasks are **main-session-only** (sub-agent write boundary).
 
 ## Definition of done
