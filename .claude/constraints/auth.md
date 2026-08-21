@@ -196,7 +196,19 @@ if (!result.IsAllowed)
 }
 ```
 
-**Note**: Single rule model (`OperationAccessRule`) - Dataverse handles all permission computation (teams, roles, sharing). Uses `RetrievePrincipalAccess` in app-only contexts; uses direct query pattern in OBO contexts because `RetrievePrincipalAccess` does NOT work with OBO tokens.
+**Note**: Single rule model (`OperationAccessRule`).
+
+> ⚠️ **Corrected 2026-08-20** (`unified-access-control-r2` investigation). The previous text claimed
+> `RetrievePrincipalAccess` is used in app-only contexts. **It is not — it has zero call sites in the
+> repository.** Both modes run the same direct query `GET sprk_documents({id})` and grant at most
+> `AccessRights.Read` (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323,368-372`).
+>
+> Further, `Spaarke.Core/Auth/AuthorizationService.cs:48-52` always passes `userAccessToken: null`, so on
+> that path the probe runs **as the application, not as the caller** — it answers "can the app see this
+> record", not "can this user see it". Do not rely on `AuthorizationService` for caller-scoped access
+> decisions until this is remediated (UAC-r2 Phase 0). The genuinely caller-scoped paths today are
+> `AiAuthorizationService` (real OBO) and the impersonated read seam
+> (`DataverseWebApiService.RetrieveMultipleImpersonatedAsync`, `MSCRMCallerID`).
 
 **See**: [UAC Access Control Pattern](../patterns/auth/uac-access-control.md)
 

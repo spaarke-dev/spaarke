@@ -1,17 +1,18 @@
 # Dataverse Access-Layer Routing (which `IDataverseService` impl serves what — and the traps)
 
-> **Status**: canonical routing map · **Last Reviewed**: 2026-08-15 (r3 RED-4 hardening)
+> **Status**: canonical routing map · **Last Reviewed**: 2026-08-20 (`unified-access-control-r2` drift
+> correction — Auth column updated: the #3b MI migration LANDED 2026-08-17, commit `a76e7e714`)
 > **Why this exists**: two impls back one composite interface; a mis-route already shipped a bug
 > (`GraphModule.cs:74-77`). Read this before injecting a Dataverse interface or editing either impl.
 > **Projects**: interim `dataverse-access-hardening` (fences the traps) · `dataverse-access-unification-r1`
-> (retires them) · `#3b` MI migration (task 011/NG1).
+> (retires them) · `#3b` MI migration (task 011/NG1 — **done**, proven live on dev).
 
 ## The two implementations
 
 | Impl | Mechanism | Auth (today) | Role |
 |---|---|---|---|
-| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | `ClientSecret` (`API_CLIENT_SECRET`) — **ADR-028 violation, #3b** | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
-| `DataverseWebApiService` | REST / `HttpClient` | `ClientSecret` (`Dataverse:ClientSecret`) — **ADR-028 violation, #3b** | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
+| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | **MI-first** (ADR-028 §24): `Graph:ManagedIdentity:Enabled=true` → `DefaultAzureCredential` pinned to the UAMI (`DataverseServiceClientImpl.cs:54-73`); `ClientSecret` (`API_CLIENT_SECRET`) retained as local-dev fallback only | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
+| `DataverseWebApiService` | REST / `HttpClient` | **MI-first** (ADR-028 §24): same flag → `DefaultAzureCredential` (`DataverseWebApiService.cs:53-65`); `ClientSecret` (`Dataverse:ClientSecret`) retained as local-dev fallback only | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
 
 ## Routing table (`Infrastructure/DI/GraphModule.cs:44-82`)
 
@@ -89,8 +90,11 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    (all event callers inject `IEventDataverseService`, all field-mapping callers inject
    `IFieldMappingDataverseService`); full BFF suite 10,427 pass.
 
-## Auth (#3b)
+## Auth (#3b) — ✅ LANDED 2026-08-17
 
-Both impls use a client secret → ADR-028 §24 mandates Managed Identity. Migration is constructor-scoped per
-impl, routed to task 011/NG1 (`notes/task-011-ng1-3b-mi-migration.md`). Grant `prvActOnBehalfOfAnotherUser`
-to the MI app-user for the impersonated write path; never remove the secret until MI is proven live.
+Both impls are now **MI-first** per ADR-028 §24 (commit `a76e7e714`, "proven live on dev"): when
+`Graph:ManagedIdentity:Enabled=true`, each constructor builds a `DefaultAzureCredential` pinned to the UAMI
+(`ManagedIdentity:ClientId`); the client-secret path is the local-dev fallback and is retained (do NOT remove
+`Dataverse:ClientSecret` / `API_CLIENT_SECRET`) per the migration's own guard comments. Original plan:
+task 011/NG1 (`notes/task-011-ng1-3b-mi-migration.md`). `prvActOnBehalfOfAnotherUser` must be granted to the
+MI app-user for the impersonated write path.
