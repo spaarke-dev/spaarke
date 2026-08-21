@@ -220,6 +220,78 @@ public class AuthorizationServiceCharacterizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // GetCallerAccessAsync — task 006 (FR-05). The snapshot accessor capability consumers use.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The guard that makes A-4 non-recurrable, and the sibling of
+    /// <see cref="AuthorizeAsync_WithNoCallerToken_DeniesAndNeverConsultsDataSource"/>: a snapshot
+    /// request with no caller token yields <see cref="AccessRights.None"/> WITHOUT consulting the data
+    /// source. Passing the null through would be strictly worse than returning None — a null selects
+    /// app-only evaluation, which on the SPA/Teams surface always answers yes.
+    ///
+    /// The double would GRANT if reached, so this assertion cannot succeed vacuously.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetCallerAccessAsync_WithNoCallerToken_ReturnsNoRightsAndNeverConsultsDataSource(string? token)
+    {
+        var source = new RecordingAccessDataSource { RightsToReturn = AccessRights.Read };
+
+        var snapshot = await ServiceWith(source)
+            .GetCallerAccessAsync("caller-oid-1", "document-1", token);
+
+        snapshot.AccessRights.Should().Be(AccessRights.None,
+            "a caller-scoped snapshot without a caller token must carry no rights");
+        source.Calls.Should().BeEmpty(
+            "reaching the data source with a null token IS the app-only evaluation finding A-4 " +
+            "describes — it must not happen at all");
+    }
+
+    /// <summary>
+    /// The forwarding half: the caller's token reaches the data source verbatim, so capability
+    /// consumers compute from the caller's own rights rather than the application's.
+    /// </summary>
+    [Fact]
+    public async Task GetCallerAccessAsync_WithCallerToken_ForwardsItAndReturnsTheCallersRights()
+    {
+        var source = new RecordingAccessDataSource { RightsToReturn = AccessRights.Read | AccessRights.Write };
+
+        var snapshot = await ServiceWith(source)
+            .GetCallerAccessAsync("caller-oid-1", "document-1", CallerToken);
+
+        source.Calls.Should().ContainSingle();
+        source.Calls[0].UserAccessToken.Should().Be(CallerToken);
+        source.Calls[0].UserId.Should().Be("caller-oid-1");
+        source.Calls[0].ResourceId.Should().Be("document-1");
+
+        snapshot.AccessRights.Should().Be(AccessRights.Read | AccessRights.Write);
+    }
+
+    /// <summary>
+    /// Enforcement and capability reporting must read the SAME snapshot (FR-05 acceptance: "capabilities
+    /// derive from the same snapshot as enforcement"). <c>AuthorizeAsync</c> routes through
+    /// <c>GetCallerAccessAsync</c>, so both present identical arguments to the data source. If a future
+    /// change gave <c>AuthorizeAsync</c> its own path, the two argument tuples would diverge here.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizeAsync_AndGetCallerAccessAsync_PresentIdenticalArgumentsToTheDataSource()
+    {
+        var source = new RecordingAccessDataSource { RightsToReturn = AccessRights.Read };
+        var service = ServiceWith(source);
+
+        await service.AuthorizeAsync(Context());
+        await service.GetCallerAccessAsync("caller-oid-1", "document-1", CallerToken);
+
+        source.Calls.Should().HaveCount(2);
+        source.Calls[0].Should().Be(source.Calls[1],
+            "both the enforcement path and the capability path must resolve the caller's rights the " +
+            "same way — a second, divergent access calculus is what FR-05 forbids");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // NEGATIVE — must already hold. These pin fail-closed behavior that task 005 MUST preserve.
     // ADR-003: pin the deny, never relax it to make a test pass.
     // ─────────────────────────────────────────────────────────────────────────────

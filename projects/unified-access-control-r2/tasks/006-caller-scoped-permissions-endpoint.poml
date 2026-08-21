@@ -4,7 +4,7 @@
     <title>FR-05: PermissionsEndpoints returns caller-scoped capabilities</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-004</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (capability disclosure) — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,25 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-05; finding A-4. If 005 has not merged when this lands, CanWrite-class flags will be false for everyone (Read ceiling) — acceptable interim, note it in the PR.</notes>
+  <notes>Spec FR-05; finding A-4. If 005 has not merged when this lands, CanWrite-class flags will be false for everyone (Read ceiling) — acceptable interim, note it in the PR.
+
+COMPLETED 2026-08-21. Closed A-4 AND the remainder of FR-02: a repo grep for `userAccessToken: null` now returns ZERO production call-sites.
+
+Design: AuthorizationService gained GetCallerAccessAsync(userId, resourceId, userAccessToken, ct) — the token param deliberately has NO default, because A-4's root cause was the `= null` DEFAULT on IAccessDataSource.GetUserAccessAsync, not a missing null check. AuthorizeAsync routes through it, leaving EXACTLY ONE member of the service touching _accessDataSource — acceptance criterion 5 is now grep-checkable rather than asserted, and pinned by a test comparing both paths' argument tuples. Fourteen capabilities project from ONE snapshot (fourteen AuthorizeAsync calls would be 1,400 rule-chain evaluations per 100-doc batch). Method deliberately NOT added to IAuthorizationService (ADR-010; the endpoint injects the concrete type as DocumentAuthorizationFilter.cs:26 already does).
+
+Step 3 decision: no-access response = 200 + all-false, not 403. FR-05's acceptance wording presupposes a body; the batch route cannot express per-document denial as a status code; and all-false does not distinguish an inaccessible document from a nonexistent one. All fail-closed paths now share one NoCapabilities(...) factory.
+
+SECOND DISCLOSURE found and closed (beyond A-4's wording): the batch handler honoured a UserId from the request BODY. DataverseAccessDataSource.cs:184-199 treats userId and userAccessToken as INDEPENDENT inputs, so that would have queried a different principal under the caller's own OBO token and written task 014's cache key sdap:auth:access:obo:{userId}:{resourceId} under the VICTIM's oid. BatchPermissionsRequest.UserId removed (wire-compatible — System.Text.Json ignores unknown members).
+
+Escalation trigger EVALUATED, did not fire: two independent greps confirm ZERO clients call /api/documents/{id}/permissions or /permissions/batch. The endpoint has been shipping a disclosure nothing consumed; fixing was chosen over retiring because tasks 065-067 need exactly this surface.
+
+Tests: 12 new at tests/integration/auth/UnifiedAccessControl/ (7 endpoint + 5 service). Non-vacuity is the crux — with the real IAccessDataSource the offline host fails closed to None, so "all capabilities false" was true BEFORE the fix too. A CallerScopedAccessTestFixture substitutes a double that grants Read|Write only to the matching token on one document. Verified EMPIRICALLY: reverting the single-doc token fails 2 tests, reverting the batch token as well fails 3; both restored → 35/35.
+
+Gates: BFF 10,637 passed / 0 failed (was 10,625) · ArchTests 36/36 (Spaarke.Core stayed web-free) · Core 45/45 · publish 43.65 MB compressed incl. PDBs — 0.00 MB delta, no packages added · no HIGH/CRITICAL CVE.
+
+Follow-on constraints filed on tasks 005 (verify the eleven Write+ capabilities light up) and 032 (the one-access-path invariant must survive the evaluator spine). Drive-by: corrected CachedAccessDataSource.cs:27-28, whose comment still claimed AuthorizationService was app-only (made false by task 004).
+
+Rationale: notes/task-006-capability-rights-mapping.md</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

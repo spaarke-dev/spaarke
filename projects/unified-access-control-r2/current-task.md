@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-21 (by `context-handoff`)
+> **Last Updated**: 2026-08-21 (by `task-execute`, after task 006)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,15 +10,32 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 004 completed and committed |
+| **Task** | **none active** — task 006 completed and committed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **5 of 19 complete** (001 ✅ 003 ✅ 004 ✅ 014 ✅ 019 ✅) |
-| **Next Action** | Run **task 006** via the `task-execute` skill with argument `projects/unified-access-control-r2/tasks/006-caller-scoped-permissions-endpoint.poml` (path verified 2026-08-21). It finishes what 004 started — see ⚠️ below. |
+| **Phase** | Phase 0 — enforcement remediation · **6 of 19 complete** (001 ✅ 003 ✅ 004 ✅ 006 ✅ 014 ✅ 019 ✅) |
+| **Next Action** | Run **task 005** via `task-execute` with `projects/unified-access-control-r2/tasks/005-lift-read-ceiling.poml` (path verified). It is the last critical-path item in Phase 0 and now carries **two** binding obligations — see ⚠️ below |
+
+### 🎉 FR-02 is now closed
+
+Task 004 closed the `AuthorizationService` path; **task 006 closed the direct-call path**. A repo grep
+for `userAccessToken: null` returns **zero production call-sites**. Both FR-02 and FR-05 are satisfied.
+
+### ⚠️ Read before starting task 005
+
+Task 005 carries **two** binding constraints, both filed as `<constraint>` elements in its POML:
+
+1. **From task 003** — you MUST map Dataverse `AppendToAccess` → `AccessRights.AppendTo`. Miss it and
+   `POST /api/office/save` is permanently 403 *while looking fixed*: the operation resolves, so the
+   denial reads as legitimate `insufficient_rights` rather than the loud `unknown_operation` it replaced.
+2. **From task 006** — **eleven of fourteen** capabilities on `GET /api/documents/{id}/permissions` are
+   false for every caller until the ceiling lifts (only `CanPreview`, `CanReadMetadata`,
+   `CanViewVersions` can be true). After 005 lands, verify those flags actually light up; a ceiling fix
+   that does not surface there means the snapshot widened somewhere the endpoint does not read.
 
 ### Files Modified This Session
 
-**All committed.** 5 commits on `work/unified-access-control-r2`, **none pushed**:
+**All committed.** 7 commits on `work/unified-access-control-r2`, **none pushed**:
 
 | Commit | Contents |
 |---|---|
@@ -27,24 +44,14 @@
 | `9037c3a01` | task 003 — 4 policy keys + 15-test completeness gate; filed A-23 |
 | `6393acba8` | wave P0-B — 014 (auth-mode cache key) + 019 (membership `["*"]`) |
 | `ac9d78c85` | task 004 — `AuthorizationService` caller-scoped; `TokenHelper.ExtractBearerTokenOrNull` |
+| `4a695ce02` | checkpoint — context handoff after task 004 |
+| _(this task)_ | task 006 — caller-scoped `PermissionsEndpoints`; `GetCallerAccessAsync`; removed body-supplied `UserId` |
 
 ### Critical Context
 
-Phase 0 is repairing enforcement on the access path. Task 004 made `AuthorizationService` evaluate as
-the **caller** (token now on `AuthorizationContext.UserAccessToken`, `required string?` so app-only must
-be declared explicitly; missing token → deny with `sdap.access.deny.no_caller_token`, data source never
-consulted). Last verified state: **BFF 10,625 passed / 0 failed · ArchTests 36/36 · Core 45/45 · publish
-43.65 MB compressed** (baseline 44.96, ceiling 60).
-
-### ⚠️ Read before starting task 006
-
-**FR-02's acceptance criterion is still OPEN and 006 owns the rest of it.**
-`PermissionsEndpoints.cs:76` and `:159` still pass `userAccessToken: null` — they call
-`IAccessDataSource` **directly**, bypassing `AuthorizationService`, so task 004 could not reach them
-(finding A-4). `required` does not protect that path either, because it never constructs an
-`AuthorizationContext`. **Route those calls THROUGH `AuthorizationService`** rather than re-plumbing the
-token at the endpoint, or the same defect reappears at the next direct caller. Full reasoning:
-[`notes/task-004-caller-scoped-design.md`](notes/task-004-caller-scoped-design.md) §6.
+Last verified state: **BFF 10,637 passed / 0 failed · ArchTests 36/36 · Core 45/45 · publish 43.65 MB
+compressed incl. PDBs** (baseline 44.96, ceiling 60 — **0.00 MB delta**, no packages added). No
+HIGH/CRITICAL CVE.
 
 ---
 
@@ -54,43 +61,47 @@ token at the endpoint, or the same defect reappears at the next direct caller. F
 
 | Option | Tasks | Why |
 |---|---|---|
-| **Recommended** | **006** (`parallel-safe:true`) | Finishes FR-02 (above). Small, well-scoped |
-| High value | **005** (lift the Read ceiling) | Carries a **binding obligation from task 003**: MUST map Dataverse `AppendToAccess` → `AccessRights.AppendTo`, or `POST /api/office/save` is permanently 403 *while looking fixed* (the denial reads as legitimate `insufficient_rights`) |
-| Independent | **002** (authorize document download) | A-1 — R1's January-2026 attack scenario, still open. Unblocks 012 |
+| **Recommended** | **005** (lift the Read ceiling) | Last critical-path item in Phase 0; unblocks eleven capability flags AND the Office save route. Two binding obligations (above) |
+| Independent | **002** (authorize document download) | A-1 — R1's January-2026 attack scenario, still open. Unblocks 012. `parallel-safe:false` |
+| Independent | **010** (idempotent grant + revoke-all) | A-11 · `opus`/`xhigh`. Unblocks 017 and Phase 4's task 060 |
 
-⚠️ 005 and 006 are file-disjoint but **not ideal to pair**: 006's correct fix routes through
-`AuthorizationService`, which 005's rights-mapping also affects. Run 005 first if pairing.
+⚠️ **Phase 0 has no remaining co-schedulable pair.** `{014, 019}` was the only file-disjoint pair, and
+006 was the only other `safe:true` task; it had no partner in its wave. Everything left clusters in the
+four contended directories. Run these serially.
 
-### Decisions made this session
+### Decisions made in task 006
 
 | Decision | Rationale | Where |
 |---|---|---|
-| Access-control tests live at `tests/integration/auth/**`, not the paths the POMLs name | Only that path is an ADR-038 §2 KEEP category; it had **zero compiled files** and was globbed by no csproj, so a test placed there would silently not run. CLAUDE.md §6.5 path C | `notes/task-001-untestable-findings.md` §4a |
-| Escalation resolved as **path B** for 6 wire-format findings, **path C** for A-15/A-16 | Owner-accepted 2026-08-21. Recorded as `<constraint source="task-001">` on tasks 007/012/013/015/016/017/018 | same file, §3 |
-| `entity.associate_document` → `AppendTo`, not `Write` | The filter authorizes the **target entity** and the operation attaches a document TO it. Creates a binding obligation on task 005 | `notes/task-003-operation-rights-decisions.md` §1–2 |
-| Token carried on `AuthorizationContext`, **not** via `IHttpContextAccessor` | `Spaarke.Core` has no ASP.NET Core dependency and `LayerDependencyTests` guards that boundary; a second auth service would violate ADR-010 | `notes/task-004-caller-scoped-design.md` §1 |
-| `required` on a **nullable** property | Forces every construction site to state intent, so app-only is a visible `= null` rather than the default you get by not thinking — which is how A-2 survived. Produced 7 compile errors across 11 sites | same file, §2 |
+| `AuthorizationService.GetCallerAccessAsync` — **no default** on the token param | A-4's root cause was the `= null` **default** on `IAccessDataSource.GetUserAccessAsync`, not a missing null check. A mandatory positional param can't be called without stating intent — task 004's `required` forcing function, in the shape a method signature allows | `notes/task-006-capability-rights-mapping.md` §3 |
+| `AuthorizeAsync` routes through it → **one** member touches `_accessDataSource` | Makes "capabilities derive from the same snapshot as enforcement" grep-checkable, not asserted. Pinned by a test comparing both paths' argument tuples | same, §3 |
+| Snapshot accessor, not 14 × `AuthorizeAsync` | The batch route would otherwise be 1,400 rule-chain evaluations per 100-doc request — and that route exists specifically to avoid N+1 | same, §3 |
+| No-access = **200 + all-false**, not 403 | FR-05's wording presupposes a body; the batch route can't express per-document denial as a status code; all-false doesn't distinguish inaccessible from nonexistent | same, §4 |
+| **Removed `BatchPermissionsRequest.UserId`** | `DataverseAccessDataSource.cs:184-199` treats `userId` and `userAccessToken` as INDEPENDENT — a body-supplied id would query a different principal under the caller's OBO token and write task 014's cache key under the **victim's** oid | same, §5 |
+| Method NOT added to `IAuthorizationService` | It's a testing seam for `AuthorizeAsync`; widening it forces every mock to change for no benefit (ADR-010). The endpoint injects the concrete type, as `DocumentAuthorizationFilter.cs:26` already does | same, §3 |
 
 ### Carried forward — read before ANY Phase 0 task
 
 | Item | Detail |
 |---|---|
 | **KEEP path** | Access-control tests → `tests/integration/auth/**`. POMLs still name `tests/unit/Sprk.Bff.Api.Tests/AccessControl/`, which does not exist and is not a KEEP path |
-| **`/api/v1/external` fixture trap** | `AuthPolicies.ExternalCollaboration` pins the `Ciam` + `Bearer` schemes, bypassing `FakeAuthHandler`. With the shared fixtures that group returns **500**, making any "not 403" assertion pass **vacuously**. Use `ExternalCollaborationTestFixture` |
-| **Anti-vacuity rule** | A test passing because the path was never reached is worse than no test. All "not 403" assertions carry a sub-500 guard; cache-miss assertions also assert the inner source was reached |
-| **Parallel-wave gotcha** | Most POMLs instruct the executor to update `TASK-INDEX.md`. When running >1 task concurrently, **suppress that instruction** and have the orchestrator own the file, or the agents collide |
-| **Own-coverage obligation** | Tasks **007, 012, 013, 015, 016, 017, 018** have no pinned baseline — each extracts a query-builder seam and supplies its own tests |
+| **Vacuity trap (bit task 006)** | With the REAL `IAccessDataSource` the offline host fails closed to `None`, so "all capabilities false" is true both before AND after a caller-scoping fix. Endpoint tests asserting only all-false pass **vacuously**. Fix: substitute a caller-scoped double that CAN answer true — see `CallerScopedAccessTestFixture`. Then **empirically verify** by reverting the fix and confirming the tests fail |
+| **`/api/v1/external` fixture trap** | `AuthPolicies.ExternalCollaboration` pins the `Ciam` + `Bearer` schemes, bypassing `FakeAuthHandler` → 500. Use `ExternalCollaborationTestFixture` |
+| **Bash cwd drift** | A bare `cd` in one Bash call persists and breaks later relative paths. Prefix with `cd /c/code_files/spaarke-wt-unified-access-control-r2` |
+| **Own-coverage obligation** | Tasks **007, 012, 013, 015, 016, 017, 018** have no pinned baseline — each supplies its own tests |
 | **`data-mutation` KEEP path** | Still un-backfilled — zero compiled files, globbed by no csproj. A write-path test placed there will silently not run |
 
 ### Open items requiring owner attention
 
 | # | Item |
 |---|---|
-| 1 | **019's product-semantics question**: `includeRelated: true` on the `LookupUserMembership` node is now a **logged-warning no-op**. The flag is visible in the Playbook Builder canvas and does nothing. No playbook sets it today (verified), so it is latent. Real fix = a `relatedEntities: string[]` config field, or remove the flag |
-| 2 | **A-23** (new, filed by 003): `AddOfficeDocumentAccessFilter` is a second orphaned filter alongside A-15 — zero call-sites, doc examples `"share"`/`"attach"` unregistered → **task 018** deletes it |
-| 3 | **I-4** (new, filed by 014): `sdap:auth:*` keys carry no tenant segment, unlike the `ITenantCache` pattern used elsewhere. Moot while single-tenant; **task 035** should design its per-user cache tenant-aware from the start |
-| 4 | Stale "task 054 implements" comments remain in `MembershipEndpoints.cs` + `IMembershipResolverService.cs` → **task 015** owns that directory |
-| 5 | **Nothing pushed.** 5 commits are local-only; no PR exists for this branch |
+| 1 | **019's product-semantics question**: `includeRelated: true` on `LookupUserMembership` is a logged-warning no-op; the flag is visible in the Playbook Builder canvas and does nothing. No playbook sets it today (verified), so it is latent. Real fix = a `relatedEntities: string[]` config field, or remove the flag |
+| 2 | **A-23**: `AddOfficeDocumentAccessFilter` is a second orphaned filter alongside A-15 → **task 018** deletes it |
+| 3 | **I-4**: `sdap:auth:*` keys carry no tenant segment. Moot while single-tenant; **task 035** should design its per-user cache tenant-aware from the start |
+| 4 | Stale "task 054 implements" comments in `MembershipEndpoints.cs` + `IMembershipResolverService.cs` → **task 015** |
+| 5 | **Nothing pushed.** 7 commits are local-only; no PR exists for this branch |
+| 6 | **NEW (006)**: `/api/documents/{id}/permissions` and `/permissions/batch` have **zero clients** — verified by two independent greps. The endpoint has been shipping a disclosure nothing consumed. Fixing was chosen over retiring because tasks 065–067 need this surface; if that changes, retirement is a legitimate option for the wrap-up |
+| 7 | **NEW (006)**: `TypedResults.Unauthorized()` returns a bare 401, not ProblemDetails (ADR-019). **Pre-existing**, not introduced by 006, and deliberately not fixed there — changing the 401 shape touches the authentication-floor characterizations task 001 pinned. Candidate for the wrap-up |
 
 ### Decisions carried in from design (unchanged)
 
@@ -132,5 +143,5 @@ All `Infrastructure/ExternalAccess/**`, `Api/ExternalAccess/**`, `Spaarke.Core/A
 ### Note on suite health
 
 An early full run of `Sprk.Bff.Api.Tests` had **1 failure**; every run since has been clean
-(10,598 → 10,617 → 10,622 → 10,625 passed, 0 failed). The failure was not reproducible and its identity
-was lost to log truncation — a pre-existing flake, not a regression. Watch for recurrence.
+(10,598 → 10,617 → 10,622 → 10,625 → 10,637 passed, 0 failed). The failure was not reproducible and its
+identity was lost to log truncation — a pre-existing flake, not a regression. Watch for recurrence.

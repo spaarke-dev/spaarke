@@ -71,11 +71,9 @@ public class AuthorizationService : IAuthorizationService
                 };
             }
 
-            // Evaluate AS THE CALLER: forward the caller's token so DataverseAccessDataSource takes its
-            // OBO path (GetUserAccessAsync:159-227) and queries Dataverse as the user, rather than
-            // app-only. Mirrors AiAuthorizationService.cs:176-180, which has always done this and was
-            // the only genuinely caller-scoped path before this task.
-            var accessSnapshot = await _accessDataSource.GetUserAccessAsync(
+            // Evaluate AS THE CALLER. Routed through GetCallerAccessAsync so that this service has
+            // exactly ONE place that touches the access data source — see that method's remarks.
+            var accessSnapshot = await GetCallerAccessAsync(
                 context.UserId,
                 context.ResourceId,
                 context.UserAccessToken,
@@ -155,6 +153,76 @@ public class AuthorizationService : IAuthorizationService
                 RuleName = "SystemError"
             };
         }
+    }
+
+    /// <summary>
+    /// Resolves the CALLER-scoped access snapshot for one resource — "what rights does THIS CALLER
+    /// hold on this record?" — without deciding any single operation.
+    /// </summary>
+    /// <param name="userId">The caller's Entra object id (<c>oid</c>).</param>
+    /// <param name="resourceId">The record being asked about.</param>
+    /// <param name="userAccessToken">
+    /// The caller's bearer token. Deliberately has <b>no default value</b> — see the remarks.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The caller's snapshot, or a snapshot carrying <see cref="AccessRights.None"/> when no caller
+    /// token is available. Never an app-only snapshot.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>Why this exists.</b> <see cref="AuthorizeAsync"/> answers "may this caller do X?" and
+    /// returns a boolean. Capability/affordance consumers need the other question — the rights
+    /// themselves — so they can project many operations from ONE snapshot. Before
+    /// unified-access-control-r2 task 006, the only way to ask that was to call
+    /// <see cref="IAccessDataSource.GetUserAccessAsync"/> directly, and
+    /// <c>Api/PermissionsEndpoints.cs</c> did exactly that with <c>userAccessToken: null</c> — reporting
+    /// what the APPLICATION could do to any authenticated caller (finding A-4, spec FR-05).</para>
+    ///
+    /// <para><b>Why the token parameter has no default.</b> The A-4 defect was not a missing null check;
+    /// it was the <c>= null</c> <i>default</i> on <see cref="IAccessDataSource.GetUserAccessAsync"/>,
+    /// which let a new direct caller inherit app-only evaluation by simply not thinking about it. A
+    /// mandatory positional parameter cannot be called without stating intent — the same forcing
+    /// function task 004 applied to <see cref="AuthorizationContext.UserAccessToken"/> via
+    /// <c>required</c>, in the shape available to a method signature.</para>
+    ///
+    /// <para><b>Single source of truth.</b> This is the ONLY member of this class that calls
+    /// <see cref="IAccessDataSource"/>; <see cref="AuthorizeAsync"/> routes through it. That makes
+    /// "capabilities derive from the same snapshot as enforcement" (FR-05 acceptance) verifiable by
+    /// grepping for <c>_accessDataSource</c> rather than something a reviewer has to take on trust.</para>
+    ///
+    /// <para><b>Fail closed.</b> An absent token yields <see cref="AccessRights.None"/> and the data
+    /// source is not consulted at all. Passing the null through would be strictly worse than denying:
+    /// on the SPA/Teams surface reads are app-only, so Dataverse row-level security is inert and
+    /// app-only answers "yes" — which is precisely the disclosure this method exists to prevent.</para>
+    /// </remarks>
+    public async Task<AccessSnapshot> GetCallerAccessAsync(
+        string userId,
+        string resourceId,
+        string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceId, nameof(resourceId));
+
+        if (string.IsNullOrWhiteSpace(userAccessToken))
+        {
+            _logger.LogWarning(
+                "ACCESS SNAPSHOT DENIED (no caller token): User {UserId} on {ResourceId} — a " +
+                "caller-scoped snapshot requires the caller's bearer token; refusing to fall back to " +
+                "app-only evaluation (fail closed). Returning AccessRights.None.",
+                userId, resourceId);
+
+            return new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = resourceId,
+                AccessRights = AccessRights.None
+            };
+        }
+
+        // Forward the caller's token so DataverseAccessDataSource takes its OBO path
+        // (GetUserAccessAsync:159-227) and queries Dataverse AS THE USER rather than as the app.
+        return await _accessDataSource.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
     }
 }
 

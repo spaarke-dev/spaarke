@@ -24,10 +24,15 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 /// Auth-mode key segment (finding A-19 / spec FR-13, fixed by task 014): the resource-access key
 /// includes an <c>{authMode}</c> segment ("sp" when <c>userAccessToken</c> is null/empty, "obo"
 /// otherwise) so an app-only (service-principal) snapshot can never be served to a subsequent OBO
-/// caller, or vice versa, within the 60s TTL. <c>Spaarke.Core.Auth.AuthorizationService</c> always
-/// calls with <c>userAccessToken: null</c> (app-only); <c>AiAuthorizationService</c> always passes the
-/// caller's own bearer token (OBO). The discriminator is a mode flag, never the raw token — the raw
-/// token MUST NOT appear in a cache key or a log line (project constraint on this task).
+/// caller, or vice versa, within the 60s TTL. The discriminator is a mode flag, never the raw token —
+/// the raw token MUST NOT appear in a cache key or a log line (project constraint on task 014).
+///
+/// <b>Updated by task 006 (2026-08-21).</b> When task 014 wrote this comment,
+/// <c>Spaarke.Core.Auth.AuthorizationService</c> always called with <c>userAccessToken: null</c>
+/// (app-only) and <c>AiAuthorizationService</c> was the only OBO caller. Task 004 (FR-02) made
+/// <c>AuthorizationService</c> caller-scoped, so BOTH now pass the caller's bearer token and the "sp"
+/// branch is reached only by a path that genuinely has no caller credential. The mode flag is still
+/// required: it is what prevents such a path's snapshot from being served to an OBO caller.
 ///
 /// A boolean mode flag is sufficient here (no further per-identity hash needed) because <c>userId</c>
 /// (the first parameter of <see cref="GetUserAccessAsync"/>) is already the caller's stable 'oid'

@@ -30,7 +30,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
 | ✅ 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
 | 🔲 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
-| 🔲 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
+| ✅ 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
 | 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
 | 🔲 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
 | 🔲 009 | Scope-check external To Do PATCH (+H-8a) | FR-08 / A-7 | 001 | — | ❌ | sonnet | high |
@@ -88,6 +88,25 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > `userAccessToken: null` because they call `IAccessDataSource` **directly**, bypassing
 > `AuthorizationService`. That is A-4 → **task 006**, which should route them THROUGH the service rather
 > than re-plumb the token. Rationale: [`notes/task-004-caller-scoped-design.md`](../notes/task-004-caller-scoped-design.md).
+
+> **Task 006 outcome (2026-08-21)**: ✅ **FR-02's criterion is now CLOSED** alongside FR-05 — a repo grep
+> for `userAccessToken: null` returns **zero** production call-sites. `AuthorizationService` gained
+> `GetCallerAccessAsync(userId, resourceId, userAccessToken, ct)` — **no default** on the token param,
+> because A-4's root cause was the `= null` *default* on `IAccessDataSource.GetUserAccessAsync`, not a
+> missing null check. `AuthorizeAsync` routes through it, so the service now has **exactly one** member
+> touching `_accessDataSource` (verified by grep + a test pinning that both paths present identical
+> arguments) — acceptance criterion 5 is structural, not asserted. Fourteen capabilities project from ONE
+> snapshot rather than fourteen `AuthorizeAsync` calls (the batch route would otherwise be 1,400
+> rule-chain evaluations per 100-doc request). No-access shape = **200 + all-false**, not 403.
+> **Second disclosure found + closed**: the batch handler honoured a `UserId` from the request BODY.
+> `DataverseAccessDataSource.cs:184-199` treats `userId` and `userAccessToken` as INDEPENDENT, so that
+> would have queried a different principal under the caller's OBO token and written task 014's cache key
+> under the **victim's** oid. `BatchPermissionsRequest.UserId` is removed (wire-compatible).
+> Escalation trigger evaluated and correctly did NOT fire — **zero clients** call either route (two
+> independent greps); the endpoint has been shipping a disclosure nothing consumed.
+> ⚠️ Until **task 005** lifts the Read ceiling, eleven of the fourteen capabilities are false for
+> everyone in production — the honest interim state, not a regression.
+> Rationale: [`notes/task-006-capability-rights-mapping.md`](../notes/task-006-capability-rights-mapping.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

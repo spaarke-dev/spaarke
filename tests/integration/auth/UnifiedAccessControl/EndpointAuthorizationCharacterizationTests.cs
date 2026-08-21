@@ -231,17 +231,27 @@ public class EndpointAuthorizationCharacterizationTests
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-4 — CURRENT (BROKEN) BEHAVIOR, and the sharpest demonstration in this file: an authenticated
-    /// caller with NO access to the document receives <c>200 OK</c> with a capabilities payload.
-    /// <c>PermissionsEndpoints.cs:76</c> passes <c>userAccessToken: null</c>, so what comes back
-    /// describes what the APPLICATION can do, not what this caller can do — and it is returned to
-    /// anyone who can authenticate.
+    /// ✅ FLIPPED BY TASK 006 (FR-05) — was
+    /// <c>Characterization_GetPermissions_ForCallerWithoutDocumentAccess_Returns200WithCapabilities</c>.
     ///
-    /// FLIPPED BY: task 006 (FR-05) — capabilities MUST become caller-scoped, so this caller is either
-    /// rejected or told it has none.
+    /// <c>PermissionsEndpoints.cs:76</c> passed <c>userAccessToken: null</c>, so the response described
+    /// what the APPLICATION could do and was returned to anyone who could authenticate. The endpoint now
+    /// resolves rights through <c>AuthorizationService.GetCallerAccessAsync</c>, so a caller with no
+    /// access is told it has none.
+    ///
+    /// The response shape stays <c>200 + all-false</c> rather than 403 — deliberate: FR-05's acceptance
+    /// reads "a user without access receives CanPreview=false", which presupposes a body, and the sibling
+    /// batch route cannot express per-document denial as a status code.
+    ///
+    /// ⚠️ SCOPE OF THIS TEST. It asserts the FR-05 acceptance shape only. It does NOT prove
+    /// caller-scoping, and cannot: this fixture uses the real <see cref="IAccessDataSource"/>, which
+    /// fails closed to <c>None</c> offline, so all-false was true here even BEFORE the fix. The proof
+    /// that the caller's token reaches the data source lives in
+    /// <see cref="PermissionsEndpointCallerScopedTests"/>, which substitutes a caller-scoped double that
+    /// can also answer <c>true</c>. Stated explicitly so this test is not mistaken for the guarantee.
     /// </summary>
     [Fact]
-    public async Task Characterization_GetPermissions_ForCallerWithoutDocumentAccess_Returns200WithCapabilities()
+    public async Task GetPermissions_ForCallerWithoutDocumentAccess_ReturnsNoCapabilities()
     {
         // Arrange — authenticated, no grant/share/ownership on this document.
         using var client = _fixture.CreateAuthenticatedClient();
@@ -249,16 +259,14 @@ public class EndpointAuthorizationCharacterizationTests
         // Act
         var response = await client.GetAsync($"/api/documents/{DocumentId}/permissions");
 
-        // Assert — CURRENT behavior: a successful capabilities response for a caller with no access.
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "A-4 pins the CURRENT broken state: the endpoint has no per-document authorization gate " +
-            "and reports app-scoped capabilities (PermissionsEndpoints.cs:76 passes userAccessToken: " +
-            "null), so any authenticated caller learns any document's capabilities. Task 006 makes " +
-            "this caller-scoped and flips this away from 200.");
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().NotBeNullOrWhiteSpace(
-            "the 200 carries a capabilities payload — that payload is the disclosure");
+        body.Should().Contain("\"canPreview\":false",
+            "FR-05 acceptance: a user without access receives CanPreview=false");
+        body.Should().NotContain(":true",
+            "no capability may be reported for a document this caller cannot access");
     }
 
     /// <summary>
