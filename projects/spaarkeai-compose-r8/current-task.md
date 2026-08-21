@@ -1,9 +1,9 @@
 # Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-20 (by `context-handoff` — end of session; ready for `/compact`)
+> **Last Updated**: 2026-08-20 (task 012 complete)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: branch `work/spaarkeai-compose-r8` @ `18ebc525e`, **10 ahead of `origin/master`, 0 behind, working tree CLEAN**.
+> **Git**: branch `work/spaarkeai-compose-r8`, 12 ahead of `origin/master`, 0 behind, working tree CLEAN.
 > Draft **PR #806** is open for the branch. Nothing is uncommitted; nothing is at risk across compaction.
 
 ---
@@ -12,26 +12,24 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **012** — Save lifecycle hardening (dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery) |
+| **Task** | **014** — Engine-side integrity: a re-anchor download failure must never persist the stale baseline |
 | **Status** | **not-started** — no work in progress, no partial edits. A clean starting point. |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 012` — which invokes `task-execute` on `tasks/012-save-lifecycle-hardening.poml` (FULL rigor · opus @ xhigh · steps `directional`). |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 014` — which invokes `task-execute` on `tasks/014-reanchor-baseline-integrity.poml`. Any of 015 / 016 / 018 is an equally valid next pick. |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 013 ✅ · 050 ✅** (all 2026-08-20) |
+| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 050 ✅** (all 2026-08-20) |
 
 ### Startable now — pick any; all are `parallel-safe: false`, so run them ONE AT A TIME
 
 | # | Task | Why it is startable |
 |---|---|---|
-| **012** | Save lifecycle hardening | deps 010 ✅ — **recommended next** (see below) |
-| **014** | Engine-side integrity — re-anchor download failure must never persist the stale baseline | deps none. The ONE Half-A defect in Track S |
-| **015** | Document size ceilings — route to the existing chunked upload | deps 013 ✅ (**unblocked this session**) |
-| **016** | Honest-failure set — the eight silent-drop modes | deps 010 ✅, 013 ✅ (**unblocked this session**) |
-| **018** | Track S CI gate — run the Compose client suite in CI | deps 010 ✅. Must land BEFORE 017 |
+| **014** | Engine-side integrity — re-anchor download failure must never persist the stale baseline | deps none. **The ONE Half-A defect in Track S** — recommended next |
+| **015** | Document size ceilings — route to the existing chunked upload | deps 013 ✅ |
+| **016** | Honest-failure set — the eight silent-drop modes | deps 010 ✅, 013 ✅ |
+| **018** | Track S CI gate — run the Compose client suite in CI | deps 010 ✅. Must land BEFORE 017. Task 012 left it a **reproducible finding** (see below) |
 
-**Why 012 first**: task 013 handed it a concrete input. Its `AbortSignal` work falls in the same class as
-the transport-failure gap task 010 surfaced — an aborted request never reaches an HTTP status, so it needs
-the non-status handling the save-outcome contract now has vocabulary for. Doing 012 next means that
-handling is designed once. **Nothing forces this order** — 014/015/016/018 are equally valid.
+**Why 014 next**: it is the only Track S task that touches the engine rather than the contract, and it is
+the one remaining defect where the *bytes* are wrong rather than the *report*. Nothing forces this order —
+015/016/018 are equally valid, and 018 now has more input than it did.
 
 **The entire Compose spine is `parallel-safe: false`** (project CLAUDE.md). Do NOT dispatch these to
 parallel agents — 012/014/015/016 all touch `ComposeService.cs` and/or `ComposeWorkspace.tsx`.
@@ -56,7 +54,36 @@ parallel agents — 012/014/015/016 all touch `ComposeService.cs` and/or `Compos
 7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and will
    look like a catastrophic regression; the real figure is **43.68 MB** against a 60 MB ceiling.
 
-### Carried forward from task 011 (read before 012 / 013)
+### Carried forward from task 012 (read before 014 / 015 / 016 / 018)
+
+Full write-up: [`notes/save-lifecycle-hardening.md`](notes/save-lifecycle-hardening.md).
+
+- **The editor's dirty flag is now cleared in exactly ONE place on the save path**: `commitSaved()`,
+  after a confirmed success. Every capture method (`serializeOperationLog`, `buildContentModel`,
+  `buildImportedContentModel`) only WATERMARKS. The six `dirtyRef.current = false` sites that remain
+  in `ComposeEditor.tsx` are all in the load/mount effect — a different lifecycle. **Do not add a
+  seventh on the save path.**
+- **`commitSaved()` fires on every successful save that CAPTURED something** — including
+  born-in-editor now — but deliberately NOT on a clean byte-identical passthrough save, which must
+  touch no editor state (renderOnSave review F3 defends this; making the call unconditional breaks
+  that test, correctly).
+- **The save carries a 120 s deadline** (`COMPOSE_SAVE_TIMEOUT_MS`) via an `AbortSignal` passed
+  through `authenticatedFetch`'s `RequestInit`. An abort classifies as the new `aborted` failure
+  kind (read `.name` structurally — `AbortError` / `TimeoutError`), which is a FAILED save: dirty
+  flag intact, no `commitSaved`.
+- **A ref-based in-flight guard** blocks a concurrent second save. It is claimed AFTER the
+  synchronous setup, immediately before the first `await` — sync code cannot interleave, and a sync
+  throw above that line would otherwise latch the guard and kill saving for the session.
+- **FR-S04 needed no work**: the 423 lock banner + working Retry shipped with task 010 and is
+  already covered end-to-end in `ComposeWorkspace.saveErrorRouting.test.tsx`.
+- **Task 018 finding, reproducible**: a `jest.mock('@spaarke/auth', …, { virtual: true })` in a suite
+  that also loads the REAL `ComposeEditor` graph corrupts `@spaarke/auth` resolution for LATER
+  suites in the same run (`useComposeWordShuttle` started failing with "Auth not initialized" from
+  the real dist). Repro + the systemic fix (a `moduleNameMapper` entry to `Spaarke.Auth/src`,
+  mirroring `@spaarke/ai-widgets`) are in the notes. Also: **adding test files reorders the run**
+  (jest sorts by file size), which is how this surfaced.
+
+### Carried forward from task 011 (read before 013)
 
 - Every EXISTING-item save now takes the **6-arg `ReplaceFileContentAsUserAsync`** (with `If-Match`);
   the etag-less overload serves only saves with no resolved version. **A new save-path test that mocks
@@ -118,7 +145,7 @@ Six tracks, sequenced. **36 tasks / 9 phases** (re-cut 2026-08-20 by file-pass; 
 | Phase | Track | Status |
 |---|---|---|
 | 0 (001–002) | Coordination + PR #690 dependency | ✅ |
-| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 013 ✅ · 012, 014–016, **018**, then 017 🔲 |
+| 1 (010–018) | **Track S — save reliability (P0, ships alone)** | 🔄 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014–016, **018**, then 017 🔲 |
 | 2 (020–023) | Oracle + corpus (measures today's loss as the control) | 🔲 |
 | 3 (030–031) | **Model proof — THE GATE** | 🔲 |
 | 4 (040–045) | Track A — faithful save *(POMLs provisional — amendable by 031)* | 🔲 |
@@ -183,6 +210,16 @@ into a handoff reads exactly like a finding to the next session; these were corr
 - `ComposeShadowPatchEngine` was already demoted by R6 to the transitional path; R8 finishes that retirement.
 
 ---
+
+## Files modified — task 012 (complete)
+
+| File | Change |
+|---|---|
+| `widgets/ComposeEditor.tsx` | `docRevisionRef` + `capturedRevisionRef`; the three capture methods WATERMARK instead of clearing; `commitSaved` is the single save-path clear, now revision-aware (catches mid-flight edits the op-log cannot represent); handle JSDoc corrected |
+| `widgets/ComposeWorkspace.tsx` | 120 s `AbortController` deadline through `authenticatedFetch`'s `RequestInit`; new `aborted` failure class + honest message; ref-based in-flight guard claimed before the first `await`, released in `finally`; commit gate extended to born-in-editor (`sentEditorContentModel`) while still excluding clean passthrough saves |
+| `widgets/ComposeEditor.saveLifecycleDirty.test.tsx` | NEW — 5 tests against the REAL editor + handle (FR-S03) |
+| `widgets/ComposeWorkspace.saveLifecycle.test.tsx` | NEW — 5 tests: timeout, retry-after-timeout, in-flight guard, guard release, unaffected happy path (FR-S05) |
+| `notes/save-lifecycle-hardening.md` | NEW — blast-radius table, mechanism rationale, escalation-trigger analysis, the 018 finding |
 
 ## Files modified — task 013 (complete)
 

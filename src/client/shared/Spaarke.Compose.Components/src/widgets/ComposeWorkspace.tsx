@@ -273,6 +273,19 @@ const UNTITLED_DOC_NAME = 'Untitled document.docx';
  */
 const COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS = 15000;
 
+/**
+ * FR-S05 (r8 task 012): the save request's own deadline. Before this, a save had none — a hung
+ * request stranded `status === 'saving'` forever, and the only escape was a page reload, which
+ * discarded the document. The `AbortSignal` this drives makes a hung save terminate as a FAILED
+ * save (dirty flag intact, retry available) instead of a dead end.
+ *
+ * 120s is deliberately generous rather than snappy: a save can carry the full base64-encoded
+ * retained original (documents up to the body ceiling task 015 addresses) over an arbitrary link,
+ * and a timeout that fires on a save that WOULD have completed is itself a way to lose work. The
+ * value bounds the pathological case; it is not a latency target.
+ */
+const COMPOSE_SAVE_TIMEOUT_MS = 120000;
+
 /** True when a name is still the unnamed-draft placeholder (never a user-chosen name). */
 function isUntitledDraftName(name?: string): boolean {
   return !name || name.trim().length === 0 || name === UNTITLED_DOC_NAME;
@@ -421,6 +434,11 @@ function isSuccessfulSaveOutcome(outcome: ComposeSaveOutcome | undefined): boole
 type SaveFailureClass =
   | { kind: 'http'; status: number; detail: string }
   | { kind: 'auth'; detail: string }
+  // FR-S05 (r8 task 012): the save's own timeout fired (or the request was otherwise aborted). A
+  // subclass of `transport` by mechanism — `fetch` rejects and no HTTP exchange completed — but it
+  // is the ONE failure class we caused ourselves, and the only one whose honest advice is "it took
+  // too long" rather than "check your connection". Kept a distinct member so the message can say so.
+  | { kind: 'aborted'; detail: string }
   | { kind: 'transport'; detail: string };
 
 /**
@@ -436,6 +454,14 @@ function classifySaveFailure(err: unknown): SaveFailureClass {
   const status = (err as { status?: unknown } | null | undefined)?.status;
   if (typeof status === 'number' && status >= 100 && status <= 599) {
     return { kind: 'http', status, detail };
+  }
+  // FR-S05 (r8 task 012): an aborted `fetch` rejects with a DOMException named `AbortError`
+  // (`TimeoutError` where `AbortSignal.timeout` is used). Read `.name` STRUCTURALLY for the same
+  // reason `.status` is: `instanceof DOMException` is not reliable across realms, and jsdom/Node
+  // differ on whether the rejection is a DOMException or a plain Error at all.
+  const name = (err as { name?: unknown } | null | undefined)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return { kind: 'aborted', detail };
   }
   if (err instanceof Error && err.name === 'AuthError') {
     return { kind: 'auth', detail };
@@ -463,6 +489,16 @@ function saveFailureMessage(failure: SaveFailureClass): string {
   // still arrive as an ApiError with status 401. Same cause, same recovery, same sentence.
   if (failure.kind === 'auth') {
     return SIGN_IN_EXPIRED_MESSAGE;
+  }
+  // FR-S05 (r8 task 012): the save's own timeout stopped a request that never came back. "Not saved"
+  // is the honest claim: nothing here confirmed a write, and the edits are intact for a retry. The
+  // server may still have completed it, which is why the sentence points at a reload rather than
+  // promising the document is unchanged.
+  if (failure.kind === 'aborted') {
+    return (
+      'Not saved — the save took too long and was stopped. Your changes are still here — try again. ' +
+      'If it keeps timing out, reload the document first to check whether an earlier attempt landed.'
+    );
   }
   if (failure.kind === 'transport') {
     return "Not saved — we couldn't complete the request (network or connection problem). Your changes are still here — try again.";
@@ -1611,6 +1647,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
+  // FR-S05 (r8 task 012): the in-flight guard. `state.status === 'saving'` is NOT sufficient on its
+  // own — `triggerSave` closes over `state`, so two calls dispatched in the same tick (Ctrl+S held
+  // down, the toolbar button plus the cross-pane bridge chip, an unmount flush landing on top of a
+  // manual save) both read the pre-dispatch `'loaded'` and both POST. A ref is read at call time,
+  // not at render time, so it closes that window. Two concurrent saves of the same document race
+  // each other's write and each other's `commitSaved`, which is how an edit gets acknowledged by a
+  // save that never carried it.
+  const saveInFlightRef = React.useRef(false);
   const triggerSave = React.useCallback(
     async (
       saveMode: ComposeSaveMode = 'version',
@@ -1681,6 +1725,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
         return;
       }
+
+      // FR-S05 (r8 task 012): claim the in-flight guard. Sited HERE — after all the synchronous
+      // setup above, immediately before the first `await` (the transient-create container
+      // resolution). Two reasons, both deliberate:
+      //   • Sync code cannot interleave, so nothing above this line needs guarding; the window a
+      //     second save can slip through opens at the first suspension point.
+      //   • A synchronous throw in that setup would otherwise latch the guard forever, silently
+      //     killing saving for the rest of the session — a worse failure than the double-POST the
+      //     guard exists to prevent. Below this line every exit path releases it.
+      if (saveInFlightRef.current) return;
+      saveInFlightRef.current = true;
+      /** The single release point: the request's `finally`, and the two early returns below. */
+      const finishSaveAttempt = (): void => {
+        saveInFlightRef.current = false;
+      };
+      const failEarly = (errorMessage: string): void => {
+        finishSaveAttempt();
+        dispatch({ kind: 'saveFailed', errorMessage });
+      };
+
       if (isTransientCreate) {
         let resolvedContainerId = saveContainerId;
         // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
@@ -1712,15 +1776,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
                 "Cannot save this new document yet — we couldn't determine your storage container " +
                 '(the Dataverse context may still be loading). Please try again in a moment.';
-          dispatch({ kind: 'saveFailed', errorMessage });
+          failEarly(errorMessage);
           return;
         }
         saveContainerId = resolvedContainerId;
       } else if (!saveDriveId) {
-        dispatch({
-          kind: 'saveFailed',
-          errorMessage: 'Cannot save — SPE drive configuration missing.',
-        });
+        failEarly('Cannot save — SPE drive configuration missing.');
         return;
       }
 
@@ -1736,6 +1797,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // and the outcome being read is genuinely INDETERMINATE, and claiming either result there would be
       // a guess. Tracked separately from `savePersisted` so the catch can say so honestly.
       let saveReachedServer = false;
+      // FR-S05 (r8 task 012): the save's deadline. `AbortController` (not `AbortSignal.timeout`) so
+      // the timer can be cleared the moment the exchange finishes — an un-cleared timeout would fire
+      // later and abort a signal nobody is reading, and, more importantly, keeps a 2-minute timer
+      // alive per save. The abort surfaces as a rejected `fetch` → the catch below classifies it
+      // `aborted` → a FAILED save with the dirty flag intact, which is what an unfinished save is.
+      const saveAbort = new AbortController();
+      const saveTimeoutId = window.setTimeout(() => saveAbort.abort(), COMPOSE_SAVE_TIMEOUT_MS);
       try {
         // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
         // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
@@ -1877,6 +1945,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         //     mapper / mapper returned null) → the TRANSITIONAL op-log shape, completely unchanged:
         //     { content/baselineVersionId, operationLog?, comments, paraIdMap }.
         let requestBody: Record<string, unknown>;
+        // FR-S03 (r8 task 012): did THIS save capture a born-in-editor content model? That capture
+        // now watermarks the editor instead of clearing its dirty flag, so the post-success
+        // `commitSaved()` must fire for it — see the commit gate below. Kept as a plain flag set at
+        // the call sites rather than a closure, so `editorRef.current`'s narrowing is not disturbed.
+        let sentEditorContentModel = false;
         if (isTransientCreate) {
           // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
           // signal the replace path uses (`bornInEditor = !state.docxBytes`). Only a TRUE born-in-editor doc
@@ -1923,6 +1996,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // comment-bake for ALL ContentModel saves), so the separate `comments` field is GONE here.
             // paraIdMap stays (existing field; empty for a born-in-editor doc anyway).
             requestBody = { ...createCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+            sentEditorContentModel = true;
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
             // ORIGINAL bytes as the render carrier.
@@ -1995,6 +2069,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // the drive-ITEM id — a real version fetch would 404). task 012 amendment: no separate
             // `comments` field — `buildContentModel()` folds the threads into the model.
             requestBody = { ...replaceCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+            sentEditorContentModel = true;
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — loaded/imported OR reopened-authored replace save, MODEL shape: the merged model
             // + the baseline source (retained bytes when still held — the same-session case — else the
@@ -2023,10 +2098,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }
         }
 
+        // ADR-028: `authenticatedFetch` stays the transport (never a raw `fetch`) — the signal rides
+        // its existing `RequestInit`, which it spreads onto every attempt, so the deadline also
+        // bounds the 401 retry loop rather than restarting with it.
         const response = await authenticatedFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
+          signal: saveAbort.signal,
         });
 
         // The request completed with a 2xx. Whether anything was WRITTEN is the outcome field's job.
@@ -2192,9 +2271,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           warnings: mergedSaveWarnings.length > 0 ? mergedSaveWarnings : null,
         });
 
-        // Clear the local dirty flag so the Save button disables until the
-        // next edit. ComposeEditor's internal dirtyRef also resets on the
-        // next load; here we mirror that for post-save.
+        // Clear the local dirty flag so the Save button disables until the next edit. This is the
+        // workspace's MIRROR of the editor's authoritative `dirtyRef`, not a second source of truth:
+        // the `commitSaved()` below fires on every successful save and its `onDirtyChange` is the
+        // last writer, correctly re-arming Save when the user typed mid-flight. This assignment
+        // covers only the case where the editor handle is already gone (unmount race). FR-S03 (r8
+        // task 012): it sits on the success branch, AFTER the outcome-honesty gate — a failed save
+        // never reaches it.
         setIsDirty(false);
 
         // FR-07(b) (task 010): a transient draft that just persisted (create-on-save promotion)
@@ -2232,6 +2315,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // `recaptureBaselineSnapshot()`, which would silently absorb (mask) any edits typed during
         // the in-flight save. The live recapture remains only as the older-editor-build fallback.
         // Exactly ONE commitSaved fires per successful save on every path.
+        //
+        //
+        // FR-S03 (r8 task 012): the commit gate gains the BORN-IN-EDITOR case. `buildContentModel()`
+        // no longer clears the dirty flag at build time — it watermarks — so a born-in-editor save
+        // that reached here without committing would leave the document permanently dirty after a
+        // save that actually succeeded (the mirror image of the bug this task removes). The gate
+        // stays a gate rather than becoming unconditional: a CLEAN byte-identical passthrough save
+        // captures nothing and must touch no editor state at all (review F3).
+        //
+        // The invariant across all three arms: exactly ONE `commitSaved()` per successful save that
+        // captured anything, and none for one that captured nothing.
         if (usedModelPath) {
           const postSaveHandle = editorRef.current as (ComposeEditorHandle & ComposeEditorImportedModelHandle) | null;
           if (postSaveHandle && typeof postSaveHandle.adoptBaselineSnapshot === 'function' && importedBuilt) {
@@ -2239,8 +2333,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           } else {
             postSaveHandle?.recaptureBaselineSnapshot?.();
           }
-          editorRef.current?.commitSaved?.();
-        } else if (operationLog) {
+        }
+        if (usedModelPath || operationLog || sentEditorContentModel) {
           editorRef.current?.commitSaved?.();
         }
 
@@ -2337,6 +2431,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // the recovery. Task 010 routed 412 here transitionally; this task removed the reason.
         // Re-adding a 412 branch would mean a refusal loop came back — check the server first.
         dispatch({ kind: 'saveFailed', errorMessage: saveFailureMessage(failure) });
+      } finally {
+        // FR-S05 (r8 task 012): both cleanups belong here and nowhere else. The `saving` status is
+        // terminated by the dispatches above (`saveSucceeded` / `saveFailed` both return the reducer
+        // to `'loaded'`) — every path through the try and the catch performs one, including the
+        // outcome-honesty gate's early return, so the editor can no longer be stranded mid-save.
+        window.clearTimeout(saveTimeoutId);
+        finishSaveAttempt();
       }
     },
     [

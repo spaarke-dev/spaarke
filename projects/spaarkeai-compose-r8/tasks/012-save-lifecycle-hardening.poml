@@ -4,7 +4,7 @@
     <title>FR-S03/S04/S05 — Save lifecycle hardening: dirty flag survives a failed POST, timeout + AbortSignal + in-flight guard, working 423 recovery</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Rewrites save lifecycle state across ComposeEditor.tsx and ComposeWorkspace.tsx; a mistake here silently loses user work.</rigor-reason>
     <model-tier>opus</model-tier>
