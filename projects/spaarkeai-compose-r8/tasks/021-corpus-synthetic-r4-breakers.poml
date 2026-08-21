@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-G04 (part 1) — Corpus: the three synthetic constructs that broke R4 (mc:AlternateContent duplicate paraIds · interior text boxes · multi-part paraId collisions)</title>
     <phase>2 Oracle &amp; Corpus</phase>
-    <gate>blocked-on-001</gate>
-    <status>pending</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Authors test fixtures; no product source modified. Correctness is verifiable by inspecting the generated OOXML.</rigor-reason>
     <model-tier>sonnet</model-tier>

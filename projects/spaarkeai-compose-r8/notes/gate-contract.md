@@ -51,6 +51,18 @@ Duplicate `w14:paraId` anywhere in the document: **1 of 10** (`AppligentNDA_Sign
 Machine-readable form: `fidelity-gate-result.json`, written next to the test assembly on every run. Task 023
 publishes this as the formal control; tasks 030/031 assert a merge model against it.
 
+> **Corpus extended the same day (tasks 021 + 022).** Eight fixtures were added — three R4-breakers and five
+> near-tier families — and picked up by the gate with **zero code changes**. Post-extension the corpus is
+> **18 documents / 271 comparable blocks: 8.86% overall, 2.37% near-tier**. Near-tier preservation *fell*,
+> because the new fixtures add 18 near-tier-relevant blocks and preserve **none** of them — the bar got
+> harder to clear because it now covers constructs the old corpus never reached. Task 023 should publish the
+> 18-document figure as the formal control; the 10-document table above is the measurement task 020 built the
+> instrument against. See `tests/fixtures/compose-corpus/corpus-manifest.md` §1.7–§1.8.
+>
+> The sharpest single reading in the whole corpus is `char-formatting-mixed-runs.docx`: **0% near-tier
+> preservation with NO degradation warning at all**. The renderer does not know it dropped the formatting, so
+> the user is never told. That is the silent-loss mode this project exists to close, isolated in one fixture.
+
 ### Three findings the numbers hand to Phase 3
 
 1. **The loss is INSIDE blocks, not structural.** Every document's block count is stable (109 → 109,

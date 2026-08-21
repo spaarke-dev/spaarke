@@ -72,8 +72,8 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 020 | **The gate contract** — preservation oracle + outcome-honesty assertion + two comparison levels with normalization *(all one harness file)* | FR-G01/02/03 | FULL | opus/max | ❌ | 001, 013 | ✅ |
-| 021 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds · interior text boxes · multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
-| 022 | Corpus: near-tier owner documents (char formatting · court spacing · footnotes · `REF` · content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | 🔲 |
+| 021 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds · interior text boxes · multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | ✅ |
+| 022 | Corpus: near-tier owner documents (char formatting · court spacing · footnotes · `REF` · content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | ✅ |
 | 023 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | opus/high | ❌ | 020–022 | 🔲 |
 
 > **✅ 020 CLOSED — the control is published, 2026-08-21.** The gate now measures what SURVIVES, not just

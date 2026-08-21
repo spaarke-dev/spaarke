@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-G04 (part 2) — Corpus: near-tier documents (character formatting · court-filing spacing · footnotes · REF cross-refs · content controls)</title>
     <phase>2 Oracle &amp; Corpus</phase>
-    <gate>blocked-on-001</gate>
-    <status>pending</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Authors/curates test fixtures; no product source modified.</rigor-reason>
     <model-tier>sonnet</model-tier>

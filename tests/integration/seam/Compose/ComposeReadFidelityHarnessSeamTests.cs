@@ -187,6 +187,20 @@ public sealed class ComposeReadFidelityHarnessSeamTests
                     var content = sdtRun.GetFirstChild<SdtContentRun>();
                     if (content is not null) AppendGoldenInline(content, sb);
                     break;
+                case SimpleField simpleField:
+                    // `w:fldSimple` — the SIMPLE field form (a REF/PAGEREF instruction). Its child runs are
+                    // the field's CACHED RESULT: the text Word actually displays and the projection
+                    // legitimately emits inside a field atom. It was falling through `default:` and being
+                    // dropped from the golden, so a projection that CORRECTLY rendered the cached result
+                    // read as a text-exactness failure.
+                    //
+                    // Found 2026-08-21 by `spaarkeai-compose-r8` task 022, the first corpus document to
+                    // contain a `w:fldSimple` (`ref-cross-references.docx`). The complex three-part form
+                    // (`fldChar`/`instrText`/cached result) was already correct — its cached result sits in
+                    // a plain `w:r` that `AppendGoldenRun` already walks. This is a correction to the
+                    // GOLDEN model, not a relaxation: the assertion now demands text it previously ignored.
+                    AppendGoldenInline(simpleField, sb);
+                    break;
                 default:
                     break;
             }
