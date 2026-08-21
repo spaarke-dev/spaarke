@@ -182,6 +182,7 @@ $savedqueryToEntity = @{}    # savedqueryid -> entity MetadataId
 $systemformToEntity = @{}    # formid -> entity MetadataId
 $entityLogicalNames = @{}    # entity MetadataId -> logicalname
 $appModuleNames = @{}        # appmoduleid -> uniquename
+$customControlNames = @{}    # customcontrolid -> name (for -ExcludedPCFs)
 $objTypeCodeToEntityId = @{} # logicalname -> MetadataId
 
 if (-not $SkipTransitiveFilter) {
@@ -222,6 +223,13 @@ if (-not $SkipTransitiveFilter) {
         $appModuleNames[$a.appmoduleid] = $a.uniquename
     }
     Write-Host "    Loaded $($appModuleNames.Count) appmodules" -ForegroundColor DarkGray
+
+    # CustomControls -> name (for -ExcludedPCFs name-based exclusion)
+    $ccResult = Invoke-Dataverse "customcontrols?`$select=customcontrolid,name"
+    foreach ($cc in $ccResult.value) {
+        $customControlNames[$cc.customcontrolid] = $cc.name
+    }
+    Write-Host "    Loaded $($customControlNames.Count) customcontrols" -ForegroundColor DarkGray
 }
 
 # ---- 3. Compute deltas ------------------------------------------------------
@@ -245,6 +253,7 @@ $skippedByReason = @{
     'excluded-entity-cascade'   = 0
     'excluded-appmodule'        = 0
     'excluded-canvasapp'        = 0
+    'excluded-pcf'              = 0
     'system-managed-10xxx'      = 0
 }
 
@@ -275,6 +284,18 @@ foreach ($comp in $inventory.distinctComponents) {
         $appUniqueName = $appModuleNames[$comp.ObjectId]
         if ($ExcludedAppModules -contains $appUniqueName) {
             $skippedByReason['excluded-appmodule']++
+            continue
+        }
+    }
+
+    # Excluded PCFs (CustomControls) by name — customer-provisioning-orchestration-r1 owner directive 2026-08-20
+    # These stay deployed in spaarkedev1 but are kept OUT of the shipped SpaarkeMaster ZIP.
+    # Follow-on retirement work: see pcf-legacy-retirement-r1 (both non-shipping-safe PCFs AND
+    # in-service PCFs currently mislabeled as retired).
+    if ($comp.ComponentType -eq 66 -and $customControlNames.ContainsKey($comp.ObjectId)) {
+        $ccName = $customControlNames[$comp.ObjectId]
+        if ($ExcludedPCFs -contains $ccName) {
+            $skippedByReason['excluded-pcf']++
             continue
         }
     }
@@ -316,7 +337,11 @@ foreach ($comp in $inventory.distinctComponents) {
 }
 
 if ($ExcludedPCFs.Count -gt 0) {
-    Write-Warning "PCF name-based exclusion is not yet wired in this pass. ExcludedPCFs=$($ExcludedPCFs -join ',') will be honored in a follow-on release. Currently ALL PCFs from inventory are included."
+    Write-Host "==> PCF exclusion active — $($ExcludedPCFs.Count) PCF(s) will be kept OUT of $MasterSolutionUniqueName" -ForegroundColor Cyan
+    foreach ($p in $ExcludedPCFs) { Write-Host "    excluded-pcf: $p" -ForegroundColor DarkGray }
+    if ($skippedByReason['excluded-pcf'] -eq 0) {
+        Write-Warning "None of the -ExcludedPCFs names matched any customcontrol in the delta. Check that the names are exact matches to customcontrol.name (e.g. 'sprk_Spaarke.Controls.UniversalDocumentUpload'). No PCFs were actually excluded."
+    }
 }
 
 Write-Host ""
@@ -327,6 +352,7 @@ Write-Host "    Skipped (Canvas Apps)                         : $($skippedByReas
 Write-Host "    Skipped (excluded OOB entities)               : $($skippedByReason['excluded-entity'])"
 Write-Host "    Skipped (cascade: sub-components of excluded) : $($skippedByReason['excluded-entity-cascade'])"
 Write-Host "    Skipped (excluded AppModules)                 : $($skippedByReason['excluded-appmodule'])"
+Write-Host "    Skipped (excluded PCFs by name)               : $($skippedByReason['excluded-pcf'])"
 
 # 3b. OOB customizations - resolve attribute MetadataId per entity/attribute
 Write-Host "==> Resolving OOB attribute MetadataIds (for componenttype=2 add)" -ForegroundColor Cyan

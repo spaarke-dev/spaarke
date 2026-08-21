@@ -1,19 +1,45 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 — **H-3 PIVOTED to Spaarke Master solution scoping (was: live deploy). Wave G-8 authoring complete (30/30 defects); H-3 shifted focus to the DATAVERSE-content packaging discipline that H6 requires. Spaarke.Plugins removed from spaarkedev1; solution-authoring release process shipped; algorithm-corrected TRUE delta identified (218 items vs original 1224 false).**
+> **Last Updated**: 2026-08-21 — **H-3 SOLUTION SCOPING COMPLETE ✅. SpaarkeMaster.zip v1.1.0.0 produced (24 MB, 412 root components, 23 CCs). Ready to hand off to H6 pipeline. Wave H-4 first live E2E is next.**
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `0ef8ff57e` — in sync with origin |
+| **HEAD** | (pending commit + push — see git log) |
 | **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT) |
-| **Working tree** | clean |
-| **Phase status** | Wave G-8 authoring COMPLETE + H-3 SOLUTION-SCOPING IN PROGRESS (Assemble apply pending owner review of 218-item delta) |
-| **r1 E2E goal (FR-18 / SC #5)** | Framework ready; H6 blocked pending Spaarke Master managed ZIP; Wave H-4 first live E2E blocked on Assemble apply |
-| **IN-FLIGHT** | None (dry-run report at `/tmp/assemble-whatif-v3.log`, ephemeral) |
-| **Owner decision needed** | Approve applying the 218-item delta (Assemble without -WhatIf) OR further scope adjustments |
+| **Working tree** | modifications to commit: Assemble script `-ExcludedPCFs` wiring + follow-on `pcf-legacy-retirement-r1` scaffold + current-task.md update; SpaarkeMaster.zip at `out/` (24 MB — NOT committed; will upload to blob storage in Wave H-3 step 7) |
+| **Phase status** | Wave G-8 COMPLETE ✅ + H-3 SOLUTION SCOPING COMPLETE ✅ (SpaarkeMaster.zip produced). Next: Wave H-3 live deploy sequence + Wave H-4 E2E |
+| **r1 E2E goal (FR-18 / SC #5)** | UNBLOCKED — SpaarkeMaster.zip in hand |
+| **IN-FLIGHT** | None |
+| **Owner decision needed** | Proceed to Wave H-3 live deploy sequence (13 steps starting with SB queue recreate) OR pause for review |
+
+## 📦 H-3 SOLUTION SCOPING — 2026-08-21 outcome
+
+**SpaarkeMaster.zip v1.1.0.0** — the shipping baseline for first-customer provisioning:
+- Location: `out/SpaarkeMaster.zip` (24,678,365 bytes = 24 MB)
+- 412 root components, 23 CustomControls, 214 WebResources, 124 Entities, 34 OptionSets, 7 Roles, 6 SiteMaps, 2 AppModules
+- Managed export, Publisher = Spaarke, v1.1.0.0 (Minor bump from 1.0.0.0)
+
+**PCF trim outcomes** — 25 in delta, disposition:
+- **16 USE (shipping)**: 7 Communication* + MatterHeader + TrackingFieldTrio + RegardingResolver + UpdateRelatedButton + SpaarkeGridCustomizer + EmailProcessingMonitor + ThemeEnforcer + ScopeConfigEditor + RegardingLink + AssociationResolver (view-cell renderer for 6 sprk_event views; live on Matter form pre-removal)
+- **7 excluded via `-ExcludedPCFs`**: AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, LegalWorkspace, UniversalDocumentUpload, PlaybookBuilderHost
+- **1 deleted from spaarkedev1**: UniversalDatasetGrid (customcontrol record + cascaded 3 customcontrolresource rows) — its bundle.js + styles.css WRs were missing; broke pac export; owner-approved Option A destructive fix
+
+**Assemble script fix**: `-ExcludedPCFs` parameter WIRED at `scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1` (was no-op at line 319 before; now filters by CC name and reports skipped count in FILTER STATS)
+
+**Non-blocking known issues (deferred to `pcf-legacy-retirement-r1`)**:
+- 10 N:N intersect entities returned 400 on `AddSolutionComponent` (expected Dataverse behavior; auto-generate transitively with parent M:N relationships; cosmetic-only)
+- 8 PCFs excluded from ship but still deployed in `spaarkedev1` (dedicated solutions) — retirement decision deferred
+- 5 in-service PCFs currently ship (RegardingLink + 4 form-bound REDs — SpeDocumentViewer, EventAutoAssociate, EventFormController + AssociationResolver removed by owner)
+- 477 env-wide orphan customcontrolresource rows (mostly Microsoft platform metadata debt; leave alone unless blocking)
+
+See [`projects/pcf-legacy-retirement-r1/README.md`](../pcf-legacy-retirement-r1/README.md) + [`notes/audit-findings-from-r1.md`](../pcf-legacy-retirement-r1/notes/audit-findings-from-r1.md) for the full audit trail.
+
+## ▶ Next: Wave H-3 live deploy sequence
+
+13 sequential steps starting with SB queue recreate (see below §H-3 remaining). Awaits owner go.
 
 ### On post-/compact resume
 
