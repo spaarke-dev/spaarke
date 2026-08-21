@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **Wave W1** — 002 (owns GraphService) · 003 · 005 |
+| **Task** | **005** — Diagnose + fix Audit Log (last of Wave W1) |
 | **Status** | not-started |
 | **Phase** | 1 — Workstream A (Make failures visible) |
 | **Rigor** | FULL (all three) |
