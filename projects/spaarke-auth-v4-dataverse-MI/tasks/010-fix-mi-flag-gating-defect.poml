@@ -11,7 +11,8 @@
     <model-tier-reason>Well-specified defect with an exact fix and a closed test matrix.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>A</parallel-group>
-    <parallel-safe>true</parallel-safe>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CORRECTED 2026-08-20: NOT parallel-safe. Task 011 also modifies src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs. Dispatching both as concurrent sub-agents would collide on that file. Run 010 then 011 sequentially -- 011's CCA caching builds on the branch structure 010 corrects.</parallel-reason>
     <deps>003</deps>
     <tags>auth,bff-api,dataverse,bugfix</tags>
     <estimated-effort>2-4 hours</estimated-effort>

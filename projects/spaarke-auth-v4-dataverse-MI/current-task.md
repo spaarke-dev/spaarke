@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-20 (by task-execute, after task 003 — Phase 0 complete)
+> **Last Updated**: 2026-08-20 (by task-execute — task 010 ESCALATED)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -10,24 +10,32 @@
 | Field | Value |
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — zero-secret BFF confidential credential (OBO → MI-FIC) |
-| **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **Group A — 010 + 011** (not started) |
-| **Step** | Begin task 010 and task 011 |
-| **Status** | not-started — **unblocked**, dep 003 is ✅ |
-| **Next Action** | **Both are `parallel-safe: true`.** Per root CLAUDE.md, dispatch in **ONE message with TWO `task-execute` Skill calls**: `tasks/010-fix-mi-flag-gating-defect.poml` + `tasks/011-fix-di-lifetimes.poml` |
-| **Portfolio** | [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · **3 of 26 active** (3 deferred) |
+| **Branch** | `work/spaarke-auth-v4-dataverse-MI` |
+| **Task** | **010 — Fix the MI-flag gating defect** |
+| **Step** | 3 of 5 — ⛔ **BLOCKED at `DataverseAccessDataSource.cs`** |
+| **Status** | 🔔 **ESCALATED — awaiting owner decision.** See [`BLOCKED.md`](BLOCKED.md) |
+| **Next Action** | Owner chooses: **A) decouple** (recommended) · B) defer the file to Phase 2 · C) ❌ do NOT copy the template verbatim |
+| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · **3 of 26 active** (3 deferred) |
 
-> ## ✅ PHASE 0 COMPLETE — THE CREDENTIAL DECISION IS RECORDED
+> ## 🔔 TASK 010 ESCALATION — the trigger fired exactly as written
 >
-> **MI-FIC is adopted.** OBO proven on the wire under a Managed-Identity-issued client assertion
-> (Graph/SPE · Dataverse `user_impersonation` with `upn` preserved · long-running OBO), with a
-> negative control that fails loudly. **Option B (KV certificate) not taken.** Risk R-002 retired.
-> ADR-028 A4 now carries an adoption-status block.
-> → [`notes/decisions/003-credential-decision.md`](notes/decisions/003-credential-decision.md)
+> `DataverseAccessDataSource.cs:53-77` uses **one `if`** to control both the **app-only credential** *and* the
+> **OBO confidential client** (`_cca`). Copying the prescribed `DataverseWebApiService` template puts `_cca = null`
+> in the MI branch — so with `Graph:ManagedIdentity:Enabled=true` (the intended dev end-state, already live)
+> **every delegated Dataverse access-check throws** at `:107`. That is the fail-closed outage this project exists
+> to avoid, introduced by the task meant to be a safe prerequisite.
 >
-> **Two items deliberately recorded as NOT proven** — Power BI (deferred, DEF-001) and the Model 2
-> cross-tenant FIC shape (open, owed by provisioning §9.2). Neither gates a dev-only Model 1 rollout.
-> Do **not** read the decision as having settled Model 2.
+> **Recommended: decouple** — flag-gate `_credential`, build `_cca` independently whenever OBO config exists.
+> It is also the exact seam task 020 needs, so task 022 does not have to untangle it under pressure.
+>
+> ✅ Already done and safe: `DataverseWebApiClient.cs` gating fixed (no OBO path there), builds clean.
+> ⛔ `DataverseAccessDataSource.cs` deliberately **untouched**. Nothing deployed.
+
+### ⚠️ Secondary finding — Group A was misclassified (CORRECTED)
+
+Both 010 and 011 declared `parallel-safe: true` and TASK-INDEX claimed *"different files"* — but **both modify
+`DataverseAccessDataSource.cs`**. Concurrent sub-agents would collide. Now `parallel-safe: false` on both, group
+re-marked **`010 → 011` sequential**.
 
 ### Repo state
 

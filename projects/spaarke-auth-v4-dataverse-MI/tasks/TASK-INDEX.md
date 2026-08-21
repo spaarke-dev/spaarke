@@ -11,8 +11,8 @@
 | 001 | Create the dev deployment slot + assign UAMI | 0 Spike | **FULL**¹ | sonnet/med | — | — | ❌ | — | ✅ |
 | 002 | Spike: prove OBO under a MI client assertion | 0 Spike | FULL | **opus/xhigh** | 001 | — | ❌ | — | ✅ |
 | 003 | Record the credential decision with evidence | 0 Spike | STANDARD | sonnet/med | 002 | — | ❌ `.claude/` | — | ✅ |
-| 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ✅ | FR-A1 | 🔲 |
-| 011 | Fix DI lifetimes + record the ADR-009 decision | 1 Prereq | FULL | sonnet/high | 003 | **A** | ✅ | FR-A2 | 🔲 |
+| 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A1 | 🔄 |
+| 011 | Fix DI lifetimes + record the ADR-009 decision | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A2 | 🔲 |
 | 020 | `IClientAssertionProvider` seam + raise ADR-010 ceiling | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | 🔲 |
 | 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | 🔲 |
 | 022 | Migrate the 6 BFF-identity confidential clients | 2 Provider | FULL | **opus/xhigh** | 021 | **D** | ❌ | FR-B3 | 🔲 |
@@ -53,7 +53,7 @@ changed downstream tasks — see [`notes/decisions/001-slot-creation.md`](../not
 | Group | Tasks | Prerequisite | Goal-eligible | Notes |
 |---|---|---|---|---|
 | — | 001 → 002 → 003 | none | ❌ | Serial. 002/003 are the credential decision gate |
-| **A** | 010, 011 | 003 | ✅ | Both prerequisite defects; different files |
+| **A** | 010 → 011 | 003 | ❌ | **CORRECTED 2026-08-20: NOT parallel — the "different files" claim was wrong.** Both modify `Spaarke.Dataverse/DataverseAccessDataSource.cs`. Run **sequentially**: 011's CCA caching builds on the branch structure 010 corrects |
 | **B** | 020 | 011 | ❌ | Serial — everything downstream depends on the seam |
 | **C** | 021, 023, 024 | 020 | ✅ | Independent surfaces of the provider |
 | **D** | 022 | 021 | ❌ | The migration itself; highest blast radius |

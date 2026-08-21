@@ -33,24 +33,42 @@ public class DataverseWebApiClient : IDisposable
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        // Use client credentials (same as DataverseServiceClientImpl) when available.
-        // Falls back to DefaultAzureCredential (managed identity) if client credentials not configured.
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
-        var tenantId = configuration["TENANT_ID"];
+        // FR-A1 (auth-v4 task 010): select the credential from the Graph:ManagedIdentity:Enabled
+        // FLAG, not from secret presence. Previously the mere presence of API_CLIENT_SECRET selected
+        // the secret path -- and on dev the secret IS present because OBO needs it, so this class ran
+        // on the client secret despite MI being enabled. Gating shape copied from
+        // DataverseWebApiService.cs (already corrected by #3b) so both read the same switch.
+        // This class has no OBO path, so the app-only credential is the only concern here.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId))
+        if (useManagedIdentity)
         {
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-            _logger.LogInformation("DataverseWebApiClient using client credentials for {ApiUrl}", _apiUrl);
-        }
-        else
-        {
-            var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
+            var managedIdentityClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
             _credential = new DefaultAzureCredential(string.IsNullOrEmpty(managedIdentityClientId)
                 ? new DefaultAzureCredentialOptions()
                 : new DefaultAzureCredentialOptions { ManagedIdentityClientId = managedIdentityClientId });
-            _logger.LogInformation("DataverseWebApiClient using DefaultAzureCredential for {ApiUrl}", _apiUrl);
+            _logger.LogInformation(
+                "DataverseWebApiClient using Managed Identity (ADR-028; clientId {ClientId}) for {ApiUrl}",
+                managedIdentityClientId ?? "(system-assigned)", _apiUrl);
+        }
+        else
+        {
+            var clientId = configuration["API_APP_ID"];
+            var clientSecret = configuration["API_CLIENT_SECRET"];
+            var tenantId = configuration["TENANT_ID"];
+
+            if (string.IsNullOrEmpty(tenantId))
+                throw new InvalidOperationException("TENANT_ID configuration is required (Managed Identity disabled)");
+            if (string.IsNullOrEmpty(clientId))
+                throw new InvalidOperationException("API_APP_ID configuration is required (Managed Identity disabled)");
+            if (string.IsNullOrEmpty(clientSecret))
+                throw new InvalidOperationException("API_CLIENT_SECRET configuration is required (Managed Identity disabled)");
+
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            _logger.LogInformation(
+                "DataverseWebApiClient using ClientSecret credential (local-dev fallback) for {ApiUrl}", _apiUrl);
         }
 
         _httpClient = new HttpClient
