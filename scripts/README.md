@@ -294,15 +294,16 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
-**Purpose:** Create the production Entra ID app registration (BFF API) and store credentials in Key Vault
+**Purpose:** Create the production Entra ID app registration (BFF API), store credentials in Key Vault, and create/verify managed-identity federated credentials (MI-FIC)
 **Usage:** 🔴 One-time - Production environment setup
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Entra ID admin permissions, Key Vault access
 **Owner:** DevOps Team
-**Last Used:** March 2026
+**Last Used:** August 2026 (FIC extension, task 030)
 
 **When to Use:**
 - Setting up production Entra ID app registrations
+- Creating a managed-identity federated credential for a new (app-registration, UAMI) pair
 - Recreating registrations in a new tenant
 - After tenant migration
 
@@ -323,6 +324,38 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 > `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault secrets
 > were removed. They had zero code consumers; Dataverse server-to-server access
 > consolidated onto the BFF app registration credential (`API_CLIENT_SECRET`) on 2026-01-07.
+
+**Also creates federated identity credentials (MI-FIC)** — added 2026-08-21 by
+`spaarke-auth-v4-dataverse-MI` task 030 (spec FR-C4). This is the repo's **only** FIC automation;
+before it, every federated credential in the tenant was created by hand.
+
+```powershell
+# Create/verify a FIC only (the entry point customer provisioning invokes)
+.\Register-EntraAppRegistrations.ps1 -FicOnly `
+  -FederatedCredentialAppId <app-reg-id> `
+  -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>"
+
+# Import the FIC functions into another provisioning script without running anything
+. .\Register-EntraAppRegistrations.ps1 -ExportFunctionsOnly
+```
+
+- **Idempotent on the `(issuer, subject, audience)` triple, not the name** — a credential that already
+  carries the required triple under a different name is a no-op, not a duplicate or an error.
+- **Verified by a real token exchange**, never by "create returned success" — a misconfigured FIC
+  creates cleanly and fails only at exchange.
+- **Exit codes**: `0` verified · `1` fault · `2` structurally correct but not exchange-provable from
+  this host (a workstation cannot mint a managed-identity assertion — pass `-AssertionToken`, or
+  `-AllowUnverified` to accept it).
+- **Cross-tenant pairs are refused**, not attempted: Entra requires the app registration and the UAMI
+  in the same tenant, and a cross-tenant FIC creates successfully then fails silently.
+- Behaviour without the new flags is unchanged (verified byte-identical).
+
+> ⚠️ **The client-secret path above is transitional.** It exists under ADR-028 exception **E-3** and is
+> scheduled for removal by spec FR-C3 / task 033 of `spaarke-auth-v4-dataverse-MI`. ADR-028 **A4** ranks
+> secrets last ("development and testing only"). **New credentials should use MI-FIC**, not the secret.
+> The two capabilities above are not co-equal — one is the target state, the other is being retired.
+
+Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md`](../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md)
 
 ---
 

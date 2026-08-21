@@ -99,9 +99,16 @@ Load [`.claude/constraints/auth.md`](../../.claude/constraints/auth.md) and
 
 ### Two live CI gates that will bite
 
-1. **`ADR010_DITests.cs:164`** — 1:1-interface ceiling is **153**. `IClientAssertionProvider` makes 154.
-   **Raise it to 154 in the same PR as task 020**, with a comment citing the FR-14 cross-assembly justification.
+1. **`ADR010_DITests.cs`** — 1:1-interface ceiling is **153**. ~~`IClientAssertionProvider` makes 154; raise
+   it to 154 in the same PR as task 020.~~ **CORRECTED at task 020 (2026-08-20) — do NOT raise it.**
+   Measured at the gate: the real count is **151**, not 153, and `IClientAssertionProvider` does not move it
+   at all, because the test scans `typeof(Program).Assembly` — the **BFF only** — while the interface is
+   declared in `Spaarke.Dataverse`. The ratchet is *blind* to cross-assembly seams. Raising it would have
+   widened the existing slack from 2 to 3 and let a future in-assembly interface land unreviewed.
+   The blind spot itself is filed as an open owner decision (**#809**), not something task 020 changed.
 2. **`LayerDependencyTests.cs:43`** — fails if `Spaarke.Dataverse` gains a ProjectReference. It must not.
+   Note it enforces only *that* half; the PackageReference half every task here cites is **not** enforced
+   (open owner decision **#810**).
 
 ## Per-task obligations (BFF=Y)
 

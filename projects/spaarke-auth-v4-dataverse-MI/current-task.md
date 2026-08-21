@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 (by `context-handoff`, after task 020)
+> **Last Updated**: 2026-08-21 (task 030 — implementation + verification complete, quality gates running)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,21 +11,48 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **030 — FIC provisioning automation** (`Register-EntraAppRegistrations.ps1` extension) — not started |
+| **Task** | **030 — FIC provisioning automation** (`Register-EntraAppRegistrations.ps1` extension) — **implementation + verification COMPLETE**; Step 9.5 gates in flight |
 | **Task file** | `projects/spaarke-auth-v4-dataverse-MI/tasks/030-fic-provisioning-automation.poml` |
-| **Status** | not-started — **unblocked** (dep 020 ✅) |
-| **Next Action** | **1)** `git merge origin/master` (1 behind, docs-only) · **2)** `task-execute` on `tasks/030-fic-provisioning-automation.poml` |
-| **Why 030, not 021** | ⏩ **Owner pulled it forward 2026-08-19** — `customer-provisioning-orchestration-r1`'s Wave G-3 is soft-blocked on it. Run it **before** 021/022; do not let phase order carry it |
-| **Progress** | **6 of 26 active complete** (001, 002, 003, 010, 011, 020) · **20 remaining** · 3 deferred |
+| **Status** | in-progress — code done, 11 of 11 verification checks pass, decision record + provisioning notification written |
+| **Next Action** | **1)** apply any code-review / adr-check findings · **2)** mark POML + TASK-INDEX ✅ · **3)** commit + push · **4)** next task is **021** (ordered credential selection — read `notes/decisions/020-assertion-seam.md` first; its scope GREW) |
+| **Why 030 first** | ⏩ Owner pulled it forward 2026-08-19 for `customer-provisioning-orchestration-r1`'s Wave G-3. **Delivered** — their PR #779 has zero FIC code, so the duplicate-work risk did not materialise |
+| **Progress** | **6 of 26 active complete** (001, 002, 003, 010, 011, 020); **030 pending gate sign-off** · 20 remaining · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
+
+### Task 030 — files modified this session
+
+| File | Purpose |
+|---|---|
+| `scripts/Register-EntraAppRegistrations.ps1` | **+835/−3 additive.** 7 FIC functions + execution section + 12 params. Inert without `-CreateFederatedCredential`/`-FicOnly`/`-ExportFunctionsOnly` |
+| `scripts/README.md` | Registry entry: FIC usage, exit codes, idempotency contract |
+| `projects/.../notes/decisions/030-fic-automation.md` | **NEW** — design rationale + 11-check verification table + what was NOT verified |
+| `projects/.../notes/PROVISIONING-CHANGE-REQUEST.md` | **§10 appended** — delivery notice, invocation contract, exit codes, §9.2 re-raise, merge note |
+| `projects/.../CLAUDE.md` | Corrected the stale "raise the ADR-010 ceiling to 154" instruction that task 020 disproved |
+
+### Task 030 — three things a fresh session must not re-derive
+
+1. **Idempotency is keyed on `(issuer, subject, audience)`, NOT the credential name.** Entra enforces that
+   triple's uniqueness itself and *rejects* a duplicate — so a name-only check does not create a duplicate,
+   it produces a **failed run against an already-correct credential**. Verified live 2026-08-21.
+2. **The structural check must run BEFORE the AADSTS70021 retry loop.** A wrong subject and ordinary
+   propagation produce the *same* error code; the structural check is the only thing that separates them.
+3. **Exit `2` ≠ failure.** It means structurally correct but not exchange-provable from this host (a
+   workstation cannot mint a managed-identity assertion). Exchange verification completes in **task 031**
+   on the slot, via `-AssertionToken`.
+
+### Task 030 — open item carried forward
+
+⚠️ **PROVISIONING-CHANGE-REQUEST §9.2 is still unanswered** (Model 2 cross-tenant FIC issuer). The script
+now *refuses* cross-tenant pairs at runtime, so the failure is loud rather than silent — but the question
+must be answered **before `customer-provisioning-orchestration-r1` Wave G-3 task 130 executes**.
 
 ### Repo + live state (verified at handoff)
 
 | Check | Value |
 |---|---|
-| Working tree | **clean**, 0 uncommitted |
+| Working tree | **5 files modified, uncommitted** (see below) |
 | Pushed through | `0e73c014d` |
-| Behind `origin/master` | **1** — `418718295 docs(spe-admin)`, docs-only, no conflict risk |
+| Behind `origin/master` | **0** — merged `418718295` at task-030 start |
 | Slot `/healthz` | **200** (`spaarke-bff-dev-staging`) |
 | Production `/healthz` | **200** — **never swapped**, untouched all project |
 | Full BFF suite | **10,554 / 0** (97 skipped) |

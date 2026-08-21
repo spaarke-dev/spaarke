@@ -352,3 +352,78 @@ dispatch date as you can.
 - **Your MI-FIC cap-inversion note** — appreciated. For the record the same inversion is what made "OBO requires a
   secret" survive three prior audits here; the failure mode is a plausible mechanism reasoned about from the wrong
   end, not missing evidence.
+
+---
+
+## 10. DELIVERED — `Register-EntraAppRegistrations.ps1` FIC extension has landed (2026-08-21)
+
+Task 030 / spec **FR-C4** is complete and on `work/spaarke-auth-v4-dataverse-MI`. This is the item §9.3
+committed to sequencing early for your **Wave G-3 task 130** — it landed first, so **do not build the
+duplicate**. Your branch currently contains zero federated-credential code, so nothing needs unwinding.
+
+### Invocation contract
+
+Two entry points, both on the existing script (no new file):
+
+```powershell
+# 1. Standalone — app-registration/Key Vault/consent steps are skipped
+.\Register-EntraAppRegistrations.ps1 -FicOnly `
+  -FederatedCredentialAppId <app-reg-id> `
+  -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>" `
+  -TenantId <tenant>
+
+# 2. Dot-source the functions into Provision-Customer.ps1 without executing anything
+. .\Register-EntraAppRegistrations.ps1 -ExportFunctionsOnly
+New-SpaarkeFederatedCredential -AppId $appId -UamiResourceId $uami -TenantId $tenant
+```
+
+`-UamiResourceId` is an **ARM resource ID, not a name** — five UAMIs exist in dev and
+`spaarke-bff-identity` is a decoy that is not attached to the BFF.
+
+### Exit codes — please branch on these
+
+| Exit | Meaning | Your action |
+|---|---|---|
+| `0` | Verified by a real token exchange | Proceed |
+| `1` | Fault — create failed, drift refused, structurally invalid, or exchange rejected | Stop; the message carries Azure CLI's verbatim error |
+| `2` | Structurally correct but **not exchange-provable from this host** | Not a failure. See below |
+
+**Exit `2` will be your normal result** if you run provisioning from an agent that does not carry the
+target UAMI: a managed-identity assertion can only be minted from inside Azure on compute holding the
+identity. Either pass `-AssertionToken` (minted on that compute), or pass `-AllowUnverified` and
+schedule verification for after the App Service exists. We deliberately did **not** make "created" imply
+"working" — a misconfigured FIC creates cleanly and fails only at exchange.
+
+### Two things worth knowing
+
+1. **Idempotency is keyed on `(issuer, subject, audience)`, not the credential name.** Entra enforces
+   that triple's uniqueness per application itself and *rejects* a second credential carrying it. A
+   name-only check therefore does not produce a duplicate — it produces a **failed run against a
+   credential that was already correct**. We hit exactly that on the first live run and fixed it; if
+   task 130 had been written against name-matching, it would have hit it too.
+2. **Cross-tenant pairs are refused at runtime**, with a message citing §9.2 — see below.
+
+### ⚠️ §9.2 is still unanswered, and it now has a runtime consequence
+
+Our §9.2 question — whether Model 2's customer-tenant stamp trusts its **own stamp UAMI** (reading a) or
+the **shared Spaarke UAMI** (reading b) — has not been answered. The script now **refuses** a
+cross-tenant (app-registration, UAMI) pair rather than attempting it, because Entra requires both in the
+same tenant and a cross-tenant FIC **creates successfully and fails only at token exchange**.
+
+Practically: under reading (a) you are unaffected. Under reading (b), MI-FIC is structurally impossible
+for that shape and it needs the ADR-028 A4 certificate alternative — which would reopen the
+certificate-provisioning work recorded as *dropped, not deferred*.
+
+**Please answer before Wave G-3 task 130 executes.** The failure mode is loud now instead of silent,
+which is an improvement, but the underlying question is unchanged.
+
+### Merge coordination
+
+Your PR **#779** rewrites this same script (+707 / −257, the idempotency-contract rewrite). We simulated
+the three-way merge: **one conflict hunk**, where both sides append to `param()` — resolution is keep
+both (your `$SecretExpiryMonths` plus our FIC parameters). Everything else merges cleanly, and we
+specifically checked that our `-FicOnly` Key Vault skip lands correctly on your restructured pre-flight.
+Whoever merges second resolves that one hunk.
+
+Full rationale + verification evidence:
+[`notes/decisions/030-fic-automation.md`](decisions/030-fic-automation.md).
