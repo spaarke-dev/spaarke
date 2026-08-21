@@ -50,7 +50,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 012 | **Save lifecycle hardening** — dirty flag survives a failed POST · timeout + `AbortSignal` + in-flight guard · working 423 recovery | FR-S03/04/05 | FULL | opus/xhigh | ❌ | 010 | ✅ |
 | 013 | **Save-outcome contract + telemetry** — closed enum on the wire; no 200-with-nothing-written; emit the outcome | FR-S06, S10 | FULL | opus/xhigh | ❌ | — | ✅ |
 | 014 | **Engine-side integrity** — re-anchor download failure must never persist the stale baseline *(the ONE Half-A defect in Track S)* | FR-S07 | FULL | opus/xhigh | ❌ | — | ✅ |
-| 015 | **Document size ceilings** — route to the existing chunked upload; remove the ~22 MB body ceiling; honest oversize pre-flight | FR-S08 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
+| 015 | **Document size ceilings** — route to the existing chunked upload; remove the ~22 MB body ceiling; honest oversize pre-flight | FR-S08 | FULL | opus/xhigh | ❌ | 013 | 🔄 |
 | 016 | **Honest-failure set** — silent guard drops · name-modal gate · tenant precondition · checkout force-close · promote-after-write · 429 mapping · filesize/filepath refresh · per-document draft slot | FR-S09 | FULL | opus/xhigh | ❌ | 010, 013 | 🔲 |
 | 018 | **Track S enforcement** — run the Compose client suite in CI as a self-contained gate (the Half-B counterpart to `compose-fidelity-gate`); fix sibling-resolution + non-determinism | — | FULL | opus/xhigh | ❌ | 010 | 🔲 |
 | 017 | **Track S deploy** (BFF + `sprk_spaarkeai` together) + owner UAT | — | STANDARD | sonnet/high | ❌ | 010–016, **018** | 🔲 |

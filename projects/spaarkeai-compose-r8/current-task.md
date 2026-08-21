@@ -1,6 +1,6 @@
-# Current Task State — spaarkeai-compose-r8
+﻿# Current Task State — spaarkeai-compose-r8
 
-> **Last Updated**: 2026-08-20 (task 012 complete)
+> **Last Updated**: 2026-08-20 (tasks 012 + 014 complete; 015 server half landed; 018 in flight)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Git**: branch `work/spaarkeai-compose-r8`, 12 ahead of `origin/master`, 0 behind, working tree CLEAN.
@@ -12,27 +12,48 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **014** — Engine-side integrity: a re-anchor download failure must never persist the stale baseline |
-| **Status** | **not-started** — no work in progress, no partial edits. A clean starting point. |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 014` — which invokes `task-execute` on `tasks/014-reanchor-baseline-integrity.poml`. Any of 015 / 016 / 018 is an equally valid next pick. |
+| **Task** | **015 (finish the client half)** — then **016**. **018** may already be done — CHECK `git status` and `notes/compose-client-ci-gate.md` FIRST. |
+| **Status** | 015 is **PARTIAL**: the server half is committed (`06b370995`); the client pre-flight is not written. The design for it is already decided — see [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md) "What remains". |
+| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then finish task 015's client pre-flight` — or start **016**, which owns the same file. Doing both in ONE pass over `ComposeWorkspace.tsx` is cheaper than two. |
 | **Blocked on** | Nothing. |
-| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 050 ✅** (all 2026-08-20) |
+| **Complete** | **001 ✅ · 002 ✅ · 010 ✅ · 011 ✅ · 012 ✅ · 013 ✅ · 014 ✅ · 050 ✅** · 015 🔄 partial · 018 in flight |
 
-### Startable now — pick any; all are `parallel-safe: false`, so run them ONE AT A TIME
+### ⚠️ FIRST THING: reconcile the working tree
 
-| # | Task | Why it is startable |
+A background agent was running **task 018** (CI gate) concurrently and its edits may be uncommitted.
+`git status` will show `.github/workflows/sdap-ci.yml`, `jest.config.js`, several `*.test.tsx`,
+`projects/INDEX.md`, `scripts/ci/summarize-jest-results.js` and
+`projects/spaarkeai-compose-r8/notes/compose-client-ci-gate.md`. **Read that notes file first** — it
+carries 018's baseline measurements and its blocking-vs-advisory decision. Verify its work (run the
+package suite) before committing it; do not assume it is finished or correct.
+
+Also untracked: `src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/**` — researcher-subagent
+memory, written during task 015. Harmless; decide whether to commit or delete it.
+
+### Startable now — all `parallel-safe: false`; run ONE AT A TIME
+
+| # | Task | Why |
 |---|---|---|
-| **014** | Engine-side integrity — re-anchor download failure must never persist the stale baseline | deps none. **The ONE Half-A defect in Track S** — recommended next |
-| **015** | Document size ceilings — route to the existing chunked upload | deps 013 ✅ |
-| **016** | Honest-failure set — the eight silent-drop modes | deps 010 ✅, 013 ✅ |
-| **018** | Track S CI gate — run the Compose client suite in CI | deps 010 ✅. Must land BEFORE 017. Task 012 left it a **reproducible finding** (see below) |
+| **015 (client half)** | the pre-flight; design already decided | `ComposeWorkspace.tsx` |
+| **016** | honest-failure set — the eight silent-drop modes | same file + `ComposeEndpoints.cs` + `ComposeService.cs` |
+| **018** | verify/finish whatever the background agent left | CI YAML + client tests |
 
-**Why 014 next**: it is the only Track S task that touches the engine rather than the contract, and it is
-the one remaining defect where the *bytes* are wrong rather than the *report*. Nothing forces this order —
-015/016/018 are equally valid, and 018 now has more input than it did.
+**Do NOT run 015-client and 016 in parallel** — both own `ComposeWorkspace.tsx`. 018 IS file-disjoint
+from both (that is why it was safe to run it alongside 014, which was server-only).
 
-**The entire Compose spine is `parallel-safe: false`** (project CLAUDE.md). Do NOT dispatch these to
-parallel agents — 012/014/015/016 all touch `ComposeService.cs` and/or `ComposeWorkspace.tsx`.
+### Owner decisions needed at review (do not let these pass silently)
+
+1. **Task 015 deviates from its POML.** It does NOT route to the chunked upload path. Reason: Graph's
+   simple upload has been **250 MB since Oct 2023** (the 4 MB guard was enforcing a limit that no longer
+   exists), and the chunked path **cannot carry an end-to-end `If-Match`** — so routing there would have
+   silently weakened task 011's concurrency guarantee for exactly the large documents it was meant to
+   help. Full reasoning + citations: [`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
+2. **`If-Match` on `PUT .../content` is UNDOCUMENTED in the Graph v1.0 reference.** Task 011's
+   concurrency guarantee rests on it. Worth an empirical probe (stale `If-Match` → expect 412) against a
+   real SPE container **before the 017 deploy**. One test settles it.
+3. **The god-class ratchet is RED on `DataverseServiceClientImpl.cs`** (2,975 vs frozen 2,864) — NOT this
+   project's file (`a76e7e714` / `e3e72af91`). It was red before task 014 and still is. The two Compose
+   waivers WERE re-baselined with documented reasons pointing at Track D 070/073. This one needs an owner.
 
 ### Traps that will bite a fresh session (all learned the hard way this session)
 
@@ -53,6 +74,24 @@ parallel agents — 012/014/015/016 all touch `ComposeService.cs` and/or `Compos
    this session's work, reproduced by stashing. Do not chase them; task 018 root-causes them.
 7. **Publish size must be measured COMPRESSED** (zip the publish dir). Raw bytes read ~137 MB and will
    look like a catastrophic regression; the real figure is **43.68 MB** against a 60 MB ceiling.
+
+### Carried forward from tasks 014 + 015 (read before 016)
+
+Full write-ups: [`notes/reanchor-baseline-integrity.md`](notes/reanchor-baseline-integrity.md) ·
+[`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
+
+- **A stale-base re-anchor that cannot re-download the current bytes now REFUSES** —
+  `ComposeStaleBaselineUnavailableException` → 409 + `refused-stale` + cause `baseline-download`. The
+  old fallback persisted the LOAD-TIME baseline over a version already known to be newer. Do not
+  reintroduce any "proceed with what we have" branch on that path.
+- **`ComposeSaveLimits.MaxDocumentBytes` (25 MB) is THE limit.** It drives the request-body cap, the
+  refusal, and the number in the message. **Never add a second size constant** — especially not a
+  client-side copy; the client must receive the number from the server or do no numeric pre-flight.
+- **The 4 MB Graph guard is gone** from `UploadSmallAsUserAsync`. Simple upload is 250 MB (since Oct
+  2023, SPE-confirmed). If you see a 4 MB threshold anywhere else, it is stale too.
+- **`refused-invalid` = "retrying this unchanged cannot succeed"**; `refused-stale` = "the base moved and
+  we could not rebase; nothing written, nothing overwritten"; `storage-failed` = "the write itself
+  failed". Pick on that axis, not on which subsystem threw.
 
 ### Carried forward from task 012 (read before 014 / 015 / 016 / 018)
 
