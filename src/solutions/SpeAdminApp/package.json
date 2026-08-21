@@ -14,11 +14,13 @@
     "@azure/msal-browser": "^3.30.0",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.225",
+    "@hello-pangea/dnd": "^17.0.0",
     "@lexical/html": "^0.41.0",
     "@lexical/list": "^0.41.0",
     "@lexical/react": "^0.41.0",
     "@lexical/rich-text": "^0.41.0",
     "@lexical/selection": "^0.41.0",
+    "@microsoft/applicationinsights-web": "^3.3.11",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
@@ -31,7 +33,9 @@
     "diff": "^8.0.3",
     "dompurify": "^3.4.0",
     "lexical": "^0.41.0",
+    "mammoth": "^1.12.0",
     "marked": "^17.0.4",
+    "pdfjs-dist": "^6.2.108",
     "react-window": "^1.8.11"
   },
   "devDependencies": {
