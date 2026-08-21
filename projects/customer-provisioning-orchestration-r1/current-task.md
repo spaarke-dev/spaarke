@@ -1,72 +1,160 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-21 (context-handoff for fresh session) — **H-3 SOLUTION SCOPING COMPLETE ✅. SpaarkeMaster.zip v1.1.0.0 produced (24 MB, 412 root components, 23 CCs). Ready to hand off to H6 pipeline. Wave H-4 first live E2E is next.**
+> **Last Updated**: 2026-08-21 T18:20Z (by context-handoff) — **Wave H-3 PARTIAL PAUSE after 8 of 13 steps executed. 4 fix-at-discovery patches committed at `5076b0a14` + pushed. Step 9 hit a sidecar Layer-2 blocker requiring container-stdout access we haven't identified. Next session picks up with sidecar diagnostics + BFF-API-ClientSecret real value.**
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST on fresh session)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `88c330dc7` — clean tree, in sync with origin |
-| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT) |
-| **Working tree** | CLEAN. All H-3 work committed. |
-| **Phase status** | Wave G-8 COMPLETE ✅ + H-3 SOLUTION SCOPING COMPLETE ✅ (SpaarkeMaster.zip produced). Next: Wave H-3 live deploy sequence + Wave H-4 E2E |
-| **r1 E2E goal (FR-18 / SC #5)** | UNBLOCKED — SpaarkeMaster.zip in hand |
-| **SpaarkeMaster.zip location** | `out/SpaarkeMaster.zip` (24,678,365 bytes = 24 MB) — LOCAL ONLY, gitignored; NOT in origin |
-| **IN-FLIGHT** | None. All destructive DV changes complete + verified. |
-| **Owner decision needed** | Proceed to Wave H-3 live deploy sequence (13 steps starting with SB queue recreate) OR pause for review |
+| **HEAD** | `5076b0a14` — clean tree, in sync with origin (`git push` completed 18:20Z) |
+| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT, no CI configured on `work/*` branches) |
+| **Working tree** | CLEAN. All fix-at-discovery patches committed. |
+| **Phase status** | Wave H-3 PARTIAL — Steps 1-8 ✅ · Step 9 (Deploy-ControlPlane) partial: code deployed but sites unhealthy · Steps 10-13 pending |
+| **Live Azure state** | L2 control-plane infra fully deployed on `rg-spaarke-platform-dev`. 3 sites (Api prod, Api staging, Worker) `state: Running` at App Service level but `/healthz` returns 500/503. Sidecar exits 1 → App Service kills whole site startup. |
+| **Owner decision needed** | Option A/B/C/D (see §"Wave H-3 pause — 4-option decision" below) |
 
 ### 🚀 FRESH SESSION RECOVERY (paste these commands)
 
 ```powershell
 # 1. Verify state matches this checkpoint
-git log --oneline -3      # Should show 88c330dc7 at HEAD
+git log --oneline -5      # Should show 5076b0a14 at HEAD
 git status                # Should be clean
 
-# 2. Verify SpaarkeMaster.zip still present locally (24 MB)
-ls -la out/SpaarkeMaster.zip
-
-# 3. If ZIP missing (fresh worktree), regenerate:
-#    (Prereq: pac auth SPAARKE DEV 1 + az account set to Spaarke Development Env)
-#    pac solution export --name SpaarkeMaster --path out/SpaarkeMaster.zip --managed --overwrite
-
-# 4. Verify pac/az auth is set to spaarkedev1
+# 2. Verify pac + az auth
 pac auth list             # Should show SPAARKE DEV 1 as active [3]
 az account show           # Should show Spaarke Development Environment sub
+
+# 3. Verify Azure state (should match: sites Running but /healthz failing)
+az webapp show --name spaarke-provisioning-controlplane-dev --resource-group rg-spaarke-platform-dev --query state -o tsv
+az webapp show --name spaarke-provisioning-controlplane-worker-dev --resource-group rg-spaarke-platform-dev --query state -o tsv
+curl -sIm 15 https://spaarke-provisioning-controlplane-worker-dev.azurewebsites.net/healthz | head -1
+
+# 4. Verify blob artifact from Step 7 still there
+az storage blob list --auth-mode login --account-name sprkcpartifactsdev --container-name provisioning-artifacts -o table
 ```
 
 ### 📍 What to say to resume
 
-Any of these will pick up where we left off:
-- **"continue with wave H-3"** → 13-step live deploy sequence (see §"Waves after G-8" below)
+- **"continue with wave H-3"** → picks up at Step 9 unresolved (sidecar Layer 2) + Step 10-13
+- **"provide BFF-API-ClientSecret <value>"** → seeds the sentinel + retries Worker startup
+- **"debug sidecar"** → focused sidecar Layer 2 investigation (see §"Sidecar Layer 2 investigation approaches" below)
+- **"defer sidecar (Path D)"** → remove sitecontainer from Bicep so Worker starts, ship H-3 without sidecar
 - **"where was I?"** → project-continue skill loads full context
-- **"start wave H-4"** → skip live deploy, go straight to E2E (WON'T work; H-3 must complete first)
-- **"pick up where we left off"** → same as "where was I?"
 
 ### 🧠 Critical context for next session
 
-1. **SpaarkeMaster.zip is DONE** — 24 MB managed export, v1.1.0.0, 412 root components. Located at `out/SpaarkeMaster.zip` (gitignored). Blob upload happens in Wave H-3 step 7.
-2. **UDG was DELETED from spaarkedev1** (destructive, owner-approved Option A on 2026-08-21). Cascade removed 2 orphan customcontrolresource rows + all solution memberships. UDG had 0 live deps; ships nothing to customers. If ever needed, rebuild from `src/client/shared/Spaarke.UI.Components/` (DataGrid framework superseded it anyway).
-3. **7 PCFs excluded via `-ExcludedPCFs`** — still deployed in spaarkedev1 dedicated solutions but not shipped to customers. Retirement deferred to `projects/pcf-legacy-retirement-r1/`.
-4. **5 form-bound REDs ship in SpaarkeMaster** — AssociationResolver (owner removed from Matter form 2026-08-20; will be excluded from next release), RegardingLink (6 sprk_event views), SpeDocumentViewer (Document form), EventAutoAssociate (Event quick create), EventFormController (2 Event forms + hardcoded GUID in `EventDetailSidePane/src/services/sidePaneService.ts:119`). These need proper form migration in `pcf-legacy-retirement-r1` before they can be retired.
-5. **Environment health note**: 477 env-wide orphan customcontrolresource rows in spaarkedev1 (mostly Microsoft platform metadata debt). Leave alone unless blocking. Documented in follow-on project.
+1. **What's DEPLOYED on Azure** (all landed via Bicep, all reversible via redeploy):
+   - RG `rg-spaarke-platform-dev` — L2 UAMI, App Service Plan, KV `sprk-controlplane-dev-kv`, Cosmos `cosmos-spaarke-platform-dev`, App Insights + Log Analytics
+   - `sprkcontrolplanedevacr` (Container Registry) with `provisioning-sidecar:v0.1.0` + `:latest`
+   - `sprkcpartifactsdev` (Storage) with `provisioning-artifacts` container holding `dataverse-solutions-latest.json` + `SpaarkeMaster.zip`
+   - 3 App Services (`spaarke-provisioning-controlplane-dev` + staging slot + `spaarke-provisioning-controlplane-worker-dev`) with .Api + .Worker code + kvRefIdentity → L2 UAMI
+   - Sitecontainer `exchange-policy-sidecar` on Worker pointing to `sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest` with UserAssigned auth + `userManagedIdentityClientId` set correctly
+   - 7 RBAC grants (KV Secrets User, Cosmos SQL role, Storage Blob Data Reader, SB Sender+Receiver, AcrPull, subscription-scope Contributor) — all on L2 UAMI (`38f7693f-e6e2-4a3e-9acf-7f9e29dd4044`, clientId `965a4a01-01e1-442b-97a6-6a98308018b3`)
 
-### 📦 Files modified this session (all committed to `88c330dc7`)
+2. **What's SEEDED in KV `sprk-controlplane-dev-kv`** (7 secrets):
+   - `Dataverse-ClientSecret` (BINDING never-delete — sentinel, r3 anti-S2S rule)
+   - `BFF-API-ClientSecret` = sentinel `pending-oob-population` ← **BLOCKS Worker startup** (EnvVarValuesOptions.Validate() fail-fast)
+   - `AzureOpenAI-Endpoint` = sentinel (only Model1Shared H12c consults; not boot-blocking)
+   - `Sidecar-Shared-Secret` = generated GUID (real)
+   - `Exchange-Connect-Cert` = sentinel (only needed at Connect-ExchangeOnline time)
+   - `Redis-ConnectionString` = auto-resolved from live `spaarke-bff-redis-dev` (real)
+   - `ServiceBus-ConnectionString` (pre-existing, untouched by seeder)
 
-- `scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1` — wired `-ExcludedPCFs` parameter (was no-op at line 319)
-- `projects/customer-provisioning-orchestration-r1/current-task.md` — H-3 outcome + this Quick Recovery
-- `projects/pcf-legacy-retirement-r1/README.md` — NEW project scaffold with 4-class debt inventory
-- `projects/pcf-legacy-retirement-r1/notes/audit-findings-from-r1.md` — NEW; full audit trail from r1
+3. **What Grant-ControlPlaneIdentity.ps1 GRANTED on spaarkedev1 + Entra**:
+   - Custom Dataverse security role `Spaarke Provisioning Registry` (root roleId `f15eac95-839d-f111-b8de-70a8a590c51c`) + 8 privileges (5 sprk_dataverseenvironment @ Global + prvReadUser/BU/Role @ Local)
+   - L2 UAMI as App User on spaarkedev1: `systemuserid=a5b1773e-849d-f111-b8de-7ced8ddc4a05` + role association
+   - 15 Graph app-role grants on L2 UAMI SP (File Storage, Files, Sites, Users, Groups, Mail, Directory)
 
-### 🧨 Destructive DV changes this session (all owner-approved, all applied)
+4. **BLOCKING BUGS** (2 confirmed, 1 suspected):
+   - **[SIDECAR Layer 2, CONFIRMED]** After all 4 fix-at-discovery patches, sidecar STILL exits 1 at startup. Docker log shows `Site container: spaarke-provisioning-controlplane-worker-dev_exchange-policy-sidecar terminated during site startup` at T+~1sec but we haven't captured the SIDECAR CONTAINER'S OWN STDOUT (App Service does not route sitecontainer logs to `/home/LogFiles/` VFS by default). Startup probe fails at 0.9-1.1 sec.
+   - **[BFF-API-ClientSecret, SUSPECTED]** Worker `EnvVarValuesOptions.Validate()` fails-fast at boot when KV resolves the sentinel `pending-oob-population` string. Would surface only AFTER sidecar issue resolved (currently masked because sidecar kills site first).
+   - **[.Api HTTP 500, UNKNOWN]** .Api prod returns 500 (not 503). May be pre-existing dev-live state OR another validation failure. Was HTTP 200 before Step 9 (dev-live "ad-hoc, ahead of committed source per DS-5 §B.6").
 
-- `AddSolutionComponent` × 200 to SpaarkeMaster (via Apply run)
-- SpaarkeMaster version PATCH: 1.0.0.0 → 1.1.0.0
-- `delete_record customcontrolresource 9338842c-…` (attempted; auto-recreated)
-- `delete_record customcontrolresource 459de3c0-…` (attempted; auto-recreated)
-- `delete_record customcontrol 88dbb4ef-…` (**UDG deletion** — cascade removed 3 ccr rows + all solution memberships)
+5. **H-3.5 residual (post-H-3 architectural work, before Wave H-4 opens)**:
+   - Update `CanonicalSolutionCatalog.cs` from 8-solution to 1-solution SpaarkeMaster model
+   - Update `Deploy-DataverseSolutions.ps1` `$SolutionImportOrder` hashtable
+   - Update H6SolutionImportHandlerTests to match
+   - Amend `publish-dataverse-solutions-manifest.yml` CI workflow to publish SpaarkeMaster.zip (currently uses 8-entry catalog; would fail on real run — only 2 of 8 folders have bin/Release scaffolding)
+   - The Wave H-3 Step 7 manual manifest upload IS the workaround; not a permanent fix
 
-None of these are reversible without redeploying UDG from source.
+### 📦 Files modified this session (all committed to `5076b0a14`)
+
+- `infrastructure/bicep/modules/controlplane-worker-app-service.bicep` — add `userManagedIdentityClientId: uamiClientId` on sitecontainer
+- `infrastructure/bicep/parameters/platform-controlplane-dev.bicepparam` — add `acrImageTag` + `exchangeConnectAppId`
+- `infrastructure/bicep/platform-controlplane.bicep` — add `exchangeConnectAppId` top-level param + plumb to Worker module
+- `scripts/Grant-GraphAppRoles.ps1` — `%24filter` / `%24select` → literal `` `$filter `` / `` `$select `` (Windows cmd.exe compound-command bug)
+- `scripts/provisioning/Grant-ControlPlaneIdentity.ps1` — Depth 0→1 for 3 basics + root-role filter (`_parentroleid_value eq null`)
+
+### 🧨 Destructive changes this session (all owner-approved, all applied)
+
+- **Azure (rg-spaarke-platform-dev)**: 2 subscription-scope Bicep deploys landing 6 net-new resources (ACR, Storage + subresources, Worker App Service + sitecontainer) + 7 RBAC grants including subscription-scope Contributor. All idempotent-safe for re-deploy.
+- **Service Bus (SharePointEmbedded RG)**: `sprk-provisioning-jobs` queue deleted + recreated with sessions=true, dedup=true, PT1H window. Old ad-hoc SB Sender role assignment (`2efad74b-…`) deleted; Bicep-managed replacement (`006895e1-…`) authored.
+- **KV (sprk-controlplane-dev-kv)**: 5 new secrets seeded (BINDING-guarded Dataverse-ClientSecret skipped).
+- **Dataverse (spaarkedev1)**: New security role `Spaarke Provisioning Registry` + custom role privileges + new Application User systemuser for L2 UAMI + role association.
+- **Entra (a221a95e-… tenant)**: 15 Graph app-role grants on L2 UAMI service principal.
+- **Blob storage**: `SpaarkeMaster.zip` uploaded + `dataverse-solutions-latest.json` authored (H-3 Step 7 manual, pending H-3.5 CI-workflow amendment).
+- **GitHub repo vars**: `SIDECAR_ACR_LOGIN_SERVER` + `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`.
+
+## ⏸ Wave H-3 pause — 4-option decision (owner-in-loop)
+
+| Path | Action | When suitable |
+|---|---|---|
+| **A** | Fresh session — pick up where we left off with sidecar Layer 2 investigation | Best for clean-context deep dive |
+| **B** | Continue in-session sidecar debug now | (Was pursued at end of prior session; hit context depth) |
+| **C** | Provide real `BFF-API-ClientSecret` value → seed it → retry Worker startup | Unblocks the Worker independently of sidecar |
+| **D** | Delete sitecontainer from Bicep (make sidecar optional) → Worker starts → verify Steps 10-13 without sidecar → ship H-3 minus sidecar | Ship H-3 today; defer sidecar to Wave H-4 |
+
+**Recommended: A + C** — start fresh session with focused sidecar investigation + owner supplies BFF-API-ClientSecret in parallel.
+
+## 🔍 Sidecar Layer 2 investigation approaches (for next session)
+
+The sidecar `provisioning-sidecar:v0.1.0` (Listener.ps1) exits 1 at startup even after fixing:
+- ✅ `userManagedIdentityClientId` on sitecontainer (fix #1)
+- ✅ `acrImageTag` pointing to real ACR image (fix #2)
+- ✅ `EXCHANGE_CONNECT_APP_ID` set to all-zero GUID (fix #3)
+
+Remaining unknowns needing investigation:
+
+1. **Access sitecontainer STDOUT** (App Service does not route it to `/home/LogFiles/` VFS by default):
+   - Try `Microsoft.Web/sites/sitecontainers/logs` ARM subresource
+   - Try enabling Application Insights container logs (requires code change in Listener.ps1)
+   - Try `docker logs` via SSH into the App Service instance (`az webapp ssh`)
+   - Try running the sidecar image locally with `docker run` + same env vars to reproduce
+
+2. **Test `SIDECAR_SHARED_SECRET` KV-ref resolution on sitecontainers**:
+   - The env var value shows literal `@Microsoft.KeyVault(...)` string in `az webapp sitecontainers list` (configured value, not resolved). If sitecontainer KV-refs don't resolve, Listener.ps1's `Test-SecretEqual` on the literal string is the fail.
+   - Main container KV refs DID resolve (Worker container started OK per docker log before sidecar killed site).
+
+3. **Try running sidecar image locally** to see immediate error:
+   ```powershell
+   docker pull sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:v0.1.0
+   docker run --rm `
+     -e SIDECAR_SHARED_SECRET='test-value' `
+     -e PLATFORM_KV_URI='https://sprk-controlplane-dev-kv.vault.azure.net/' `
+     -e EXCHANGE_CERT_SECRET_NAME='Exchange-Connect-Cert' `
+     -e EXCHANGE_CONNECT_APP_ID='00000000-0000-0000-0000-000000000000' `
+     sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:v0.1.0
+   ```
+
+## 📊 Detailed H-3 step status
+
+| Step | Action | Status | Notes |
+|---|---|---|---|
+| 1 | SB queue recreate (sessions + dedup + PT1H) | ✅ | Verified: `requiresSession=true, requiresDuplicateDetection=true` |
+| 2 | platform-controlplane.bicep deploy | ✅ | 6 net-new + Path A ad-hoc SB Sender cleanup + full re-run clean |
+| 3 (folded into 9) | kvRefIdentity PATCH | ✅ | Landed via Deploy-ControlPlane.ps1 (3 sites patched) |
+| 4 | Seed-PlatformKeyVault.ps1 | ✅ | 5 new + BINDING-guarded Dataverse-ClientSecret skipped |
+| 5 | az acr build sidecar → ACR | ✅ | `provisioning-sidecar:v0.1.0` + `:latest` in ACR |
+| 5b (fix-at-discovery) | Sidecar activation Bicep fixes | ✅ | `userManagedIdentityClientId` + `acrImageTag` + `exchangeConnectAppId` |
+| 6 | GitHub repo vars | ✅ | `SIDECAR_ACR_LOGIN_SERVER` + `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
+| 7 | Publish dataverse-solutions manifest | ✅ (workaround) | Manual upload to blob; CI workflow amendment deferred to H-3.5 |
+| 8 | Grant-ControlPlaneIdentity.ps1 | ✅ | 8 DV privileges + App User + 15 Graph app-roles applied; 3 fixes-at-discovery landed |
+| 9 | Deploy-ControlPlane.ps1 -Swap | 🟡 | Code deployed, kvRefIdentity PATCH landed, but sites unhealthy (sidecar exit 1) |
+| 10 | Verify /healthz + sidecar via Verify-Sidecar-Live.ps1 | ⏭️ | Blocked by Step 9 |
+| 11 | Commit fix patches + flip TASK-INDEX | 🟡 partial | Fixes COMMITTED at `5076b0a14` + pushed; TASK-INDEX flip pending Step 9 success |
+| 12 | Verify BFF /api/diagnostics/tenant-container-resolver (task 176) | ⏭️ | Blocked by Step 9 |
+| 13 | Model 2 customer.bicep what-if | ⏭️ | Blocked by Step 9 |
 
 ## 📦 H-3 SOLUTION SCOPING — 2026-08-21 outcome
 
