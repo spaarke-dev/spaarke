@@ -11,10 +11,10 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — 022 closed (commit `243b514c1`, pushed) |
-| **Status** | Full suite **10,591 / 0** twice · auth seams **55/55** · ArchTests **36/36** · publish **44.99 MB** · CVE clean |
-| **Next Action** | **Phase 6 — `060` → `061` → `062` → `063`.** All gated on 022 only, which is now complete. 060/061/062 are group **G**, `parallel-safe: true`; 063 depends on 060+061. Pure code/test, no live environment |
-| **Progress** | **11 of 26 active complete** · **15 remaining** · 3 deferred |
+| **Task** | **none active** — 022 (`243b514c1`) and 060 (`bde4a640d`) closed and pushed |
+| **Status** | Full suite **10,591 / 0** twice · auth seams **55/55** · ArchTests **44/44** (36 + 8 new) · publish **44.99 MB** · CVE clean |
+| **Next Action** | **`061` → `062` → `063`.** 061/062 are group **G**, `parallel-safe: true`, gated on 022 (done); 063 needs 060+061. Read the ⚠️ on **062** below before starting it — it will fire on today's config if written naively |
+| **Progress** | **12 of 26 active complete** · **14 remaining** · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
 
 ---
@@ -73,9 +73,9 @@ Full record: [`notes/decisions/022-migrate-confidential-clients.md`](notes/decis
 
 | Task | Booked obligations |
 |---|---|
-| **060** | Allowlist `OrderedCredentialClientProvider` as the **sanctioned** `.WithClientSecret` binding point **with its reason** (consolidation, not expansion) · E-1 sites (`SpeAdminTokenProvider`, `SpeAdminGraphService`) · Power BI ×2 **with the deferral reason verbatim** · negative control that the detector fires · `_cca`-decoupling source guard (010) · no-name-based-managed-identity-resolution guard (023) · `ManagedIdentityClientAssertion` constructed only in a ctor/static-init (020) · **the task-020 "flake" is DISCHARGED — do not re-diagnose** |
+| ~~**060**~~ | ✅ **DONE** (`bde4a640d`). `tests/Spaarke.ArchTests/CredentialGuardTests.cs`, 8 tests. All three booked guards landed. **Success criterion 12 demonstrated live** — a seeded ninth secret-bearing client failed the build naming `file:line`, then was removed. Record: [`notes/decisions/060-credential-guard.md`](notes/decisions/060-credential-guard.md) |
 | **061** | Census must scan **ALL server assemblies**, not just the BFF (020's blind spot — and `ConfidentialClientTokenCredential` now lives in `Spaarke.Dataverse`) · count the provider as **ONE consolidated site, not expansion** · keep both Power BI sites as secret-backed entries |
-| **062** | Startup assertion: outside Development, fail fast if a BFF-identity credential resolves to a **secret**. ⚠️ Interacts with `AddCredentialSelection`'s default order, which still contains `ClientSecret` until 033 — so this guard must not fire before 033 removes it. Decide the sequencing explicitly |
+| **062** | ⚠️ **READ THIS FIRST — written naively, this guard fires on today's dev configuration.** It must fail outside Development when a BFF credential *resolves to* a secret. But `AddCredentialSelection`'s default order still **contains** `ClientSecret`, deliberately, until task 033 — that is the E-3 fallback and the rollback target. So key the assertion on the credential actually **SELECTED** (`OrderedCredentialClientProvider.SelectedKindFor`), never on the order's contents; or ship it disabled until 033 flips it on. Decide explicitly and record which |
 | **063** | Depends on 060+061. `tests/Spaarke.ArchTests/` is **not** a KEEP path, so `/test-diet` at 090 would delete the forcing functions this project exists to leave behind |
 
 **Success criterion 12 (the distinguishing one)**: introduce a deliberate ninth secret-bearing
