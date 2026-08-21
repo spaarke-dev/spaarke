@@ -11,21 +11,29 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **017** — Track S deploy (BFF + `sprk_spaarkeai` **together**, NFR-05) + owner UAT. |
-| **Status** | not started. **Track S is CODE-COMPLETE** — 010–016 + 018 all ✅. |
-| **Next Action** | `Read projects/spaarkeai-compose-r8/current-task.md, then work on task 017` → `task-execute` on `tasks/017-track-s-deploy-uat.poml`. |
-| **Blocked on** | Owner decision **B** below — see "Settle before deploying". |
-| **Complete** | **001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 016 · 018 · 050** ✅ |
+| **Task** | **017** — Track S deploy + owner UAT. **Steps 1-5 DONE. Steps 6, 6.5, 7 are the OWNER'S.** |
+| **Status** | **in-progress — blocked on owner UAT.** Do NOT mark 017 complete until the checklist is filled in and a GO/NO-GO is recorded. |
+| **Next Action** | Owner runs [`notes/track-s-uat.md`](notes/track-s-uat.md) against dev, records observations per row, and writes GO/NO-GO. Then task 017 closes and Phase 2 (020) starts. |
+| **Complete** | 001 · 002 · 010 · 011 · 012 · 013 · 014 · 015 · 016 · 018 · 050 ✅ |
 
-### Settle before deploying (task 017)
+### Deployed 2026-08-21 (task 017 steps 1-5)
 
-**`If-Match` on `PUT .../content` is UNDOCUMENTED** in the Graph v1.0 reference — only
-`delete`/`update`/`move`/`createUploadSession` document an `if-match` header. Task 011's concurrency
-guarantee ("last-writer-wins is *enforced*, not hoped for") rests on it, and task 015's decision not to
-route through the chunked path was made partly to preserve it. The probe: PUT with a deliberately stale
-`If-Match` against a real SPE container, as the user — **412, or silent overwrite?** Cheap to write;
-only the owner can run it against a live tenant. Full note:
-[`notes/document-size-ceilings.md`](notes/document-size-ceilings.md).
+Both artifacts from **`e5815e862`**, same window (NFR-05 anti-clobber pairing):
+
+| Artifact | Target | Evidence |
+|---|---|---|
+| BFF | `spaarke-bff-dev` (`DOTNETCORE\|10.0`) | 44.98 MB package · **SHA-256 verified on 4 critical files** · `/healthz` 200 · Compose + checkout routes **401 = registered** |
+| `sprk_spaarkeai` | `spaarkedev1`, resource `5206a442-3451-f111-bec7-7ced8d1dc988` | 5,694 KB published · **7 Track S strings + the per-document draft key verified present in the built HTML** |
+
+**Branch tip is now `7e6b17a71`, one commit ahead of what was deployed.** The delta is
+`2366b4ccd` — CI's Prettier bot re-wrapping a 2-line type union in `ComposeEditor.tsx`. **Formatting
+only; the deployed artifact is functionally identical.** No redeploy needed for UAT.
+
+**Gates run before deploying** (task 017 step 3 asked for evidence they ran in 010-016; there was none,
+so they were run against the cumulative diff rather than asserted): `adr-check` **0 violations /
+0 warnings** · NetArchTest **36/36** · `code-review` no Critical, no Warning, **one Suggestion**
+(the metadata refresh writes unconditionally — see the UAT note) · publish **43.68 MB** compressed
+(−1.28 MB vs baseline) · **0 HIGH/CRITICAL CVE**.
 
 ### Resolved since the last handoff
 
