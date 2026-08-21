@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 (task **030 COMPLETE** — both quality gates passed)
+> **Last Updated**: 2026-08-21 — task 030 COMPLETE + E2E verified; **task 021 DESIGNED, not started**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,12 +11,12 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **021 — Ordered credential selection** (MI-FIC → KV certificate → dev secret) — not started |
+| **Task** | **021 — Ordered credential selection** (MI-FIC → KV certificate → dev secret) — **design done, implementation NOT started** |
 | **Task file** | `projects/spaarke-auth-v4-dataverse-MI/tasks/030-fic-provisioning-automation.poml` |
-| **Status** | not-started. **030 complete** (adr-check 0 violations; code-review 2 criticals found + fixed) |
-| **Next Action** | `task-execute` on `tasks/021-ordered-credential-selection.poml`. **Read `notes/decisions/020-assertion-seam.md` FIRST — 021's scope GREW.** Ordered selection is MI-FIC → certificate → secret, and only the FIRST is an assertion, so it cannot live behind `IClientAssertionProvider`; 021 must author a second, client-level contract |
+| **Status** | not-started (no `src/` changes). Stopped at protocol **Step 3 — context budget**, deliberately: 021 is a 4–6h xhigh task and starting it on a long session risks half-modified `.cs` |
+| **Next Action** | **`/compact` first**, then `task-execute` on `tasks/021-ordered-credential-selection.poml`. Read **`notes/decisions/021-credential-config-keys.md`** — the full design is already decided there (contract shape, cache key, fall-through table, config keys). It is the plan, not the outcome: **nothing is implemented** |
 | **Why 030 first** | ⏩ Owner pulled it forward 2026-08-19 for `customer-provisioning-orchestration-r1`'s Wave G-3. **Delivered** — their PR #779 has zero FIC code, so the duplicate-work risk did not materialise |
-| **Progress** | **7 of 26 active complete** (001, 002, 003, 010, 011, 020, **030**) · **19 remaining** · 3 deferred |
+| **Progress** | **7 of 26 active complete** (001, 002, 003, 010, 011, 020, 030) · **19 remaining** · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
 
 ### Task 030 — files modified this session
@@ -46,6 +46,26 @@ substring matching cannot return by accident.
 **C2** — the `-ExportFunctionsOnly` dot-source mode ran `param()` in the **caller's** scope, silently
 replacing a consumer's `$TenantId` with this script's production default. Wrong tenant = wrong issuer
 = a credential that creates cleanly and never works. Mode **removed**; consumers invoke `-FicOnly`.
+
+### Task 021 — what is already decided (do NOT re-derive)
+
+Full design: **`notes/decisions/021-credential-config-keys.md`**. The four things that took the longest:
+
+1. **A second contract is required** — `IConfidentialClientProvider` in `Spaarke.Dataverse`, returning a
+   configured `IConfidentialClientApplication`. MSAL types are legal there (`Spaarke.Dataverse.csproj:17`
+   already references `Microsoft.Identity.Client` 4.87.0 → **no new package, FR-14 unaffected**). Ordered
+   selection cannot live behind `IClientAssertionProvider` because only MI-FIC *is* an assertion.
+2. **Only `DataverseAccessDataSource` needs the interface.** The three BFF sites
+   (`GraphClientFactory`, `DataverseUserClient`, `AgentTokenService`) inject the provider **concretely** —
+   ADR-010 prefers that. Do not add interfaces they don't need.
+3. **⚠️ The POML's certificate instruction is unsatisfiable as written.** `LoadCertificateAsync` is a
+   **private instance method** on `CiamGraphClientFactory` closing over its own fields. "Reuse it" +
+   "don't write a second one" can only both hold by **extracting** it — which means editing
+   `CiamGraphClientFactory`, a file *not* in `<relevant-files>` and already A4-compliant, so the
+   extraction must be behaviour-preserving.
+4. **Negative-cache TTL must be seconds, not minutes** — because task 030 measured a ~2 min Entra flap
+   window. A long memo would latch onto one transient failure and hold the process on the fallback
+   **secret** after MI-FIC recovered.
 
 ### Task 030 — E2E verified, and two error codes this project had wrong
 
