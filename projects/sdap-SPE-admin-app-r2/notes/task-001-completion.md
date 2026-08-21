@@ -143,10 +143,19 @@ already own `SpeAdminApp` client work — or raise it as a hygiene item alongsid
 
 ---
 
-## Bounded by task 002
+## ~~Bounded by task 002~~ — CORRECTED 2026-08-21 by task 002
 
-**28 of the 70 `catch (ODataError)` sites in `SpeAdminGraphService.cs` swallow the error** (13 → `null`,
+> ⚠️ **The claim below was wrong and is retained only as the record.** Task 002's audit checked something
+> this note did not: whether each swallowing method has a *translating wrapper*. It does.
+>
+> The 24 swallowing sites are **all** `when`-filtered to `NotFound`, and 23 of 24 sit inside an
+> `XForConfigAsync` wrapper that translates every non-404 to `SpaarkeStorageException`. A 403/429/5xx is
+> never swallowed. **All 70 paths reach the task-001 error surface**, not 42 of them. See
+> [`odata-catch-inventory.md`](odata-catch-inventory.md).
+>
+> The empty-grid symptom in spec §2.4 originates elsewhere — hardcoded `StorageUsedInBytes: null` (task 024),
+> Sync Status (003), Search (004), Audit Log (005).
+
+~~**28 of the 70 `catch (ODataError)` sites in `SpeAdminGraphService.cs` swallow the error** (13 → `null`,
 11 → empty/default, 4 rethrow-other). On those paths there is no error for task 001 to surface — the caller
-cannot distinguish *absent* from *failed*. Those screens stay silent until **task 002** lands. This is the
-correct division per this task's POML note, but it means "the app now tells the truth" is only true for the
-42 translating paths.
+cannot distinguish *absent* from *failed*. Those screens stay silent until **task 002** lands.~~

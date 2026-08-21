@@ -4,7 +4,7 @@
     <title>Audit the 70 catch (ODataError) sites — distinguish "legitimately absent" from "call failed"</title>
     <phase>1 Workstream A — Make failures visible</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs across a 4,911-LOC hot-path file; tags include bff-api. Brownfield root-cause work.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,6 +102,18 @@
   </acceptance-criteria>
 
   <notes>Spec FR-A02. Verified 2026-08-21: exactly 70 `catch (ODataError` occurrences in SpeAdminGraphService.cs. The inventory is a durable artifact — the decomposition follow-on (speadmingraphservice-decomposition-r1) will use it to understand each concern's failure semantics.</notes>
+
+
+  <completion>
+    <date>2026-08-21</date>
+    <summary>All 70 sites classified: 46 PROPAGATE, 24 ABSENT-TOLERANT. Zero unclassified. The task's PREMISE DID NOT HOLD - the sites do not conflate absent-vs-failed. Every one of the 24 tolerant sites is already `when`-filtered to NotFound, and 23 of 24 sit inside an XForConfigAsync wrapper that translates all non-404s. A 403/429/5xx is never swallowed. No reclassification was warranted; manufacturing changes to already-correct code would have been the wrong outcome.</summary>
+    <defect-found>SoftDeleteContainerAsync (:4715) had no translating wrapper; its caller Services/SpeAdmin/BulkOperationService.cs caught the raw ODataError - a Microsoft.Graph type outside the Infrastructure.Graph boundary (ADR-007 s1, an explicit constraint of this task). Fixed: both bulk call sites now route through the existing GraphCallScope.Run helper and catch SpaarkeStorageException; the per-item message passes through ProblemDetailsHelper.Redact, closing a secret-leak path into BulkOperationItemError.</defect-found>
+    <residual>BulkOperationService still holds 2 Microsoft.Graph.GraphServiceClient locals (:243, :346). Removing them needs a config-scoped bulk API instead of a pre-resolved client threaded through a loop - structural work for speadmingraphservice-decomposition-r1. NetArchTest does not flag it (enforced rule covers endpoints). Recorded in the inventory.</residual>
+    <corrects>Task 001's completion note claimed 28 of 70 sites swallow errors and "those screens stay silent until 002 lands". Count right, conclusion wrong - it did not check wrapper pairing. Corrected in notes/task-001-completion.md.</corrects>
+    <verified>dotnet build 0 errors; 10,564 unit tests pass; ArchTests 36/36; publish 43.68 MB compressed (unchanged, ceiling 60); no package changes.</verified>
+    <not-verified>Acceptance criterion 2 (forced Graph 403/500 renders an error, not an empty grid) is verified by CODE TRACE, not empirically. Forcing a Graph failure at the HTTP boundary needs WireMock, which is task 040 and has not run. ADR-038 bans Mock&lt;HttpMessageHandler&gt;. Task 040/041 should add the executable proof.</not-verified>
+    <notes>projects/sdap-SPE-admin-app-r2/notes/odata-catch-inventory.md</notes>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
