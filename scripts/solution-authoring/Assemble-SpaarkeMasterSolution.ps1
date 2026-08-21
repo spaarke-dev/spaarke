@@ -34,6 +34,19 @@
 .PARAMETER ExcludedPCFs
     Optional list of PCF (Custom Control) unique names to EXCLUDE from the assembly.
 
+.PARAMETER ExcludedAppModules
+    List of AppModule (MDA) unique names to EXCLUDE. Default excludes 'sprk_SpaarkePlatform'.
+
+.PARAMETER ExcludedEntities
+    List of Entity logical names to EXCLUDE. Default excludes 'email' (OOB email is not used).
+
+.PARAMETER ExcludeCanvasApps
+    If set (default true), exclude Canvas Apps (componenttype=300) entirely.
+
+.PARAMETER SkipTransitiveFilter
+    If set, DISABLE the rootcomponentbehavior=0 transitive-inclusion filter (debug only;
+    causes over-inclusion of sub-components that are already transitively in SpaarkeMaster).
+
 .PARAMETER VersionBumpKind
     Which version segment to bump when new components are added. Values: Build (default) | Revision | Minor | Major
 
@@ -66,6 +79,10 @@ param(
     [string]$MasterSolutionUniqueName = 'SpaarkeMaster',
     [string]$OutputZipPath = "$PSScriptRoot/../../out/SpaarkeMaster.zip",
     [string[]]$ExcludedPCFs = @(),
+    [string[]]$ExcludedAppModules = @('sprk_SpaarkePlatform'),
+    [string[]]$ExcludedEntities = @('email'),
+    [bool]$ExcludeCanvasApps = $true,
+    [switch]$SkipTransitiveFilter,
     [ValidateSet('Build', 'Revision', 'Minor', 'Major')]
     [string]$VersionBumpKind = 'Build',
     [switch]$SkipExport
@@ -145,29 +162,150 @@ if ($master.ismanaged) {
 Write-Host "    Solution: $($master.uniquename) v$($master.version) (id: $($master.solutionid))" -ForegroundColor Green
 
 Write-Host "==> Enumerating current SpaarkeMaster components (baseline)" -ForegroundColor Cyan
-$currentResult = Invoke-Dataverse "solutioncomponents?`$select=componenttype,objectid&`$filter=_solutionid_value eq $($master.solutionid)"
+$currentResult = Invoke-Dataverse "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=_solutionid_value eq $($master.solutionid)"
 $currentSet = @{}
+$masterFullIncludeEntities = @{}  # entities in SpaarkeMaster where rootcomponentbehavior=0 (transitively include sub-components)
 foreach ($c in $currentResult.value) {
     $key = "$($c.componenttype)|$($c.objectid)"
     $currentSet[$key] = $true
+    if ($c.componenttype -eq 1 -and $c.rootcomponentbehavior -eq 0) {
+        $masterFullIncludeEntities[$c.objectid] = $true
+    }
 }
 Write-Host "    Current baseline: $($currentSet.Count) components already in $MasterSolutionUniqueName" -ForegroundColor Green
+Write-Host "    Full-include entities (rootcomponentbehavior=0): $($masterFullIncludeEntities.Count) [sub-components of these are transitively in export]" -ForegroundColor Green
+
+# ---- 2b. Load metadata lookup tables for transitive-inclusion filter --------
+
+$attributeToEntity = @{}     # attribute MetadataId -> parent entity MetadataId
+$savedqueryToEntity = @{}    # savedqueryid -> entity MetadataId
+$systemformToEntity = @{}    # formid -> entity MetadataId
+$entityLogicalNames = @{}    # entity MetadataId -> logicalname
+$appModuleNames = @{}        # appmoduleid -> uniquename
+$objTypeCodeToEntityId = @{} # logicalname -> MetadataId
+
+if (-not $SkipTransitiveFilter) {
+    Write-Host "==> Loading metadata for transitive-inclusion filter (may take ~10-30s)" -ForegroundColor Cyan
+
+    # Entities + attributes in one call (expands are efficient in Dataverse)
+    $entMeta = Invoke-Dataverse "EntityDefinitions?`$select=MetadataId,LogicalName,IsCustomEntity&`$expand=Attributes(`$select=MetadataId)"
+    foreach ($e in $entMeta.value) {
+        $entityLogicalNames[$e.MetadataId] = $e.LogicalName
+        $objTypeCodeToEntityId[$e.LogicalName] = $e.MetadataId
+        foreach ($a in $e.Attributes) {
+            $attributeToEntity[$a.MetadataId] = $e.MetadataId
+        }
+    }
+    Write-Host "    Loaded $($entityLogicalNames.Count) entities, $($attributeToEntity.Count) attributes" -ForegroundColor DarkGray
+
+    # Saved queries -> entity via returnedtypecode
+    $sqResult = Invoke-Dataverse "savedqueries?`$select=savedqueryid,returnedtypecode"
+    foreach ($sq in $sqResult.value) {
+        if ($sq.returnedtypecode -and $objTypeCodeToEntityId.ContainsKey($sq.returnedtypecode)) {
+            $savedqueryToEntity[$sq.savedqueryid] = $objTypeCodeToEntityId[$sq.returnedtypecode]
+        }
+    }
+    Write-Host "    Loaded $($savedqueryToEntity.Count) savedquery->entity mappings" -ForegroundColor DarkGray
+
+    # System forms -> entity via objecttypecode
+    $formResult = Invoke-Dataverse "systemforms?`$select=formid,objecttypecode"
+    foreach ($f in $formResult.value) {
+        if ($f.objecttypecode -and $objTypeCodeToEntityId.ContainsKey($f.objecttypecode)) {
+            $systemformToEntity[$f.formid] = $objTypeCodeToEntityId[$f.objecttypecode]
+        }
+    }
+    Write-Host "    Loaded $($systemformToEntity.Count) systemform->entity mappings" -ForegroundColor DarkGray
+
+    # AppModules -> uniquename (for exclusion)
+    $appResult = Invoke-Dataverse "appmodules?`$select=appmoduleid,uniquename"
+    foreach ($a in $appResult.value) {
+        $appModuleNames[$a.appmoduleid] = $a.uniquename
+    }
+    Write-Host "    Loaded $($appModuleNames.Count) appmodules" -ForegroundColor DarkGray
+}
 
 # ---- 3. Compute deltas ------------------------------------------------------
 
-$toAdd = @()
+# Resolve excluded-entity MetadataIds for cascade filter
+$excludedEntityMetadataIds = @{}
+foreach ($id in $entityLogicalNames.Keys) {
+    if ($ExcludedEntities -contains $entityLogicalNames[$id]) {
+        $excludedEntityMetadataIds[$id] = $true
+    }
+}
+Write-Host "==> Excluded entity MetadataIds resolved: $($excludedEntityMetadataIds.Count) [$($ExcludedEntities -join ', ')]" -ForegroundColor DarkGray
 
-# 3a. Publisher-owned distinct components from inventory (skip PCFs on exclude list)
+# System-managed componenttype ranges (Dataverse-internal; auto-generated with parent entities)
+$systemManagedTypeRange = 10000..11000
+
+$toAdd = @()
+$skippedByReason = @{
+    'transitive-in-master'      = 0
+    'excluded-entity'           = 0
+    'excluded-entity-cascade'   = 0
+    'excluded-appmodule'        = 0
+    'excluded-canvasapp'        = 0
+    'system-managed-10xxx'      = 0
+}
+
+# 3a. Publisher-owned distinct components from inventory
 foreach ($comp in $inventory.distinctComponents) {
     $key = "$($comp.ComponentType)|$($comp.ObjectId)"
     if ($currentSet.ContainsKey($key)) { continue }
 
-    if ($comp.ComponentType -eq 66 -and $ExcludedPCFs.Count -gt 0) {
-        # Custom Control (PCF) - check exclude list. Component objectid is control name typically.
-        # NOTE: exclusion by name requires resolving object -> name; deferred to post-first-E2E authoring.
-        # For now log a WARNING if user passed excludes so they know it is not yet wired.
+    # ---- Exclusion filters ----
+
+    # Canvas Apps entirely (per owner directive)
+    if ($ExcludeCanvasApps -and $comp.ComponentType -eq 300) {
+        $skippedByReason['excluded-canvasapp']++
+        continue
     }
 
+    # OOB entities we do NOT want (email etc.)
+    if ($comp.ComponentType -eq 1 -and $entityLogicalNames.ContainsKey($comp.ObjectId)) {
+        $logicalName = $entityLogicalNames[$comp.ObjectId]
+        if ($ExcludedEntities -contains $logicalName) {
+            $skippedByReason['excluded-entity']++
+            continue
+        }
+    }
+
+    # Excluded AppModules by uniquename (e.g. Spaarke Platform)
+    if ($comp.ComponentType -eq 80 -and $appModuleNames.ContainsKey($comp.ObjectId)) {
+        $appUniqueName = $appModuleNames[$comp.ObjectId]
+        if ($ExcludedAppModules -contains $appUniqueName) {
+            $skippedByReason['excluded-appmodule']++
+            continue
+        }
+    }
+
+    # ---- Cascade: skip sub-components whose parent entity is in ExcludedEntities ----
+    $parentEntityId = $null
+    switch ($comp.ComponentType) {
+        2  { $parentEntityId = $attributeToEntity[$comp.ObjectId] }        # Attribute
+        26 { $parentEntityId = $savedqueryToEntity[$comp.ObjectId] }       # SavedQuery
+        60 { $parentEntityId = $systemformToEntity[$comp.ObjectId] }       # SystemForm
+    }
+    if ($parentEntityId -and $excludedEntityMetadataIds.ContainsKey($parentEntityId)) {
+        $skippedByReason['excluded-entity-cascade']++
+        continue
+    }
+
+    # ---- Transitive-inclusion filter (rootcomponentbehavior=0 on parent entity) ----
+    if (-not $SkipTransitiveFilter -and $parentEntityId) {
+        if ($masterFullIncludeEntities.ContainsKey($parentEntityId)) {
+            $skippedByReason['transitive-in-master']++
+            continue
+        }
+    }
+
+    # ---- System-managed 10xxx types (Dataverse auto-generates with parents) ----
+    if ($comp.ComponentType -ge 10000 -and $comp.ComponentType -le 11000) {
+        $skippedByReason['system-managed-10xxx']++
+        continue
+    }
+
+    # ---- Genuine addition ----
     $toAdd += [PSCustomObject]@{
         Source            = 'inventory'
         ComponentType     = $comp.ComponentType
@@ -180,6 +318,15 @@ foreach ($comp in $inventory.distinctComponents) {
 if ($ExcludedPCFs.Count -gt 0) {
     Write-Warning "PCF name-based exclusion is not yet wired in this pass. ExcludedPCFs=$($ExcludedPCFs -join ',') will be honored in a follow-on release. Currently ALL PCFs from inventory are included."
 }
+
+Write-Host ""
+Write-Host "==> FILTER STATS" -ForegroundColor Cyan
+Write-Host "    Skipped (transitive-in-master via behavior=0) : $($skippedByReason['transitive-in-master'])"
+Write-Host "    Skipped (system-managed 10xxx types)          : $($skippedByReason['system-managed-10xxx'])"
+Write-Host "    Skipped (Canvas Apps)                         : $($skippedByReason['excluded-canvasapp'])"
+Write-Host "    Skipped (excluded OOB entities)               : $($skippedByReason['excluded-entity'])"
+Write-Host "    Skipped (cascade: sub-components of excluded) : $($skippedByReason['excluded-entity-cascade'])"
+Write-Host "    Skipped (excluded AppModules)                 : $($skippedByReason['excluded-appmodule'])"
 
 # 3b. OOB customizations - resolve attribute MetadataId per entity/attribute
 Write-Host "==> Resolving OOB attribute MetadataIds (for componenttype=2 add)" -ForegroundColor Cyan
