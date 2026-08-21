@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ComposeWorkspace.types.ts — shared types for the Compose workspace orchestrator
  * and its extracted hooks (`useComposeBroadcastChannel`, `useComposeCheckoutLifecycle`,
  * `useComposeHeartbeatGate`).
@@ -203,6 +203,19 @@ export interface ComposeWorkspaceState {
    * `loadedContentModel`; null = none surfaced / older BFF.
    */
   loadedContentModelWarnings: Array<{ code: string; count: number }> | null;
+
+  /**
+   * FR-S08 (r8 task 015): the document-size limit the SERVER enforces, as advertised on the response
+   * that mounted this document. Drives the save pre-flight, so a too-large document is refused BEFORE
+   * the user waits out a 25 MB upload that was always going to be rejected.
+   *
+   * `null` means the server did not advertise one — an older BFF, or a mount door that never called
+   * the server (a local Browse pick, a born-in-editor seed). Then the client does NO numeric
+   * pre-flight and lets the server refuse honestly. It deliberately does NOT fall back to a
+   * compiled-in number: a second constant is exactly how "your file is fine" becomes a rejection,
+   * which is the failure this requirement exists to remove.
+   */
+  maxDocumentBytes: number | null;
   /**
    * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): the load's source format. `'pdf'` = the
    * mounted docx was SYNTHESIZED server-side from a PDF's canonical-model projection (task 040;
@@ -326,6 +339,8 @@ export type ComposeWorkspaceAction =
       // response — folded into saveDegradationWarnings on the first model-path save. Undefined/null
       // (older BFF / no loss) → null.
       contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      /** FR-S08 (task 015): the server-advertised save size limit, in bytes. */
+      maxDocumentBytes?: number | null;
       // Task 041 (FR-06, PDF intake): the Load response's sourceFormat marker ('pdf' = the mounted
       // docx was synthesized from a PDF). Undefined/null (older BFF / native docx) → null.
       sourceFormat?: string | null;
@@ -381,6 +396,8 @@ export type ComposeWorkspaceAction =
       // task 013 (r6, review F7): the projection's flatten warnings from the same response — same
       // lifecycle as `contentModel` (see the loadSucceeded field above).
       contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      /** FR-S08 (task 015): the server-advertised save size limit, in bytes. */
+      maxDocumentBytes?: number | null;
       // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
@@ -492,6 +509,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   projection: null,
   loadedContentModel: null,
   loadedContentModelWarnings: null,
+  maxDocumentBytes: null,
   sourceFormat: null,
   saveDegradationWarnings: null,
   errorMessage: null,
@@ -551,6 +569,8 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): the projection's flatten warnings — same atomic set/clear as the model.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
+        // FR-S08 (task 015): the server-advertised limit, set atomically with the rest of the mount.
+        maxDocumentBytes: action.maxDocumentBytes ?? null,
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
@@ -647,6 +667,8 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
+        // FR-S08 (task 015): the server-advertised limit, set atomically with the rest of the mount.
+        maxDocumentBytes: action.maxDocumentBytes ?? null,
         // Task 051 (FR-06 — PDF import parity): a Browse-project / Assistant-upload mount CAN now be
         // PDF-sourced (task 050 gave ProjectForMount the intake fork), so carry the marker when the door
         // supplies it; a native docx mount omits it → null (clear-rather-than-inherit still holds — a fresh
@@ -701,6 +723,9 @@ export function composeWorkspaceReducer(
         loadedContentModel: null,
         // task 013 (r6, F7): no projection ran for this mount — nothing was flattened.
         loadedContentModelWarnings: null,
+        // FR-S08 (task 015): a born-in-editor seed never called the server, so no limit is known
+        // here — null means "do no numeric pre-flight", not "unlimited".
+        maxDocumentBytes: null,
         // Task 041 (FR-06): a born-in-editor seed is not a PDF-sourced load — clear rather than inherit.
         sourceFormat: null,
         // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same

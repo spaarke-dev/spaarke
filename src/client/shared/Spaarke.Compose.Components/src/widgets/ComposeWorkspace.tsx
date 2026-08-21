@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ComposeWorkspace.tsx — workspace-level orchestrator for the Spaarke Compose surface.
  *
  * Project:   spaarkeai-compose-r1
@@ -1352,6 +1352,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // Task 041 (FR-06, PDF intake): 'pdf' = `content` is the docx SYNTHESIZED server-side from
           // the PDF's canonical-model projection (task 040). Parsed defensively (older BFF omits it).
           sourceFormat?: string | null;
+          // FR-S08 (r8 task 015): the server-advertised save size limit, in bytes. Optional — an
+          // older BFF omits it, which the reader below normalizes to null (no numeric pre-flight).
+          maxDocumentBytes?: number | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1400,6 +1403,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // task 013 (r6, F7): the projection's flatten warnings — same defensive-parse convention
           // as the collections above (omitted/malformed → null).
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
+          // FR-S08 (r8 task 015): the server-advertised save size limit. Read defensively — an older
+          // BFF omits it, and `null` there means "do no numeric pre-flight", never "unlimited".
+          maxDocumentBytes: typeof payload.maxDocumentBytes === 'number' ? payload.maxDocumentBytes : null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
           // Task 041 (FR-06, PDF intake): the source-format marker + a client-minted transient dedup
@@ -1722,6 +1728,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         dispatch({
           kind: 'saveFailed',
           errorMessage: 'Cannot save — BFF base URL or tenant configuration missing.',
+        });
+        return;
+      }
+
+      // FR-S08 (r8 task 015): the size PRE-FLIGHT. Measured here, before the request is built, so an
+      // oversize document costs the user nothing — no base64 encode of 25+ MB, no upload they wait out
+      // only to have it rejected at the far end.
+      //
+      // The limit is the one the SERVER advertised on the response that mounted this document, never a
+      // compiled-in copy: a second constant is precisely how "your file is fine" becomes a rejection,
+      // and the server is the side that actually enforces it. When no limit was advertised — an older
+      // BFF, or a mount door that never called the server (a local Browse pick, a born-in-editor seed)
+      // — we do NO numeric check and let the server refuse honestly with its own number. Guessing here
+      // would reintroduce the divergence this requirement exists to remove.
+      //
+      // Only the retained ORIGINAL bytes are measured: they are the only bytes the client ever sends,
+      // and the ContentModel shapes are small structured JSON the server renders (a born-in-editor doc
+      // has no retained bytes at all).
+      const advertisedLimit = state.maxDocumentBytes;
+      const outgoingBytes = state.docxBytes?.byteLength ?? 0;
+      if (advertisedLimit !== null && outgoingBytes > advertisedLimit) {
+        const asMb = (n: number) => Math.round((n / (1024 * 1024)) * 10) / 10;
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage:
+            `Not saved — this document is ${asMb(outgoingBytes)} MB and the limit is ${asMb(advertisedLimit)} MB. ` +
+            'Your changes are still here. Remove or compress large embedded images, or split the document, then save again.',
         });
         return;
       }
@@ -3990,6 +4023,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // Task 051 (FR-06 — PDF import parity): 'pdf' when the uploaded file was a PDF and `content` is
           // the docx SYNTHESIZED by the task-050 mount fork. Parsed defensively (older BFF omits it).
           sourceFormat?: string | null;
+          // FR-S08 (r8 task 015): the server-advertised save size limit, in bytes. Optional — an
+          // older BFF omits it, which the reader below normalizes to null (no numeric pre-flight).
+          maxDocumentBytes?: number | null;
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -4020,6 +4056,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModel: payload.contentModel ?? null,
           // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
+          // FR-S08 (r8 task 015): the server-advertised save size limit. Read defensively — an older
+          // BFF omits it, and `null` there means "do no numeric pre-flight", never "unlimited".
+          maxDocumentBytes: typeof payload.maxDocumentBytes === 'number' ? payload.maxDocumentBytes : null,
           // Task 051 (FR-06 — PDF import parity): carry the PDF-source marker so the editor admits the
           // synthesized docx as editable (despite the .pdf display name) and Save routes create-on-save.
           sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,

@@ -1079,7 +1079,10 @@ public static class ComposeEndpoints
                 ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings),
                 // Task 050 (FR-06): the PDF-source marker (task 051 keys the honest-lossiness UX + the
                 // save-as-docx flow off it). Null for a native docx upload.
-                SourceFormat: mount.SourceFormat));
+                SourceFormat: mount.SourceFormat,
+                // FR-S08 (r8 task 015): advertise the enforced limit so the client pre-flights against
+                // the SAME number the endpoint checks. One source; the client never hard-codes it.
+                MaxDocumentBytes: ComposeSaveLimits.MaxDocumentBytes));
         }
         catch (ComposePdfIntakeException ex)
         {
@@ -1378,7 +1381,10 @@ public static class ComposeEndpoints
                 ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings),
                 // Task 040 (FR-06, PDF intake): "pdf" when Content is the docx SYNTHESIZED from the
                 // PDF's canonical-model projection; null for a native docx load. Additive (ADR-040).
-                SourceFormat: result.SourceFormat));
+                SourceFormat: result.SourceFormat,
+                // FR-S08 (r8 task 015): advertise the enforced limit so the client pre-flights against
+                // the SAME number the endpoint checks. One source; the client never hard-codes it.
+                MaxDocumentBytes: ComposeSaveLimits.MaxDocumentBytes));
         }
         catch (ArgumentException ex)
         {
@@ -2477,7 +2483,13 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
     // Task 050 (FR-06 — PDF import parity): "pdf" when the uploaded source was a PDF (Content is the
     // synthesized docx); null for a native docx upload. Mirrors LoadComposeDocumentResponse.SourceFormat.
-    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null,
+    // FR-S08 (r8 task 015): the document-size limit the SERVER enforces, advertised so the client can
+    // pre-flight against the SAME number instead of carrying a copy that drifts. The client must never
+    // hard-code a limit — when this is absent (older BFF) it does no numeric pre-flight and lets the
+    // server refuse honestly, because a guessed limit is exactly how "your file is fine" becomes a
+    // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2689,7 +2701,13 @@ public sealed record LoadComposeDocumentResponse(
     // Task 040 (FR-06, PDF intake): "pdf" when content is the docx SYNTHESIZED from the PDF's
     // canonical-model projection (client keys the honest-lossiness UX + save-as-docx routing off
     // this); null for a native docx load. Optional/trailing (ADR-040 additive).
-    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null,
+    // FR-S08 (r8 task 015): the document-size limit the SERVER enforces, advertised so the client can
+    // pre-flight against the SAME number instead of carrying a copy that drifts. The client must never
+    // hard-code a limit — when this is absent (older BFF) it does no numeric pre-flight and lets the
+    // server refuse honestly, because a guessed limit is exactly how "your file is fine" becomes a
+    // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it

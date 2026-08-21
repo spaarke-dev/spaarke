@@ -1,7 +1,6 @@
-# Task 015 — Document size ceilings (FR-S08)
+﻿# Task 015 — Document size ceilings (FR-S08)
 
-> **PARTIAL — server half landed 2026-08-20 (`06b370995`). The client pre-flight is NOT done.**
-> Read "What remains" before continuing.
+> **COMPLETE.** Server half 2026-08-20 (`06b370995`); client pre-flight 2026-08-21.
 
 ---
 
@@ -75,27 +74,25 @@ message rather than quietly satisfied. **The owner should ratify this at review.
   zip deflates it by about half. The assertion on the packaged length is what holds the contract — do
   not "simplify" it away.
 
-## What remains (client)
+## The client pre-flight (landed)
 
-The client pre-flight: measure before sending, refuse over the limit with the number stated.
+The client does **not** carry a compiled-in limit. The server advertises `maxDocumentBytes` on the Load
+and Upload responses (sourced from `ComposeSaveLimits.MaxDocumentBytes`); the reducer stores it
+atomically with the rest of the mount; `triggerSave` compares against it before building the request,
+so an oversize document costs no base64 encode and no upload the user waits out.
 
-**The design decision is already made and is the reason it was not rushed**: the client must NOT carry a
-compiled-in copy of the limit — two constants is precisely how "your file is fine" becomes an
-unexplained failure. The server should advertise `maxDocumentBytes` on the Load (and Upload) response;
-the client stores it and pre-flights against it. When the server does not advertise one (older BFF, or a
-Browse-only mount that never called Load), the client does **no numeric pre-flight** and lets the server
-refuse honestly — guessing is what the constraint forbids.
+When the server advertised nothing — an older BFF, or a mount door that never called the server (a
+local Browse pick, a born-in-editor seed) — the client does **no numeric pre-flight** and lets the
+server refuse honestly with its own number. That is the whole point of the design: a guessed client
+limit is exactly how "your file is fine" becomes a rejection.
 
-Concretely:
-1. Add `maxDocumentBytes` to `LoadComposeDocumentResponse` (and the upload response) sourced from
-   `ComposeSaveLimits.MaxDocumentBytes`.
-2. Carry it into `ComposeWorkspace` reducer state at mount.
-3. In `triggerSave`, before building the request: if the limit is known and the payload exceeds it,
-   dispatch `saveFailed` with the stated number and do not send.
-4. Client test: over-limit → no fetch, message names the limit; under-limit → unchanged; limit absent →
-   no pre-flight, save proceeds.
+Three client tests in `ComposeWorkspace.saveLifecycle.test.tsx`: over the advertised limit → **no
+request is sent** and the message names both numbers; under → saves normally; **no advertised limit →
+the client does not invent one**. Verified anti-self-confirming — reverting `ComposeWorkspace.tsx` to
+HEAD fails the over-limit test.
 
-`ComposeWorkspace.tsx` is also task 016's file — do 015's client half and 016 in one pass, or 015 first.
+Final verification: client suite **90/90 suites, 1106/1106 tests** at CI concurrency; all Compose server
+tests **1135/1135**; publish **43.68 MB** compressed incl. PDBs (0.00 delta); prettier clean.
 
 ## Finding for the owner — `If-Match` on `PUT .../content` is UNDOCUMENTED
 

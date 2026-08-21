@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ComposeWorkspace.saveLifecycle.test.tsx — spaarkeai-compose-r8 task 012 (FR-S05).
  *
  * THE CONTRACT: a save that never comes back cannot strand the editor, and two saves of the same
@@ -50,7 +50,15 @@ const SAVE_TIMEOUT_MS = 120000;
  */
 type SaveBehavior = 'ok' | 'hang' | 'deferred';
 
-const config: { behavior: SaveBehavior } = { behavior: 'ok' };
+/**
+ * FR-S08 (task 015): the size limit the mocked server advertises on its Load response. `null` = the
+ * server advertises nothing (an older BFF), which must switch the client's numeric pre-flight OFF
+ * rather than make it guess.
+ */
+const config: { behavior: SaveBehavior; advertisedLimit: number | null } = {
+  behavior: 'ok',
+  advertisedLimit: null,
+};
 
 let saveCallCount = 0;
 let releaseDeferredSave: (() => void) | null = null;
@@ -114,6 +122,8 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         versionId: 'v-load',
         fileName: 'contract.docx',
         size: 500,
+        // FR-S08: the server-advertised document-size limit the client pre-flights against.
+        maxDocumentBytes: config.advertisedLimit,
         anchoredAnnotations: [],
         definedTermsTracking: [],
         actionHistory: [],
@@ -254,6 +264,7 @@ beforeEach(() => {
   saveCallCount = 0;
   releaseDeferredSave = null;
   config.behavior = 'ok';
+  config.advertisedLimit = null;
   editorProps.current = {};
 });
 
@@ -293,6 +304,52 @@ async function errorBannerText(): Promise<string> {
   const banner = await screen.findByTestId('compose-workspace-error-banner');
   return banner.textContent ?? '';
 }
+
+describe("ComposeWorkspace — FR-S08: the size pre-flight uses the SERVER's number, or none", () => {
+  it('a document over the advertised limit is refused BEFORE any request is sent', async () => {
+    // 1 byte: the retained mount bytes (a few bytes of base64-decoded ZIP magic) exceed it, so the
+    // pre-flight fires without needing a 25 MB fixture. The mechanism under test is the comparison
+    // and where it happens, not the magnitude.
+    config.advertisedLimit = 1;
+    await mountLoaded();
+
+    await clickSave();
+
+    expect(saveCallCount).toBe(0);
+    const text = await errorBannerText();
+    expect(text).toContain('Not saved');
+    expect(text).toContain('the limit is');
+    expect(text).toContain('still here');
+
+    // Refused, not broken: the editor is out of `saving` and the work is untouched.
+    await waitFor(() => expect(editorProps.current.canSave).toBe(true));
+    expect(commitSavedMock).not.toHaveBeenCalled();
+  });
+
+  it('NEGATIVE: a document UNDER the advertised limit saves normally', async () => {
+    config.advertisedLimit = 25 * 1024 * 1024;
+    await mountLoaded();
+
+    await clickSave();
+
+    await waitFor(() => expect(saveCallCount).toBe(1));
+    await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
+  });
+
+  it('NEGATIVE: when the server advertises NO limit, the client does not invent one', async () => {
+    // An older BFF, or a mount door that never called the server. The client must not fall back to a
+    // compiled-in number — the server still enforces its own and refuses honestly if need be. A guess
+    // here is the "two constants" divergence the requirement exists to remove.
+    config.advertisedLimit = null;
+    await mountLoaded();
+
+    await clickSave();
+
+    await waitFor(() => expect(saveCallCount).toBe(1));
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
+  });
+});
 
 describe('ComposeWorkspace — FR-S05: a save cannot hang forever and cannot double-run', () => {
   it('a hung save times out, reports honestly, and returns the editor to a usable state without a reload', async () => {

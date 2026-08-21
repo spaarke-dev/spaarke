@@ -1,10 +1,10 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <task id="015" project="spaarkeai-compose-r8">
   <metadata>
     <title>FR-S08 — Route Compose to the existing chunked upload; remove the ~22 MB request-body ceiling; honest oversize pre-flight</title>
     <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the storage-boundary write path and the request-body limit for the Compose save route.</rigor-reason>
     <model-tier>opus</model-tier>
