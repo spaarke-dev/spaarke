@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-21 (task-execute, task 020 start)
+> **Last Updated**: 2026-08-21 (task-execute — 017, 020, 021, 022 all closed)
 > **Recovery**: Read "Quick Recovery" first.
 
 ---
@@ -9,53 +9,63 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **020** — FR-G01/G02/G03: the gate contract (preservation oracle + outcome honesty + two comparison levels) |
-| **Phase** | 2 — Oracle & Corpus (**critical path**: 020 → 023 → 030 → **031 GATE**) |
-| **Rigor / Tier** | FULL · `opus` @ `max` · steps `directional` · `parallel-safe: false` |
-| **Step** | 3 of 7 — implement the normalization layer |
-| **Status** | in-progress |
-| **Next Action** | Write `tests/integration/seam/Compose/ComposeBlockPreservationOracle.cs`, then wire it into `ComposeFidelityGateHarnessTests.cs` |
+| **Task** | **023** — Control measurement: run the oracle on master, publish today's real loss numbers |
+| **Phase** | 2 — Oracle & Corpus (**critical path**: 023 → 030 → **031 GATE**) |
+| **Rigor / Tier** | STANDARD · `opus` @ `high` · `parallel-safe: false` |
+| **Status** | not-started — **startable now** (deps 020 ✅, 021 ✅, 022 ✅) |
+| **Next Action** | Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --filter "FullyQualifiedName~ComposeFidelityGateHarnessTests"`, read `fidelity-gate-result.json`, and publish the 18-document control per the 023 POML. Most of the measurement already exists in [`notes/gate-contract.md`](notes/gate-contract.md). |
 
 ### Critical context
 
-Phase 1 (Track S) is **CLOSED** — owner UAT GO on 2026-08-21. Task 020 builds the measurement the whole
-architecture decision rests on. **If the oracle reads ~100% on master, STOP** — that means it is
-normalizing away real signal (escalation trigger), because R6's silent fidelity loss is verified: the owner
-is looking at it in dev right now.
+**Phase 1 (Track S) is CLOSED** — owner UAT GO 2026-08-21. **Phase 2 is 3/4 done.**
 
-### Design decided (steps 1–2 complete)
+The control on current master: **8.86% overall block preservation, 2.37% near-tier**, 18 documents /
+271 comparable blocks. Every save reports `persisted` and none of them lies — Track S's outcome contract
+holds corpus-wide. The loss is **inside blocks, not structural** (block counts stable: 109→109, 50→50), which
+is exactly the shape "clone the untouched blocks verbatim" is built for.
 
-- **Existing harness asserts only** round-trip HTTP success + edit presence + warn-not-fail. Its header
-  states outright that byte-identity is NOT asserted on the save path. That is the hole R6 shipped through.
-- **Reuse (CLAUDE.md §11)**: extend `ComposeFidelityGateHarnessTests` + `ComposeCorpusFixtureLocator`; the
-  new comparison engine lands as a sibling helper file, the same idiom as the existing
-  `ComposeOoxmlPackagePartComparer.cs`. **Not** a second harness — still one `[Theory]` gate, one corpus,
-  one locator.
-- **`ComposeOoxmlPackagePartComparer` cannot be extended for this**: it answers a binary
-  "is the package byte-identical" over whole parts, and its `IsStructurallyFaithful` uses
-  `body.Descendants<Paragraph>()` — the exact walk this task forbids. Left untouched (it serves the no-op
-  byte-diff suite).
-- **Pairing**: direct `w:body` children, document order, `paraId` corroborating only; unpaired blocks
-  reported as dropped/added; duplicate-paraId documents flagged distinctly.
-- **Near tier**: rPr · pPr · ind · tabs/tab · footnoteReference/footnoteRef · fldSimple/fldChar/instrText.
-- **Outcome honesty**: wire `outcome` ∈ `ComposeSaveOutcomes` closed set, cross-checked against whether
-  bytes actually reached the SPE facade boundary (the harness already captures them).
+### What the owner still sees in dev, and who owns it
 
-### Files modified this session
+| Banner | Track | Owner |
+|---|---|---|
+| "Some formatting was simplified when saving" | **A** | Phases 2→3→4 (040–044), gated on 031 |
+| "wording differs slightly from this document" | **C** | **051–053 — startable NOW**, not gated on 031 |
 
-| File | Purpose |
+Owner standing directive: *"we NEVER should get the 'wording differs slightly'."* Track C is the shortest
+path to removing the second banner and does not wait for the Phase-3 gate.
+
+### Completed this session
+
+| Task | Outcome |
 |---|---|
-| `tests/integration/seam/Compose/ComposeBlockPreservationOracle.cs` | NEW — normalization + pairing + tiered comparison engine |
-| `tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs` | Wire the oracle + outcome-honesty into the gate; extend the JSON sink |
-| `projects/spaarkeai-compose-r8/notes/gate-contract.md` | NEW — normalization justifications + near-tier definition |
+| **017** | Track S UAT **GO**. Fixed the save-degradation banner that claimed *"the original file is unchanged until you save"* **after** the bytes were written. |
+| **020** | The preservation oracle + outcome-honesty + two comparison levels. Ten `Oracle_*` facts prove the instrument. |
+| **021** | Three R4-breaker fixtures (dup paraId in `mc:AlternateContent`, interior text boxes, multi-part paraId collision). |
+| **022** | Five near-tier fixtures (char formatting, court spacing, footnotes, `REF`, content controls). |
 
----
+### Defects found and fixed beyond task scope
 
-## Prior task (017) — CLOSED
+1. **`NdaSaveNo422RegressionTests` mocked the etag-less `ReplaceFileContentAsUserAsync`** — task 011 moved the
+   save path to the `If-Match` overload; both still exist, so the stale setup compiled, never matched, and the
+   save reported 404. **A Track S regression**, invisible because per-task runs were filtered to `Seam.Compose`.
+2. **`ComposeReadFidelityHarnessSeamTests`' golden model dropped `w:fldSimple`** — the cached result never
+   entered the golden, so a correct projection read as a failure. The fix *tightens* the assertion.
+3. **`w14:paraId` must be 8 hex digits ≤ `0x7FFFFFFF`** — my first fixture draft used non-hex mnemonics.
 
-Track S deployed to dev (BFF `spaarke-bff-dev` + `sprk_spaarkeai`, both from `e5815e862`, one window).
-Owner UAT **GO**. One defect found by the UAT and fixed: the save-degradation banner claimed *"the original
-file is unchanged until you save"* **after** the bytes were written. Evidence: `notes/track-s-uat.md`.
+### Traps (carried forward — all still live)
 
-The two banners the owner still sees are **not** Track S — formatting-simplified is **Track A** (Phases 2–4),
-*"wording differs slightly"* is **Track C** (051–053, startable now, not gated on 031).
+- `git checkout <commit> -- <path>` writes the **INDEX**; a follow-up `git checkout -- <path>` restores the OLD
+  version and silently reverts work. Safe A/B form: **`git show <commit>:<path> > <path>`**.
+- **Run the FULL test project before closing a task**, not `--filter`. Defect 1 above hid behind a filter for
+  two tasks.
+- `refs/stash` lives in the **common git dir** — 60+ worktrees share one stash list.
+- SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before every build.
+- `/api/documents/{id:guid}` returns **404 for a non-GUID id** — a healthy route can look unregistered.
+- Use `pwsh`, not `powershell`, for the deploy hash-verify step.
+- Bash heredocs in this harness mangle ``-style escapes inside quoted Python — write patch scripts to a file
+  in the scratchpad and run them instead.
+
+### Not yet deployed
+
+The task 017 banner fix (`ComposeBannerStack.tsx`) is **committed but not deployed** — client-only, ships with
+the next `sprk_spaarkeai` deploy. No BFF change is pending.
