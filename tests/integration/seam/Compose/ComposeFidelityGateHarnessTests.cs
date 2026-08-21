@@ -801,6 +801,70 @@ public sealed class ComposeFidelityGateHarnessTests :
     }
 
     [Fact]
+    public void Oracle_IgnoresAnEmptyPropertyContainer_ButStillSeesOneThatLostItsContent()
+    {
+        // Task 023 control-measurement finding. Current master emits an empty `<w:pPr/>` on essentially
+        // every rendered paragraph, including ones whose source had none. That is not loss — Word renders
+        // `<w:p><w:pPr/><w:r>…` and `<w:p><w:r>…` identically — but it contains "pPr", so it was being
+        // counted as a NEAR-TIER difference and inflating the headline metric with phantom loss.
+        //
+        // Both halves are asserted together on purpose. The first half alone would be a plausible way to
+        // make the numbers look better; the second is what proves it is not.
+        var noPropsOriginal = BuildDocxWithBody(
+            "<w:p w14:paraId=\"11000001\"><w:r><w:t>Alpha</w:t></w:r></w:p>" + Paragraph("11000002", "X" + OracleMarker));
+        var emptyPropsSaved = BuildDocxWithBody(
+            "<w:p w14:paraId=\"11000001\"><w:pPr/><w:r><w:rPr/><w:t>Alpha</w:t></w:r></w:p>" + Paragraph("11000002", "X" + OracleMarker));
+
+        ComposeBlockPreservationOracle.Compare(
+                noPropsOriginal, emptyPropsSaved, OracleMarker, ComposeBlockPreservationOracle.ComparisonLevel.Strict)
+            .OverallPreservationPercent.Should().Be(100d,
+                "an empty property container carries no formatting — 'was absent, came back empty' is a "
+                + "serialization artifact, not loss, and counting it makes the gate unreachable for the "
+                + "wrong reason");
+
+        // The half that matters: a `w:pPr` that HAD content and came back EMPTY is the real defect —
+        // exactly what current master does to indentation, spacing and tab stops.
+        var withPropsOriginal = BuildDocxWithBody(
+            "<w:p w14:paraId=\"11000001\"><w:pPr><w:ind w:left=\"720\"/><w:spacing w:line=\"480\"/></w:pPr>"
+            + "<w:r><w:t>Alpha</w:t></w:r></w:p>" + Paragraph("11000002", "X" + OracleMarker));
+
+        var stripped = ComposeBlockPreservationOracle.Compare(
+            withPropsOriginal, emptyPropsSaved, OracleMarker, ComposeBlockPreservationOracle.ComparisonLevel.Strict);
+
+        stripped.OverallPreservationPercent.Should().Be(50d,
+            "only the EMPTY side is removed, so a source w:pPr that lost its indentation and spacing "
+            + "still differs — the normalization erases 'absent vs empty' and nothing else");
+        stripped.Differences.Should().ContainSingle().Which.IsNearTier.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Oracle_NamesTheConstructInsideADroppedRepeatedChild_NotJustTheParent()
+    {
+        // Task 023 control-measurement finding, the UNDER-reporting artifact. `multipart-paraid-collision`
+        // loses an entire `<w:r>` carrying a `w:footnoteReference`. Both sides still have only `w:r`
+        // children, so the "names present on one side only" set is EMPTY and the difference collapsed to a
+        // bare "p" — which contains no near-tier element and classified a dropped footnote reference as
+        // NOT near-tier. Under-reporting is the same failure as over-reporting, pointed the other way.
+        var original = BuildDocxWithBody(
+            "<w:p w14:paraId=\"11000001\"><w:r><w:t>A sentence.</w:t></w:r>"
+            + "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:footnoteReference w:id=\"1\"/></w:r></w:p>"
+            + Paragraph("11000002", "X" + OracleMarker));
+        var saved = BuildDocxWithBody(
+            "<w:p w14:paraId=\"11000001\"><w:r><w:t>A sentence.</w:t></w:r></w:p>"
+            + Paragraph("11000002", "X" + OracleMarker));
+
+        var report = ComposeBlockPreservationOracle.Compare(
+            original, saved, OracleMarker, ComposeBlockPreservationOracle.ComparisonLevel.Strict);
+
+        var difference = report.Differences.Should().ContainSingle().Subject;
+        difference.DifferingPaths.Should().Contain("p/footnoteReference",
+            "the path must NAME the construct that went missing — a bare \"p\" is not actionable and, "
+            + "worse, is not near-tier");
+        difference.IsNearTier.Should().BeTrue(
+            "a dropped footnote reference is a near-tier loss by the definition in the gate contract");
+    }
+
+    [Fact]
     public void Oracle_ReportsBlockCountDrift_WhenTheSaveDropsAParagraph()
     {
         // The R3 empty-paragraph-drift defect class (48 paragraphs in, 39 out). The percentage alone

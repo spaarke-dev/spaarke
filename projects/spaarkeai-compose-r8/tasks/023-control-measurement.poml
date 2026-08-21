@@ -3,8 +3,8 @@
   <metadata>
     <title>Control measurement — run the oracle on current master and publish today's real loss numbers</title>
     <phase>2 Oracle &amp; Corpus</phase>
-    <gate>blocked-on-020</gate>
-    <status>pending</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Runs an existing harness and publishes results; no product source modified. But the interpretation gates Phase 3.</rigor-reason>
     <model-tier>opus</model-tier>

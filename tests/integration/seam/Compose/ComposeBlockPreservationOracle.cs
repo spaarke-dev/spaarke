@@ -432,6 +432,29 @@ public static class ComposeBlockPreservationOracle
             }
         }
 
+        // (8) EMPTY `w:pPr` / `w:rPr` — a property CONTAINER carrying no attributes and no children.
+        //     It expresses no formatting: Word renders `<w:p><w:pPr/><w:r>…` and `<w:p><w:r>…` identically,
+        //     and the schema makes the element optional precisely because its absence and its empty
+        //     presence mean the same thing.
+        //
+        //     ADDED BY TASK 023, from the control measurement's diff classification. Current master emits
+        //     an empty `<w:pPr/>` on essentially every rendered paragraph, including ones whose source had
+        //     no `w:pPr` at all. Without this rule those blocks counted as NEAR-TIER LOSSES — the path
+        //     contains `pPr` — which inflated the headline metric with a difference that loses nothing.
+        //     An oracle that reports phantom loss is as dangerous as one that hides real loss: it makes
+        //     the gate unreachable and creates pressure to lower the bar for the wrong reason.
+        //
+        //     This CANNOT hide a real loss, and the paired test pins that: a source `w:pPr` that HAD
+        //     content and came back empty still differs, because only the empty side is removed. The rule
+        //     erases "was absent, came back empty" and nothing else.
+        foreach (var container in clone.DescendantsAndSelf()
+                     .Where(e => (e.Name == W + "pPr" || e.Name == W + "rPr")
+                                 && !e.HasAttributes && !e.HasElements && string.IsNullOrEmpty(e.Value))
+                     .ToList())
+        {
+            container.Remove();
+        }
+
         // LEVEL SWITCH — the ONLY difference between the two gate levels. Lenient erases the session
         // anchors so content loss shows through unmasked; Strict keeps them so identity drift shows.
         if (level == ComparisonLevel.Lenient)
@@ -572,11 +595,25 @@ public static class ComposeBlockPreservationOracle
                     sink.Add(JoinPath(path, name));
                 }
 
-                if (asymmetric.Count == 0)
+                // Same element NAME on both sides but a different COUNT — a REPEATED construct was
+                // dropped or duplicated. `asymmetric` is empty here by construction, so naming only the
+                // parent would report a dropped `<w:r><w:rPr>…</w:rPr><w:footnoteReference/></w:r>` as a
+                // bare "p" and classify it NOT near-tier, because nothing names what was inside it.
+                //
+                // ADDED BY TASK 023 (second control-measurement artifact, this one UNDER-reporting):
+                // `multipart-paraid-collision.docx` loses an entire footnote-reference run and read as a
+                // non-near-tier difference. Descend into the UNMATCHED TAIL on whichever side is longer
+                // and record every distinct element name it contains, so the difference names the
+                // construct that actually went missing.
+                var longer = aChildren.Count > bChildren.Count ? aChildren : bChildren;
+                for (var extra = Math.Min(aChildren.Count, bChildren.Count); extra < longer.Count; extra++)
                 {
-                    // Same element NAMES on both sides but a different COUNT — a repeated construct was
-                    // duplicated or dropped. Name the parent so it is still reported.
-                    sink.Add(JoinPath(path, null));
+                    foreach (var name in longer[extra].DescendantsAndSelf()
+                                 .Select(e => e.Name.LocalName)
+                                 .Distinct(StringComparer.Ordinal))
+                    {
+                        sink.Add(JoinPath(path, name));
+                    }
                 }
             }
 

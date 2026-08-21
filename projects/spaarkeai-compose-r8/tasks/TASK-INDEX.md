@@ -74,7 +74,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 020 | **The gate contract** — preservation oracle + outcome-honesty assertion + two comparison levels with normalization *(all one harness file)* | FR-G01/02/03 | FULL | opus/max | ❌ | 001, 013 | ✅ |
 | 021 | Corpus: the 3 synthetic R4-breakers (`mc:AlternateContent` dup paraIds · interior text boxes · multi-part collisions) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | ✅ |
 | 022 | Corpus: near-tier owner documents (char formatting · court spacing · footnotes · `REF` · content controls) | FR-G04 | STANDARD | sonnet/high | ✅ | 001 | ✅ |
-| 023 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | opus/high | ❌ | 020–022 | 🔲 |
+| 023 | **Control measurement** — run the oracle on current master; publish today's real loss numbers | — | STANDARD | opus/high | ❌ | 020–022 | ✅ |
 
 > **✅ 020 CLOSED — the control is published, 2026-08-21.** The gate now measures what SURVIVES, not just
 > whether the save crashed. On current master: **6.53% overall block preservation, 2.55% near-tier**, across
@@ -85,6 +85,15 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > dev banner, itemised; (c) `AppligentNDA_Signed.docx` **already** carries duplicate `w14:paraId`s, so task
 > 021 should check coverage before synthesizing that R4-breaker.
 > Evidence: [`notes/gate-contract.md`](../notes/gate-contract.md).
+
+> **✅ PHASE 2 COMPLETE — the control is published, 2026-08-21.** Current master preserves **18.08%** of
+> untouched blocks (lenient), **12.18%** strict, and **6.67%** of the near tier, over 18 documents / 271
+> blocks. All 18 saves terminate `persisted` with **zero** outcome-honesty violations — Track S holds.
+> Task 023's classification pass found and fixed **two oracle artifacts** (one over-reporting by 9 points,
+> one under-reporting a dropped footnote reference as 100%), each with a paired test asserting the real loss
+> it was masking is still caught. **Thresholds ratified: 100% near-tier / ≥95% overall at LENIENT; strict is
+> a no-regression ratchet at 12.18%, not a gate.** The MISS condition is defined in advance — see
+> [`notes/control-measurement.md`](../notes/control-measurement.md). **030 may proceed.**
 
 ## Phase 3 — Model proof · **THE GATE**
 

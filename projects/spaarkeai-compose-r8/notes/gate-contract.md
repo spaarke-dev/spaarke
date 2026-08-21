@@ -51,6 +51,22 @@ Duplicate `w14:paraId` anywhere in the document: **1 of 10** (`AppligentNDA_Sign
 Machine-readable form: `fidelity-gate-result.json`, written next to the test assembly on every run. Task 023
 publishes this as the formal control; tasks 030/031 assert a merge model against it.
 
+> ### ⚠️ SUPERSEDED BY TASK 023 — read [`control-measurement.md`](control-measurement.md) for the real numbers
+>
+> The figures in this document are the measurement task 020 built the instrument against. Task 023's
+> classification pass then found **two oracle artifacts** and fixed them here, which moved the headline
+> substantially in both directions:
+>
+> | Stage | Lenient overall | Near tier |
+> |---|---:|---:|
+> | As published below (both artifacts present) | 8.86% | 2.37% |
+> | After A1 — empty `<w:pPr/>` no longer counted as loss (**over**-reporting) | 18.08% | 7.14% |
+> | After A2 — a dropped repeated child now names what was inside it (**under**-reporting) | **18.08%** | **6.67%** |
+>
+> **The control of record is 18.08% overall / 12.18% strict / 6.67% near tier**, over 18 documents and 271
+> comparable blocks. The normalization table below is still authoritative and now carries entry (8) for A1;
+> the A2 fix is in the difference walk, not the normalizer.
+
 > **Corpus extended the same day (tasks 021 + 022).** Eight fixtures were added — three R4-breakers and five
 > near-tier families — and picked up by the gate with **zero code changes**. Post-extension the corpus is
 > **18 documents / 271 comparable blocks: 8.86% overall, 2.37% near-tier**. Near-tier preservation *fell*,
