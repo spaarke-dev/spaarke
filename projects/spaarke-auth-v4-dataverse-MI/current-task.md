@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-20 (by task-execute — task 010 ESCALATED)
+> **Last Updated**: 2026-08-20 (by task-execute, after task 010)
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,31 +11,32 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — zero-secret BFF confidential credential (OBO → MI-FIC) |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` |
-| **Task** | **010 — Fix the MI-flag gating defect** |
-| **Step** | 3 of 5 — ⛔ **BLOCKED at `DataverseAccessDataSource.cs`** |
-| **Status** | 🔔 **ESCALATED — awaiting owner decision.** See [`BLOCKED.md`](BLOCKED.md) |
-| **Next Action** | Owner chooses: **A) decouple** (recommended) · B) defer the file to Phase 2 · C) ❌ do NOT copy the template verbatim |
-| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · **3 of 26 active** (3 deferred) |
+| **Task** | **011 — Fix DI lifetimes + record the ADR-009 cache decision** (not started) |
+| **Step** | Begin Step 1 of task 011 |
+| **Status** | not-started — **unblocked**, dep 003 ✅ and 010 ✅ |
+| **Next Action** | Run `task-execute` on **`tasks/011-fix-di-lifetimes.poml`** — run it **alone**; 010/011 are NOT parallel-safe (both touch `DataverseAccessDataSource.cs`) |
+| **⚠️ Sync** | **11 commits behind `origin/master`** — merge before the next code task (Step 10.6) |
+| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · **4 of 26 active** (3 deferred) |
 
-> ## 🔔 TASK 010 ESCALATION — the trigger fired exactly as written
+> ## ✅ Task 010 complete — escalation resolved via owner Option A (decouple)
 >
-> `DataverseAccessDataSource.cs:53-77` uses **one `if`** to control both the **app-only credential** *and* the
-> **OBO confidential client** (`_cca`). Copying the prescribed `DataverseWebApiService` template puts `_cca = null`
-> in the MI branch — so with `Graph:ManagedIdentity:Enabled=true` (the intended dev end-state, already live)
-> **every delegated Dataverse access-check throws** at `:107`. That is the fail-closed outage this project exists
-> to avoid, introduced by the task meant to be a safe prerequisite.
->
-> **Recommended: decouple** — flag-gate `_credential`, build `_cca` independently whenever OBO config exists.
-> It is also the exact seam task 020 needs, so task 022 does not have to untangle it under pressure.
->
-> ✅ Already done and safe: `DataverseWebApiClient.cs` gating fixed (no OBO path there), builds clean.
-> ⛔ `DataverseAccessDataSource.cs` deliberately **untouched**. Nothing deployed.
+> `DataverseAccessDataSource` now gates the **app-only** credential on `Graph:ManagedIdentity:Enabled`
+> while building the **OBO** confidential client **independently**. The prescribed "copy
+> `DataverseWebApiService`" shape would have set `_cca = null` under MI and thrown on every delegated
+> access check. This is also the exact seam task 020 needs.
+> → [`notes/decisions/010-credential-gating.md`](notes/decisions/010-credential-gating.md)
 
-### ⚠️ Secondary finding — Group A was misclassified (CORRECTED)
+### ⚠️ Two open items carried forward
 
-Both 010 and 011 declared `parallel-safe: true` and TASK-INDEX claimed *"different files"* — but **both modify
-`DataverseAccessDataSource.cs`**. Concurrent sub-agents would collide. Now `parallel-safe: false` on both, group
-re-marked **`010 → 011` sequential**.
+1. **Pre-existing CI red — NOT ours.** `GodClassGuardTests` FR-14 fails on
+   `DataverseServiceClientImpl.cs` (2975 vs 2864) and `ComposeEndpoints.cs` (2755 vs 2651). Neither is
+   in our diff; `ComposeEndpoints.cs` is byte-identical to `origin/master`. Arrived via the master
+   merge from `#3b` / `compose-r7`. Remedy per `god-class-ratchet.md` is decompose-or-re-baseline-with-
+   reason, and it belongs to the projects that caused the growth. **Branch CI will be red until then.**
+2. **Structural guard deferred to task 060** — assert by source analysis that `_cca` is never assigned
+   inside the MI branch. Could not live in the seam test (reflection = ADR-038 ban **B8**; and the class
+   swallows credential errors into `AccessRights.None`, so selection is not observable behaviourally).
+   Booked onto 060 as a constraint **and** an acceptance criterion.
 
 ### Repo state
 

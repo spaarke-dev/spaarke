@@ -11,7 +11,7 @@
 | 001 | Create the dev deployment slot + assign UAMI | 0 Spike | **FULL**¹ | sonnet/med | — | — | ❌ | — | ✅ |
 | 002 | Spike: prove OBO under a MI client assertion | 0 Spike | FULL | **opus/xhigh** | 001 | — | ❌ | — | ✅ |
 | 003 | Record the credential decision with evidence | 0 Spike | STANDARD | sonnet/med | 002 | — | ❌ `.claude/` | — | ✅ |
-| 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A1 | 🔄 |
+| 010 | Fix the MI-flag gating defect | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A1 | ✅ |
 | 011 | Fix DI lifetimes + record the ADR-009 decision | 1 Prereq | FULL | sonnet/high | 003 | **A** | ❌ | FR-A2 | 🔲 |
 | 020 | `IClientAssertionProvider` seam + raise ADR-010 ceiling | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | 🔲 |
 | 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | 🔲 |

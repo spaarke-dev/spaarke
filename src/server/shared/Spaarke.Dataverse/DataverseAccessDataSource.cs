@@ -46,34 +46,81 @@ public class DataverseAccessDataSource : IAccessDataSource
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _dataverseScope = $"{dataverseUrl.TrimEnd('/')}/.default";
 
-        // Use ClientSecretCredential when configured (enables OBO token exchange), else use the
-        // DI-injected TokenCredential (UAMI-pinned via the BFF's ManagedIdentityCredentialFactory).
-        // Constructor TokenCredential is optional for backwards-compat with non-DI instantiation;
-        // production registrations from BFF will always provide it.
-        if (!string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
-        {
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-            _logger.LogInformation("DataverseAccessDataSource using ClientSecretCredential for service principal auth");
+        // ---------------------------------------------------------------------------------------
+        // FR-A1 (auth-v4 task 010) — DECOUPLED credential selection.
+        //
+        // These are TWO INDEPENDENT concerns and used to share a single `if`:
+        //   (1) _credential — the APP-ONLY token used by EnsureAuthenticatedAsync.
+        //   (2) _cca        — the OBO confidential client for DELEGATED (per-user) access.
+        //
+        // The old shape selected BOTH on "is a client secret present?", which had two bugs:
+        //   * The app-only path ignored Graph:ManagedIdentity:Enabled entirely, so on dev — where
+        //     API_CLIENT_SECRET is set BECAUSE OBO needs it — this class ran on the client secret
+        //     even though MI was enabled. That is the defect FR-A1 exists to fix.
+        //   * Fixing that naively (copying DataverseWebApiService's plain if/else) would have put
+        //     `_cca = null` in the MI branch, so enabling MI would DISABLE OBO and every delegated
+        //     access check would throw at GetDataverseTokenViaOBOAsync. DataverseWebApiService is a
+        //     safe template only because it has no OBO path; this class does.
+        //
+        // So: gate (1) on the flag, and build (2) whenever OBO configuration exists — independent of
+        // the flag. DefaultAzureCredential cannot perform an OBO exchange (ADR-028 A4), and the MI
+        // flag says nothing about delegated access. Phase 2 (task 020) swaps only the credential
+        // INSIDE (2) to the MI-FIC assertion; the app-only branch is untouched by that migration.
+        // ---------------------------------------------------------------------------------------
 
-            // Initialize MSAL for OBO token exchange
+        // (1) APP-ONLY credential — gated by the flag.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
+
+        if (useManagedIdentity)
+        {
+            // BFF-FIX-2026-05-24: prefer the DI-injected TokenCredential (pinned to the UAMI clientId
+            // by the BFF's ManagedIdentityCredentialFactory). Fall back to DefaultAzureCredential for
+            // instantiation outside the BFF DI container (tooling, integration tests).
+            var miClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
+            _credential = credential ?? new DefaultAzureCredential(
+                string.IsNullOrEmpty(miClientId)
+                    ? new DefaultAzureCredentialOptions()
+                    : new DefaultAzureCredentialOptions { ManagedIdentityClientId = miClientId });
+            _logger.LogInformation(
+                "DataverseAccessDataSource app-only auth: Managed Identity (ADR-028; {CredentialKind}, clientId {ClientId})",
+                credential != null ? "DI-injected TokenCredential" : "DefaultAzureCredential (fallback)",
+                miClientId ?? "(system-assigned)");
+        }
+        else
+        {
+            // Fail fast with an actionable message rather than handing back a null/unusable credential.
+            if (string.IsNullOrEmpty(tenantId))
+                throw new InvalidOperationException("TENANT_ID configuration is required (Graph:ManagedIdentity:Enabled is not true)");
+            if (string.IsNullOrEmpty(clientId))
+                throw new InvalidOperationException("API_APP_ID configuration is required (Graph:ManagedIdentity:Enabled is not true)");
+            if (string.IsNullOrEmpty(clientSecret))
+                throw new InvalidOperationException("API_CLIENT_SECRET configuration is required (Graph:ManagedIdentity:Enabled is not true)");
+
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            _logger.LogInformation(
+                "DataverseAccessDataSource app-only auth: ClientSecret credential (local-dev fallback)");
+        }
+
+        // (2) OBO confidential client — INDEPENDENT of the MI flag. Built whenever OBO config exists.
+        //     ADR-028 E-3: the secret here is transitional; task 020 replaces it with a MI-FIC
+        //     client assertion via the shared provider, and task 033 removes the secret entirely.
+        if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret))
+        {
             _cca = ConfidentialClientApplicationBuilder
                 .Create(clientId)
                 .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
                 .WithClientSecret(clientSecret)
                 .Build();
-
-            _logger.LogInformation("DataverseAccessDataSource initialized with OBO support");
+            _logger.LogInformation("DataverseAccessDataSource delegated auth: OBO available");
         }
         else
         {
-            // BFF-FIX-2026-05-24: prefer the DI-injected TokenCredential (pinned to UAMI clientId).
-            // Falls back to DefaultAzureCredential() for cases where this type is instantiated
-            // outside the BFF DI container (e.g. tooling, integration tests).
-            _credential = credential ?? new DefaultAzureCredential();
-            _cca = null; // No OBO support with managed identity
-            _logger.LogInformation(
-                "DataverseAccessDataSource using {CredentialKind} - OBO not available",
-                credential != null ? "DI-injected TokenCredential" : "DefaultAzureCredential (fallback)");
+            _cca = null;
+            _logger.LogWarning(
+                "DataverseAccessDataSource delegated auth: OBO NOT available (no confidential-client configuration). "
+                + "Delegated access checks will fail closed.");
         }
     }
 
