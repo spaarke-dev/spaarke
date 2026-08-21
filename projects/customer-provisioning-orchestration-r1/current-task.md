@@ -1,29 +1,104 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-20 — **🎯 Wave G-8 COMPLETE. All 30 audit-identified defects closed. Framework is now E2E-provable (was "authoring done" before). Owner-in-the-loop Wave H-3 (live deploy) + H-4 (first E2E) is the only remaining path to demonstrate live customer provisioning success.**
+> **Last Updated**: 2026-08-20 — **H-3 PIVOTED to Spaarke Master solution scoping (was: live deploy). Wave G-8 authoring complete (30/30 defects); H-3 shifted focus to the DATAVERSE-content packaging discipline that H6 requires. Spaarke.Plugins removed from spaarkedev1; solution-authoring release process shipped; algorithm-corrected TRUE delta identified (218 items vs original 1224 false).**
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST after /compact)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `b3e879cf9` — in sync with origin |
-| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — Wave G-8 complete, ready for owner review + Wave H-3 dispatch) |
-| **L2 tests** | 1324 pass / 1 skip / **0 fail** / 1325 total (net -157 from pre-G-8 1481 due to Batch 8 deletion sweep of 16 unregistered shell-out classes; expected + benign) |
-| **BFF build** | ✅ 0 warnings, 0 errors |
-| **Worker build** | ✅ 0 warnings, 0 errors |
-| **Bicep compile** | ✅ all 4 entry points (customer / platform-controlplane / model1-shared / model2-full) — warnings-only + pre-existing |
-| **Phase status** | **Phase C'' 100% COMPLETE (authoring + gap-closure)** — G-1..G-7 (58 tasks) + G-8 (12 batches + 1 amendment closing all 30 audit defects) |
-| **r1 E2E goal (FR-18 / SC #5)** | **Framework FULLY READY for live proof** — all 30 audit blockers closed. Live proof requires owner-in-the-loop Wave H-3 + H-4. |
-| **IN-FLIGHT** | None — Wave G-8 fully landed on origin |
-| **Working ledger** | `notes/post-authoring-audit-2026-08-20.md` — 30 defects, source Fable reviewer, close status |
+| **HEAD** | `0ef8ff57e` — in sync with origin |
+| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT) |
+| **Working tree** | clean |
+| **Phase status** | Wave G-8 authoring COMPLETE + H-3 SOLUTION-SCOPING IN PROGRESS (Assemble apply pending owner review of 218-item delta) |
+| **r1 E2E goal (FR-18 / SC #5)** | Framework ready; H6 blocked pending Spaarke Master managed ZIP; Wave H-4 first live E2E blocked on Assemble apply |
+| **IN-FLIGHT** | None (dry-run report at `/tmp/assemble-whatif-v3.log`, ephemeral) |
+| **Owner decision needed** | Approve applying the 218-item delta (Assemble without -WhatIf) OR further scope adjustments |
 
 ### On post-/compact resume
 
-1. **Read `notes/post-authoring-audit-2026-08-20.md`** — authoritative defect list; 30/30 CLOSED
-2. **Check `git log --oneline -15`** — Wave G-8 batches all present
-3. **No in-flight subagents** — all fixes landed
-4. **Wave H-3 (live deploy) + H-4 (first E2E) are owner-in-the-loop** — will NOT auto-dispatch. Await owner direction.
+1. **Read this Quick Recovery + §H-3 SOLUTION SCOPING below** — H-3 was pivoted from "live deploy" to "solution scoping" mid-session
+2. **Check `git log --oneline -8`** — see recent commits: solution-authoring release process (`809ae3477`) + algorithm fix (`0ef8ff57e`)
+3. **Read `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`** — the newly-established release discipline (3 scripts + OOB manifest)
+4. **No in-flight subagents** — all Wave G-8 + all H-3 authoring landed
+5. **Wave H-3 remaining + H-4 are owner-in-the-loop** — will NOT auto-dispatch. Await owner direction.
+
+---
+
+## 🌟 H-3 SOLUTION SCOPING — established this session (2026-08-20)
+
+### What changed and why
+
+- Original H-3 (live control-plane deploy) was blocked by discovery that customer-provisioning H6 assumed 8 named Dataverse solutions but only 2 had scaffolding
+- Microsoft's official ALM guidance (Pattern #1 Single Solution) confirmed one-managed-solution is correct for Spaarke's small-medium ISV scale
+- Owner directive: use existing `SpaarkeMaster` (not v2), augment via systematic component identification + release-process discipline
+
+### Deliverables committed (809ae3477)
+
+- `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md` — full release workflow + governance
+- `docs/data-model/oob-customizations.yaml` — manifest (21 sprk_ columns across 4 OOB entities: contact 9 + systemuser 7 + businessunit 3 + account 2)
+- `docs/data-model/spaarke-components-inventory.json` — baseline inventory (479KB; 70 solutions, 2042 distinct components)
+- `scripts/solution-authoring/Get-SpaarkeComponents.ps1` — publisher-anchored query (Spaarke publisherid `6aeef721-ba73-f011-b4cb-6045bdd6a665`)
+- `scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1` — idempotent augment + version-bump + managed export
+- `scripts/solution-authoring/Test-SolutionCompleteness.ps1` — CI drift detection
+
+### Algorithm fix committed (0ef8ff57e)
+
+Original Assemble delta was 1224 items (inflated). Root cause: naive `solutioncomponent` row comparison ignored Dataverse `rootcomponentbehavior=0` (Include Subcomponents transitive inclusion).
+
+Fixes applied:
+1. **Transitive-inclusion filter** — for Attribute/SavedQuery/SystemForm, resolve parent entity via metadata; skip if parent in SpaarkeMaster with `behavior=0` (skipped 421)
+2. **System-managed 10xxx filter** — Dataverse-internal types auto-generate with parents (skipped 567)
+3. **AppModule exclusion** — `sprk_SpaarkePlatform` excluded per owner (skipped 1)
+4. **Canvas App exclusion** — all `componenttype=300` excluded per owner (skipped 5)
+5. **OOB entity exclusion** — `email` excluded per owner (skipped 1)
+6. **Cascade exclusion** — sub-components of excluded entities also skipped (skipped 11)
+
+**Filter total: 1006 skipped. True delta: 218 items.**
+
+### Destructive Dataverse operations completed on spaarkedev1
+
+- **`Spaarke.Plugins` REMOVED** (was orphaned Spaarke-authored plugin, only in Default Solution):
+  - Deleted 2 SDK message processing steps (Create + Delete of `sprk_document`, both Post-op Async)
+  - Deleted `plugintype` (`Spaarke.Plugins.DocumentEventPlugin`, id `4cf7363a-a3f8-4b46-b954-55295967f442`)
+  - Deleted `pluginassembly` (id `302e1064-7818-4955-a119-bf53da0c0d68`)
+- **Verified**: zero non-Microsoft plugins remain in spaarkedev1 (only `PreferredSolutionPlugins` which is Microsoft-authored)
+
+### The 218-item TRUE delta (Assemble -WhatIf, awaiting owner approval to apply)
+
+| Type | Count | Notes |
+|---|---:|---|
+| Attribute | 61 | Attributes on entities not fully-included in SpaarkeMaster (mostly Doc Intelligence + spaarke_core additions) |
+| Entity | 12 | 10 N:N intersect entities (hidden M:N linking tables) + 2 env-var OOB tables |
+| CustomControl (PCF) | 25 | All PCFs — owner will excluded specific ones post-first-E2E |
+| EntityRelationship | 64 | Relationships to entities |
+| SystemForm | 15 | Forms not transitively included |
+| SavedQuery | 9 | Views not transitively included |
+| WebResource | 18 | Web resources (delta from SpaarkeFeatures + others) |
+| OptionSet | 5 | Global option sets |
+| SiteMap | 4 | App navigation |
+| Chart | 1 | Dashboard chart |
+| OOB attributes | 21 | From `oob-customizations.yaml` (correctly resolved via metadata) |
+| Misc | 2 | ComponentType_14 + ComponentType_50 |
+| **TOTAL** | **218** | |
+
+### Explicit exclusions applied
+
+- **AppModule `sprk_SpaarkePlatform`** (Spaarke Platform MDA)
+- **All 5 Canvas Apps** (componenttype 300)
+- **OOB `email` entity** + cascade its 11 sub-components
+- **All Dataverse system-managed componenttype 10000-11000** (auto-generate with parents)
+- **Test/scratch solutions**: SpaarkeMasterTest, SpaarkeMasterTest2, PowerAppsToolsTemp_sprk, TemplatePCFImport
+
+### Next steps to reach Wave H-4
+
+1. **Owner reviews the 218 delta** — decide if additional exclusions needed (PCFs, other OOB entities, etc.)
+2. **Apply Assemble** (without -WhatIf) — augments SpaarkeMaster in spaarkedev1, bumps version to `1.0.0.1`, exports managed ZIP to `./out/SpaarkeMaster.zip`
+3. **Hand off SpaarkeMaster.zip** to customer-provisioning H6 pipeline (upload to provisioning-artifacts storage; H6 auto-imports)
+4. **Original Wave H-3 live deployment sequence** (still needed): recreate SB queue, deploy L2 control-plane, kvRefIdentity PATCH, seed platform KV, sidecar ACR push, Deploy-ControlPlane.ps1, verify healthz/policies
+5. **Wave H-4 first live E2E**: `/provision-environment {customerId}` against a trial customer
+
+**Runtime state note**: pac CLI is authed as `ralph.schroeder@spaarke.com` with active org = `SPAARKE DEV 1` (spaarkedev1). az CLI is authed to Spaarke Development Environment subscription. MCP dataverse tools work against spaarkedev1.
 
 ---
 
