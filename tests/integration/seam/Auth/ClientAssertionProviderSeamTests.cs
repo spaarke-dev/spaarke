@@ -147,12 +147,28 @@ public class ClientAssertionProviderSeamTests
         // arrive here, as a typed exception carrying a code the ordered selector can branch on.
         var provider = Create(Config(("Graph:ManagedIdentity:ClientId", UamiClientId)));
 
-        var ex = await Assert.ThrowsAsync<MsalServiceException>(() => provider.GetAssertionAsync());
+        // Assert the BASE type. An earlier version demanded MsalServiceException specifically and was
+        // WRONG in a way that mattered: MSAL throws MsalClientException for
+        // managed_identity_all_sources_unavailable, so this test failed intermittently — roughly half of
+        // full-suite runs, while passing in isolation. The intermittency is real and explainable rather
+        // than mysterious: MSAL caches the selected managed-identity source process-statically, so which
+        // probe path runs first (and therefore which exception shape surfaces) depends on which test
+        // touches it first under parallel collections.
+        //
+        // Chasing that down on 2026-08-21 found a genuine defect in task 021's ordered selection, not
+        // just a bad assertion here: its fall-through predicate and catch clause were also typed to
+        // MsalServiceException, so the commonest fall-through case — no IMDS on this host — would have
+        // propagated instead of falling through to the secret. This test is what surfaced it. Keeping
+        // the assertion at the base type is what keeps it able to.
+        // ThrowsAnyAsync, not ThrowsAsync: the latter demands an EXACT type match and would reject both
+        // concrete subclasses, which is the whole point here. Observed on this machine within minutes of
+        // each other — one run MsalClientException, the next MsalServiceException, same code path.
+        var ex = await Assert.ThrowsAnyAsync<MsalException>(() => provider.GetAssertionAsync());
 
-        // Assert the TYPE plus a SET of codes, never a single code. Which one is thrown depends on the
-        // host: a developer workstation cannot route to 169.254.169.254 at all, whereas GitHub-hosted
-        // runners are Azure VMs where IMDS *is* reachable but carries no matching identity. Pinning one
-        // code would make this test pass locally and fail in CI, or vice versa.
+        // Assert a SET of codes, never a single one. Which is thrown depends on the host: a developer
+        // workstation cannot route to 169.254.169.254 at all, whereas GitHub-hosted runners are Azure
+        // VMs where IMDS *is* reachable but carries no matching identity. Pinning one code would make
+        // this pass locally and fail in CI, or vice versa.
         ex.ErrorCode.Should().BeOneOf(
             MsalError.ManagedIdentityUnreachableNetwork,     // no route to IMDS (workstation)
             MsalError.ManagedIdentityRequestFailed,          // IMDS reachable, identity absent/wrong

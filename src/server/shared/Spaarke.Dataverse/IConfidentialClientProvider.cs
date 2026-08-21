@@ -68,11 +68,18 @@ public interface IConfidentialClientProvider
     /// fatal to the request rather than silently degrading: an OBO path with no credential cannot
     /// authenticate anyone, so failing here is the fail-closed outcome (NFR-03).
     /// </exception>
-    /// <exception cref="MsalServiceException">
+    /// <exception cref="MsalException">
     /// A credential failed in a way that is NOT a fall-through condition — most importantly
     /// <c>managed_identity_request_failed</c>, which means IMDS was reachable but the configured
     /// identity was absent or wrong (the FR-B4 signature). Falling through on that would run production
     /// on the transitional secret while every health signal looked green, so it is rethrown.
+    ///
+    /// <para>Declared as the <b>base</b> <see cref="MsalException"/> deliberately: MSAL splits these
+    /// across <see cref="MsalServiceException"/> and <see cref="MsalClientException"/>, and which one
+    /// arrives depends on where the failure occurred rather than on what it means — the "no managed
+    /// identity on this host" case is a <i>client</i> exception. Naming only the service type here would
+    /// mislead a caller writing a catch clause, which is precisely the mistake this implementation made
+    /// and corrected on 2026-08-21.</para>
     /// </exception>
     Task<IConfidentialClientApplication> GetClientAsync(
         string tenantId,

@@ -138,6 +138,55 @@ public class CredentialOrderingSeamTests
         }
     }
 
+    [Fact]
+    public async Task GetClientAsync_WhenTheHostHasNoImdsAtAll_FallsThroughEvenThoughMsalThrowsAClientException()
+    {
+        // REGRESSION. The theory above drives the stub with MsalServiceException, and that assumption
+        // hid a real defect: MSAL throws MsalClientException — a DIFFERENT branch of the hierarchy — for
+        // managed_identity_all_sources_unavailable, which is the "no IMDS on this host" case. That is
+        // the commonest fall-through of all and the entire reason ordered selection exists, and the
+        // original predicate and catch clause were both typed to MsalServiceException, so it never
+        // matched. Every developer workstation would have received a failed request instead of a
+        // fall-through to the secret.
+        //
+        // Found on 2026-08-21 from a real MSAL stack trace surfaced by an intermittent failure in
+        // ClientAssertionProviderSeamTests, not by reasoning about types. This test pins the shape MSAL
+        // actually throws so the narrowing cannot come back.
+        var provider = Build(
+            order: new[] { CredentialKind.ManagedIdentityFederated, CredentialKind.ClientSecret },
+            assertion: StubAssertion.FailingWithClientException(MsalError.ManagedIdentityAllSourcesUnavailable));
+
+        await provider.GetClientAsync(Tenant, AppId);
+
+        provider.SelectedKindFor(Tenant, AppId)
+            .Should().Be(CredentialKind.ClientSecret,
+                "a host with no IMDS must fall through — this is local development, not a fault");
+    }
+
+    [Fact]
+    public void IsFallThroughEligible_AcceptsBothMsalExceptionBranches_ForTheSameErrorCode()
+    {
+        // The same error code must decide the same way regardless of which branch of MSAL's exception
+        // hierarchy carries it. Meaning belongs to the code; the type only records where the failure
+        // happened.
+        OrderedCredentialClientProvider.IsFallThroughEligible(
+            new MsalClientException(MsalError.ManagedIdentityAllSourcesUnavailable, "no IMDS"))
+            .Should().BeTrue();
+
+        OrderedCredentialClientProvider.IsFallThroughEligible(
+            new MsalServiceException(MsalError.ManagedIdentityAllSourcesUnavailable, "no IMDS"))
+            .Should().BeTrue();
+
+        // And the fail-loud code stays fail-loud on both branches.
+        OrderedCredentialClientProvider.IsFallThroughEligible(
+            new MsalClientException(MsalError.ManagedIdentityRequestFailed, "wrong identity"))
+            .Should().BeFalse();
+
+        OrderedCredentialClientProvider.IsFallThroughEligible(
+            new MsalServiceException(MsalError.ManagedIdentityRequestFailed, "wrong identity"))
+            .Should().BeFalse();
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Criterion 2 — every fall-through is traceable.
     // ---------------------------------------------------------------------------------------------
@@ -482,19 +531,39 @@ public class CredentialOrderingSeamTests
     private sealed class StubAssertion : IClientAssertionProvider
     {
         private string? _errorCode;
+        private readonly bool _asClientException;
 
-        private StubAssertion(string? errorCode) => _errorCode = errorCode;
+        private StubAssertion(string? errorCode, bool asClientException = false)
+        {
+            _errorCode = errorCode;
+            _asClientException = asClientException;
+        }
 
         public static StubAssertion Working() => new(null);
 
         public static StubAssertion Failing(string errorCode) => new(errorCode);
 
+        /// <summary>
+        /// Fails as <see cref="MsalClientException"/> — the branch MSAL actually uses for
+        /// <c>managed_identity_all_sources_unavailable</c>. Assuming the service branch is what hid a
+        /// real fall-through defect until 2026-08-21.
+        /// </summary>
+        public static StubAssertion FailingWithClientException(string errorCode) => new(errorCode, true);
+
         public void Recover() => _errorCode = null;
 
         public Task<string> GetAssertionAsync(CancellationToken cancellationToken = default)
-            => _errorCode is null
-                ? Task.FromResult("stub.signed.assertion")
-                : throw new MsalServiceException(_errorCode, $"stubbed managed-identity failure: {_errorCode}");
+        {
+            if (_errorCode is null)
+            {
+                return Task.FromResult("stub.signed.assertion");
+            }
+
+            var message = $"stubbed managed-identity failure: {_errorCode}";
+            throw _asClientException
+                ? new MsalClientException(_errorCode, message)
+                : new MsalServiceException(_errorCode, message);
+        }
     }
 
     /// <summary>

@@ -4,7 +4,7 @@
     <title>UAMI / app-registration conflation guard and test (FR-B4)</title>
     <phase>2 Provider</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs; guards a silent-failure mode.</rigor-reason>
     <model-tier>sonnet</model-tier>

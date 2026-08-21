@@ -164,8 +164,21 @@ public sealed class OrderedCredentialClientProvider : IConfidentialClientProvide
     /// environment" fall through; every other code — including ones MSAL may add in a future version —
     /// fails loud. A denylist would silently grant fall-through to unknown future errors, which is the
     /// wrong default for a credential downgrade.</para>
+    ///
+    /// <para><b>Takes <see cref="MsalException"/>, not <see cref="MsalServiceException"/>, and that
+    /// breadth is load-bearing rather than defensive.</b> An earlier version of this method took
+    /// <c>MsalServiceException</c>, which looked right and was wrong: MSAL throws
+    /// <b><see cref="MsalClientException"/></b> for <c>managed_identity_all_sources_unavailable</c> —
+    /// the "no IMDS on this host" case, which is the single most common fall-through and the entire
+    /// reason ordered selection exists. With the narrower type the catch clause never matched, the
+    /// exception propagated, and a developer workstation got a failed request instead of a fall-through
+    /// to the secret. Caught 2026-08-21 from a real MSAL stack trace
+    /// (<c>All Managed Identity sources are unavailable … 169.254.169.254:80</c>), not from reasoning —
+    /// the seam tests missed it because their stub threw the type this method had assumed. Both
+    /// exception types carry <c>ErrorCode</c> from the shared base, so branching on the code is correct
+    /// for either.</para>
     /// </summary>
-    public static bool IsFallThroughEligible(MsalServiceException exception)
+    public static bool IsFallThroughEligible(MsalException exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
 
@@ -297,7 +310,10 @@ public sealed class OrderedCredentialClientProvider : IConfidentialClientProvide
             {
                 descriptor = await AcquireAsync(kind, ct).ConfigureAwait(false);
             }
-            catch (MsalServiceException ex) when (IsFallThroughEligible(ex))
+            // MsalException, not MsalServiceException: the commonest fall-through case
+            // (managed_identity_all_sources_unavailable, i.e. no IMDS on this host) arrives as
+            // MsalClientException. Catching only the service type made this clause never match it.
+            catch (MsalException ex) when (IsFallThroughEligible(ex))
             {
                 _logger.LogWarning(
                     ex,

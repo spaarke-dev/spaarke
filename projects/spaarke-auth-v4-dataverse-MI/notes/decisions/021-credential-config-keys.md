@@ -285,7 +285,54 @@ that an absent section still boots on the canonical order. That control is the A
 optional — there is no `appsettings.json` in the BFF, so *every* environment and fixture in this repo has
 no `Graph:Credentials` section.
 
-## 14. Observed flake in a task-020 test — NOT caused by this task, and not dismissed
+## 13a. ⚠️ F-3 — the fall-through predicate was typed to the WRONG MSAL exception branch
+
+**Found 2026-08-21 while running tasks 023/024, by chasing the "flake" recorded in §14 instead of
+accepting it. It was not a flake. It was this defect, surfacing intermittently.**
+
+`IsFallThroughEligible` took `MsalServiceException`, and `SelectAndBuildAsync` caught only that type.
+MSAL throws **`MsalClientException`** — a different branch of the hierarchy — for
+`managed_identity_all_sources_unavailable`, which is the *"no IMDS on this host"* case:
+
+```
+MsalClientException : All Managed Identity sources are unavailable. The Azure Instance
+Metadata Service (IMDS) that runs on VMs was not detected … (169.254.169.254:80)
+```
+
+**Consequence had it shipped:** the single most common fall-through — a developer workstation with no
+IMDS, the exact case ordered credential selection exists to handle — would not have been caught. The
+exception would have propagated and failed the request instead of falling through to the secret. The
+mechanism this task exists to build would have been inoperative in the environment it is most used in.
+
+**Why the seam tests did not catch it.** They did not fail to run; they asserted the wrong thing. The
+stub threw `MsalServiceException` — the type the implementation had *assumed* — so the tests and the code
+shared one mistaken premise and agreed with each other perfectly. A test written from the same
+assumption as the code cannot falsify that assumption. What caught it was a **real MSAL stack trace**.
+
+**The intermittency is explainable, not mysterious.** MSAL caches the selected managed-identity source
+*process-statically*, so which probe path runs first — and therefore which exception shape surfaces —
+depends on which test touches it first under parallel collections. Observed on one machine within
+minutes: one run `MsalClientException`, the next `MsalServiceException`, same code path. That is why it
+passed in isolation and failed in roughly half of full-suite runs.
+
+**Fixes applied:**
+
+| Change | Why |
+|---|---|
+| `IsFallThroughEligible(MsalException)` | Meaning belongs to the **error code**; the exception type only records *where* the failure happened. Both branches carry `ErrorCode` from the shared base |
+| `catch (MsalException ex) when (IsFallThroughEligible(ex))` | The catch clause has to match the type MSAL actually throws |
+| `IConfidentialClientProvider` `<exception>` doc widened to `MsalException` | Naming only the service type would mislead the next caller writing a catch clause — the same mistake, propagated by documentation |
+| New test: fall-through driven by `MsalClientException` | Pins the shape MSAL really throws |
+| New test: `IsFallThroughEligible` agrees across both branches for the same code | The code decides, not the type |
+| `ClientAssertionProviderSeamTests` → `Assert.ThrowsAnyAsync<MsalException>` | `ThrowsAsync<T>` demands an **exact** type match and rejects both subclasses — which was the original bug in that assertion |
+
+**The lesson worth keeping:** an intermittent test failure is evidence, not noise. §14 below booked this
+onto task 060 rather than chasing it, on the reasoning that fixing a flake blind suppresses signal. That
+reasoning was right, but the conclusion drawn from it was too weak — the correct next step was to
+*capture the error*, not to defer. One more full-suite run at normal verbosity would have surfaced a
+shipped defect two tasks earlier.
+
+## 14. The "flake" in a task-020 test — RESOLVED: it was F-3 above, not a flake
 
 `ClientAssertionProviderSeamTests.Provider_WhenNoManagedIdentityIsReachable_FailsAtFirstCall_WithACatchableMsalError`
 failed **once in two full-suite runs** (run 1: 1 failed / 10,571 passed; run 2: **0 failed / 10,572
@@ -298,11 +345,15 @@ one of three. Its own doc comment already concedes host-dependence — a worksta
 `169.254.169.254`, whereas GitHub-hosted runners are Azure VMs where IMDS *is* reachable. Under
 full-suite load a fourth outcome evidently occurs.
 
-**Not fixed here, deliberately**: the failing run was captured at quiet verbosity, so the actual error
-code was not recorded, and fixing a flake blind is how a real signal gets suppressed. **Booked onto task
-060** with the reproduction condition (full suite, not isolation) so it is diagnosed with the code in
-hand. This matters more than an ordinary flake: it is a test of the credential seam, and an auth gate
-that cries wolf is one people learn to re-run rather than read.
+**RESOLVED at tasks 023/024, and it was not a flake.** Re-running the suite at normal verbosity produced
+the stack trace, and the stack trace produced **F-3 above** — a real defect in this task's fall-through
+predicate. Final tally before the fix: **2 failures in 4 full-suite runs**, ~50%, always passing in
+isolation. Both the test's assertion and the production predicate were typed to the wrong branch of
+MSAL's exception hierarchy.
+
+The obligation booked onto task 060 is therefore **discharged, not carried** — there is nothing left for
+060 to diagnose. What remains booked onto 060 from this task is only the `.WithClientSecret` allowlist
+entry (§15.1).
 
 ## 15. ADR compliance
 

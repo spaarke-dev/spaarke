@@ -16,8 +16,8 @@
 | 020 | `IClientAssertionProvider` seam (**ceiling NOT raised — see ¹⁴**) | 2 Provider | FULL | **opus/xhigh** | 011 | **B** | ❌ | FR-B1 | ✅ |
 | 021 | Ordered credential selection (the rollback mechanism) | 2 Provider | FULL | sonnet/xhigh | 020 | **C** | ✅ | FR-B2 | ✅ |
 | 022 | Migrate the 6 BFF-identity confidential clients | 2 Provider | FULL | **opus/xhigh** | 021 | **D** | ❌ | FR-B3 | 🔲 |
-| 023 | UAMI ↔ app-reg conflation guard + test | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B4 | 🔲 |
-| 024 | Relax the three config validators | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B5 | 🔲 |
+| 023 | UAMI ↔ app-reg conflation guard + test | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B4 | ✅ |
+| 024 | Relax the three config validators | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B5 | ✅ |
 | 030 | `Register-EntraAppRegistrations.ps1` FIC extension **⏩ PULLED FORWARD** | 3 Rollout | FULL | sonnet/high | 020 | **E** | ✅ | FR-C4 | ✅ |
 | 031 | Deploy to slot + full §6.1 OBO checklist | 3 Rollout | FULL | sonnet/high | 022 | — | ❌ | FR-C1 | 🔲 |
 | 032 | Slot swap + soak | 3 Rollout | FULL | sonnet/high | 031 | — | ❌ | FR-C2 | 🔲 |

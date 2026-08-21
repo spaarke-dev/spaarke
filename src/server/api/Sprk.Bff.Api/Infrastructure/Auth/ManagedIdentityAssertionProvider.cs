@@ -35,6 +35,15 @@ namespace Sprk.Bff.Api.Infrastructure.Auth;
 /// first call instead — measured at ~80 ms, not a timeout — as a catchable
 /// <c>MsalServiceException</c>.</para>
 ///
+/// <para><b>The conflation guard is NOT here, deliberately (task 023).</b> Checking the two identities
+/// at construction is impossible without breaking the property above — this constructor must never
+/// fail, or local development stops booting and task 021's ordered selection loses the fall-through it
+/// depends on. Configuration <i>coherence</i>, unlike credential <i>availability</i>, is knowable
+/// without a network, so it is asserted at startup instead by
+/// <see cref="Configuration.IdentityConfigurationValidator"/>. This class needed no change for FR-B4:
+/// it already resolves the UAMI through the shared resolver and never reads the app-registration id, so
+/// there is no cross-defaulting here to remove.</para>
+///
 /// <para>Introduced by <c>spaarke-auth-v4-dataverse-MI</c> task 020 (FR-B1).</para>
 /// </summary>
 public sealed class ManagedIdentityAssertionProvider : IClientAssertionProvider

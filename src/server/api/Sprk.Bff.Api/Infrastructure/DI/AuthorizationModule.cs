@@ -416,6 +416,12 @@ public static class AuthorizationModule
         // cannot be expressed as data annotations — see the validator.
         services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, CredentialSelectionOptionsValidator>();
 
+        // FR-B4 (task 023) — the UAMI / app-registration conflation guard. Registered against the same
+        // options type so it runs under the SAME ValidateOnStart above: the two identities are only
+        // meaningful together with the credential order (rule 3 fires only when MI-FIC has no fallback),
+        // so validating them separately would need the order duplicated in two places.
+        services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, IdentityConfigurationValidator>();
+
         // SINGLETON, and it owns the ONE confidential-client cache. Task 022 collapses the three
         // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient, AgentTokenService) onto
         // it — which is what CLOSES task 011's time-boxed A4 exception. If this cache is not authored

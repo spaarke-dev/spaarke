@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 — **task 021 COMPLETE** (ordered credential selection shipped + gated)
+> **Last Updated**: 2026-08-21 — **tasks 021, 023, 024 COMPLETE. Phase 2 is done except 022.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,11 +11,90 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — 021 closed |
-| **Status** | Committed, working tree clean. Full suite **10,572 / 0** · ArchTests **36 / 36** · publish **44.98 MB** · CVE clean |
-| **Next Action** | **023 and 024 are both unblocked and `parallel-safe: true`** (group C, deps 020 — the same group 021 was in). Run them as parallel `task-execute` agents in ONE message. **022 is the serial one** (group D, `parallel-safe: false`, opus/xhigh), is the highest-blast-radius task in the project, and just grew — give it a fresh session |
-| **Progress** | **8 of 26 active complete** (001, 002, 003, 010, 011, 020, 021, 030) · **18 remaining** · 3 deferred |
+| **Task** | **none active** — 021, 023, 024 all closed |
+| **Status** | Committed, working tree clean. Auth seams **50 / 50** · ArchTests **36 / 36** · publish **44.98 MB** · CVE clean |
+| **Next Action** | **`022` — the only remaining Phase 2 task, and the one everything downstream waits on.** `parallel-safe: false`, `opus/xhigh`, highest blast radius in the project, and it grew at task 021. **Give it a fresh session** and read `notes/decisions/021-credential-config-keys.md` first |
+| **Progress** | **10 of 26 active complete** (001, 002, 003, 010, 011, 020, 021, 023, 024, 030) · **16 remaining** · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
+
+---
+
+## 🔴 A defect shipped at 021 was caught at 023/024 — read this before trusting the 021 record
+
+`IsFallThroughEligible` and its catch clause were typed to **`MsalServiceException`**. MSAL throws
+**`MsalClientException`** for `managed_identity_all_sources_unavailable` — the *"no IMDS on this host"*
+case, which is the **commonest fall-through** and the entire reason ordered selection exists. The clause
+never matched it, so a developer workstation would have gotten a failed request instead of a fall-through
+to the secret.
+
+**The seam tests passed because the stub threw the type the implementation assumed.** A test written from
+the same premise as the code cannot falsify that premise. What caught it was a real MSAL stack trace,
+surfaced by an intermittent failure that task 021 had booked away as a "flake" (final tally: **2 failures
+in 4 full-suite runs**, always passing in isolation — MSAL caches the selected MI source
+process-statically, so which exception shape appears depends on test ordering).
+
+Fixed in the predicate, the catch clause, the contract docs, and the task-020 test
+(`Assert.ThrowsAsync<T>` demands an **exact** type match — it needed `ThrowsAnyAsync`). Two regression
+tests pin the real shape. Full write-up: `notes/decisions/021-credential-config-keys.md` **§13a**.
+
+**Carry the lesson, not just the fix:** an intermittent failure is evidence. Booking it away was the
+wrong call; capturing the error at normal verbosity cost one suite run and found a shipped defect.
+
+---
+
+## Tasks 023 + 024 — what shipped
+
+| File | Task | Purpose |
+|---|---|---|
+| `Configuration/IdentityConfigurationValidator.cs` | 023 (+024 rule 4) | **NEW** — the UAMI ↔ app-registration guard, 4 rules |
+| `Configuration/DataverseOptions.cs` | 024 | `[Required]` off `ClientSecret` |
+| `Configuration/GraphOptionsValidator.cs` | 024 | "MI disabled ⇒ `Graph:ClientSecret`" rule removed |
+| `Configuration/AgentTokenOptions.cs` | 024 | `[Required]` + validator check off `ClientSecret` |
+| `tests/integration/seam/Auth/IdentityConflationSeamTests.cs` | 023/024 | **NEW** — 10 tests |
+
+Records: [`023-identity-conflation.md`](notes/decisions/023-identity-conflation.md) ·
+[`024-relax-config-validators.md`](notes/decisions/024-relax-config-validators.md).
+
+### ⚠️ Live trap found at 023 — `AZURE_CLIENT_ID` holds a managed identity
+
+Verified on `spaarke-bff-dev` 2026-08-21: `AZURE_CLIENT_ID` = `5967251e-…` (the **UAMI**), while the app
+registration is `1e40baad-…`. `GraphClientFactory.cs:54` reads `AZURE_CLIENT_ID ?? API_APP_ID` as the
+**app-only** clientId — so it resolves to a managed identity where an app registration is required.
+
+**Inert only because `Graph__ManagedIdentity__Enabled=true` makes that branch dead code.** Set the flag
+false — plausible during an incident — and the BFF builds a `ClientSecretCredential` from a managed
+identity and fails with an opaque `AADSTS` error naming neither identity.
+
+Guarded (fatal when MI is disabled, `LogError` when enabled). **Not** fixed in the environment: app
+settings are task 031/032/033 territory and app-only behaviour is out of 023's scope. **Booked onto 031** —
+the single consumer falls back to `API_APP_ID`, which is correct, so *clearing* `AZURE_CLIENT_ID` removes
+the trap rather than guarding it.
+
+### Two POML instructions that could not be followed as written
+
+- **023's `<outputs>` list `ManagedIdentityAssertionProvider.cs` as `modify`** — but no substantive change
+  exists to make. It already resolves the UAMI through the shared resolver and never reads `API_APP_ID`,
+  so there is **no cross-defaulting to remove**; and it must not fail at construction (task 020's
+  contract, which 021's fall-through depends on), so the guard could not live there. Only a
+  cross-reference was added. Said plainly rather than manufacturing a change to match the list.
+- **024's step 3 says "move `AgentTokenOptions` under `ValidateOnStart`"** — **not done**, and the steps
+  are `directional` so this is a permitted deviation. Verified: **no fixture seeds an `AgentToken`
+  section**, and the validator still requires `TenantId`/`ClientId`/`AgentAppId`/`DataverseEnvironmentUrl`,
+  so the move would fail startup for every fixture that boots `Program.cs` — violating 024's own
+  criterion 3. `AgentModule.cs:19-21` already records the original deferral reason, which still holds.
+
+### The finding that lowered 024's risk
+
+Two of the three "validators that mandate the secret" mandated a secret **nothing reads**:
+`DataverseOptions.ClientSecret` has **zero** consumers (only `EnvironmentUrl` is used), and
+`GraphOptions.ClientSecret` has **zero** — the two `.WithClientSecret(_options.ClientSecret)` sites that
+look like consumers take `IOptions<PowerBiOptions>`, a different type. Only
+`AgentTokenOptions.ClientSecret` is real (`AgentTokenService.cs:105`).
+
+So the startup-crash dependency on the secret was, in two of three cases, a mandate with no runtime
+purpose. Validation did not disappear — it moved to `IdentityConfigurationValidator` **rule 4**, which
+asserts the weaker correct thing (*some* credential is obtainable) and is deliberately conservative:
+MI-FIC is never treated as provably-absent, so the rule cannot false-positive a workstation or fixture.
 
 ---
 
@@ -143,7 +222,7 @@ with the reproduction condition (full suite, not isolation).
 
 ---
 
-## Completed (8 of 26)
+## Completed (10 of 26)
 
 | Task | Outcome |
 |---|---|
@@ -154,6 +233,8 @@ with the reproduction condition (full suite, not isolation).
 | **011** | Confidential clients shared process-wide; **ADR-009 token-cache decision made** |
 | **020** | `IClientAssertionProvider` seam; **ADR-010 ceiling deliberately NOT raised** |
 | **021** | **Ordered credential selection + the ONE client cache.** Rollback is now a config edit |
+| **023** | UAMI / app-registration conflation guard; found a **live trap** in `AZURE_CLIENT_ID` |
+| **024** | The three secret mandates relaxed; credential adequacy checked once, correctly |
 | **030** | `Register-EntraAppRegistrations.ps1` FIC extension; **E2E-verified against the live tenant** |
 
 Decision records: [`notes/decisions/`](notes/decisions/). **Read `020` and `021` before task 022** — between
@@ -275,9 +356,9 @@ cat projects/spaarke-auth-v4-dataverse-MI/tasks/TASK-INDEX.md
 cat projects/spaarke-auth-v4-dataverse-MI/notes/decisions/021-credential-config-keys.md   # changes 022's scope
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev-staging.azurewebsites.net/healthz  # 200
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.net/healthz          # 200
-# then: task-execute on tasks/023-*.poml AND tasks/024-*.poml in ONE message (both parallel-safe)
+# then: task-execute on tasks/022-migrate-confidential-clients.poml (serial, opus/xhigh, fresh session)
 ```
 
 ## Blockers
 
-**None.** 023 and 024 are startable immediately and in parallel.
+**None.** 022 is startable immediately. It is the last Phase 2 task and gates 031/032/033 and all of Phase 6.
