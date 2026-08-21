@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -334,8 +335,14 @@ public class UploadSessionManager
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE create (upload-small): Graph throttling for container={ContainerId} path={Path}", containerId, path);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016): a throttle is a TYPED, retryable refusal carrying Graph's own
+            // back-off, not a generic InvalidOperationException that reaches the endpoint's catch-all and
+            // becomes an HTTP 500. Nothing was written; the caller's document is intact.
+            var retryAfter = ReadRetryAfter(ex.ResponseHeaders);
+            _logger.LogWarning(ex,
+                "SPE create (upload-small): Graph throttling for container={ContainerId} path={Path} retryAfter={RetryAfter}",
+                containerId, path, retryAfter);
+            throw new GraphThrottledException(path, retryAfter, ex);
         }
         catch (ODataError ex)
         {
@@ -359,9 +366,11 @@ public class UploadSessionManager
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning("Graph API throttling, retry after {RetryAfter}s",
-                ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016): same typed refusal as the ODataError filter above. Kept in
+            // step with it so the belt-and-suspenders path cannot report a throttle differently.
+            var retryAfter = ex.ResponseHeaders?.RetryAfter?.Delta;
+            _logger.LogWarning(ex, "Graph API throttling, retry after {RetryAfter}", retryAfter);
+            throw new GraphThrottledException(path, retryAfter, ex);
         }
         catch (ServiceException ex)
         {
@@ -473,8 +482,12 @@ public class UploadSessionManager
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016) — see the create-path throttle catch above.
+            var retryAfter = ReadRetryAfter(ex.ResponseHeaders);
+            _logger.LogWarning(ex,
+                "SPE replace-content: Graph throttling drive={DriveId} item={ItemId} retryAfter={RetryAfter}",
+                driveId, itemId, retryAfter);
+            throw new GraphThrottledException(itemId, retryAfter, ex);
         }
         catch (ODataError ex)
         {
@@ -511,8 +524,12 @@ public class UploadSessionManager
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016) — see the ODataError filter above.
+            var retryAfter = ex.ResponseHeaders?.RetryAfter?.Delta;
+            _logger.LogWarning(ex,
+                "SPE replace-content: Graph throttling drive={DriveId} item={ItemId} retryAfter={RetryAfter}",
+                driveId, itemId, retryAfter);
+            throw new GraphThrottledException(itemId, retryAfter, ex);
         }
         catch (ServiceException ex)
         {
@@ -531,6 +548,35 @@ public class UploadSessionManager
     private static bool IsResourceLockedCode(string? code) =>
         !string.IsNullOrEmpty(code) &&
         code.Contains("locked", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// FR-S09 item 6 (r8 task 016): read Graph's <c>Retry-After</c> off a Kiota error's response headers.
+    /// </summary>
+    /// <remarks>
+    /// Graph sends <c>Retry-After</c> as delta-seconds on a 429. It is the ONE piece of information that
+    /// makes a throttle actionable, and every throttle site used to discard it. Returns null when the
+    /// header is absent or unparseable — callers state a conservative default rather than invent a number.
+    /// An HTTP-date form (RFC 9110 permits it, Graph does not send it) is deliberately NOT parsed: a wrong
+    /// number would be worse than none.
+    /// </remarks>
+    private static TimeSpan? ReadRetryAfter(IDictionary<string, IEnumerable<string>>? headers)
+    {
+        if (headers is null) return null;
+        foreach (var (key, values) in headers)
+        {
+            if (!string.Equals(key, "Retry-After", StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (var value in values)
+            {
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
+                    && seconds is > 0 and <= 3600)
+                {
+                    return TimeSpan.FromSeconds(seconds);
+                }
+            }
+            return null;
+        }
+        return null;
+    }
 
     /// <summary>
     /// Creates an upload session for large files as the user (OBO flow).

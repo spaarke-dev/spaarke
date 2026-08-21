@@ -692,6 +692,9 @@ export interface ComposeEditorProps {
   onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
+  /** FR-S09 item 3 (r8 task 016): why Save is unavailable — forwarded verbatim to
+   *  ComposeFormatToolbar, which renders it as the disabled button's tooltip. */
+  saveDisabledReason?: string;
   /** True while a save is in flight. */
   isSaving?: boolean;
   /** FR-01/FR-03 (task 020/040): forwarded to ComposeFormatToolbar's Save dropdown Auto Save toggle.
@@ -1777,8 +1780,7 @@ function distinctiveAnchorPrefix(text: string): string {
 /** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
  *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
 type AdvisoryAnchorResolution =
-  | { span: { from: number; to: number }; kind?: undefined }
-  | { span: null; kind: 'not_found' | 'ambiguous' };
+  { span: { from: number; to: number }; kind?: undefined } | { span: null; kind: 'not_found' | 'ambiguous' };
 
 /**
  * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an
@@ -1909,6 +1911,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       wordActionsDisabled,
       onSave,
       canSave,
+      saveDisabledReason,
       isSaving,
       autoSaveEnabled,
       onAutoSaveToggle,
@@ -3325,6 +3328,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
+          saveDisabledReason={saveDisabledReason}
           isSaving={isSaving}
           autoSaveEnabled={autoSaveEnabled}
           onAutoSaveToggle={onAutoSaveToggle}

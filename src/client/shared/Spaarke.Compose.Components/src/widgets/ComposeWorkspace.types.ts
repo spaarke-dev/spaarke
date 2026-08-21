@@ -827,7 +827,18 @@ export function composeWorkspaceReducer(
           : state.documentRef,
       };
     case 'saveFailed':
-      return { ...state, status: 'loaded', errorMessage: action.errorMessage, saveErrorIsLock: action.isLock ?? false };
+      return {
+        ...state,
+        // FR-S09 item 1 (r8 task 016): only a save that was actually RUNNING returns to 'loaded'.
+        // This used to force 'loaded' unconditionally, which was harmless while the only dispatchers
+        // were the in-flight save path (status 'saving') and its pre-flight guards (status 'loaded').
+        // Task 016 gives the entry guards a voice, and one of them fires while the document is still
+        // LOADING — forcing 'loaded' there would tell the workspace the load had finished and swap a
+        // spinner for a half-mounted editor. A refusal must not move the state machine.
+        status: state.status === 'saving' ? 'loaded' : state.status,
+        errorMessage: action.errorMessage,
+        saveErrorIsLock: action.isLock ?? false,
+      };
     case 'reset':
       return INITIAL_STATE;
     case 'importWarnings':

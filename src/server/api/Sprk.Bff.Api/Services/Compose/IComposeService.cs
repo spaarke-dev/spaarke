@@ -1313,6 +1313,19 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
+
+    /// <summary>
+    /// FR-S09 item 7 (r8 task 016): true when the idempotent existing-row branch could not refresh the
+    /// file metadata (<c>sprk_filesize</c> / <c>sprk_filepath</c>) that this save just changed.
+    /// </summary>
+    /// <remarks>
+    /// The document itself is saved and complete — only the Dataverse columns describing it are stale, so
+    /// this is a <c>persisted-with-warnings</c> signal, never a failure. It exists because the refresh
+    /// used to not happen at all: every replace save left the row reporting the size and path of the
+    /// FIRST version, and nothing said so. A refresh that is attempted and fails must not go back to
+    /// being silent.
+    /// </remarks>
+    public bool MetadataRefreshFailed { get; init; }
 }
 
 /// <summary>

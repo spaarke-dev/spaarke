@@ -288,6 +288,15 @@ export interface ComposeFormatToolbarProps {
   onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
+  /**
+   * FR-S09 item 3 (r8 task 016): why Save is unavailable, shown as the button's tooltip.
+   *
+   * A disabled control with no explanation is its own silent failure — the user presses Save, nothing
+   * happens, and the interface offers no account of itself. Mirrors the `applyTemplateDisabledReason`
+   * convention already used by the Apply-template button in this toolbar. Undefined → the plain "Save"
+   * tooltip (the button is enabled, or its unavailability is self-evident).
+   */
+  saveDisabledReason?: string;
   /** True while a save is in flight. */
   isSaving?: boolean;
   /** FR-01/FR-03 (task 020/040): current Auto Save state, surfaced as a checkable menu item in the Save
@@ -467,6 +476,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     hasLoadedBaseline,
     onSave,
     canSave,
+    saveDisabledReason,
     isSaving,
     autoSaveEnabled,
     onAutoSaveToggle,
@@ -1041,7 +1051,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         >
           <MenuTrigger disableButtonEnhancement>
             {(triggerProps: MenuButtonProps) => (
-              <Tooltip content={isSaving ? 'Saving…' : 'Save'} relationship="label" withArrow>
+              <Tooltip content={isSaving ? 'Saving…' : (saveDisabledReason ?? 'Save')} relationship="label" withArrow>
                 <SplitButton
                   appearance="subtle"
                   data-testid="compose-format-save"

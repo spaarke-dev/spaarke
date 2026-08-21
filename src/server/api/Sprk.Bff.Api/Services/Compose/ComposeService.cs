@@ -101,6 +101,12 @@ public class ComposeService : IComposeService
     // These string keys are the Compose contract the future OutcomeCard renders; keep stable.
     internal const string StepContainer = "container";
     internal const string StepRecord = "record";
+
+    /// <summary>
+    /// FR-S09 item 7 (r8 task 016): the save landed but the <c>sprk_document</c> row's file metadata
+    /// (<c>sprk_filesize</c> / <c>sprk_filepath</c>) could not be brought up to date with it.
+    /// </summary>
+    internal const string DocumentMetadataStaleCode = "document-metadata-stale";
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
@@ -1589,8 +1595,40 @@ public class ComposeService : IComposeService
             SourceDocumentRecordId = request.SourceDocumentRecordId,
         };
 
-        var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
-            .ConfigureAwait(false);
+        // FR-S09 item 5 (r8 task 016): the SPE write ABOVE has already landed and is durable. If the
+        // record step now throws, "not saved" is a lie — the bytes are in storage, only the identity row
+        // is missing — and it is the lie that costs the most, because the user retypes work that exists.
+        //
+        // Two exception classes, deliberately handled differently:
+        //   • The Dataverse identity-key faults (inactive alternate key / duplicate rows) are RETHROWN.
+        //     The endpoint already maps those to an honest 409/503 with administrator-actionable copy and
+        //     `partially-recorded` telemetry. Swallowing them here would dead-code that handler — and
+        //     dead handlers are this project's entire subject.
+        //   • Everything else (Dataverse unavailable, timeout, transient auth) becomes a RETURNED
+        //     terminal result carrying `partially-recorded`, the same shape the container-failure path
+        //     uses. The save is over; a retry completes the promotion idempotently.
+        PromoteComposeDocumentResult promotion;
+        try
+        {
+            promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (IsDataverseIdentityKeyFault(ex))
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Compose save: the SPE write succeeded but the sprk_document record step FAILED for " +
+                "driveItem={DocumentSpeId} (session={SessionId}). The document bytes are durable; the " +
+                "identity record is not. Reporting partially-recorded.",
+                effectiveSpeId, request.SessionId);
+
+            return BuildRecordFailedResult(
+                request, effectiveSpeId, effectiveDriveId, saved, origin, observedAt,
+                detail: $"record step failed: {ex.GetType().Name}: {ex.Message}");
+        }
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 4 — indexing (sync-OBO). The Compose user wrote the file, so indexing MUST run
@@ -1663,7 +1701,14 @@ public class ComposeService : IComposeService
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
             containerSignal: CompletedSignal(StepContainer),
-            recordSignal: CompletedSignal(StepRecord),
+            // FR-S09 item 5(a) (r8 task 016): derived, not asserted. This was a hardcoded
+            // CompletedSignal — the record step reported success even when promotion resolved no record
+            // id at all, which is the same class of claim-without-evidence as a 200 that means nothing
+            // was written. The very next statement already branches on `DocumentRecordId.HasValue` for
+            // the profile step, so the two lines used to contradict each other three lines apart.
+            recordSignal: promotion.DocumentRecordId.HasValue
+                ? CompletedSignal(StepRecord)
+                : RecordNotResolvedSignal(),
             profileSignal: profileSignal,
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
@@ -1671,8 +1716,27 @@ public class ComposeService : IComposeService
         // FR-S06 (task 013): the ONE success-path outcome decision. Ordered most-severe first so a save
         // that both partially applied AND warned reports the more consequential state — `partially-recorded`
         // means the user has work to redo, which must not be masked by the softer warning member.
+        // FR-S09 item 5(b) (r8 task 016): the record step is part of the decision. Before this, the
+        // outcome read the partial-apply summary and the warning list and NOTHING else — so a save whose
+        // completion aggregate was Failed (no sprk_document row) still reported `persisted`, which is
+        // "indistinguishable from full success" exactly as FR-S09 describes. The projection was computed
+        // three lines above and then ignored.
+        var recordResolved = promotion.DocumentRecordId.HasValue;
+
+        // FR-S09 item 7 (r8 task 016): a failed metadata refresh is a warning, not a failure — the
+        // document is saved and complete; only the columns describing it are stale.
+        if (promotion.MetadataRefreshFailed)
+        {
+            renderDegradationWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+            {
+                new(DocumentMetadataStaleCode, 1),
+            };
+        }
+
         var outcome =
-            partialApplySummary is { UnresolvedCount: > 0 } ? ComposeSaveOutcome.PartiallyRecorded
+            !recordResolved ? ComposeSaveOutcome.PartiallyRecorded
+            : partialApplySummary is { UnresolvedCount: > 0 } ? ComposeSaveOutcome.PartiallyRecorded
             : (renderDegradationWarnings is { Count: > 0 } || reanchorSummary is not null) ? ComposeSaveOutcome.PersistedWithWarnings
             : ComposeSaveOutcome.Persisted;
 
@@ -2738,12 +2802,57 @@ public class ComposeService : IComposeService
             await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
                 .ConfigureAwait(false);
 
+            // FR-S09 item 7 (r8 task 016): refresh the file metadata this save just changed.
+            //
+            // This branch is the REPLACE path — every save after the first lands here. It wrote a new
+            // version to SPE (new byte length, and a new web URL whenever the file was renamed or moved)
+            // and then returned without touching the row, so `sprk_filesize` and `sprk_filepath` kept
+            // describing the FIRST version forever. Downstream readers trust those columns: the
+            // Documents grid shows the size, "Open in SharePoint" follows the path. Both quietly drifted.
+            //
+            // Only these two columns, and only when the caller supplied them: the create branch owns the
+            // fields that define IDENTITY (origin, transient key, canonical link) and those must never be
+            // mutated by a later save — the existing-row branch's whole contract is idempotence.
+            var metadataRefreshFailed = false;
+            var refreshFields = new Dictionary<string, object>();
+            if (request.FileSize.HasValue)
+            {
+                // Whole Number (int) column — same cast the create branch uses; the OrganizationService
+                // write path is strict about CLR type.
+                refreshFields[FileSizeAttribute] = (int)request.FileSize.Value;
+            }
+            if (!string.IsNullOrWhiteSpace(request.FilePath))
+            {
+                refreshFields[FilePathAttribute] = request.FilePath!;
+            }
+            if (refreshFields.Count > 0)
+            {
+                try
+                {
+                    await _dataverse.UpdateAsync(DocumentLogicalName, existingId, refreshFields, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Never fails the save — the document IS stored. But it is not silent either: the
+                    // flag rides back to SaveAsync, which turns it into a `document-metadata-stale`
+                    // degradation warning on a `persisted-with-warnings` outcome.
+                    metadataRefreshFailed = true;
+                    _logger.LogWarning(ex,
+                        "Compose promote: file-metadata refresh failed for sprk_document {DocumentRecordId} " +
+                        "(driveItem={DocumentSpeId}). The save itself is unaffected; sprk_filesize/sprk_filepath " +
+                        "are now stale for this row.",
+                        existingId, request.DocumentSpeId);
+                }
+            }
+
             return new PromoteComposeDocumentResult
             {
                 DocumentSpeId = request.DocumentSpeId,
                 SessionId = request.SessionId,
                 DocumentRecordId = existingId,
                 WasCreated = false,
+                MetadataRefreshFailed = metadataRefreshFailed,
             };
         }
 
@@ -3030,6 +3139,91 @@ public class ComposeService : IComposeService
         StoredStatus = JobStatus.Completed,
         Started = true,
     };
+
+    /// <summary>
+    /// FR-S09 item 5 (r8 task 016): the record step ran and resolved no <c>sprk_document</c> id.
+    /// Terminal Failed (there is no retry budget on this path), so the aggregate can never read a
+    /// success for a save that produced no identity record.
+    /// </summary>
+    private static StoredStepSignal RecordNotResolvedSignal() => new()
+    {
+        StepName = StepRecord,
+        StoredStatus = JobStatus.Failed,
+        Started = true,
+        Attempt = 1,
+        MaxAttempts = 1,
+        Detail = "record step resolved no sprk_document id",
+    };
+
+    /// <summary>
+    /// FR-S09 item 5 (r8 task 016): does this <see cref="InvalidOperationException"/> describe one of the
+    /// two Dataverse identity-key faults that <c>ComposeEndpoints.ExecuteSaveAsync</c> maps to an honest,
+    /// administrator-actionable 409/503?
+    /// </summary>
+    /// <remarks>
+    /// The predicate is duplicated from that catch filter ON PURPOSE, and the duplication is the point:
+    /// the promote guard must let exactly those exceptions through so the endpoint handler stays live.
+    /// If either side changes, the other must change with it — a single shared helper would be tidier
+    /// but would hide that coupling behind an abstraction, and an endpoint handler that quietly stops
+    /// being reachable is the defect this whole task exists to remove. Keep them in step.
+    /// </remarks>
+    private static bool IsDataverseIdentityKeyFault(InvalidOperationException ex) =>
+        ex.Message.Contains("Found multiple records", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+        || (ex.Message.Contains("sprk_graphitemid", StringComparison.OrdinalIgnoreCase)
+            && ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// FR-S09 item 5 (r8 task 016): the terminal result for "the bytes are durable, the record is not".
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <c>BuildContainerFailedResult</c>'s shape — a RETURNED non-success outcome rather than a
+    /// throw — because the two are the same kind of event: a save that reached a defined, reportable end
+    /// state that is not success. <c>partially-recorded</c> rather than <c>storage-failed</c>: storage
+    /// succeeded. Telling the user their document is gone when it is provably stored would be its own
+    /// dishonest outcome, and it would invite them to retype work that already exists.
+    /// </remarks>
+    private static SaveComposeDocumentResult BuildRecordFailedResult(
+        SaveComposeDocumentRequest request,
+        string effectiveSpeId,
+        string? effectiveDriveId,
+        FileHandleDto saved,
+        ComposeOrigin origin,
+        DateTimeOffset observedAt,
+        string detail)
+    {
+        var completion = ProjectCreateOnSaveState(
+            subjectId: effectiveSpeId,
+            correlationId: request.SessionId,
+            containerSignal: CompletedSignal(StepContainer),
+            recordSignal: new StoredStepSignal
+            {
+                StepName = StepRecord,
+                StoredStatus = JobStatus.Failed,
+                Started = true,
+                Attempt = 1,
+                MaxAttempts = 1,
+                Detail = detail,
+            },
+            profileSignal: ProfileNotAttemptedSignal("profile not attempted: record step failed"),
+            indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
+            observedAt: observedAt);
+
+        return new SaveComposeDocumentResult
+        {
+            Outcome = ComposeSaveOutcome.PartiallyRecorded,
+            DocumentSpeId = effectiveSpeId,
+            DriveId = effectiveDriveId,
+            SessionId = request.SessionId,
+            DocumentRecordId = null,
+            VersionId = saved.Id,
+            ETag = saved.ETag,
+            Size = saved.Size,
+            WasPromotedThisSave = false,
+            CompletionState = completion,
+            Origin = origin,
+        };
+    }
 
     /// <summary>
     /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI

@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
@@ -1633,7 +1634,15 @@ public static class ComposeEndpoints
             {
                 ComposeSaveOutcome.Persisted => ComposeSaveTelemetry.CauseNone,
                 ComposeSaveOutcome.PersistedWithWarnings => ComposeSaveTelemetry.CauseWarnings,
-                ComposeSaveOutcome.PartiallyRecorded => ComposeSaveTelemetry.CausePartialApply,
+                // FR-S09 item 5 (task 016): `partially-recorded` now has two producers, and they mean
+                // different things operationally. A partial APPLY is the user's edits not all landing
+                // (recoverable by redoing them); a failed record PROMOTION is our Dataverse write not
+                // landing (recoverable by retrying, and a spike means Dataverse is unwell). Collapsing
+                // both into one cause would make the counter unable to tell a content problem from an
+                // infrastructure problem — which is the whole reason the cause dimension exists.
+                ComposeSaveOutcome.PartiallyRecorded => result.PartialApply is { UnresolvedCount: > 0 }
+                    ? ComposeSaveTelemetry.CausePartialApply
+                    : ComposeSaveTelemetry.CauseRecordPromotion,
                 ComposeSaveOutcome.StorageFailed => ComposeSaveTelemetry.CauseContainerStep,
                 _ => ComposeSaveTelemetry.CauseNone,
             });
@@ -1736,6 +1745,32 @@ public static class ComposeEndpoints
                 detail: "This document is open in Word — close it there, then click Retry. It also releases " +
                         "automatically within a few minutes. Your Compose changes are safe and still pending.",
                 type: "https://tools.ietf.org/html/rfc4918#section-11.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.GraphThrottledException ex)
+        {
+            // FR-S09 item 6 (r8 task 016): Microsoft Graph throttled the write (HTTP 429). Before this
+            // catch, the throttle arrived as a bare InvalidOperationException, fell through to the final
+            // `catch (Exception)`, and became an HTTP 500 reading "Save failed: InvalidOperationException:
+            // Service temporarily unavailable due to Graph rate limiting" — a message that tells the user
+            // their save hit a server error, when in fact the service is healthy and simply asked them to
+            // wait. Graph's own `Retry-After` was discarded on the way.
+            //
+            // 429, mirrored back with the header, so the caller (and any proxy) sees a standards-shaped
+            // rate-limit response rather than a fault. `storage-failed` on the telemetry side: the write
+            // ATTEMPT is what failed and nothing was stored — with cause `throttled`, which is what makes
+            // a throttling spike distinguishable from a real storage outage in the counter.
+            var retryAfterSeconds = (int)Math.Ceiling((ex.RetryAfter ?? TimeSpan.FromSeconds(30)).TotalSeconds);
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseThrottled);
+            logger.LogWarning(ex,
+                "Compose save: throttled by Graph (429), retryAfter={RetryAfter}s. TraceId={TraceId}",
+                retryAfterSeconds, httpContext.TraceIdentifier);
+            httpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            return Results.Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "Too Many Requests",
+                detail: $"The document service is busy right now, so nothing was saved and nothing was " +
+                        $"overwritten. Your changes are still here — try again in about {retryAfterSeconds} seconds.",
+                type: "https://tools.ietf.org/html/rfc6585#section-4");
         }
         catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
         {

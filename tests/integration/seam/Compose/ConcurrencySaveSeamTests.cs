@@ -819,6 +819,240 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     // Shared arrange + OOXML helpers.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 5. FR-S09 (r8 task 016) — the honest-failure set, server half.
+    //
+    //    Three defects that shared one signature: the save ended in a state the response did not
+    //    describe. (a) the SPE write landed and the Dataverse record step did not, and the user was
+    //    told "not saved"; (b) Graph asked us to wait and the user was told the server had errored;
+    //    (c) every replace save left `sprk_filesize`/`sprk_filepath` describing the FIRST version
+    //    forever, and nothing anywhere said so. Plus (d), the negative: a healthy save is untouched.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_RecordPromotionFailsAfterTheWrite_ReportsPartiallyRecorded_NotAFailedSave()
+    {
+        const string speId = "spe-item-frs09-promote";
+        const string driveId = "drive-frs09-promote";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The write SUCCEEDS. This is the whole point: the bytes are durable before the record step runs.
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, body, _) =>
+            {
+                using var ms = new MemoryStream();
+                body.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1\""));
+
+        // ...and THEN Dataverse is unavailable. A TimeoutException (not an InvalidOperationException) on
+        // purpose: the alt-key lookup swallows InvalidOperationException as "not found", and the endpoint
+        // maps the two identity-KEY faults itself — this is the third class, the one that used to fall
+        // through to `catch (Exception)` and return a 500 reading "Save failed: ...".
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse request timed out."));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        persisted.Should().NotBeNull("the SPE write ran and completed before the record step was attempted");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the document IS stored — a 500 here told the user their save failed while their bytes sat safely in storage. Body: {body}");
+        body.Should().Contain("partially-recorded",
+            "the bytes are durable and the identity record is not — that is precisely what this member means");
+        body.Should().NotContain("storage-failed",
+            "storage succeeded; saying otherwise would tell the user their document is gone when it provably is not");
+        body.Should().NotContain("\"outcome\":\"persisted\"",
+            "and it must not read as a clean success either — the record step really did fail");
+    }
+
+    [Fact]
+    public async Task Save_GraphThrottles_Returns429WithRetryAfter_NotAGenericFiveHundred()
+    {
+        const string speId = "spe-item-frs09-throttle";
+        const string driveId = "drive-frs09-throttle";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The typed translation `UploadSessionManager` produces from a Graph 429 — the same level the
+        // 423 lock tests mock at.
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Sprk.Bff.Api.Infrastructure.Graph.GraphThrottledException(speId, TimeSpan.FromSeconds(17)));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+            $"a throttle is a rate limit, not a server fault — it used to surface as HTTP 500. Body: {body}");
+        response.Headers.RetryAfter?.Delta.Should().Be(TimeSpan.FromSeconds(17),
+            "Graph told us how long to wait, and that number is the only actionable part of a throttle — it was being discarded");
+        body.Should().Contain("17", "the wait must reach the user, not just the header");
+        body.Should().Contain("still here", "and the copy must say the user's work survives");
+        body.Should().NotContain("InvalidOperationException",
+            "the old message leaked a .NET type name at the user, which reads as a crash");
+    }
+
+    [Fact]
+    public async Task Save_ReplacePath_RefreshesFileSizeAndFilePath_OnTheExistingRecord()
+    {
+        const string speId = "spe-item-frs09-metadata";
+        const string driveId = "drive-frs09-metadata";
+        const string newWebUrl = "https://contoso.sharepoint.com/contentstorage/spe-item-frs09-metadata";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        // The idempotent EXISTING-row branch — i.e. every save after the first. This is the branch that
+        // used to return without touching the row.
+        var existingDocumentId = Guid.NewGuid();
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", existingDocumentId));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        Guid? updatedId = null;
+        Dictionary<string, object>? updatedFields = null;
+        _fixture.DataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+            {
+                updatedId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The write reports the NEW size and the NEW web URL — the two facts the row was never told.
+        const int newSize = 4242;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "concurrency-seam.docx", ParentId: null, Size: newSize,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2\"", IsFolder: false, WebUrl: newWebUrl, DriveId: driveId));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"the save itself is unaffected — body: {body}");
+
+        updatedId.Should().Be(existingDocumentId, "the refresh must target the row this document already has");
+        updatedFields.Should().NotBeNull(
+            "a replace save changed the file's size and URL; the row used to keep reporting the FIRST version's forever");
+        var fields = updatedFields!;
+        fields.Should().ContainKey("sprk_filesize");
+        fields["sprk_filesize"].Should().Be(newSize,
+            "the Documents grid reads this column — a stale size is a wrong number shown to the user, not a hidden one");
+        fields.Should().ContainKey("sprk_filepath");
+        fields["sprk_filepath"].Should().Be(newWebUrl,
+            "\"Open in SharePoint\" follows this column");
+
+        // Identity is the create branch's business. A later save must never mutate it.
+        fields.Should().NotContainKey("sprk_composeorigin");
+        fields.Should().NotContainKey("sprk_composetransientkey");
+        fields.Should().NotContainKey("sprk_graphitemid");
+    }
+
+    [Fact]
+    public async Task Save_HealthyReplace_StillReportsPersisted_WithNoNewWarnings()
+    {
+        // NEGATIVE (FR-S09 acceptance): none of the above may cost the ordinary case anything. A clean
+        // replace save must still be a plain `persisted` with no warning surface — the outcome decision
+        // now reads the record step and the metadata refresh, and this is what proves that reading them
+        // did not turn every healthy save into a warning.
+        const string speId = "spe-item-frs09-healthy";
+        const string driveId = "drive-frs09-healthy";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+        _fixture.DataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1\""));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+        body.Should().Contain("\"outcome\":\"persisted\"", "a healthy save is a plain success");
+        body.Should().NotContain("partially-recorded");
+        body.Should().NotContain("document-metadata-stale");
+    }
+
     private void ArrangeIdempotentPromotionAndIndexing()
     {
         var existingDocumentId = Guid.NewGuid();

@@ -1670,8 +1670,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // placeholder. Undefined for every already-named / replace-path save (unchanged behavior).
       opts?: { displayNameOverride?: string }
     ): Promise<void> => {
-      if (state.status !== 'loaded') return;
-      if (!state.documentRef || !editorRef.current) return;
+      // FR-S09 item 1 (r8 task 016): these were two bare `return`s. The user pressed Save and
+      // NOTHING happened — no banner, no console line, no state change, no way to tell a refusal
+      // apart from a broken button. Each case is now decided explicitly, and the two that are
+      // reachable-and-invisible now say so.
+      if (state.status === 'saving' || saveInFlightRef.current) {
+        // A save is already running. Deliberately NOT a banner: "Saving…" and a disabled Save button
+        // are already on screen saying exactly this, and a second, contradictory signal ("your save
+        // was refused") would be worse than the silence. Documented as non-silent rather than assumed
+        // to be — the distinction this whole task turns on.
+        return;
+      }
+      if (state.status !== 'loaded') {
+        // 'loading' / 'error' / 'empty'. The toolbar and Ctrl+S do not exist in these states, so the
+        // only caller that can arrive here is programmatic — the Assistant's "Add the document to the
+        // DMS" chip, or an unmount flush. It used to drop them on the floor. The message is worded to
+        // stay true when it surfaces (the banner renders once the editor is up), and the reducer
+        // deliberately does NOT move `status` for a refusal — see the `saveFailed` case.
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage: 'That save did not run — the document was still opening. Nothing was lost; press Save again.',
+        });
+        return;
+      }
+      if (!state.documentRef || !editorRef.current) {
+        // THE silent one. Status is 'loaded', so the editor and an ENABLED Save button are both on
+        // screen, and pressing Save did nothing at all — repeatedly, with no explanation. It happens
+        // when the editor's imperative handle has not attached yet (a render race) or the document
+        // reference was lost, and it is indistinguishable from a dead button.
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage:
+            'That save did not run — the editor was not ready. Your changes are still here; press Save again.',
+        });
+        return;
+      }
 
       // FR-02 (task 030): trimmed user-entered name from the save-name modal, if any.
       const nameOverride = opts?.displayNameOverride?.trim() || undefined;
@@ -1767,7 +1800,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       //   • A synchronous throw in that setup would otherwise latch the guard forever, silently
       //     killing saving for the rest of the session — a worse failure than the double-POST the
       //     guard exists to prevent. Below this line every exit path releases it.
-      if (saveInFlightRef.current) return;
+      // The TEST moved to the entry guards above (FR-S09 item 1) so a refused second save can say so;
+      // the CLAIM stays here, at the last moment before the first `await`, for the reasons above.
       saveInFlightRef.current = true;
       /** The single release point: the request's `finally`, and the two early returns below. */
       const finishSaveAttempt = (): void => {
@@ -2453,6 +2487,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 : 'This document is open in Word — close it there, then Retry. It also releases automatically ' +
                   'within a few minutes. Your Compose changes are safe and still pending.',
             isLock: true,
+          });
+          return;
+        }
+
+        // FR-S09 item 6 (r8 task 016): the service asked us to wait. Distinct from every other status
+        // here because nothing is wrong — not with the document, not with the request, not with the
+        // server — and the only useful instruction is a duration. Before task 016 a Graph throttle
+        // reached the client as a 500 whose body read "Save failed: InvalidOperationException: Service
+        // temporarily unavailable due to Graph rate limiting", which reads as a fault and invites a
+        // support ticket instead of a coffee. The server states the wait in its ProblemDetails detail
+        // (and in Retry-After); prefer it, and fall back to a conservative sentence rather than
+        // inventing a number.
+        if (failure.kind === 'http' && failure.status === 429) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              failure.detail && failure.detail !== 'HTTP 429'
+                ? failure.detail
+                : 'Not saved — the document service is busy right now. Nothing was overwritten and your ' +
+                  'changes are still here — try again in a moment.',
           });
           return;
         }
@@ -4354,7 +4408,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // sourceFormat and re-targets), then Word actions re-enable against the new docx identity.
   const isPdfSourced = state.sourceFormat === 'pdf';
   const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing || isPdfSourced;
-  const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
+  // FR-S09 item 3 (r8 task 016): `tenantId` joins the precondition set.
+  //
+  // It was already required by `triggerSave` (which refuses without it) and by every save request
+  // body — but not by the gate, so the Save button sat there ENABLED on a workspace that could not
+  // possibly save, and only said so after the user pressed it. A precondition enforced one layer
+  // deeper than it is advertised is a precondition the user discovers by failing.
+  const hasSaveConfiguration = bffBaseUrl.length > 0 && !!tenantId;
+  const hasUnsavedWorkToSave = isDirty || hasTransientDraft;
+  const canSaveNow = !isSavingNow && hasSaveConfiguration && hasUnsavedWorkToSave;
+  // ...and the disabled button explains itself rather than just being grey.
+  const saveDisabledReason = isSavingNow
+    ? undefined // the toolbar already renders "Saving…" for this case
+    : !hasSaveConfiguration
+      ? 'Saving is unavailable — this workspace is missing its Spaarke connection settings. Reload the page, and contact an administrator if it persists.'
+      : !hasUnsavedWorkToSave
+        ? 'No unsaved changes'
+        : undefined;
 
   // FR-05 (task 032): "Apply firm template" gating. The button renders only for a PERSISTED doc
   // (an SPE drive-item exists — the server merges the SAVED bytes; a transient draft has nothing
@@ -4673,6 +4743,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 requestSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
+              // FR-S09 item 3 (r8 task 016): a disabled Save states its reason (tooltip).
+              saveDisabledReason={saveDisabledReason}
               // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
@@ -4815,7 +4887,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         open={saveNameModal !== null}
         mode={saveNameModal?.mode ?? 'first-save'}
         defaultName={saveNameModal?.defaultName ?? ''}
-        onClose={() => setSaveNameModal(null)}
+        onClose={() => {
+          // FR-S09 item 2 (r8 task 016): the name modal is a HARD GATE on the save the user just
+          // asked for — dismissing it (Cancel / Esc / backdrop) means that save does not happen.
+          // It used to close in silence, leaving someone who pressed Ctrl+S and then Esc believing
+          // their document was saved. The document stays dirty either way; now it also says so.
+          setSaveNameModal(null);
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage: 'Not saved — this document needs a name. Press Save and enter one.',
+          });
+        }}
         onSubmit={name => {
           const mode: ComposeSaveMode = saveNameModal?.mode === 'save-as' ? 'new' : 'version';
           setSaveNameModal(null);

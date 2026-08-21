@@ -92,6 +92,19 @@ public static class ComposeSaveTelemetry
     public const string CauseNotFound = "not-found";
     /// <summary>A Dataverse key/duplicate-record conflict or an inactive alternate key.</summary>
     public const string CauseRecordConflict = "record-conflict";
+    /// <summary>
+    /// FR-S09 item 6 (task 016): Microsoft Graph throttled the write (HTTP 429). Nothing was stored and
+    /// the same request WILL succeed later — distinct from <see cref="CauseUnhandled"/>, where it landed
+    /// before this cause existed and was indistinguishable from a real server fault in the counter.
+    /// </summary>
+    public const string CauseThrottled = "throttled";
+    /// <summary>
+    /// FR-S09 item 5 (task 016): the SPE write landed but the <c>sprk_document</c> record step did not —
+    /// promotion threw, or resolved no record id. The bytes are durable; the identity record is not.
+    /// Rides on <c>partially-recorded</c>, and is what separates it from a partial OPERATION apply
+    /// (<see cref="CausePartialApply"/>), which is the user's work rather than ours.
+    /// </summary>
+    public const string CauseRecordPromotion = "record-promotion";
     /// <summary>An unclassified fault reaching the endpoint's final catch.</summary>
     public const string CauseUnhandled = "unhandled";
 
