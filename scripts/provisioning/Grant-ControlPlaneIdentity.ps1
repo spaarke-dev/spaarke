@@ -429,17 +429,16 @@ function Get-SecurityRoleId {
         [Parameter(Mandatory)][string]$Token,
         [Parameter(Mandatory)][string]$RoleName
     )
-    # Root-BU scoping via bound function (matches
-    # DataverseWebApiAppUserCreator.FindSecurityRoleIdAsync). Fallback to
-    # name-only filter for envs that reject the bound function.
+    # Dataverse creates 1 root role + N inherited copies (one per child BU).
+    # AddPrivilegesRole ONLY works on the root (error 0x80044152 "Inherited roles
+    # cannot be modified" otherwise). The root is the copy with parentroleid=null.
+    # customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21:
+    # the previous BU-bound-function filter did not reliably select the root on
+    # spaarkedev1 and returned an inherited child, causing AddPrivilegesRole to
+    # 400. Explicit parentroleid-null filter is the reliable OData-native form.
     $encoded = [System.Uri]::EscapeDataString($RoleName)
-    $primary = "$($EnvUrl.TrimEnd('/'))/api/data/v9.2/roles?`$filter=name eq '$encoded' and _businessunitid_value eq (Microsoft.Dynamics.CRM.GetRootBusinessUnitId())&`$select=roleid"
-    try {
-        $resp = Invoke-DataverseWebApi -Method GET -Uri $primary -Token $Token
-    } catch {
-        $fallback = "$($EnvUrl.TrimEnd('/'))/api/data/v9.2/roles?`$filter=name eq '$encoded'&`$select=roleid"
-        $resp = Invoke-DataverseWebApi -Method GET -Uri $fallback -Token $Token
-    }
+    $uri = "$($EnvUrl.TrimEnd('/'))/api/data/v9.2/roles?`$filter=name eq '$encoded' and _parentroleid_value eq null&`$select=roleid"
+    $resp = Invoke-DataverseWebApi -Method GET -Uri $uri -Token $Token
     if (-not $resp -or -not $resp.value -or $resp.value.Count -eq 0) { return $null }
     return $resp.value[0].roleid
 }
@@ -459,10 +458,15 @@ $script:RequiredPrivileges = @(
 
     # prvReadUser-class basics needed to resolve the caller's own identity
     # (WhoAmI + audit attribution) and traverse business unit / role
-    # relationships. Basic depth = self-only where applicable.
-    @{ Name = 'prvReadUser';         Depth = 0 },
-    @{ Name = 'prvReadBusinessUnit'; Depth = 0 },
-    @{ Name = 'prvReadRole';         Depth = 0 }
+    # relationships. Depth = Local (1) — Dataverse REJECTS Basic (0) on
+    # these three: error 0x8004140b "privilege X can't have depth = Basic"
+    # (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery
+    # 2026-08-21; confirmed empirically against spaarkedev1). Local is the
+    # minimum accepted depth and matches what OOB System-Administrator-
+    # equivalent scoped roles use for these three basics.
+    @{ Name = 'prvReadUser';         Depth = 1 },
+    @{ Name = 'prvReadBusinessUnit'; Depth = 1 },
+    @{ Name = 'prvReadRole';         Depth = 1 }
 )
 
 function Get-PrivilegeIdByName {

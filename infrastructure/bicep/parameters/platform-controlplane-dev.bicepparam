@@ -87,5 +87,18 @@ param jwtTenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'
 param controlPlaneAppRegClientId = ''
 
 // ============================================================================
+// SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
+// ============================================================================
+// Points the Worker sitecontainer at the platform ACR image built by
+// scripts/provisioning/build-provisioning-sidecar.yml (or the manual
+// `az acr build --registry sprkcontrolplanedevacr --image provisioning-sidecar:latest`
+// first-push per Wave H-3 Step 5). Flipping this off the MCR-placeholder default
+// auto-computes sidecarAuthType='UserAssigned' via the module's ternary default;
+// the userManagedIdentityClientId now unconditionally set on the sitecontainer
+// resource (controlplane-worker-app-service.bicep Wave H-3 fix-at-discovery)
+// resolves the ACR pull via the shared control-plane UAMI's AcrPull grant.
+param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest'
+
+// ============================================================================
 // TAGS (defaults are fine for dev)
 // ============================================================================

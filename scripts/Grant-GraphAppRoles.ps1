@@ -287,8 +287,13 @@ function Invoke-GraphRest {
 function Get-GraphSpObjectId {
     param([string]$GraphResourceAppId)
 
-    # NB: $filter needs to be URL-encoded as %24filter when embedded in a URI passed to az.
-    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals?%24filter=appId%20eq%20'$GraphResourceAppId'&%24select=id,displayName"
+    # OData accepts literal `$filter` / `$select` (no URL encoding required); the
+    # earlier `%24filter` form breaks on Windows when az.cmd shells to cmd.exe and
+    # the `&%24select=...` fragment is interpreted as a compound command
+    # ('%24select' not recognized as an internal or external command — exit 1).
+    # customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21.
+    # PowerShell backtick-escapes `$` so it is not interpolated as a variable.
+    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$GraphResourceAppId'&`$select=id,displayName"
     $resp = Invoke-GraphRest -Method GET -Uri $uri
 
     if (-not $resp -or -not $resp.value -or $resp.value.Count -eq 0) {
@@ -420,8 +425,9 @@ Write-Success "Graph SP object ID: $graphSpObjectId (appId $($parsed.GraphResour
 
 Write-Step 3 "Verify UAMI service principal exists"
 try {
+    # `$select literal per H-3 Windows fix-at-discovery 2026-08-21 (see Get-GraphSpObjectId).
     $uamiSp = Invoke-GraphRest -Method GET `
-        -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$UamiPrincipalId`?%24select=id,displayName,servicePrincipalType,appId"
+        -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$UamiPrincipalId`?`$select=id,displayName,servicePrincipalType,appId"
 } catch {
     Write-Fail "UAMI service principal '$UamiPrincipalId' not found in tenant $TenantId. Verify you passed the object ID (not the appId or the managed-identity clientId)."
     Write-Info $_.Exception.Message

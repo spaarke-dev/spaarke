@@ -332,6 +332,11 @@ resource exchangePolicySidecar 'Microsoft.Web/sites/sitecontainers@2024-04-01' =
     targetPort: '8091'
     isMain: false
     authType: sidecarAuthType
+    // Required when authType == 'UserAssigned' (customer-provisioning-orchestration-r1
+    // Wave H-3 fix-at-discovery 2026-08-21): ACR pull 401s without this when the tag
+    // points to the platform ACR. Ignored by the platform when authType == 'Anonymous'
+    // (the MCR-placeholder default), so unconditionally setting it is safe.
+    userManagedIdentityClientId: uamiClientId
     environmentVariables: [
       // PLATFORM_KV_URI + EXCHANGE_CERT_SECRET_NAME + EXCHANGE_CONNECT_APP_ID
       // are plain (non-secret) values per Listener.ps1's documented

@@ -177,6 +177,9 @@ param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 @description('ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed.')
 param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? 'Anonymous' : 'UserAssigned'
 
+@description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default \'\' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: "all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding.')
+param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
+
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
 
@@ -463,6 +466,11 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // module's concern (Batch 3).
     acrImageTag: acrImageTag
     sidecarAuthType: sidecarAuthType
+    // Wave H-3 fix-at-discovery 2026-08-21: worker module always had this
+    // param but nothing plumbed it here; empty value caused sidecar Listener.ps1
+    // fail-fast (exit 1) → App Service killed whole site startup. See top-level
+    // exchangeConnectAppId param description for full rationale.
+    exchangeConnectAppId: exchangeConnectAppId
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
     // worker module emits it as the three
