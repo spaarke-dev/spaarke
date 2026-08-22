@@ -393,9 +393,83 @@ internal static class ComposeBlockMerge
 
             // ParagraphMarkRunProperties (w:pPr/w:rPr) carries the paragraph-mark's own formatting and is
             // inherited like any other unmodeled property.
-            renderedPr.AppendChild(child.CloneNode(true));
+            InsertInSchemaOrder(renderedPr, child.CloneNode(true), ParagraphPropertyOrder);
         }
     }
+
+    /// <summary>
+    /// Inserts <paramref name="child"/> at its schema-mandated position among <paramref name="container"/>'s
+    /// existing children.
+    /// </summary>
+    /// <remarks>
+    /// <b>Appending is not correct here.</b> <c>CT_PPr</c> and <c>CT_RPr</c> are <c>xsd:sequence</c>, so child
+    /// ORDER is part of the schema, not a formatting detail. An earlier draft of this inheritance appended,
+    /// which produced <c>w:jc</c> before <c>w:spacing</c>/<c>w:ind</c> on any paragraph where the model had set
+    /// alignment — schema-invalid output, and invisible to a fixture that never combines the two. The task-041
+    /// edited-block measurement surfaced it as `spacing|jc`, `ind|spacing`, `jc|ind` on two corpus documents.
+    ///
+    /// <para>An element whose name is not in the order table is appended, which is the safe direction: an
+    /// unknown extension element belongs after the known sequence rather than in the middle of it.</para>
+    /// </remarks>
+    private static void InsertInSchemaOrder(
+        OpenXmlCompositeElement container, OpenXmlElement child, IReadOnlyList<string> order)
+    {
+        var rank = OrderRank(child, order);
+
+        OpenXmlElement? predecessor = null;
+        foreach (var existing in container.ChildElements)
+        {
+            if (OrderRank(existing, order) <= rank)
+            {
+                predecessor = existing;
+                continue;
+            }
+
+            break;
+        }
+
+        if (predecessor is null)
+        {
+            container.InsertAt(child, 0);
+        }
+        else
+        {
+            container.InsertAfter(child, predecessor);
+        }
+    }
+
+    private static int OrderRank(OpenXmlElement element, IReadOnlyList<string> order)
+    {
+        for (var i = 0; i < order.Count; i++)
+        {
+            if (string.Equals(order[i], element.LocalName, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return int.MaxValue;
+    }
+
+    /// <summary>ECMA-376 <c>CT_PPr</c> child sequence (§17.3.1.26).</summary>
+    private static readonly string[] ParagraphPropertyOrder =
+    {
+        "pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl", "numPr",
+        "suppressLineNumbers", "pBdr", "shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap",
+        "overflowPunct", "topLinePunct", "autoSpaceDE", "autoSpaceDN", "bidi", "adjustRightInd",
+        "snapToGrid", "spacing", "ind", "contextualSpacing", "mirrorIndents", "suppressOverlap", "jc",
+        "textDirection", "textAlignment", "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr",
+        "sectPr", "pPrChange",
+    };
+
+    /// <summary>ECMA-376 <c>CT_RPr</c> child sequence (§17.3.2.28).</summary>
+    private static readonly string[] RunPropertyOrder =
+    {
+        "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike", "outline",
+        "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden", "color", "spacing",
+        "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText",
+        "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath", "rPrChange",
+    };
 
     /// <summary>
     /// Applies the base paragraph's DOMINANT run properties — the <c>w:rPr</c> of the run holding the most
@@ -430,7 +504,7 @@ internal static class ComposeBlockMerge
             {
                 if (present.Add(child.GetType()))
                 {
-                    runPr.AppendChild(child.CloneNode(true));
+                    InsertInSchemaOrder(runPr, child.CloneNode(true), RunPropertyOrder);
                 }
             }
         }

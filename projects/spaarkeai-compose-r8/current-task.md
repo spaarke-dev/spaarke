@@ -11,10 +11,11 @@
 |-------|-------|
 | **Phases 1–3** | ✅ COMPLETE. Gate **PASSED**. |
 | **Task 040** | ✅ **COMPLETE** — the merge is the production save path. |
+| **Task 041** | 🔄 **IN PROGRESS** — baseline measured, two defects fixed. FR-A05 atom carry NOT yet built. |
 | **ADR-049 third amendment** | ✅ **APPLIED** 2026-08-21. Nothing pending. |
 | **Next task** | **041** — FR-A04 opaque-atom carry + the edited block's residual formatting loss. **Not optional, not deferrable** (gate §7 condition 1). |
 | **Alternative** | **051** — Track C anchor supply. Independent of everything above; kills the *"wording differs slightly"* banner. |
-| **Next Action** | Read `tasks/041-*.poml` **and** [`notes/merge-mechanism-results.md`](notes/merge-mechanism-results.md) §4.1 — 041's scope is now precisely defined by what inheritance does NOT reach. |
+| **Next Action** | Implement **FR-A05 carry, bookmarks first** — see [`notes/edited-block-loss.md`](notes/edited-block-loss.md) "What FR-A05 must now deliver". |
 
 ### The one thing to understand
 
@@ -26,6 +27,13 @@ dominant-`rPr` inheritance, which stops it collapsing to Normal — but a paragr
 *mid-run* is levelled to its dominant formatting.
 
 **Task 041 owns that, and the gate cannot see it** — the oracle excludes the edited block by construction.
+It is now MEASURED: **10 of 18 corpus documents come through with the edited block intact**; the other 8 lose
+bookmarks (2), a block-level `w:sdt` (1), soft breaks (1), run-level formatting variation (2) and run/text
+boundaries (4). Full table + per-construct priorities: [`notes/edited-block-loss.md`](notes/edited-block-loss.md).
+
+**Dropping `w:bookmarkStart`/`w:bookmarkEnd` is the worst of these and is not obvious**: it breaks
+cross-references *elsewhere* in the document. The user edits paragraph 12; a `REF` field in paragraph 40
+stops resolving. Build that carry first.
 
 ---
 
@@ -67,6 +75,13 @@ the plan. `mergeUnchangedBlocks` now defaults to **true**.
 ---
 
 ## Traps (all live)
+
+- **`w:pPr` / `w:rPr` are `xsd:sequence` — child ORDER is schema, not style.** Task 040's inheritance appended
+  and produced invalid output; it now inserts at the ECMA-376 position. Any future code that adds a child to
+  either element must respect the order tables in `ComposeBlockMerge`.
+- **Corpus fixtures are now held schema-valid** by `CorpusFixture_IsSchemaValidWordprocessingML`. Nine
+  project-authored fixtures were repaired 2026-08-22. **Never "fix" a real-world fixture** — their quirks are
+  the test case, and all four were already valid.
 
 - **`mergeUnchangedBlocks` is a TEST SEAM, not a feature flag.** Bound to no configuration. It exists so the
   measurement can run a control arm through the same renderer — the anti-vacuity evidence the gate rests on.

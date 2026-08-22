@@ -302,6 +302,72 @@ public static class ComposeBlockPreservationOracle
     /// `mc:Choice` and `mc:Fallback` are therefore OPAQUE — compared whole, never descended into for
     /// pairing purposes.
     /// </summary>
+
+    // ===============================================================================================
+    // The INVERSE entry point — task 041.
+    //
+    // `Compare` above deliberately EXCLUDES the one block the harness edited, because task 020's question
+    // was "does an edit damage everything else?". Task 041's question is the complement: "what does the
+    // edit damage in the block the user actually typed in?" — the loss the gate is blind to by
+    // construction, and the one users describe as "it destroyed my document".
+    //
+    // ADDITIVE. Nothing here is reachable from `Compare`, so no gate number can move because this exists.
+    //
+    // The edit marker is STRIPPED from the saved block's text before comparison. Without that every block
+    // would trivially differ on `w:t` and the measurement would say nothing. With it, the residual
+    // differences are exactly what the save changed BEYOND what the user typed.
+    // ===============================================================================================
+
+    /// <summary>
+    /// Compares the EDITED block only. Returns null when the edited block cannot be located or has no
+    /// counterpart in the original — a state the caller must report rather than read as "nothing lost".
+    /// </summary>
+    public static BlockDifference? CompareEditedBlock(
+        byte[] original, byte[] saved, string editMarker, ComparisonLevel level)
+    {
+        var originalBlocks = ReadBodyBlocks(original);
+        var savedBlocks = ReadBodyBlocks(saved);
+
+        var editedIndex = FindEditedBlockIndex(savedBlocks, editMarker);
+        if (editedIndex < 0 || editedIndex >= originalBlocks.Count || editedIndex >= savedBlocks.Count)
+        {
+            return null;
+        }
+
+        var originalNumbering = BuildNumberingOrdinalMap(originalBlocks);
+        var savedNumbering = BuildNumberingOrdinalMap(savedBlocks);
+
+        var savedWithoutMarker = new XElement(savedBlocks[editedIndex]);
+        foreach (var text in savedWithoutMarker.DescendantsAndSelf(W + "t"))
+        {
+            if (text.Value.Contains(editMarker, StringComparison.Ordinal))
+            {
+                text.Value = text.Value.Replace(editMarker, string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        var a = Normalize(originalBlocks[editedIndex], level, originalNumbering);
+        var b = Normalize(savedWithoutMarker, level, savedNumbering);
+
+        var paths = new List<string>();
+        if (!string.Equals(Canonicalize(a), Canonicalize(b), StringComparison.Ordinal))
+        {
+            CollectDifferencePaths(a, b, new List<string>(), paths);
+            if (paths.Count == 0)
+            {
+                paths.Add(a.Name.LocalName);
+            }
+        }
+
+        return new BlockDifference(
+            Index: editedIndex,
+            BlockElement: originalBlocks[editedIndex].Name.LocalName,
+            OriginalParaId: ReadParaId(originalBlocks[editedIndex]),
+            SavedParaId: ReadParaId(savedBlocks[editedIndex]),
+            DifferingPaths: paths,
+            IsNearTier: paths.Any(IsNearTierPath));
+    }
+
     private static List<XElement> ReadBodyBlocks(byte[] docx)
     {
         using var stream = new MemoryStream(docx, writable: false);
