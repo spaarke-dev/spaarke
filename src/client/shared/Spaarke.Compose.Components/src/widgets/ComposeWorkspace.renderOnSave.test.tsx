@@ -540,16 +540,44 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     );
   });
 
-  it('task 013 (F7): the FIRST model-path save folds the mount-time projection flatten warnings — and a second model save does not repeat them', async () => {
+  // Task 044 (r8) SUPERSEDES task 013's F7 fold. The old test asserted that a model-path save folds the
+  // mount-time projection flatten warnings into the save banner, on the reasoning that "the loss they
+  // describe materializes on the first save that renders from the flatten-tier model". That was true when
+  // every save rebuilt the whole body. Since task 040 the merge CLONES untouched blocks verbatim, so a text
+  // box on a block the user did not touch loses nothing — and the banner was reporting a loss that did not
+  // happen. The server now reports what was ACTUALLY lost, per re-rendered block, so the fold is both
+  // unnecessary and false. The `pdf-intake-*` exception (a reflow that really did happen at LOAD) is
+  // asserted below and is unchanged.
+  it('task 044: a model-path save does NOT fold the mount-time docx flatten warnings — the merge clones those blocks, so nothing was simplified', async () => {
     config.loadContentModel = LOADED_MODEL;
-    // The mount door surfaced projection flatten warnings (previously server-log-only): the loss
-    // they describe materializes on the first save that renders from the flatten-tier model.
+    // The mount door surfaced projection flatten warnings. Under the merge these describe blocks that are
+    // now cloned verbatim on save.
     config.loadContentModelWarnings = [
       { code: 'text-box-flattened', count: 2 },
       { code: 'complex-object-dropped', count: 1 },
     ];
-    // The mapper adds one more text-box occurrence — counts must SUM per code (2 + 1 = 3).
-    config.builtResult = { model: BUILT_MODEL, warnings: [{ code: 'text-box-flattened', count: 1 }] };
+    config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    config.saveDegradationWarnings = undefined;
+    renderStoredDoc();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    // No banner at all: nothing the server reported, nothing the mapper reported, and the held flatten
+    // warnings are no longer folded. A false "Some formatting was simplified when saving" here is exactly
+    // what trains a reader to ignore the true ones.
+    await waitFor(() =>
+      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
+    );
+  });
+
+  it('task 044: the SERVER remains authoritative — a real loss it reports still reaches the banner', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.loadContentModelWarnings = [{ code: 'text-box-flattened', count: 2 }];
+    config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    // The merge's shortfall report: the edited block genuinely lost soft breaks.
+    config.saveDegradationWarnings = [{ code: 'edited-paragraph-line-break-dropped', count: 2 }];
     renderStoredDoc();
     await waitForEditor();
 
@@ -557,17 +585,32 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
-    expect(banner.textContent).toContain('A text box was converted to regular text. (×3)');
-    expect(banner.textContent).toContain('A drawing or embedded object could not be carried over.');
+    // The server's real finding is shown...
+    expect(banner.textContent).toContain('A line break inside an edited paragraph was dropped.');
+    // ...and the stale mount-time flatten warning is NOT, because that block was cloned.
+    expect(banner.textContent).not.toContain('A text box was converted to regular text.');
+  });
 
-    // SECOND model-path save (still dirty, no new mapper/server warnings): the mount warnings were
-    // CLEARED by the first model save's adoption — the loss materialized once, it is not repeated.
+  it('task 044: pdf-intake facts are STILL folded — that reflow happened at LOAD, before any save', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.loadContentModelWarnings = [
+      { code: 'pdf-intake-fixed-layout-reflowed', count: 1 },
+      { code: 'text-box-flattened', count: 2 },
+    ];
     config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    config.saveDegradationWarnings = undefined;
+    renderStoredDoc();
+    await waitForEditor();
+
     await clickSave();
-    await waitFor(() => expect(saveRequests).toHaveLength(2));
-    await waitFor(() =>
-      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    // The PDF intake already reflowed the source into the synthesized carrier — that loss is real
+    // whatever the save does, so it must still surface.
+    expect(banner.textContent.length).toBeGreaterThan(0);
+    // The docx flatten warning alongside it is still not folded.
+    expect(banner.textContent).not.toContain('A text box was converted to regular text.');
   });
 
   it('task 013 (F7): an OP-LOG-path save does NOT fold the projection flatten warnings (the loss does not materialize on the byte-identical path)', async () => {

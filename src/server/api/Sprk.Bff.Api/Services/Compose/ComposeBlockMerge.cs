@@ -607,11 +607,104 @@ internal static class ComposeBlockMerge
             {
                 // The shell could not be reconstructed — degrade to the bare paragraph WITH a warning
                 // rather than emitting a malformed control. Never a refusal (ADR-049 invariant 1).
-                warn?.Invoke("content-control-flattened");
+                warn?.Invoke("hard-tier-sdt-flattened");
             }
         }
 
+        // ── 3. Report what could NOT be carried ─────────────────────────────────────────────────
+        //
+        // Task 044. Cloned blocks never reach this method, so nothing here can warn about a construct that
+        // survived intact — which is the whole point: the accept-flatten taxonomy predates the merge and
+        // warned about text boxes, fields and content controls on blocks that are now cloned verbatim.
+        //
+        // What remains is the honest half. A block the user EDITED is rebuilt from the model, and any
+        // construct the model cannot represent and the carry above cannot restore is genuinely gone. Before
+        // this, it went silently: the corpus produced ZERO render-path warnings while an edited paragraph
+        // could still lose a field or a drawing. Suppressing false warnings is only safe if the true ones
+        // start firing in the same change.
+        WarnForConstructsLostOnThisBlock(body, firstRenderedIndex, baseElement, warn);
+
         return carried;
+    }
+
+    /// <summary>
+    /// Families of construct that live inside a paragraph, cannot be expressed in
+    /// <see cref="ComposeContentModel"/>, and are not restored by the carry above. Each maps to the
+    /// degradation code R7's copy layer already understands, so no new warning surface is introduced
+    /// (root §11).
+    /// </summary>
+    private static readonly (string LocalName, string Code)[] ReportableConstructs =
+    {
+        ("fldSimple", "field-flattened-to-text"),
+        ("fldChar", "field-flattened-to-text"),
+        ("drawing", "complex-object-dropped"),
+        ("object", "complex-object-dropped"),
+        ("pict", "complex-object-dropped"),
+        ("footnoteReference", "unrepresented-footnote-reference"),
+        ("endnoteReference", "unrepresented-endnote-reference"),
+        ("br", "edited-paragraph-line-break-dropped"),
+        ("sym", "symbol-flattened"),
+        ("tab", "tab-flattened"),
+    };
+
+    private static void WarnForConstructsLostOnThisBlock(
+        Body body, int firstRenderedIndex, OpenXmlElement baseElement, Action<string>? warn)
+    {
+        if (warn is null || firstRenderedIndex >= body.ChildElements.Count)
+        {
+            return;
+        }
+
+        var rendered = body.ChildElements[firstRenderedIndex];
+
+        foreach (var family in ReportableConstructs.GroupBy(c => c.Code))
+        {
+            var names = family.Select(f => f.LocalName).ToArray();
+            var before = CountConstructs(baseElement, names);
+            if (before == 0)
+            {
+                continue;
+            }
+
+            var after = CountConstructs(rendered, names);
+            for (var i = after; i < before; i++)
+            {
+                // One warning per LOST instance, not per family, so the count the banner shows is the
+                // number of things actually gone rather than the number of kinds of thing.
+                warn(family.Key);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Counts construct occurrences in a block, NOT descending into opaque regions.
+    /// </summary>
+    /// <remarks>
+    /// A text box's interior is carried whole or not at all, so counting the fields inside one would report
+    /// a loss on a construct that either survived entirely or was never separable in the first place.
+    /// </remarks>
+    private static int CountConstructs(OpenXmlElement block, string[] localNames)
+    {
+        var count = 0;
+        foreach (var element in new[] { block }.Concat(block.Descendants()))
+        {
+            if (element is AlternateContent or TextBoxContent)
+            {
+                continue;
+            }
+
+            if (element.Ancestors().Any(a => a is AlternateContent or TextBoxContent))
+            {
+                continue;
+            }
+
+            if (localNames.Contains(element.LocalName, StringComparer.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     /// <summary>

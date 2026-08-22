@@ -281,6 +281,10 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'comment-flattened': "A comment's rich content was simplified when saving.",
   'comment-anchor-flattened': "A comment's anchored range was simplified when saving.",
   'strikethrough-flattened': 'Strikethrough formatting was not preserved.',
+  // Task 044 (r8): the merge's shortfall report emits this for a w:sym in an EDITED paragraph. Every
+  // other code it emits already had copy — this was the one gap, and a banner that falls through to
+  // the raw "(symbol-flattened ×2)" line is developer language in a user-facing sentence.
+  'symbol-flattened': 'A special symbol in an edited paragraph was saved as ordinary text.',
   'numbering-unresolved': "An automatic list number couldn't be preserved and may differ.",
   'numstylelink-unresolved': "A linked list-numbering style couldn't be preserved.",
   'style-linked-numbering-dropped': 'Style-linked list numbering was simplified.',

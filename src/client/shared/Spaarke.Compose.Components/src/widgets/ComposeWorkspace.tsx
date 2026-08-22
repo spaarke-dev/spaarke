@@ -2333,12 +2333,29 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
             ]
           : [];
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // TASK 044 (r8) — the docx flatten warnings are NO LONGER folded into the save banner.
+        //
+        // The R6-era reasoning above ("the loss they describe MATERIALIZES exactly here, on the first
+        // save that renders from the flatten-tier model") was correct WHEN EVERY SAVE REBUILT THE WHOLE
+        // BODY. Since task 040 it is false: a text box, field or content control on a block the user did
+        // not touch is CLONED VERBATIM and nothing about it is simplified. Folding the load-time flatten
+        // warnings in anyway produced a "Some formatting was simplified when saving" banner on documents
+        // that lost nothing — the false signal that trains a reader to ignore the true ones.
+        //
+        // The server is now authoritative and precise: `payload.degradationWarnings` carries one warning
+        // per construct ACTUALLY lost, counted on the block that was re-rendered (ComposeBlockMerge's
+        // shortfall report). Nothing is suppressed — the true warnings arrive from the party that knows.
+        //
+        // `pdf-intake-*` facts are the exception and are STILL folded on both paths: that reflow already
+        // happened at LOAD, before any save, so the loss is real regardless of what the save does.
+        const pdfIntakeFacts = heldWarnings.filter(
+          w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')
+        );
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
-          usedModelPath
-            ? heldWarnings
-            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')),
+          pdfIntakeFacts,
           clientSurfacedLossWarnings
         );
         dispatch({
