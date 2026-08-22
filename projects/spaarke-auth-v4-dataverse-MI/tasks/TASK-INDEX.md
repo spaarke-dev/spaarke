@@ -27,7 +27,7 @@
 | 042 | Remove `PowerBi:ClientSecret` | 4 PowerBI | FULL | sonnet/high | 041 | — | ✅ | FR-D3 | ⏭️ |
 | 050 | Content Safety → MI (path already exists) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E1 | 🔲 |
 | 051 | Service Bus → namespace + MI; rotate the leaked SAS | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E2 | 🔲 |
-| 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 | 🔲 |
+| 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 |✅ |
 | 053 | AI Search ×2 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | 🔲 |
 | 054 | Document Intelligence ×3 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E5 | 🔲 |
 | 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 |✅ |

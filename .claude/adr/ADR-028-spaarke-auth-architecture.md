@@ -271,6 +271,22 @@ When MI is genuinely unworkable for a specific outbound surface, the **only** sa
 - **Restore-to-MI**: Single config change — clear `AzureOpenAI__ApiKey` app setting; code falls back to `TokenCredential` (MI) automatically. Do this when AIServices-kind MI auth is consistently reliable (track via Microsoft Foundry product updates).
 - **Remediation TODO**: Restore MI when reliable. No filed ticket yet (the failure mode is widely documented but Microsoft has not published a confirmed fix).
 
+#### E-2 RE-AFFIRMED with current evidence — 2026-08-21 (`spaarke-auth-v4-dataverse-MI` task 052, FR-E3)
+
+E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, and two candidate root causes are now **eliminated**:
+
+| Hypothesis | Checked 2026-08-21 | Verdict |
+|---|---|---|
+| **Missing custom subdomain** — Microsoft's documented cause of exactly this symptom, and the reason task 052 was scheduled | `spaarke-openai-dev` has `customSubDomainName: spaarke-openai-dev` | **ELIMINATED.** It is configured, and was never the cause. The hoped-for one-config fix does not exist |
+| **Missing / unpropagated RBAC** | UAMI `9fd47efb-…` holds **both** `Cognitive Services OpenAI User` and `Cognitive Services User` at account scope | **ELIMINATED** (re-confirms the original finding, still true) |
+| **Wrong endpoint host** — the app is configured with `…openai.azure.com` while this `kind=AIServices` account's canonical endpoint is `…cognitiveservices.azure.com` | User-token chat completion returned **HTTP 200 on BOTH hosts** | **Not the cause for user tokens.** Untested for `idtyp=app` tokens — see below |
+
+**What was NOT re-tested, and why it matters:** the decisive comparison in E-2 is *user token → 200* versus *managed-identity token → 401 with correct claims*. Only the first half is reachable from a workstation. The managed-identity half needs IMDS inside the app container: a developer workstation has no route to IMDS, and the **Kudu SCM container does not receive `IDENTITY_ENDPOINT`** (verified 2026-08-21 — `has_endpoint=no`), so it cannot stand in. The original 401 evidence — App Insights `LoggingTokenCredential` capture showing correct `oid`, `appid`, `aud`, `idtyp=app` — remains the only direct measurement and is **not contradicted** by anything found today.
+
+**Next test, and it is cheap**: on the dev slot, set `AzureOpenAI__Endpoint` to `https://spaarke-openai-dev.cognitiveservices.azure.com/` (the account's own endpoint for its `AIServices` kind) **and** clear `AzureOpenAI__ApiKey`, then exercise a chat completion. The host alias is the one variable E-2 never isolated, and it is specifically plausible for an `AIServices`-kind account where `…openai.azure.com` is an alias rather than the resource's endpoint. Two app settings, instantly reversible.
+
+**Do not remove E-2 without that measurement.** Re-testing only the half that was already known to pass would reproduce the prior result and mistake it for a refutation — the failure mode this project exists to eliminate.
+
 ### E-3: OBO / BFF-identity confidential clients — transitional retained secret (2026-08-17, per A4)
 
 - **Scope**: the confidential clients authenticating as the BFF identity that still use `.WithClientSecret` — `GraphClientFactory` (Graph OBO), `DataverseAccessDataSource` (Dataverse OBO + app-only), `DataverseUserClient` (Dataverse OBO), `AgentTokenService` (Graph + Dataverse OBO for the M365 Copilot agent), `ReportingEmbedService` / `ReportingProfileManager` (Power BI app-only), and the residual `ClientSecretCredential` fallbacks in `DataverseServiceClientImpl` / `DataverseWebApiService`. Config: `BFF-API-ClientSecret` behind five keys (`API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Graph__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret`) plus a lowercase Key Vault alias `bff-api-client-secret` used by the Office add-in deploy.
