@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — Wave W1 complete (001 ✅ 002 ✅ 003 ✅ 005 ✅) |
-| **Step** | Between waves. Next is **Wave W2**: 040, 004, 010 |
-| **Status** | clean — worktree has 0 uncommitted changes; local HEAD == origin |
-| **Next Action** | Say `continue`. Recommended order **040 → 004 → 010** (see "Why 040 first"). |
+| **Task** | **none in progress** — W1 complete (001 ✅ 002 ✅ 003 ✅ 005 ✅); **W2: 040 ✅**, 004 + 010 remain |
+| **Step** | Between tasks. Next is **task 004** (Search root cause), then **010** (auth spike) |
+| **Status** | clean — 0 uncommitted; local HEAD == origin at `8e3b954da` |
+| **Next Action** | Invoke `task-execute` on `tasks/004-fix-search.poml`. **Verify its premise first** — five for five have been wrong or incomplete. |
 
 ### Files Modified This Session
 
@@ -26,6 +26,8 @@ All committed and pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**):
 | `aa69ce941` | **Task 003** — `SyncHealth`/`ConcernOutcome`; Dataverse-outage-looks-like-OK fixed; 9 tests |
 | `356001ee7` | docs refresh |
 | `44a239aab` | **Task 005** — Audit Log read **and** write paths repaired; 19 tests |
+| `b6ffe09e5` | checkpoint |
+| `8e3b954da` | **Task 040** — WireMock Graph fixture; **unblocked WireMock repo-wide**; 10 tests. No `src/` change |
 
 ⚠️ **Separate repo, NOT pushed**: `c:/code_files/spaarke-prototype` has **1 unpushed commit** `a53832a`
 (the `spe-admin-r2-uat` harness + shared `_infra` mock fixes) on `feature/uat-harness-framework`. Left
@@ -46,7 +48,7 @@ premise before implementing to it — three of four premises were wrong.
 | Gate | Value |
 |---|---|
 | `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors (7 pre-existing warnings) |
-| Unit tests | **10,592 passed**, 0 failed, 97 skipped (+56 added this session) |
+| Unit tests | **10,602 passed**, 0 failed, 97 skipped (+66 added this session) |
 | ArchTests | 36/36 |
 | Publish (compressed, framework-dependent linux-x64) | **43.68 MB** — under the ~44.96 MB baseline, ceiling 60 |
 | New NuGet | none |
@@ -86,11 +88,41 @@ and [`notes/odata-catch-inventory.md`](notes/odata-catch-inventory.md).
 
 > ⚠️ A summary passed to these **must not name a cause the caught exception did not establish.**
 
-### Why 040 first in Wave W2
+### 🔑 Task 040 done — the harness now exists, and it already earns its keep
 
-Spec §5 orders 004 before 040, but **040 (WireMock) is the unlock**: tasks 002 and 005 both had to record
-empirical criteria as unverified because forcing an upstream failure needs a harness, and ADR-038 bans
-`Mock<HttpMessageHandler>`. Doing 040 first lets those criteria actually be proven and protects 004's work.
+`tests/integration/contract/SpeAdmin/GraphWireMockFixture.cs` + `README.md`. Use it for any
+Graph-touching change. **Do not build a second one** — two Graph fakes already existed and were
+correctly rejected as non-extendable (reasons in `notes/task-040-completion.md` §3a).
+
+```csharp
+using var graph = new GraphWireMockFixture();
+graph.StubGet("/storage/fileStorage/containers", """{"value":[…]}""");
+await sut.ListContainersAsync(graph.CreateGraphClient(), containerTypeId);   // real production method
+graph.SelectFieldsFor("/storage/fileStorage/containers").Should().BeEquivalentTo("id", "displayName");
+```
+
+**Three facts worth not re-deriving:**
+
+1. **WireMock was dead repo-wide, mislabeled.** Every request 500'd — WireMock.Net 1.5.45 loads
+   `MimeKitLite` at runtime and the test csproj had `ExcludeAssets=all` (stripping the *runtime* asset,
+   not just the compile-time collision it was added for). Now `compile`. If WireMock ever blanket-500s
+   again, **check that first**. The 6 tests in `Integration/GraphApiWireMockTests.cs` sat skipped as
+   *"path matching … requires configuration investigation"* — wrong, and it kept the one tool able to
+   catch the §3.2 defect class dark for all of R1.
+2. **The seam already existed.** 47 `SpeAdminGraphService` methods take `GraphServiceClient` as a
+   parameter. The hardcoded `…/beta` is confined to the private `CreateGraphClient*` helpers.
+   Escalation trigger evaluated → **did not fire**; **task 021's base-address decision is untouched**.
+3. **KEEP path matters.** The POML's `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/` is not one of
+   ADR-038's seven. New Graph tests go in `tests/integration/contract/SpeAdmin/`.
+
+### 🔴 Defect handed to task 022 — do not re-derive
+
+`SpeAdminGraphService.cs:4368` guards `deletedDateTime` with `rawDeletedAt is string`, but Kiota stores
+a **`System.DateTime`** (probed against the real SDK). The guard can never be true, so **every
+recycle-bin row reports a null deletion timestamp**. Found by the fixture on its first run.
+
+Pinned as characterization tests that **must fail and be updated when 022 fixes it** — deleting one
+instead would restore the silence. Same for the `StorageUsedInBytes: null` pin (task 024).
 
 ### Standing gap — UI verification
 
