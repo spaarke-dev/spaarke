@@ -42,14 +42,27 @@ using '../stacks/model1-shared.bicep'
 //   Shared BFF UAMI      = sprk-prod-shared-bff-uami
 param environment = 'prod'
 
-// eastus chosen over westus2 because (a) it is the Bicep default at the stack
-// level, (b) it has the broadest coverage for the Azure OpenAI model/version
-// pins already baked into stacks/model1-shared.bicep (gpt-4o 2024-08-06,
-// gpt-4o-mini 2024-07-18, text-embedding-3-large v1) and their required TPM
-// capacities (150/200/350), (c) eastus AI Search Standard has predictable
-// replica availability for the environment=='prod' ? 2 : 1 replica choice
-// baked into the stack. Dev's westus2 choice was historical, not architectural.
-param location = 'eastus'
+// Revised 2026-08-22 during Model 1 Prod first-live deploy attempt:
+// SWITCHED to westus2 (from eastus) after preflight discovered that this fresh
+// PayAsYouGo sub has ZERO auto-granted App Service Plan quota in East US and
+// Microsoft's auto-approver auto-DENIED the S1 quota request. West US 2 preflight
+// against the SAME sub succeeded with no quota bump needed — East US-specific
+// capacity pressure (Microsoft has tightened auto-grant in East US for brand-new
+// subs). This ALSO aligns with r2's proven pattern: `spaarke-bff-prod` was West US 2.
+//
+// Consequence: Azure OpenAI cannot follow (gpt-5 family absent from West US 2 —
+// verified 2026-08-22 via `az cognitiveservices model list --location westus2`).
+// OpenAI is overridden to West US 3 via `sharedOpenAiLocation` below (mirrors r2's
+// `spaarke-openai-prod` which was West US 3). Model 1 Prod = 2-region deployment,
+// same-sub, cross-region OpenAI access — standard Azure pattern for OpenAI
+// consumers whose primary region lacks the desired GA models.
+param location = 'westus2'
+
+// Override: deploy Azure OpenAI to West US 3 instead of West US 2 because gpt-5
+// family (gpt-5.4 + gpt-5-mini + gpt-5-pro) is GA in westus3 but absent from westus2.
+// West US 3 also has text-embedding-3-large GA. See sharedOpenAiLocation param doc
+// in stacks/model1-shared.bicep for rationale + discovery context.
+param sharedOpenAiLocation = 'westus3'
 
 // ============================================================================
 // PER-TENANT SEED GROUP (required — stacks/model1-shared.bicep composes shared

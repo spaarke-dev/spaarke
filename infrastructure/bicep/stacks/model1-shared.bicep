@@ -74,8 +74,11 @@ targetScope = 'subscription'
 @allowed(['dev', 'staging', 'prod'])
 param environment string
 
-@description('Primary Azure region for all resources (shared + per-tenant).')
+@description('Primary Azure region for MOST resources (App Service Plan, KV, Cosmos, Redis, SB, Storage, Doc Intel, AI Search, UAMI, App Insights, LogAn — both shared + per-tenant).')
 param location string = 'eastus'
+
+@description('SHARED PLATFORM — Azure OpenAI region (separate from `location` because gpt-5 family GA is region-specific). Defaults to `location` for back-compat. Override to `westus3` when `location` is `westus2` (r2 pattern: spaarke-openai-prod in West US 3, spaarke-bff-prod in West US 2). Discovered 2026-08-22 during Model 1 Prod stand-up (customer-provisioning-orchestration-r1): gpt-5 family is fully GA in eastus + westus3 but absent from westus2.')
+param sharedOpenAiLocation string = location
 
 @description('SHARED PLATFORM — Resource group name for shared infrastructure. Canonical: rg-spaarke-shared-{env}.')
 param sharedResourceGroupName string = 'rg-spaarke-shared-${environment}'
@@ -340,7 +343,7 @@ module sharedOpenAi '../modules/openai.bicep' = {
   name: 'openAi-shared'
   params: {
     openAiName: sharedOpenAiName
-    location: location
+    location: sharedOpenAiLocation // Can differ from primary `location` — see param doc above
     // Higher capacity than Model 2 dedicated — serves multiple Model 1 tenants
     // with per-tenant budget enforcement via D19/A2 token-metering layer.
     //
@@ -362,41 +365,65 @@ module sharedOpenAi '../modules/openai.bicep' = {
     // `o1-mini`) so ~15 BFF files referencing those strings need no change; Azure
     // OpenAI decouples deployment name from underlying model — standard pattern.
     // The MODELS are modernized to current GA (not Legacy) versions.
+    // Deployment set REVISED 2026-08-22 (customer-provisioning-orchestration-r1
+    // Model 1 Prod first-live stand-up) for AUTO-ALLOCATED QUOTA COMPATIBILITY:
+    //
+    // Fresh Azure subs in West US 3 get these auto-allocated (verified via
+    // `az cognitiveservices usage list -l westus3`):
+    //   - gpt-5-mini GlobalStandard: 500 TPM (>= our 300 use)
+    //   - text-embedding-3-large STANDARD SKU: 350 TPM (our exact ask)
+    // Fresh subs get ZERO for:
+    //   - gpt-5.4 GlobalStandard (needs support ticket for bump)
+    //   - gpt-5-pro GlobalStandard (needs support ticket for bump)
+    //   - text-embedding-3-large GlobalStandard (needs support ticket)
+    //
+    // TEMPORARY 2-tier stack (Fast + Standard both on gpt-5-mini):
+    // - `gpt-4o` alias runs gpt-5-mini @ 200 TPM (Standard tier — technically a mini
+    //   in the Standard slot; behavior close to legacy gpt-4o for most workloads,
+    //   comparable in reasoning + tool-calling; ideal target is gpt-5.4)
+    // - `gpt-4o-mini` alias runs gpt-5-mini @ 100 TPM (Fast tier — its natural home)
+    // - Reasoning tier UNFILLED (BFF's ModelTierDeploymentResolver line 47-49 auto-
+    //   falls back to Standard when Reasoning model is not configured — documented
+    //   behavior; ideal target is gpt-5-pro)
+    // - Embeddings on Standard SKU (works for our scale; ideal target is GlobalStandard
+    //   for consistency with rest of set once quota approved)
+    //
+    // UPGRADE PATH to full P5 (do this AFTER filing support ticket + Microsoft
+    // approving these quotas — probably 1-24 hrs; not blocking prod stand-up):
+    //   1. Change 'gpt-4o' alias: model 'gpt-5-mini' → 'gpt-5.4', capacity 200 → 150
+    //   2. Add back the 'o1-mini' alias: model 'gpt-5-pro', GlobalStandard, capacity 50
+    //   3. Change text-embedding-3-large SKU: 'Standard' → 'GlobalStandard'
+    //   4. Re-run `az deployment sub create` (idempotent — reconciles the deployments)
+    //
+    // Deployment ALIAS names preserved (`gpt-4o`, `gpt-4o-mini`) so ~15 BFF files
+    // referencing those strings need zero change; Azure OpenAI decouples deployment
+    // name from underlying model — standard pattern.
     deployments: [
-      // ALL gpt-5.x deployments use 'GlobalStandard' SKU (gpt-5-pro literally supports
-      // no other SKU; gpt-5.4/mini support Standard is FALSE — Azure rejects). text-
-      // embedding-3-large supports both Standard + GlobalStandard; we standardize on
-      // GlobalStandard for the whole tier to keep the deployment set homogeneous.
-      // See modules/openai.bicep line ~114 for the per-deployment SKU override
-      // mechanism (2026-08-22 addition; backward-compat default is Standard).
       {
-        name: 'gpt-4o' // BFF deployment alias (ModelSelector Standard/ScopeGeneration/Default)
-        model: 'gpt-5.4'
-        version: '2026-03-05' // GA, retirement 2027-09-21 — long runway
+        name: 'gpt-4o' // BFF deployment alias (ModelSelector Standard/ScopeGeneration/Default; ModelTierDeploymentResolver Standard tier)
+        model: 'gpt-5-mini'
+        version: '2025-08-07' // GA, retirement 2027-02-09
         sku: 'GlobalStandard'
-        capacity: 150
+        capacity: 200 // From auto-allocated gpt-5-mini GlobalStandard 500 TPM pool (100 more for `gpt-4o-mini` alias below = 300 of 500)
       }
       {
         name: 'gpt-4o-mini' // BFF deployment alias (ModelSelector Fast tier: Classification/EntityResolution/Validation/Explanation/ToolHandler)
         model: 'gpt-5-mini'
         version: '2025-08-07' // GA, retirement 2027-02-09
         sku: 'GlobalStandard'
-        capacity: 200 // >= 200 TPM required for beta scale
-      }
-      {
-        name: 'o1-mini' // BFF deployment alias (ModelSelector PlanGeneration; ModelTierDeploymentResolver Reasoning tier)
-        model: 'gpt-5-pro'
-        version: '2025-10-06' // GA, retirement 2027-02-09 — purpose-built reasoning model
-        sku: 'GlobalStandard'
-        capacity: 50 // Reasoning models are called selectively; lower TPM sufficient for MVP
+        capacity: 100 // From auto-allocated gpt-5-mini GlobalStandard 500 TPM pool
       }
       {
         name: 'text-embedding-3-large'
         model: 'text-embedding-3-large'
         version: '1' // GA, retirement 2028-02-09
-        sku: 'GlobalStandard'
+        sku: 'Standard' // Auto-allocated 350 TPM (GlobalStandard is 0 on fresh sub — upgrade after quota approval)
         capacity: 350
       }
+      // Reasoning tier `o1-mini` alias INTENTIONALLY OMITTED — gpt-5-pro GlobalStandard
+      // TPM is 0 on fresh sub, needs quota approval. BFF's ModelTierDeploymentResolver
+      // line 47-49 documented fallback: `Reasoning` tier requests fall back to
+      // `StandardModel` when ReasoningModel not configured. Zero code impact.
     ]
     tags: sharedTags
   }
