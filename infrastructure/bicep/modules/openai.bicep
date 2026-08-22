@@ -110,12 +110,20 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
 // MODEL DEPLOYMENTS
 // ============================================================================
 
+// Deployment SKU is per-deployment optional (default 'Standard' preserves prior
+// caller behavior). gpt-5.x family REQUIRES 'GlobalStandard' (gpt-5-pro literally
+// supports no other SKU); gpt-4o family supports 'Standard'. Add `sku: 'GlobalStandard'`
+// to a deployment object to override — see stacks/model1-shared.bicep for the
+// canonical gpt-5.x tier stack example. Discovered 2026-08-22 during Model 1 Prod
+// stand-up (customer-provisioning-orchestration-r1) — preflight rejects with
+// "InvalidResourceProperties: The specified SKU 'Standard' of account deployment
+// is not supported by the model 'gpt-5.x'" when this defaults for gpt-5 models.
 @batchSize(1)
 resource modelDeployments 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = [for deployment in deployments: {
   parent: openAi
   name: deployment.name
   sku: {
-    name: 'Standard'
+    name: deployment.?sku ?? 'Standard'
     capacity: deployment.capacity
   }
   properties: {

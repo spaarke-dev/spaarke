@@ -343,23 +343,58 @@ module sharedOpenAi '../modules/openai.bicep' = {
     location: location
     // Higher capacity than Model 2 dedicated — serves multiple Model 1 tenants
     // with per-tenant budget enforcement via D19/A2 token-metering layer.
+    //
+    // 3-tier deployment set (Fast / Standard / Reasoning + Embeddings) matches
+    // BFF's ModelSelector (Services/Ai/ModelSelector.cs) + ModelTierDeploymentResolver
+    // (Services/Ai/LinearConsumers/ModelTierDeploymentResolver.cs, ADR-039 canonical).
+    //
+    // customer-provisioning-orchestration-r1 Model 1 Prod stand-up (2026-08-22):
+    // BUMPED to gpt-5 family. Previous pins (gpt-4o:2024-08-06 + gpt-4o-mini:2024-07-18
+    // + missing reasoning deployment) surfaced two problems at prod-deploy time:
+    //   (1) Both gpt-4o + gpt-4o-mini pins deprecated by Microsoft on 2026-03-31,
+    //       blocked from new deployment ("ServiceModelDeprecated" preflight error)
+    //   (2) Reasoning tier was declared in BFF (`o1-mini` default in ModelSelector.cs
+    //       line 70 + `AiModelTier.Reasoning` enum in ModelTierDeploymentResolver)
+    //       but had NO Bicep deployment — Reasoning-tagged Actions were falling
+    //       back to Standard silently.
+    //
+    // Deployment NAMES are preserved from the legacy set (`gpt-4o`, `gpt-4o-mini`,
+    // `o1-mini`) so ~15 BFF files referencing those strings need no change; Azure
+    // OpenAI decouples deployment name from underlying model — standard pattern.
+    // The MODELS are modernized to current GA (not Legacy) versions.
     deployments: [
+      // ALL gpt-5.x deployments use 'GlobalStandard' SKU (gpt-5-pro literally supports
+      // no other SKU; gpt-5.4/mini support Standard is FALSE — Azure rejects). text-
+      // embedding-3-large supports both Standard + GlobalStandard; we standardize on
+      // GlobalStandard for the whole tier to keep the deployment set homogeneous.
+      // See modules/openai.bicep line ~114 for the per-deployment SKU override
+      // mechanism (2026-08-22 addition; backward-compat default is Standard).
       {
-        name: 'gpt-4o'
-        model: 'gpt-4o'
-        version: '2024-08-06'
+        name: 'gpt-4o' // BFF deployment alias (ModelSelector Standard/ScopeGeneration/Default)
+        model: 'gpt-5.4'
+        version: '2026-03-05' // GA, retirement 2027-09-21 — long runway
+        sku: 'GlobalStandard'
         capacity: 150
       }
       {
-        name: 'gpt-4o-mini'
-        model: 'gpt-4o-mini'
-        version: '2024-07-18'
+        name: 'gpt-4o-mini' // BFF deployment alias (ModelSelector Fast tier: Classification/EntityResolution/Validation/Explanation/ToolHandler)
+        model: 'gpt-5-mini'
+        version: '2025-08-07' // GA, retirement 2027-02-09
+        sku: 'GlobalStandard'
         capacity: 200 // >= 200 TPM required for beta scale
+      }
+      {
+        name: 'o1-mini' // BFF deployment alias (ModelSelector PlanGeneration; ModelTierDeploymentResolver Reasoning tier)
+        model: 'gpt-5-pro'
+        version: '2025-10-06' // GA, retirement 2027-02-09 — purpose-built reasoning model
+        sku: 'GlobalStandard'
+        capacity: 50 // Reasoning models are called selectively; lower TPM sufficient for MVP
       }
       {
         name: 'text-embedding-3-large'
         model: 'text-embedding-3-large'
-        version: '1'
+        version: '1' // GA, retirement 2028-02-09
+        sku: 'GlobalStandard'
         capacity: 350
       }
     ]
