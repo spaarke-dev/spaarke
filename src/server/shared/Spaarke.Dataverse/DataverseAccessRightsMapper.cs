@@ -24,8 +24,17 @@ namespace Spaarke.Dataverse;
 /// <c>entity.associate_document</c> resolves and the denial reads as a legitimate
 /// <c>insufficient_rights</c>. Task 003 recorded exactly that failure mode as a binding obligation on
 /// task 005.</para>
+///
+/// <para><b>Why it became public</b> (task 008, spec FR-07). It was <c>internal</c> + <c>InternalsVisibleTo</c>
+/// while <see cref="DataverseAccessDataSource"/> was its only consumer and the test assembly its only
+/// other reader. Task 008's <c>CallerRecordAccessProbe</c> lives in <c>Sprk.Bff.Api</c> and reads the
+/// same <c>RetrievePrincipalAccess</c> wire format for a project/matter/work-assignment target, so it
+/// needs this mapper from a different assembly. Widening this pure function is the narrow option; the
+/// alternatives were an <c>InternalsVisibleTo("Sprk.Bff.Api")</c> that would expose every internal in
+/// this assembly, or a second copy of the name→flag table — and two copies of that table is exactly
+/// how an <c>AppendAccess</c>/<c>AppendToAccess</c> transposition gets introduced in one of them.</para>
 /// </remarks>
-internal static class DataverseAccessRightsMapper
+public static class DataverseAccessRightsMapper
 {
     /// <summary>
     /// Maps a comma-separated Dataverse rights string to flags.
@@ -35,7 +44,7 @@ internal static class DataverseAccessRightsMapper
     /// <see cref="AccessRights.None"/> — an authoritative "no rights", which is the fail-closed answer.
     /// </param>
     /// <returns>The bitwise combination of every recognised right. Unrecognised names contribute nothing.</returns>
-    internal static AccessRights FromAccessRightsString(string? accessRightsString)
+    public static AccessRights FromAccessRightsString(string? accessRightsString)
     {
         if (string.IsNullOrWhiteSpace(accessRightsString))
         {

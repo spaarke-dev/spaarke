@@ -431,6 +431,20 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
 
+            // Delegation rule (unified-access-control-r2 task 008, FR-07): every /api/v1/external-access
+            // route now requires Write on the target record, evaluated as the caller via an OBO probe.
+            // These are CONTRACT tests — they assert what /invite-and-grant does for an ENTITLED caller,
+            // not who is entitled — so the fixture's caller is given Write. Without this the real probe
+            // has no Dataverse offline, correctly answers "no rights", and every case 403s before the
+            // contract under test is ever exercised.
+            //
+            // Deliberately NOT an "allow everything" stub: it reports Write on the record it is asked
+            // about, so if a future change aimed the check at the wrong record these tests would still
+            // pass — that discrimination is owned by DelegationRuleCharacterizationTests, which asserts
+            // the probed target. Here the point is only that an entitled caller gets through.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new EntitledCallerRecordAccessProbe());
+
             // Replace the Dataverse-backed external services with header-driven stubs (virtual seams).
             services.RemoveAll<ExternalParticipationService>();
             services.AddScoped<ExternalParticipationService>(sp =>
@@ -584,6 +598,27 @@ internal sealed class StubExternalDataService : ExternalDataService
             ? Task.FromResult<(Guid?, string?)>((projectId, "external-doc.bin"))
             : Task.FromResult<(Guid?, string?)>((null, null));
     }
+}
+
+/// <summary>
+/// A caller who holds Write on whatever record the delegation rule asks about — i.e. someone entitled
+/// to manage external access, which is the caller these contract tests are written from the
+/// perspective of (task 008, FR-07).
+/// </summary>
+/// <remarks>
+/// Substituted at the <c>virtual</c> seam on <see cref="CallerRecordAccessProbe"/>, so no OBO exchange
+/// or Dataverse call is attempted. Whether an UNENTITLED caller is refused — the actual subject of
+/// FR-07 — is asserted in <c>tests/integration/auth/UnifiedAccessControl/</c>, not here.
+/// </remarks>
+public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
+{
+    public EntitledCallerRecordAccessProbe()
+        : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+    { }
+
+    public override Task<AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(AccessRights.Read | AccessRights.Write);
 }
 
 /// <summary>

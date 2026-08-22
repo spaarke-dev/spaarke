@@ -32,7 +32,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
 | ✅ 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
 | 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
-| 🔲 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
+| ✅ 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
 | 🔲 009 | Scope-check external To Do PATCH (+H-8a) | FR-08 / A-7 | 001 | — | ❌ | sonnet | high |
 | ✅ 010 | Idempotent grant + revoke-all | FR-09 / A-11 | 001 | — | ❌ | **opus** | **xhigh** |
 | 🔲 011 | Reject same-entity self-join | FR-10 / A-17 | 001 | — | ❌ | sonnet | high |
@@ -175,6 +175,43 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > `GroupBy` collapse (scoped out by constraint). Task **017** edits the same file next and MUST NOT reduce
 > the sweep back to a single row.
 > Rationale: [`notes/task-010-grant-lifecycle.md`](../notes/task-010-grant-lifecycle.md).
+
+> **Task 008 outcome (2026-08-22)**: A-6 closed — **FR-07's delegation gate is in place, so the PCF
+> "+ User" button (task 065) is unblocked.** `AddDelegationRuleFilter()` on the `/api/v1/external-access`
+> group enforces B-14 (Write on the target record, evaluated as the caller) across all SIX mutations.
+> **Group-level, dispatching on the bound request TYPE with a default that DENIES** — a seventh route
+> added later is gated from its first request rather than inheriting the hole. Route→target: grant /
+> invite / invite-and-grant → the grant root; **revoke → the ROW's root, not the body's `projectId`**
+> (checking the body would let a caller with Write on any project revoke grants on a matter they cannot
+> touch); close/provision → the project.
+> **The existing authorization path could NOT serve this.** `DataverseAccessDataSource` hard-codes
+> `sprk_documents({id})` in BOTH its RPA target and its fallback probe, so it answers `None` for a
+> project for EVERY caller — the filter would have denied universally. `IDataverseUserClient` is the
+> right shape but is twice-gated (compound AI gate + `ToolFramework:Enabled`) → depending on it from
+> six unconditional routes would be the §10 F.1 asymmetric-registration anti-pattern. Hence
+> `CallerRecordAccessProbe`: OBO `WhoAmI()` → `RetrievePrincipalAccess`, entity-generic, fail-closed.
+> **`WhoAmI` is not incidental** — RPA takes the principal as an ARGUMENT, so an app-only version would
+> carry the caller's identity as *data* (a wrong id silently answers about the wrong person: the A-2
+> shape). Under OBO the identity is the *credential*.
+> **No read-probe fallback, deliberately**: a read proves Read, and Read is not licence to grant. So an
+> RPA outage denies all six mutations rather than widening them — logged as `DELEGATION-RPA-UNAVAILABLE`,
+> and **task 034 now owns live RPA verification for six mutation endpoints, not just the document read.**
+> Both escalation triggers evaluated; **neither fired** — `provision-project`'s premise was false (the
+> handler already requires the project to exist), and revoke's extra read duplicates one the handler
+> already performs. ⚠️ **Residual owner decision**: provisioning creates a **business unit**; is
+> Write-on-project the right gate, or should it need a privileged role?
+> ⚠️ `/invite` now REQUIRES a resolvable root (it provisions a CIAM identity). The only first-party
+> caller already sends `projectId` as required, so nothing breaks — but it is a contract narrowing.
+> ⚠️ Two `ExternalAccessContractTests` needed an entitled caller in their fixture; the production rule
+> was **not** weakened for them. ⚠️ Filed for triage: `EntityAccessFilter` passes
+> `"{entityType}:{entityId}"` into that same document-only data source and can therefore only resolve
+> `None` — the Office save path's entity check may be inert (same class as A-20, no Phase 0 owner).
+> 🔔 **ADR-028 A4 needs an owner ruling**: a NEW `.WithClientSecret(...)` site (the 8th). E-3 covers
+> transitional sites and does not license expansion; there is no `WithClientAssertion` anywhere in the
+> repo, so complying would mean inventing MI-FIC plumbing inside an authorization filter. **Path A
+> proposed.** ADR-003's "rules only / no new auth service layers" tension is the SAME one already routed
+> to task 030's path-B amendment — cited, not re-escalated.
+> Rationale: [`notes/task-008-delegation-rule.md`](../notes/task-008-delegation-rule.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

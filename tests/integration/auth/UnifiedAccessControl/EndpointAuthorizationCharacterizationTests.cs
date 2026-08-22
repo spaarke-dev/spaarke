@@ -293,21 +293,30 @@ public class EndpointAuthorizationCharacterizationTests
     }
 
     /// <summary>
-    /// A-6 — CURRENT (BROKEN) BEHAVIOR. Grant / revoke / close-project sit behind bare
-    /// <c>RequireAuthorization()</c> (ExternalAccessEndpoints.cs:109-111) with no delegation check, so
-    /// authentication alone admits the caller to the external-grant write surface. A read-only user is
-    /// not distinguished from someone entitled to grant access.
+    /// ✅ FLIPPED BY TASK 008 (FR-07) — was
+    /// <c>Characterization_ExternalAccessAdminRoutes_AdmitAnyAuthenticatedCaller</c>.
     ///
-    /// FLIPPED BY: task 008 (FR-07) — the delegation rule ("you may grant if you have Write on the
-    /// target record", decision B-14) MUST reject a caller lacking Write. This is the gate that has to
-    /// land BEFORE the PCF "+ User" button (task 065), or that button is one-click privilege
-    /// escalation on a confidential matter.
+    /// <para>A-6: grant / revoke / close-project sat behind a bare <c>RequireAuthorization()</c>
+    /// (ExternalAccessEndpoints.cs:109-111) with no delegation check, so authentication alone admitted
+    /// the caller to the external-grant write surface — a read-only user was not distinguished from
+    /// someone entitled to grant access.</para>
+    ///
+    /// <para>The group now carries <c>AddDelegationRuleFilter()</c>, which enforces owner decision
+    /// B-14: you may change who can reach a record only if you hold Write on that record, evaluated as
+    /// the caller. This is the gate that had to land BEFORE the PCF "+ User" button (task 065).</para>
+    ///
+    /// <para><b>Scope of this assertion.</b> It pins that the routes are no longer OPEN. It cannot
+    /// distinguish the rule from an unconditional denial, because the real
+    /// <c>CallerRecordAccessProbe</c> has no Dataverse offline and correctly answers "no
+    /// rights" for everyone. The discriminating coverage — the same routes ADMITTING a caller who
+    /// holds Write — is <see cref="DelegationRuleCharacterizationTests"/>, which substitutes the probe.
+    /// Read the two together; neither is sufficient alone.</para>
     /// </summary>
     [Theory]
     [InlineData("/api/v1/external-access/grant")]
     [InlineData("/api/v1/external-access/revoke")]
     [InlineData("/api/v1/external-access/close-project")]
-    public async Task Characterization_ExternalAccessAdminRoutes_AdmitAnyAuthenticatedCaller(string route)
+    public async Task ExternalAccessAdminRoutes_ForCallerWithoutWriteOnTarget_AreDenied(string route)
     {
         // Arrange — authenticated, but with no demonstrated Write on any target record.
         using var client = _fixture.CreateAuthenticatedClient();
@@ -321,28 +330,29 @@ public class EndpointAuthorizationCharacterizationTests
             accessLevel = 1
         });
 
-        // Assert — CURRENT behavior: neither authentication nor authorization rejects this caller.
-        // (Downstream the handler fails on the unavailable test-host Dataverse, which is irrelevant
-        // here — the finding is that the caller was admitted to the grant-write surface at all.)
-        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
-            "A-6 pins the CURRENT broken state: {0} is behind bare RequireAuthorization() with no " +
-            "delegation check. Task 008 adds the Write-on-target rule and flips this to Forbidden.", route);
-        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+        // Assert — authentication still passes (that gate is unchanged); authorization now refuses.
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "FR-07/B-14: {0} mutates who can reach a record, so a caller who cannot be shown to hold " +
+            "Write on that record must be refused", route);
+        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized,
+            "the authentication floor is unchanged — this is an authorization denial, not a credential one");
     }
 
     /// <summary>
-    /// A-6 — the non-vacuous half of the above. <c>/grant</c> answers <c>400</c> for a malformed body,
-    /// which can only happen INSIDE the handler: the caller passed every gate in front of it. So the
-    /// grant-write surface is genuinely reachable by an arbitrary authenticated caller, not merely
-    /// "not visibly rejected".
+    /// ✅ FLIPPED BY TASK 008 (FR-07) — was
+    /// <c>Characterization_PostGrant_ReachesHandlerValidationForArbitraryAuthenticatedCaller</c>.
     ///
-    /// This is the finding that gates task 065: until task 008 lands the delegation rule, the PCF
-    /// "+ User" button would be a one-click path to Full Access on a confidential matter.
+    /// <para>A-6's sharpest evidence: <c>/grant</c> used to answer <c>400</c> for a malformed body,
+    /// which can only happen INSIDE the handler. The grant-write surface was therefore genuinely
+    /// reachable by an arbitrary authenticated caller, not merely "not visibly rejected".</para>
     ///
-    /// FLIPPED BY: task 008 (FR-07) — authorization MUST reject before body validation is reached.
+    /// <para>Authorization now runs first, so the same request never reaches validation. The inverse
+    /// — a caller WITH Write reaching that same 400 — is asserted by
+    /// <c>DelegationRuleCharacterizationTests.ExternalAccessMutation_ForCallerWithWriteOnTarget_ReachesHandlerValidation</c>,
+    /// which is what makes this pair discriminating rather than a blanket "everything denies".</para>
     /// </summary>
     [Fact]
-    public async Task Characterization_PostGrant_ReachesHandlerValidationForArbitraryAuthenticatedCaller()
+    public async Task PostGrant_ForArbitraryAuthenticatedCaller_IsRejectedBeforeHandlerValidation()
     {
         // Arrange — authenticated caller with no entitlement to grant anything.
         using var client = _fixture.CreateAuthenticatedClient();
@@ -354,12 +364,12 @@ public class EndpointAuthorizationCharacterizationTests
             accessLevel = 1
         });
 
-        // Assert — 400 proves handler entry: authorization admitted the caller, and only the payload
-        // stopped the grant.
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "A-6 pins the CURRENT broken state: the caller reached the handler's own validation, so " +
-            "nothing in front of it asked whether this caller may grant access. Task 008 adds that " +
-            "check, and the caller is then rejected before validation runs.");
+        // Assert — 403, not the 400 the handler's own validation would have produced. Authorization
+        // decided before the payload was ever judged, so no app-only write could be attempted.
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the delegation rule must reject an unentitled caller BEFORE body validation — reaching " +
+            "validation is what proved the surface was open (A-6)");
+        response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest);
     }
 
     /// <summary>
