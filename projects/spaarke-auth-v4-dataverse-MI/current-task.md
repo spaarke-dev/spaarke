@@ -11,11 +11,48 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — PHASE 6 IS COMPLETE. 022, 060, 061, 062, 063 all closed and pushed |
+| **Task** | **none active** — Phase 6 complete; Group F started (**055, 052** closed) |
 | **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | **`031` — owner decision required first** (see the red section below). Everything not gated on a human decision or elapsed time is done |
-| **Progress** | **15 of 26 active complete** · **11 remaining** (031,032,033,050-056,090) · 3 deferred |
+| **Next Action** | **Group F: `050` → `053` → `054` → `056` → `051`.** Read the ⚠️ Group F block below FIRST — the RBAC sweep at task 052 already answered several of their prerequisites |
+| **Progress** | **17 of 26 active complete** · **9 remaining** (031,032,033,050,051,053,054,056,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
+
+---
+
+## ⚠️ Group F (050–056) — free prerequisites already established by task 052's RBAC sweep
+
+**Read before starting any of these.** A subscription-wide role listing for the UAMI
+(`9fd47efb-7962-492b-ac44-e5ccd0268ebb`) turned up prerequisites the individual tasks would otherwise
+each go and discover:
+
+| Task | What is already true |
+|---|---|
+| **053** AI Search | UAMI already holds **`Search Index Data Contributor`** on `spaarke-search-dev`. The RBAC half is DONE — the task is code + config only |
+| **051** Service Bus | UAMI holds **`Data Sender`** + **`Data Receiver`**, but **scoped to the `sprk-membership-changes` TOPIC ONLY**, not the namespace. Do NOT assume namespace-level access — any other topic/queue needs its own grant. ⚠️ This task also says "rotate the leaked SAS": `appsettings.Development.json` contains a live Service Bus SAS key. **Rotating a live shared credential is an outward-facing action — confirm with the owner first** |
+| **050** Content Safety | Check for `Cognitive Services User` on the Content Safety resource — the UAMI has it on `spaarke-openai-dev`, which is a DIFFERENT account. Verify before assuming |
+| **033 / 055** | The Key Vault is **`spaarke-spekvcert`**, resource group **`SharePointEmbedded`** (UAMI holds `Key Vault Secrets User`). This answers the vault question task 055 could not resolve — it is where the secret purge happens |
+
+### 🔴 The UAMI is NOT in `rg-spaarke-dev`
+
+It lives in **`spe-infrastructure-westus2`**. `az identity show -g rg-spaarke-dev -n mi-bff-api-dev`
+returns **`ResourceNotFound`**. Resolve it from the App Service instead — by resource ID, per this
+project's own rule:
+
+```bash
+az webapp identity show -g rg-spaarke-dev -n spaarke-bff-dev --query userAssignedIdentities
+```
+
+`spaarke-openai-dev` and `spaarke-search-dev` are also in `spe-infrastructure-westus2`, and the Service
+Bus namespace is in `SharePointEmbedded`. **The dev estate spans at least four resource groups.**
+
+---
+
+## Group F — completed
+
+| Task | Outcome |
+|---|---|
+| **055** | `Analysis:PromptFlowKey` — **DEAD, deleted** (`250a5faae`). Zero readers, never deployed, KV entries were never-updated placeholders. The one Prompt Flow artifact in the repo uses the Foundry SDK's `@tool` decorator and does not read this key. KV purge booked to 033. [Record](notes/decisions/055-promptflow-key-disposition.md) |
+| **052** | ADR-028 **E-2 RE-AFFIRMED**, key NOT cleared (`0ece27567`). Custom subdomain IS configured → the hoped-for one-config fix never existed. **Near-miss**: a user-token 200 nearly became "E-2 disproven", but E-2 already documents that exact test passing — the distinguishing fact is user-200 vs MI-401. The MI half is untestable from here (Kudu SCM has no `IDENTITY_ENDPOINT`). One cheap test booked to 031. [Record](notes/decisions/052-azure-openai-e2-retest.md) |
 
 ---
 
