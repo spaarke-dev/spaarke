@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 — **task 022 COMPLETE. PHASE 2 IS DONE.**
+> **Last Updated**: 2026-08-21 — **PHASE 2 AND PHASE 6 ARE BOTH COMPLETE.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -69,14 +69,23 @@ Full record: [`notes/decisions/022-migrate-confidential-clients.md`](notes/decis
 
 ---
 
-## Phase 6 — what each task inherited (READ BEFORE STARTING 060)
+## Phase 6 — COMPLETE. The forcing functions are in place
 
-| Task | Booked obligations |
+| Task | Outcome |
 |---|---|
-| ~~**060**~~ | ✅ **DONE** (`bde4a640d`). `tests/Spaarke.ArchTests/CredentialGuardTests.cs`, 8 tests. All three booked guards landed. **Success criterion 12 demonstrated live** — a seeded ninth secret-bearing client failed the build naming `file:line`, then was removed. Record: [`notes/decisions/060-credential-guard.md`](notes/decisions/060-credential-guard.md) |
-| **061** | Census must scan **ALL server assemblies**, not just the BFF (020's blind spot — and `ConfidentialClientTokenCredential` now lives in `Spaarke.Dataverse`) · count the provider as **ONE consolidated site, not expansion** · keep both Power BI sites as secret-backed entries |
-| **062** | ⚠️ **READ THIS FIRST — written naively, this guard fires on today's dev configuration.** It must fail outside Development when a BFF credential *resolves to* a secret. But `AddCredentialSelection`'s default order still **contains** `ClientSecret`, deliberately, until task 033 — that is the E-3 fallback and the rollback target. So key the assertion on the credential actually **SELECTED** (`OrderedCredentialClientProvider.SelectedKindFor`), never on the order's contents; or ship it disabled until 033 flips it on. Decide explicitly and record which |
-| **063** | Depends on 060+061. `tests/Spaarke.ArchTests/` is **not** a KEEP path, so `/test-diet` at 090 would delete the forcing functions this project exists to leave behind |
+| **060** | `tests/Spaarke.ArchTests/CredentialGuardTests.cs`, 8 tests (`bde4a640d`). The credential ban + all three booked guards (010 decoupling, 023 no-name-resolution, 020 assertion reuse). **Success criterion 12 demonstrated live.** [Record](notes/decisions/060-credential-guard.md) |
+| **061** | `CredentialCensusTests.cs`, 5 tests (`502f31395`). 7 sites / 6 files, per-FILE counts, both SDKs. **Cross-assembly blind spot demonstrated live** from `Spaarke.Dataverse`. [Record](notes/decisions/061-credential-census.md) |
+| **062** | `IdentityConfigurationValidator` **rule 6** + `RequireSecretFreeIdentity` (`047a9ae40`). Asserts the ORDER, not a resolution — a startup probe would refuse to boot during Entra's measured ~2-min flap. Inert by default. [Record](notes/decisions/062-startup-credential-assertion.md) |
+| **063** | `/test-diet` heuristic 0 + `tests/CLAUDE.md` fitness-function category (`05818d8b2`). **Also fixed a repo-wide defect**: the classifier was missing `tests/integration/seam/**`, so every seam test in the repo was a delete candidate. **Carries an OPEN ADR-038 path-B proposal.** [Record](notes/decisions/063-archtest-keep-path.md) |
+
+## 🔔 OPEN OWNER DECISION — ADR-038 amendment (task 063, CLAUDE.md §6.5 path B)
+
+ADR-038 names *"NetArchTest-style architecture tests at Tier 1"* as the sanctioned replacement for the
+discovery lost to bans B1–B5 — and its own KEEP-path list leaves them unprotected, so `/test-diet`
+recommends deleting them. **Proposal: add an eighth category, `tests/Spaarke.ArchTests/**` (structural
+fitness functions).** The gap is general — `LayerDependencyTests` and `ADR010_DITests` have had the same
+exposure since before this project existed. ADR-038 was NOT edited; the directive + skill changes hold
+the line meanwhile and are marked ratification-open. Full write-up in the 063 record §4.
 
 **Success criterion 12 (the distinguishing one)**: introduce a deliberate ninth secret-bearing
 confidential client on a scratch branch and **the build must fail**. That is 060+061's real acceptance
