@@ -1,48 +1,93 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-21 T18:20Z (by context-handoff) — **Wave H-3 PARTIAL PAUSE after 8 of 13 steps executed. 4 fix-at-discovery patches committed at `5076b0a14` + pushed. Step 9 hit a sidecar Layer-2 blocker requiring container-stdout access we haven't identified. Next session picks up with sidecar diagnostics + BFF-API-ClientSecret real value.**
+> **Last Updated**: 2026-08-21 T19:15Z (by context-handoff) — **Wave H-3 CLOSED ✅ (all essentials green; TASK-INDEX 108/110/113 → ✅). Strategic pivot away from Wave H-4: instead of validating r1 REST API E2E against a fresh customer, we stand up the PRODUCTION Model 1 shared environment first (using existing `infrastructure/bicep/stacks/model1-shared.bicep`). Awaiting owner decision on new Azure subscription for Model 1 Prod.**
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST on fresh session)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `5076b0a14` — clean tree, in sync with origin (`git push` completed 18:20Z) |
-| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT, no CI configured on `work/*` branches) |
-| **Working tree** | CLEAN. All fix-at-discovery patches committed. |
-| **Phase status** | Wave H-3 PARTIAL — Steps 1-8 ✅ · Step 9 (Deploy-ControlPlane) partial: code deployed but sites unhealthy · Steps 10-13 pending |
-| **Live Azure state** | L2 control-plane infra fully deployed on `rg-spaarke-platform-dev`. 3 sites (Api prod, Api staging, Worker) `state: Running` at App Service level but `/healthz` returns 500/503. Sidecar exits 1 → App Service kills whole site startup. |
-| **Owner decision needed** | Option A/B/C/D (see §"Wave H-3 pause — 4-option decision" below) |
+| **HEAD** | `c6c9dfe80` — clean tree, in sync with origin |
+| **PR** | https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT) |
+| **Working tree** | CLEAN. All fixes committed. |
+| **Phase status** | **Wave H-3 CLOSED ✅** — L2 control-plane running on `rg-spaarke-platform-dev` with `/healthz` HTTP 200 on both .Api prod + .Worker. 5 fix-at-discovery patches merged. Sidecar Layer 2 permanently disabled (Bicep app-setting-ref bug — H-3.5 residual). |
+| **Strategic pivot (2026-08-21 T19:00Z)** | Wave H-4 (r1 REST-API E2E) DEFERRED. Instead: stand up **Model 1 Production Environment** in a NEW Spaarke Azure sub using `infrastructure/bicep/stacks/model1-shared.bicep` (already authored). This is the actual product deliverable — shared-tenancy tier for SMB customers. Wave H-4 becomes "add a customer TO Model 1 Prod" (much smaller). |
+| **Owner blocker** | Provision new Azure subscription named "Spaarke Model 1 Production" (or similar) + assign Owner to deploying identity. Once sub id + admin identity confirmed, Model 1 Prod deploy is ~1.5 hours of active work. |
 
 ### 🚀 FRESH SESSION RECOVERY (paste these commands)
 
 ```powershell
 # 1. Verify state matches this checkpoint
-git log --oneline -5      # Should show 5076b0a14 at HEAD
+git log --oneline -5      # Should show c6c9dfe80 at HEAD
 git status                # Should be clean
 
 # 2. Verify pac + az auth
 pac auth list             # Should show SPAARKE DEV 1 as active [3]
 az account show           # Should show Spaarke Development Environment sub
 
-# 3. Verify Azure state (should match: sites Running but /healthz failing)
-az webapp show --name spaarke-provisioning-controlplane-dev --resource-group rg-spaarke-platform-dev --query state -o tsv
-az webapp show --name spaarke-provisioning-controlplane-worker-dev --resource-group rg-spaarke-platform-dev --query state -o tsv
+# 3. Verify L2 control-plane still healthy (Wave H-3 end state)
+curl -sIm 15 https://spaarke-provisioning-controlplane-dev.azurewebsites.net/healthz | head -1
 curl -sIm 15 https://spaarke-provisioning-controlplane-worker-dev.azurewebsites.net/healthz | head -1
+# Both should return HTTP/1.1 200
 
-# 4. Verify blob artifact from Step 7 still there
-az storage blob list --auth-mode login --account-name sprkcpartifactsdev --container-name provisioning-artifacts -o table
+# 4. Confirm Model 1 Bicep stack exists (already authored)
+ls infrastructure/bicep/stacks/model1-shared.bicep
+ls infrastructure/bicep/stacks/model1-customer.bicep
 ```
 
 ### 📍 What to say to resume
 
-- **"continue with wave H-3"** → picks up at Step 9 unresolved (sidecar Layer 2) + Step 10-13
-- **"provide BFF-API-ClientSecret <value>"** → seeds the sentinel + retries Worker startup
+- **"start Model 1 Prod deployment"** → begins the ~1.5-hour deploy sequence (requires new sub id)
+- **"we don't have a new sub yet"** → I'll draft a Model-1-Prod deployment plan owner can hand to IT
+- **"continue Wave H-4 anyway"** → picks up r1 REST-API E2E against a customer target (needs the 3-5 Wave H-4 blockers addressed first)
+- **"where was I?"** → project-continue skill loads full context
 - **"debug sidecar"** → focused sidecar Layer 2 investigation (see §"Sidecar Layer 2 investigation approaches" below)
 - **"defer sidecar (Path D)"** → remove sitecontainer from Bicep so Worker starts, ship H-3 without sidecar
 - **"where was I?"** → project-continue skill loads full context
 
 ### 🧠 Critical context for next session
+
+**STRATEGIC PIVOT (2026-08-21 T19:00Z)** — this session ended with a shift in direction based on owner discussion:
+
+**The r1-vs-r2 clarification:**
+- `production-environment-setup-r2` (complete 2026-03-20) shipped `scripts/Provision-Customer.ps1` (1,632-line 13-step orchestrator). Demo env provisioned with it.
+- r1 is a re-architecture: 19 handlers in C# .NET + REST API + async Cosmos state machine. Adds new capabilities (H0.5 admin consent, H3 per-customer Entra app-reg, H10 Graph grants, H11 users, H12a/b/c AI, H14a Exchange sidecar) that Provision-Customer.ps1 doesn't do.
+- r1 is ~60-70% complete toward automated REST-API E2E. Underlying capability (via script) already exists.
+
+**Owner decision to pivot:**
+- Don't test Wave H-4 (r1 REST-API E2E) against a synthetic cross-tenant test customer
+- Instead: stand up the actual PRODUCTION Model 1 shared environment (`model1-shared.bicep` already authored). This IS the product deliverable — SMB tier where multiple customers share Spaarke's tenant/sub with row-level + per-tenant-resource isolation
+- Wave H-4 then becomes "add a first real customer to Model 1 Prod" (much smaller scope)
+- Model 1 uses SAME Spaarke Entra tenant by design (shared tenancy); needs new Azure sub for prod isolation from dev
+
+**Model 1 Prod deployment plan (~1.5 hours active work):**
+1. Owner provisions new Azure sub "Spaarke Model 1 Production" + assigns admin
+2. Author `parameters/model1-prod.bicepparam`
+3. `az deployment sub create --template-file infrastructure/bicep/stacks/model1-shared.bicep --parameters ...`
+   - Creates shared RG (`rg-spaarke-shared-prod`) + all shared modules (KV, Redis, SB, Storage, App Service Plan, OpenAI, AI Search, Doc Intelligence, shared BFF UAMI, shared BFF App Service, monitoring)
+   - Creates per-tenant RG + per-tenant KV/Storage/Cosmos/UAMI/App Insights
+4. Create shared Dataverse env (`spaarke-model1-prod.crm.dynamics.com`) via PPAC OR `Provision-Customer.ps1` step 5
+5. Import `SpaarkeMaster.zip` (already in blob from Wave H-3 Step 7)
+6. Configure shared BFF App Service with prod env vars
+7. Verify: /healthz → 200, sign in with Spaarke user, verify Model 1 shell loads
+8. Success = Model 1 Prod exists, ready for first real customer
+
+**Per-customer onboarding after that:**
+- ~10-15 min per customer (re-run same Bicep with new customerId → per-tenant RG only; shared RG no-op)
+- + Dataverse registry write + SPE container + user + role assignment
+
+**Wave H-4 in the pivot picture:**
+- Substantially smaller scope: only the PER-CUSTOMER handlers (~4-5 handlers vs. 19)
+- H0.5 admin consent NOT needed (shared tenant)
+- H3 per-customer Entra app-reg NOT needed (shared multitenant BFF app)
+- H2a customer.bicep NOT needed (model1-shared.bicep replaces it for Model 1)
+- H8 SPE container still needed per customer
+- H11 user provisioning still needed per customer
+- H14a sidecar still deferred (H-3.5 residual)
+
+---
+
+### Wave H-3 detailed state (preserved for reference):
 
 1. **What's DEPLOYED on Azure** (all landed via Bicep, all reversible via redeploy):
    - RG `rg-spaarke-platform-dev` — L2 UAMI, App Service Plan, KV `sprk-controlplane-dev-kv`, Cosmos `cosmos-spaarke-platform-dev`, App Insights + Log Analytics
