@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ (004, 010, 040) · **W3: 012 ✅**, 011 🔄 partial, 013 🔲 |
-| **Step** | Between tasks. **Next: 013** (Azure config, STANDARD, ~1h — cheapest fix in the project), then Workstream C via **029** / **030** |
-| **Status** | clean tree at checkpoint; task 012 committed |
-| **Next Action** | Invoke `task-execute` on `tasks/013-security-events-grant.poml`. Note its escalation trigger: **consent is an operator action** — if the executing identity cannot grant tenant admin consent, STOP, don't work around it in code. **Verify the POML's premise first** — 8 of 9 so far have been wrong, incomplete, or aimed at the wrong layer. |
+| **Task** | **013 🔄 step 1 done, grant HELD** — W1 ✅ · W2 ✅ · W3: 012 ✅, 011 🔄 partial |
+| **Step** | 013 step 1 (which registration + confirm absent) ✅. **Step 2 — the grant — awaits an operator decision** on whether the Security path moves to the BFF first. |
+| **Status** | task 012 committed; 013 notes uncommitted |
+| **Next Action** | **Operator decides**: grant `SecurityEvents.Read.All` to the **BFF** and move `GetSecurityAlertsForConfigAsync`/`GetSecureScoreForConfigAsync` off `GetClientForConfigAsync` (recommended), **or** grant to `170c98e1` as the POML literally says, **or** defer. See [`notes/app-registration-topology.md`](notes/app-registration-topology.md). If deferring, next is Workstream C via **029** / **030**. |
 
 ### Files Modified This Session
 

@@ -31,7 +31,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
-| 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔲 |
+| 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔄 **step 1 done — grant pending decision** |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
@@ -148,6 +148,29 @@ names: ADR-028 **A4** territory, a new site under **E-3**, and it contradicts
 
 **Not blocked**: A, C (ungated parts), D, E, F, and task 013. **Search is NOT blocked on auth** —
 task 004 proved it was a wrong Graph entity type and fixed it. 011 must not inherit Search.
+
+---
+
+## 🔎 Task 013 — step 1 done, grant held pending an operator decision
+
+`SecurityEvents.Read.All` (`bf394140-…`) is **absent** on both registrations — premise confirmed. But
+the Security screen authenticates as the **config's owning app**, which is `SDAP-PCF-CLIENT`
+(`170c98e1-…`) — a **four-hat registration**: shared browser client for every Spaarke surface, SPE
+owning app, confidential client whose secret the BFF uses, and originally a Microsoft SPE VS Code
+sample app.
+
+**The argument for moving the path is modeling, not exposure.** App-only roles are unreachable from a
+browser (they need `client_credentials`), so granting one here would *not* expose it to browser clients
+— an earlier draft claimed otherwise and was wrong. What does not survive scrutiny is routing
+**tenant-wide** security data through a **container-type config's** owning app: with two customer
+configs, which one reads the tenant's secure score? No answer — that's the tell.
+
+✅ **Done meanwhile** (operator-authorized): two **expired** credentials removed from `170c98e1`
+(secret `SharePointEmbeddedVSCode` exp. 2025-11-22; cert `CN=SharePoint Embedded VS Code Ext` exp.
+2026-03-14). One valid secret + one valid cert retained, both to 2027.
+
+Full analysis + the registration-split recommendation (filed for `spaarke-auth-v4-dataverse-MI`, not R2
+scope): [`notes/app-registration-topology.md`](../notes/app-registration-topology.md).
 
 ---
 
