@@ -63,7 +63,13 @@ public static class RevokeExternalAccessEndpoint
     // Handler
     // =========================================================================
 
-    private static async Task<IResult> RevokeAccessAsync(
+    /// <summary>
+    /// Internal (not private) so the test assembly can exercise the PRODUCTION handler directly per
+    /// <c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c> — the same convention used across this codebase,
+    /// and no reflection into a private member (ADR-038 §7 ban B8). The revoke sweep's correctness is a
+    /// privilege-retention question; it must be tested against the real handler, not a re-implementation.
+    /// </summary>
+    internal static async Task<IResult> RevokeAccessAsync(
         RevokeAccessRequest request,
         DataverseWebApiClient dataverseClient,
         IGraphClientFactory graphClientFactory,
@@ -90,14 +96,61 @@ public static class RevokeExternalAccessEndpoint
             "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId}",
             request.AccessRecordId, request.ContactId);
 
-        // ── Step 1: Deactivate the sprk_externalrecordaccess record ──────────
+        // ── Step 1: Deactivate EVERY active row for this logical grant ───────
+        //
+        // Revoke used to deactivate exactly ONE row, by AccessRecordId (finding A-11). Because /grant
+        // created unconditionally, two identical grants produced two active rows — so revoking "the"
+        // grant left a sibling standing and access survived revocation. The participation surface could
+        // not reveal it either: QueryGrantSetAsync collapses duplicates with GroupBy(root).Max(level) and
+        // never returns access-record ids.
+        //
+        // The revocation target now identifies a LOGICAL grant (root × grantee), and every active row on
+        // that key is deactivated. Task 010 / spec FR-09.
+        int deactivatedCount;
         try
         {
-            var deactivatePayload = new { statecode = 1, statuscode = 2 };
-            await dataverseClient.UpdateAsync(AccessEntitySet, request.AccessRecordId, deactivatePayload, ct);
+            var targetRow = await ExternalGrantLifecycle.RetrieveRowAsync(dataverseClient, request.AccessRecordId, ct);
+
+            if (targetRow is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Not Found",
+                    detail: $"Access record '{request.AccessRecordId}' was not found.");
+            }
+
+            var key = ExternalGrantLifecycle.DeriveKey(targetRow);
+
+            if (key is null)
+            {
+                // FAIL LOUDLY. Per this task's ADR-003 constraint, /revoke must never report success
+                // while any matching active row remains unqueried — and a row with no derivable root or
+                // grantee has no queryable siblings. Deactivating only the target would be precisely the
+                // silent partial revocation A-11 describes, so refusing is the fail-closed answer.
+                logger.LogError(
+                    "[EXT-REVOKE] Access record {AccessRecordId} has no derivable grant key (no root " +
+                    "and/or no grantee lookup). Refusing to revoke: sibling rows cannot be identified, so " +
+                    "success cannot be guaranteed.", request.AccessRecordId);
+
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Internal Server Error",
+                    detail: $"Access record '{request.AccessRecordId}' is missing the root or grantee lookup " +
+                            "needed to identify every row of this grant. No rows were deactivated.",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+            }
+
+            // Sweep by KEY, not by id — this is what makes the revoke complete. Note the target row is
+            // swept too when active, and that an ALREADY-INACTIVE target still sweeps live siblings:
+            // "the row you named is already off" is not the same as "this grant confers nothing".
+            var activeRows = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key.Value, ct);
+
+            deactivatedCount = await ExternalGrantLifecycle.DeactivateAsync(
+                dataverseClient, activeRows.Select(r => r.Id), logger, ct);
 
             logger.LogInformation(
-                "[EXT-REVOKE] Deactivated access record {AccessRecordId}", request.AccessRecordId);
+                "[EXT-REVOKE] Revoked grant {Key}: deactivated {Count} active row(s) (target {AccessRecordId}).",
+                key.Value, deactivatedCount, request.AccessRecordId);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -108,8 +161,11 @@ public static class RevokeExternalAccessEndpoint
         }
         catch (Exception ex)
         {
+            // Covers the sibling-row query AND any partial sweep. Reporting success here would be the
+            // worst outcome available: the caller believes access is gone while rows remain active.
             logger.LogError(ex,
-                "[EXT-REVOKE] Failed to deactivate access record {AccessRecordId}", request.AccessRecordId);
+                "[EXT-REVOKE] Failed to revoke grant for access record {AccessRecordId}. Some rows may " +
+                "remain active.", request.AccessRecordId);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -179,7 +235,10 @@ public static class RevokeExternalAccessEndpoint
                 request.ContactId);
         }
 
-        return TypedResults.Ok(new RevokeAccessResponse(speRevoked, WebRoleRemoved: false));
+        // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
+        // already fully inactive (a safe no-op), >1 means duplicates existed and were swept — the exact
+        // condition that used to leave access standing after a "successful" revoke.
+        return TypedResults.Ok(new RevokeAccessResponse(speRevoked, WebRoleRemoved: false, deactivatedCount));
     }
 
     // =========================================================================

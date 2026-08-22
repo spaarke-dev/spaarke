@@ -4,7 +4,7 @@
     <title>FR-09: Make /grant idempotent and /revoke deactivate ALL matching active rows</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the grant lifecycle (authorization path) — FULL per root CLAUDE.md §8; a wrong fix silently retains privilege.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -93,7 +93,33 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09; finding A-11 (severity rank #1). Task 017 (SPE revoke matcher, same file) depends on this task — do NOT fix the UPN matcher here; keep the diff scoped to row lifecycle. If task 008 (delegation) merges first, its filter sits in front of these routes — tests must authenticate as a Write-holder.</notes>
+  <notes>Spec FR-09; finding A-11 (severity rank #1). Task 017 (SPE revoke matcher, same file) depends on this task — do NOT fix the UPN matcher here; keep the diff scoped to row lifecycle. If task 008 (delegation) merges first, its filter sits in front of these routes — tests must authenticate as a Write-holder.
+
+COMPLETED 2026-08-22. Grant-grant-revoke now leaves ZERO active rows.
+
+LOGICAL KEY = (root record) x (exactly one grantee: Contact XOR Organization). Two load-bearing details: (a) a row may carry BOTH a contact and an organization -- the org is the contact's FIRM, association metadata, NOT grantee identity; contact wins, or a person grant and an org grant on the same root would collide and could revoke each other. (b) "_sprk_contact_value eq null" is what makes an org grant an org grant; without it the org filter also matches every person grant whose contact belongs to that org, so revoking one firm's grant would sweep each member's personal grant. The key mirrors the READ side (ExternalParticipationService.cs:511) term for term -- write/read disagreement about "the same grant" IS A-11.
+
+/GRANT upserts: query the key; none creates; exact level is a no-op returning the existing id; a different level UPDATES in place; surplus rows collapse onto the survivor. The pre-existence query's failure PROPAGATES -- falling back to a blind create would reintroduce the duplicate this task removes.
+
+CONCURRENT-GRANT RACE: both racers must elect the SAME survivor or they deactivate each other's row and the grant vanishes entirely -- worse than the bug being fixed. Election is OrderBy(id).First(): stable and clock-independent, unlike createdon which can tie at Dataverse precision. The post-create collapse is non-fatal by design; any survivor is swept by the next grant OR revoke, both of which now operate by key.
+
+/REVOKE sweeps: retrieve target, derive key, query ALL active rows on that key, deactivate every one, report DeactivatedCount. An ALREADY-INACTIVE target still sweeps live siblings -- "the row you named is off" is not "this grant confers nothing", and answering the first when asked the second is how A-11 hid. Any failure returns an error; success with rows still active is the worst outcome available.
+
+UNDERIVABLE KEY -> FAIL LOUDLY, deactivate nothing. The POML flags this as an escalation ("fail loudly vs best-effort sweep is a security judgment call"), but the task's OWN ADR-003 constraint answers it: /revoke must never report success while any matching active row remains unqueried, and siblings that cannot be identified cannot be guaranteed absent. Recorded rather than escalated because the constraint is explicit, not because the judgment was skipped.
+
+ALL THREE ESCALATION TRIGGERS EVALUATED, NONE FIRED. (1) No data-cleanup script written -- duplicates collapse opportunistically on the key being touched, which is what step 2 asks for. (2) Underivable key resolved by the constraint above. (3) RevokeAccessResponse gains DeactivatedCount with a default -- additive and optional, request shapes untouched, AccessGrantModal + SPA unaffected.
+
+A REAL DEFECT WAS CAUGHT BY THE FULL SUITE. ExternalAccessContractTests.InviteAndGrant_WhenGranting_... failed with "Did not expect accessRecordId to be empty". Its stub answers EVERY query with the same canned payload, so the new pre-existence query deserialized a contact row into an ExternalGrantRow with Id == Guid.Empty; the upsert adopted that unaddressable row as "the existing grant", aimed an UpdateAsync at Guid.Empty, and returned an empty id -- a silent no-op reported as success, the exact failure class this project exists to remove. Fixed in PRODUCTION (QueryActiveRowsAsync discards rows with no usable id), NOT by adjusting the stub. Task 005's TRX-capture technique named the test immediately; under -v q it would have been indistinguishable from the pre-existing flake.
+
+DELIBERATELY NOT CHANGED: the read-side GroupBy in ExternalParticipationService (scoped out by constraint; Phase 1 rebuilds the evaluator), so duplicates stop being CREATED and stop SURVIVING revocation but remain INVISIBLE to the participation surface until Phase 1. Also untouched: the SPE UPN matcher (task 017, same file).
+
+TESTS: 23 at tests/integration/auth/UnifiedAccessControl/ (3 task-001 characterizations flipped). The revoke handler was made internal so the PRODUCTION handler is exercised per InternalsVisibleTo -- no reflection (ban B8), no transport mock (ban B1). The fake table INTERPRETS the production $filter rather than returning canned rows, so a wrong predicate fails the test. Verified empirically: dropping "_sprk_contact_value eq null" fails 3 tests; reducing revoke to the named row fails 2.
+
+Honest note: GrantTwiceThenRevokeOnce_LeavesZeroActiveGrants states FR-09's wording but would ALSO pass with a single-row revoke, because the upsert means only one row ever exists -- it verifies the combination, not the sweep. The test with teeth is Revoke_WithPreExistingDuplicateRows_DeactivatesEveryOne (three seeded duplicates, all three deactivated), and that is the one the sweep perturbation fails. Both kept.
+
+Gates: BFF 10,676 passed / 0 failed (TRX confirms none) - ArchTests 36/36 - Core 45/45 - publish 43.66 MB compressed incl. PDBs (+0.01 MB), no packages added.
+
+Rationale: notes/task-010-grant-lifecycle.md</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -34,7 +34,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
 | 🔲 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
 | 🔲 009 | Scope-check external To Do PATCH (+H-8a) | FR-08 / A-7 | 001 | — | ❌ | sonnet | high |
-| 🔲 010 | Idempotent grant + revoke-all | FR-09 / A-11 | 001 | — | ❌ | **opus** | **xhigh** |
+| ✅ 010 | Idempotent grant + revoke-all | FR-09 / A-11 | 001 | — | ❌ | **opus** | **xhigh** |
 | 🔲 011 | Reject same-entity self-join | FR-10 / A-17 | 001 | — | ❌ | sonnet | high |
 | 🔲 012 | Track or disable anonymous share links | FR-11 / A-14 | 002 | — | ❌ | sonnet | high |
 | 🔲 013 | Workforce email `oid` no-hijack | FR-12 / A-18 | 001 | — | ❌ | sonnet | high |
@@ -150,6 +150,31 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > have no per-document filter. They mint URLs rather than stream bytes — a different blast radius and a
 > separate decision. **Should be assessed as its own task.**
 > Rationale: [`notes/task-002-download-authorization.md`](../notes/task-002-download-authorization.md).
+
+> **Task 010 outcome (2026-08-22)**: A-11 (**ranked #1 of 13**) closed. `/grant` UPSERTS against a logical
+> key; `/revoke` sweeps EVERY active row on that key. Grant→grant→revoke leaves zero.
+> **Logical key = `(root) × (Contact XOR Organization)`**, and two details are load-bearing: (a) a row may
+> carry BOTH a contact and an org — the org is the contact's **firm**, association metadata, NOT identity;
+> contact wins, or a person grant and an org grant on the same root would collide and could revoke each
+> other. (b) `_sprk_contact_value eq null` is what makes an org grant an org grant — drop it and revoking
+> one firm's grant sweeps every member's personal grant. The key mirrors the READ side
+> (`ExternalParticipationService.cs:511`) term for term: **write/read disagreement about "the same grant"
+> IS A-11.**
+> **Concurrent-grant race**: both racers MUST elect the same survivor or they deactivate each other and
+> the grant vanishes — worse than the bug. Election is `OrderBy(id).First()`, stable and clock-independent
+> (`createdon` can tie).
+> **Underivable key → FAIL LOUDLY, deactivate nothing.** The POML flags this as an escalation, but the
+> task's own ADR-003 constraint answers it: siblings that cannot be queried cannot be guaranteed absent,
+> so reporting success is forbidden. All three escalation triggers evaluated; **none fired**.
+> ⚠️ **A REAL DEFECT was caught by the full suite** (`ExternalAccessContractTests.InviteAndGrant_…`): the
+> upsert adopted an unaddressable row (`Id == Guid.Empty`) as "the existing grant", aimed an update at
+> `Guid.Empty`, and returned an empty id — a silent no-op reported as success. Fixed in **production**
+> (discard rows with no usable id), not by adjusting the stub. Task 005's TRX-capture technique named it
+> immediately; under `-v q` it would have been indistinguishable from the pre-existing flake.
+> ⚠️ **Duplicates remain INVISIBLE** to the participation surface until Phase 1 replaces the read-side
+> `GroupBy` collapse (scoped out by constraint). Task **017** edits the same file next and MUST NOT reduce
+> the sweep back to a single row.
+> Rationale: [`notes/task-010-grant-lifecycle.md`](../notes/task-010-grant-lifecycle.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 
