@@ -12,6 +12,30 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// Integration tests for Graph API operations using WireMock to simulate responses.
 /// Tests retry logic, error handling, and various HTTP status codes.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>The Skip reason on these tests was wrong, and the wrong diagnosis kept them dark.</b> They did
+/// not fail because of "WireMock.Net path matching" or a missing configuration. WireMock.Net 1.5.45
+/// loads <c>MimeKitLite</c> at runtime while mapping an incoming request, and this test project
+/// carried <c>&lt;ExcludeAssets&gt;all&lt;/ExcludeAssets&gt;</c> on that package — which strips the
+/// runtime asset, not just the compile-time one it was added to suppress. Every request died with
+/// <c>FileNotFoundException</c> inside WireMock's <c>GlobalExceptionMiddleware</c> and came back 500.
+/// Fixed in the csproj by excluding only the <c>compile</c> asset (task 040,
+/// <c>sdap-SPE-admin-app-r2</c>).
+/// </para>
+/// <para>
+/// <b>They remain skipped for a different reason.</b> Each one points a bare <see cref="HttpClient"/>
+/// at WireMock and asserts WireMock returned the body WireMock was just told to return. No production
+/// code is on the path, so they cannot fail for any reason that matters — ADR-038 B7/B10 scaffolding.
+/// Un-skipping them would add green tests that defend nothing. Retiring them is task 042's scope, not
+/// this task's.
+/// </para>
+/// <para>
+/// <b>Use this instead:</b> <c>tests/integration/contract/SpeAdmin/GraphWireMockFixture.cs</c>, which
+/// drives real <c>SpeAdminGraphService</c> methods over the same fake endpoint and asserts both the
+/// outgoing request shape and the response mapping.
+/// </para>
+/// </remarks>
 public class GraphApiWireMockTests : IDisposable
 {
     private readonly WireMockServer _mockServer;
@@ -26,7 +50,7 @@ public class GraphApiWireMockTests : IDisposable
         };
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task ListChildren_Success_ReturnsItems()
     {
         // Arrange
@@ -65,7 +89,7 @@ public class GraphApiWireMockTests : IDisposable
         content.Should().Contain("Document2.pdf");
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task ListChildren_Throttled_RetriesWithBackoff()
     {
         // Arrange
@@ -115,7 +139,7 @@ public class GraphApiWireMockTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task DownloadContent_NotFound_Returns404()
     {
         // Arrange
@@ -142,7 +166,7 @@ public class GraphApiWireMockTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task UploadSmall_Forbidden_Returns403()
     {
         // Arrange
@@ -170,7 +194,7 @@ public class GraphApiWireMockTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task DeleteItem_Success_Returns204()
     {
         // Arrange
@@ -191,7 +215,7 @@ public class GraphApiWireMockTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
-    [Fact(Skip = "WireMock.Net path matching returns 500 for all requests in this environment - requires WireMock configuration investigation")]
+    [Fact(Skip = "Superseded — see class remarks. The 500s are FIXED (MimeKitLite runtime asset); these tests assert only that WireMock echoes its own stub. Retirement is task 042's call.")]
     public async Task DownloadContent_RangeRequest_ReturnsPartialContent()
     {
         // Arrange

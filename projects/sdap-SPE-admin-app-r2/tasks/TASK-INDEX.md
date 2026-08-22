@@ -28,14 +28,14 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 005 | [Diagnose + fix Audit Log](005-fix-audit-log.poml) | 1 A | A05 | FULL | sonnet | xhigh | W1 | ✅ | 001 | ✅ |
 | 004 | [Diagnose + fix Search](004-fix-search.poml) | 1 A | A04 | FULL | sonnet | xhigh | W2 | ❌ | 001 | 🔲 |
 | 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | 🔲 |
-| 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | 🔲 |
+| 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔲 |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | 🔲 |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔲 |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
-| 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | 🔲 |
+| 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) 🔴 | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | 🔲 |
 | 023 | [Property names + quota/consumption split](023-property-names-and-quota-split.poml) | 3 C | C04, C05 | FULL | sonnet | high | W7 | ❌ | 020, 040 | 🔲 |
 | 024 | [SPIKE + branch — storage consumption](024-storage-consumption-spike.poml) | 3 C | C06 | FULL | sonnet | high | W8 | ❌ | 023 | 🔲 |
 | 025 | [Full 9-property settings surface](025-full-settings-surface.poml) | 3 C | C07 | FULL | sonnet | high | W9 | ❌ | 023, 040 | 🔲 |
@@ -63,7 +63,7 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 |---|---|---|---|---|
 | **W0** | 001 ✅ | — | 1 (serial) | **Done 2026-08-21.** 60 error sites routed; endpoint-layer only (no GraphService change needed). ⚠️ UI verification blocked — SpeAdminApp build broken by a pre-existing missing dep; see `notes/task-001-completion.md` |
 | **W1** ✅ | **002** ✅, 003 ✅, 005 ✅ | 001 ✅ | 3 | **002 done 2026-08-21** — premise did not hold; the 70 sites were already correct (404-filtered + translating wrappers). One real ADR-007 defect found + fixed in `BulkOperationService`. 003 owns DashboardSync; 005 owns AuditService |
-| **W2** | **004**, 010, 040 | 001 ✅ | 3 | 004 owns GraphService; 010 is notes-only; 040 is test-project-only. 🔔 **010 may reopen the ADR gate** |
+| **W2** | **004**, 010, **040** ✅ | 001 ✅ | 3 | **040 done 2026-08-21** — WireMock was unusable repo-wide (MimeKitLite runtime asset stripped by `ExcludeAssets=all`; the recorded "path matching" reason was wrong). Escalation trigger evaluated, did NOT fire — 47 GraphService methods already take `GraphServiceClient` as a param, so task 021's base-address decision is untouched. Fixture found a 🔴 **new defect for task 022** (see below). 004 owns GraphService; 010 is notes-only. 🔔 **010 may reopen the ADR gate** |
 | **W3** | **011**, 012, 013 | 010 ✅ **WORKABLE** | 3 | 011 owns TokenProvider + GraphService; 012 owns filter + client; 013 is Azure config |
 | **W4** | **020**, 030 | 011, 040 ✅ | 2 | 020 owns GraphService; 030 is client-only |
 | **W5** | **021** | 020 ✅ | 1 | GraphService + config + client |
@@ -101,6 +101,21 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 
 **Longest chain: 8 tasks.** Task 010 is the highest-risk node — an `UNWORKABLE` verdict blocks 011, and
 everything from 020 onward depends on 011. The auth spike is not just first; it is load-bearing.
+
+---
+
+## 🔴 Verified defects handed forward (do not re-derive)
+
+| Found by | Defect | Site | Owner |
+|---|---|---|---|
+| **040** | `deletedDateTime` is guarded by `rawDeletedAt is string`, but Kiota stores a **`System.DateTime`** in `AdditionalData` (probed against the real SDK). The guard can never be true, so **every recycle-bin row reports a null deletion timestamp** — rows cannot be sorted by deletion date or aged out, and the screen cannot tell that apart from "deleted at an unknown time". | `SpeAdminGraphService.cs:4368` | **022** |
+
+Pinned as characterization tests in `tests/integration/contract/SpeAdmin/` that name the defect and
+the owning task. **They must FAIL and be updated when the fix lands** — deleting one instead would
+restore the silence. Evidence: [`notes/task-040-completion.md`](../notes/task-040-completion.md) §4.
+
+Fifth instance of the project's signature shape: *a lower layer collapsing a real value into an absent
+one that an upper layer reads as benign.*
 
 ---
 

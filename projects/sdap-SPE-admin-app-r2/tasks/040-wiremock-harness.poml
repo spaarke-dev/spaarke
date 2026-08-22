@@ -4,7 +4,7 @@
     <title>Build the WireMock Graph fixture infrastructure (pulled forward from Workstream D)</title>
     <phase>2 Workstream D-infra — Build the harness that should have existed</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): any task modifying tests/** runs code-review + adr-check UNCONDITIONALLY.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,7 +109,19 @@ DELIBERATE ORDERING DEVIATION: spec §5 lists Workstream D after C. This task is
     <criterion testable="true">dotnet test passes for the SpeAdmin area; dotnet build 0 errors.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-D01. Pulled forward from Workstream D into Phase 2 — deliberate deviation from spec §5 ordering, rationale in plan.md §4. Every Phase 3 task adds its mapping coverage onto this fixture. Parallel-safe: test project only.</notes>
+  <notes>Spec FR-D01. Pulled forward from Workstream D into Phase 2 — deliberate deviation from spec §5 ordering, rationale in plan.md §4. Every Phase 3 task adds its mapping coverage onto this fixture. Parallel-safe: test project only.
+
+COMPLETED 2026-08-21 — full record in notes/task-040-completion.md. 10 tests, 10,602 passed / 0 failed, ArchTests 36/36. NO production file modified.
+
+Four things a later task needs to know:
+
+1. WireMock was UNUSABLE repo-wide and the recorded reason was wrong. Every request 500'd because WireMock.Net 1.5.45 loads MimeKitLite at runtime and the test csproj had ExcludeAssets=all on it (stripping the runtime asset, not just the compile-time one it was added to suppress). Fixed to ExcludeAssets=compile. The six tests in Integration/GraphApiWireMockTests.cs had been skipped as "WireMock.Net path matching ... requires WireMock configuration investigation" — a wrong diagnosis that kept the one tool able to catch the §3.2 defect class dark for all of R1.
+
+2. ESCALATION TRIGGER EVALUATED — DID NOT FIRE. 47 SpeAdminGraphService methods already take GraphServiceClient as a parameter; the hardcoded beta base address is confined to the private CreateGraphClient* helpers serving GetClientForConfigAsync. Task 021's base-address decision is untouched and unprejudiced.
+
+3. KEEP-PATH DEVIATION. The POML's relevant-files put these under tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/, which is not one of ADR-038's seven KEEP paths (and tests/unit/domain/** forbids I/O). Placed at tests/integration/contract/SpeAdmin/ instead. The POML justification's claim that no Graph fixture existed was also wrong — two did; both were assessed under CLAUDE.md §11 and correctly not extended.
+
+4. 🔴 NEW DEFECT FOR TASK 022. The fixture found it on first run: SpeAdminGraphService.cs:4368 guards deletedDateTime with `rawDeletedAt is string`, but Kiota stores a System.DateTime (probed). The guard can never be true, so EVERY recycle-bin row reports a null deletion timestamp. Not fixed here — 040 is parallel-safe because it touches no production code, and W2's one GraphService slot belongs to task 004. Pinned as a characterization test that must fail and be updated when 022 lands.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
