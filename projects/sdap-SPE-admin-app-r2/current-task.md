@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ (004, 010, 040) · **auth decision made + tenant scope shipped** |
-| **Step** | Between tasks. **Next: Workstream C** — start with **029** or **030** (neither needs the god-file), then 020 |
-| **Status** | clean — 0 uncommitted; local HEAD == origin at `325511d5b` |
-| **Next Action** | Invoke `task-execute` on `tasks/029-billing-status-surface.poml` (client+DTO only, no god-file) or `030`. **Verify each POML's premise first** — every one so far has been wrong, incomplete, or aimed at the wrong layer. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ (004, 010, 040) · **W3: 012 ✅**, 011 🔄 partial, 013 🔲 |
+| **Step** | Between tasks. **Next: 013** (Azure config, STANDARD, ~1h — cheapest fix in the project), then Workstream C via **029** / **030** |
+| **Status** | clean tree at checkpoint; task 012 committed |
+| **Next Action** | Invoke `task-execute` on `tasks/013-security-events-grant.poml`. Note its escalation trigger: **consent is an operator action** — if the executing identity cannot grant tenant admin consent, STOP, don't work around it in code. **Verify the POML's premise first** — 8 of 9 so far have been wrong, incomplete, or aimed at the wrong layer. |
 
 ### Files Modified This Session
 
@@ -34,6 +34,30 @@ All committed and pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**):
 ⚠️ **Separate repo, NOT pushed**: `c:/code_files/spaarke-prototype` has **1 unpushed commit** `a53832a`
 (the `spe-admin-r2-uat` harness + shared `_infra` mock fixes) on `feature/uat-harness-framework`. Left
 unpushed deliberately — pushing another repo needs the operator's say-so.
+
+### 🔑 Task 012 — do not re-derive
+
+**Entra directory roles are INVISIBLE to the BFF.** `SDAP-BFF-SPE-API` leaves `groupMembershipClaims`
+unset, so no `wids` claim is ever emitted. Proven with a **positive control**: a real token for
+`aud = api://1e40baad-…`, issued to a **confirmed member** of the tenant's SharePoint Embedded
+Administrator role (`1a7d78b6-…`), carried **no `wids` at all** — while `roles` was present.
+
+→ **Claim-absence does not mean role-absence.** Any filter check would tell genuine role holders they
+lack the role. **Do not "complete" `SpeAdminAuthorizationFilter` by adding a `wids` check** — the code
+says so inline, with the measurement.
+
+The real defect was one layer down and unnamed by the POML: all four container-type ops passed a
+hardcoded **500**, so a Graph **403 reached the admin as "Internal Server Error"**. Now: layer 1
+(Spaarke app role, visible → filter) and layer 2 (Entra role, only Graph knows → 403-filtered catch),
+each speaking only about what it can observe. Layer 2 names the role and what it enables but never
+asserts the caller lacks it — 403 also covers unregistered types, consent gaps, wrong-tenant configs.
+
+🔔 **Open operator decision (nothing depends on it)**: set `groupMembershipClaims: DirectoryRole` on
+the BFF registration for *proactive* detection? Not taken unilaterally — that registration backs every
+Spaarke client surface. See `notes/task-012-completion.md` §5.
+
+`tests/integration/auth/**` was a **dead ADR-038 KEEP path** — README only, compiled by no project.
+Now wired; 14 tests live there.
 
 ### Critical Context
 

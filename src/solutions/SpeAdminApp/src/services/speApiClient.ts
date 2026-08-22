@@ -108,6 +108,70 @@ export function describeApiError(err: unknown, fallback = ""): string {
 }
 
 // ---------------------------------------------------------------------------
+// Authorization prerequisites
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable codes the BFF uses to report an authorization prerequisite. SPE Admin has **two independent
+ * authorization layers**, and telling them apart is the whole point — see
+ * `SpeAdminAuthorizationFilter` for the full description.
+ */
+export const PERMISSION_CODES = {
+  /** Not signed in / session expired. Nothing is known about this caller's permissions. */
+  unauthenticated: "sdap.access.deny.unauthenticated",
+  /** Layer 1 — signed in, but without the Spaarke admin app role. Granted by a Spaarke admin. */
+  spaarkeAdmin: "sdap.access.deny.role_insufficient",
+  /** Layer 2 — Microsoft Graph refused a container-type operation. Granted by an Entra admin. */
+  entraDirectoryRole: "spe.containertypes.entra_role_required",
+} as const;
+
+/** How a screen should present an authorization prerequisite. */
+export interface PermissionPrerequisite {
+  /** Banner heading — states the nature of the problem, not a guess at its cause. */
+  title: string;
+  /** Fluent `MessageBar` intent. `warning` where the user can obtain access; `error` otherwise. */
+  intent: "warning" | "error";
+}
+
+/**
+ * Classifies a caught error as one of the authorization prerequisites the BFF reports.
+ *
+ * Screens use this to title the banner accurately. Without it every prerequisite renders under
+ * "Failed to load container types", which reads as a malfunction and sends the admin looking for a
+ * bug instead of a permission.
+ *
+ * The **body text always comes from {@link describeApiError}** — the BFF is the only party that knows
+ * which layer denied the request and what grants it, so the client must not compose its own
+ * explanation here. This function chooses a heading and nothing more.
+ *
+ * @returns The presentation, or `null` when the error is not an authorization prerequisite.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 012 (spec FR-B03).
+ */
+export function describePermissionPrerequisite(err: unknown): PermissionPrerequisite | null {
+  if (!(err instanceof ApiError)) return null;
+
+  const problem = err.problemDetails as Record<string, unknown> | null;
+  const code = extension(problem, "errorCode") ?? extension(problem, "reasonCode");
+
+  switch (code) {
+    case PERMISSION_CODES.entraDirectoryRole:
+      // Graph refused. The role is the prerequisite — but the user may already hold it and be
+      // blocked by something else, so this is a "warning", not a verdict.
+      return { title: "Additional permission required", intent: "warning" };
+
+    case PERMISSION_CODES.spaarkeAdmin:
+      return { title: "Spaarke administrator permission required", intent: "warning" };
+
+    case PERMISSION_CODES.unauthenticated:
+      return { title: "Sign in to continue", intent: "warning" };
+
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Typed HTTP helpers
 // ---------------------------------------------------------------------------
 

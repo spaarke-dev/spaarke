@@ -183,6 +183,16 @@ public static class ContainerTypeEndpoints
                 Count = items.Count
             });
         }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied listing container types for config {ConfigId} — reporting the Entra " +
+                "directory-role prerequisite. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(sse, "Could not list container types.", context.TraceIdentifier);
+        }
         catch (SpaarkeStorageException sse)
         {
             logger.LogError(
@@ -288,6 +298,17 @@ public static class ContainerTypeEndpoints
                 BillingClassification = containerType.BillingClassification,
                 CreatedDateTime = containerType.CreatedDateTime
             });
+        }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied reading container type {TypeId} for config {ConfigId} — reporting the " +
+                "Entra directory-role prerequisite. TraceId: {TraceId}",
+                typeId, configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(
+                sse, $"Could not open container type '{typeId}'.", context.TraceIdentifier);
         }
         catch (SpaarkeStorageException sse)
         {
@@ -435,6 +456,16 @@ public static class ContainerTypeEndpoints
             };
 
             return Results.Created($"/api/spe/containertypes/{created.Id}", dto);
+        }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied creating a container type for config {ConfigId} — reporting the Entra " +
+                "directory-role prerequisite. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(sse, "Could not create the container type.", context.TraceIdentifier);
         }
         catch (SpaarkeStorageException sse)
         {
@@ -692,5 +723,63 @@ public static class ContainerTypeEndpoints
                     ["traceId"] = context.TraceIdentifier
                 });
         }
+    }
+
+    /// <summary>
+    /// Stable code for "Graph refused a container-type operation, and the Entra directory role is the
+    /// prerequisite that grants it". The client keys its message off this.
+    /// </summary>
+    internal const string EntraRoleRequiredErrorCode = "spe.containertypes.entra_role_required";
+
+    /// <summary>
+    /// Translate a Graph 403 on a container-type operation into a response that names the Entra
+    /// directory-role prerequisite — the second of the two authorization layers described on
+    /// <see cref="Filters.SpeAdminAuthorizationFilter"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this lives at the Graph boundary rather than in the endpoint filter.</b> The filter
+    /// cannot see Entra directory roles: <c>SDAP-BFF-SPE-API</c> leaves
+    /// <c>groupMembershipClaims</c> unset, so no <c>wids</c> claim is emitted — verified 2026-08-22
+    /// against a token issued to a confirmed holder of the SharePoint Embedded Administrator role.
+    /// A Graph 403, by contrast, IS authoritative: Graph applied the real rule and refused.
+    /// </para>
+    /// <para>
+    /// <b>What this message may and may not say.</b> It names the role and what the role enables. It
+    /// does <b>NOT</b> assert that the caller lacks the role — Graph reports that the request was
+    /// denied, not why, and 403 has other causes (an unregistered container type, a consent gap, a
+    /// config pointing at another tenant). Asserting "you lack role X" from this signal would be a
+    /// guess, and a wrong one told to a genuine role holder is precisely the misleading-error defect
+    /// this project removes (spec FR-B03). The wording therefore states the prerequisite and points at
+    /// the Graph diagnostics for the alternative causes.
+    /// </para>
+    /// <para>
+    /// Before this existed, all four container-type operations passed a hardcoded
+    /// <see cref="StatusCodes.Status500InternalServerError"/>, so a permission denial reached the
+    /// admin as "Internal Server Error" — indistinguishable from a server bug.
+    /// </para>
+    /// </remarks>
+    /// <param name="sse">The translated Graph failure. Callers MUST filter on status 403.</param>
+    /// <param name="attempted">What was being attempted, stated without asserting why it failed.</param>
+    /// <param name="traceId">Correlation id for support.</param>
+    // internal rather than private so the wording contract above can be asserted directly. It is pure
+    // translation — no I/O, no mocks — so the test is ADR-038 §2 path #6 (domain logic), not scaffolding.
+    internal static IResult EntraRoleDeniedProblem(
+        SpaarkeStorageException sse,
+        string attempted,
+        string traceId)
+    {
+        return sse.ToProblemDetails(
+            summary:
+                $"{attempted} Microsoft Graph refused the request. Container-type administration " +
+                "requires the \"SharePoint Embedded Administrator\" or \"Global Administrator\" role in " +
+                "Microsoft Entra, which grants tenant-wide visibility and management of container " +
+                "types. That role is granted by a Microsoft Entra administrator and is separate from " +
+                "your Spaarke administrator permission — Spaarke cannot see whether you hold it. If you " +
+                "do hold it, this denial has another cause and the Graph details below identify it.",
+            errorCode: EntraRoleRequiredErrorCode,
+            statusCode: StatusCodes.Status403Forbidden,
+            traceId: traceId,
+            title: "Additional permission required");
     }
 }

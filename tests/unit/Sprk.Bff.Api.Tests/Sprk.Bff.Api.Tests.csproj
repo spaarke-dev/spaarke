@@ -74,6 +74,17 @@
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
   </ItemGroup>
 
+  <!--
+    sdap-SPE-admin-app-r2 task 012 (spec FR-B03) — security-auth KEEP path per ADR-038 §2 path #1.
+    tests/integration/auth/** existed as a documented KEEP category but held only its README, and was
+    not compiled by ANY test project — so the category was unusable and nothing had ever been filed
+    there. Included on the same terms as contract/** above: compiled into this assembly so the shared
+    fixtures and package references stay reachable without a second project.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\auth\**\*.cs" LinkBase="AuthTests" />
+  </ItemGroup>
+
   <!-- Golden-utterance eval suite seed data (spaarke-ai-architecture-redesign-r1
        task 011 / FR-P0-09). The harness (ContractTests\Eval\GoldenUtteranceEvalSuiteTests.cs,
        compiled via the contract glob above) resolves the case file via

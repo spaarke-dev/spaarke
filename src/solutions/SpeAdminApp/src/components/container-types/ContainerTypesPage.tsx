@@ -46,7 +46,12 @@ import {
   DocumentBulletList20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, describeApiError } from "../../services/speApiClient";
+import {
+  speApiClient,
+  describeApiError,
+  describePermissionPrerequisite,
+} from "../../services/speApiClient";
+import type { PermissionPrerequisite } from "../../services/speApiClient";
 import type { ContainerType } from "../../types/spe";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
@@ -156,6 +161,16 @@ const useStyles = makeStyles({
     ...shorthands.gap(tokens.spacingVerticalM),
     height: "100%",
     color: tokens.colorNeutralForeground2,
+  },
+
+  /**
+   * Scoping explanation under the empty state. Secondary foreground token so it reads as context
+   * rather than as an error, and adapts with the theme (ADR-021 — no hard-coded colours).
+   */
+  scopeNote: {
+    maxWidth: "46rem",
+    textAlign: "center",
+    color: tokens.colorNeutralForeground3,
   },
 
   /** Message bar wrapper */
@@ -305,6 +320,13 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  /**
+   * Set when the load failed because of an authorization prerequisite rather than a malfunction.
+   * Titling those "Failed to load container types" sends an admin hunting for a bug when what they
+   * actually need is a role grant (spec FR-B03).
+   */
+  const [errorNotice, setErrorNotice] = React.useState<PermissionPrerequisite | null>(null);
+
   // ── Action State ────────────────────────────────────────────────────────────
 
   /** ID of the selected container type (set on row click). */
@@ -334,6 +356,7 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
     if (!selectedConfig) return;
     setLoading(true);
     setError(null);
+    setErrorNotice(null);
     setActionError(null);
     setActionStatus(null);
     setSelectedTypeId(null);
@@ -344,6 +367,8 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
       const message =
         describeApiError(err, "Failed to load container types. Please try again.");
       setError(message);
+      // Null for ordinary failures — the banner then falls back to its "failed to load" heading.
+      setErrorNotice(describePermissionPrerequisite(err));
     } finally {
       setLoading(false);
     }
@@ -551,9 +576,13 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
           </div>
         ) : error ? (
           <div className={styles.feedback}>
-            <MessageBar intent="error">
+            {/* An authorization prerequisite is not a malfunction — title it for what it is, and let
+                the BFF's detail (which names the layer and what grants it) carry the explanation. */}
+            <MessageBar intent={errorNotice?.intent ?? "error"}>
               <MessageBarBody>
-                <MessageBarTitle>Failed to load container types</MessageBarTitle>
+                <MessageBarTitle>
+                  {errorNotice?.title ?? "Failed to load container types"}
+                </MessageBarTitle>
                 {error}
               </MessageBarBody>
             </MessageBar>
@@ -574,6 +603,16 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
             <Text size={300}>
               No container types found for this configuration. Use the{" "}
               <strong>New</strong> button to create one.
+            </Text>
+            {/* The request SUCCEEDED and returned nothing, so this is scoping, not denial. Graph
+                returns the container types this caller can see; the Entra role widens that to the
+                whole tenant. Saying so here is what stops an admin reading an empty list as either
+                "nothing exists" or "I was blocked" (spec FR-B03 / §4.2b). */}
+            <Text size={200} className={styles.scopeNote}>
+              This list shows the container types your account can see. Tenant-wide visibility
+              requires the <strong>SharePoint Embedded Administrator</strong> or{" "}
+              <strong>Global Administrator</strong> role in Microsoft Entra — a Microsoft permission,
+              separate from your Spaarke administrator permission.
             </Text>
           </div>
         ) : (

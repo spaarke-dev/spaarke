@@ -30,7 +30,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | ✅ **UNWORKABLE** |
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
-| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | 🔲 unblocked |
+| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔲 |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
@@ -65,7 +65,7 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 | **W1** ✅ | **002** ✅, 003 ✅, 005 ✅ | 001 ✅ | 3 | **002 done 2026-08-21** — premise did not hold; the 70 sites were already correct (404-filtered + translating wrappers). One real ADR-007 defect found + fixed in `BulkOperationService`. 003 owns DashboardSync; 005 owns AuditService |
 | **W2** | **004** ✅, 010, **040** ✅ | 001 ✅ | 3 | **004 done 2026-08-21** — root cause proven by live Graph calls: `fileStorageContainer` is **not a valid `/search/query` entity type**. 🔔 **The spec's app-only hypothesis (§3.1) is DISPROVEN — neither escalation trigger fired, and task 011 does NOT inherit Search.** Three defects fixed (container entity type; missing `region`; invalid `contentSources`). |
 | **W2** cont. | | | | **040 done 2026-08-21** — WireMock was unusable repo-wide (MimeKitLite runtime asset stripped by `ExcludeAssets=all`; the recorded "path matching" reason was wrong). Escalation trigger evaluated, did NOT fire — 47 GraphService methods already take `GraphServiceClient` as a param, so task 021's base-address decision is untouched. Fixture found a 🔴 **new defect for task 022** (see below). **Only 010 remains in W2** — notes-only; 🔔 it may still reopen the ADR gate |
-| **W3** | **011**, 012, 013 | 010 ✅ **WORKABLE** | 3 | 011 owns TokenProvider + GraphService; 012 owns filter + client; 013 is Azure config |
+| **W3** | **011** 🔄, **012** ✅, 013 | 010 ✅ | 3 | **012 done 2026-08-22** — Entra directory roles are **invisible to the BFF** (`groupMembershipClaims` unset → no `wids`), proven with a positive control: a token issued to a **confirmed holder** of the SharePoint Embedded Administrator role carries no `wids` at all. So claim-absence ≠ role-absence, and layer 1 must never speak about directory roles. Real defect was one layer down: all four container-type ops hardcoded **500**, so a Graph **403 read as "Internal Server Error"**. Now reported at the layer that is authoritative for each. 011 owns TokenProvider + GraphService; 013 is Azure config |
 | **W4** | **020**, 030 | 011, 040 ✅ | 2 | 020 owns GraphService; 030 is client-only |
 | **W5** | **021** | 020 ✅ | 1 | GraphService + config + client |
 | **W6** | **022** | 020, 040 ✅ | 1 | GraphService |
@@ -156,6 +156,8 @@ task 004 proved it was a wrong Graph entity type and fixed it. 011 must not inhe
 | Found by | Defect | Site | Owner |
 |---|---|---|---|
 | **040** | `deletedDateTime` is guarded by `rawDeletedAt is string`, but Kiota stores a **`System.DateTime`** in `AdditionalData` (probed against the real SDK). The guard can never be true, so **every recycle-bin row reports a null deletion timestamp** — rows cannot be sorted by deletion date or aged out, and the screen cannot tell that apart from "deleted at an unknown time". | `SpeAdminGraphService.cs:4368` | **022** |
+| **012** | The **no-arg** `ToProblemDetails()` (~29 callers in `ContainerItemEndpoints` / `DocumentsEndpoints` / `OBOEndpoints` / `UploadEndpoints`) hardcodes 403 as *"api identity lacks required container-type permission"* — but on any **delegated** path the failing identity is the signed-in user, not the api identity, so it may name the wrong party. **Not fixed** — 29 shared call sites, and which are delegated is unverified. Record, don't guess. | `GraphErrorTranslator.cs:126` | **042** / decomposition-r1 |
+| **012** | Container types' general `catch (SpaarkeStorageException)` still maps **every non-403 Graph status to 500**, so a 429 throttle also reads as a server error. 403 was fixed; the rest were left rather than changing error semantics beyond FR-B03. | `ContainerTypeEndpoints.cs` ×3 | **021** / **023** |
 
 Pinned as characterization tests in `tests/integration/contract/SpeAdmin/` that name the defect and
 the owning task. **They must FAIL and be updated when the fix lands** — deleting one instead would

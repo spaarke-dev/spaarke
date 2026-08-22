@@ -136,16 +136,39 @@ public static partial class ProblemDetailsHelper
         );
     }
 
-    public static IResult Forbidden(string reasonCode)
+    /// <summary>
+    /// Build a 403 ProblemDetails carrying a deny code and, optionally, an explanation the caller can
+    /// act on.
+    /// </summary>
+    /// <param name="reasonCode">Stable machine-readable deny code, <c>{domain}.{area}.{action}.{reason}</c>.</param>
+    /// <param name="detail">
+    /// Optional. What was actually checked and what would grant it. Defaults to "Access denied", which
+    /// tells the user nothing — supply a real explanation wherever the denying code knows one.
+    /// <b>It MUST NOT name a cause the denying code did not establish</b>; an authorization layer that
+    /// cannot observe a permission must not claim the caller lacks it (spec FR-B03).
+    /// </param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    /// <remarks>
+    /// The optional parameters were added by sdap-SPE-admin-app-r2 task 012 (spec FR-B03). Existing
+    /// call sites keep the previous behaviour unchanged.
+    /// </remarks>
+    public static IResult Forbidden(string reasonCode, string? detail = null, string? traceId = null)
     {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = reasonCode
+        };
+
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
         return Results.Problem(
             title: "Forbidden",
             statusCode: 403,
-            detail: "Access denied",
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = reasonCode
-            }
+            detail: string.IsNullOrWhiteSpace(detail) ? "Access denied" : detail,
+            extensions: extensions
         );
     }
 

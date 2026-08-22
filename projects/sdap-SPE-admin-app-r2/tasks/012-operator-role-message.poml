@@ -4,7 +4,7 @@
     <title>Surface the operator role prerequisite as an actionable message</title>
     <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs (auth filter) and .tsx; tags include auth and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>
