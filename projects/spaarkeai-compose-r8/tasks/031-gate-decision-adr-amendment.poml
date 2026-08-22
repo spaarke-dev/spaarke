@@ -4,7 +4,7 @@
     <title>GATE DECISION — pass/miss against the corpus, plus the ADR-049 third-amendment draft</title>
     <phase>3 Model Proof — THE GATE</phase>
     <gate>blocked-on-030</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The decision that authorizes or blocks all of Phase 4. Drafts a binding ADR amendment.</rigor-reason>
     <model-tier>opus</model-tier>

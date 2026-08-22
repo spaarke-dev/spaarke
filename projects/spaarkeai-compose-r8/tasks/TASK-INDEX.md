@@ -100,7 +100,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
 | 030 | **Merge prototype + measurement** — stamp → re-project → per-block compare → clone unchanged; answers spec §5.3; includes heavy-restructure (FR-G06) + N-cycle Word round-trip (FR-G07) | FULL | opus/max | ❌ | 023 | ✅ |
-| 031 | **GATE DECISION** + ADR-049 third-amendment draft. *Escalation trigger: a miss goes to the owner — do not improvise* | FULL | opus/max | ❌ | 030 | 🔲 |
+| 031 | **GATE DECISION** + ADR-049 third-amendment draft. *Escalation trigger: a miss goes to the owner — do not improvise* | FULL | opus/max | ❌ | 030 | ✅ |
 
 > **✅ 030 COMPLETE — the prototype clears every gate condition, 2026-08-21.** **18 of 18 documents at 100%
 > overall and 100% near-tier preservation**, against a control of 18.08% / 6.67%. The 109-block patent claims
@@ -114,6 +114,16 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > property inheritance (041) is what closes that, and 030 does not exercise it.** Reorder also yields no
 > merge benefit (degrades to R6, never fails). Full analysis + what 040 must do differently:
 > [`notes/merge-prototype-results.md`](../notes/merge-prototype-results.md). **031 has its evidence.**
+
+> **✅ 031 — GATE DECISION: PASS, 2026-08-21.** All five threshold criteria met; neither escalation trigger
+> fired. **Phase 4 is AUTHORIZED**, with two conditions: (a) **041 is not optional** — it owns the only
+> remaining user-visible loss (the EDITED block still loses its own formatting; the gate measures UNTOUCHED
+> blocks by construction); (b) **074 is BLOCKED ⛔** — `ComposeShadowPatchEngine` subsumption is
+> **NOT-CONFIRMED**: all three live call sites are on the op-log path the prototype never exercised, so
+> FR-D01 keeps one waiver rather than deleting 3,000 lines on "probably". Four Phase-4 POMLs need amending
+> (040/041/044/074 — see the decision §6). ADR-049 third amendment is **DRAFTED, awaiting owner sign-off**
+> (§6.5 Path B); task 045 applies it. [`notes/gate-decision.md`](../notes/gate-decision.md) ·
+> [`notes/adr-049-third-amendment-draft.md`](../notes/adr-049-third-amendment-draft.md)
 
 ## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*
 
@@ -154,7 +164,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 071 | Decompose `ComposeDocxProjectionBuilder.cs` + delete its waiver | 3,085 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 072 | Decompose `ComposeDocumentRenderer.cs` + delete its waiver | 2,304 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 073 | Decompose `Api/ComposeEndpoints.cs` + delete its waiver | 2,651 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
-| 074 | **Retire `ComposeShadowPatchEngine.cs`** + delete its waiver — confirm at the gate **before** deleting | 2,999 | FULL | opus/max | ❌ | 031, 040 | 🔲 |
+| 074 | **Retire `ComposeShadowPatchEngine.cs`** + delete its waiver — confirm at the gate **before** deleting | 2,999 | FULL | opus/max | ❌ | 031, 040 | ⛔ |
 
 ## Phase 8 — Wrap-up
 
