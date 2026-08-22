@@ -4,7 +4,7 @@
     <title>Document Intelligence: migrate the three key sites to Entra/MI (FR-E5)</title>
     <phase>5 Group 2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs on the document-analysis path.</rigor-reason>
     <model-tier>sonnet</model-tier>
