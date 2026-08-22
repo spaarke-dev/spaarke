@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-16 (A-13): SPE membership revoke matches the key membership is written with (+ H-8b relic cleanup)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-010</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the revocation path (SPE ACL removal) — a real logic defect leaving container permissions in place while reporting success — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Precise mismatch (matcher searches contact GUID inside the email UPN) with the write key identified (contactEmail); the fix is matching on the correct key. Well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/ExternalAccess/RevokeExternalAccessEndpoint.cs — a known-contended dir AND shared with task 010 (grant/revoke idempotency); serialized after 010.</parallel-reason>
+    <deps>001, 010</deps>
+    <tags>bff-api, auth, security</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-13 (spec FR-16, Medium): the SPE membership revoke matcher searches for the contact GUID INSIDE the userPrincipalName — but SPE permissions are written with userPrincipalName = contact EMAIL, so the predicate never matches and revoke reports success while leaving the container permission in place. Match on the same key membership is written with (email). While in the file, remove the H-8b vestigial WebRoleRemoved relic and reconcile the best-effort SPE-removal path.</prompt>
+  <role>SPAARKE platform developer. Expert in SharePoint Embedded container permissions (Graph), the Spaarke SPE membership service, and the external revoke path. Follow ADRs strictly.</role>
+  <goal>A revoke removes the corresponding SPE container permission, matched on the email key the membership was written with; the endpoint no longer reports SPE-revoke success when it removed nothing. The Power Pages relic (WebRoleRemoved) is gone.</goal>
+
+  <context>
+    <background>Finding A-13 (10-finding-confirmations.md): RevokeExternalAccessEndpoint.cs:222-235 sets contactIdStr = contactId.ToString() then matches a permission whose AdditionalData["userPrincipalName"].Contains(contactIdStr) (:230-231). SPE permissions are written with userPrincipalName = contactEmail — SpeContainerMembershipService.cs:75 (["userPrincipalName"] = contactEmail). An email never contains the contact GUID → the predicate never matches. On no-match, contactPermission?.Id == null returns true ("may have already been removed", :237-243) → reports success while leaving the ACL entry. Impact bounded by broker-only model (grants write no SPE permission; GrantExternalAccessEndpoint.cs:116-117 SpeContainerMembershipGranted:false), so residual ACLs are mostly legacy/invite-path — still a defect. H-8b (design-register §H.8): RevokeExternalAccessEndpoint.cs:182 returns vestigial WebRoleRemoved:false (Power Pages relic); retains a best-effort SPE-permission-removal path (:120-145,197-261) even though grants never add container members — "fix together". FR-16 acceptance: a revoke removes the corresponding container permission, verified by test.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/SpeRevokeMatcherTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the never-matches behavior (new file created here if 001 did not cover SPE).</dependency>
+      <dependency task="010" status="pending">Grant/revoke idempotency already merged into RevokeExternalAccessEndpoint.cs — rebase this change on it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed on reporting: if the SPE permission cannot be confirmed removed, the endpoint MUST NOT report SPE-revoke success — distinguish "confirmed absent" from "match failed". Scope: the SPE-revoke result path.</constraint>
+    <constraint source="project">Match on the SAME key SPE membership is written with (contactEmail per SpeContainerMembershipService.cs:75) — verify the write key before trusting it; if the write key changed, match the current one. Scope: the matcher predicate.</constraint>
+    <constraint source="project">Remove the WebRoleRemoved Power Pages relic (:182) and reconcile the best-effort SPE path so it is coherent with the broker-only grant model — do not leave dead branches that imply container members are added on grant. Scope: the H-8b cleanup.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-13: Extract the SPE permission matcher (RevokeExternalAccessEndpoint.cs:222-235) so email-vs-GUID matching is assertable without Graph. Task 001 could not pin A-13; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
+    <constraint source="task-010">BINDING INVARIANT to preserve in this same file. Task 010 changed /revoke from "deactivate ONE row by AccessRecordId" to "derive the logical grant key (root x Contact-XOR-Organization), query ALL active rows on that key, deactivate every one" -- that sweep IS the fix for A-11 (silent privilege retention after revoke). You MUST NOT reduce it back to the target row, and you MUST NOT weaken the org/person isolation: "_sprk_contact_value eq null" in ExternalGrantKey is what stops an organization revoke from sweeping every member's personal grant. The tests GrantTwiceThenRevokeOnce_LeavesZeroActiveGrants, Revoke_WithPreExistingDuplicateRows_DeactivatesEveryOne and both Revoke_Of*Grant_DoesNot* isolation tests pin this; they must stay green or be replaced by equivalents pinning the same properties. ALSO CONSIDER (not required): the SPE permission removal you are fixing still keys on the single request.ContactId, while the Dataverse sweep now keys on the logical grant -- for an ORGANIZATION grant those are different sets, so an org revoke may leave SPE membership for members whose Dataverse access was just removed. Assess and either fix or file it. Rationale: notes/task-010-grant-lifecycle.md sections 2 and 4. Scope: RevokeExternalAccessEndpoint.cs changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE membership revoke</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spe-writer-identity-matching.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="spe-writer-identity-matching" location=".claude/patterns/auth/spe-writer-identity-matching.md">Matching SPE permissions by the identity key they were written with</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm task 010 merged; rebase.</step>
+    <step order="1">Confirm the write key at SpeContainerMembershipService.cs:75 (contactEmail); confirm the mismatched matcher at RevokeExternalAccessEndpoint.cs:222-235.</step>
+    <step order="2">Change the matcher to compare userPrincipalName to the contact email (exact match, not GUID Contains); resolve the contact's email for the revoke if not already available.</step>
+    <step order="3">Fix the false-success at :237-243: only report SPE-revoke success when a permission was actually found and removed (or confirmed genuinely absent), not merely unmatched.</step>
+    <step order="4">Remove the WebRoleRemoved relic (:182) and reconcile the best-effort SPE path (:120-145,197-261) with the broker-only model.</step>
+    <step order="5">Author SpeRevokeMatcherTests: a revoke of a contact with a real email-keyed SPE permission removes it (verified); a contact with no permission reports genuinely-absent, not false-success.</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the H-8b reconciliation decision in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the best-effort SPE path would break a legacy/invite flow that DOES add container members, STOP and escalate: retain vs remove the SPE path is a product decision about the invite lineage, not a pure cleanup.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/SpeRevokeMatcherTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A revoke removes the corresponding SPE container permission, matched on the email key membership was written with (FR-16 acceptance) — verified by test.</criterion>
+    <criterion testable="true">Negative: when no matching permission is found, the endpoint reports genuinely-absent rather than false SPE-revoke success.</criterion>
+    <criterion testable="true">Negative: an SPE removal error is surfaced, not swallowed as success.</criterion>
+    <criterion testable="true">The WebRoleRemoved relic is removed and the SPE path is coherent with the broker-only grant model.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16; finding A-13; register H-8b. Depends on task 010 (same file). Impact is bounded by the broker-only model but the matcher must satisfy its purpose.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

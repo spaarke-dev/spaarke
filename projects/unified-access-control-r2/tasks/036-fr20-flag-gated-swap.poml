@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-20 — flag-gated swap: systemuser root sets from Dataverse's answer; keep the contact-grants union; canary-gated merge</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-032-034-035; MERGE GATED on task 034 canary green (NFR-04)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs change on the row-level-security boundary; tags bff-api/auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FR-20 fail-OPEN risk (orchestrator directive): this is the task where an inert impersonation header becomes an org-wide disclosure — highest blast radius in the phase.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) + ExternalAccessModule.cs.</parallel-reason>
+    <deps>032, 034, 035</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Swap the SOURCE of systemuser root sets inside AccessibleRecordSetService.ComposeForSystemUserAsync from MembershipResolverService pattern-matching to ImpersonatedRootSetSource (task 035), behind a config flag whose DEFAULT is the existing membership path (fail-safe rollout). KEEP THE CONTACT-GRANTS UNION unchanged — grants live in sprk_externalrecordaccess, not POA; Dataverse cannot see them (register B-17). Surface truncation honestly per NFR-03. This task's PR MUST NOT merge until the task-034 negative canary is green in the gate — equality between impersonated and app-only row counts means impersonation is inert.</prompt>
+  <role>SPAARKE platform developer, C#/.NET authorization internals + feature-flag rollout discipline. Follow ADRs strictly.</role>
+  <goal>ComposeForSystemUserAsync consults ImpersonatedRootSetSource when ExternalAccess:ImpersonatedRootSets:Enabled = true (default false), contributing the Dataverse-answer term at the rights level task 032 assigned to the systemuser plane; contact-grants union preserved verbatim on both flag states; AccessibleRecordSet carries a Truncated flag surfaced on the module data response; runbook records the prvActOnBehalfOfAnotherUser prerequisite.</goal>
+
+  <context>
+    <background>Design §4.4: Dataverse applies ownership, role depth, BU, teams, POA shares, hierarchy — both pattern-matching defects (BU over-grant, POA under-grant) disappear. Investigation 08 §4: everything downstream consumes only the id set/rights map, so the swap is contained in ComposeForSystemUserAsync; watch items — keep the contact-grants union (§4-2), copy CommunicationThreadReadService's no-app-only-fallback refusal (§3a-2), decide truncation semantics for broad-role users whose REAL set can vastly exceed 5000 where pattern-matching structurally could not (§2). NFR-03: caps must never be silent — "Only 5,000 records displayed".</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file role="modify">docs/guides/auth-deployment-setup.md</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Rights-map evaluator (the Dataverse-answer term contributes into the additive max).</dependency>
+      <dependency task="034" status="pending">NFR-04 negative canary — BLOCKING MERGE GATE for this PR; cite the green run in the PR description.</dependency>
+      <dependency task="035" status="pending">ImpersonatedRootSetSource (the new source being swapped in).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-04">Scope: merge of this task. The negative canary MUST be green before merge; equality (impersonation inert) fails the build. The PR description MUST link the canary run. Merging without it is forbidden regardless of unit-test state.</constraint>
+    <constraint source="register B-17 / spec FR-20">Scope: ComposeForSystemUserAsync. The contact-grants union term MUST survive on BOTH flag states — deleting or gating it removes access Dataverse knows nothing about. A regression test pins it under flag-on.</constraint>
+    <constraint source="ADR-032">Scope: the flag design. Default = false (existing membership path). Flag evaluation happens once per composition, is logged with the active source, and flag-off requires zero configuration (Null-Object/absent-config semantics — the kill-switch direction is BACK to the proven path).</constraint>
+    <constraint source="spec NFR-01 + investigation 08 §3a-2">Scope: failure handling under flag-on. If the impersonated source throws (including Guid.Empty from a principal missing SystemUserId), the composition FAILS (deny) — MUST NOT fall back to the membership path or an app-only query mid-request, because a silent fallback reintroduces the over-grant the flag was supposed to remove.</constraint>
+    <constraint source="spec NFR-03">Scope: truncation. When the impersonated set hits its cap, AccessibleRecordSet carries Truncated=true and the external module data response exposes it so the client can render "Only 5,000 records displayed". Silent truncation is a defect.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>root-set source swap, feature-flag rollout on an authorization path</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="no-app-only-fallback refusal" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">The 403-on-unresolvable-caller refusal (":731-745 area") — copy this failure discipline; never skip the term.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Verify tasks 032/035 merged and task 034's canary is green in the gate. Read ComposeForSystemUserAsync as it stands post-032.</step>
+    <step order="1">Add the ExternalAccess:ImpersonatedRootSets:Enabled option (default false) with an options class; document both states in appsettings.json comments.</step>
+    <step order="2">Implement the flag-on branch: root ids for the three root types from ImpersonatedRootSetSource; contribute as the Dataverse-answer term (design §4.5 term 1) into the additive max; membership term omitted on this plane under flag-on; contact-grants union untouched.</step>
+    <step order="3">Implement failure handling per the NFR-01 constraint (throw → gate denies; log with the [WF-AUTHZ] prefix and the active source).</step>
+    <step order="4">Propagate Truncated from the source onto AccessibleRecordSet and out through the external module data response; verify the field reaches the client payload.</step>
+    <step order="5">Tests: flag-off byte-equivalent behavior (existing suite green untouched); flag-on term-source assertions incl. shared-record-appears (POA fix direction) and BU-only-record-absent (over-grant fix direction) via substituted source; contact-grants union present under both states; source-throw → deny; truncation propagation.</step>
+    <step order="6">Update docs/guides/auth-deployment-setup.md §6: prvActOnBehalfOfAnotherUser grant on the BFF application user + the warning that the app user must stay Org-scoped (impersonated privileges are the intersection — a narrow app user silently UNDER-grants; register E-2/E-3).</step>
+    <step order="7">Build + tests; publish-size measurement per §10; PR description cites: canary run, ADR-028 A2 amendment (task 031), placement decision, flag rollout plan.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the task-034 canary is not green (or cannot run) at merge time, STOP — do not merge, do not downgrade the gate to a follow-up. Escalate per CLAUDE.md §6 with the canary state.</trigger>
+    <trigger>If truncation semantics for broad-role users require a product decision beyond the Truncated flag (e.g. top-N ordering choice when capping — open register item C-1), implement the cap + flag and escalate the ordering question rather than choosing silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+    <output type="docs">docs/guides/auth-deployment-setup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Flag OFF (default): composition behavior is identical to pre-task state — full existing unit suite green with zero test edits for this branch.</criterion>
+    <criterion testable="true">Flag ON: a record SHARED with the caller (present in the impersonated answer, absent from membership) appears in the composed set (FR-20 acceptance, under-grant fixed).</criterion>
+    <criterion testable="true">Flag ON negative: a record matched only by owningbusinessunit where the caller's role does not cover it (absent from the impersonated answer, present in membership pattern-matching) does NOT appear (FR-20 acceptance, over-grant fixed).</criterion>
+    <criterion testable="true">Flag ON: a systemuser who is also a granted contact retains grant-derived ids — contact-grants union pinned by test.</criterion>
+    <criterion testable="true">Negative: impersonated-source throw (incl. missing SystemUserId) → composition fails → gate denies; NO fallback to membership or app-only, asserted by test.</criterion>
+    <criterion testable="true">Truncated=true flows to the external module data response when the cap is hit; never silently dropped.</criterion>
+    <criterion testable="true">docs/guides/auth-deployment-setup.md §6 records the privilege grant + Org-scope warning.</criterion>
+    <criterion testable="true">PR cites the green NFR-04 canary run; build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20/NFR-02/NFR-03/NFR-04; design §4.4; investigation 08 §4 + §6 T2/T5 (runbook half of T5 lands here; the uac-access-control.md drift fix belongs to the docs-drift workstream, not this task). The blanket Collaborate stamp was deleted in task 033 — verify it has not crept back (grep WorkforceProjectAccessLevel = 0 hits).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

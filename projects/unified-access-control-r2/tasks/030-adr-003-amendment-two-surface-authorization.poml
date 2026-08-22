@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="unified-access-control-r2">
+  <metadata>
+    <title>ADR-003 amendment (path B) — two-surface authorization; sanction the (recordId → rights) evaluator</title>
+    <phase>1 One evaluator</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architecture change on the authorization model; tags include auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration / architectural work per CLAUDE.md §8.5 — high blast radius: this amendment sanctions the shape every Phase 1 code task depends on.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>MAIN-SESSION-ONLY: edits .claude/adr/** which sub-agents cannot write (CLAUDE.md §3). Must merge before task 032 (the evaluator shape change it sanctions).</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <deps>none</deps>
+    <tags>adr, auth, documentation, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-003 (CLAUDE.md §6.5 path B) so it describes the authorization architecture as it will actually exist: TWO enforcement surfaces (MDA = Dataverse-native; SPA/Teams = BFF evaluator), with ONE unified evaluator returning (recordId → rights) composed as additive terms (highest wins) followed by ordered vetoes. Retire the four rules that no longer describe reality. This amendment MUST merge before task 032 changes the evaluator shape — the code must land under an ADR that sanctions it, not in violation of one.</prompt>
+  <role>SPAARKE platform developer with authorization-architecture expertise. Follow ADRs strictly; this task exercises the §6.5 path-B amendment protocol itself.</role>
+  <goal>Amended concise ADR at .claude/adr/ADR-003-authorization-seams.md and amended full ADR at docs/adr/ADR-003-lean-authorization-seams.md, both describing the two-surface model and the unified evaluator contract, with a changelog entry in .claude/CHANGELOG.md.</goal>
+
+  <context>
+    <background>spec.md "ADR Tensions" row 1 and design.md §9: ADR-003's rules — "two seams only", "new auth logic MUST be an IAuthorizationRule", "MUST NOT create new service layers for auth", "cache UAC snapshots per-request only" — none describe reality. The external stack (CallerPrincipalResolver + AccessibleRecordSetService) and CachedAccessDataSource (cross-request 60s/2-min cache) already diverge, and the rules as written would force the FR-19 evaluator into a shape that cannot carry rights or vetoes. Owner-approved resolution path is B (amend/supersede). Register item H-5; drift evidence in register §G row 2.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-003-authorization-seams.md</file>
+      <file role="modify">docs/adr/ADR-003-lean-authorization-seams.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/spec.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Scope: this whole task. This is a path-B amendment: the amended ADR must be merged BEFORE or ALONGSIDE the dependent code (task 032), never after. Record the amendment rationale in the ADR itself (date, project, superseded rules).</constraint>
+    <constraint source="CLAUDE.md §3">Scope: file writes. .claude/** paths are writable ONLY from the main session — if executed by a sub-agent, STOP and hand the edits back as structured text.</constraint>
+    <constraint source="ADR-003">Scope: the amended rule set. The amendment must PRESERVE the rules that still hold — fail-closed with machine-readable deny codes, authorize-before-SpeFileStore, cache data never decisions — and retire only the four rules named in the spec ADR Tensions table. Do not weaken fail-closed language anywhere.</constraint>
+    <constraint source="project">Scope: the new evaluator contract text. It MUST state verbatim: the evaluator returns (recordId → rights); additive terms compose via highest-wins max; vetoes are evaluated in order deny-list → Restricted after the max; Secure suppresses derived-member and org-expansion terms BEFORE the max; "No Access" is a veto, NEVER a level (design §4.5 / register B-8..B-10).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>authorization architecture, ADR amendment protocol</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/03-native-uac-core.md</file>
+    </files>
+    <patterns>
+      <pattern name="concise-vs-full-adr" location=".claude/adr/ADR-028-spaarke-auth-architecture.md">ADR-028's amendment sections (A1/A2) show the house style for dated, scoped amendments appended to a living ADR — mirror it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load design.md §4 and §9, spec.md ADR Tensions, and both ADR-003 versions.</step>
+    <step order="1">Draft the amendment for the FULL ADR (docs/adr/ADR-003-lean-authorization-seams.md): a dated "Amendment (2026-08, unified-access-control-r2)" section that (a) records the two-surface model, (b) defines the unified evaluator contract per the project constraint above, (c) explicitly supersedes the four retired rules with the reality-based replacements, (d) records why (the external stack + CachedAccessDataSource divergence; a HashSet cannot carry rights).</step>
+    <step order="2">Rewrite the CONCISE ADR (.claude/adr/ADR-003-authorization-seams.md) MUST/MUST NOT lists to the amended rule set. New MUSTs include: evaluator returns (recordId → rights); vetoes ordered deny → Restricted post-max; Secure suppression pre-max; "No Access" never a level; fail closed on every error path. Keep it ≤ ~100 lines.</step>
+    <step order="3">Cross-link: concise → full; full → projects/unified-access-control-r2/design.md §4. Fix the dead link noted in register §G row 2.</step>
+    <step order="4">Add a .claude/CHANGELOG.md entry (procedure-surface change).</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If, while drafting, a still-live consumer is found that genuinely depends on a retired rule (e.g. code registered as IAuthorizationRule that the amendment would orphan), STOP and escalate per CLAUDE.md §6.5 with the finding — do not silently broaden the amendment's scope.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-003-authorization-seams.md</output>
+    <output type="docs">docs/adr/ADR-003-lean-authorization-seams.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR versions contain a dated amendment section naming unified-access-control-r2 and explicitly superseding exactly these four rules: "two seams only", "new auth logic MUST be an IAuthorizationRule", "MUST NOT create new service layers for auth", "cache per-request only".</criterion>
+    <criterion testable="true">The amended concise ADR states the evaluator contract: (recordId → rights); additive max; veto order deny-list → Restricted post-max; Secure suppression pre-max; "No Access" is a veto, never a level.</criterion>
+    <criterion testable="true">Negative: no fail-closed rule, deny-code rule, or authorize-before-storage rule is weakened or deleted by the amendment (diff review).</criterion>
+    <criterion testable="true">Negative: no file outside .claude/adr/**, docs/adr/**, .claude/CHANGELOG.md, and this project's notes/ is modified.</criterion>
+    <criterion testable="true">.claude/CHANGELOG.md carries an entry for this amendment.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec: ADR Tensions table row 1. The amendment sanctions the task-032 shape change; sequence 030 → 032 is mandatory (orchestrator instruction). Register §G row 2 lists the concrete drift points to fix while in the file.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

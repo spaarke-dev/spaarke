@@ -1,8 +1,8 @@
 # External Access SPA Architecture
 
-> **Last Updated**: July 20, 2026
-> **Last Reviewed**: 2026-07-20
-> **Reviewed By**: spaarke-SPA-external-access-platform-r1 (task 042 — rewrite to the shipped SWA + CIAM platform)
+> **Last Updated**: July 20, 2026 (corrected 2026-08-21)
+> **Last Reviewed**: 2026-08-21
+> **Reviewed By**: spaarke-SPA-external-access-platform-r1 (task 042 — rewrite to the shipped SWA + CIAM platform); corrected 2026-08-21 by the `unified-access-control-r2` investigation (dual-scheme `/api/v1/external` group + `CallerPrincipalAuthorizationFilter` per teams-app-r1 task 025; Plane 3 AI Search marked NOT IMPLEMENTED; polymorphic/org grant model)
 > **Status**: Current
 > **Purpose**: Architecture of the Secure Project Workspace — a React 18 SPA for external stakeholders hosted on Azure Static Web Apps and authenticated with Microsoft Entra External ID (CIAM)
 
@@ -46,7 +46,7 @@ The SPA source lives at `src/client/external-spa/`. It is built with Vite and de
 4. After login, MSAL stores tokens in `sessionStorage` (per-tab isolation).
 5. `WorkspaceHomePage` mounts — `useExternalContext()` calls `GET /api/v1/external/me`.
 6. `acquireBffToken()` uses `acquireTokenSilent()` with redirect fallback on `InteractionRequiredAuthError`.
-7. The BFF validates the CIAM JWT via its `Ciam` scheme, then `ExternalCallerAuthorizationFilter` resolves the Dataverse Contact by the stable CIAM `oid` claim (`Contact.sprk_externalobjectid`) and loads project participations from Redis (60s TTL, Dataverse fallback).
+7. The BFF validates the CIAM JWT via its `Ciam` scheme, then the group-level `CallerPrincipalAuthorizationFilter` (which replaced `ExternalCallerAuthorizationFilter` — teams-app-r1 task 025; the CIAM strategy reproduces the old filter's behavior exactly) resolves the Dataverse Contact by the stable CIAM `oid` claim (`Contact.sprk_externalobjectid`) and loads grant participations from Redis (60s TTL, Dataverse fallback).
 8. The `/me` response includes `contactId`, `email`, and `projects[]` with access levels (`ViewOnly`/`Collaborate`/`FullAccess`).
 9. User navigates to a project — `ProjectPage` loads documents, to-dos, contacts, and organizations via the BFF.
 10. All data routes through the BFF API — no direct calls to Dataverse or SPE from the browser.
@@ -76,7 +76,7 @@ External users are **local accounts in a dedicated Entra External ID (CIAM) tena
 
 The BFF API app exposes App ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e` with scope `SDAP.Access`. It sets `requestedAccessTokenVersion: 2`, so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`), which the BFF validates as `Ciam:Audience`.
 
-**Contact resolution by stable `oid`**: `ExternalCallerAuthorizationFilter` resolves the CIAM caller to a Dataverse Contact by the immutable `oid` claim, stored on `Contact.sprk_externalobjectid` (String/100). Email (`preferred_username` / `upn` / `email`) is a **first-login fallback only** — it then binds the `oid` onto the Contact. Once an `oid` is bound, a mismatched email neither redirects resolution nor grants access. A token carrying neither `oid` nor a usable email is rejected (401).
+**Contact resolution by stable `oid`**: the CIAM caller-principal strategy (`CiamContactPrincipalStrategy` in `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs`, invoked by the group-level `CallerPrincipalAuthorizationFilter`) resolves the CIAM caller to a Dataverse Contact by the immutable `oid` claim, stored on `Contact.sprk_externalobjectid` (String/100). Email (`preferred_username` / `upn` / `email`) is a **first-login fallback only** — it then binds the `oid` onto the Contact. Once an `oid` is bound, a mismatched email neither redirects resolution nor grants access. A token carrying neither `oid` nor a usable email is rejected (401).
 
 **Broker-only invariant**: The external user's token is used only to authenticate to the BFF and is never exchanged downstream (no OBO on the external path). All external SPE + Dataverse reads are app-only / managed identity, and no per-external-user workforce B2B guest is provisioned.
 
@@ -88,10 +88,12 @@ The BFF runs **two** JWT bearer schemes side by side (`Infrastructure/DI/Authori
 
 | Scheme | Tenant / authority | Applies to |
 |--------|--------------------|-----------|
-| Workforce default (`AddMicrosoftIdentityWebApi`) | Workforce Entra tenant | Internal surfaces, incl. the `/api/v1/external-access` management group |
-| `Ciam` (`AuthSchemes.Ciam`) | Entra External ID (`*.ciamlogin.com`) | The `/api/v1/external` group only, pinned via the named policy `AuthPolicies.CiamExternal` |
+| Workforce default (`AddMicrosoftIdentityWebApi`) | Workforce Entra tenant | Internal surfaces, incl. the `/api/v1/external-access` management group — **and** (since teams-app-r1 task 025) the `/api/v1/external` collaboration group |
+| `Ciam` (`AuthSchemes.Ciam`) | Entra External ID (`*.ciamlogin.com`) | The `/api/v1/external` group, via the dual-scheme named policy `AuthPolicies.ExternalCollaboration` |
 
-The `Ciam` scheme is **additive** — it is appended to the existing workforce authentication builder (no third `AddAuthentication`), so the workforce default scheme is preserved for internal surfaces. The `AuthPolicies.CiamExternal` policy pins `AuthenticationSchemes = ["Ciam"]` + `RequireAuthenticatedUser` on the external route group, so a workforce token is rejected on `/api/v1/external/*` and a CIAM token is rejected on the workforce-default `/api/v1/external-access/*`. The default-scheme `PostConfigure<JwtBearerOptions>` audience-merge does **not** apply to the `Ciam` named options.
+The `Ciam` scheme is **additive** — it is appended to the existing workforce authentication builder (no third `AddAuthentication`), so the workforce default scheme is preserved for internal surfaces.
+
+> **Corrected 2026-08-21**: the original CIAM-only pin (`AuthPolicies.CiamExternal`) on `/api/v1/external` was **superseded** by `AuthPolicies.ExternalCollaboration` (teams-app-r1 task 025 · R2 FR-22): the policy accepts **both** the `Ciam` scheme **and** the workforce default scheme (`Infrastructure/DI/AuthorizationModule.cs:278-286`), so a workforce (Teams-host) token is now **accepted** on `/api/v1/external/*` — not rejected as this doc previously stated. The group-level `CallerPrincipalAuthorizationFilter` resolves either token to a plane-agnostic `CallerPrincipal` with its record scope (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs`); the CIAM path is behaviorally unchanged. `CiamExternal` still exists but is retained for reference only (`Infrastructure/Authentication/AuthPolicies.cs`). A CIAM token is still rejected on the workforce-default `/api/v1/external-access/*`. The default-scheme `PostConfigure<JwtBearerOptions>` audience-merge does **not** apply to the `Ciam` named options.
 
 Cross-tenant provisioning uses `CiamGraphClientFactory` — an app-only MSAL confidential client built `WithCertificate` (Key Vault cert `ciam-graph-provisioner-cert` in `spaarke-spekvcert`, loaded by name, never a plaintext secret) `WithAuthority(ciamAuthority)` + `AcquireTokenForClient`. It is modeled on `SpeAdminTokenProvider.GetOrCreateMsalApp` per ADR-010 (reuse the established cross-tenant pattern).
 
@@ -103,21 +105,24 @@ Cross-tenant provisioning uses `CiamGraphClientFactory` — an app-only MSAL con
 |-------|-----------------|----------------|
 | **Plane 1 — Dataverse records** | Project + child record access via `sprk_externalrecordaccess` participation | BFF (app-only) — the auth filter resolves participations per request |
 | **Plane 2 — SPE Files** | SharePoint Embedded document content | BFF-brokered **app-only** streaming (no external identity reaches SPE; no synthetic container membership written) |
-| **Plane 3 — AI Search** | Azure AI Search query scope | BFF constructs the query filter at query time from active participations |
+| **Plane 3 — AI Search** | Azure AI Search query scope | **NOT IMPLEMENTED** (corrected 2026-08-21) — no external route reaches AI Search; there is no external search surface, and index-time security trimming is unbuilt (`PrivilegeGroupIds` is always written empty at index time — `Services/Jobs/RecordSyncJob.cs:557`) |
 
-**Participation model** (Plane 1): a single active `sprk_externalrecordaccess` record (grantee = the **Contact** person) grants the Contact access to the parent project and its child records. Revoking = deactivating that record.
+**Participation model** (Plane 1): a single active `sprk_externalrecordaccess` record grants access to the granted root record and its children. *(Corrected 2026-08-21 — the model generalized during `unified-access-control-r2`:)* the grant **root is polymorphic** — project, matter, or work assignment, bound via exactly one PascalCase typed lookup (`sprk_Project` / `sprk_Matter` / `sprk_WorkAssignment`); the grantee is either a **Contact** (`sprk_Contact` lookup) or — for an **organization grant** — a contact-null row bound to `sprk_Organization` (the custom org entity, **not** OOB `account`), under which every active org member inherits access at check time (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs`). Revoking = deactivating that record (`statecode=1`). An optional `sprk_expiresdate` is stored on the grant, but **expiry is NOT ENFORCED anywhere** — the read path filters on `statecode eq 0` only.
 
-**Access level enforcement**: The access level (`ViewOnly` = `100000000`, `Collaborate` = `100000001`, `FullAccess` = `100000002`) is embedded in the `/me` response. Client-side capability flags are UX-only. Actual enforcement is server-side in the BFF via `ExternalCallerAuthorizationFilter` and per-endpoint checks (`ExternalCallerContext.HasProjectAccess` / `GetEffectiveRights`). Effective rights: ViewOnly → Read; Collaborate → Read + Create + Write; FullAccess → Read + Create + Write + Delete.
+**Access level enforcement**: The access level (`ViewOnly` = `100000000`, `Collaborate` = `100000001`, `FullAccess` = `100000002`) is embedded in the `/me` response. Client-side capability flags are UX-only. Actual enforcement is server-side in the BFF via the `CallerPrincipalAuthorizationFilter` and per-endpoint checks (`CallerPrincipal.HasProjectAccess` / `GetEffectiveRights`). Effective rights: ViewOnly → Read; Collaborate → Read + Create + Write; FullAccess → Read + Create + Write + Delete (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:126-134`). *(Corrected 2026-08-21 — precision:)* project **membership** (`HasProjectAccess`) is checked on every project-scoped endpoint, but the **level-derived rights** are enforced only on to-do creation today (`POST /projects/{id}/todos` requires the Create right — `Api/ExternalAccess/ExternalProjectDataEndpoints.cs:281-284`); `PATCH /todos/{id}` performs no project-scope check (acknowledged in code as an accepted gap).
 
 The Redis participation cache (ADR-009, 60s TTL) is invalidated on grant so a new grant is immediately visible.
 
 ---
 
-## BFF Data Endpoints (`/api/v1/external` — `CiamExternal` policy + `ExternalCallerAuthorizationFilter`)
+## BFF Data Endpoints (`/api/v1/external` — `ExternalCollaboration` policy + `CallerPrincipalAuthorizationFilter`)
+
+*(Corrected 2026-08-21: group policy/filter names updated per teams-app-r1 task 025 — see BFF Authentication Schemes above.)*
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/external/me` | User context — `contactId`, `email`, project access list |
+| `GET` | `/api/v1/external/me/entitlements` | Tier-1 module entitlement context (module codes gating tab visibility) — added by `unified-access-control-r2` task 072 |
 | `GET` | `/api/v1/external/projects` | All projects the caller has access to |
 | `GET` | `/api/v1/external/projects/{id}` | Single project record |
 | `GET` | `/api/v1/external/projects/{id}/documents` | Project documents (metadata) |
@@ -129,6 +134,8 @@ The Redis participation cache (ADR-009, 60s TTL) is invalidated on grant so a ne
 | `PATCH` | `/api/v1/external/todos/{id}` | Update a to-do |
 
 > **Note**: The to-do routes replaced the former event-based routes (`smart-todo-decoupling-r3`, FR-29). The SPA consumes `sprk_todo`, not `sprk_event`.
+>
+> **Added 2026-08-21**: a module-host read-data seam is also mounted under this group at `/api/v1/external/api/dataverse/*` (`fetch`, `record`, `metadata`, `savedquery`, `savedqueries` — `Api/ExternalAccess/ExternalModuleDataEndpoints.cs`). It inherits the group's dual-scheme policy + caller-principal filter and record-scopes every read.
 
 **Management endpoints** (internal Corporate Workspace, workforce default scheme — `/api/v1/external-access`):
 
@@ -196,8 +203,8 @@ Per **ADR-028 Amendment A1 limitation E-3**, **direct-Office features for extern
 | Auth grant type | Authorization code + PKCE | Implicit is deprecated; MSAL handles silent refresh and MFA | — |
 | SPA routing | BrowserRouter + SWA navigationFallback | Clean URLs; deep links resolve via rewrite; unknown paths render in-app 404 | — |
 | Token storage | sessionStorage (not localStorage) | **Intentional divergence from internal surfaces.** Per-tab isolation for shared/kiosk workstations. Internal surfaces use `localStorage` for cross-tab SSO (different threat model). See [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md). | ADR-028 (documented exception) |
-| BFF CIAM validation | Second `Ciam` JwtBearer scheme, pinned to `/api/v1/external` | Additive to the workforce default; distinct issuer/audience | ADR-028 A1 |
-| Auth filter pattern | Per-endpoint filter (not global middleware) | `ExternalCallerAuthorizationFilter` follows ADR-008 | ADR-008 |
+| BFF CIAM validation | Second `Ciam` JwtBearer scheme on `/api/v1/external` (since task 025: dual-scheme with the workforce default via `ExternalCollaboration`) | Additive to the workforce default; distinct issuer/audience | ADR-028 A1 |
+| Auth filter pattern | Route-group endpoint filter (not global middleware) | `CallerPrincipalAuthorizationFilter` (successor of `ExternalCallerAuthorizationFilter`) follows ADR-008 | ADR-008 |
 | Participation cache | Redis 60s TTL | Avoids Dataverse query per BFF call; invalidated on grant | ADR-009 |
 | Cross-tenant Graph | `CiamGraphClientFactory` (cert in Key Vault) | Workforce MI cannot reach the CIAM tenant; app-only cert per `SpeAdminTokenProvider` pattern | ADR-010 |
 
@@ -206,7 +213,7 @@ Per **ADR-028 Amendment A1 limitation E-3**, **direct-Office features for extern
 ## Constraints
 
 - **MUST** host on Azure Static Web Apps with `navigationFallback` rewrite; use **`BrowserRouter`** (never `HashRouter`).
-- **MUST** authenticate external users against the CIAM authority (`*.ciamlogin.com`) via the `Ciam` scheme; resolve the Contact by stable `oid` (`sprk_externalobjectid`).
+- **MUST** authenticate external users against the CIAM authority (`*.ciamlogin.com`) via the `Ciam` scheme; resolve the Contact by stable `oid` (`sprk_externalobjectid`). (The `/api/v1/external` group is dual-scheme since teams-app-r1 task 025 — it additionally accepts workforce tokens, resolved by the workforce strategy; external users still authenticate CIAM-only.)
 - **MUST** keep the external path broker-only — no OBO, all SPE/Dataverse access app-only; never provision a workforce B2B guest for an external user.
 - **MUST** enforce Dataverse authorization **before** streaming file content; never expose Graph pointers to the browser.
 - **MUST** route all data through the BFF API — no direct Dataverse/SPE calls from the browser.
@@ -222,7 +229,7 @@ Per **ADR-028 Amendment A1 limitation E-3**, **direct-Office features for extern
 | Missing `navigationFallback` with `BrowserRouter` | 404 on direct navigation to `/project/{id}` | `staticwebapp.config.json` must rewrite unmatched routes to `/index.html` (excluding assets) |
 | Forgetting `knownAuthorities` for the CIAM host | MSAL rejects the `*.ciamlogin.com` OIDC metadata | Declare the CIAM authority host in MSAL `knownAuthorities` (it is a non-default authority) |
 | Wrong token-audience config | 401 on all `/api/v1/external/*` calls | `Ciam:Audience` must be the BFF-API **client-id GUID** (`4a4d5126-…`, v2 tokens) |
-| Missing `ExternalCallerAuthorizationFilter` on a new endpoint | Endpoint reachable without participation check | Every `/api/v1/external/*` endpoint applies the filter (ADR-008) |
+| New endpoint mapped outside the filtered `/api/v1/external` group | Endpoint reachable without participation check | The `CallerPrincipalAuthorizationFilter` is applied at the route-group level (ADR-008) — map new external endpoints under the group so they inherit it |
 | Redis cache not invalidated on grant | New grant not visible for up to 60s | Grant operations must invalidate the Redis participation cache |
 | Reusing the OBO download path on the external surface | Broker-only invariant violated | Use app-only `SpeFileStore.DownloadFileAsync`, never `DownloadFileAsUserAsync` |
 | Resolving Contact by email instead of `oid` | Wrong-Contact resolution / spoofable | Resolve by `oid`; email is a first-login fallback only |
@@ -253,4 +260,4 @@ Per **ADR-028 Amendment A1 limitation E-3**, **direct-Office features for extern
 
 ---
 
-*Last Updated: July 20, 2026*
+*Last Updated: July 20, 2026 — corrected 2026-08-21 by the `unified-access-control-r2` investigation*

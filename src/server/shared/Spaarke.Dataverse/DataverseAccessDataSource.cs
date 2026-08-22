@@ -294,15 +294,154 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>
-    /// Checks user's access to a specific resource using Dataverse's built-in security.
-    /// Uses a direct query approach: If the user can retrieve the record, they have Read access.
-    /// This works with OBO (delegated) tokens where RetrievePrincipalAccess may not be available.
+    /// Resolves the principal's ACTUAL access rights on a record.
     /// </summary>
-    /// <param name="userId">Dataverse systemuserid</param>
+    /// <param name="userId">Dataverse systemuserid (already mapped from the Entra oid by the caller)</param>
     /// <param name="resourceId">Document resource ID</param>
     /// <param name="dataverseToken">Dataverse access token (from OBO or service principal)</param>
     /// <param name="ct">Cancellation token</param>
+    /// <remarks>
+    /// <para><b>unified-access-control-r2 task 005 (spec FR-04, finding A-20 Read-ceiling half).</b>
+    /// This method used to answer with a single hard-coded <see cref="AccessRights.Read"/> on success:
+    /// it probed <c>GET sprk_documents({id})</c> and reasoned "the query succeeded, therefore Read".
+    /// The comment on the old implementation said Dataverse "will enforce Write/Delete separately" —
+    /// but on the SPA/Teams surface the BFF filter IS the enforcement point, so nothing enforced them.
+    /// Every policy requiring more than Read was unsatisfiable: <c>upload_file</c> (Write|Create),
+    /// <c>create_container</c> (Create|Write), <c>download_file</c> (Write), <c>delete_file</c>
+    /// (Delete), <c>share_document</c> (Share) denied for every caller, however privileged.</para>
+    ///
+    /// <para><b>Now:</b> <c>RetrievePrincipalAccess</c> — the Dataverse function that answers exactly
+    /// this question — is called first, and its full flag set is mapped by
+    /// <see cref="MapDataverseAccessRights"/>. Both that mapper and
+    /// <see cref="PrincipalAccessResponse"/> already existed in this file but were <b>dead code</b>:
+    /// orphaned wiring left behind when the direct-query probe replaced the original implementation.
+    /// This task reconnects them rather than writing anything new.</para>
+    ///
+    /// <para><b>Why the probe survives as a fallback.</b> The removed comment claimed
+    /// RetrievePrincipalAccess "may not be available" with delegated tokens. That claim is unverified
+    /// (it has zero call sites repo-wide, so nothing ever exercised it) and cannot be settled offline.
+    /// Rather than bet the fix on it, any RetrievePrincipalAccess failure falls back to the original
+    /// probe. The fallback is strictly safe: it grants Read only when the principal can genuinely read
+    /// the record, so the snapshot is never wider than today's and never wider than Dataverse's own
+    /// answer. A failure is logged with the <c>RPA-FALLBACK</c> marker so a systematic outage is
+    /// visible rather than silently capping everyone at Read again.</para>
+    ///
+    /// <para><b>Fail-closed.</b> No path infers rights from anything but Dataverse's answer. Errors
+    /// yield no rights (an empty record list → <see cref="AccessRights.None"/>).</para>
+    /// </remarks>
     private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(
+        string userId,
+        string resourceId,
+        string dataverseToken,
+        CancellationToken ct)
+    {
+        // AUTHORITATIVE: ask Dataverse what rights this principal holds on this record.
+        var principalRights = await TryRetrievePrincipalAccessAsync(userId, resourceId, dataverseToken, ct);
+
+        if (principalRights.HasValue)
+        {
+            if (principalRights.Value == AccessRights.None)
+            {
+                _logger.LogInformation(
+                    "[UAC-DIAG] RetrievePrincipalAccess: no rights. User={UserId}, Resource={ResourceId}",
+                    userId, resourceId);
+                return new List<PermissionRecord>();
+            }
+
+            _logger.LogInformation(
+                "[UAC-DIAG] RetrievePrincipalAccess SUCCESS: User={UserId}, Resource={ResourceId}, GrantedAccess={AccessRights}",
+                userId, resourceId, principalRights.Value);
+
+            return new List<PermissionRecord>
+            {
+                new PermissionRecord(userId, resourceId, principalRights.Value)
+            };
+        }
+
+        // FALLBACK: RetrievePrincipalAccess was unusable. Degrade to the original read probe, which
+        // grants at most Read and only when the principal can actually retrieve the record.
+        return await QueryReadAccessByProbeAsync(userId, resourceId, dataverseToken, ct);
+    }
+
+    /// <summary>
+    /// Calls Dataverse's <c>RetrievePrincipalAccess</c> function for one principal against one record.
+    /// </summary>
+    /// <returns>
+    /// The principal's rights (possibly <see cref="AccessRights.None"/>) when Dataverse answered, or
+    /// <c>null</c> when the function could not be used — the signal to fall back. The distinction
+    /// matters: <c>None</c> is an authoritative "no rights", <c>null</c> is "no answer".
+    /// </returns>
+    private async Task<AccessRights?> TryRetrievePrincipalAccessAsync(
+        string userId,
+        string resourceId,
+        string dataverseToken,
+        CancellationToken ct)
+    {
+        try
+        {
+            // GET systemusers(<systemuserid>)/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)
+            //     ?@p1={"@odata.id":"sprk_documents(<recordid>)"}
+            // The function is bound to the PRINCIPAL; Target names the record. The response carries a
+            // comma-separated rights string ("ReadAccess,WriteAccess,AppendToAccess,...") — exactly the
+            // shape MapDataverseAccessRights and PrincipalAccessResponse were written to consume.
+            var target = $"{{\"@odata.id\":\"sprk_documents({resourceId})\"}}";
+            var url = $"systemusers({userId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
+                      + $"?@p1={Uri.EscapeDataString(target)}";
+
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+                _logger.LogWarning(
+                    "[UAC-DIAG] RPA-FALLBACK: RetrievePrincipalAccess returned {StatusCode} for User={UserId}, " +
+                    "Resource={ResourceId}. Falling back to the read probe, which caps rights at Read — " +
+                    "Write+ operations will deny for this request. ResponseBody={ResponseBody}",
+                    response.StatusCode, userId, resourceId, responseBody);
+
+                return null;
+            }
+
+            var principalAccess = await response.Content.ReadFromJsonAsync<PrincipalAccessResponse>(ct);
+
+            if (principalAccess is null)
+            {
+                _logger.LogWarning(
+                    "[UAC-DIAG] RPA-FALLBACK: RetrievePrincipalAccess returned an unparseable body for " +
+                    "User={UserId}, Resource={ResourceId}. Falling back to the read probe.",
+                    userId, resourceId);
+
+                return null;
+            }
+
+            // An absent/empty rights string is an authoritative "no rights", not a parse failure:
+            // Dataverse answered, and the answer was nothing. MapDataverseAccessRights returns None.
+            return MapDataverseAccessRights(principalAccess.AccessRights);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                exception: ex,
+                message: "[UAC-DIAG] RPA-FALLBACK: RetrievePrincipalAccess threw for User={UserId}, " +
+                         "Resource={ResourceId}. Falling back to the read probe.",
+                userId, resourceId);
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The original (pre-task-005) access probe, retained as the fallback path.
+    /// If the principal can retrieve the record, they have at least Read; otherwise nothing.
+    /// Grants at most <see cref="AccessRights.Read"/> — it cannot observe Write/Delete/Share.
+    /// </summary>
+    private async Task<List<PermissionRecord>> QueryReadAccessByProbeAsync(
         string userId,
         string resourceId,
         string dataverseToken,
@@ -313,7 +452,6 @@ public class DataverseAccessDataSource : IAccessDataSource
             // APPROACH: Query the document directly using the OBO token.
             // If the query succeeds, the user has at least Read access (Dataverse enforces this).
             // If it fails with 403/404, they don't have access.
-            // This is simpler and works with delegated tokens where RetrievePrincipalAccess may fail.
 
             _logger.LogInformation(
                 "[UAC-DIAG] Checking document access via direct query: User={UserId}, Resource={ResourceId}",
@@ -359,15 +497,18 @@ public class DataverseAccessDataSource : IAccessDataSource
                 return new List<PermissionRecord>();
             }
 
-            // Success! The user can retrieve the document, so they have at least Read access.
-            // For AI operations, Read access is sufficient.
+            // Success: the principal can retrieve the document, so they hold at least Read.
             _logger.LogInformation(
-                "[UAC-DIAG] Document query SUCCESS: User={UserId}, Resource={ResourceId}, GrantedAccess=Read",
+                "[UAC-DIAG] Document query SUCCESS (fallback probe): User={UserId}, Resource={ResourceId}, GrantedAccess=Read",
                 userId, resourceId);
 
             return new List<PermissionRecord>
             {
-                // Grant Read access - if user needs Write/Delete/etc., Dataverse will enforce that separately
+                // Read only. This probe cannot observe Write/Delete/Create/Share — it only knows the
+                // record was retrievable. The old comment here claimed "Dataverse will enforce
+                // Write/Delete separately"; on the SPA/Teams surface that is false, because the BFF
+                // filter IS the enforcement point (finding A-20). RetrievePrincipalAccess above is the
+                // path that answers the full question; reaching here means it was unavailable.
                 new PermissionRecord(userId, resourceId, AccessRights.Read)
             };
         }
@@ -379,40 +520,11 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>
-    /// Maps Dataverse permission string to AccessRights flags.
-    /// Dataverse returns comma-separated string like "ReadAccess,WriteAccess,DeleteAccess".
+    /// Maps a Dataverse rights string to <see cref="AccessRights"/> flags, and logs the mapping.
     /// </summary>
-    /// <param name="accessRightsString">Comma-separated Dataverse rights (e.g., "ReadAccess,WriteAccess")</param>
-    /// <returns>Bitwise combination of AccessRights flags</returns>
-    /// <example>
-    /// Input: "ReadAccess,WriteAccess,DeleteAccess"
-    /// Output: AccessRights.Read | AccessRights.Write | AccessRights.Delete
-    /// </example>
     private AccessRights MapDataverseAccessRights(string? accessRightsString)
     {
-        if (string.IsNullOrWhiteSpace(accessRightsString))
-        {
-            return AccessRights.None;
-        }
-
-        // Dataverse returns comma-separated flags: "ReadAccess,WriteAccess,DeleteAccess"
-        var rights = accessRightsString.Split(',', StringSplitOptions.TrimEntries);
-        var accessRights = AccessRights.None;
-
-        foreach (var right in rights)
-        {
-            accessRights |= right switch
-            {
-                "ReadAccess" => AccessRights.Read,
-                "WriteAccess" => AccessRights.Write,
-                "DeleteAccess" => AccessRights.Delete,
-                "CreateAccess" => AccessRights.Create,
-                "AppendAccess" => AccessRights.Append,
-                "AppendToAccess" => AccessRights.AppendTo,
-                "ShareAccess" => AccessRights.Share,
-                _ => AccessRights.None
-            };
-        }
+        var accessRights = DataverseAccessRightsMapper.FromAccessRightsString(accessRightsString);
 
         _logger.LogDebug("Mapped Dataverse rights '{Rights}' to {AccessRights}",
             accessRightsString, accessRights);

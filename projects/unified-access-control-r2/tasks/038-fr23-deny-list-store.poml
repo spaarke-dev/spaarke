@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-23 — deny-list (No Access List) store: Dataverse schema + fail-closed BFF reader</title>
+    <phase>1 One evaluator</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New authorization data surface + .cs reader on the auth path; tags bff-api/auth/dataverse.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified new-table + reader work with a named reference implementation; default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>p1-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New files + schema only; DI registration is an append-only block — but do NOT run concurrently with 035/036/042 which also edit ExternalAccessModule.cs (they are parallel-safe:false, so the scheduler serializes them; this task may run alongside 034 whose files are fully disjoint).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, security, dataverse, schema, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the deny-list store for the ethical wall and per-child revocation (spec FR-23): a new Dataverse table holding No Access entries keyed subject × object, where subject ∈ {contact, organization} and object ∈ {organization, specific record}; plus a fail-closed BFF reader. No overlap exists — spec Placement table: "Deny-list store | none found | New". The veto WIRING into the evaluator is task 039; this task delivers the store + reader only.</prompt>
+  <role>SPAARKE platform developer, Dataverse schema + C#/.NET data access. Follow ADRs strictly.</role>
+  <goal>A deployed sprk_noaccessentry table (dev environment) with: subject lookups (sprk_contact, sprk_organization — exactly one populated), object columns (sprk_objectorganization lookup; polymorphic record reference via entity-logical-name + record-id columns per the ADR-024 regarding pattern), statecode for deactivation, and reason text; an INoAccessListReader BFF service answering "which of these candidate records are denied for this principal's identities" in bounded queries; unit tests.</goal>
+
+  <context>
+    <background>Spec FR-23: a deny list vetoes access after the max, keyed by (contact | organization) × (record | record's organization) — a contact on the No Access List for organization X is denied on every record referencing X, even holding Full Access. Register B-11: data model per owner is a "No Access List" subgrid on Contact matched against the record's Organization, extended to individual contacts; the same machinery serves per-child revocation (a subject × specific-record entry). Note the deliberate asymmetry: CONFERRAL is allow-listed (FR-24), but DENIAL matches ANY organization reference on the record — over-matching a deny is the specified behavior.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/NoAccessListReaderTests.cs</file>
+      <file role="new">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-23">Scope: the schema. The key shape MUST support all four combinations: contact×organization (ethical wall), contact×record (per-child revocation), organization×organization, organization×record. "No Access" MUST NOT be modeled as a level/option on the grant table — it is a separate deny store.</constraint>
+    <constraint source="spec NFR-01">Scope: the reader. Fail closed: a faulted deny-list read returns a DENY-ALL answer for the queried candidates (deny-list unreadable ⇒ cannot prove not-denied), with a distinct log signal. Never an empty "nobody denied" result on error.</constraint>
+    <constraint source="ADR-024">Scope: the record-object reference. Use the regarding-pattern pair (logical name + id) for the polymorphic record object — do NOT create one lookup per possible entity type.</constraint>
+    <constraint source="ADR-010">Scope: DI. Interface as testing seam + concrete registration; reader reads app-only via the established Dataverse access style of the module (broker-only, no OBO).</constraint>
+    <constraint source="spec NFR-02">Scope: query shape. Bounded, batched queries (subject ids + candidate org/record ids in or-filters) — no per-record round trip; follow the ~500-value in-clause discipline.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema authoring, deny-store design, fail-closed readers</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="fail-closed reader" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs">The single-question fail-closed reader with interface seam — copy its structure; note its fail direction is deny-nothing-extra (false), while THIS reader's fail direction is deny-everything-queried (per the NFR-01 constraint) — document why in the class header.</pattern>
+      <pattern name="batched or-filter read" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">QueryOrganizationGrantRowsAsync's or-joined id filter shape for the candidate-set query.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read register B-11, spec FR-23, ADR-024, the dataverse-create-schema skill.</step>
+    <step order="1">Author src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md: columns, exactly-one-subject rule, object shapes, statecode semantics, the four key combinations with examples (ethical wall; per-child revocation).</step>
+    <step order="2">Create the table + columns in dev via the dataverse-create-schema skill (Web API); verify with a describe/read-back; record logical names in the schema doc.</step>
+    <step order="3">Implement INoAccessListReader + NoAccessListReader: input (contactId, orgIds[], candidate records as (entityLogicalName, recordId, referencedOrgIds[])), output = denied record ids + deny provenance (which entry matched); active entries only (statecode 0).</step>
+    <step order="4">Register in ExternalAccessModule (append-only block, ADR-010 comment).</step>
+    <step order="5">Unit tests per the closed set below (substitute Dataverse responses).</step>
+    <step order="6">Build + tests; publish-size measurement per §10.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document schema decisions + any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner's B-11 subgrid model implies a DIFFERENT storage shape than a standalone junction table (e.g. entries must live as rows of an existing entity for the Contact-form subgrid to bind), STOP and confirm the table design before creating schema — schema creation in dev is effectively irreversible without cleanup cost.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None found — spec Placement table row 2 ("Deny-list store | none found"); grep for noaccess/denylist under src/server returns zero access-control hits (verified during task authoring, 2026-08-21).</existing>
+    <extension>No — sprk_externalrecordaccess is an additive grant store; encoding deny rows there would make "No Access" level-shaped, which FR-23 explicitly forbids (max() would ignore it and the ethical wall fails silently).</extension>
+    <cost-of-doing-nothing>Ethical walls and per-child revocation are unimplementable: a contact on the No Access List for org X would retain Full Access wherever a grant exists, and FR-27's per-child revocation has no mechanism (spec Placement table).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/NoAccessListReaderTests.cs</output>
+    <output type="docs">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The table exists in dev with subject (contact | organization), object (organization | polymorphic record), statecode, reason — read back and documented.</criterion>
+    <criterion testable="true">Reader: a contact×organization entry denies every candidate record whose referenced-org set contains that organization (ANY reference — including a non-conferring one like opposing counsel; the over-match asymmetry pinned by test).</criterion>
+    <criterion testable="true">Reader: a contact×record entry denies exactly that record (per-child revocation key); organization-subject variants of both shapes covered.</criterion>
+    <criterion testable="true">Negative: a DEACTIVATED entry (statecode ≠ 0) denies nothing.</criterion>
+    <criterion testable="true">Negative: a faulted Dataverse read returns deny-all-queried with the distinct log signal — never an empty result (fail-closed test with throwing transport).</criterion>
+    <criterion testable="true">Negative: a subject with no entries yields zero denials (no false walls).</criterion>
+    <criterion testable="true">The evaluator (AccessibleRecordSetService) is unchanged in this task; build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-23 + Placement table row 2; register B-11 (owner data model), B-6 (child revocation), B-10 (never a level). Record→referenced-orgs resolution is the CALLER's input in this design — task 039 decides how the evaluator supplies it (record org lookups); keep the reader agnostic.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

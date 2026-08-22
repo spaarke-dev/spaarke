@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-20 negative canary (NFR-04) — impersonation-inertness merge gate, authored BEFORE the swap</title>
+    <phase>1 One evaluator</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override (modifies tests/**, tags testing/integration-test) — code-review + adr-check unconditional; also auth tags.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but FULLY specified — the exact test design (assertions, fixtures, fail direction) is written verbatim in investigation 08 §3d; literal execution is what's wanted.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>p1-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, integration-test, auth, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the negative canary for Dataverse impersonation as a BLOCKING MERGE GATE (spec NFR-04), and land it BEFORE the FR-20 swap (task 036 lists this task as a gate dependency). The fail-OPEN failure mode it guards: an impersonation header silently not applied yields the app-only (System Administrator) row set with HTTP 200 and no error — org-wide disclosure with zero symptoms. The canary makes that state a loud build failure: an impersonated low-privilege read must return a STRICT SUBSET of, and STRICTLY FEWER rows than, the same query app-only. Equality means impersonation is inert and the build fails. This is a merge gate, not a nice-to-have.</prompt>
+  <role>SPAARKE platform developer, integration testing against live Dataverse. Follow ADRs strictly (ADR-038 KEEP-path seam test).</role>
+  <goal>tests/integration/auth/ImpersonationNegativeCanaryTests.cs implementing Tests 1-3 from investigation 08 §3d, wired into CI as a required (blocking) check for the access path; canary-user provisioning contract documented so the fixture is reproducible per environment.</goal>
+
+  <context>
+    <background>Investigation 08 §3: DataverseImpersonation.Apply silently no-ops on null/Guid.Empty BY DESIGN; the read primitive guards its own entry (throws on Guid.Empty, DataverseWebApiService.cs:962-965) but app-only is the silent default of the whole client — any new call path that forgets to pass the id compiles fine and runs app-only. The canary is the only mechanism that catches "header not applied" (proxy stripping, privilege revoked, wrong parameter) regardless of cause. Canary design verbatim: CanaryUser = permanently-provisioned low-privilege systemuser (User-level Read on sprk_matter only; owns exactly K seeded matters; org contains &gt;K matters it cannot read). Spec NFR-04 gates Phase 1 on this test.</background>
+    <relevant-files>
+      <file role="new">tests/integration/auth/ImpersonationNegativeCanaryTests.cs</file>
+      <file role="new">tests/integration/auth/README.md</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseImpersonationTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-04">Scope: the canary assertions. Test 1 MUST assert BOTH impersonatedIds ⊂ appOnlyIds AND impersonatedIds.Count &lt; appOnlyIds.Count (strictly fewer). Equality is a FAILURE — never a skip, never a warning. Do not weaken to non-strict subset.</constraint>
+    <constraint source="ADR-038">Scope: test placement and style. tests/integration/auth/** is a KEEP path; write behavioral tests against the real primitive — no Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no ctor null-check tests.</constraint>
+    <constraint source="spec NFR-01">Scope: fixture failure handling. A missing/misconfigured canary user must FAIL the run with an actionable message (which user, which privilege, which seed count) — never silently skip, because a skipped canary is an open gate.</constraint>
+    <constraint source="project">Scope: this task. Do NOT modify src/server/** — the canary tests the EXISTING primitive (RetrieveMultipleImpersonatedAsync). If the primitive needs a change to be testable, that is an escalation, not an edit.</constraint>
+    <constraint source="task-005">ADD to this task's live-tenant verification checklist (you are the first task that has a real tenant). Task 005 replaced the "can I retrieve the record -> therefore Read" probe with Dataverse's RetrievePrincipalAccess, but NO test exercises that HTTP call -- mocking the transport is ADR-038 ban B1, so the URL form and its availability under a delegated (OBO) token can ONLY be settled against a real tenant. The comment task 005 deleted claimed RPA "may not be available" under OBO; that claim was unverified (zero call sites -- nothing had ever exercised it), and the old probe was retained as a fallback precisely because it could not be settled offline. While you have the tenant: (a) confirm a caller holding Write/Create on a record gets those flags in the snapshot, not just Read; (b) grep the BFF logs for the RPA-FALLBACK marker -- if it is firing, the Read ceiling is silently BACK and every Write+ operation denies while looking like a legitimate insufficient_rights; (c) confirm the BFF application user holds the privileges RPA needs on the app-only path (read systemuser + read the target). This is observation only -- it does NOT require modifying src/server/**, so it does not conflict with the constraint above. Rationale: notes/task-005-rights-mapping.md section 8. Scope: this task's live-tenant verification checklist.</constraint>
+    <constraint source="task-008">SCOPE EXPANSION of the task-005 RPA obligation above -- read it first, then this. Task 008 made RetrievePrincipalAccess the gate for SIX external-access MUTATION endpoints (grant, invite, invite-and-grant, revoke, close-project, provision-project), not just the document read path. CallerRecordAccessProbe issues OBO WhoAmI() then RetrievePrincipalAccess against sprk_projects / sprk_matters / sprk_workassignments -- a DIFFERENT target entity from task 005's sprk_documents, so 005 passing does NOT imply 008 passes. There is deliberately NO read-probe fallback here (a read proves Read, and Read is not licence to grant), so if RPA is unavailable under a delegated token every external-access mutation returns 403 and the Manage Access UI is dead rather than merely degraded. While you have the tenant: (a) confirm WhoAmI() returns the CALLER's systemuserid under an OBO Dataverse token; (b) confirm RetrievePrincipalAccess answers for a sprk_project target, not only sprk_documents; (c) grep the BFF logs for BOTH markers -- RPA-FALLBACK (read path, silently caps at Read) and DELEGATION-RPA-UNAVAILABLE (mutation path, denies outright). Observation only; no src/server/** change. Rationale: notes/task-008-delegation-rule.md sections 3 and 9. Scope: this task's live-tenant verification checklist.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse impersonation, fail-OPEN detection, integration seam tests</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="live-Dataverse seam test" location="tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs">The existing seam-test harness (config-driven live environment, seeded records, cleanup) is the fixture style to copy for the canary.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read investigation 08 §3 in full; inspect the integration test harness conventions (existing tests/integration/** fixtures, environment config).</step>
+    <step order="1">Define the canary-user fixture contract in tests/integration/auth/README.md: exact security-role shape (User-level Read on sprk_matter ONLY), K seeded matters owned by the canary, the invariant that the org holds &gt;K matters, and the config keys the tests read (canary systemuserid, expected seed ids). Include the provisioning steps an operator runs once per environment.</step>
+    <step order="2">Implement Test 1 (strict subset + strictly fewer — the header-not-applied catcher), Test 2 (exactness: impersonatedIds == the K seeded ids), Test 3 (integration assertion that RetrieveMultipleImpersonatedAsync with Guid.Empty throws — pins the guard so a refactor cannot drop it).</step>
+    <step order="3">Wire the tests into the CI pipeline as a blocking check for access-path changes (follow the repo's existing integration-test CI wiring; if integration tests are not run in CI today, wire this class into whatever gate DOES block merges and record the mechanism in the README).</step>
+    <step order="4">Run against dev; verify all three pass with the provisioned canary user, and verify Test 1 FAILS if pointed at an admin-privileged user (manual one-time inversion check — record the evidence in notes).</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document deviations + the inversion-check evidence in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no non-admin canary user can be provisioned in dev (spec Prerequisites: isolation is not verifiable from an admin account — an admin sees every record by definition, making the strict-fewer assertion structurally unsatisfiable), STOP and escalate per CLAUDE.md §6: the FR-20 swap (task 036) MUST NOT proceed until the canary can run truthfully.</trigger>
+    <trigger>If CI has no mechanism to run live-Dataverse tests as a blocking check, STOP and escalate with options (scheduled canary + required manual gate vs. secrets provisioning for CI) rather than silently landing the tests as non-blocking.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Impersonation unit contract tests exist (tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseImpersonationTests.cs) but only pin Apply()'s no-op contract against mocks — nothing exercises the live header end-to-end; tests/integration/auth/ does not exist yet (glob verified during authoring).</existing>
+    <extension>No — the strict-fewer invariant is only meaningful against live Dataverse row security; it cannot live in the unit suite, and ADR-038 names tests/integration/auth/** as the KEEP path for exactly this seam.</extension>
+    <cost-of-doing-nothing>An impersonation header silently not applied returns the app-only (System Administrator) row set with HTTP 200 — org-wide disclosure with zero symptoms, and the FR-20 swap would ship ungated (spec NFR-04).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/auth/ImpersonationNegativeCanaryTests.cs</output>
+    <output type="docs">tests/integration/auth/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test 1 asserts impersonatedIds ⊂ appOnlyIds AND impersonatedIds.Count strictly &lt; appOnlyIds.Count for the same sprk_matters id-only query; run green against dev with the canary user.</criterion>
+    <criterion testable="true">Test 2 asserts the impersonated set equals exactly the K seeded matter ids.</criterion>
+    <criterion testable="true">Test 3 asserts RetrieveMultipleImpersonatedAsync(entitySet, query, Guid.Empty) throws.</criterion>
+    <criterion testable="true">Negative: with a Global-read caller substituted (inversion check), Test 1 FAILS — evidence recorded in notes.</criterion>
+    <criterion testable="true">Negative: with the canary-user config absent, the tests FAIL with an actionable message (not skip, not pass).</criterion>
+    <criterion testable="true">The blocking-gate wiring exists and is documented in tests/integration/auth/README.md; task 036 can cite it.</criterion>
+    <criterion testable="true">No file under src/server/** modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-04 + investigation 08 §3d (verbatim design) + register E-4. RESIDUAL (not this task): the RUNTIME canary variant (startup/scheduled strict-fewer check emitting a metric + alarm, guarding production config drift) — recommended by investigation 08, not mandated by NFR-04; file via project-defer-issue-tracking when this task closes.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

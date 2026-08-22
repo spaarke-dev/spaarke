@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-13 (A-19): Access cache key must include auth mode (SP vs OBO)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization caching path — cache poisoning that defeats the OBO check (Medium) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A one-line-class key composition fix with a precise root cause in A-19; the reasoning is contained.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Infrastructure/Caching/CachedAccessDataSource.cs is NOT a contended directory and is touched by no other Phase 0 task. File-disjoint from its P0-B partner task 019 (Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs); both depend only on 001 and can run concurrently. Must merge BEFORE task 004, which depends on it.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, cache</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-19 (spec FR-13, Medium): CachedAccessDataSource's cache key omits the auth mode, so a service-principal (app-only) access snapshot can be served to a subsequent OBO caller for up to 60s — defeating the only caller-scoped check. Add the auth mode (or the token identity) to the cache key so a service-principal snapshot is never served to an OBO caller. This must merge BEFORE task 004 flips AuthorizationService to OBO, or the new OBO calls will hit stale SP-mode entries.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke IAccessDataSource decorator chain and cache-key composition. Follow ADRs strictly.</role>
+  <goal>The access cache key distinguishes app-only (SP) evaluations from OBO evaluations so the two never collide; an SP-mode Read snapshot cannot be returned to an OBO caller within the TTL window.</goal>
+
+  <context>
+    <background>Finding A-19 (10-finding-confirmations.md): cache key `sdap:auth:access:{userId}:{resourceId}` — CachedAccessDataSource.cs:65 — omits userAccessToken even though the method takes it (:55-59); TTL 60s (:37). Two callers share this single cached IAccessDataSource decorator (SpaarkeCore.cs:59-67): AuthorizationService passes userAccessToken:null → SP/app-only mode (today; task 004 changes this); AiAuthorizationService passes the caller bearer → OBO mode. In DataverseAccessDataSource.GetUserAccessAsync:159-227, SP mode queries app-only (app sees everything → Read granted), OBO mode queries as the user. Same cache key → an SP-mode "Read" snapshot is served to a subsequent OBO caller. FR-13 acceptance: a service-principal snapshot is never served to an OBO caller. Add auth-mode discrimination to the key (a boolean SP-vs-OBO segment, or a hash of the token identity — do NOT put the raw token in the key).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/CachedAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the cross-mode cache collision, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: when in doubt whether two evaluations share a mode, they must NOT share a cache entry — err toward key separation, never toward reuse. Scope: the key composition.</constraint>
+    <constraint source="project">The raw user access token MUST NOT appear in the cache key or logs — use a stable non-reversible discriminator (mode flag, or a hash of a stable identity claim). Scope: the key builder.</constraint>
+    <constraint source="project">This task changes ONLY the key composition; it does not change what DataverseAccessDataSource returns (that is tasks 004/005). Scope boundary.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth cache key hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="token-caching" location=".claude/patterns/auth/token-caching.md">Token/identity handling in cache keys</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read CachedAccessDataSource.cs:37,55-65; confirm the key omits any auth-mode discriminator.</step>
+    <step order="2">Add an auth-mode segment to the key: at minimum SP-vs-OBO; if OBO callers can differ by identity within the same userId, include a hash of the stable token identity claim (never the raw token).</step>
+    <step order="3">Flip the task-001 characterization test: an SP-mode snapshot is NOT returned to an OBO caller for the same (userId, resourceId); add a test proving two modes get separate entries.</step>
+    <step order="4">Run full test suite; build green.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Note in projects/unified-access-control-r2/notes/ that task 004 depends on this landing first.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If distinguishing OBO callers requires a token claim that is not reliably present, STOP and escalate the discriminator choice rather than silently keying only on the SP/OBO boolean (which would still let two different OBO users collide on the same userId).</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/CachedAccessDataSource.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A service-principal (SP-mode) access snapshot is never served to an OBO caller for the same (userId, resourceId) within the TTL (FR-13 acceptance) — asserted by a test that populates SP mode then reads OBO mode.</criterion>
+    <criterion testable="true">Two evaluations differing only by auth mode produce distinct cache entries.</criterion>
+    <criterion testable="true">Negative: the raw user access token does not appear in the cache key (asserted by inspecting the composed key).</criterion>
+    <criterion testable="true">Same-mode, same-identity repeat reads still hit the cache (no caching regression).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13; finding A-19. Ordering-critical: MUST merge before task 004. This closes the poisoning window that would otherwise be widened when AuthorizationService starts making real OBO calls.
+
+COMPLETION (2026-08-21): Added an {authMode} ("sp"|"obo", computed from string.IsNullOrEmpty(userAccessToken))
+segment to the resource-access cache key in CachedAccessDataSource.cs. Escalation trigger evaluated and NOT
+fired: traced both call sites (AuthorizationService.cs:48-52, AiAuthorizationService.cs:63-180) and confirmed
+userId is always the caller's own 'oid' claim sourced from the same ClaimsPrincipal as userAccessToken in a
+single request — so two different OBO callers already have two different userId values, and a boolean mode
+flag is sufficient (no token-identity hash needed). Flipped the 3 Characterization_ tests in
+tests/integration/auth/UnifiedAccessControl/AccessCacheCharacterizationTests.cs (renamed, doc comments updated
+to "FLIPPED BY TASK 014"), added 1 new negative test proving the raw token is not embedded in the key. Kept the
+3 unchanged negative tests (only their shared ProductionCacheKey constant literal changed shape). 6 tests before
+this task -> 7 after. dotnet build clean; targeted test filters green (82/82 AccessControl namespace, 7/7 in
+this file). Publish size 43.67 MB compressed incl. PDBs (baseline ~44.96 MB / prior 43.65 MB — +0.02 MB, noise).
+No vulnerable packages (no .csproj touched). Per orchestrator instruction, TASK-INDEX.md and current-task.md
+were NOT updated by this task run — a parallel agent (task 019) owns those files; the orchestrator applies the
+status flip.
+
+See projects/unified-access-control-r2/notes/task-014-cache-key-auth-mode.md for full detail.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

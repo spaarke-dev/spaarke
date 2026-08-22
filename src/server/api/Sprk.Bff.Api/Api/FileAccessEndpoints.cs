@@ -49,11 +49,19 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // A-1 applies here identically (unified-access-control-r2 task 002, spec FR-01). GetContent
+        // streams the document's bytes (`TypedResults.Stream`) from the same app-only SPE path as
+        // /download, and had the same missing gate. Closing /download alone would have left the attack
+        // scenario fully intact behind a different URL — the finding is the missing per-document
+        // authorization, not the route name.
         docs.MapGet("/{documentId}/content", GetContent)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentContent")
             .WithTags("File Access")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -98,13 +106,32 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // Per-document authorization (unified-access-control-r2 task 002, spec FR-01, finding A-1).
+        //
+        // This route had NO per-document filter: the group's RequireAuthorization() asked only "are you
+        // anyone?", and the handler then streamed app-only from SPE — so any authenticated caller could
+        // download any document by GUID. That is R1's January-2026 attack scenario.
+        //
+        // The app-only SPE stream is NOT the defect and is deliberately unchanged: files written by the
+        // managed identity can only be read back by it (auth constraints, Pattern 4 — Writer-Identity
+        // Matching). What was missing is the Dataverse-level answer to "may THIS caller have this
+        // document?", which the filter now supplies before any SPE call is made.
+        //
+        // Operation "read" matches the two routes that already do this correctly — the sibling
+        // DataverseDocumentsEndpoints.cs `GET /api/v1/documents/{id}/download` and the eml-render route
+        // below. Both download routes must reach the SAME decision for the same caller on the same
+        // document; task 001 pinned their disagreement as the finding.
         docs.MapGet("/{documentId}/download", GetDownload)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentDownload")
             .WithTags("File Access")
-            .WithDescription("Download document file using app-only authentication. " +
-                "Proxies SPE file downloads for files uploaded by background processing.")
+            .WithDescription("Download document file. The caller is authorized against the document " +
+                "first; the SPE stream itself is app-only because background-written files are only " +
+                "readable by the identity that wrote them.")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 

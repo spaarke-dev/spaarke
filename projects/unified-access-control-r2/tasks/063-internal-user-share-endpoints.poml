@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="unified-access-control-r2">
+  <metadata>
+    <title>BFF endpoints: internal system-user share grant / revoke / list (FR-29 server half)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 060 (POA seam) + 008 (FR-07 delegation) merged. Delegation is a HARD prerequisite: these endpoints must not exist without it.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New authorization-granting endpoints (.cs, auth): the write path by which internal users gain record access.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Endpoints compose the 060 seam + the FR-07 delegation filter — both already built; contract fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** (endpoint group wiring) — exclusive zone.</parallel-reason>
+    <deps>060, 008, 010</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the server half of the Manage Access "+ User" capability: endpoints to grant, revoke and list Dataverse shares for SYSTEM USER principals on a record, writing through the consolidated POA seam, gated by the FR-07 delegation rule (caller must hold Write on the target record, checked OBO). These endpoints are what the AccessGrantModal's "+ User" picker (task 065) calls — they must ship BEFORE it.</prompt>
+  <role>SPAARKE platform developer. Minimal API endpoint groups, endpoint filters (ADR-008), OBO delegation checks, POA sharing. Follow ADRs strictly.</role>
+  <goal>Three endpoints on the internal admin surface (route placement decision stated in PR — the /api/v1/external-access group or a sibling internal-access group): POST share (record, systemuserId, level), POST unshare (same key), GET shares (record) returning principal + AccessMask; all delegation-gated; ProblemDetails on every deny; unit + seam tests.</goal>
+
+  <context>
+    <background>spec.md FR-29; design.md §6 ("System user access — '+ User' picker -> Dataverse share (POA)") and the blocking-prerequisite paragraph: the modal writes exclusively through BFF endpoints via authenticatedFetch; those run app-only and consult NO Dataverse privilege, so without the delegation gate a read-only user gets a one-click path to Full Access on a confidential matter. Level mapping: View Only / Collaborate / Full Access -> AccessMask values must reuse the 060 seam's single mapping (no second mapping table).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs (or suite-convention name; state the route-group decision)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (group wiring)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (endpoint shape + cache-invalidation conventions)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/ (060 seam)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (endpoint tests incl. delegation negatives)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="pending">Consolidated POA seam (grant/revoke/read for systemuser principals).</dependency>
+      <dependency task="008" status="pending">FR-07 delegation filter (Write-on-record OBO) — HARD prerequisite; do not ship these routes ungated.</dependency>
+      <dependency task="010" status="pending">FR-09 idempotency conventions (grant twice / revoke once semantics) these endpoints mirror.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Delegation enforcement via the FR-07 endpoint filter attached to every route in this task — no inline checks, no route without the filter. Scope: all three endpoints.</constraint>
+    <constraint source="NFR-01">Unresolved record, unresolved principal, or filter error = deny (403/404 ProblemDetails), never fall through to the seam. Scope: every handler.</constraint>
+    <constraint source="project">Share writes MUST invalidate the relevant access caches the same way GrantExternalAccessEndpoint does (mirror its invalidation calls for whatever cache the Phase-1 evaluator consults for systemuser terms). Scope: grant + unshare handlers.</constraint>
+    <constraint source="project">One level-to-AccessMask mapping: reuse the 060 seam's mapping; a literal mask in an endpoint is a defect. Scope: request DTO handling.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification in PR citing .claude/constraints/bff-extensions.md; publish size ≤ 60 MB reported; unconditional endpoint mapping requires unconditional service registration (Null-Object rule §F.1) if any flag is involved. Scope: PR + DI wiring.</constraint>
+    <constraint source="ADR-019">All error responses are ProblemDetails with stable codes. Scope: all three endpoints.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>share-management endpoints</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Endpoint + DTO conventions.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Filter attachment.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify the FR-07 delegation filter exists and is attachable — if not merged, STOP (gate violated).</step>
+    <step order="1">State the route-group decision (internal shares on the external-access admin group vs a sibling) with one-paragraph rationale; wire the group with auth + delegation filter.</step>
+    <step order="2">Implement the three handlers over the 060 seam; DTOs with level enum; cache invalidation on writes.</step>
+    <step order="3">Tests: grant/revoke round trip; list reflects state; delegation negatives (no Write -> 403; unauthenticated -> 401); invalid principal/record -> 4xx ProblemDetails; idempotent revoke.</step>
+    <step order="4">Build + tests green; publish size reported.</step>
+    <step order="5">Update TASK-INDEX.md; document the route decision in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the FR-07 delegation filter's merged shape cannot express "Write on arbitrary entity type" for the record types these endpoints accept, STOP and escalate rather than narrowing the check or skipping entity types silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grant/Revoke endpoints exist ONLY for contact/org grants (sprk_externalrecordaccess — GrantExternalAccessEndpoint.cs); no endpoint writes POA shares for system users (grep Api/ for GrantAccess: only playbook sharing, wrong surface).</existing>
+    <extension>No — the contact-grant endpoints write a different store (grant table vs POA); overloading them would fork their contract. The new endpoints reuse their group, filters and conventions.</extension>
+    <cost-of-doing-nothing>FR-29 acceptance fails: an internal user cannot be granted or revoked from the modal; on share-only secure projects (FR-28) there is NO UI path to give any human access at all.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (share endpoint tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller WITH Write on record R, POST share (user U, level Collaborate) creates the POA share; GET shares lists U with the mapped mask; POST unshare removes it.</criterion>
+    <criterion testable="true">Negative: a caller WITHOUT Write on R receives 403 on share AND unshare (the FR-07 gate, pinned per route).</criterion>
+    <criterion testable="true">Negative: unauthenticated -> 401; unknown systemuser or record -> 4xx ProblemDetails with stable code; no partial write.</criterion>
+    <criterion testable="true">Revoking a non-existent share is idempotent (2xx, no error side effects) consistent with FR-09 semantics.</criterion>
+    <criterion testable="true">Grant/unshare invalidate the evaluator-relevant caches (test observes fresh state within the same request flow).</criterion>
+    <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported; route decision documented.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-29; design.md §6. Consumed by task 065. FR-30's read/provenance surface is task 064 — do not build a partial provenance read here.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

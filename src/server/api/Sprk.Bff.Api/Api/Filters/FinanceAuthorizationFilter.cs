@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -77,7 +78,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             UserId = userId,
             ResourceId = resourceId,
             Operation = _operation,
-            CorrelationId = httpContext.TraceIdentifier
+            CorrelationId = httpContext.TraceIdentifier,
+            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
         };
 
         try

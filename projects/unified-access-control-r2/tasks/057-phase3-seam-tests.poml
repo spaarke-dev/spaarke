@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="unified-access-control-r2">
+  <metadata>
+    <title>Phase 3 seam test suite: inheritance end-to-end + negative authorization cases (FR-26/FR-27)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires 052, 055, 056 merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** — FULL unconditionally per CLAUDE.md §8 TEST-MODIFYING override.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against a closed acceptance list; scenarios fully enumerated below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches tests/** only — file-disjoint from task 058 (docs/) in the same wave.</parallel-reason>
+    <deps>052, 055, 056</deps>
+    <tags>testing, integration-test, auth, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Phase-3 vertical-slice seam tests that prove child inheritance end to end at the external fetch seam — the chain from FR-26 stamp through evaluator inheritance to module-scoped fetch — including the negative and authorization cases that Phase 3 makes newly dangerous (A-7 class: todos becoming access-scoped).</prompt>
+  <role>SPAARKE platform developer. ADR-038 seam testing (vertical-slice, KEEP paths). Follow ADRs strictly.</role>
+  <goal>A seam test module under tests/integration/seam/ covering the closed scenario set below, green in CI, with fixtures following docs/procedures/test-fixture-contracts.md; no scaffolding-class tests (build-vs-maintain classifier respected).</goal>
+
+  <context>
+    <background>NFR-07 built the characterization suite in Phase 0; Phase 3 changes behaviour, so the seam suite must pin the NEW contract. ADR-038 names tests/integration/seam/** the DoD category for dispatch-spine/access-path changes. The scenarios combine FR-26 (stamp), FR-27 (inherit + child modules), FR-23 (per-child deny), FR-21/22 (veto interplay on children).</background>
+    <relevant-files>
+      <file role="modify">tests/integration/seam/ (extend the existing suite with Phase-3 child-inheritance seam tests — name per the suite's convention)</file>
+      <file role="canonical-reference">tests/integration/seam/ (task 044's unified-evaluator seam suite as the structural reference)</file>
+      <file role="canonical-reference">docs/procedures/test-fixture-contracts.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">Server writers stamp (fixtures can create via service paths).</dependency>
+      <dependency task="055" status="pending">Inheritance term.</dependency>
+      <dependency task="056" status="pending">Child modules registered.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">KEEP-path placement (tests/integration/seam/**); banned patterns (Mock of HttpMessageHandler, DI-registration tests, ctor null-check tests) apply to every test added. Scope: whole task.</constraint>
+    <constraint source="testing-procedures-§F.2">Fixture-config-FIRST: when a test fails suspecting DI, inspect fixture claims/config against test-fixture-contracts.md before touching registrations. Scope: debugging loop.</constraint>
+    <constraint source="project">Tests assert BEHAVIOUR at the HTTP/service seam, not internals — the fetch endpoint + evaluator surface, not private term functions. Scope: test design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>seam testing for the access path</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Seam test structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Read the existing Phase 0/1 seam suite structure + fixtures; extend, do not fork conventions.</step>
+    <step order="2">Implement the closed scenario set (acceptance criteria below), one test per criterion, both principal kinds where the criterion says so.</step>
+    <step order="3">Run the full test suite; fix flakiness at the fixture level only.</step>
+    <step order="4">Update TASK-INDEX.md; note any scenario that could not be expressed at the seam (escalate rather than dropping silently).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a scenario requires live Dataverse state the fixture harness cannot represent (e.g. real field-security), STOP and record it as a UAT-verification item in notes rather than writing a hollow mock test.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ (Phase-3 child-inheritance seam tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Contact with Project P access fetches todos/events/communications/invoices stamped to P and receives exactly those rows (workforce systemuser variant included for todos).</criterion>
+    <criterion testable="true">A todo whose ONLY regarding is a communication under Matter M is returned to a caller with M access (the FR-26 stamp path proven at the seam).</criterion>
+    <criterion testable="true">Per-child deny: after a deny-list entry on one invoice, the caller still fetches sibling invoices and the parent, but not the denied invoice.</criterion>
+    <criterion testable="true">Negative: caller with zero roots fetches every child module and gets 0 rows, no Dataverse query.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to the module fetch endpoint returns 401; a resolved caller fetching an unregistered entity returns 403.</criterion>
+    <criterion testable="true">Negative: a matter associated to a project is NOT returned via project access (matter-does-not-inherit pinned at the seam).</criterion>
+    <criterion testable="true">Secure ancestor: contact whose only path is an org/standing grant gets 0 child rows for a secure project's children (FR-22 through inheritance).</criterion>
+    <criterion testable="true">Full suite green in CI.</criterion>
+  </acceptance-criteria>
+
+  <notes>ADR-038 §7 classifier: these are MAINTAIN-class (they pin the shipped access contract). spec.md FR-26/27, FR-21/22/23 interplay.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
