@@ -144,6 +144,14 @@ public sealed class ComposeServiceImportedRenderSaveTests
                 "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_document") { Id = Guid.NewGuid() });
 
+        // FR-S09 item 7 (r8 task 016): a replace save now refreshes sprk_filesize/sprk_filepath on the
+        // existing row. The mock is STRICT, so without this setup the call throws MockException, the
+        // service's best-effort catch records a failed refresh, and every clean replace test acquires a
+        // spurious `document-metadata-stale` warning — a fixture gap presenting as a production defect.
+        _dataverse.Setup(d => d.UpdateAsync(
+                "sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _indexing.Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));

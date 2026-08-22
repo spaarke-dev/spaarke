@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-B04/B05 — Durable lifetime follows the session's own retention (incl. Ttl == -1 filed = indefinite); availability becomes server-authoritative</title>
+    <phase>6 Track B — Durable Session Files</phase>
+    <gate>blocked-on-060</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Retention semantics govern data deletion; the `-1` filed case must not be mis-read as "expired".</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: `Ttl == -1` meaning "indefinite" is exactly the sentinel a naive comparison treats as "already expired", and the consequence is deleting the files of filed matters. That failure is silent, delayed, and irreversible — the definition of the case where a subtle miss ships.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Track B files only.</parallel-reason>
+    <deps>060</deps>
+    <tags>bff-api, storage, frontend, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    **FR-B04 Retention** — the durable copy's lifetime follows the SESSION's retention, not a storage default:
+    90-day container default for unfiled sessions, and **indefinite for filed sessions**, signalled by
+    `StoredSession.Ttl == -1`. That sentinel is the trap: any expiry comparison that treats `-1` as a small
+    number deletes the files of filed matters.
+
+    **FR-B05 Availability is server-authoritative** — R7 shipped a CLIENT-SIDE 24h heuristic
+    (`AttachedFileSummary.available`) that guesses whether a file is still usable. With durable bytes, the
+    guess is both unnecessary and wrong. Replace it with a server-supplied fact, or remove it. R7's re-attach
+    layer is REUSED, not rebuilt.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in session retention semantics, blob lifecycle policy, and the R7 attached-file surface. Follow ADR-009, ADR-014/015 and ADR-038.</role>
+
+  <goal>
+    A filed session's files are never expired. An unfiled session's files follow the 90-day default. The
+    client learns availability from the server rather than guessing from a timestamp.
+  </goal>
+
+  <context>
+    <background>
+      The R7 client heuristic exists because there was nothing else to go on — the server genuinely did not
+      know. Now it does. Leaving the heuristic in place after adding durable bytes would produce the worst
+      combination: files that exist but are reported unavailable.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/ (AttachedFileSummary consumer)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ (StoredSession)</file>
+      <file role="test">tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-B04">`StoredSession.Ttl == -1` means INDEFINITE. Every expiry comparison MUST handle this sentinel explicitly. A comparison that treats it numerically deletes filed matters' files.</constraint>
+    <constraint source="project">Retention MUST be derived from the session's own TTL, not from a storage-account lifecycle policy applied blindly — a blanket policy cannot express "indefinite for filed".</constraint>
+    <constraint source="spec FR-B05">The client-side 24h heuristic MUST be replaced or REMOVED — not left in place alongside a server signal. Two availability sources is drift.</constraint>
+    <constraint source="root CLAUDE.md §11">R7's re-attach layer is REUSED. MUST NOT rebuild it.</constraint>
+    <constraint source="ADR-014/015">Tenant isolation on every retention/availability read path.</constraint>
+    <constraint source="ADR-009">Any cached availability state uses `IDistributedCache`, never `IMemoryCache`.</constraint>
+    <constraint source="ADR-038">Seam tests including: a filed (`Ttl == -1`) session's files survive an expiry pass; an unfiled session follows the 90-day default; the client renders availability from the server value.</constraint>
+    <constraint source="spec NFR-02">No new NuGet. Report publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>retention semantics, blob lifecycle, availability signalling</topic>
+    <files>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>.claude/adr/ADR-014-tenant-isolation.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/durable-session-files.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-009.</step>
+    <step order="1">Read `StoredSession` and locate EVERY expiry comparison against `Ttl`. Enumerate them and confirm how each currently handles `-1`.</step>
+    <step order="2">Implement retention derived from session TTL: 90-day default unfiled, indefinite when `Ttl == -1`. Handle the sentinel explicitly at every site found in step 1.</step>
+    <step order="3">Add a server-supplied availability fact to the attached-file response.</step>
+    <step order="4">Replace or remove the client-side 24h heuristic on `AttachedFileSummary.available`. Leave exactly one source of truth.</step>
+    <step order="5">Reuse R7's re-attach layer for the reopen flow.</step>
+    <step order="6">Seam tests: filed session survives an expiry pass; unfiled follows 90 days; client availability comes from the server; tenant isolation on the read path.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If retention cannot be expressed per-session with the provisioned storage account (e.g. only account-level lifecycle policies are available), surface it — a blanket policy cannot express "indefinite for filed" and applying one anyway would delete filed matters' files.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/</output>
+    <output type="test">tests/integration/seam/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every `Ttl` expiry comparison handles the `-1` sentinel explicitly — enumerated in the task notes.</criterion>
+    <criterion>A filed session (`Ttl == -1`) retains its files through an expiry pass (asserted by seam test).</criterion>
+    <criterion>An unfiled session's files follow the 90-day default.</criterion>
+    <criterion>The client renders availability from a SERVER-supplied value.</criterion>
+    <criterion>The client-side 24h heuristic is replaced or removed — exactly one availability source remains (verified by grep).</criterion>
+    <criterion>R7's re-attach layer is reused, not rebuilt.</criterion>
+    <criterion>Tenant isolation holds on the retention/availability read path (asserted by seam test).</criterion>
+    <criterion>NEGATIVE: no blanket storage lifecycle policy was applied that could expire filed sessions' files.</criterion>
+    <criterion>NEGATIVE: no `IMemoryCache` usage introduced.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

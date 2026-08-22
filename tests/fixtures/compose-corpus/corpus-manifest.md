@@ -198,3 +198,118 @@ Owner intake process: land the redacted `.docx` under this directory (auto-regis
 | `spaarkeai-compose-fidelity-r4.5` | 050 — WS-5 page/line spike | `line-numbered-pleading.docx` (row 13) is the ONLY corpus input carrying `w:lnNumType` — used to measure rendered-line divergence against a layout engine (LibreOffice-headless / Word-rendering service), per FR-19. |
 | `spaarkeai-compose-r6` | 013 — NDA 422 regression test | `AppligentNDA_Signed.docx` (row 14) is the seed input for the seam/regression test proving render-on-save no longer hits `DocxAnnotationWriter.LocateTarget` interior-location HTTP 422 on this doc (text-box `mc:AlternateContent` + duplicate `w14:paraId`) — handled by construction, not surgical anchoring. |
 | `spaarkeai-compose-r6` | 060 — fidelity harness | `AppligentNDA_Signed.docx` (row 14) is a harness seed exercising `mc:AlternateContent` Choice/Fallback textbox flattening + duplicate-`paraId` de-duplication in the render-on-save path. |
+
+---
+
+## 1.7. R8 R4-breakers — the three constructs that ended the surgical byte-patch model (task 021)
+
+> **Added** 2026-08-21 by `spaarkeai-compose-r8` task 021 (spec FR-G04 part 1). **All three are SYNTHETIC**,
+> authored by writing raw OOXML parts into a zip container. Each is **minimal and single-purpose — one
+> construct per document** — so a Phase-3 gate failure names its own cause without further investigation.
+>
+> These test whether the merge model **SURVIVES pathological structure**. §1.8's fixtures test whether it
+> **PRESERVES ordinary legal formatting**. Both bars matter and they fail differently.
+
+| # | Filename | Construct isolated | Why it broke R4 | Measured on master (task 020 oracle, lenient) |
+|---|---|---|---|---|
+| 15 | `alternate-content-duplicate-paraid.docx` | One `mc:AlternateContent` whose `mc:Choice` (DrawingML `wps:txbx`) and `mc:Fallback` (VML `v:textbox`) branches carry the **identical** `w14:paraId` (`1BADD1D0`), between two ordinary body paragraphs | [MS-DOCX] permits a duplicate `paraId` across `mc:AlternateContent`, and Word emits exactly this for every text box. Any code treating `paraId` as a unique key resolves the wrong node — the R4 interior-location HTTP 422. | 33.33% overall · **0.00% near tier** · duplicate-paraId flag **TRUE** · warns `text-box-flattened`, `unrendered-paragraphs` |
+| 16 | `interior-text-boxes.docx` | Two body paragraphs each wrapping a VML `w:pict`/`v:textbox` containing two `w:txbxContent` paragraphs, plus a leading and trailing plain paragraph | The text-box paragraphs are **descendants** of `w:body` but not **children** of it. `body.Descendants<Paragraph>()` yields **7** here where the body has **4** direct children — interleaving them into the body sequence and mis-pairing every block after the first text box. | 25.00% overall · **0.00% near tier** · warns `text-box-flattened`, `unrendered-paragraphs` |
+| 17 | `multipart-paraid-collision.docx` | The same `w14:paraId` (`3C0111DE`) in **three different parts** — `document.xml`, `footnotes.xml` and `header1.xml` — plus a live `w:footnoteReference` from the body | `paraId` uniqueness is **part-scoped**, not package-scoped. A package-wide index keyed on `paraId` collides across parts even when every part is individually well-formed. | 50.00% overall · **0.00% near tier** · warns `unrepresented-footnote-reference` |
+
+### Overlap with the existing corpus (checked, not assumed)
+
+`AppligentNDA_Signed.docx` (row 14) **already** carries duplicate `w14:paraId`s inside `mc:AlternateContent`
+signature-block textboxes — 55 attributes, 52 unique, 3 duplicated. Task 020's oracle detects it
+(`duplicateParaIdsInOriginal = true`, the only such document in the pre-021 corpus).
+
+Row 15 is retained anyway, and deliberately: row 14 is a 50-block real document exercising a dozen constructs
+at once, so a failure there names nothing. Row 15 is 4 blocks carrying **one** construct. The real document
+proves the case occurs in the wild; the synthetic one localises the fault.
+
+### Verification method (§1.7)
+
+Each fixture was generated as a real OPC zip (`[Content_Types].xml`, `_rels/.rels`, `word/document.xml`, plus
+`word/_rels/document.xml.rels` + `footnotes.xml`/`header1.xml` where referenced), then driven through the
+**live** render-on-save wire path by `ComposeFidelityGateHarnessTests` — load → single-paragraph edit → POST
+save → reopen. All three classify `warn` (never `fail`), terminate in outcome `persisted`, and produce the
+per-construct degradation codes listed above. Structural claims (duplicate `paraId`, descendant-vs-child
+paragraph counts, cross-part id reuse) are asserted by task 020's oracle rather than stated here.
+
+---
+
+## 1.8. R8 near-tier families — what the 100% bar is measured against (task 022)
+
+> **Added** 2026-08-21 by `spaarkeai-compose-r8` task 022 (spec FR-G04 part 2). **All five are SYNTHETIC**
+> and contain **no confidential content** — representative legal drafting authored for this purpose, not
+> owner documents.
+>
+> The Phase-3 gate's headline threshold is **100% preservation at the near tier**: character formatting,
+> paragraph properties, indentation, tabs, footnote references and fields (definition in
+> `projects/spaarkeai-compose-r8/notes/gate-contract.md`). **A 100% bar over a corpus that does not exercise
+> those constructs is a bar over nothing.** These five put the constructs under the bar.
+
+| # | Filename | Near-tier family | What it contains | Measured on master (task 020 oracle, lenient) |
+|---|---|---|---|---|
+| 18 | `char-formatting-mixed-runs.docx` | **Character formatting** | One paragraph split across 8 runs mixing `w:b` / `w:i` / `w:u` / `w:smallCaps` / `w:vertAlign="superscript"` with a shared `w:rFonts`+`w:sz`; plus a single **densely-formatted run** (`b`+`i`+`caps`+`color`+`spacing`+`sz`) as the FR-A04 property-inheritance case — an edit landing inside it must inherit every property | 33.33% overall · **0.00% near tier** · no degradation warning (the loss is **silent** — precisely the R6 failure mode) |
+| 19 | `court-filing-spacing.docx` | **Court-filing spacing** | Double spacing (`w:spacing w:line="480" w:lineRule="auto"`), first-line indent, **hanging** indents at two depths, an explicit `w:tabs` stop, justified + centered paragraphs, and `w:sectPr/w:lnNumType` line numbering | 20.00% overall · **0.00% near tier** · warns `indentation-dropped` |
+| 20 | `footnote-references.docx` | **Footnotes** | Two body paragraphs each carrying a `w:footnoteReference` **mid-sentence** (text continues after the reference), targets in `footnotes.xml` with the required separator/continuationSeparator pair | 33.33% overall · **0.00% near tier** · warns `unrepresented-footnote-reference` |
+| 21 | `ref-cross-references.docx` | **`REF` cross-references** | **Both** field forms against one bookmark: the simple `w:fldSimple` (` REF … \r \h `) and the three-part complex field (`fldChar begin` → `instrText PAGEREF` → `separate` → **cached result** → `end`) | 33.33% overall · **0.00% near tier** · warns `field-flattened-to-text` |
+| 22 | `content-controls-sdt.docx` | **Content controls** | A **block-level** `w:sdt` (alias `Party Name`, with `w:placeholder`) and an **inline** SDT run (alias `Counterparty`, bold content) inside running prose | 33.33% overall · **0.00% near tier** · warns `content-control` |
+
+### Two defects these fixtures found on the day they landed
+
+Both were in existing code that no corpus document had previously reached — which is the entire argument for
+extending the corpus rather than reasoning about coverage.
+
+1. **`ComposeReadFidelityHarnessSeamTests`'s golden model dropped `w:fldSimple`.** Its
+   `AppendGoldenInline` switch handled `w:r`, `w:hyperlink`, `w:ins`, `w:del` and inline `w:sdt`, and let
+   `w:fldSimple` fall through `default:` — so the field's **cached result** never entered the golden text.
+   `ref-cross-references.docx` (row 21) is the first corpus document to contain one, and the projection,
+   which renders the cached result correctly, read as a text-exactness *failure*. Fixed by adding the
+   `SimpleField` case. This **tightens** the assertion: the golden now demands text it previously ignored,
+   so a projection that later drops a cached result will fail. The complex three-part form was already
+   correct — its cached result sits in a plain `w:r` the walker already visited.
+
+2. **`w14:paraId` must be an 8-digit hex value ≤ `0x7FFFFFFF`.** The first draft of these fixtures used
+   mnemonic prefixes (`G…`, `H…`) that are not hex at all, and `A…`–`F…` leading nibbles that exceed the
+   ceiling. The read harness's `data-paraid="[0-9A-Fa-f]+"` matcher rejected them — correctly. All 22
+   fixture ids are now spec-valid, verified programmatically (8 hex digits, non-zero, ≤ `0x7FFFFFFF`).
+
+### The cached-result trap (row 21)
+
+A writer that keeps a field's **displayed text** while dropping the field itself turns a live cross-reference
+into frozen prose. It reads as correct — the number is right — until the document is edited and the reference
+no longer updates. Row 21 exists so the gate can tell "the field survived" from "the field's answer survived",
+which no text-level comparison can distinguish.
+
+### Why every row reads 0.00% near tier today
+
+That is the finding, not a fixture defect. Row 18 is the sharpest case: it produces **no degradation warning
+at all** while losing 100% of its near tier. The renderer does not know it dropped anything, so the user is
+not told — the silent-loss mode this whole project exists to close. Rows 19–22 at least warn.
+
+### Verification method (§1.8)
+
+Identical to §1.7: real OPC zips driven through the live render-on-save wire path by
+`ComposeFidelityGateHarnessTests`. All five classify `pass` or `warn` (never `fail`) and terminate in outcome
+`persisted`; the preservation figures above come from task 020's oracle, recorded per-run in
+`fidelity-gate-result.json`.
+
+### Corpus totals after §1.7 + §1.8
+
+| | Documents | Comparable blocks | Overall preservation | Near-tier preservation |
+|---|---:|---:|---:|---:|
+| Before tasks 021/022 | 10 | 245 | 6.53% | 2.55% |
+| **After** | **18** | **271** | **8.86%** | **2.37%** |
+
+Near-tier preservation **fell** (2.55% → 2.37%) because the eight new fixtures add 18 near-tier-relevant
+blocks and preserve none of them. That is the corpus doing its job: the bar got harder to clear because it
+now covers constructs the previous corpus did not reach.
+
+### Zero-code-change property (FR-G08), demonstrated
+
+All eight fixtures were picked up by the gate with **no `.cs` edit** — the harness's `[MemberData]` enumerates
+the corpus directory at test-discovery time. The suite went from 21 to 29 tests on the strength of dropping
+files into `tests/fixtures/compose-corpus/`. Asserted by
+`Gate_CorpusEnumerationIsDynamic_NewDocumentNeedsZeroCodeChanges`.
+

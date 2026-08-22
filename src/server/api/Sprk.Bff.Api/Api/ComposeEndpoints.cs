@@ -1,4 +1,5 @@
 using System.Text;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -98,6 +100,12 @@ public static class ComposeEndpoints
         group.MapPost("/documents/{documentSpeId}/save", Save)
             .WithName("ComposeSaveDocument")
             .WithSummary("Save DOCX bytes to SPE (idempotent first-Save promotion per FR-06)")
+            // FR-S08 (r8 task 015): raise the request-body cap above the document limit. The document
+            // rides base64-encoded inside a JSON envelope, so Kestrel's 30 MB default rejected documents
+            // from about 22 MB up — at the TRANSPORT layer, before any handler ran, which is why the user
+            // saw an unexplained failure with no message instead of the honest size refusal in
+            // ExecuteSaveAsync. Both numbers derive from ComposeSaveLimits so they cannot drift apart.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             // SPE persistence → ai-persist (20/min) per its documented purpose, not the 5/min upload bucket.
             .RequireRateLimiting("ai-persist")
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
@@ -136,6 +144,9 @@ public static class ComposeEndpoints
         // GET `{documentSpeId}` (2) — different segment counts / verbs.
         group.MapPost("/documents/create-on-save", CreateOnSave)
             .WithName("ComposeCreateOnSaveDocument")
+            // FR-S08: the SAME cap as the replace route above — a first save of a large document is the
+            // case that hit the old ceiling hardest, since create-on-save always carries the full bytes.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
             // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
             .RequireRateLimiting("ai-persist")
@@ -1069,7 +1080,10 @@ public static class ComposeEndpoints
                 ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings),
                 // Task 050 (FR-06): the PDF-source marker (task 051 keys the honest-lossiness UX + the
                 // save-as-docx flow off it). Null for a native docx upload.
-                SourceFormat: mount.SourceFormat));
+                SourceFormat: mount.SourceFormat,
+                // FR-S08 (r8 task 015): advertise the enforced limit so the client pre-flights against
+                // the SAME number the endpoint checks. One source; the client never hard-codes it.
+                MaxDocumentBytes: ComposeSaveLimits.MaxDocumentBytes));
         }
         catch (ComposePdfIntakeException ex)
         {
@@ -1368,7 +1382,10 @@ public static class ComposeEndpoints
                 ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings),
                 // Task 040 (FR-06, PDF intake): "pdf" when Content is the docx SYNTHESIZED from the
                 // PDF's canonical-model projection; null for a native docx load. Additive (ADR-040).
-                SourceFormat: result.SourceFormat));
+                SourceFormat: result.SourceFormat,
+                // FR-S08 (r8 task 015): advertise the enforced limit so the client pre-flights against
+                // the SAME number the endpoint checks. One source; the client never hard-codes it.
+                MaxDocumentBytes: ComposeSaveLimits.MaxDocumentBytes));
         }
         catch (ArgumentException ex)
         {
@@ -1582,9 +1599,60 @@ public static class ComposeEndpoints
         HttpContext httpContext,
         CancellationToken ct)
     {
+        // FR-S08 (r8 task 015): the document-size gate, on the ONE path both save routes share so the
+        // replace and create-on-save routes can never diverge on it. Checked BEFORE SaveAsync, so an
+        // oversize document costs no render, no baseline fetch and no byte transfer to storage.
+        //
+        // `refused-invalid`, correctly: retrying the same request cannot succeed — something about the
+        // request has to change first, which is exactly that outcome member's defining property. And it
+        // is a ProblemDetails naming the actual limit, never a bare 400/413: the failure this replaces
+        // was a transport-level rejection with no body, which told the user nothing about what to do.
+        if (request.Content.Length > ComposeSaveLimits.MaxDocumentBytes)
+        {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseTooLarge);
+            logger.LogWarning(
+                "Compose save refused: document is {Size} bytes, over the {Limit}-byte limit (session={SessionId}). TraceId={TraceId}",
+                request.Content.Length, ComposeSaveLimits.MaxDocumentBytes, request.SessionId, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Document Too Large",
+                detail: $"This document is {request.Content.Length / (1024 * 1024)} MB, and Compose can save documents up to " +
+                        $"{ComposeSaveLimits.MaxDocumentDisplay}. Nothing was saved and your changes are still here. " +
+                        "Remove or compress large embedded images, or split the document, then save again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
         try
         {
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);
+
+            // FR-S10 (task 013): every terminal outcome is counted, including the ones that arrive on a
+            // 200. `storage-failed` here is NOT hypothetical — it is the container-failure path, which
+            // returns rather than throws, and was previously indistinguishable from success in request
+            // telemetry. That indistinguishability is why three releases shipped with saves broken.
+            ComposeSaveTelemetry.RecordSaveOutcome(result.Outcome, result.Outcome switch
+            {
+                ComposeSaveOutcome.Persisted => ComposeSaveTelemetry.CauseNone,
+                ComposeSaveOutcome.PersistedWithWarnings => ComposeSaveTelemetry.CauseWarnings,
+                // FR-S09 item 5 (task 016): `partially-recorded` now has two producers, and they mean
+                // different things operationally. A partial APPLY is the user's edits not all landing
+                // (recoverable by redoing them); a failed record PROMOTION is our Dataverse write not
+                // landing (recoverable by retrying, and a spike means Dataverse is unwell). Collapsing
+                // both into one cause would make the counter unable to tell a content problem from an
+                // infrastructure problem — which is the whole reason the cause dimension exists.
+                ComposeSaveOutcome.PartiallyRecorded => result.PartialApply is { UnresolvedCount: > 0 }
+                    ? ComposeSaveTelemetry.CausePartialApply
+                    : ComposeSaveTelemetry.CauseRecordPromotion,
+                ComposeSaveOutcome.StorageFailed => ComposeSaveTelemetry.CauseContainerStep,
+                _ => ComposeSaveTelemetry.CauseNone,
+            });
+
+            if (result.Outcome is ComposeSaveOutcome.StorageFailed or ComposeSaveOutcome.PartiallyRecorded)
+            {
+                logger.LogWarning(
+                    "Compose save completed with a non-success outcome {Outcome} for driveItem={DocumentSpeId} (session={SessionId}). TraceId={TraceId}",
+                    result.Outcome.ToWireValue(), result.DocumentSpeId, result.SessionId, httpContext.TraceIdentifier);
+            }
 
             return Results.Ok(new SaveComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
@@ -1610,10 +1678,18 @@ public static class ComposeEndpoints
                     .ToList(),
                 // Task 012: the post-save canonical model (render-path saves only) — the client adopts it
                 // as its new retained loaded model + re-baselines its snapshot. Additive (ADR-040).
-                ContentModel: result.ContentModel));
+                ContentModel: result.ContentModel,
+                // FR-S06 (task 013): the terminal outcome, as a stable wire string. The client decides
+                // success from THIS, not from the 200 — because a 200 does not imply anything was
+                // written (see the container-failure path, which returns StorageFailed on a 200).
+                Outcome: result.Outcome.ToWireValue()));
         }
         catch (ArgumentException ex)
         {
+            // FR-S10: a malformed request is a terminal save outcome and belongs in the counter — an
+            // upstream client regression that starts sending bad requests should be visible as a spike,
+            // not just as scattered 400s.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseBadRequest);
             return BadRequest(ex.Message);
         }
         catch (ComposePdfIntakeException ex)
@@ -1622,6 +1698,9 @@ public static class ComposeEndpoints
             // the 041 client saves PDF-sourced docs via create-on-save). Refuse with the honest 422
             // instead of a deep OOXML failure surfacing as a generic 500. MUST precede the
             // InvalidOperationException catch below (this type derives from it).
+            ComposeSaveTelemetry.RecordSaveOutcome(
+                ex.Unavailable ? ComposeSaveOutcome.StorageFailed : ComposeSaveOutcome.RefusedInvalid,
+                ComposeSaveTelemetry.CauseBadRequest);
             logger.LogWarning(ex, "Compose save: PDF baseline refused. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
@@ -1630,6 +1709,7 @@ public static class ComposeEndpoints
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseNotFound);
             logger.LogWarning(ex, "Compose save: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
@@ -1639,6 +1719,7 @@ public static class ComposeEndpoints
         }
         catch (UnauthorizedAccessException ex)
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CauseForbidden);
             logger.LogWarning(ex, "Compose save: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status403Forbidden,
@@ -1656,6 +1737,7 @@ public static class ComposeEndpoints
             // close or SharePoint's ~30-min-from-last-edit timeout. Do NOT say "check it in" (there is nothing
             // to check in) — that misled users who never checked anything out. The client renders a distinct
             // Retry affordance (no fake Unlock button).
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedLocked, ComposeSaveTelemetry.CauseWordLock);
             logger.LogWarning(ex, "Compose save: drive-item locked by Word co-authoring (423). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status423Locked,
@@ -1664,17 +1746,79 @@ public static class ComposeEndpoints
                         "automatically within a few minutes. Your Compose changes are safe and still pending.",
                 type: "https://tools.ietf.org/html/rfc4918#section-11.3");
         }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.GraphThrottledException ex)
+        {
+            // FR-S09 item 6 (r8 task 016): Microsoft Graph throttled the write (HTTP 429). Before this
+            // catch, the throttle arrived as a bare InvalidOperationException, fell through to the final
+            // `catch (Exception)`, and became an HTTP 500 reading "Save failed: InvalidOperationException:
+            // Service temporarily unavailable due to Graph rate limiting" — a message that tells the user
+            // their save hit a server error, when in fact the service is healthy and simply asked them to
+            // wait. Graph's own `Retry-After` was discarded on the way.
+            //
+            // 429, mirrored back with the header, so the caller (and any proxy) sees a standards-shaped
+            // rate-limit response rather than a fault. `storage-failed` on the telemetry side: the write
+            // ATTEMPT is what failed and nothing was stored — with cause `throttled`, which is what makes
+            // a throttling spike distinguishable from a real storage outage in the counter.
+            var retryAfterSeconds = (int)Math.Ceiling((ex.RetryAfter ?? TimeSpan.FromSeconds(30)).TotalSeconds);
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseThrottled);
+            logger.LogWarning(ex,
+                "Compose save: throttled by Graph (429), retryAfter={RetryAfter}s. TraceId={TraceId}",
+                retryAfterSeconds, httpContext.TraceIdentifier);
+            httpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            return Results.Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "Too Many Requests",
+                detail: $"The document service is busy right now, so nothing was saved and nothing was " +
+                        $"overwritten. Your changes are still here — try again in about {retryAfterSeconds} seconds.",
+                type: "https://tools.ietf.org/html/rfc6585#section-4");
+        }
         catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
         {
-            // DEF-14: the drive-item changed under the caller since load (If-Match precondition
-            // failed). Map to 412 rather than clobbering; the client's recovery is reload + reapply.
-            logger.LogWarning(ex, "Compose save: ETag precondition failed (412). TraceId={TraceId}", httpContext.TraceIdentifier);
+            // FR-S02 (r8 task 011): the save route NO LONGER RETURNS 412. Concurrency is last-writer-wins
+            // with a warning — a document whose stored version merely moved since load now SUCCEEDS and
+            // carries a `concurrent-external-change` warning, so the old "reload and reapply" refusal (and
+            // its dead client handler) are gone.
+            //
+            // Reaching here now means something narrower and genuinely transient: a writer landed inside
+            // the read-to-write window AND the single rebase retry in ComposeService.ReplaceWithPreconditionAsync
+            // also lost — i.e. the document is being written continuously by someone else right now. That is
+            // a CONFLICT (409), not a failed precondition the caller can fix by reloading: nothing about the
+            // caller's state is stale, and the honest instruction is simply to try again. Their work is
+            // intact client-side; the save is a no-op.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedStale, ComposeSaveTelemetry.CausePrecondition);
+            logger.LogWarning(ex, "Compose save: If-Match precondition failed after the rebase retry (409). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
-                statusCode: StatusCodes.Status412PreconditionFailed,
-                title: "Document Changed",
-                detail: "This document changed since you opened it — reload and reapply your changes. " +
-                        "Nothing was overwritten.",
-                type: "https://tools.ietf.org/html/rfc7232#section-4.2");
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Document Busy",
+                detail: "Someone else is saving this document right now, so your save did not go through. " +
+                        "Nothing was overwritten and your changes are still here — try saving again in a moment.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
+        }
+        catch (Sprk.Bff.Api.Services.Compose.ComposeStaleBaselineUnavailableException ex)
+        {
+            // FR-S07 (r8 task 014): the document's base moved AND the re-anchor could not re-download the
+            // current bytes, so the operation log had nothing valid to rebase onto. The save is refused
+            // before any write — this replaces a fallback that persisted the LOAD-TIME baseline instead,
+            // silently overwriting a newer version with pre-edit content and reporting HTTP 200.
+            //
+            // `refused-stale`, not `storage-failed`: no write was attempted, so nothing about the storage
+            // ATTEMPT failed, and the stored version is untouched. Telling the user their document may be
+            // damaged when it is provably intact would be its own dishonest outcome. The failed READ is
+            // carried on the telemetry `cause` dimension instead, which is what it is for.
+            //
+            // 409 rather than 412: nothing about the CALLER's state is stale — reloading would not help,
+            // and a re-download failure is usually transient. The honest instruction is to try again.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedStale, ComposeSaveTelemetry.CauseBaselineDownload);
+            logger.LogWarning(ex,
+                "Compose save: stale base could not be rebased (reason={Reason}) — refused, nothing written. TraceId={TraceId}",
+                ex.Reason, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Could Not Save Onto the Newer Version",
+                detail: "This document changed since you opened it, and we could not read the newer version to " +
+                        "merge your changes into it, so nothing was saved and nothing was overwritten. Your " +
+                        "changes are still here — try saving again in a moment.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
         catch (ComposePatchException ex)
         {
@@ -1682,6 +1826,7 @@ public static class ComposeEndpoints
             // paraId/anchor, unsupported schema version, opaque-atom or structural refusal). Mapped to a typed
             // ProblemDetails per Kind — never an opaque 500. Nothing partially wrote — Apply throws before the
             // SPE write in ComposeService.SaveAsync.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.RefusedInvalid, ComposeSaveTelemetry.CausePatchRefusal);
             logger.LogWarning(ex, "Compose save: patch-engine refusal ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
             return MapPatchException(ex, httpContext);
         }
@@ -1702,6 +1847,12 @@ public static class ComposeEndpoints
             // administrator reconciles the data / reactivates the key.
             var keyInactive = ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
                 || ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase);
+            // FR-S06 (task 013): `partially-recorded`, NOT `storage-failed`. This block's own comment
+            // records why: the SPE version ALREADY PERSISTED and only the sprk_document row upsert
+            // failed. The bytes are durable; the identity record is not. Calling that a storage failure
+            // would tell the user their document is gone when it is not — the precise class of dishonest
+            // outcome the closed enum exists to prevent.
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.PartiallyRecorded, ComposeSaveTelemetry.CauseRecordConflict);
             logger.LogError(ex,
                 "Compose save: sprk_document identity-key fault (keyInactive={KeyInactive}). TraceId={TraceId}",
                 keyInactive, httpContext.TraceIdentifier);
@@ -1721,6 +1872,7 @@ public static class ComposeEndpoints
         }
         catch (Exception ex)
         {
+            ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseUnhandled);
             logger.LogError(ex, "Compose save: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
@@ -2366,7 +2518,13 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
     // Task 050 (FR-06 — PDF import parity): "pdf" when the uploaded source was a PDF (Content is the
     // synthesized docx); null for a native docx upload. Mirrors LoadComposeDocumentResponse.SourceFormat.
-    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null,
+    // FR-S08 (r8 task 015): the document-size limit the SERVER enforces, advertised so the client can
+    // pre-flight against the SAME number instead of carrying a copy that drifts. The client must never
+    // hard-code a limit — when this is absent (older BFF) it does no numeric pre-flight and lets the
+    // server refuse honestly, because a guessed limit is exactly how "your file is fine" becomes a
+    // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2578,7 +2736,13 @@ public sealed record LoadComposeDocumentResponse(
     // Task 040 (FR-06, PDF intake): "pdf" when content is the docx SYNTHESIZED from the PDF's
     // canonical-model projection (client keys the honest-lossiness UX + save-as-docx routing off
     // this); null for a native docx load. Optional/trailing (ADR-040 additive).
-    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null,
+    // FR-S08 (r8 task 015): the document-size limit the SERVER enforces, advertised so the client can
+    // pre-flight against the SAME number instead of carrying a copy that drifts. The client must never
+    // hard-code a limit — when this is absent (older BFF) it does no numeric pre-flight and lets the
+    // server refuse honestly, because a guessed limit is exactly how "your file is fine" becomes a
+    // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
@@ -2649,7 +2813,18 @@ public sealed record SaveComposeDocumentResponse(
     [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null,
     // Task 012 (the client cutover): the post-save canonical model (render-path saves only) — null on
     // op-log/clean saves or when the post-save projection failed. Optional/trailing (ADR-040 additive).
-    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // FR-S06 (r8 task 013): the TERMINAL OUTCOME of this save, as a stable wire string from the closed
+    // ComposeSaveOutcome set. THE CLIENT DECIDES SUCCESS FROM THIS FIELD, NOT FROM THE HTTP STATUS —
+    // a 200 does not imply anything was written (the container-failure path returns `storage-failed`
+    // on a 200, which is exactly how a total write failure used to render as "Saved ✓").
+    //
+    // Defaulted to `persisted` so the record's optional-trailing convention holds and an older caller
+    // deserializing this response is unaffected. The default is safe HERE and only here: every server
+    // construction site passes an explicit value derived from the service result's `required` Outcome,
+    // so the default can never be what a real response carries — it exists for wire compatibility, not
+    // as a fallback for "we didn't know".
+    [property: JsonPropertyName("outcome")] string Outcome = ComposeSaveOutcomes.Persisted);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/apply-template</c> (FR-05, task 032).
 /// <c>templateIdOrName</c> is a template record id (GUID) or the exact template <c>title</c>;

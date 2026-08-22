@@ -225,6 +225,10 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SaveComposeDocumentResult
             {
+                // FR-S06 (r8 task 013): `Outcome` is `required` by design — a save result that does not
+                // say what happened is a COMPILE error, which is what stops a future path from silently
+                // reintroducing the 200-with-nothing-written defect. This is the clean-save case.
+                Outcome = ComposeSaveOutcome.Persisted,
                 DocumentSpeId = speId,
                 DriveId = driveId,
                 SessionId = sessionId,

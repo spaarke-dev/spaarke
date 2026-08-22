@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ComposeWorkspace.tsx — workspace-level orchestrator for the Spaarke Compose surface.
  *
  * Project:   spaarkeai-compose-r1
@@ -273,6 +273,19 @@ const UNTITLED_DOC_NAME = 'Untitled document.docx';
  */
 const COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS = 15000;
 
+/**
+ * FR-S05 (r8 task 012): the save request's own deadline. Before this, a save had none — a hung
+ * request stranded `status === 'saving'` forever, and the only escape was a page reload, which
+ * discarded the document. The `AbortSignal` this drives makes a hung save terminate as a FAILED
+ * save (dirty flag intact, retry available) instead of a dead end.
+ *
+ * 120s is deliberately generous rather than snappy: a save can carry the full base64-encoded
+ * retained original (documents up to the body ceiling task 015 addresses) over an arbitrary link,
+ * and a timeout that fires on a save that WOULD have completed is itself a way to lose work. The
+ * value bounds the pathological case; it is not a latency target.
+ */
+const COMPOSE_SAVE_TIMEOUT_MS = 120000;
+
 /** True when a name is still the unnamed-draft placeholder (never a user-chosen name). */
 function isUntitledDraftName(name?: string): boolean {
   return !name || name.trim().length === 0 || name === UNTITLED_DOC_NAME;
@@ -375,6 +388,141 @@ function mergeDegradationWarnings(
     }
   }
   return Array.from(byCode.entries()).map(([code, count]) => ({ code, count }));
+}
+
+/**
+ * FR-S06 (r8 task 013) — the closed set of terminal save outcomes the server reports on the wire.
+ * Mirrors `ComposeSaveOutcome` / `ComposeSaveOutcomes` in `IComposeService.cs`; the strings ARE the
+ * contract. There is deliberately no "unknown" member: an unrecognized value is handled where it is
+ * read (treated as not-a-success), not by widening the set.
+ */
+type ComposeSaveOutcome =
+  | 'persisted'
+  | 'persisted-with-warnings'
+  | 'refused-stale'
+  | 'refused-locked'
+  | 'refused-invalid'
+  | 'storage-failed'
+  | 'partially-recorded';
+
+/**
+ * FR-S06 (r8 task 013): did this save actually store the document?
+ *
+ * `persisted` and `persisted-with-warnings` are the only outcomes where the bytes are durable and
+ * complete. `partially-recorded` is deliberately NOT here: the document is stored but does not contain
+ * everything submitted, so the user has work to redo and must not be told an unqualified "Saved".
+ *
+ * An ABSENT outcome means an older BFF that predates the field, whose 200 always meant a completed
+ * write — so absent is a success. An UNRECOGNIZED value means a newer BFF added a member this client
+ * does not know: treat it as not-a-success, because the safe failure direction is to under-claim.
+ */
+function isSuccessfulSaveOutcome(outcome: ComposeSaveOutcome | undefined): boolean {
+  return outcome === undefined || outcome === 'persisted' || outcome === 'persisted-with-warnings';
+}
+
+/**
+ * FR-S01 (r8 task 010) — how a save failure is classified before it is routed to an outcome.
+ *
+ * `authenticatedFetch` (ADR-028) RETURNS only when `response.ok`; every non-2xx is THROWN as an
+ * `ApiError` carrying `.status` + ProblemDetails. Two failure classes never reach an HTTP status at
+ * all, and both used to render as the same dead-end "Save failed: …" string:
+ *   - `AuthError` — thrown when the 401 retry budget is exhausted, or no response was received.
+ *     It carries `code`, never `status` (see `Spaarke.Auth/src/authenticatedFetch.ts`).
+ *   - a transport rejection — `fetch` itself rejected (offline, DNS, CORS, abort), so no HTTP
+ *     exchange happened. A malformed success body (`response.json()` throwing) lands here too.
+ */
+type SaveFailureClass =
+  | { kind: 'http'; status: number; detail: string }
+  | { kind: 'auth'; detail: string }
+  // FR-S05 (r8 task 012): the save's own timeout fired (or the request was otherwise aborted). A
+  // subclass of `transport` by mechanism — `fetch` rejects and no HTTP exchange completed — but it
+  // is the ONE failure class we caused ourselves, and the only one whose honest advice is "it took
+  // too long" rather than "check your connection". Kept a distinct member so the message can say so.
+  | { kind: 'aborted'; detail: string }
+  | { kind: 'transport'; detail: string };
+
+/**
+ * FR-S01 (r8 task 010): classify a thrown save failure. Never throws.
+ *
+ * The `status` read is deliberately STRUCTURAL rather than `err instanceof ApiError`: `instanceof`
+ * fails silently when `@spaarke/auth` resolves to two copies across a bundle boundary (the host page
+ * and this library), and a silent fall-through to the generic message is precisely the defect FR-S01
+ * exists to remove. `.status` is the only field the routing needs, so it is read directly.
+ */
+function classifySaveFailure(err: unknown): SaveFailureClass {
+  const detail = err instanceof Error ? err.message : String(err);
+  const status = (err as { status?: unknown } | null | undefined)?.status;
+  if (typeof status === 'number' && status >= 100 && status <= 599) {
+    return { kind: 'http', status, detail };
+  }
+  // FR-S05 (r8 task 012): an aborted `fetch` rejects with a DOMException named `AbortError`
+  // (`TimeoutError` where `AbortSignal.timeout` is used). Read `.name` STRUCTURALLY for the same
+  // reason `.status` is: `instanceof DOMException` is not reliable across realms, and jsdom/Node
+  // differ on whether the rejection is a DOMException or a plain Error at all.
+  const name = (err as { name?: unknown } | null | undefined)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return { kind: 'aborted', detail };
+  }
+  if (err instanceof Error && err.name === 'AuthError') {
+    return { kind: 'auth', detail };
+  }
+  return { kind: 'transport', detail };
+}
+
+/**
+ * FR-S01 (r8 task 010): the honest save-failure sentence for a classified failure.
+ *
+ * Every message states (a) that nothing was saved and (b) that the pending edits survive — which is
+ * TRUE on every path here: `commitSaved()` (which drops the op-log batch) fires only after a
+ * confirmed 200, so a refused save leaves the document dirty with its edits intact for a retry.
+ *
+ * `ApiError.message` is already `problemDetails.detail ?? title ?? "HTTP {status}"`, so the
+ * synthesized `HTTP {status}` fallback is stripped rather than echoed back after our own status text.
+ *
+ * 423 is NOT handled here — it routes to the lock banner (which owns its own copy + Retry).
+ */
+const SIGN_IN_EXPIRED_MESSAGE =
+  'Not saved — your sign-in expired. Refresh the page to sign in again, then Save. Your changes are still here.';
+
+function saveFailureMessage(failure: SaveFailureClass): string {
+  // A 401 that exhausted the retry budget arrives as an AuthError (no status); one that did not can
+  // still arrive as an ApiError with status 401. Same cause, same recovery, same sentence.
+  if (failure.kind === 'auth') {
+    return SIGN_IN_EXPIRED_MESSAGE;
+  }
+  // FR-S05 (r8 task 012): the save's own timeout stopped a request that never came back. "Not saved"
+  // is the honest claim: nothing here confirmed a write, and the edits are intact for a retry. The
+  // server may still have completed it, which is why the sentence points at a reload rather than
+  // promising the document is unchanged.
+  if (failure.kind === 'aborted') {
+    return (
+      'Not saved — the save took too long and was stopped. Your changes are still here — try again. ' +
+      'If it keeps timing out, reload the document first to check whether an earlier attempt landed.'
+    );
+  }
+  if (failure.kind === 'transport') {
+    return "Not saved — we couldn't complete the request (network or connection problem). Your changes are still here — try again.";
+  }
+  const { status } = failure;
+  const serverDetail = (failure.detail && failure.detail !== `HTTP ${status}` ? failure.detail : '')
+    .trim()
+    .replace(/\.$/, '');
+  const suffix = serverDetail ? `: ${serverDetail}.` : '.';
+  switch (status) {
+    case 401:
+      return SIGN_IN_EXPIRED_MESSAGE;
+    case 403:
+      return `You do not have permission to save this document${suffix} Your changes are still here.`;
+    case 404:
+      return (
+        'Not saved — this document no longer exists at its saved location (it may have been moved or ' +
+        'deleted). Your changes are still here — use Save As to store them as a new document.'
+      );
+    default:
+      return status >= 500
+        ? `Not saved — the server hit an error (HTTP ${status})${suffix} Your changes are still here — try again.`
+        : `Not saved — the server rejected this save (HTTP ${status})${suffix} Your changes are still here.`;
+  }
 }
 
 /** Raw wire shape of a `projection` field on a Compose bytes->response payload (Load / Upload /
@@ -1135,17 +1283,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
 
-        if (!response.ok) {
-          const msg =
-            response.status === 404
-              ? 'Document not found. It may have been deleted or moved.'
-              : response.status === 403
-                ? 'You do not have permission to open this document.'
-                : `Failed to load document (HTTP ${response.status}).`;
-          dispatch({ kind: 'loadFailed', errorMessage: msg });
-          return;
-        }
-
         const payload = (await response.json()) as {
           documentSpeId: string;
           driveId: string;
@@ -1204,6 +1341,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // Task 041 (FR-06, PDF intake): 'pdf' = `content` is the docx SYNTHESIZED server-side from
           // the PDF's canonical-model projection (task 040). Parsed defensively (older BFF omits it).
           sourceFormat?: string | null;
+          // FR-S08 (r8 task 015): the server-advertised save size limit, in bytes. Optional — an
+          // older BFF omits it, which the reader below normalizes to null (no numeric pre-flight).
+          maxDocumentBytes?: number | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1252,6 +1392,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // task 013 (r6, F7): the projection's flatten warnings — same defensive-parse convention
           // as the collections above (omitted/malformed → null).
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
+          // FR-S08 (r8 task 015): the server-advertised save size limit. Read defensively — an older
+          // BFF omits it, and `null` there means "do no numeric pre-flight", never "unlimited".
+          maxDocumentBytes: typeof payload.maxDocumentBytes === 'number' ? payload.maxDocumentBytes : null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
           // Task 041 (FR-06, PDF intake): the source-format marker + a client-minted transient dedup
@@ -1270,10 +1413,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
       } catch (err) {
         if (ac.signal.aborted) return;
+        // FR-S09 sweep (r8 task 016): status routing lives HERE, because this is where every non-2xx
+        // arrives. `authenticatedFetch` (ADR-028) RETURNS only when `response.ok` and THROWS a typed
+        // `ApiError` otherwise — so the `if (!response.ok)` block that used to sit above the parse,
+        // carrying "Document not found. It may have been deleted or moved." and "You do not have
+        // permission to open this document.", could never execute. Every failed load rendered the
+        // generic `Failed to load document: HTTP 404` instead. Same defect as FR-S01 removed from the
+        // save path and FR-S09 item 4 removed from the checkout path; this is the load path's copy.
+        const status = (err as { status?: unknown } | null | undefined)?.status;
+        const httpStatus = typeof status === 'number' && status >= 100 && status <= 599 ? status : null;
         const message = err instanceof Error ? err.message : String(err);
         dispatch({
           kind: 'loadFailed',
-          errorMessage: `Failed to load document: ${message}`,
+          errorMessage:
+            httpStatus === 404
+              ? 'Document not found. It may have been deleted or moved.'
+              : httpStatus === 403
+                ? 'You do not have permission to open this document.'
+                : httpStatus !== null
+                  ? `Failed to load document (HTTP ${httpStatus}).`
+                  : `Failed to load document: ${message}`,
         });
       }
     })();
@@ -1317,7 +1476,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           body: JSON.stringify({ tenantId, anchoredAnnotations, definedTermsTracking }),
           signal: ac.signal,
         });
-        if (response.ok && !ac.signal.aborted) {
+        // FR-S09 sweep (r8 task 016): `response.ok` is necessarily TRUE here — a non-2xx threw into
+        // the catch below. The condition was not wrong, it was unfalsifiable, which is the same defect
+        // as a dead branch wearing the opposite sign. The abort check is the real guard.
+        if (!ac.signal.aborted) {
           // Mark this state as server-synced so we don't re-POST it on the next unrelated render.
           syncedAnnotationsRef.current = snapshot;
         }
@@ -1499,6 +1661,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
+  // FR-S05 (r8 task 012): the in-flight guard. `state.status === 'saving'` is NOT sufficient on its
+  // own — `triggerSave` closes over `state`, so two calls dispatched in the same tick (Ctrl+S held
+  // down, the toolbar button plus the cross-pane bridge chip, an unmount flush landing on top of a
+  // manual save) both read the pre-dispatch `'loaded'` and both POST. A ref is read at call time,
+  // not at render time, so it closes that window. Two concurrent saves of the same document race
+  // each other's write and each other's `commitSaved`, which is how an edit gets acknowledged by a
+  // save that never carried it.
+  const saveInFlightRef = React.useRef(false);
   const triggerSave = React.useCallback(
     async (
       saveMode: ComposeSaveMode = 'version',
@@ -1508,8 +1678,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // placeholder. Undefined for every already-named / replace-path save (unchanged behavior).
       opts?: { displayNameOverride?: string }
     ): Promise<void> => {
-      if (state.status !== 'loaded') return;
-      if (!state.documentRef || !editorRef.current) return;
+      // FR-S09 item 1 (r8 task 016): these were two bare `return`s. The user pressed Save and
+      // NOTHING happened — no banner, no console line, no state change, no way to tell a refusal
+      // apart from a broken button. Each case is now decided explicitly, and the two that are
+      // reachable-and-invisible now say so.
+      if (state.status === 'saving' || saveInFlightRef.current) {
+        // A save is already running. Deliberately NOT a banner: "Saving…" and a disabled Save button
+        // are already on screen saying exactly this, and a second, contradictory signal ("your save
+        // was refused") would be worse than the silence. Documented as non-silent rather than assumed
+        // to be — the distinction this whole task turns on.
+        return;
+      }
+      if (state.status !== 'loaded') {
+        // 'loading' / 'error' / 'empty'. The toolbar and Ctrl+S do not exist in these states, so the
+        // only caller that can arrive here is programmatic — the Assistant's "Add the document to the
+        // DMS" chip, or an unmount flush. It used to drop them on the floor. The message is worded to
+        // stay true when it surfaces (the banner renders once the editor is up), and the reducer
+        // deliberately does NOT move `status` for a refusal — see the `saveFailed` case.
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage: 'That save did not run — the document was still opening. Nothing was lost; press Save again.',
+        });
+        return;
+      }
+      if (!state.documentRef || !editorRef.current) {
+        // THE silent one. Status is 'loaded', so the editor and an ENABLED Save button are both on
+        // screen, and pressing Save did nothing at all — repeatedly, with no explanation. It happens
+        // when the editor's imperative handle has not attached yet (a render race) or the document
+        // reference was lost, and it is indistinguishable from a dead button.
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage:
+            'That save did not run — the editor was not ready. Your changes are still here; press Save again.',
+        });
+        return;
+      }
 
       // FR-02 (task 030): trimmed user-entered name from the save-name modal, if any.
       const nameOverride = opts?.displayNameOverride?.trim() || undefined;
@@ -1569,6 +1772,54 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
         return;
       }
+
+      // FR-S08 (r8 task 015): the size PRE-FLIGHT. Measured here, before the request is built, so an
+      // oversize document costs the user nothing — no base64 encode of 25+ MB, no upload they wait out
+      // only to have it rejected at the far end.
+      //
+      // The limit is the one the SERVER advertised on the response that mounted this document, never a
+      // compiled-in copy: a second constant is precisely how "your file is fine" becomes a rejection,
+      // and the server is the side that actually enforces it. When no limit was advertised — an older
+      // BFF, or a mount door that never called the server (a local Browse pick, a born-in-editor seed)
+      // — we do NO numeric check and let the server refuse honestly with its own number. Guessing here
+      // would reintroduce the divergence this requirement exists to remove.
+      //
+      // Only the retained ORIGINAL bytes are measured: they are the only bytes the client ever sends,
+      // and the ContentModel shapes are small structured JSON the server renders (a born-in-editor doc
+      // has no retained bytes at all).
+      const advertisedLimit = state.maxDocumentBytes;
+      const outgoingBytes = state.docxBytes?.byteLength ?? 0;
+      if (advertisedLimit !== null && outgoingBytes > advertisedLimit) {
+        const asMb = (n: number) => Math.round((n / (1024 * 1024)) * 10) / 10;
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage:
+            `Not saved — this document is ${asMb(outgoingBytes)} MB and the limit is ${asMb(advertisedLimit)} MB. ` +
+            'Your changes are still here. Remove or compress large embedded images, or split the document, then save again.',
+        });
+        return;
+      }
+
+      // FR-S05 (r8 task 012): claim the in-flight guard. Sited HERE — after all the synchronous
+      // setup above, immediately before the first `await` (the transient-create container
+      // resolution). Two reasons, both deliberate:
+      //   • Sync code cannot interleave, so nothing above this line needs guarding; the window a
+      //     second save can slip through opens at the first suspension point.
+      //   • A synchronous throw in that setup would otherwise latch the guard forever, silently
+      //     killing saving for the rest of the session — a worse failure than the double-POST the
+      //     guard exists to prevent. Below this line every exit path releases it.
+      // The TEST moved to the entry guards above (FR-S09 item 1) so a refused second save can say so;
+      // the CLAIM stays here, at the last moment before the first `await`, for the reasons above.
+      saveInFlightRef.current = true;
+      /** The single release point: the request's `finally`, and the two early returns below. */
+      const finishSaveAttempt = (): void => {
+        saveInFlightRef.current = false;
+      };
+      const failEarly = (errorMessage: string): void => {
+        finishSaveAttempt();
+        dispatch({ kind: 'saveFailed', errorMessage });
+      };
+
       if (isTransientCreate) {
         let resolvedContainerId = saveContainerId;
         // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
@@ -1600,19 +1851,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
                 "Cannot save this new document yet — we couldn't determine your storage container " +
                 '(the Dataverse context may still be loading). Please try again in a moment.';
-          dispatch({ kind: 'saveFailed', errorMessage });
+          failEarly(errorMessage);
           return;
         }
         saveContainerId = resolvedContainerId;
       } else if (!saveDriveId) {
-        dispatch({
-          kind: 'saveFailed',
-          errorMessage: 'Cannot save — SPE drive configuration missing.',
-        });
+        failEarly('Cannot save — SPE drive configuration missing.');
         return;
       }
 
       dispatch({ kind: 'requestSave' });
+      // FR-S01 (r8 task 010): did the POST reach a 2xx? Everything after the fetch — response parsing,
+      // dispatches, draft cleanup, the editor's `commitSaved()` — runs inside the same `try`, so a throw
+      // there would otherwise be reported as "Not saved" for a document the server ALREADY wrote. That is
+      // the same class of dishonest outcome this task removes, pointing the other way.
+      let savePersisted = false;
+      // FR-S06 (r8 task 013): a 2xx arrived, but we have NOT yet read the outcome that says whether
+      // anything was written. Before 013 a 200 was taken to mean "written" — that assumption is exactly
+      // what let a total write failure render as "Saved ✓". So the window between the response arriving
+      // and the outcome being read is genuinely INDETERMINATE, and claiming either result there would be
+      // a guess. Tracked separately from `savePersisted` so the catch can say so honestly.
+      let saveReachedServer = false;
+      // FR-S05 (r8 task 012): the save's deadline. `AbortController` (not `AbortSignal.timeout`) so
+      // the timer can be cleared the moment the exchange finishes — an un-cleared timeout would fire
+      // later and abort a signal nobody is reading, and, more importantly, keeps a 2-minute timer
+      // alive per save. The abort surfaces as a rejected `fetch` → the catch below classifies it
+      // `aborted` → a FAILED save with the dirty flag intact, which is what an unfinished save is.
+      const saveAbort = new AbortController();
+      const saveTimeoutId = window.setTimeout(() => saveAbort.abort(), COMPOSE_SAVE_TIMEOUT_MS);
       try {
         // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
         // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
@@ -1754,6 +2020,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         //     mapper / mapper returned null) → the TRANSITIONAL op-log shape, completely unchanged:
         //     { content/baselineVersionId, operationLog?, comments, paraIdMap }.
         let requestBody: Record<string, unknown>;
+        // FR-S03 (r8 task 012): did THIS save capture a born-in-editor content model? That capture
+        // now watermarks the editor instead of clearing its dirty flag, so the post-success
+        // `commitSaved()` must fire for it — see the commit gate below. Kept as a plain flag set at
+        // the call sites rather than a closure, so `editorRef.current`'s narrowing is not disturbed.
+        let sentEditorContentModel = false;
         if (isTransientCreate) {
           // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
           // signal the replace path uses (`bornInEditor = !state.docxBytes`). Only a TRUE born-in-editor doc
@@ -1800,6 +2071,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // comment-bake for ALL ContentModel saves), so the separate `comments` field is GONE here.
             // paraIdMap stays (existing field; empty for a born-in-editor doc anyway).
             requestBody = { ...createCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+            sentEditorContentModel = true;
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
             // ORIGINAL bytes as the render carrier.
@@ -1872,6 +2144,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // the drive-ITEM id — a real version fetch would 404). task 012 amendment: no separate
             // `comments` field — `buildContentModel()` folds the threads into the model.
             requestBody = { ...replaceCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+            sentEditorContentModel = true;
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — loaded/imported OR reopened-authored replace save, MODEL shape: the merged model
             // + the baseline source (retained bytes when still held — the same-session case — else the
@@ -1900,59 +2173,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }
         }
 
+        // ADR-028: `authenticatedFetch` stays the transport (never a raw `fetch`) — the signal rides
+        // its existing `RequestInit`, which it spreads onto every attempt, so the deadline also
+        // bounds the 401 retry loop rather than restarting with it.
         const response = await authenticatedFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
+          signal: saveAbort.signal,
         });
 
-        if (!response.ok) {
-          // Try to extract ProblemDetails.detail so the banner surfaces the
-          // actual server-side reason (BFF puts exception name + message +
-          // TraceId in `detail`). Fall back to a generic message if the body
-          // isn't JSON.
-          let detail = '';
-          try {
-            const problem = (await response.clone().json()) as {
-              detail?: string;
-              title?: string;
-            };
-            detail = problem.detail ?? problem.title ?? '';
-          } catch {
-            detail = (await response.text().catch(() => '')).slice(0, 400);
-          }
-          // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
-          // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
-          // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
-          // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
-          // carries the honest message.
-          if (response.status === 423) {
-            dispatch({
-              kind: 'saveFailed',
-              errorMessage:
-                detail ||
-                'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
-              isLock: true,
-            });
-            return;
-          }
-          // UAT-25/26 (2026-08-18, honest/safe): 412 = the server refused the save because the document
-          // changed since we opened it (an external Word/tab writer landed a new version) — nothing was
-          // overwritten. Route to the honest external-change banner (explicit Reload; the user's pending
-          // edits are preserved, never silently discarded) instead of a dead-end save error. This is the
-          // "reload and reapply" recovery the 412 ProblemDetails describes.
-          if (response.status === 412) {
-            dispatch({ kind: 'externalChangeDetected' });
-            return;
-          }
-          const msg =
-            response.status === 403
-              ? `You do not have permission to save this document. ${detail}`.trim()
-              : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
-          dispatch({ kind: 'saveFailed', errorMessage: msg });
-          return;
-        }
+        // The request completed with a 2xx. Whether anything was WRITTEN is the outcome field's job.
+        saveReachedServer = true;
 
+        // FR-S01 (r8 task 010): there is NO `if (!response.ok)` branch here, and there must never be one
+        // again. `authenticatedFetch` returns ONLY when `response.ok` — every non-2xx is thrown as a typed
+        // `ApiError` (ADR-028 / ADR-019 ProblemDetails). The block that used to sit here (423 lock banner,
+        // 412 reload flow, 403 copy) was therefore unreachable from R5 onward, which is why every server
+        // refusal rendered as one undifferentiated "Save failed: …" with no recovery. Status routing now
+        // lives in the `catch` below, on `ApiError.status` — the ONE save-error path.
         const payload = (await response.json()) as {
           documentSpeId: string;
           documentRecordId?: string;
@@ -1968,6 +2207,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           eTag?: string;
           size: number;
           wasPromotedThisSave: boolean;
+          // FR-S06 (r8 task 013): the server's TERMINAL OUTCOME for this save, from a closed set. This —
+          // not the HTTP status — is what says whether anything was written: the create-on-save
+          // container-failure path returns `storage-failed` on a 200, which is exactly how a total write
+          // failure used to render as "Saved ✓". Optional so an older BFF (no field) still works; absent
+          // is treated as `persisted`, which is what that older BFF's 200 always meant.
+          outcome?: ComposeSaveOutcome;
           // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
           // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
           // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
@@ -1985,6 +2230,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // base for the next model-path save. Optional/null (older BFF, or a non-render-path save).
           contentModel?: ComposeContentModel | null;
         };
+
+        // FR-S06 (r8 task 013): THE honesty gate. A 200 does NOT mean the document was stored — the
+        // create-on-save container-failure path returns a result (it does not throw), so the endpoint
+        // wraps it in a 200 carrying `storage-failed`. Before this branch, that rendered as "Saved ✓"
+        // over a write that never happened.
+        //
+        // Deliberately BEFORE the Assistant notification and the `saveSucceeded` dispatch: announcing a
+        // save to chat, clearing the dirty flag, and committing the op-log are all success side effects,
+        // and every one of them would be wrong here. Returning leaves the document dirty with its edits
+        // intact, exactly as a thrown failure does — so a retry re-sends the same work.
+        if (!isSuccessfulSaveOutcome(payload.outcome)) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              payload.outcome === 'partially-recorded'
+                ? 'Partly saved — the document was stored, but not everything was recorded. Reload the ' +
+                  'document to see what landed, then redo anything missing.'
+                : 'Not saved — the server accepted the request but could not store the document. Your ' +
+                  'changes are still here — try again, and contact an administrator if it keeps failing.',
+          });
+          return;
+        }
+
+        // FR-S01 (task 010) + FR-S06 (task 013): the document is now CONFIRMED persisted — a 2xx AND a
+        // success outcome. Set here rather than at the fetch so the catch below can honestly say "it was
+        // saved" without that claim resting on the status alone; a throw before this point is reported
+        // as a failure, which is correct, because at that point we did not yet know the write landed.
+        savePersisted = true;
 
         // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
         // affordance (FIX #7a below).
@@ -2060,12 +2333,29 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
             ]
           : [];
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // TASK 044 (r8) — the docx flatten warnings are NO LONGER folded into the save banner.
+        //
+        // The R6-era reasoning above ("the loss they describe MATERIALIZES exactly here, on the first
+        // save that renders from the flatten-tier model") was correct WHEN EVERY SAVE REBUILT THE WHOLE
+        // BODY. Since task 040 it is false: a text box, field or content control on a block the user did
+        // not touch is CLONED VERBATIM and nothing about it is simplified. Folding the load-time flatten
+        // warnings in anyway produced a "Some formatting was simplified when saving" banner on documents
+        // that lost nothing — the false signal that trains a reader to ignore the true ones.
+        //
+        // The server is now authoritative and precise: `payload.degradationWarnings` carries one warning
+        // per construct ACTUALLY lost, counted on the block that was re-rendered (ComposeBlockMerge's
+        // shortfall report). Nothing is suppressed — the true warnings arrive from the party that knows.
+        //
+        // `pdf-intake-*` facts are the exception and are STILL folded on both paths: that reflow already
+        // happened at LOAD, before any save, so the loss is real regardless of what the save does.
+        const pdfIntakeFacts = heldWarnings.filter(
+          w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')
+        );
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
-          usedModelPath
-            ? heldWarnings
-            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')),
+          pdfIntakeFacts,
           clientSurfacedLossWarnings
         );
         dispatch({
@@ -2073,9 +2363,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           warnings: mergedSaveWarnings.length > 0 ? mergedSaveWarnings : null,
         });
 
-        // Clear the local dirty flag so the Save button disables until the
-        // next edit. ComposeEditor's internal dirtyRef also resets on the
-        // next load; here we mirror that for post-save.
+        // Clear the local dirty flag so the Save button disables until the next edit. This is the
+        // workspace's MIRROR of the editor's authoritative `dirtyRef`, not a second source of truth:
+        // the `commitSaved()` below fires on every successful save and its `onDirtyChange` is the
+        // last writer, correctly re-arming Save when the user typed mid-flight. This assignment
+        // covers only the case where the editor handle is already gone (unmount race). FR-S03 (r8
+        // task 012): it sits on the success branch, AFTER the outcome-honesty gate — a failed save
+        // never reaches it.
         setIsDirty(false);
 
         // FR-07(b) (task 010): a transient draft that just persisted (create-on-save promotion)
@@ -2096,8 +2390,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
         // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
         // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
-        // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
-        // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
+        // the batch, and ONLY on success. FR-S01 (r8 task 010): a rejected save THROWS out of
+        // `authenticatedFetch` straight to the catch below, so it never reaches here — the op-log + dirty
+        // flag survive for a retry that re-sends the same edits.
         // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
         // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
         // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
@@ -2112,6 +2407,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // `recaptureBaselineSnapshot()`, which would silently absorb (mask) any edits typed during
         // the in-flight save. The live recapture remains only as the older-editor-build fallback.
         // Exactly ONE commitSaved fires per successful save on every path.
+        //
+        //
+        // FR-S03 (r8 task 012): the commit gate gains the BORN-IN-EDITOR case. `buildContentModel()`
+        // no longer clears the dirty flag at build time — it watermarks — so a born-in-editor save
+        // that reached here without committing would leave the document permanently dirty after a
+        // save that actually succeeded (the mirror image of the bug this task removes). The gate
+        // stays a gate rather than becoming unconditional: a CLEAN byte-identical passthrough save
+        // captures nothing and must touch no editor state at all (review F3).
+        //
+        // The invariant across all three arms: exactly ONE `commitSaved()` per successful save that
+        // captured anything, and none for one that captured nothing.
         if (usedModelPath) {
           const postSaveHandle = editorRef.current as (ComposeEditorHandle & ComposeEditorImportedModelHandle) | null;
           if (postSaveHandle && typeof postSaveHandle.adoptBaselineSnapshot === 'function' && importedBuilt) {
@@ -2119,8 +2425,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           } else {
             postSaveHandle?.recaptureBaselineSnapshot?.();
           }
-          editorRef.current?.commitSaved?.();
-        } else if (operationLog) {
+        }
+        if (usedModelPath || operationLog || sentEditorContentModel) {
           editorRef.current?.commitSaved?.();
         }
 
@@ -2159,8 +2465,91 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
+        // FR-S01 (r8 task 010): THE save-error path. Every server refusal arrives here as a thrown
+        // `ApiError` (ADR-028), so each status gets its own outcome + recovery affordance instead of one
+        // dead-end string. The op-log and dirty flag are untouched on every branch — `commitSaved()` fires
+        // only after a confirmed 200 — so each message can honestly promise the edits survive.
+        const failure = classifySaveFailure(err);
+
+        // The POST already returned 2xx — the document IS written. Something in the post-save bookkeeping
+        // threw. Every message below promises "Not saved", which would be a lie here; say what actually
+        // happened instead. The `saveSucceeded` dispatch (if it got that far) stands.
+        if (savePersisted) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              'Your document was saved, but something went wrong immediately afterwards ' +
+              `(${failure.detail}). Reload the document to see the saved version.`,
+          });
+          return;
+        }
+
+        // FR-S06: a 2xx arrived but we never read the outcome (e.g. an unreadable body), so we do not
+        // know whether the write landed. Say that, rather than picking a side — "Not saved" would risk
+        // a duplicate save, and "Saved" would risk silent data loss. Reloading is the one action that
+        // resolves the ambiguity.
+        if (saveReachedServer) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              'We could not confirm whether your document was saved — the server replied, but the reply ' +
+              `could not be read (${failure.detail}). Reload the document to check before saving again; ` +
+              'your changes are still here either way.',
+          });
+          return;
+        }
+
+        // UAT #10/#11 (task 052): 423 = a Word-for-the-web CO-AUTHORING lock (Spaarke never does a formal
+        // checkout, so a 423 is always co-authoring). No programmatic unlock exists — `isLock` routes to the
+        // honest "Open in Word" bar with Retry Save + Reload from Word, not a fake Unlock. The server detail
+        // already carries the honest message; the fallback covers a detail-less 423.
+        if (failure.kind === 'http' && failure.status === 423) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              failure.detail && failure.detail !== 'HTTP 423'
+                ? failure.detail
+                : 'This document is open in Word — close it there, then Retry. It also releases automatically ' +
+                  'within a few minutes. Your Compose changes are safe and still pending.',
+            isLock: true,
+          });
+          return;
+        }
+
+        // FR-S09 item 6 (r8 task 016): the service asked us to wait. Distinct from every other status
+        // here because nothing is wrong — not with the document, not with the request, not with the
+        // server — and the only useful instruction is a duration. Before task 016 a Graph throttle
+        // reached the client as a 500 whose body read "Save failed: InvalidOperationException: Service
+        // temporarily unavailable due to Graph rate limiting", which reads as a fault and invites a
+        // support ticket instead of a coffee. The server states the wait in its ProblemDetails detail
+        // (and in Retry-After); prefer it, and fall back to a conservative sentence rather than
+        // inventing a number.
+        if (failure.kind === 'http' && failure.status === 429) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              failure.detail && failure.detail !== 'HTTP 429'
+                ? failure.detail
+                : 'Not saved — the document service is busy right now. Nothing was overwritten and your ' +
+                  'changes are still here — try again in a moment.',
+          });
+          return;
+        }
+
+        // FR-S02 (r8 task 011): there is deliberately NO 412 branch here. Concurrency is now
+        // LAST-WRITER-WINS with a warning — the server never refuses a save because the stored version
+        // moved, so a save-path 412 is unreachable. The concurrent-writer case arrives on the SUCCESS
+        // path instead, as a `concurrent-external-change` degradation warning naming version history as
+        // the recovery. Task 010 routed 412 here transitionally; this task removed the reason.
+        // Re-adding a 412 branch would mean a refusal loop came back — check the server first.
+        dispatch({ kind: 'saveFailed', errorMessage: saveFailureMessage(failure) });
+      } finally {
+        // FR-S05 (r8 task 012): both cleanups belong here and nowhere else. The `saving` status is
+        // terminated by the dispatches above (`saveSucceeded` / `saveFailed` both return the reducer
+        // to `'loaded'`) — every path through the try and the catch performs one, including the
+        // outcome-honesty gate's early return, so the editor can no longer be stranded mid-save.
+        window.clearTimeout(saveTimeoutId);
+        finishSaveAttempt();
       }
     },
     [
@@ -2523,18 +2912,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [memoEmailBody, setMemoEmailBody] = React.useState('');
 
   /**
-   * Reads the ProblemDetails `code` extension from a non-OK memo response (agreements-r1 UAT round-1 #2)
-   * so the toolbar can tell "session not bound to an Analysis" (promote first — the review is NOT lost)
-   * apart from "no memo persisted yet" (generate first). Never throws — a missing/unparseable body
-   * yields `null`, so a genuine transport/server error still falls through to generic handling.
+   * FR-S09 sweep (r8 task 016): translate a THROWN memo failure into FR-14's negative message, if it is
+   * one — "session not bound to an Analysis" (promote first — the review is NOT lost) vs. "no memo
+   * persisted yet" (generate first).
+   *
+   * This REPLACES `readMemoProblemCode`, which read the ProblemDetails `code` extension off a non-OK
+   * `Response` — a shape `authenticatedFetch` never returns. Both of its call sites therefore sat
+   * inside unreachable `if (!response.ok)` blocks, and BOTH of FR-14's negative messages were dead:
+   * a user with no memo yet, and a user on the direct-Compose door, got the same generic failure. The
+   * same `code` is already parsed onto `ApiError.problemDetails`, so no second body read is needed.
+   *
+   * Returns null for a genuine transport/server error, which keeps its own generic handling.
    */
-  const readMemoProblemCode = React.useCallback(async (response: Response): Promise<string | null> => {
-    try {
-      const body = (await response.clone().json()) as { code?: unknown } | null;
-      return typeof body?.code === 'string' ? body.code : null;
-    } catch {
-      return null;
-    }
+  const memoNegativeFromError = React.useCallback(async (err: unknown): Promise<string | null> => {
+    const status = (err as { status?: unknown } | null | undefined)?.status;
+    if (typeof status !== 'number') return null;
+    const details = (err as { problemDetails?: Record<string, unknown> | null } | null | undefined)?.problemDetails;
+    const code = typeof details?.['code'] === 'string' ? (details['code'] as string) : null;
+    return selectMemoNegativeMessage(status, code);
   }, []);
 
   /**
@@ -2550,17 +2945,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     { kind: 'ok'; memo: ReviewMemoReadResponse } | { kind: 'negative'; message: string }
   > => {
     if (!bffBaseUrl || !state.sessionId) return { kind: 'negative', message: MEMO_NO_MEMO_MESSAGE };
-    const response = await authenticatedFetch(
-      `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
-      { method: 'GET' }
-    );
-    if (response.ok) {
-      return { kind: 'ok', memo: (await response.json()) as ReviewMemoReadResponse };
+    let response: Response;
+    try {
+      response = await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+        { method: 'GET' }
+      );
+    } catch (err) {
+      // FR-S09 sweep (r8 task 016): the negative split happens on the THROWN ApiError. The
+      // `if (response.ok)` / fallthrough that used to follow the call was unreachable.
+      const negative = await memoNegativeFromError(err);
+      if (negative) return { kind: 'negative', message: negative };
+      throw err;
     }
-    const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
-    if (negative) return { kind: 'negative', message: negative };
-    throw new ApiError(`Failed to read the review memo (${response.status})`, response.status);
-  }, [bffBaseUrl, state.sessionId, readMemoProblemCode]);
+    return { kind: 'ok', memo: (await response.json()) as ReviewMemoReadResponse };
+  }, [bffBaseUrl, state.sessionId, memoNegativeFromError]);
 
   /**
    * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
@@ -2576,17 +2975,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo/docx`,
         { method: 'GET' }
       );
-      if (!response.ok) {
-        // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
-        // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
-        const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
-        if (negative) {
-          setMemoActionMessage(negative);
-          return;
-        }
-        throw new ApiError(`Failed to generate the review memo (${response.status})`, response.status);
-      }
-
+      // FR-S09 sweep (r8 task 016): the `if (!response.ok)` split-negatives block that used to sit
+      // here was unreachable. The split now happens in the catch, on the thrown ApiError.
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
       const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
@@ -2604,11 +2994,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         URL.revokeObjectURL(url);
       }
     } catch (err) {
-      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not generate the review memo.');
+      // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
+      // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
+      const negative = await memoNegativeFromError(err);
+      setMemoActionMessage(negative ?? (err instanceof ApiError ? err.message : 'Could not generate the review memo.'));
     } finally {
       setMemoActionInFlight(false);
     }
-  }, [bffBaseUrl, state.sessionId, memoActionInFlight, readMemoProblemCode]);
+  }, [bffBaseUrl, state.sessionId, memoActionInFlight, memoNegativeFromError]);
 
   /**
    * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
@@ -2820,14 +3213,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET' });
-        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
-        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
-        // safety net should that behaviour ever change.
-        if (!response.ok) {
-          if (response.status === 404) return; // no compose outputs yet — nothing to materialize
-          setComposeDraftError(`Failed to load the drafted content (HTTP ${response.status}).`);
-          return;
-        }
+        // FR-S09 sweep (r8 task 016): the "defensive" guard that stood here is DELETED. It could not
+        // execute — its own comment said so — and a safety net that cannot deploy is not a safety net,
+        // it is a second description of the contract that can silently drift from the first. The catch
+        // below already routes the 404 ("nothing drafted yet") as a silent no-op.
 
         const outputs = (await response.json()) as ComposeLedgerOutput[];
         const composeOutputs = Array.isArray(outputs)
@@ -3358,7 +3747,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
               });
-              if (response.ok) {
+              // FR-S09 sweep (r8 task 016): necessarily TRUE — a non-2xx threw into the catch below,
+              // which already falls through to `mountTransient` with `projection: null`.
+              {
                 const payload = (await response.json()) as {
                   projection?: RawComposeProjectionPayload;
                   // task 012 (r6): canonical model + optional minted-byte echo (commit 70be80006).
@@ -3680,15 +4071,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           signal: ac.signal,
         });
 
-        if (!response.ok) {
-          const msg =
-            response.status === 404
-              ? 'The uploaded file is no longer available (the session may have expired). Re-upload it in the Assistant and try again.'
-              : `Failed to open the uploaded file (HTTP ${response.status}).`;
-          dispatch({ kind: 'loadFailed', errorMessage: msg });
-          return;
-        }
-
         const payload = (await response.json()) as {
           content: string;
           fileName?: string;
@@ -3713,6 +4095,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // Task 051 (FR-06 — PDF import parity): 'pdf' when the uploaded file was a PDF and `content` is
           // the docx SYNTHESIZED by the task-050 mount fork. Parsed defensively (older BFF omits it).
           sourceFormat?: string | null;
+          // FR-S08 (r8 task 015): the server-advertised save size limit, in bytes. Optional — an
+          // older BFF omits it, which the reader below normalizes to null (no numeric pre-flight).
+          maxDocumentBytes?: number | null;
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -3743,6 +4128,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModel: payload.contentModel ?? null,
           // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
+          // FR-S08 (r8 task 015): the server-advertised save size limit. Read defensively — an older
+          // BFF omits it, and `null` there means "do no numeric pre-flight", never "unlimited".
+          maxDocumentBytes: typeof payload.maxDocumentBytes === 'number' ? payload.maxDocumentBytes : null,
           // Task 051 (FR-06 — PDF import parity): carry the PDF-source marker so the editor admits the
           // synthesized docx as editable (despite the .pdf display name) and Save routes create-on-save.
           sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,
@@ -3774,8 +4162,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }
       } catch (err) {
         if (ac.signal.aborted) return;
+        // FR-S09 sweep (r8 task 016): the 404 copy — "the session may have expired, re-upload it in
+        // the Assistant" — used to live in an `if (!response.ok)` block above the parse, and could not
+        // execute. An expired session rendered `Failed to open the uploaded file: HTTP 404`, which
+        // tells the user nothing about the one action that fixes it.
+        const status = (err as { status?: unknown } | null | undefined)?.status;
+        const httpStatus = typeof status === 'number' && status >= 100 && status <= 599 ? status : null;
         const message = err instanceof Error ? err.message : String(err);
-        dispatch({ kind: 'loadFailed', errorMessage: `Failed to open the uploaded file: ${message}` });
+        dispatch({
+          kind: 'loadFailed',
+          errorMessage:
+            httpStatus === 404
+              ? 'The uploaded file is no longer available (the session may have expired). Re-upload it in the Assistant and try again.'
+              : httpStatus !== null
+                ? `Failed to open the uploaded file (HTTP ${httpStatus}).`
+                : `Failed to open the uploaded file: ${message}`,
+        });
       }
     })();
 
@@ -3842,19 +4244,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
-        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
-        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
-        // safety net should that behaviour ever change.
-        if (!response.ok) {
-          dispatch({
-            kind: 'loadFailed',
-            errorMessage:
-              response.status === 404
-                ? 'The drafted document is no longer available (the session may have expired). Try drafting it again.'
-                : `Failed to load the drafted document (HTTP ${response.status}).`,
-          });
-          return;
-        }
+        // FR-S09 sweep (r8 task 016): the unreachable "defensive" guard is DELETED — the catch below
+        // already carries the 404 copy, and two descriptions of one contract drift apart.
 
         // GET /compose-outputs → ComposeLedgerOutputDto[]: { key, bindingId, turn, disposition, payload }.
         // The nested `payload` is passed through opaquely (snake_case body_html preserved).
@@ -4038,7 +4429,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // sourceFormat and re-targets), then Word actions re-enable against the new docx identity.
   const isPdfSourced = state.sourceFormat === 'pdf';
   const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing || isPdfSourced;
-  const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
+  // FR-S09 item 3 (r8 task 016): `tenantId` joins the precondition set.
+  //
+  // It was already required by `triggerSave` (which refuses without it) and by every save request
+  // body — but not by the gate, so the Save button sat there ENABLED on a workspace that could not
+  // possibly save, and only said so after the user pressed it. A precondition enforced one layer
+  // deeper than it is advertised is a precondition the user discovers by failing.
+  const hasSaveConfiguration = bffBaseUrl.length > 0 && !!tenantId;
+  const hasUnsavedWorkToSave = isDirty || hasTransientDraft;
+  const canSaveNow = !isSavingNow && hasSaveConfiguration && hasUnsavedWorkToSave;
+  // ...and the disabled button explains itself rather than just being grey.
+  const saveDisabledReason = isSavingNow
+    ? undefined // the toolbar already renders "Saving…" for this case
+    : !hasSaveConfiguration
+      ? 'Saving is unavailable — this workspace is missing its Spaarke connection settings. Reload the page, and contact an administrator if it persists.'
+      : !hasUnsavedWorkToSave
+        ? 'No unsaved changes'
+        : undefined;
 
   // FR-05 (task 032): "Apply firm template" gating. The button renders only for a PERSISTED doc
   // (an SPE drive-item exists — the server merges the SAVED bytes; a transient draft has nothing
@@ -4357,6 +4764,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 requestSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
+              // FR-S09 item 3 (r8 task 016): a disabled Save states its reason (tooltip).
+              saveDisabledReason={saveDisabledReason}
               // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
@@ -4499,7 +4908,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         open={saveNameModal !== null}
         mode={saveNameModal?.mode ?? 'first-save'}
         defaultName={saveNameModal?.defaultName ?? ''}
-        onClose={() => setSaveNameModal(null)}
+        onClose={() => {
+          // FR-S09 item 2 (r8 task 016): the name modal is a HARD GATE on the save the user just
+          // asked for — dismissing it (Cancel / Esc / backdrop) means that save does not happen.
+          // It used to close in silence, leaving someone who pressed Ctrl+S and then Esc believing
+          // their document was saved. The document stays dirty either way; now it also says so.
+          setSaveNameModal(null);
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage: 'Not saved — this document needs a name. Press Save and enter one.',
+          });
+        }}
         onSubmit={name => {
           const mode: ComposeSaveMode = saveNameModal?.mode === 'save-as' ? 'new' : 'version';
           setSaveNameModal(null);

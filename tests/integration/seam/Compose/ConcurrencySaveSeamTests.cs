@@ -133,11 +133,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -190,13 +193,24 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
-    // 1b. UAT-25/26 (2026-08-18) — a stale-base save on the WHOLE-BODY ContentModel path CANNOT re-anchor
-    //     (it re-authors the entire body), so it must REFUSE with 412 (reload + reapply — nothing
-    //     overwritten) rather than SILENTLY OVERWRITING the external writer's new version. The honest
-    //     counterpart to test #1: the op-log path re-anchors; the model path refuses.
+    // 1b. FR-S02 (spaarkeai-compose-r8 task 011) — a stale-base save on the WHOLE-BODY ContentModel path
+    //     PERSISTS (last-writer-wins) and WARNS. Owner decision 2026-08-19, superseding the UAT-25/26
+    //     412 refusal this test previously asserted.
+    //
+    //     Why the reversal is the safer behavior, not the laxer one: Compose versions every save, so the
+    //     superseded writer's content is the PREVIOUS version and is recoverable from version history —
+    //     whereas the refusal left the USER with unsaved work in a browser tab and no way forward, and
+    //     its client-side recovery handler was dead code the day it shipped (r8 task 010, FR-S01).
+    //
+    //     This test is also the NFR-08 pairing for the outcome: the server half asserted here, the
+    //     rendered client affordance asserted in ComposeWorkspace.saveErrorRouting.test.tsx.
+    //
+    //     Third assertion, the one that makes "last writer wins" a guarantee rather than a hope: the PUT
+    //     carries `If-Match` set to the LIVE version this save's baseline was resolved against, closing
+    //     the check-then-act window between the metadata read and the write.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     [Fact]
-    public async Task Save_StaleBase_ContentModelPath_Refuses412_WithoutOverwriting_ThroughTheWire()
+    public async Task Save_StaleBase_ContentModelPath_PersistsLastWriterWins_WarnsAndSendsIfMatch_ThroughTheWire()
     {
         const string speId = "spe-item-uat25-stale-model";
         const string driveId = "drive-uat25-stale-model";
@@ -232,12 +246,19 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
 
-        // Track that the refused save NEVER overwrites (no ReplaceFileContentAsUserAsync after the seed).
-        var overwroteAfterSeed = false;
+        // The stale-base save now WRITES (last-writer-wins). Capture the If-Match the write carried — a
+        // resolved live version means the save must go through the PRECONDITIONED overload, never the
+        // blind one, or the read-to-write window is still open.
+        var wroteAfterSeed = false;
+        string? sentIfMatch = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback(() => overwroteAfterSeed = true)
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, _, ifMatch, _) =>
+            {
+                wroteAfterSeed = true;
+                sentIfMatch = ifMatch;
+            })
             .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
 
         // ── Save #2 on the whole-body ContentModel path against the stale base. ──
@@ -251,10 +272,19 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         });
 
         var secondBody = await secondSave.Content.ReadAsStringAsync();
-        secondSave.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
-            $"a stale-base whole-body ContentModel save must refuse (412), never silently overwrite the external writer — body: {secondBody}");
-        overwroteAfterSeed.Should().BeFalse(
-            "nothing may be written on the refused save — the external writer's version stays intact (no silent lost-update)");
+        secondSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"FR-S02: a moved base no longer refuses the save — concurrency is last-writer-wins with a warning — body: {secondBody}");
+
+        wroteAfterSeed.Should().BeTrue("the save must actually persist — last-writer-wins means the write happens");
+
+        sentIfMatch.Should().Be("\"v2-etag-external\"",
+            "the PUT must carry If-Match set to the LIVE version this save's baseline was resolved against — " +
+            "that is what closes the check-then-act window and makes last-writer-wins a guarantee rather than a hope. " +
+            "Sending the client's stale load-time ETag instead would re-create the refusal FR-S02 removed.");
+
+        secondBody.Should().Contain("concurrent-external-change",
+            "the user MUST be told their save superseded another writer's version, with version history as the " +
+            "recovery — a silent supersession is the dishonest half of last-writer-wins");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -299,11 +329,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -423,11 +456,14 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(original.ToArray()));
 
+        // FR-S02 (r8 task 011): the post-stale write goes through the IF-MATCH overload — an existing-item
+        // save always reads live metadata, so `preWriteETag` is set and the PUT carries the precondition.
+        // The etag-less overload above still serves the seed save (no metadata read, nothing to assert).
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -489,6 +525,131 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 1c. FR-S07 (spaarkeai-compose-r8 task 014) — a stale-base re-anchor that CANNOT re-download the
+    //     current bytes must write NOTHING.
+    //
+    //     The defect this replaces: the re-download failure returned the LOAD-TIME baseline as the bytes
+    //     to persist, and the save proceeded. Because this branch runs only when the base has ALREADY
+    //     been observed to move, those bytes are by definition older than the version about to be
+    //     overwritten — so the fallback silently replaced a newer document with pre-edit content, and
+    //     reported HTTP 200. It is the only data-destroying path in Track S, and the only one on the
+    //     engine side rather than the client contract.
+    //
+    //     The fallback is deleted, not guarded: a re-anchor with no current bytes has no valid basis for
+    //     a save. The refusal is a defined terminal outcome (`refused-stale`, FR-S06), never an HTTP 422
+    //     content-refusal (ADR-049).
+    //
+    //     Two arrangements, because the SPE facade can fail either way and both took the same fallback:
+    //     the download THROWS, and the download returns NULL.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData(true)]   // DownloadFileAsUserAsync throws
+    [InlineData(false)]  // DownloadFileAsUserAsync returns null
+    public async Task Save_StaleBase_ReanchorDownloadFails_WritesNothing_RefusesStale_ThroughTheWire(bool downloadThrows)
+    {
+        var speId = $"spe-item-frs07-{(downloadThrows ? "throw" : "null")}";
+        var driveId = $"drive-frs07-{(downloadThrows ? "throw" : "null")}";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // ── Save #1 seeds the version stamp at "v1-etag" (the assert-baseline for the next save). ──
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the seeding save must succeed — body: {await firstSave.Content.ReadAsStringAsync()}");
+
+        // ── An EXTERNAL writer lands a new version, so this save's base has moved and the op log must be
+        //    re-anchored against the CURRENT bytes... which we then make unobtainable. ──────────────────
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
+
+        if (downloadThrows)
+        {
+            _fixture.SpeMock
+                .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Simulated SPE download failure on the re-anchor path."));
+        }
+        else
+        {
+            _fixture.SpeMock
+                .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Stream?)null);
+        }
+
+        // Capture ANY write attempted after the seed, on EITHER overload, along with the bytes it carried.
+        // Capturing the bytes rather than only a flag is deliberate: when this assertion failed against the
+        // pre-fix code it showed WHICH document would have been written, which is the evidence that the
+        // fallback was destructive rather than merely wasteful.
+        byte[]? persistedAfterSeed = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persistedAfterSeed = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
+
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[FR-S07]" },
+            },
+        };
+
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments = (object?)null,
+        });
+
+        var body = await secondSave.Content.ReadAsStringAsync();
+
+        // (a) NOTHING was written. This is the assertion that matters — the stored version must be exactly
+        //     what the external writer left, not our pre-edit copy of it.
+        persistedAfterSeed.Should().BeNull(
+            "a re-anchor that could not obtain the current bytes has no valid basis for a save; writing the " +
+            "load-time baseline would overwrite a version we already know is newer");
+
+        // (b) The failure is a DEFINED refusal the user can act on — not a 200, and not a 422 content
+        //     refusal (ADR-049 forbids reintroducing that failure mode on this path).
+        secondSave.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            $"the save is refused because the base moved and could not be rebased — body: {body}");
+        secondSave.StatusCode.Should().NotBe(HttpStatusCode.UnprocessableEntity,
+            "ADR-049: the outcome is a defined save outcome, never a content refusal");
+        body.Should().Contain("could not", "the detail must say plainly why the save did not happen");
+        body.Should().Contain("still", "and that the user's changes survive for a retry");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 3. NEGATIVE — an unrelated, non-lock, non-precondition failure during the SPE write still
     //    surfaces as a GENERIC 500 ProblemDetails — proving the DEF-14/051 typed catches for 423/412
     //    do not swallow or misclassify an unrelated failure as a lock/precondition.
@@ -534,9 +695,363 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         payload.Should().NotContain("This document changed since you opened it", "an unrelated failure must NOT be misclassified as the 412 precondition copy");
     }
 
+    // ════════════════════════════════════════
+    // 4. FR-S08 (spaarkeai-compose-r8 task 015) — the document-size ceiling is a STATED limit, not a
+    //    transport rejection.
+    //
+    //    Two ceilings used to sit on this path and neither told the user anything:
+    //      - `UploadSmallAsUserAsync` threw an ArgumentException above 4 MB, enforcing a Graph limit that
+    //        has not existed since October 2023 (simple upload is 250 MB, SPE-confirmed). A first save of
+    //        any document over 4 MB failed outright.
+    //      - Kestrel's 30 MB default request-body cap rejected the base64+JSON envelope from about 22 MB
+    //        of document up, at the transport layer, before any handler ran.
+    //
+    //    Now: ONE limit (`ComposeSaveLimits.MaxDocumentBytes`), enforced on the shared save path with a
+    //    ProblemDetails that names it, and a request-body cap derived from the same constant so the
+    //    transport can never pre-empt the honest refusal.
+    // ════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_DocumentOverTheLimit_RefusedWithTheStatedLimit_NoRawTransportRejection()
+    {
+        const string speId = "spe-item-frs08-oversize";
+        const string driveId = "drive-frs08-oversize";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // Nothing may be written. BOTH overloads are watched: a refusal that still touched storage would
+        // be a refusal in name only.
+        var wrote = false;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, 1, "\"v1\""));
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, 1, "\"v1\""));
+
+        // One byte over the limit — the boundary IS the contract, so test at the boundary.
+        var oversize = new byte[ComposeSaveLimits.MaxDocumentBytes + 1];
+        oversize[0] = 0x50; oversize[1] = 0x4B; oversize[2] = 0x03; oversize[3] = 0x04;
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = oversize,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            $"an oversize document is refused as invalid — retrying it unchanged cannot succeed. Body: {body}");
+        response.StatusCode.Should().NotBe(HttpStatusCode.RequestEntityTooLarge,
+            "a raw 413 carries no body and tells the user nothing about what to do");
+
+        // The message must state the ACTUAL enforced number. This assertion is what keeps the advertised
+        // limit and the enforced limit the same thing: it reads the very constant the endpoint enforces,
+        // so changing one without the other fails here.
+        body.Should().Contain(ComposeSaveLimits.MaxDocumentDisplay,
+            "the refusal must name the real limit, not a stale hard-coded number");
+        body.Should().Contain("Document Too Large");
+        body.Should().Contain("still here", "and must say the user's work survives");
+
+        wrote.Should().BeFalse("an oversize document is refused before any render or byte transfer");
+    }
+
+    [Fact]
+    public async Task Save_DocumentOverFourMegabytes_Succeeds_TheStaleGraphCeilingIsGone()
+    {
+        const string speId = "spe-item-frs08-6mb";
+        const string driveId = "drive-frs08-6mb";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // A real, openable docx padded past the retired 4 MB boundary. Padding a custom part (rather than
+        // appending junk to the zip) keeps it a document the save path genuinely processes, so this
+        // exercises the real pipeline instead of an early parse rejection.
+        // 12 MB of filler, not 6: GUID hex still deflates by roughly half inside the OPC zip, so the
+        // request is pre-compression and the assertion below is what actually holds the contract.
+        var large = BuildDocxPaddedTo(12 * 1024 * 1024);
+        large.Length.Should().BeGreaterThan(4 * 1024 * 1024, "the fixture must clear the OLD 4 MB ceiling");
+        large.Length.Should().BeLessThan((int)ComposeSaveLimits.MaxDocumentBytes, "and stay under the current limit");
+
+        var wrote = false;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback(() => wrote = true)
+            .ReturnsAsync(BuildFileHandle(speId, driveId, large.Length, "\"v1-large\""));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = large,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a 6 MB document sits far inside both Graph's 250 MB simple-upload limit and Compose's own {ComposeSaveLimits.MaxDocumentDisplay}. Body: {body}");
+        wrote.Should().BeTrue("the document must actually reach storage — a 200 that wrote nothing is the FR-S06 defect");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Shared arrange + OOXML helpers.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 5. FR-S09 (r8 task 016) — the honest-failure set, server half.
+    //
+    //    Three defects that shared one signature: the save ended in a state the response did not
+    //    describe. (a) the SPE write landed and the Dataverse record step did not, and the user was
+    //    told "not saved"; (b) Graph asked us to wait and the user was told the server had errored;
+    //    (c) every replace save left `sprk_filesize`/`sprk_filepath` describing the FIRST version
+    //    forever, and nothing anywhere said so. Plus (d), the negative: a healthy save is untouched.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_RecordPromotionFailsAfterTheWrite_ReportsPartiallyRecorded_NotAFailedSave()
+    {
+        const string speId = "spe-item-frs09-promote";
+        const string driveId = "drive-frs09-promote";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The write SUCCEEDS. This is the whole point: the bytes are durable before the record step runs.
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, body, _) =>
+            {
+                using var ms = new MemoryStream();
+                body.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1\""));
+
+        // ...and THEN Dataverse is unavailable. A TimeoutException (not an InvalidOperationException) on
+        // purpose: the alt-key lookup swallows InvalidOperationException as "not found", and the endpoint
+        // maps the two identity-KEY faults itself — this is the third class, the one that used to fall
+        // through to `catch (Exception)` and return a 500 reading "Save failed: ...".
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse request timed out."));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        persisted.Should().NotBeNull("the SPE write ran and completed before the record step was attempted");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the document IS stored — a 500 here told the user their save failed while their bytes sat safely in storage. Body: {body}");
+        body.Should().Contain("partially-recorded",
+            "the bytes are durable and the identity record is not — that is precisely what this member means");
+        body.Should().NotContain("storage-failed",
+            "storage succeeded; saying otherwise would tell the user their document is gone when it provably is not");
+        body.Should().NotContain("\"outcome\":\"persisted\"",
+            "and it must not read as a clean success either — the record step really did fail");
+    }
+
+    [Fact]
+    public async Task Save_GraphThrottles_Returns429WithRetryAfter_NotAGenericFiveHundred()
+    {
+        const string speId = "spe-item-frs09-throttle";
+        const string driveId = "drive-frs09-throttle";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The typed translation `UploadSessionManager` produces from a Graph 429 — the same level the
+        // 423 lock tests mock at.
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Sprk.Bff.Api.Infrastructure.Graph.GraphThrottledException(speId, TimeSpan.FromSeconds(17)));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+            $"a throttle is a rate limit, not a server fault — it used to surface as HTTP 500. Body: {body}");
+        response.Headers.RetryAfter?.Delta.Should().Be(TimeSpan.FromSeconds(17),
+            "Graph told us how long to wait, and that number is the only actionable part of a throttle — it was being discarded");
+        body.Should().Contain("17", "the wait must reach the user, not just the header");
+        body.Should().Contain("still here", "and the copy must say the user's work survives");
+        body.Should().NotContain("InvalidOperationException",
+            "the old message leaked a .NET type name at the user, which reads as a crash");
+    }
+
+    [Fact]
+    public async Task Save_ReplacePath_RefreshesFileSizeAndFilePath_OnTheExistingRecord()
+    {
+        const string speId = "spe-item-frs09-metadata";
+        const string driveId = "drive-frs09-metadata";
+        const string newWebUrl = "https://contoso.sharepoint.com/contentstorage/spe-item-frs09-metadata";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        // The idempotent EXISTING-row branch — i.e. every save after the first. This is the branch that
+        // used to return without touching the row.
+        var existingDocumentId = Guid.NewGuid();
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", existingDocumentId));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        Guid? updatedId = null;
+        Dictionary<string, object>? updatedFields = null;
+        _fixture.DataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+            {
+                updatedId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The write reports the NEW size and the NEW web URL — the two facts the row was never told.
+        const int newSize = 4242;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "concurrency-seam.docx", ParentId: null, Size: newSize,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2\"", IsFolder: false, WebUrl: newWebUrl, DriveId: driveId));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"the save itself is unaffected — body: {body}");
+
+        updatedId.Should().Be(existingDocumentId, "the refresh must target the row this document already has");
+        updatedFields.Should().NotBeNull(
+            "a replace save changed the file's size and URL; the row used to keep reporting the FIRST version's forever");
+        var fields = updatedFields!;
+        fields.Should().ContainKey("sprk_filesize");
+        fields["sprk_filesize"].Should().Be(newSize,
+            "the Documents grid reads this column — a stale size is a wrong number shown to the user, not a hidden one");
+        fields.Should().ContainKey("sprk_filepath");
+        fields["sprk_filepath"].Should().Be(newWebUrl,
+            "\"Open in SharePoint\" follows this column");
+
+        // Identity is the create branch's business. A later save must never mutate it.
+        fields.Should().NotContainKey("sprk_composeorigin");
+        fields.Should().NotContainKey("sprk_composetransientkey");
+        fields.Should().NotContainKey("sprk_graphitemid");
+    }
+
+    [Fact]
+    public async Task Save_HealthyReplace_StillReportsPersisted_WithNoNewWarnings()
+    {
+        // NEGATIVE (FR-S09 acceptance): none of the above may cost the ordinary case anything. A clean
+        // replace save must still be a plain `persisted` with no warning surface — the outcome decision
+        // now reads the record step and the metadata refresh, and this is what proves that reading them
+        // did not turn every healthy save into a warning.
+        const string speId = "spe-item-frs09-healthy";
+        const string driveId = "drive-frs09-healthy";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+        _fixture.DataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1\""));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+        body.Should().Contain("\"outcome\":\"persisted\"", "a healthy save is a plain success");
+        body.Should().NotContain("partially-recorded");
+        body.Should().NotContain("document-metadata-stale");
+    }
 
     private void ArrangeIdempotentPromotionAndIndexing()
     {
@@ -594,6 +1109,34 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     /// document has (every editor id is client-minted at load and travels only in the save's paraIdMap,
     /// never physically in the bytes). Used by the Seam A stale-comment test to prove the re-anchor path
     /// stamps those minted ids into the current bytes so an advisory comment bakes instead of orphaning.</summary>
+    /// <summary>A VALID docx padded to at least <paramref name="targetBytes"/> via a custom XML part —
+    /// still openable by the save pipeline, unlike appending raw bytes to the zip. Used to clear the
+    /// retired 4 MB simple-upload ceiling with a document the server will genuinely process.</summary>
+    private static byte[] BuildDocxPaddedTo(int targetBytes)
+    {
+        var baseDoc = BuildDocxWithParaIds(Paragraphs, ParaIds);
+        using var ms = new MemoryStream();
+        ms.Write(baseDoc, 0, baseDoc.Length);
+        ms.Position = 0;
+        using (var doc = WordprocessingDocument.Open(ms, isEditable: true))
+        {
+            var part = doc.MainDocumentPart!.AddCustomXmlPart(CustomXmlPartType.CustomXml);
+            using var writer = new StreamWriter(part.GetStream(FileMode.Create));
+            writer.Write("<padding>");
+            // Fresh GUIDs, not repeated characters: repeated text deflates to a few KB and the fixture
+            // would silently stay under 4 MB, quietly testing nothing.
+            var written = 0;
+            while (written < targetBytes)
+            {
+                var piece = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+                writer.Write(piece);
+                written += piece.Length;
+            }
+            writer.Write("</padding>");
+        }
+        return ms.ToArray();
+    }
+
     private static byte[] BuildDocxWithoutParaIds(IReadOnlyList<string> paragraphs)
     {
         using var stream = new MemoryStream();

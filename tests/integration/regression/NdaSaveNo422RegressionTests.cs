@@ -81,7 +81,14 @@ public sealed class NdaSaveNo422RegressionTests : IClassFixture<ComposeFidelityS
             .ReturnsAsync(BuildFileHandle(speId, driveId, ndaBytes.Length, "\"v1\""));
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                // FR-S02 (r8 task 011): the Compose save path moved to the If-Match overload of
+                // ReplaceFileContentAsUserAsync. Both overloads still exist on ISpeFileOperations, so a
+                // setup against the etag-LESS one compiles, never matches the call the service now makes,
+                // and the strict-ish mock returns null — which the service correctly reports as "not found
+                // or could not be written" (404). The test then failed for a reason that had nothing to do
+                // with the 422 regression it guards. Found 2026-08-21 during the task 021/022 FULL-suite
+                // run; per-task runs were filtered to Seam.Compose and never executed this file.
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(speId, driveId, ndaBytes.Length, "\"v2\""));
 
         // The DELIBERATELY hostile map: ONE entry against a ~55-paragraph body — the exact
@@ -143,8 +150,9 @@ public sealed class NdaSaveNo422RegressionTests : IClassFixture<ComposeFidelityS
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                // If-Match overload — see the note on the first arrangement above (FR-S02, task 011).
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);

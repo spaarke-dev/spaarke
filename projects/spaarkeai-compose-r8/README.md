@@ -26,6 +26,9 @@ audit proved the fidelity loss is systemic to the write model, not a set of spec
 
 ## Start here
 
+- [`design.md`](design.md) — **the project design** (2026-08-19): the three tracks, the R4→R6→R8 architectural
+  pendulum, four candidate write models + the recommended hypothesis, the Phase-0 proof gate + decision rule, the
+  preservation oracle, ADR-049 tension, and five open owner questions.
 - [`notes/fidelity-architecture-investigation.md`](notes/fidelity-architecture-investigation.md) — the findings,
   the architectural root cause, candidate fix directions, and the research questions R8 must answer.
 - [`notes/durable-session-files.md`](notes/durable-session-files.md) — the durable-files scope add: 90-day

@@ -101,6 +101,12 @@ public class ComposeService : IComposeService
     // These string keys are the Compose contract the future OutcomeCard renders; keep stable.
     internal const string StepContainer = "container";
     internal const string StepRecord = "record";
+
+    /// <summary>
+    /// FR-S09 item 7 (r8 task 016): the save landed but the <c>sprk_document</c> row's file metadata
+    /// (<c>sprk_filesize</c> / <c>sprk_filepath</c>) could not be brought up to date with it.
+    /// </summary>
+    internal const string DocumentMetadataStaleCode = "document-metadata-stale";
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
@@ -1231,17 +1237,35 @@ public class ComposeService : IComposeService
                 && !string.IsNullOrEmpty(effectiveBaselineETag)
                 && !string.Equals(effectiveBaselineETag, preWriteETag, StringComparison.Ordinal);
 
-            // UAT-25: the whole-body ContentModel re-author CANNOT re-anchor another writer's changes (unlike
-            // the op-log path below) — so a stale base there would SILENTLY OVERWRITE whatever Word / another
-            // tab wrote. Refuse honestly (412 reload-and-reapply, nothing overwritten) instead of clobbering.
+            // FR-S02 (r8 task 011) — CONCURRENCY IS LAST-WRITER-WINS WITH A WARNING. Owner decision
+            // 2026-08-19, superseding the 412 refusal that shipped 2026-08-18.
+            //
+            // The whole-body ContentModel re-author cannot re-anchor another writer's changes (unlike the
+            // op-log path below), so a moved base here DOES mean this save supersedes theirs. That is
+            // acceptable and it is not data loss: Compose versions every save, so the other writer's
+            // content is the PREVIOUS version, recoverable from version history. The refusal it replaces
+            // was worse in exactly the way that matters — it left the user with unsaved work in a browser
+            // tab and no way forward, and its client-side recovery handler was dead code the day it
+            // shipped (task 010).
+            //
+            // So: proceed, and TELL THE USER. The warning rides the existing degradation-warning channel
+            // (no new wire field, no new client surface) and names version history as the recovery. The
+            // write below additionally carries `If-Match: preWriteETag`, so "last writer wins" is enforced
+            // at the storage boundary rather than merely hoped for — a writer landing between our read and
+            // our PUT is rejected by Graph and retried against the fresh version, never silently lost.
             if (request.ContentModel is not null && baseMoved)
             {
                 _logger.LogWarning(
-                    "Compose save: STALE base on the ContentModel (whole-body) path for driveItem={DocumentSpeId} " +
-                    "(baseline eTag={BaselineETag} [{BaselineSource}], live eTag={CurrentETag}) — refusing (412) to " +
-                    "avoid silently overwriting an external writer; the client reloads + reapplies.",
+                    "Compose save: base moved on the ContentModel (whole-body) path for driveItem={DocumentSpeId} " +
+                    "(baseline eTag={BaselineETag} [{BaselineSource}], live eTag={CurrentETag}) — proceeding " +
+                    "last-writer-wins and warning the user; the superseded content remains in version history.",
                     request.DocumentSpeId, effectiveBaselineETag, saveStamp is not null ? "stamp" : "load-time", preWriteETag);
-                throw new EtagPreconditionFailedException(request.DocumentSpeId!, ifMatch: effectiveBaselineETag);
+
+                renderDegradationWarnings = new List<ComposeProjectionWarning>(
+                    renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+                {
+                    new(ConcurrentExternalChangeCode, 1),
+                };
             }
 
             if (request.ContentModel is null && (hasOperations || hasComments) && baseMoved)
@@ -1503,16 +1527,24 @@ public class ComposeService : IComposeService
             if (string.IsNullOrWhiteSpace(request.DriveId))
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
-            using var contentStream = new MemoryStream(contentToPersist, writable: false);
-            // FR-08 (task 050): the write itself stays the existing etag-less overload (unchanged R1
-            // behavior + write-path signature) — preWriteETag is used above purely for the staleness
-            // ASSERT (comparing our own persisted version stamp to the live eTag) and below to SEED the
-            // next save's stamp when the write's own response carries no eTag. Upgrading this write to a
-            // Graph-level If-Match precondition is a further-hardening candidate, not required by this
-            // task's acceptance criteria (staleness is asserted + re-anchored via OUR OWN stamp, not via
-            // Graph's optimistic-concurrency response).
-            var replaced = await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
+            // FR-S02 (r8 task 011): the write now carries `If-Match` — the "further-hardening candidate"
+            // task 050 deferred. Without it, last-writer-wins is a hope: between reading `preWriteETag`
+            // above and this PUT there is a check-then-act window in which another writer can land a
+            // version that this blind write would erase with no version of theirs ever recorded.
+            //
+            // The precondition value is `preWriteETag` — the LIVE version this save's baseline was
+            // resolved against, which is exactly what the POML requires and is correct on both paths:
+            // the non-stale path merged against it because it equals the load-time baseline, and the
+            // stale path merged against it because ReanchorStaleSaveAsync re-downloaded those very bytes.
+            // Deliberately NOT the client's load-time ETag — sending that would re-create the refusal
+            // this task removed, since a concurrent writer would fail the precondition every time.
+            //
+            // Null preWriteETag (no metadata read — a drive-less or transient path) degrades to the R1
+            // blind PUT, unchanged. `ReplaceFileContentAsUserAsync` already accepts the value and maps a
+            // Graph 412 to a typed EtagPreconditionFailedException (ADR-007: the Graph type never
+            // crosses the facade); the ETag itself crosses as a plain string.
+            var replaced = await ReplaceWithPreconditionAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId!, contentToPersist, preWriteETag, cancellationToken)
                 .ConfigureAwait(false);
 
             if (replaced is null || string.IsNullOrEmpty(replaced.Id))
@@ -1563,8 +1595,40 @@ public class ComposeService : IComposeService
             SourceDocumentRecordId = request.SourceDocumentRecordId,
         };
 
-        var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
-            .ConfigureAwait(false);
+        // FR-S09 item 5 (r8 task 016): the SPE write ABOVE has already landed and is durable. If the
+        // record step now throws, "not saved" is a lie — the bytes are in storage, only the identity row
+        // is missing — and it is the lie that costs the most, because the user retypes work that exists.
+        //
+        // Two exception classes, deliberately handled differently:
+        //   • The Dataverse identity-key faults (inactive alternate key / duplicate rows) are RETHROWN.
+        //     The endpoint already maps those to an honest 409/503 with administrator-actionable copy and
+        //     `partially-recorded` telemetry. Swallowing them here would dead-code that handler — and
+        //     dead handlers are this project's entire subject.
+        //   • Everything else (Dataverse unavailable, timeout, transient auth) becomes a RETURNED
+        //     terminal result carrying `partially-recorded`, the same shape the container-failure path
+        //     uses. The save is over; a retry completes the promotion idempotently.
+        PromoteComposeDocumentResult promotion;
+        try
+        {
+            promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (IsDataverseIdentityKeyFault(ex))
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Compose save: the SPE write succeeded but the sprk_document record step FAILED for " +
+                "driveItem={DocumentSpeId} (session={SessionId}). The document bytes are durable; the " +
+                "identity record is not. Reporting partially-recorded.",
+                effectiveSpeId, request.SessionId);
+
+            return BuildRecordFailedResult(
+                request, effectiveSpeId, effectiveDriveId, saved, origin, observedAt,
+                detail: $"record step failed: {ex.GetType().Name}: {ex.Message}");
+        }
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 4 — indexing (sync-OBO). The Compose user wrote the file, so indexing MUST run
@@ -1637,13 +1701,48 @@ public class ComposeService : IComposeService
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
             containerSignal: CompletedSignal(StepContainer),
-            recordSignal: CompletedSignal(StepRecord),
+            // FR-S09 item 5(a) (r8 task 016): derived, not asserted. This was a hardcoded
+            // CompletedSignal — the record step reported success even when promotion resolved no record
+            // id at all, which is the same class of claim-without-evidence as a 200 that means nothing
+            // was written. The very next statement already branches on `DocumentRecordId.HasValue` for
+            // the profile step, so the two lines used to contradict each other three lines apart.
+            recordSignal: promotion.DocumentRecordId.HasValue
+                ? CompletedSignal(StepRecord)
+                : RecordNotResolvedSignal(),
             profileSignal: profileSignal,
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
 
+        // FR-S06 (task 013): the ONE success-path outcome decision. Ordered most-severe first so a save
+        // that both partially applied AND warned reports the more consequential state — `partially-recorded`
+        // means the user has work to redo, which must not be masked by the softer warning member.
+        // FR-S09 item 5(b) (r8 task 016): the record step is part of the decision. Before this, the
+        // outcome read the partial-apply summary and the warning list and NOTHING else — so a save whose
+        // completion aggregate was Failed (no sprk_document row) still reported `persisted`, which is
+        // "indistinguishable from full success" exactly as FR-S09 describes. The projection was computed
+        // three lines above and then ignored.
+        var recordResolved = promotion.DocumentRecordId.HasValue;
+
+        // FR-S09 item 7 (r8 task 016): a failed metadata refresh is a warning, not a failure — the
+        // document is saved and complete; only the columns describing it are stale.
+        if (promotion.MetadataRefreshFailed)
+        {
+            renderDegradationWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+            {
+                new(DocumentMetadataStaleCode, 1),
+            };
+        }
+
+        var outcome =
+            !recordResolved ? ComposeSaveOutcome.PartiallyRecorded
+            : partialApplySummary is { UnresolvedCount: > 0 } ? ComposeSaveOutcome.PartiallyRecorded
+            : (renderDegradationWarnings is { Count: > 0 } || reanchorSummary is not null) ? ComposeSaveOutcome.PersistedWithWarnings
+            : ComposeSaveOutcome.Persisted;
+
         return new SaveComposeDocumentResult
         {
+            Outcome = outcome,
             DocumentSpeId = effectiveSpeId,
             DriveId = effectiveDriveId,
             SessionId = promotion.SessionId,
@@ -1793,6 +1892,74 @@ public class ComposeService : IComposeService
                 unavailable: false);
         }
     }
+
+    /// <summary>
+    /// FR-S02 (r8 task 011): replace the drive-item's content under an `If-Match` precondition, retrying
+    /// ONCE against the freshly-read version if a writer landed inside the check-then-act window.
+    /// </summary>
+    /// <remarks>
+    /// The retry is the deliberate resolution of the POML's step-5 question ("retry once, or report
+    /// storage-failed?"). Retrying is correct here because the precondition failure carries no information
+    /// the user could act on — it means only that our read was microseconds stale, and the save's own
+    /// semantics are already last-writer-wins, so re-issuing against the fresh version produces exactly the
+    /// outcome the user asked for. Retrying UNBOUNDED would be wrong (a hot document could spin), and
+    /// failing immediately would resurrect the dead-end this task exists to remove — so: exactly one retry,
+    /// then an honest typed failure the endpoint maps to a defined outcome.
+    ///
+    /// The second attempt re-reads metadata rather than reusing the failed ETag: reusing it would fail
+    /// identically, and the point of the retry is to rebase onto whatever landed.
+    /// </remarks>
+    private async Task<FileHandleDto?> ReplaceWithPreconditionAsync(
+        HttpContext httpContext,
+        string driveId,
+        string itemId,
+        byte[] content,
+        string? ifMatch,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(ifMatch))
+        {
+            // No resolved version to assert against (no metadata read happened — a drive-less or
+            // transient path). Nothing to precondition on, so this stays the unchanged R1 blind PUT via
+            // the etag-less overload rather than passing an explicit null through the If-Match one.
+            using var blindStream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, blindStream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, stream, ifMatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        // Only reachable with a non-empty `ifMatch` — the guard above returns for the blind-PUT case, so
+        // this catch cannot fire on a request that never carried a precondition.
+        catch (EtagPreconditionFailedException)
+        {
+            var fresh = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogWarning(
+                "Compose save: If-Match precondition failed for driveItem={DocumentSpeId} (sent eTag={SentETag}, " +
+                "live eTag={FreshETag}) — a writer landed inside the read-to-write window. Retrying ONCE against " +
+                "the fresh version (last-writer-wins).",
+                itemId, ifMatch, fresh?.ETag);
+
+            using var retryStream = new MemoryStream(content, writable: false);
+            return await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, driveId, itemId, retryStream, fresh?.ETag, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// FR-S02 (r8 task 011): the degradation-warning code carried when a save superseded a version another
+    /// writer landed while the document was open. Concurrency is last-writer-wins with a warning; this code
+    /// IS the warning, and the client renders it naming version history as the recovery path.
+    /// Mirrored client-side by <c>CONCURRENT_EXTERNAL_CHANGE_CODE</c> in <c>ComposeBannerStack.tsx</c>.
+    /// </summary>
+    internal const string ConcurrentExternalChangeCode = "concurrent-external-change";
 
     /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
     /// re-fetch (versionId + driveId + speId).</summary>
@@ -2024,9 +2191,22 @@ public class ComposeService : IComposeService
         bool trackChanges,
         CancellationToken cancellationToken)
     {
-        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
-        // download miss fails closed: every op/comment surfaces as ORPHAN (never a silent apply onto a
-        // baseline we could not verify).
+        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against.
+        //
+        // FR-S07 (r8 task 014): a download miss REFUSES THE SAVE. It previously returned `originalBaseline`
+        // — the LOAD-TIME bytes — and let the caller persist them. This method is only ever reached when
+        // the base has already been observed to MOVE, so those bytes are by definition older than the
+        // version they were about to replace: the fallback silently overwrote a newer document with
+        // pre-edit content and reported HTTP 200. It was the only data-destroying path in Track S.
+        //
+        // Its comment claimed it "fails closed" because every op surfaced as ORPHAN — and that was true of
+        // the OPS. It was the BYTES that were wrong. Surfacing the ops honestly while writing a stale
+        // document is precisely the Half-A/Half-B confusion this project exists to remove.
+        //
+        // Deleted rather than guarded: a re-anchor with no current bytes cannot produce a correct save
+        // under any condition, so there is no version of this fallback worth keeping. The throw is caught
+        // at the endpoint and reported as `refused-stale` (FR-S06) — a defined terminal outcome, never an
+        // HTTP 422 content refusal (ADR-049).
         Stream? stream;
         try
         {
@@ -2036,14 +2216,17 @@ public class ComposeService : IComposeService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — REFUSING the save; nothing written, stored version untouched.",
                 request.DocumentSpeId);
-            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+            throw new ComposeStaleBaselineUnavailableException(request.DocumentSpeId!, "download-faulted", ex);
         }
 
         if (stream is null)
         {
-            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+            _logger.LogWarning(
+                "Compose save: stale-base re-anchor got no content stream for driveItem={DocumentSpeId} — REFUSING the save; nothing written, stored version untouched.",
+                request.DocumentSpeId);
+            throw new ComposeStaleBaselineUnavailableException(request.DocumentSpeId!, "download-empty");
         }
 
         byte[] currentBytes;
@@ -2619,12 +2802,57 @@ public class ComposeService : IComposeService
             await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
                 .ConfigureAwait(false);
 
+            // FR-S09 item 7 (r8 task 016): refresh the file metadata this save just changed.
+            //
+            // This branch is the REPLACE path — every save after the first lands here. It wrote a new
+            // version to SPE (new byte length, and a new web URL whenever the file was renamed or moved)
+            // and then returned without touching the row, so `sprk_filesize` and `sprk_filepath` kept
+            // describing the FIRST version forever. Downstream readers trust those columns: the
+            // Documents grid shows the size, "Open in SharePoint" follows the path. Both quietly drifted.
+            //
+            // Only these two columns, and only when the caller supplied them: the create branch owns the
+            // fields that define IDENTITY (origin, transient key, canonical link) and those must never be
+            // mutated by a later save — the existing-row branch's whole contract is idempotence.
+            var metadataRefreshFailed = false;
+            var refreshFields = new Dictionary<string, object>();
+            if (request.FileSize.HasValue)
+            {
+                // Whole Number (int) column — same cast the create branch uses; the OrganizationService
+                // write path is strict about CLR type.
+                refreshFields[FileSizeAttribute] = (int)request.FileSize.Value;
+            }
+            if (!string.IsNullOrWhiteSpace(request.FilePath))
+            {
+                refreshFields[FilePathAttribute] = request.FilePath!;
+            }
+            if (refreshFields.Count > 0)
+            {
+                try
+                {
+                    await _dataverse.UpdateAsync(DocumentLogicalName, existingId, refreshFields, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Never fails the save — the document IS stored. But it is not silent either: the
+                    // flag rides back to SaveAsync, which turns it into a `document-metadata-stale`
+                    // degradation warning on a `persisted-with-warnings` outcome.
+                    metadataRefreshFailed = true;
+                    _logger.LogWarning(ex,
+                        "Compose promote: file-metadata refresh failed for sprk_document {DocumentRecordId} " +
+                        "(driveItem={DocumentSpeId}). The save itself is unaffected; sprk_filesize/sprk_filepath " +
+                        "are now stale for this row.",
+                        existingId, request.DocumentSpeId);
+                }
+            }
+
             return new PromoteComposeDocumentResult
             {
                 DocumentSpeId = request.DocumentSpeId,
                 SessionId = request.SessionId,
                 DocumentRecordId = existingId,
                 WasCreated = false,
+                MetadataRefreshFailed = metadataRefreshFailed,
             };
         }
 
@@ -2913,6 +3141,91 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
+    /// FR-S09 item 5 (r8 task 016): the record step ran and resolved no <c>sprk_document</c> id.
+    /// Terminal Failed (there is no retry budget on this path), so the aggregate can never read a
+    /// success for a save that produced no identity record.
+    /// </summary>
+    private static StoredStepSignal RecordNotResolvedSignal() => new()
+    {
+        StepName = StepRecord,
+        StoredStatus = JobStatus.Failed,
+        Started = true,
+        Attempt = 1,
+        MaxAttempts = 1,
+        Detail = "record step resolved no sprk_document id",
+    };
+
+    /// <summary>
+    /// FR-S09 item 5 (r8 task 016): does this <see cref="InvalidOperationException"/> describe one of the
+    /// two Dataverse identity-key faults that <c>ComposeEndpoints.ExecuteSaveAsync</c> maps to an honest,
+    /// administrator-actionable 409/503?
+    /// </summary>
+    /// <remarks>
+    /// The predicate is duplicated from that catch filter ON PURPOSE, and the duplication is the point:
+    /// the promote guard must let exactly those exceptions through so the endpoint handler stays live.
+    /// If either side changes, the other must change with it — a single shared helper would be tidier
+    /// but would hide that coupling behind an abstraction, and an endpoint handler that quietly stops
+    /// being reachable is the defect this whole task exists to remove. Keep them in step.
+    /// </remarks>
+    private static bool IsDataverseIdentityKeyFault(InvalidOperationException ex) =>
+        ex.Message.Contains("Found multiple records", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+        || (ex.Message.Contains("sprk_graphitemid", StringComparison.OrdinalIgnoreCase)
+            && ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// FR-S09 item 5 (r8 task 016): the terminal result for "the bytes are durable, the record is not".
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <c>BuildContainerFailedResult</c>'s shape — a RETURNED non-success outcome rather than a
+    /// throw — because the two are the same kind of event: a save that reached a defined, reportable end
+    /// state that is not success. <c>partially-recorded</c> rather than <c>storage-failed</c>: storage
+    /// succeeded. Telling the user their document is gone when it is provably stored would be its own
+    /// dishonest outcome, and it would invite them to retype work that already exists.
+    /// </remarks>
+    private static SaveComposeDocumentResult BuildRecordFailedResult(
+        SaveComposeDocumentRequest request,
+        string effectiveSpeId,
+        string? effectiveDriveId,
+        FileHandleDto saved,
+        ComposeOrigin origin,
+        DateTimeOffset observedAt,
+        string detail)
+    {
+        var completion = ProjectCreateOnSaveState(
+            subjectId: effectiveSpeId,
+            correlationId: request.SessionId,
+            containerSignal: CompletedSignal(StepContainer),
+            recordSignal: new StoredStepSignal
+            {
+                StepName = StepRecord,
+                StoredStatus = JobStatus.Failed,
+                Started = true,
+                Attempt = 1,
+                MaxAttempts = 1,
+                Detail = detail,
+            },
+            profileSignal: ProfileNotAttemptedSignal("profile not attempted: record step failed"),
+            indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
+            observedAt: observedAt);
+
+        return new SaveComposeDocumentResult
+        {
+            Outcome = ComposeSaveOutcome.PartiallyRecorded,
+            DocumentSpeId = effectiveSpeId,
+            DriveId = effectiveDriveId,
+            SessionId = request.SessionId,
+            DocumentRecordId = null,
+            VersionId = saved.Id,
+            ETag = saved.ETag,
+            Size = saved.Size,
+            WasPromotedThisSave = false,
+            CompletionState = completion,
+            Origin = origin,
+        };
+    }
+
+    /// <summary>
     /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI
     /// scope (fire-and-forget) for a newly-created (or idempotently-resolved) <c>sprk_document</c>, and
     /// returns the non-terminal "dispatched" profile-analysis step signal WITHOUT awaiting the profile.
@@ -3173,6 +3486,12 @@ public class ComposeService : IComposeService
 
         return new SaveComposeDocumentResult
         {
+            // FR-S06 (task 013): THE defect this contract exists to remove. This path RETURNS (it does
+            // not throw), so the endpoint wraps it in Results.Ok — a save that wrote nothing at all
+            // presented as HTTP 200, which the client rendered as "Saved ✓". The status stays 200 (the
+            // create-on-save step-projection contract rides on this body), but the body now says plainly
+            // that nothing was stored, and the client keys off THIS field rather than the status.
+            Outcome = ComposeSaveOutcome.StorageFailed,
             DocumentSpeId = request.DocumentSpeId ?? string.Empty,
             DriveId = request.DriveId,
             SessionId = request.SessionId,

@@ -396,7 +396,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
-    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null)
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null, bool mergeUnchangedBlocks = true, ComposeMergeStats? mergeStats = null)
     {
         if (carrierBytes is null || carrierBytes.Length == 0)
         {
@@ -444,6 +444,34 @@ public sealed partial class ComposeDocumentRenderer
                 // headers-vanish symptom, on this one shape).
                 trailingSectPr = body.Elements<Paragraph>().LastOrDefault()
                     ?.ParagraphProperties?.SectionProperties?.CloneNode(true) as SectionProperties;
+            }
+
+            // ═══════════════════════════════════════════════════════════════════════════════════
+            // THE BASE SIDE (ADR-049 R8 third amendment · task 040).
+            //
+            // `body.RemoveAllChildren()` below is the single instruction that cost the project 82% of its
+            // untouched blocks: every tab stop, indent, style, spacing rule and numbering association in the
+            // carrier was discarded here, and the body rebuilt from a content model carrying justification,
+            // bold and italic.
+            //
+            // The merge does not change that control flow (ADR-049 I-5: ONE body author, and this is it). It
+            // adds the BASE side R6 never had — the baseline's own blocks, captured before the swap and
+            // re-projected server-side, so a block the user never touched is put back VERBATIM instead of
+            // re-authored from a lossy model.
+            //
+            // Captured BEFORE the removal because RemoveAllChildren detaches the nodes.
+            //
+            // `mergeUnchangedBlocks` defaults to TRUE and is a TEST SEAM, not a feature flag: it is bound to
+            // no configuration and exists so the seam measurement can run a control arm through the same
+            // renderer in the same test run. An instrument that reports two different answers for two inputs
+            // is measuring something; that is the anti-vacuity evidence behind the gate.
+            var mergeBaseline = mergeUnchangedBlocks ? ComposeBlockMerge.Capture(body, carrierBytes) : null;
+            if (mergeUnchangedBlocks && mergeBaseline is null)
+            {
+                // Fail OPEN: a baseline we cannot re-project simply gets no merge and the render proceeds
+                // exactly as R6 does. A save is never refused because the base side was unavailable
+                // (ADR-049 invariant 1 — every save terminates in a defined outcome).
+                mergeStats?.RecordBaselineUnavailable();
             }
 
             body.RemoveAllChildren();
@@ -519,7 +547,15 @@ public sealed partial class ComposeDocumentRenderer
                 renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
 
-            RenderBlocks(body, renderBlocks, state);
+            if (mergeBaseline is not null)
+            {
+                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats);
+            }
+            else
+            {
+                RenderBlocks(body, renderBlocks, state);
+            }
+
             ResolveHyperlinkRelationships(body, mainPart, state);
 
             if (mainPart.StyleDefinitionsPart is null)
@@ -887,7 +923,7 @@ public sealed partial class ComposeDocumentRenderer
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
+    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state, IDictionary<int, int>? runCursor = null)
     {
         // Ordered-list continuity (task 021, review 020-R1 + Step-9.5 fix F1): the model contract — not
         // block adjacency — governs instance selection. An item carrying a source NumId resolves through
@@ -913,7 +949,10 @@ public sealed partial class ComposeDocumentRenderer
         //   - StartsNewList=true always allocates a fresh restart-at-1 instance.
         // State is local per container: a table-cell boundary starts fresh (a NumId-less list never
         // continues across cells).
-        var orderedRunByLevel = new Dictionary<int, int>();
+        // Task 040: the merge owns ONE cursor for the whole body and passes it here, so ordered-list run
+        // continuity spans cloned blocks and multiple calls. Every other caller passes null and gets the
+        // previous per-call behaviour — a table-cell boundary still starts fresh, which is the contract.
+        var orderedRunByLevel = runCursor ?? new Dictionary<int, int>();
 
         void CloseRunsDeeperThan(int level)
         {
@@ -984,7 +1023,7 @@ public sealed partial class ComposeDocumentRenderer
 
     /// <summary>The nearest ACTIVE ordered run shallower than <paramref name="level"/> (a NumId-less
     /// nested ordered item joins its parent's instance at a deeper ilvl — Word's multi-level idiom).</summary>
-    private static bool TryNearestShallowerRun(Dictionary<int, int> orderedRunByLevel, int level, out int numId)
+    private static bool TryNearestShallowerRun(IDictionary<int, int> orderedRunByLevel, int level, out int numId)
     {
         for (var probe = level - 1; probe >= 0; probe--)
         {
@@ -1229,6 +1268,19 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         // Pending-deleted content authors as w:delText (Word rejects w:t inside w:del).
+        //
+        // Task 041 investigated emitting `xml:space="preserve"` only when the text NEEDS it (leading or
+        // trailing whitespace, or empty). The `p/r/t` difference class on five corpus documents is exactly
+        // this attribute: the text was character-identical and only the attribute had been added.
+        //
+        // REVERTED — the conditional rule was measurably WORSE. Word emits `xml:space="preserve"` far more
+        // liberally than "the text has edge whitespace", so matching that narrow rule made the renderer
+        // disagree with the source on 15 of 18 documents instead of 5. Emitting it unconditionally is safe
+        // (it only ever suppresses whitespace trimming) and agrees with the corpus more often.
+        //
+        // The residual `p/r/t` differences are therefore attribute-PRESENCE, not text loss — verified by
+        // inspecting the fixtures. Recorded on the loss list so the class is not re-investigated as if it
+        // were content.
         OpenXmlElement textElement = deleted
             ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
             : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
@@ -1739,6 +1791,20 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private void AssignParaIds(Body body)
     {
+        // Task 040 investigated excluding paragraphs inside opaque regions (`mc:AlternateContent`,
+        // `w:txbxContent`) from this pass, because entering them MUTATES a block the merge cloned verbatim:
+        // Word writes the same box twice (Choice + Fallback) carrying the SAME w14:paraId, pass 1 treats the
+        // second copy as a malformed duplicate, and re-mints it. Measured cost at the STRICT comparison level:
+        // alternate-content-duplicate-paraid.docx 66.67%, AppligentNDA_Signed.docx 95.92% (both 100% LENIENT
+        // — content is preserved; only identity churns).
+        //
+        // REVERTED, deliberately. Excluding them breaks task 011's global-paraId-uniqueness guarantee, which
+        // RenderOnSaveSeamTests pins by name on the NDA's 2BBF07C9/CA/CB class — duplicate anchors were part
+        // of the production-422 failure chain. Strict is a no-regression RATCHET, not a gate (task 031 T5),
+        // and both documents clear it by a wide margin; trading a safety invariant for a better number on a
+        // non-gating metric is the exact move the ADR-049 paired-MUST exists to forbid. The residual is on the
+        // task-045 loss list with this reasoning; resolving it properly means changing what the identity map
+        // considers a block, which is not a rendering change.
         var paragraphs = body.Descendants<Paragraph>().ToList();
 
         // Pass 1: keep the first occurrence of each client id; null out duplicates so pass 2 re-mints them.
@@ -1770,6 +1836,7 @@ public sealed partial class ComposeDocumentRenderer
             p.ParagraphId = new HexBinaryValue(minted);
         }
     }
+
 
     private string MintUnique(HashSet<string> seen)
     {
@@ -2300,5 +2367,68 @@ public sealed partial class ComposeDocumentRenderer
 
         /// <summary>Returns the shared bullet-list instance id, allocating it on first use.</summary>
         public int BulletInstance() => BulletInstanceId ??= _nextNumId++;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // THE MERGE, EXECUTED (ADR-049 R8 third amendment · task 040).
+    //
+    // Not a second body author (ADR-049 I-5): this method lives in the renderer, appends into the same
+    // `body`, and shares the same `ListRenderState` as `RenderBlocks`, which it delegates to for every block
+    // it does not clone. `ComposeBlockMerge` decides; this executes. One component writes body children.
+    //
+    //   cloned  -> the baseline's own subtree, appended verbatim, with ZERO property logic. Nothing is
+    //              re-derived, so nothing can be lost (invariant 7).
+    //   rendered-> from the model, inheriting the base counterpart's unmodeled properties (FR-A04).
+    //   no base -> from the model alone. An inserted block has no base side; that is not a failure.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    private void RenderMergedBlocks(
+        Body body,
+        IReadOnlyList<ComposeBlock> posted,
+        ComposeMergeBaseline baseline,
+        ListRenderState state,
+        ComposeMergeStats? stats)
+    {
+        var steps = ComposeBlockMerge.Plan(posted, baseline, stats);
+
+        // ONE ordered-list run cursor for the entire body, observed by cloned and rendered blocks alike.
+        // The task-030 prototype batched renders and let each batch start a fresh cursor, so a rendered list
+        // item following cloned list items restarted at 1 (its limitation 3). Sharing the cursor — and
+        // recording every cloned block into it — is what makes a cloned list and a rendered continuation of
+        // it number as one list.
+        var runCursor = new Dictionary<int, int>();
+        var single = new ComposeBlock[1];
+
+        foreach (var step in steps)
+        {
+            if (step.Action == ComposeMergeAction.Clone)
+            {
+                var clone = baseline.Blocks[step.BaseIndex].CloneNode(true);
+                body.AppendChild(clone);
+                ComposeBlockMerge.ObserveClonedBlock(clone, runCursor);
+                continue;
+            }
+
+            // Rendered one block at a time so the just-appended element can be identified for property
+            // inheritance. Continuity is unaffected: the run cursor is external and persists across calls.
+            var before = body.ChildElements.Count;
+            single[0] = posted[step.PostedIndex];
+            RenderBlocks(body, single, state, runCursor);
+
+            if (step.BaseIndex < 0)
+            {
+                continue;
+            }
+
+            var baseElement = baseline.Blocks[step.BaseIndex];
+            for (var i = before; i < body.ChildElements.Count; i++)
+            {
+                ComposeBlockMerge.InheritProperties(body.ChildElements[i], baseElement);
+            }
+
+            // FR-A05 (task 041): restore what the content model cannot represent — bookmarks (the target of
+            // every REF field, so dropping one breaks cross-references ELSEWHERE in the document) and a
+            // block-level content-control shell. Taken from the BASE block, never from a client payload.
+            ComposeBlockMerge.CarryUnmodeledConstructs(body, before, baseElement, code => state.Warn(code));
+        }
     }
 }

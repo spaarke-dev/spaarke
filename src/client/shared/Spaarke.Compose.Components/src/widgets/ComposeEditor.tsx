@@ -692,6 +692,9 @@ export interface ComposeEditorProps {
   onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
+  /** FR-S09 item 3 (r8 task 016): why Save is unavailable — forwarded verbatim to
+   *  ComposeFormatToolbar, which renders it as the disabled button's tooltip. */
+  saveDisabledReason?: string;
   /** True while a save is in flight. */
   isSaving?: boolean;
   /** FR-01/FR-03 (task 020/040): forwarded to ComposeFormatToolbar's Save dropdown Auto Save toggle.
@@ -891,8 +894,14 @@ export interface ComposeEditorHandle {
    * task 038 (zero-error guardrails): commit the batch returned by the most recent
    * {@link serializeOperationLog} AFTER the save POST confirmed (HTTP 200). Drops exactly that batch from
    * the op-log while PRESERVING any edits made during the in-flight save, then recomputes the dirty flag
-   * from whatever remains. The host MUST call this only on a 200 for a save that sent an op-log; a failed
-   * save never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   * from whatever remains. The host MUST call this only on a confirmed successful save; a failed save
+   * never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   *
+   * FR-S03 (spaarkeai-compose-r8 task 012): this is now the SINGLE dirty-clearing site on the save
+   * path — for EVERY save shape, including the born-in-editor ContentModel saves that previously
+   * cleared the flag at build time. The recomputed flag is dirty when either the op-log still holds
+   * entries past the committed batch OR the document revision moved past the capture point (an edit
+   * the op-log cannot represent, typed while the save was in flight).
    */
   commitSaved(): void;
 
@@ -915,7 +924,13 @@ export interface ComposeEditorHandle {
   /**
    * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
    * (AI-drafted / blank / browse-local). The host sends it to create-on-save; the server RENDERS the
-   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
+   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables).
+   *
+   * FR-S03 (spaarkeai-compose-r8 task 012): does NOT reset the dirty flag — it WATERMARKS (op-log
+   * high-water mark + doc revision), exactly as {@link buildImportedContentModel} does. The flag is
+   * cleared only by {@link commitSaved}, after a confirmed successful save, so a save that fails
+   * leaves every recovery affordance (Save button, Ctrl+S, `beforeunload`, unmount flush, toolbar
+   * label) armed. It previously cleared here, before the POST was issued.
    */
   buildContentModel(): ComposeContentModel;
 
@@ -1897,6 +1912,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       wordActionsDisabled,
       onSave,
       canSave,
+      saveDisabledReason,
       isSaving,
       autoSaveEnabled,
       onAutoSaveToggle,
@@ -1918,6 +1934,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+
+    // FR-S03 (r8 task 012) — the save-capture watermark that makes "clear the dirty flag" honest.
+    //
+    // `docRevisionRef` counts EVERY doc-changing update (incremented in `onUpdate`, outside the
+    // dirty-flag guard, so it advances on the 2nd and 100th edit too). `capturedRevisionRef` records
+    // the revision the save payload was captured at — set by `serializeOperationLog`,
+    // `buildContentModel` and `buildImportedContentModel`, the three capture methods.
+    //
+    // Why a counter and not just the op-log's size: a deferred / unrepresentable / refused-atom
+    // transaction appends NO op-log entry (`RebasedOperationLog.recordTransaction` returns early),
+    // so an edit of that class typed DURING an in-flight save is invisible to `opLog.size > 0`. On
+    // the ContentModel paths the whole document is captured, so such an edit is real work that the
+    // in-flight save did NOT carry — clearing dirty on it would silently discard it. The revision
+    // comparison sees it; the op-log count cannot. Both are consulted in `commitSaved`.
+    const docRevisionRef = React.useRef<number>(0);
+    const capturedRevisionRef = React.useRef<number | null>(null);
 
     // task 038 (spaarkeai-compose-r4 zero-error guardrails): a NON-BLOCKING, dismissible sticky notice
     // surfaced when a deferred/unrepresentable/refused step is seen (most importantly formatted or linked
@@ -2320,6 +2352,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         },
       },
       onUpdate: () => {
+        // FR-S03 (r8 task 012): OUTSIDE the dirty guard — the revision must advance on every edit,
+        // including edits made while the flag is already true (that is the mid-flight-edit case
+        // `commitSaved` has to detect).
+        docRevisionRef.current += 1;
         if (!dirtyRef.current) {
           dirtyRef.current = true;
           onDirtyChange?.(true);
@@ -2973,15 +3009,37 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
           }
           committedBoundaryRef.current = opLogRef.current!.nextSeq;
+          // FR-S03 (r8 task 012): record WHICH revision this payload captured, so a later
+          // `commitSaved` can tell "nothing changed since" from "the user typed mid-flight".
+          capturedRevisionRef.current = docRevisionRef.current;
           return opLogRef.current!.serialize(editor.state.doc);
         },
         // task 038 (zero-error guardrails): clear the just-persisted op-log batch + recompute the dirty flag
         // AFTER the save POST confirmed (200). Preserves any edits appended during the in-flight save; a
         // failed save never calls this, so the batch survives for a retry.
+        //
+        // FR-S03 (r8 task 012): this is THE one place the dirty flag is cleared on the save path —
+        // every capture method now only WATERMARKS (see `capturedRevisionRef`). The remaining
+        // `dirtyRef.current = false` assignments in this file all belong to the LOAD/mount lifecycle
+        // (a fresh document is clean by definition), never to a save.
+        //
+        // `stillDirty` is the OR of two independent signals, because neither alone is complete:
+        //   • `opLog.size > 0` — representable edits appended after the serialize high-water mark;
+        //   • a revision that moved past the capture — catches edits the op-log cannot represent
+        //     (deferred structural / unrepresentable / refused-atom steps append no entry), which on
+        //     the ContentModel paths is real work the in-flight save did not carry.
+        // A null `capturedRevisionRef` means no capture method ran for this save (a clean
+        // byte-identical passthrough): there is nothing outstanding, so the op-log count decides
+        // alone — the pre-012 behavior, unchanged.
         commitSaved: () => {
           if (!opLogRef.current) return;
           opLogRef.current.commitSaved(committedBoundaryRef.current);
-          const stillDirty = opLogRef.current.size > 0;
+          const captured = capturedRevisionRef.current;
+          const editedSinceCapture = captured !== null && docRevisionRef.current !== captured;
+          const stillDirty = opLogRef.current.size > 0 || editedSinceCapture;
+          // Consumed — the next save watermarks afresh. Left set, a second (clean) save would keep
+          // re-reading a stale capture point and report dirty forever.
+          capturedRevisionRef.current = null;
           dirtyRef.current = stillDirty;
           onDirtyChange?.(stillDirty);
         },
@@ -2997,13 +3055,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // into the model itself (Start/End anchor runs + comments list, ids allocated from 1). Text
         // output is unchanged (reject-state parity — buildContentModelWithComments delegates to the
         // legacy buildContentModel when no session threads exist).
+        //
+        // FR-S03 (r8 task 012): this used to clear the dirty flag HERE — before the POST was even
+        // issued. A save that then failed left the editor believing it was clean: Save disabled,
+        // Ctrl+S inert, `beforeunload` disarmed, the unmount flush disarmed, the toolbar reading
+        // "Saved" — the user's work one tab-close from gone, on the failure branch only. The
+        // imported sibling below already got this right (F5); both paths now behave identically:
+        // WATERMARK at build time, clear only in `commitSaved` after a confirmed success.
         buildContentModel: () => {
           if (!editor) {
             throw new Error('ComposeEditor: cannot build content model — editor not mounted');
           }
           const { model } = buildContentModelWithComments(editor, collectSessionThreadInputs());
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
+          if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          capturedRevisionRef.current = docRevisionRef.current;
           return model;
         },
         // R6 (task 012, render-on-save cutover): the imported-doc merged model — see the handle JSDoc.
@@ -3014,6 +3079,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         buildImportedContentModel: (loadedModel, opts) => {
           if (!editor) return null;
           if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          // FR-S03 (r8 task 012): same watermark as the born-in-editor sibling above.
+          capturedRevisionRef.current = docRevisionRef.current;
           return buildImportedContentModel(editor, loadedModel, paraIdSnapshotRef.current, {
             trackChanges: opts.trackChanges,
             sessionThreads: collectSessionThreadInputs(),
@@ -3262,6 +3329,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
+          saveDisabledReason={saveDisabledReason}
           isSaving={isSaving}
           autoSaveEnabled={autoSaveEnabled}
           onAutoSaveToggle={onAutoSaveToggle}

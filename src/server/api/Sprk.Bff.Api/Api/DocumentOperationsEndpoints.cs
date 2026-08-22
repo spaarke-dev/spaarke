@@ -111,8 +111,24 @@ public static class DocumentOperationsEndpoints
                     detail: $"Document {documentId} was not found",
                     extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
                 ),
+                // FR-S09 item 4 (spaarkeai-compose-r8 task 016): additive `status` + `title` so the body
+                // is recognised as RFC 7807 ProblemDetails by `authenticatedFetch`'s parser, which keys
+                // on the presence of one of those two fields. Without them the parser returns null, the
+                // thrown `ApiError` carries no body at all, and a caller handling the 409 cannot name the
+                // person holding the lock — it can only say "someone". `error`, `detail`, `checkedOutBy`
+                // and `checkedOutAt` keep their existing names and shapes, so every current reader is
+                // unaffected; this is a superset of what was sent before.
                 ConflictCheckoutResult conflict => TypedResults.Json(
-                    conflict.ConflictError,
+                    new
+                    {
+                        status = 409,
+                        title = "Document Locked",
+                        error = conflict.ConflictError.Error,
+                        detail = conflict.ConflictError.Detail,
+                        checkedOutBy = conflict.ConflictError.CheckedOutBy,
+                        checkedOutAt = conflict.ConflictError.CheckedOutAt,
+                        correlationId,
+                    },
                     statusCode: 409
                 ),
                 _ => TypedResults.Problem(

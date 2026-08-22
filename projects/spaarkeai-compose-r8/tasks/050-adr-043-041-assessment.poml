@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>ADR-043 + ADR-041 assessment — does the anchor change touch ActionKind admission? Must FR-C05's "apply anyway?" be an ADR-041 Gate?</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Blocks all Track C code from landing. An incorrect "orthogonal" finding lets a silent ADR violation ship.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: ADR-043 explicitly names "compose edit" in its MUST clause, so the easy and wrong answer ("it's just an envelope change") is also the one everyone wants. Distinguishing where an edit APPLIES from how a capability is ADMITTED requires reading both ADRs against the actual dispatch code — a judgment whose error mode is a violation that ships silently and is discovered in review.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only assessment; touches no source. Can run at any time, including during Phase 1.</parallel-reason>
+    <deps>none</deps>
+    <tags>architecture, compose, ai</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Two ADR assessments must complete BEFORE any Track C code lands. Both were surfaced by `/adr-check` on
+    2026-08-19 and are open questions in the spec.
+
+    **ADR-043** (AI capability execution spine) states at line 23 that the system "MUST admit
+    deterministic/interactive capabilities (**compose edit**, retraction) through the declarative spine via a
+    deterministic `ActionKind` + a sanctioned supersession-write leg." It names compose edit EXPLICITLY.
+    Track C changes how compose edits are anchored and retires the validator on that path. The spec's
+    expectation is that this is orthogonal — the anchor is *where* an edit applies, not *how the capability is
+    admitted* — but expectation is not assessment. **Confirm it against the actual dispatch code.** If the
+    anchor change touches `ActionKind` admission or the supersession-write leg, the declared Path C is wrong
+    and this must be re-declared as A or B under root §6.5.
+
+    **ADR-041** (judgment/confirmation policy) requires confirmation to be derived from
+    `(risk-tier × origin × completeness)` using CATALOG data, with state held as a Gate-ledger property
+    (ADR-040) so a second ask is structurally impossible. FR-C05 introduces "this clause changed since the
+    suggestion — apply anyway?" — an AI-origin confirmation, likely IN scope. FR-A07's "Edit a copy" is
+    user-initiated, likely OUT. **Assess both and state the reasoning**, because if FR-C05 is a Gate and is
+    built as an ad-hoc dialog, it risks exactly the re-ask the Gate-ledger rule exists to prevent.
+  </prompt>
+
+  <role>SPAARKE architect. Familiar with ADR-039/040/041/043, the AI capability spine, the Gate ledger, and the Compose edit path. Applies root CLAUDE.md §6.5.</role>
+
+  <goal>
+    A written assessment at `projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md` giving, for each
+    ADR, a definitive finding (orthogonal / in-scope) with code citations, and — where in scope — the specific
+    design obligation Track C must meet. Plus a clear GO/BLOCK for Track C code.
+  </goal>
+
+  <context>
+    <background>
+      This is the design-time enforcement point of the §6.5 protocol. The spec declared Path C ("comply") for
+      both, with "ASSESS FIRST" attached. Doing the assessment after the code is written inverts the protocol
+      into a rationalization.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-041-judgment-confirmation-policy.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-040-session-ledger.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-039-ai-engine-frozen.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This is a READ-ONLY assessment. MUST NOT modify any `src/` file.</constraint>
+    <constraint source="root CLAUDE.md §6.5">If either assessment finds the declared Path C is wrong, produce the §6.5 escalation block (ADR, rule, conflict, proposed path, rationale, impact, alternative considered) and BLOCK Track C code.</constraint>
+    <constraint source="project">Findings MUST cite actual code — the dispatch path, the `ActionKind` admission point, the Gate-ledger write. An assessment from ADR text alone is not sufficient; the question is what the CODE does.</constraint>
+    <constraint source="project">The ADR-041 assessment MUST cover BOTH confirmations (FR-C05 AI-origin, FR-A07 user-initiated) and state the reasoning for each, since task 043 cites this assessment.</constraint>
+    <constraint source="project">Also confirm the low-risk ADR-013 question the spec flags: does Track C's envelope addition create any new CRUD→AI dependency? `ProposedEdit` is Compose-owned with no AI-side producer, so this is expected clean — confirm rather than assume.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-043 capability spine, ADR-041 confirmation policy, Gate ledger</topic>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-policy.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-039-ai-engine-frozen.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-043, ADR-041, ADR-040, ADR-039.</step>
+    <step order="1">Read ADR-043 line 23 in full context. Locate the actual `ActionKind` admission point and the supersession-write leg IN CODE.</step>
+    <step order="2">Trace how a compose edit currently reaches that spine. Determine whether adding `(paraId, span)` to the envelope touches admission, the ActionKind, or the supersession write.</step>
+    <step order="3">Record the ADR-043 finding: orthogonal (Path C stands) or touching (re-declare as A/B with the §6.5 block).</step>
+    <step order="4">Read ADR-041's `(risk-tier × origin × completeness)` rule and the Gate-ledger property in ADR-040. Locate a canonical Gate implementation in code as the reference.</step>
+    <step order="5">Assess FR-C05's "apply anyway?" — AI-origin. Is it a Gate? If yes, state the specific obligation: catalog-derived risk tier, ledger-held state, no second ask.</step>
+    <step order="6">Assess FR-A07's "Edit a copy" — user-initiated. State the reasoning for in/out of scope; task 043 cites this.</step>
+    <step order="7">Confirm the ADR-013 question: no new CRUD→AI dependency from the envelope addition.</step>
+    <step order="8">State GO or BLOCK for Track C code.</step>
+  </steps>
+
+  <escalation>
+    <trigger>ADR-043's admission path IS touched — this is a §6.5 situation. Produce the escalation block, declare the correct path (A or B), and BLOCK tasks 051–053 until the owner resolves it.</trigger>
+    <trigger>FR-C05 IS an ADR-041 Gate — task 052 must build it as a Gate-ledger confirmation, not a dialog. State the obligation precisely enough that 052 can implement it without re-assessing.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The ADR-043 finding is definitive (orthogonal or touching) and cites the actual `ActionKind` admission point and supersession-write leg in code, by file and line.</criterion>
+    <criterion>If touching: a §6.5 escalation block exists and Track C is BLOCKED.</criterion>
+    <criterion>The ADR-041 assessment covers FR-C05 (AI-origin) with a definitive in/out finding and reasoning.</criterion>
+    <criterion>The ADR-041 assessment covers FR-A07 (user-initiated) with reasoning task 043 can cite.</criterion>
+    <criterion>If FR-C05 is a Gate: the specific obligation is stated (catalog-derived risk tier, ledger-held state, no second ask) precisely enough for task 052 to implement without re-assessing.</criterion>
+    <criterion>The ADR-013 no-new-CRUD→AI-dependency question is confirmed, not assumed.</criterion>
+    <criterion>A GO or BLOCK for Track C code is stated explicitly.</criterion>
+    <criterion>NEGATIVE: no `src/` file was modified.</criterion>
+    <criterion>NEGATIVE: no finding rests on ADR text alone without a code citation.</criterion>
+  </acceptance-criteria>
+</task>
