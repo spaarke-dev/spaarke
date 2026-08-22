@@ -588,8 +588,11 @@ public class GrantLifecycleCharacterizationTests
     {
         var row = new ExternalGrantRow
         {
-            Id = Guid.NewGuid(), ProjectId = ProjectId,
-            ContactId = ContactId, OrganizationId = OrganizationId, StateCode = 0
+            Id = Guid.NewGuid(),
+            ProjectId = ProjectId,
+            ContactId = ContactId,
+            OrganizationId = OrganizationId,
+            StateCode = 0
         };
 
         var key = ExternalGrantLifecycle.DeriveKey(row);
