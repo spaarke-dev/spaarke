@@ -91,12 +91,12 @@ public class AuthorizationServiceCharacterizationTests
 
     private static AuthorizationContext Context(
         string operation = "read_metadata", string? token = CallerToken) => new()
-    {
-        UserId = "caller-oid-1",
-        ResourceId = "document-1",
-        Operation = operation,
-        UserAccessToken = token
-    };
+        {
+            UserId = "caller-oid-1",
+            ResourceId = "document-1",
+            Operation = operation,
+            UserAccessToken = token
+        };
 
     // ─────────────────────────────────────────────────────────────────────────────
     // A-2 — Flipped by task 004 (FR-02).
