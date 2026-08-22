@@ -13,7 +13,7 @@
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
 | **Task** | **none active** — Group F: **055, 052, 050** closed; **053 ⛔ BLOCKED on owner** |
 | **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | `task-execute` on `tasks/056-bing-key-to-kv.poml` — the only Group F task with no owner gate left. **054 is PARTIALLY blocked by 053** (shares `DocumentIntelligenceOptions`; do NOT run them in parallel). 🔔 **Three items now need the owner: 050 safety defect, 053 Search auth flag, 051 SAS rotation** |
+| **Next Action** | `task-execute` on `tasks/056-bing-key-kv-by-name.poml` — the only Group F task with no owner gate left. **054 is PARTIALLY blocked by 053** (shares `DocumentIntelligenceOptions`; do NOT run them in parallel). 🔔 **Three items now need the owner: 050 safety defect, 053 Search auth flag, 051 SAS rotation** |
 | **Progress** | **18 of 26 active complete** · **8 remaining** (031,032,033,051,**053⛔**,054,056,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
