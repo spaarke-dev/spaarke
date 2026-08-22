@@ -1,10 +1,32 @@
 # ADR-049 — Third Amendment (DRAFT)
 
-> **Status**: DRAFT — awaiting owner sign-off. This is a **CLAUDE.md §6.5 Path B** (ADR amendment).
+> ## ✅ ACCEPTED — owner sign-off 2026-08-21
+>
+> **Status**: **ACCEPTED, NOT YET APPLIED.** The CLAUDE.md §6.5 **Path B** decision is made; the file write
+> is still pending.
+>
+> **Owner sign-off**, verbatim: *"ADR-049 is fine."* — 2026-08-21, in response to the Sign-off Required
+> block at the end of this document. Recorded here rather than left in conversation, because an approval
+> that lives only in chat scrollback is an approval that gets lost.
+>
 > **Drafted** 2026-08-21 by task 031 on the evidence of [`gate-decision.md`](gate-decision.md).
-> **Not yet applied.** Root CLAUDE.md §3 forbids sub-agent writes to `.claude/`; the MAIN SESSION applies
-> this to [`.claude/adr/ADR-049-compose-shadow-document.md`](../../../.claude/adr/ADR-049-compose-shadow-document.md)
-> in **task 045**, with or before the residual-loss list.
+>
+> ### What remains — the file write is PRE-AUTHORIZED, no further approval needed
+>
+> | Target | Content |
+> |---|---|
+> | [`.claude/adr/ADR-049-compose-shadow-document.md`](../../../.claude/adr/ADR-049-compose-shadow-document.md) | the **CONCISE** section below |
+> | `docs/adr/ADR-049-*.md` | the **FULL** section below |
+>
+> Applied by **task 045**, or **at the start of task 040 — whichever comes first**. Task 031's constraint
+> reads "ready to merge **with or before** task 045", so applying it early is explicitly permitted, and
+> there is a reason to prefer early: while the write is outstanding, ADR-049 still tells a reader that
+> *"render-on-save supersedes surgical byte-patch"* — the exact guidance that produced the defect 040 is
+> being written to fix. Anyone implementing 040 against the un-amended ADR would be following the wrong rule.
+>
+> **Root CLAUDE.md §3**: `.claude/` writes are MAIN-SESSION-ONLY. A sub-agent dispatched to 040 or 045
+> cannot perform this write and will fail with "Edit denied" — that is the boundary working, not a bug.
+> The main session must apply it.
 
 ---
 
@@ -169,5 +191,6 @@ and its normalization justifications).
 | **Impact if accepted** | ADR-049 gains a third amendment + seven standing invariants + the paired-MUST rule; Phase 4 implements against it |
 | **Alternative considered and rejected** | Path A (project-scoped exception) — wrong instrument: this is not a narrow deviation, it is a correction to the governing decision, and leaving the ADR as-is would let a future project re-derive R6's mistake from a still-authoritative rule |
 
-**Owner action**: accept, revise, or reject. On acceptance, task 045 applies the concise version to
-`.claude/adr/ADR-049-compose-shadow-document.md` and the full version to `docs/adr/`.
+**Owner action**: ~~accept, revise, or reject~~ → **ACCEPTED 2026-08-21** (*"ADR-049 is fine."*).
+The concise version goes to `.claude/adr/ADR-049-compose-shadow-document.md`, the full version to
+`docs/adr/`. See the ACCEPTED banner at the top of this document for the sequencing.

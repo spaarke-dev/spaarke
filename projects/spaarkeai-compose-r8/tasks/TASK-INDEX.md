@@ -122,7 +122,11 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > **NOT-CONFIRMED**: all three live call sites are on the op-log path the prototype never exercised, so
 > FR-D01 keeps one waiver rather than deleting 3,000 lines on "probably". Four Phase-4 POMLs need amending
 > (040/041/044/074 — see the decision §6). ADR-049 third amendment is **DRAFTED, awaiting owner sign-off**
-> (§6.5 Path B); task 045 applies it. [`notes/gate-decision.md`](../notes/gate-decision.md) ·
+> (§6.5 Path B) → **✅ OWNER-ACCEPTED 2026-08-21** (*"ADR-049 is fine."*). The `.claude/adr/` + `docs/adr/`
+> write is **pre-authorized** and pending — apply at task 045 **or at the start of 040, whichever comes
+> first**. Prefer early: until it lands, ADR-049 still tells a reader that "render-on-save supersedes
+> surgical byte-patch", which is the guidance that produced the defect 040 exists to fix. **Main session
+> only** (root §3) — a sub-agent will hit "Edit denied". [`notes/gate-decision.md`](../notes/gate-decision.md) ·
 > [`notes/adr-049-third-amendment-draft.md`](../notes/adr-049-third-amendment-draft.md)
 
 ## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*

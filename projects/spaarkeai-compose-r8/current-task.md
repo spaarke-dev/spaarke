@@ -12,8 +12,27 @@
 | **Phases 1–3** | ✅ **COMPLETE.** The architecture gate **PASSED**. |
 | **Next task** | **040** — the production merge mechanism (FULL · `opus`/`max` · `parallel-safe: false`) |
 | **Alternative** | **051** — Track C anchor supply. Unblocked, **not** gated on 031. Kills the *"wording differs slightly"* banner the owner keeps seeing. |
-| **Blocked on owner** | ADR-049 third amendment — **§6.5 Path B, awaiting sign-off**. Draft: [`notes/adr-049-third-amendment-draft.md`](notes/adr-049-third-amendment-draft.md). Task 045 applies it. |
+| **ADR-049 amendment** | ✅ **OWNER-ACCEPTED 2026-08-21** (*"ADR-049 is fine."*). **Nothing is blocked on the owner.** The file write is PRE-AUTHORIZED and PENDING — see "Pending ADR write" below. |
 | **Next Action** | Read `tasks/040-merge-mechanism.poml` **and** [`notes/gate-decision.md`](notes/gate-decision.md) §6 — 040's POML is provisional and needs four amendments the prototype identified. |
+
+### ⚠️ Pending ADR write — do this FIRST, before writing any 040 code
+
+The amendment is **accepted**; only the file write remains, and it needs **no further approval**.
+
+| Target | Content |
+|---|---|
+| `.claude/adr/ADR-049-compose-shadow-document.md` | the **CONCISE** section of the draft |
+| `docs/adr/ADR-049-*.md` | the **FULL** section |
+
+Source: [`notes/adr-049-third-amendment-draft.md`](notes/adr-049-third-amendment-draft.md).
+
+**Apply at the start of task 040, not at 045.** Task 031's constraint says "with or before task 045", so
+early is permitted — and while the write is outstanding, ADR-049 still tells a reader that *"render-on-save
+supersedes surgical byte-patch"*, which is the exact guidance that produced the defect 040 exists to fix.
+Implementing 040 against the un-amended ADR means following the wrong rule.
+
+**MAIN SESSION ONLY** (root §3). A sub-agent dispatched to this will fail with "Edit denied" — that is the
+write boundary working, not a bug.
 
 ### The one thing to understand
 
@@ -89,7 +108,8 @@ Task 017's banner fix (`ComposeBannerStack.tsx`) — client-only, committed, shi
 - `git checkout <commit> -- <path>` writes the **INDEX**; the safe A/B form is `git show <commit>:<path> > <path>`.
 - **Run the FULL test project before closing a task**, never `--filter`. Defect 1 above hid behind a filter for two tasks.
 - **Warm up before measuring performance** — the first pass showed a 52 ms mean that was pure JIT noise; warmed medians were 4.7–31 ms.
-- **Bash heredocs mangle ``-style escapes inside quoted Python** — write patch scripts to the scratchpad and run them.
+- **Bash heredocs mangle `
+`-style escapes inside quoted Python** — write patch scripts to the scratchpad and run them.
 - `w14:paraId` must be **8 hex digits, non-zero, ≤ `0x7FFFFFFF`** — mnemonic prefixes are not valid.
 - `refs/stash` lives in the common git dir — 60+ worktrees share one stash list.
 - SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before every build.
