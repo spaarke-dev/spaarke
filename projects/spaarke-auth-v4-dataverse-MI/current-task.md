@@ -15,7 +15,7 @@
 | **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
 | **Next Action** | `task-execute` on `tasks/050-content-safety-to-mi.poml`. **Read the ⚠️ Group F block below first** — task 052's RBAC sweep already answered several prerequisites. Then 053 → 054 → 056. **051 needs owner confirmation** (live SAS rotation) |
 | **Progress** | **17 of 26 active complete** · **9 remaining** (031,032,033,050,051,053,054,056,090) · 3 deferred |
-| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
+| **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
 ### Files modified this session — ALL COMMITTED AND PUSHED (working tree clean)
 
