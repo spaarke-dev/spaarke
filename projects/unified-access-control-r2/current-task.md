@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-21 (by `task-execute`, after task 005)
+> **Last Updated**: 2026-08-22 (by `task-execute`, after task 002)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,20 +10,25 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 005 completed and committed |
+| **Task** | **none active** — task 002 completed and committed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **7 of 19 complete** (001 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 014 ✅ 019 ✅) |
-| **Next Action** | Run **task 002** via `task-execute` with `projects/unified-access-control-r2/tasks/002-authorize-document-download.poml` (verify the filename first — the POML paths in this project have been wrong before). It is R1's January-2026 attack scenario, still open, and unblocks 012 |
+| **Phase** | Phase 0 — enforcement remediation · **8 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 014 ✅ 019 ✅) |
+| **Next Action** | Run **task 010** (`010-idempotent-grant-revoke-all.poml` — verify the filename) via `task-execute`. It is `opus`/`xhigh` and unblocks both 017 and Phase 4's task 060, making it the longest remaining dependency chain. **Task 012 is now also unblocked** by 002 |
 
-### The Phase 0 critical path is complete
+### The Phase 0 critical path is complete, and so is the R1 attack scenario
 
-`001 → {003, 014} → 004 → {005, 006}` is done. **FR-01 through FR-05 and FR-13 are closed.** What
-remains in Phase 0 are independent fixes, not chain links.
+`001 → {003, 014} → 004 → {005, 006}` is done, plus **002**. **FR-01 through FR-05 and FR-13 are
+closed.** What remains in Phase 0 are independent fixes, not chain links.
+
+**PR [#812](https://github.com/spaarke-dev/spaarke/pull/812) is open (draft)** — 9 commits pushed.
+`SDAP CI` passed and the CI Router's **Tier 1 (blocking) jobs all passed**. Two workflow runs show red
+in `gh pr checks` but were **cancelled by supersession**, and a newer batch sits in `action_required`
+(awaiting workflow-run approval — a repo policy gate someone must click, not a code failure).
 
 ### Critical Context
 
-Last verified: **BFF 10,657 passed / 0 failed · ArchTests 36/36 · Core 45/45 · publish 43.65 MB
+Last verified: **BFF 10,658 passed / 0 failed · ArchTests 36/36 · Core 45/45 · publish 43.65 MB
 compressed incl. PDBs** (baseline 44.96, ceiling 60 — **0.00 MB delta** across both of the last two
 tasks; no packages added).
 
@@ -35,7 +40,7 @@ to task 005, and not exonerated either.** Next time it recurs, capture it:
 
 ### Files Modified This Session
 
-**All committed.** 9 commits on `work/unified-access-control-r2`, **none pushed**:
+**All committed and PUSHED.** 10 commits on `work/unified-access-control-r2` → PR #812 (draft):
 
 | Commit | Contents |
 |---|---|
@@ -47,7 +52,8 @@ to task 005, and not exonerated either.** Next time it recurs, capture it:
 | `4a695ce02` | checkpoint — context handoff after task 004 |
 | `93b506a66` | task 006 — caller-scoped `PermissionsEndpoints`; `GetCallerAccessAsync`; removed body-supplied `UserId` |
 | `ab5ce1d05` | checkpoint — record task 006 sha |
-| _(task 005)_ | Read ceiling lifted — `RetrievePrincipalAccess` + `DataverseAccessRightsMapper` |
+| `676697ee6` | task 005 — Read ceiling lifted; `RetrievePrincipalAccess` + `DataverseAccessRightsMapper` |
+| _(task 002)_ | download + content authorized — closes R1's attack scenario |
 
 ---
 
@@ -57,8 +63,8 @@ to task 005, and not exonerated either.** Next time it recurs, capture it:
 
 | Option | Task | Why |
 |---|---|---|
-| **Recommended** | **002** — authorize document download (FR-01 / A-1) | The last High-severity open disclosure in Phase 0: `GET /api/documents/{id}/download` has **no per-document filter** at all, so any authenticated caller streams any document by GUID. Unblocks 012. `parallel-safe:false` |
-| High value | **010** — idempotent grant + revoke-all (A-11) | `opus` / `xhigh`. Unblocks 017 **and** Phase 4's task 060 (POA seam consolidation), so it is the longest remaining dependency chain |
+| **Recommended** | **010** — idempotent grant + revoke-all (A-11) | `opus` / `xhigh`. Unblocks 017 **and** Phase 4's task 060 (POA seam consolidation) — the longest remaining dependency chain |
+| Now unblocked | **012** — track or disable anonymous share links (A-14) | Unblocked by 002. Touches the SAME file (`FileAccessEndpoints.cs`) — it MUST NOT remove the filters 002 added, and the share-link route at `:640-668` deserves the same question asked of it |
 | Cluster | **007 / 008 / 009** | Grant expiry, delegation (**must precede the PCF "+ User" button**, task 065), external To Do scope-check |
 
 ⚠️ **Phase 0 has no remaining co-schedulable pair.** `{014, 019}` was the only file-disjoint pair;
@@ -99,6 +105,9 @@ everything left sits in the four contended directories. Run serially.
 | 7 | `TypedResults.Unauthorized()` returns a bare 401, not ProblemDetails (ADR-019). **Pre-existing**; not fixed in 006 because it would touch task 001's authentication-floor pins. Wrap-up candidate |
 | 8 | **NEW (005)**: `RetrievePrincipalAccess` is **untested against a real tenant** — its URL form and OBO availability can only be settled live. Filed as a constraint on **task 034**, which already needs a tenant. If `RPA-FALLBACK` fires in production the Read ceiling is silently back |
 | 9 | **NEW (005)**: the RPA `Target` hard-codes `sprk_documents({id})`. Not a regression (the replaced probe did too), but Phase 1's evaluator answers for ANY entity → filed as a constraint on **task 032** |
+| 10 | **NEW (002) — decision needed**: download enforcement now requires **Read**, but task 006's `CanDownload` capability requires **Write**. Effect is benign (UI hides a button that would work) but it IS the divergence FR-05 criterion 5 exists to prevent. Option A: re-point `CanDownload` at Read-class rights. Option B: move enforcement to Write on all three download/render routes. **Product decision** — see `notes/task-002-download-authorization.md` §4 |
+| 11 | **NEW (002) — needs its own task**: four routes on the `/api/documents` group still have no per-document filter — `preview-url`, `view-url`, `office`, `preview`. They mint URLs rather than stream bytes (a URL outlives the request, so arguably worse), and `preview-url` is on many client paths. Deliberately not folded into 002 |
+| 12 | **PR #812 workflow runs are `action_required`** — a newer batch awaits workflow-run approval. Someone must approve them in the GitHub UI; this is a repo policy gate, not a code failure |
 
 ### Decisions carried in from design (unchanged)
 

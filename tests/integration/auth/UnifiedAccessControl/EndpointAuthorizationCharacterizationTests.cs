@@ -130,17 +130,22 @@ public class EndpointAuthorizationCharacterizationTests
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-1 — CURRENT (BROKEN) BEHAVIOR. An authenticated caller with no established access to the
-    /// document is NOT rejected with 403 by the download route: no per-document authorization filter
-    /// is attached, so the request proceeds past authorization into handler execution (where it fails
-    /// for unrelated reasons — the document does not exist in the test host). The load-bearing
-    /// assertion is the ABSENCE of 403, i.e. authorization never ran.
+    /// ✅ FLIPPED BY TASK 002 (FR-01) — was
+    /// <c>Characterization_GetDownload_ForCallerWithoutDocumentAccess_IsNotRejectedByAuthorization</c>.
     ///
-    /// FLIPPED BY: task 002 (FR-01) — the route MUST then reject a caller without document access,
-    /// and this assertion inverts to Be(HttpStatusCode.Forbidden).
+    /// A-1, R1's January-2026 attack scenario: the route carried no per-document authorization filter.
+    /// The group's <c>RequireAuthorization()</c> asked only "are you anyone?", and the handler then
+    /// streamed app-only from SPE — so any authenticated caller could download any document by GUID.
+    ///
+    /// The route now carries <c>AddDocumentAuthorizationFilter("read")</c>, matching the two routes that
+    /// already did this correctly (the sibling <c>/api/v1/documents/{id}/download</c> and eml-render).
+    /// A caller with no access is rejected BEFORE any SPE call.
+    ///
+    /// The reason code is asserted, not just the status: a 403 alone could come from the wrong cause
+    /// (e.g. the <c>unknown_operation</c> denial that made eml-render look gated before task 003).
     /// </summary>
     [Fact]
-    public async Task Characterization_GetDownload_ForCallerWithoutDocumentAccess_IsNotRejectedByAuthorization()
+    public async Task GetDownload_ForCallerWithoutDocumentAccess_DeniedForInsufficientRights()
     {
         // Arrange — authenticated, but holds no grant/share/ownership on this document.
         using var client = _fixture.CreateAuthenticatedClient();
@@ -148,20 +153,36 @@ public class EndpointAuthorizationCharacterizationTests
         // Act
         var response = await client.GetAsync($"/api/documents/{DocumentId}/download");
 
-        // Assert — CURRENT behavior: authorization does not reject; the request reaches the handler,
-        // which then fails only because the test host has no such document (observed: 409 Conflict).
-        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
-            "A-1 pins the CURRENT broken state: FileAccessEndpoints.cs:101-109 attaches no " +
-            "per-document authorization filter, so no authorization decision is made for this caller " +
-            "and the handler streams app-only (:865). Task 002 attaches the filter and flips this to Forbidden.");
-        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized,
-            "authentication succeeded — this test isolates the missing AUTHORIZATION gate");
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "A-1 is closed: the caller is authorized against the document before anything streams");
 
-        // Guard against a VACUOUS pass: a 5xx would satisfy both assertions above without the request
-        // ever having been authorized-and-handled. Requiring a sub-500 status proves the pipeline ran
-        // to the handler, which is the actual content of finding A-1.
-        ((int)response.StatusCode).Should().BeLessThan(500,
-            "the request must genuinely reach the handler for this characterization to mean anything");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("sdap.access.deny.insufficient_rights",
+            "the denial must be a genuine RIGHTS decision");
+        body.Should().NotContain("unknown_operation",
+            "an unknown_operation denial would mean the \"read\" key regressed out of OperationAccessPolicy");
+    }
+
+    /// <summary>
+    /// ✅ TASK 002 — the same hole by a different URL. <c>GET /api/documents/{id}/content</c> streams the
+    /// document's bytes from the same app-only SPE path (<c>TypedResults.Stream</c>) and had the same
+    /// missing gate. Closing <c>/download</c> alone would have left the attack scenario fully intact
+    /// behind this route, so both were closed together — the finding is the missing per-document
+    /// authorization, not the route name.
+    /// </summary>
+    [Fact]
+    public async Task GetContent_ForCallerWithoutDocumentAccess_DeniedForInsufficientRights()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync($"/api/documents/{DocumentId}/content");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "/content streams the same bytes as /download and must reach the same decision");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("sdap.access.deny.insufficient_rights");
     }
 
     /// <summary>
@@ -198,32 +219,34 @@ public class EndpointAuthorizationCharacterizationTests
     }
 
     /// <summary>
-    /// A-1 — the contrast that makes the remaining hole unmistakable. Two routes on the SAME document,
-    /// reached by the SAME caller in the SAME request context, still disagree: <c>eml-render</c>
-    /// evaluates authorization and denies, while <c>download</c> never evaluates it at all and
-    /// proceeds to stream app-only.
+    /// ✅ FLIPPED BY TASK 002 (FR-01) — was
+    /// <c>Characterization_DownloadAndEmlRender_DisagreeOnAuthorizationForSameCallerAndDocument</c>.
     ///
-    /// Task 003 fixed the eml-render half (the denial is now a real rights decision rather than
-    /// <c>unknown_operation</c>). The disagreement that remains is purely A-1: download has no filter.
+    /// The disagreement WAS the finding: two routes on the same document, reached by the same caller in
+    /// the same request context, reached opposite decisions — eml-render evaluated authorization and
+    /// denied, while download never evaluated it at all and streamed app-only.
     ///
-    /// FLIPPED BY: task 002 (FR-01) — afterwards both routes MUST reach the same decision for the same
-    /// caller on the same document.
+    /// They now agree. This is the assertion that would catch a future route being added to this group
+    /// without a filter, which is how A-1 arose in the first place.
     /// </summary>
     [Fact]
-    public async Task Characterization_DownloadAndEmlRender_DisagreeOnAuthorizationForSameCallerAndDocument()
+    public async Task DownloadContentAndEmlRender_AgreeOnAuthorizationForSameCallerAndDocument()
     {
         using var client = _fixture.CreateAuthenticatedClient();
 
         var download = await client.GetAsync($"/api/documents/{DocumentId}/download");
+        var content = await client.GetAsync($"/api/documents/{DocumentId}/content");
         var emlRender = await client.GetAsync($"/api/documents/{DocumentId}/eml-render");
 
-        // eml-render now denies on rights (correct); download is never authorized at all (A-1).
+        // All three consult the same policy for the same caller on the same document.
+        download.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        content.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         emlRender.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        download.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
-            "A-1: FileAccessEndpoints.cs:101-109 attaches no per-document filter, so this route reaches " +
-            "the handler for a caller the sibling route just denied. Task 002 closes this.");
-        ((int)download.StatusCode).Should().BeLessThan(500,
-            "guard against a vacuous pass — the download request must genuinely reach the handler");
+
+        download.StatusCode.Should().Be(emlRender.StatusCode,
+            "the two routes that stream or render the same document must reach the same decision — " +
+            "their disagreement WAS finding A-1");
+        content.StatusCode.Should().Be(emlRender.StatusCode);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | # | Task | FR / finding | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
 | ✅ 001 | Access-path characterization + negative suite | NFR-07 | — | **P0-W0** | ✅ | sonnet | high |
-| 🔲 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
+| ✅ 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
 | ✅ 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
 | ✅ 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
 | ✅ 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
@@ -131,6 +131,25 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > call itself — mocking that transport is ADR-038 ban B1. Its URL form and OBO availability need a live
 > tenant → folded into **task 034** / Phase 4 acceptance.
 > Rationale: [`notes/task-005-rights-mapping.md`](../notes/task-005-rights-mapping.md).
+
+> **Task 002 outcome (2026-08-22)**: **R1's January-2026 attack scenario is closed.**
+> `GET /api/documents/{id}/download` now carries `AddDocumentAuthorizationFilter("read")`. The app-only
+> SPE stream is deliberately UNCHANGED — files written by the MI are only readable by it (Writer-Identity
+> Matching, auth constraints Pattern 4); the defect was the missing Dataverse-level gate, not the stream.
+> ⚠️ **SCOPE WIDENED BY ONE ROUTE, deliberately**: `GET /api/documents/{id}/content` streams the SAME
+> bytes from the SAME app-only path with the SAME missing gate. Closing `/download` alone would have left
+> the attack fully intact behind a different URL, so both were closed together.
+> **Operation key `"read"`, not `download_file` (Write)** — the sibling route
+> `DataverseDocumentsEndpoints.cs` `GET /api/v1/documents/{id}/download` ALREADY uses `"read"`, as does
+> eml-render; task 001's characterization pinned exactly that these routes *disagree*. Write would have
+> recreated the inconsistency and newly denied download to every Read-only user on a live UI path.
+> ⚠️ **OPEN FOR OWNER**: enforcement now says Read while task 006's `CanDownload` capability says Write.
+> Benign in effect (UI hides a button that would work) but it is the divergence FR-05 criterion 5 exists
+> to prevent. Two options documented — a product decision, not an implementation one.
+> ⚠️ **FILED, NOT FIXED**: four more routes on this group (`preview-url`, `view-url`, `office`, `preview`)
+> have no per-document filter. They mint URLs rather than stream bytes — a different blast radius and a
+> separate decision. **Should be assessed as its own task.**
+> Rationale: [`notes/task-002-download-authorization.md`](../notes/task-002-download-authorization.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 
