@@ -70,13 +70,24 @@ For each touched test file, enumerate `[Fact]` / `[Theory]` / `[SkippableFact]` 
 
 | Classification | Criteria | Action |
 |---|---|---|
-| **MAINTAIN** | Tests behavior, lives under one of 6 KEEP paths, fails on real regression | KEEP — confirm at canonical path |
+| **MAINTAIN** | Tests behavior, lives under one of the KEEP paths, fails on real regression | KEEP — confirm at canonical path |
+| **FITNESS FUNCTION** | Lives under `tests/Spaarke.ArchTests/**`; asserts a STRUCTURAL invariant over source/assemblies rather than runtime behavior | KEEP — see the fitness-function note below. Do NOT apply the naming heuristic (2) or the mock/assertion heuristics (3, 5, 6, 7) to these |
 | **SCAFFOLDING** | Matches any B1-B17 ban (mirror, all-mocks-trivial, internal, pass-through, coverage-filler, language-feature, snapshot-trivial, name-without-scenario, exhaustive-switch, setup-to-assertion >10:1, getter/setter, generated-code, or any of B1-B5 wiring antipatterns) | DELETE — emit `git rm` for whole file OR Edit for method-level |
 | **AMBIGUOUS** | Mixed signals (e.g., setup-heavy but assertion is behavioral) | FLAG for reviewer judgment; do not emit removal command |
 
 Per-method evaluation heuristics (apply in order):
 
-1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract}/**` OR `tests/unit/domain/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
+0. **Fitness-function check (run FIRST)**: if the file is under `tests/Spaarke.ArchTests/**`, classify **FITNESS FUNCTION → KEEP** and stop. Do not apply heuristics 1–12.
+
+   *Why this runs first and why it exists* (added 2026-08-21 by `spaarke-auth-v4-dataverse-MI` task 063): heuristic 1 below would flag every architecture test as a path violation with no canonical path to move it to, and therefore recommend deletion. That is not a gap in the classifier — it contradicts [ADR-038 itself](../../../docs/adr/ADR-038-testing-strategy.md), which at its "Some discovery loss" consequence names **"NetArchTest-style architecture tests at Tier 1"** as the sanctioned REPLACEMENT for the discovery the wiring-test bans give up. The classifier would delete the mechanism the ADR prescribes.
+
+   Heuristics 2–12 are also miscalibrated for this category by construction: a fitness function's name states the INVARIANT it enforces (`NoSecretBearingConfidentialClientOutsideTheAllowlist`) rather than a `{Method}_{Scenario}_{ExpectedResult}` triple, and its "arrange" section is a source scan whose setup-to-assertion ratio is meaninglessly high. Applying behavioral heuristics to structural tests produces confident nonsense.
+
+   Ratification status: `tests/CLAUDE.md` names this category; **an ADR-038 amendment formalising it is OPEN** (CLAUDE.md §6.5 path B). Until it lands, this rule keeps `/test-diet` from acting on the contradiction.
+
+1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**` OR `tests/unit/domain/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
+
+   > **Drift correction (2026-08-21, task 063)**: `tests/integration/seam/**` was missing from this list. It has been a KEEP path since 2026-07-09 (ADR-038 §2, added by `spaarke-ai-architecture-redesign-r2` E-40) and is listed as one of the 7 in `tests/CLAUDE.md`, but this heuristic still enumerated six. Every vertical-slice-seam test in the repo was therefore a delete candidate whenever `/test-diet` ran — a far wider exposure than the ArchTests gap that prompted the look.
 2. **Naming check (B13)**: if test name doesn't match `{Method}_{Scenario}_{ExpectedResult}` shape (e.g., `Test1`, `Foo_Works`, `DoIt_Bug417`), classify SCAFFOLDING.
 3. **Mock-shape check (B1, B2, B7, B15)**: if test contains `Mock<HttpMessageHandler>`, `Mock<IServiceClient>`, OR `Mock<>` count ≥ 3 AND assertion count ≤ 2, classify SCAFFOLDING.
 4. **Wiring check (B3, B4)**: if test asserts `services.GetRequiredService<>` OR `Throws<ArgumentNullException>` on constructor, classify SCAFFOLDING.

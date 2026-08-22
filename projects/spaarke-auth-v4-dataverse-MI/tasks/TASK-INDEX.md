@@ -33,9 +33,9 @@
 | 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 | 🔲 |
 | 056 | Bing key → KV-by-name (Group 1 hygiene) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E7 | 🔲 |
 | 060 | ArchTest credential ban + E-1/E-3 allowlist | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F1 | ✅ |
-| 061 | Credential census (**source analysis, not DI**) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F2 |✅ |
-| 062 | Startup assertion (non-Development) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F3 |✅ |
-| 063 | Pre-declare ArchTests MAINTAIN-class for `/test-diet` | 6 Forcing | STANDARD | sonnet/med | 060,061 | **G** | ❌ `.claude/` | FR-F0 | 🔲 |
+| 061 | Credential census (**source analysis, not DI**) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F2 | ✅ |
+| 062 | Startup assertion (non-Development) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F3 | ✅ |
+| 063 | Pre-declare ArchTests MAINTAIN-class for `/test-diet` | 6 Forcing | STANDARD | sonnet/med | 060,061 | **G** | ❌ `.claude/` | FR-F0 | ✅ |
 | 090 | Project wrap-up | 9 Wrap | STANDARD | sonnet/high | all active | — | ❌ | — | 🔲 |
 
 ¹ **001 ran at FULL, not the authored STANDARD** — `task-execute` Step 0.5 overrides *up* when tags include

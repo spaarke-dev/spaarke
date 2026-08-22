@@ -4,7 +4,7 @@
     <title>Pre-declare the forcing functions MAINTAIN-class for /test-diet (FR-F0)</title>
     <phase>6 Forcing Functions</phase>
     <gate>060 and 061 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Directive/documentation change; no production code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -70,4 +70,33 @@
     <criterion>Negative case: the 7 existing KEEP paths and the 17 bans are unchanged — no weakening of ADR-038.</criterion>
     <criterion>Negative case: if the risk proves not to exist, that is recorded and no directive is changed.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-08-21. Record: notes/decisions/063-archtest-keep-path.md
+    CARRIES AN OPEN ADR-038 AMENDMENT PROPOSAL (CLAUDE.md 6.5 path B) -- owner decision required.
+
+    Step 1 said confirm the risk rather than assume it. It is REAL: /test-diet heuristic 1 flags any
+    file outside the KEEP paths as a path violation and recommends DELETE when no canonical path
+    applies. tests/Spaarke.ArchTests/** is not a KEEP path, so CredentialGuardTests,
+    CredentialCensusTests and the PRE-EXISTING LayerDependencyTests and ADR010_DITests were all
+    delete candidates.
+
+    The same read found a SECOND, WIDER defect the task did not anticipate: that heuristic enumerated
+    only SIX paths -- tests/integration/seam/** was missing, though it has been a KEEP path since
+    2026-07-09 (ADR-038 section 2, E-40) and is listed in tests/CLAUDE.md. Every vertical-slice-seam
+    test in the repo was a delete candidate, including all four of this project's auth seam files.
+    Corrected.
+
+    THE FINDING THAT REFRAMES THIS: ADR-038 line 489 names "NetArchTest-style architecture tests at
+    Tier 1" as the sanctioned REPLACEMENT for the discovery lost to bans B1-B5. The ADR prescribes
+    architecture tests and its own classifier deletes them. That is an internal inconsistency, not a
+    policy gap, so naming the category RESTORES consistency rather than weakening anything.
+
+    Changed: test-diet SKILL.md (new heuristic 0 = FITNESS FUNCTION -> KEEP, plus the seam drift
+    correction) and tests/CLAUDE.md (the category, why B13 and B15 are miscalibrated for it, and FOUR
+    authoring rules that replace them -- negative control, positive control, written reasons, in-file
+    maintenance procedure). ADR-038 itself was NOT edited: the escalation trigger says escalate path B
+    rather than amend unilaterally. Both files are marked ratification-open.
+
+    The 7 KEEP paths and 17 bans are unchanged.
+  </notes>
 </task>

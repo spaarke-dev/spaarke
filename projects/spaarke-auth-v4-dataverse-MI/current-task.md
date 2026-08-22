@@ -11,10 +11,10 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — 022 (`243b514c1`) and 060 (`bde4a640d`) closed and pushed |
-| **Status** | Full suite **10,591 / 0** twice · auth seams **55/55** · ArchTests **44/44** (36 + 8 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | **`061` → `062` → `063`.** 061/062 are group **G**, `parallel-safe: true`, gated on 022 (done); 063 needs 060+061. Read the ⚠️ on **062** below before starting it — it will fire on today's config if written naively |
-| **Progress** | **12 of 26 active complete** · **14 remaining** · 3 deferred |
+| **Task** | **none active** — PHASE 6 IS COMPLETE. 022, 060, 061, 062, 063 all closed and pushed |
+| **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
+| **Next Action** | **`031` — owner decision required first** (see the red section below). Everything not gated on a human decision or elapsed time is done |
+| **Progress** | **15 of 26 active complete** · **11 remaining** (031,032,033,050-056,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
 
 ---
