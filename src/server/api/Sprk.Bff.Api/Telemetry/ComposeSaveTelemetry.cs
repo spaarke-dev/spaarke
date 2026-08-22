@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.Metrics;
+using System.Diagnostics.Metrics;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Telemetry;

@@ -1,4 +1,4 @@
-﻿// Task 054 (spaarkeai-compose-r4, NFR-06/NFR-08, Success Criterion 4) — the THROUGH-THE-WIRE seam
+// Task 054 (spaarkeai-compose-r4, NFR-06/NFR-08, Success Criterion 4) — the THROUGH-THE-WIRE seam
 // evidence for the Phase-5 concurrency behaviors tasks 050/051/052 built into `ComposeService.SaveAsync`:
 //
 //   (1) STALE-BASE save re-anchors WITHOUT an eTag 500 (task 050): a second save of the SAME
