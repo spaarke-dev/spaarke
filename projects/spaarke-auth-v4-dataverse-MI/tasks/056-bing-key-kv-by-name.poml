@@ -4,7 +4,7 @@
     <title>Bing Search key: resolve from Key Vault by name (FR-E7)</title>
     <phase>5 Group 2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs; changes how a live credential is resolved.</rigor-reason>
     <model-tier>sonnet</model-tier>

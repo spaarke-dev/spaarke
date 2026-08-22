@@ -280,21 +280,42 @@ public sealed class WebSearchHandler : IToolHandler
                 "WebSearchHandler chat-invocation start — session={ChatSessionId} decision={DecisionId} queryLen={QueryLen} maxResults={MaxResults}",
                 context.ChatSessionId, context.DecisionId, query.Length, count);
 
-            var apiKey = _configuration["BingSearch:ApiKey"];
+            var apiKey = ResolveApiKey();
             var endpoint = ReadConfigEndpoint();
 
-            // No API key → graceful mock fallback with a Warning log.
+            // No API key. auth-v4 task 056 (FR-E7): this previously returned GenerateMockResults()
+            // with degradationNote: null — i.e. FABRICATED search results, carrying real-looking URLs,
+            // wrapped in citation envelopes tagged SourceType="web" and rendered to the user as
+            // citations, with NO indication that they were invented. On an environment where the key
+            // is absent that was the normal path, not an edge case: dev has no BingSearch:ApiKey app
+            // setting and no BingSearch-ApiKey secret in the vault, so every web search returned
+            // invented citations.
+            //
+            // Feeding fabricated sources to an LLM and to the citation UI is a grounding hazard that
+            // is strictly worse than returning nothing. Empty + an explicit degradation note is the
+            // safe direction, and it does NOT fail the chat turn (so this is not the fail-fast
+            // conversion FAILURE-MODES AP-7 warns about — the graceful path is preserved, it just
+            // stops inventing evidence).
+            //
+            // Mock results remain available for local development behind an explicit opt-in.
             if (string.IsNullOrWhiteSpace(apiKey))
             {
+                var useMocks = _configuration.GetValue<bool>(UseMockResultsConfigKey);
+
                 _logger.LogWarning(
-                    "Bing API key not configured — using mock results for web search (session={ChatSessionId} decision={DecisionId})",
+                    "Bing API key not configured ({SecretNameKey} / {DirectKey} both unset) — returning {Mode} " +
+                    "for web search (session={ChatSessionId} decision={DecisionId})",
+                    ApiKeySecretNameConfigKey, ApiKeyConfigKey,
+                    useMocks ? "MOCK results (explicitly enabled)" : "no results with a degradation note",
                     context.ChatSessionId, context.DecisionId);
 
                 stopwatch.Stop();
-                var mockResults = GenerateMockResults(count);
                 return BuildToolResult(
-                    tool, query, mockResults,
-                    degradationNote: null,
+                    tool, query,
+                    useMocks ? GenerateMockResults(count) : new List<WebSearchResult>(),
+                    degradationNote: useMocks
+                        ? "Web search is not configured; the results shown are sample data, not real sources."
+                        : "Web search is not configured in this environment, so no web sources were retrieved.",
                     startedAt: startedAt,
                     stopwatch: stopwatch,
                     correlationLogId: $"session={context.ChatSessionId},decision={context.DecisionId}");
@@ -316,11 +337,14 @@ public sealed class WebSearchHandler : IToolHandler
                     "(session={ChatSessionId} decision={DecisionId})",
                     context.ChatSessionId, context.DecisionId);
 
+                // auth-v4 task 056 (FR-E7): was GenerateMockResults(). The note said "Results shown
+                // are from a fallback source", which reads as a degraded-but-real source rather than
+                // invented content. Throttling is transient — returning nothing is honest and the
+                // next turn succeeds.
                 stopwatch.Stop();
-                var mockResults = GenerateMockResults(count);
                 return BuildToolResult(
-                    tool, query, mockResults,
-                    degradationNote: "Web search is temporarily limited. Results shown are from a fallback source.",
+                    tool, query, new List<WebSearchResult>(),
+                    degradationNote: "Web search is temporarily rate-limited, so no web sources were retrieved for this request.",
                     startedAt: startedAt,
                     stopwatch: stopwatch,
                     correlationLogId: $"session={context.ChatSessionId},decision={context.DecisionId}");
@@ -492,6 +516,56 @@ public sealed class WebSearchHandler : IToolHandler
     /// <summary>
     /// Calls the Bing Web Search v7 API and returns parsed search results.
     /// </summary>
+    /// <summary>Direct key setting (legacy). Retained so existing environments keep working.</summary>
+    internal const string ApiKeyConfigKey = "BingSearch:ApiKey";
+
+    /// <summary>
+    /// Name of the configuration key that carries the Bing key, resolved at call time — the
+    /// indirection pattern used by <see cref="LlamaParseClient"/>.
+    /// </summary>
+    internal const string ApiKeySecretNameConfigKey = "BingSearch:ApiKeySecretName";
+
+    /// <summary>Explicit opt-in for sample results when no key is configured (local dev only).</summary>
+    internal const string UseMockResultsConfigKey = "BingSearch:UseMockResults";
+
+    /// <summary>
+    /// Resolves the Bing key, preferring the indirected secret name over the direct setting
+    /// (auth-v4 task 056 / FR-E7). Bing is a genuinely third-party service with no Entra option, so
+    /// the CREDENTIAL stays — this changes only how it is resolved.
+    /// </summary>
+    /// <remarks>
+    /// <b>Known limitation, stated rather than implied.</b> This copies
+    /// <see cref="LlamaParseClient"/>'s pattern as the task requires, but that pattern does NOT keep
+    /// the secret value out of configuration: it reads <c>_configuration[secretName]</c>, and App
+    /// Service resolves a Key Vault reference INTO the application's configuration at startup either
+    /// way. What the indirection buys is that the secret's NAME becomes per-environment
+    /// configuration instead of a hard-coded key. The only in-repo pattern that genuinely keeps the
+    /// value out of <c>IConfiguration</c> is a runtime <c>SecretClient</c> fetch
+    /// (<c>KnowledgeDeploymentService.GetApiKeyFromKeyVaultAsync</c>), which would add a Key Vault
+    /// round-trip to the web-search path — the latency this task's escalation trigger names.
+    /// </remarks>
+    private string? ResolveApiKey()
+    {
+        var secretName = _configuration[ApiKeySecretNameConfigKey];
+        if (!string.IsNullOrWhiteSpace(secretName))
+        {
+            var viaName = _configuration[secretName];
+            if (!string.IsNullOrWhiteSpace(viaName))
+            {
+                return viaName;
+            }
+
+            // Configured but unresolvable is a deployment fault, not "search is off": say so, and
+            // name the key that failed rather than letting it look like an absent-key no-op.
+            _logger.LogError(
+                "{SecretNameKey} is set to '{SecretName}' but no value is present under that key. " +
+                "Ensure the secret exists in Key Vault and the App Service exposes it via a Key Vault reference.",
+                ApiKeySecretNameConfigKey, secretName);
+        }
+
+        return _configuration[ApiKeyConfigKey];
+    }
+
     private async Task<List<WebSearchResult>> CallBingApiAsync(
         string query, int count, string apiKey, string endpoint, CancellationToken cancellationToken)
     {

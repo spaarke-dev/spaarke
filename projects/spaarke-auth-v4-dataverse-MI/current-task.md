@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-22 (by `task-execute` 053 — migration landed) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
+> **Last Updated**: 2026-08-22 (by `task-execute` 054 + 056) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,10 +11,10 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — Group F: **055, 052, 050** closed; **053 🔄 code-complete, live cutover booked to 031** |
-| **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | `task-execute` on `tasks/054-doc-intelligence-to-entra.poml` — **now unblocked**: 053 migrated all three `DocumentIntelligence:AiSearchKey` consumers, so 054 confines itself to the DocIntel resource itself. Then 056. 🔔 **Owner items left: 050 safety defect, 051 SAS rotation** |
-| **Progress** | **18 of 26 active complete** · **8 remaining** (031,032,033,051,**053🔄**,054,056,090) · 3 deferred |
+| **Task** | **none active** — **Group F COMPLETE except 051** (055, 052, 050, 054, 056 closed; 053 🔄 code-complete, cutover booked to 031) |
+| **Status** | Full suite **10,603 / 0** · auth seams **60/60** · ArchTests **52/52** · publish **44.99 MB** · CVE clean |
+| **Next Action** | **Group F is done except 051.** Remaining work is owner-gated: 051 (SAS rotation decision), 031→032→033 (rollout), 090 (wrap-up). Superseded: `tasks/054-doc-intelligence-to-entra.poml` — **now unblocked**: 053 migrated all three `DocumentIntelligence:AiSearchKey` consumers, so 054 confines itself to the DocIntel resource itself. Then 056. 🔔 **Owner items left: 050 safety defect, 051 SAS rotation** |
+| **Progress** | **20 of 26 active complete** · **6 remaining** (031,032,033,051,**053🔄**,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
 ### Files modified this session — ALL COMMITTED AND PUSHED (working tree clean)
@@ -82,6 +82,8 @@ Bus namespace is in `SharePointEmbedded`. **The dev estate spans at least four r
 | Task | Outcome |
 |---|---|
 | **053** | ⛔ **BLOCKED at step 1.** `spaarke-search-dev` is `apiKeyOnly` — Entra returns **403**, so the UAMI's `Search Index Data Contributor` is inert. Also found: **7 key sites, not the POML's 2** (the POML names a DEAD property and misses the single `SearchIndexClient` the whole RAG stack uses), and clearing the key would **un-register 6 services** (ADR-032 asymmetric registration). **No code changed.** [Record](notes/decisions/053-ai-search-to-entra.md) |
+| **056** | ✅ Bing key resolution changed per constraint — **but criterion 1 is structurally unmeetable** by the mandated pattern (App Service resolves KV refs INTO config either way); stated, not redefined. 🔴 **Real find: web search was returning FABRICATED results with real-looking URLs as web citations, with no degradation note** — the only path dev ever took, since no Bing key exists anywhere. Now empty + explicit note; mocks behind an opt-in. New `FabricatedResultGuardTests` (negative control demonstrated). [Record](notes/decisions/056-bing-key-kv-by-name.md) |
+| **054** | ✅ Three DocIntel keys resolved: `AiSearchKey` already done by 053 (no double work), `OpenAiKey` made key-or-MI with the key **retained under E-2**, `DocIntelKey` **escalated** — `spaarke-docintel-dev` has no custom subdomain so Entra is impossible there (prod HAS one). **Also closed a gap 053 left**: the options validator still required `AiSearchKey`, so clearing it would have failed startup anyway. [Record](notes/decisions/054-doc-intelligence-to-entra.md) |
 | **053** | 🔄 **Code-complete.** Service unblocked to `aadOrApiKey` (owner-authorised). **6 of 7 sites migrated** onto a new `SearchClientFactory` — the POML said 2 and missed the only `SearchIndexClient` in the codebase. Fixed an **ADR-032 asymmetric registration** where clearing the key would have un-registered 6 services. Site 6 = E-1 carve-out; site 7 was **dead** (3rd this workstream). **Keys NOT cleared** — live cutover booked to 031. [Record](notes/decisions/053-ai-search-to-entra.md) |
 | **050** | Content Safety was **already on MI** — no key existed to clear. Verified RBAC + no-key + MI-enabled, removed a dead `ContentSafety-ApiKey` KV reference from the template. 🔴 **Found a live safety defect**: the Prompt Shield perimeter has failed OPEN on **122 of 122** scans over the full 90-day window — cause is the 100ms deadline, **not** auth (token = 7ms). **ESCALATED**, not fixed. [Record](notes/decisions/050-content-safety-to-mi.md) |
 | **055** | `Analysis:PromptFlowKey` — **DEAD, deleted** (`250a5faae`). Zero readers, never deployed, KV entries were never-updated placeholders. The one Prompt Flow artifact in the repo uses the Foundry SDK's `@tool` decorator and does not read this key. KV purge booked to 033. [Record](notes/decisions/055-promptflow-key-disposition.md) |
