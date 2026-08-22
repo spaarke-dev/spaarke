@@ -1,7 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-21 (task-execute — **the gate prototype PASSED**)
-> **Recovery**: Read "Quick Recovery" first.
+> **Last Updated**: 2026-08-21 (context-handoff) · **Pushed**: PR #806, 0 unpushed, working tree CLEAN
+> **Recovery**: Read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
 
@@ -9,73 +9,100 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **031 — THE GATE DECISION** + ADR-049 third-amendment draft |
-| **Phase** | 3 — Model proof |
-| **Rigor / Tier** | FULL · `opus` @ **`max`** · `parallel-safe: false` |
-| **Status** | not-started — **startable** (dep 030 ✅) |
-| **Next Action** | Read `tasks/031-gate-decision-adr-amendment.poml`. The evidence is [`notes/merge-prototype-results.md`](notes/merge-prototype-results.md); the bar and MISS condition are in [`notes/control-measurement.md`](notes/control-measurement.md). |
-| **⚠️ Owner** | 031 writes to `.claude/adr/` — **main session only** (root §3 sub-agent write boundary). An ADR amendment is a **CLAUDE.md §6.5 Path B** and needs owner sign-off. |
+| **Phases 1–3** | ✅ **COMPLETE.** The architecture gate **PASSED**. |
+| **Next task** | **040** — the production merge mechanism (FULL · `opus`/`max` · `parallel-safe: false`) |
+| **Alternative** | **051** — Track C anchor supply. Unblocked, **not** gated on 031. Kills the *"wording differs slightly"* banner the owner keeps seeing. |
+| **Blocked on owner** | ADR-049 third amendment — **§6.5 Path B, awaiting sign-off**. Draft: [`notes/adr-049-third-amendment-draft.md`](notes/adr-049-third-amendment-draft.md). Task 045 applies it. |
+| **Next Action** | Read `tasks/040-merge-mechanism.poml` **and** [`notes/gate-decision.md`](notes/gate-decision.md) §6 — 040's POML is provisional and needs four amendments the prototype identified. |
 
-### The gate result — no miss condition fired
+### The one thing to understand
 
-| | Control (R6) | Prototype | Bar |
+**The gate passed at 100%, and that does NOT mean fidelity is solved.** The oracle measures **untouched**
+blocks and excludes the edited one by construction. The paragraph the user types in is still rebuilt from a
+content model carrying only justification, bold and italic — it still loses font, size, colour, indentation,
+spacing, tabs and numbering.
+
+**Task 041 owns that.** Phase 4 is authorized on the explicit condition that 041 is neither optional nor
+deferrable. Shipping 040 alone would not fix what the owner is looking at in dev.
+
+### Numbers of record
+
+| | Master today | Prototype | Gate bar |
 |---|---:|---:|---|
-| Overall preservation | 18.08% | **100%** | ≥95% |
+| Overall preservation (lenient) | 18.08% | **100%** | ≥95% |
 | Near tier | 6.67% | **100%** | 100% |
-| Documents at 100% | 1/18 | **18/18** | — |
+| Strict overall | 12.18% | no regression | ratchet only |
 
-All five MISS conditions evaluated **not met**. Neither escalation trigger fired. N=5 round trip: zero
-cumulative drift. Cost +2 to +19 ms/save (within NFR-07). No new NuGet.
+18 documents · 271 comparable blocks · 210 near-tier-relevant. All 18 saves terminate `persisted` with zero
+honesty violations.
 
-### ⚠️ The caveat that must travel with the 100%
+### Tasks complete
 
-**The oracle measures UNTOUCHED blocks and excludes the edited one.** The paragraph the user actually typed
-in is still rebuilt from a content model carrying only justification, bold and italic — it still loses its
-font, size, colour, indentation, spacing, tabs and numbering.
+**Phase 0** 001 · 002 — **Phase 1 (Track S)** 010 · 011 · 012 · 013 · 014 · 015 · 016 · 018 · 017 —
+**Phase 2** 020 · 021 · 022 · 023 — **Phase 3** 030 · 031 — **Phase 5** 050
 
-One damaged paragraph instead of forty pages is a colossal improvement. It is **not** "fidelity solved".
-**FR-A04 property inheritance (task 041) closes it, and task 030 does not exercise it at all.**
+**Blocked**: 074 ⛔ (`ComposeShadowPatchEngine` subsumption NOT-CONFIRMED — see gate-decision §5; FR-D01
+keeps one waiver rather than deleting 3,000 lines on an inference).
 
-### What 040 must do differently (from 030's results)
+### What 040 must do differently (from the prototype)
 
-1. Thread cloned list items through `ListRenderState` (a rendered list item after clones may restart at 1).
-2. Consider paraId-corroborated pairing as a **fallback after** document-order — reorder currently yields
-   zero merge benefit (degrades to R6, never fails).
-3. Pair with **041** — without property inheritance the edited block is still destroyed.
-4. Verify carrier provenance end-to-end (`ResolveSaveBaselineAsync` → renderer).
-5. `ComposeBaselineParaIdStamper` promotion proved **unnecessary** — the merge never resolves a paraId.
+1. **Drop the `ComposeBaselineParaIdStamper` promotion** — proved unnecessary; the merge never resolves a paraId.
+2. **Thread cloned list items through `ListRenderState`** — a rendered list item after clones may restart at 1.
+3. **Consider paraId-corroborated pairing as a FALLBACK after document-order** — never a primary key. Reorder
+   currently yields zero merge benefit (degrades to R6, never fails).
+4. **Verify carrier provenance end-to-end** (`ResolveSaveBaselineAsync` → renderer). A stale carrier would
+   clone the WRONG blocks.
+5. **044 must NARROW the accept-flatten warning taxonomy** — text-box/field/content-control warnings must fire
+   only for blocks actually re-rendered, or users get warned about losses that no longer occur.
 
 ### Where the prototype lives
 
-`ComposeDocumentRenderer.RenderIntoCarrier(…, mergeUnchangedBlocks: false)` — **opt-in, default OFF**. No
-production behaviour changed. Measurement: `tests/integration/seam/Compose/MergePrototypeMeasurementTests.cs`.
+`ComposeDocumentRenderer.RenderIntoCarrier(…, mergeUnchangedBlocks: false)` — **opt-in, default OFF**,
+deliberately NOT wired to production. Measurement:
+`tests/integration/seam/Compose/MergePrototypeMeasurementTests.cs`.
 
-### Completed this session
-
-**017** (Track S UAT GO + banner fix) · **020** (oracle) · **021** (R4-breaker corpus) · **022** (near-tier
-corpus) · **023** (the control + 2 oracle artifacts fixed + thresholds ratified) · **030** (merge prototype —
-**gate cleared**).
-
-### Owner-visible banners
+### Owner-visible banners in dev
 
 | Banner | Track | Owner | Gated on 031? |
 |---|---|---|---|
 | "Some formatting was simplified when saving" | **A** | 040–044 | **Yes** |
 | "wording differs slightly from this document" | **C** | **051–053** | **No — startable now** |
 
-### Traps (all live)
-
-- `git checkout <commit> -- <path>` writes the **INDEX**; safe A/B form is `git show <commit>:<path> > <path>`.
-- **Run the FULL test project before closing a task**, never `--filter`.
-- **Warm up before measuring performance** — the first pass showed a 52 ms mean that was pure JIT noise;
-  warmed medians were 4.7–31 ms.
-- Bash heredocs mangle ``-style escapes inside quoted Python — write patch scripts to the scratchpad.
-- `refs/stash` is shared across all 60+ worktrees.
-- SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before building.
-- `/api/documents/{id:guid}` returns 404 for a non-GUID id.
-- Use `pwsh`, not `powershell`, for the deploy hash-verify.
-
 ### Not yet deployed
 
-Task 017's banner fix (`ComposeBannerStack.tsx`) — client-only, ships with the next `sprk_spaarkeai` deploy.
-The merge prototype is default-OFF and deliberately NOT wired to production.
+Task 017's banner fix (`ComposeBannerStack.tsx`) — client-only, committed, ships with the next
+`sprk_spaarkeai` deploy. The merge prototype is default-OFF; **nothing from Phase 3 is live.**
+
+### Defects found and fixed beyond task scope this session
+
+1. **`NdaSaveNo422RegressionTests` mocked the etag-less `ReplaceFileContentAsUserAsync`** — a **Track S
+   regression** (task 011 moved the save path to the `If-Match` overload; both overloads exist, so the stale
+   setup compiled, never matched, and the save reported 404). Invisible because per-task runs were filtered.
+2. **`ComposeReadFidelityHarnessSeamTests`' golden model dropped `w:fldSimple`** cached results — a correct
+   projection read as a failure. The fix TIGHTENS the assertion.
+3. **Oracle artifact A1** — empty `<w:pPr/>` counted as near-tier loss (9 points of headline).
+4. **Oracle artifact A2** — a dropped repeated child read as 100% near-tier while losing a footnote reference.
+5. **The save-degradation banner** claimed the file was unchanged AFTER it was written (UAT-S-01).
+
+### Traps (all live — several cost real time this session)
+
+- `git checkout <commit> -- <path>` writes the **INDEX**; the safe A/B form is `git show <commit>:<path> > <path>`.
+- **Run the FULL test project before closing a task**, never `--filter`. Defect 1 above hid behind a filter for two tasks.
+- **Warm up before measuring performance** — the first pass showed a 52 ms mean that was pure JIT noise; warmed medians were 4.7–31 ms.
+- **Bash heredocs mangle ``-style escapes inside quoted Python** — write patch scripts to the scratchpad and run them.
+- `w14:paraId` must be **8 hex digits, non-zero, ≤ `0x7FFFFFFF`** — mnemonic prefixes are not valid.
+- `refs/stash` lives in the common git dir — 60+ worktrees share one stash list.
+- SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before every build.
+- `/api/documents/{id:guid}` returns **404 for a non-GUID id** — a healthy route can look unregistered.
+- Use `pwsh`, not `powershell`, for the deploy hash-verify step.
+
+### Evidence trail
+
+`projects/spaarkeai-compose-r8/notes/` — `track-s-uat.md` · `gate-contract.md` · `control-measurement.md` ·
+`merge-prototype-results.md` · `gate-decision.md` · `adr-049-third-amendment-draft.md` ·
+`honest-failure-set.md` · `document-size-ceilings.md`
+
+### Gate status at handoff
+
+Full BFF suite **10,780 passed / 0 failed** · NetArchTest **36/36** · publish **43.68 MB** (−1.28 vs baseline)
+· `/conflict-check` clean · PR **#806** open and current.
