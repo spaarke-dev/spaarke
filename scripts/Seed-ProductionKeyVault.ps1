@@ -172,15 +172,11 @@ Set-VaultSecret -Name "ai-search-key" `
     -Description "Azure AI Search admin key (update with real key)" `
     -IsPlaceholder $true
 
-Set-VaultSecret -Name "PromptFlow-Endpoint" `
-    -Value "https://placeholder-promptflow.azurewebsites.net" `
-    -Description "AI Foundry Prompt Flow endpoint (update after AI Foundry setup)" `
-    -IsPlaceholder $true
-
-Set-VaultSecret -Name "PromptFlow-Key" `
-    -Value "placeholder-promptflow-key" `
-    -Description "AI Foundry Prompt Flow API key (update after AI Foundry setup)" `
-    -IsPlaceholder $true
+# PromptFlow-Endpoint / PromptFlow-Key seeding REMOVED 2026-08-21 (auth-v4 task 055, FR-E6).
+# Both were seeded as placeholders and never updated, because nothing ever read them: AnalysisOptions
+# bound the values and no code path consumed either. Seeding a placeholder credential is worse than
+# not seeding one -- it makes the vault look like Prompt Flow is provisioned.
+# See projects/spaarke-auth-v4-dataverse-MI/notes/decisions/055-promptflow-key-disposition.md
 
 # === Monitoring ===
 Write-Host ""

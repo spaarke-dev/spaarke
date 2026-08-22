@@ -4,7 +4,7 @@
     <title>Determine the disposition of Analysis:PromptFlowKey (FR-E6)</title>
     <phase>5 Group 2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Investigation with a possible small config deletion; no significant code surface.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -63,4 +63,32 @@
     <criterion>The disposition is one of migrated, deleted, or retained-with-reason — recorded, not left open.</criterion>
     <criterion>Negative case: nothing is deleted while its consumer is unknown.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-08-21. Disposition: DEAD -> DELETED. Record: notes/decisions/055-promptflow-key-disposition.md
+
+    Consumer established FIRST, per the constraint. Four negative checks: zero readers of
+    AnalysisOptions.PromptFlowKey/.PromptFlowEndpoint in src/; no Prompt Flow HTTP client anywhere;
+    no reader of the sprk_PromptFlowEndpoint Dataverse environment variable the doc comment claimed
+    to map to; and Analysis__PromptFlowKey is ABSENT from spaarke-bff-dev app settings. Both Key
+    Vault entries were seeded -IsPlaceholder $true and never updated.
+
+    ESCALATION TRIGGER DID NOT FIRE, and checked precisely rather than assumed: the one genuine
+    Prompt Flow artifact, infrastructure/ai-foundry/evaluation/metrics/citation_accuracy.py, uses
+    the Foundry evaluation SDK's @tool decorator. It runs inside Foundry, is not invoked by the BFF,
+    and does not read this key. There is no consumer anywhere, inside the repo or outside it.
+
+    Removed from 4 files: AnalysisOptions.cs (both properties), appsettings.template.json, and the
+    two provisioning scripts. PromptFlowEndpoint went too though the task named only the key: an
+    endpoint with no key and no client tells every reader Prompt Flow is configured, so removing the
+    credential alone would leave a MORE misleading configuration. ExecuteFlowName/ContinueFlowName
+    are equally unread but are NOT credentials and carry safe defaults -- left in place rather than
+    widening a credential task into a dead-configuration sweep; booked to 090.
+
+    KEY VAULT ENTRIES NOT DELETED HERE -- booked onto 033. KV deletions are that task's territory,
+    and this session could not enumerate the vault (az keyvault list on rg-spaarke-dev returns
+    nothing; the guessed name fails DNS, suggesting a private endpoint). Deleting a secret I cannot
+    first list would be guessing.
+
+    Build clean, full suite 10,596/0, ArchTests 49/49, no residual references.
+  </notes>
 </task>

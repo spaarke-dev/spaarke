@@ -30,7 +30,7 @@
 | 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 | 🔲 |
 | 053 | AI Search ×2 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | 🔲 |
 | 054 | Document Intelligence ×3 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E5 | 🔲 |
-| 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 | 🔲 |
+| 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 |✅ |
 | 056 | Bing key → KV-by-name (Group 1 hygiene) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E7 | 🔲 |
 | 060 | ArchTest credential ban + E-1/E-3 allowlist | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F1 | ✅ |
 | 061 | Credential census (**source analysis, not DI**) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F2 | ✅ |

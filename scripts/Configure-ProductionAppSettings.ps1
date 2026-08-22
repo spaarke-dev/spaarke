@@ -96,8 +96,9 @@ $settings = @(
     "DocumentIntelligence__AiSearchKey=$(KVRef 'ai-search-key')",
 
     # --- Analysis ---
-    "Analysis__PromptFlowEndpoint=$(KVRef 'PromptFlow-Endpoint')",
-    "Analysis__PromptFlowKey=$(KVRef 'PromptFlow-Key')",
+    # PromptFlowEndpoint / PromptFlowKey REMOVED 2026-08-21 (auth-v4 task 055, FR-E6): both were bound
+    # and read by nothing, were never deployed, and their Key Vault entries were never-updated
+    # placeholders. See projects/spaarke-auth-v4-dataverse-MI/notes/decisions/055-promptflow-key-disposition.md
 
     # --- Application Insights ---
     "ApplicationInsights__ConnectionString=$(KVRef 'AppInsights-ConnectionString')",
