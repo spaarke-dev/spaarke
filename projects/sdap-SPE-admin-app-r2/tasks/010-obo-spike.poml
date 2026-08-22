@@ -4,7 +4,7 @@
     <title>SPIKE — prove the owning-app delegated path can obtain a Graph-audienced token</title>
     <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
     <gate>startable — §6.5 ADR decision is on record (path C); this spike can REOPEN it</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive auth work; tags include auth. Root CLAUDE.md §6 escalation territory and §8 FULL trigger.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -114,7 +114,28 @@ Together these indicate the SPE-084 multi-app OBO path has likely NEVER executed
     <criterion testable="true">A WORKABLE or UNWORKABLE verdict is recorded. If UNWORKABLE, BLOCKED.md exists and the §6.5 gate is flagged for re-run.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-B01. THE highest-risk task in the project (spec Unresolved Question 1). Tasks 011 and 012 depend on its outcome; task 004 may hand off to it. Parallel-safe: produces notes only, no source modification — runs alongside task 004 in Wave 2.</notes>
+  <notes>Spec FR-B01. THE highest-risk task in the project (spec Unresolved Question 1). Tasks 011 and 012 depend on its outcome; task 004 may hand off to it. Parallel-safe: produces notes only, no source modification — runs alongside task 004 in Wave 2.
+
+COMPLETED 2026-08-21 — VERDICT: **UNWORKABLE**. Full evidence in notes/obo-spike-findings.md; escalation in BLOCKED.md.
+
+Escalation triggers 1 and 2 BOTH FIRED. Trigger 3 did NOT (permissions are already granted).
+
+THE PREMISE WAS FALSE. sprk_owningappid = 170c98e1 = SDAP-PCF-CLIENT — the SPA client the code page already signs in as. There is NO per-customer owning app in this environment, so ADR-028 E-1 ("per-customer owning apps, which are other applications identities") does not describe the situation. The §6.5 gate resolved as path C on that premise and must be RE-RUN.
+
+Defect 1 CONFIRMED and worse than described: api://{owningAppId}/.default returns AADSTS500011 "resource principal not found" — SDAP-PCF-CLIENT has NO identifierUris and NO exposed scopes, so the scope can never resolve. Not a wrong audience; an impossible one.
+
+Defect 2 CONFIRMED and structurally unfixable: OBO requires the exchanging confidential client to BE the assertion audience. Assertion aud = 1e40baad (BFF); code builds Create(170c98e1). Cannot be fixed by configuration because 170c98e1 can never be an audience.
+
+Permissions are NOT the problem: FileStorageContainerType.Manage.All is delegated + admin-consented on BOTH service principals.
+
+Spec §3.1 CONFIRMED: app-only GET /storage/fileStorage/containerTypes returns 403 accessDenied on v1.0 AND beta.
+
+STEP 7 NOT RESOLVED — the §4.2b list-vs-create admin-role contradiction needs a delegated token, obtainable only via the broken OBO path, an interactive sign-in, or a forbidden create. Carried to task 011, which will hold a working token. Recorded honestly rather than inferred from the contradicting docs.
+
+DO NOT switch Create(OwningAppId) -> Create(BffAppId). That is exactly what trigger 1 forbids: ADR-028 A4 territory, a NEW site under E-3, and it contradicts spaarke-auth-v4-dataverse-MI design.md:149. A human picks path A/B/C in BLOCKED.md.
+
+Read-only throughout — no container type created, modified, or deleted. No secret value written anywhere.
+</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

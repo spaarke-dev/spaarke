@@ -27,10 +27,10 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 003 | [Sync Status reflects real outcomes](003-sync-status-truth.poml) | 1 A | A03 | FULL | sonnet | high | W1 | ✅ | 001 | ✅ |
 | 005 | [Diagnose + fix Audit Log](005-fix-audit-log.poml) | 1 A | A05 | FULL | sonnet | xhigh | W1 | ✅ | 001 | ✅ |
 | 004 | [Diagnose + fix Search](004-fix-search.poml) | 1 A | A04 | FULL | sonnet | xhigh | W2 | ❌ | 001 | ✅ |
-| 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | 🔲 |
+| 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | ✅ **UNWORKABLE** |
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
-| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔲 |
-| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | 🔲 |
+| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | ⛔ **BLOCKED** |
+| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ⛔ **BLOCKED** |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔲 |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
@@ -102,6 +102,32 @@ Each wave holds **at most one** `parallel-safe=false` GraphService task. Build v
 
 **Longest chain: 8 tasks.** Task 010 is the highest-risk node — an `UNWORKABLE` verdict blocks 011, and
 everything from 020 onward depends on 011. The auth spike is not just first; it is load-bearing.
+
+---
+
+## ⛔ WORKSTREAM B IS BLOCKED — read [`BLOCKED.md`](../BLOCKED.md) before touching auth
+
+Task **010 returned UNWORKABLE** (2026-08-21). Escalation triggers 1 and 2 both fired; the CLAUDE.md
+§6.5 gate **must be re-run** with new evidence before task 011 starts.
+
+**The gate's premise was false.** It resolved as path C (comply under ADR-028 **E-1**, which exempts
+*"per-customer owning apps, which are other applications' identities"*). But `sprk_owningappid` =
+`170c98e1-…` = **`SDAP-PCF-CLIENT`** — the SPA client the code page already signs in as. **There is no
+per-customer owning app in this environment**, so E-1 does not describe the situation.
+
+| Proven live | |
+|---|---|
+| `api://{owningAppId}/.default` | `AADSTS500011` — resource principal not found; the app has **no** `identifierUris` and **no** exposed scopes |
+| OBO client vs assertion audience | client `170c98e1` ≠ `aud` `1e40baad` (BFF). OBO requires them equal — structurally unfixable here |
+| `FileStorageContainerType.Manage.All` | delegated + admin-consented on **both** SPs — **permissions were never the problem** |
+| app-only `GET …/containerTypes` | **403** on v1.0 *and* beta — spec §3.1 confirmed |
+
+**Do NOT switch `Create(OwningAppId)` → `Create(BffAppId)`.** It is the one move escalation trigger 1
+names: ADR-028 **A4** territory, a new site under **E-3**, and it contradicts
+`spaarke-auth-v4-dataverse-MI` `design.md:149`. A human picks path A / B / C in `BLOCKED.md`.
+
+**Not blocked**: A, C (ungated parts), D, E, F, and task 013. **Search is NOT blocked on auth** —
+task 004 proved it was a wrong Graph entity type and fixed it. 011 must not inherit Search.
 
 ---
 
