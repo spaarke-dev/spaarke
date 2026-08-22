@@ -1562,6 +1562,40 @@ public sealed class SpeAdminGraphService
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchContainers({query})"); }
     }
 
+    /// <summary>
+    /// Lists container types using a DELEGATED (user-context) Graph client.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Container types cannot be read app-only.</b> Proven against the live tenant (task 010):
+    /// <c>GET /storage/fileStorage/containerTypes</c> returns <c>403 accessDenied</c> on v1.0 and beta
+    /// alike, even with a healthy app-only token. Graph requires a delegated token here, so the
+    /// app-only <see cref="ListContainerTypesForConfigAsync"/> path can never succeed for this call.
+    /// </para>
+    /// <para>
+    /// The caller supplies the client, built by <c>IGraphClientFactory.ForUserAsync</c> — the BFF's
+    /// existing OBO exchange, already used by SPE file operations, the Agent, and the Dataverse user
+    /// client. Deliberately NOT <c>SpeAdminTokenProvider</c>: that provider exchanges as the config's
+    /// <c>OwningAppId</c>, which in this environment is the SPA client itself. It exposes no
+    /// identifier URI, so its token request fails with <c>AADSTS500011</c>, and OBO additionally
+    /// requires the exchanging client to be the assertion's audience (the BFF). See
+    /// <c>notes/obo-spike-findings.md</c>.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>This method applies no tenant scoping.</b> The BFF identity can reach every container type
+    /// it is registered against, so in a multi-customer deployment the caller MUST already have been
+    /// authorized for the relevant business unit. That check does not exist yet — see
+    /// <c>notes/tenant-isolation-gap.md</c>.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForUserAsync(
+        GraphServiceClient userGraphClient, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(userGraphClient);
+        try { return await ListContainerTypesAsync(userGraphClient, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes(delegated)"); }
+    }
+
     public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForConfigAsync(
         ContainerTypeConfig config, CancellationToken ct = default)
     {

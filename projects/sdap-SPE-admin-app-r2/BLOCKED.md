@@ -1,3 +1,20 @@
+> ## ✅ RESOLVED 2026-08-22 — operator chose **path A** (BFF identity, existing OBO path)
+> 
+> Container types now use `IGraphClientFactory.ForUserAsync`, the BFF's existing OBO exchange —
+> already used by SPE file operations, the Agent, and the Dataverse user client. **No new
+> `.WithClientSecret` site was created**, so the A4/E-3 concern below was overstated: the BFF
+> already had four OBO sites, and SpeAdmin now reuses one instead of adding a fifth.
+> 
+> **Still open, and now the binding constraint for Model 1:** the BFF identity can reach every
+> container type, so cross-customer isolation moved from Entra into our code — where it does not
+> yet exist. See [`notes/tenant-isolation-gap.md`](notes/tenant-isolation-gap.md). Required before
+> multi-customer go-live; not required for Model 2 (dedicated).
+> 
+> ADR-028 still needs amending so E-1 stops describing a per-customer owning app that does not
+> exist for SpeAdmin (path B remains outstanding as a docs deliverable).
+
+---
+
 # BLOCKED — task 010 (OBO spike) · Workstream B halted
 
 > Written 2026-08-21 by task 010 per its escalation contract and root CLAUDE.md §6 / §6.5.
