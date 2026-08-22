@@ -155,7 +155,13 @@ public sealed class ComposeHyperlinkCommentSeamTests
     {
         var source = BuildHyperlinkCommentSource();
         var projection = _builder.BuildContentModel(source);
-        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+// Task 040: pinned to the RENDER path (mergeUnchangedBlocks: false). This test asserts how the
+        // renderer RE-AUTHORS comment anchors and hyperlink relationships, and it posts the projection unmodified — so with the merge on
+        // (the production default) every block is CLONED and the re-authoring never runs. Cloning is the
+        // correct behaviour for an unedited block; this test's subject is the render path itself, which
+        // still executes for every block the user actually changes. Merge-path coverage:
+        // ComposeMergeSeamTests.
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test", mergeUnchangedBlocks: false);
 
         CommentsPartBytes(rendered)!.AsSpan().SequenceEqual(CommentsPartBytes(source)!).Should().BeTrue(
             "the carrier's comments part is authoritative — preserved byte-identically");

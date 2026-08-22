@@ -122,18 +122,29 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > **NOT-CONFIRMED**: all three live call sites are on the op-log path the prototype never exercised, so
 > FR-D01 keeps one waiver rather than deleting 3,000 lines on "probably". Four Phase-4 POMLs need amending
 > (040/041/044/074 — see the decision §6). ADR-049 third amendment is **DRAFTED, awaiting owner sign-off**
-> (§6.5 Path B) → **✅ OWNER-ACCEPTED 2026-08-21** (*"ADR-049 is fine."*). The `.claude/adr/` + `docs/adr/`
-> write is **pre-authorized** and pending — apply at task 045 **or at the start of 040, whichever comes
-> first**. Prefer early: until it lands, ADR-049 still tells a reader that "render-on-save supersedes
-> surgical byte-patch", which is the guidance that produced the defect 040 exists to fix. **Main session
-> only** (root §3) — a sub-agent will hit "Edit denied". [`notes/gate-decision.md`](../notes/gate-decision.md) ·
+> (§6.5 Path B) → **✅ OWNER-ACCEPTED 2026-08-21** (*"ADR-049 is fine."*) → **✅ APPLIED 2026-08-21** at the
+> start of task 040. Landed in `.claude/adr/ADR-049-*.md` (concise) + a NEW `docs/adr/ADR-049-*.md` twin
+> (full), plus three stale pointer surfaces found in the same sweep: both ADR INDEXes and **root CLAUDE.md
+> §17**, all three of which still described R4's surgical byte-patch as the save contract. [`notes/gate-decision.md`](../notes/gate-decision.md) ·
 > [`notes/adr-049-third-amendment-draft.md`](../notes/adr-049-third-amendment-draft.md)
 
 ## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*
 
+> **✅ 040 — THE MERGE IS IN PRODUCTION, 2026-08-21.** Gate re-run against the production implementation:
+> **100.00% overall / 100% near-tier (lenient)** on 18/18 documents, and **100% STRICT on 16 of 18** — better
+> than the prototype, which only had to clear a no-regression ratchet. 253 blocks cloned, 18 rendered. Control
+> arm reproduces **18.08% / 6.67%** exactly. Zero hard-fails, zero honesty violations, flat 100% over 5 round
+> trips. +3.9 ms/document; publish **43.69 MB** (−1.27 vs baseline); no new NuGet; no new CVE; NetArchTest
+> 36/36; full suite **10,792 / 0**. **Five POML reconciliations** — FR-A01 dropped; comparison strips `ParaId`
+> (without which the merge scores 100% at the renderer and near 0% through the wire); **LCS alignment** instead
+> of document order (positional pairing gives ZERO preservation on insert/delete, which the prototype never
+> measured); one shared list-run cursor; basic FR-A04 inheritance done here. **041 still owns** the edited
+> block's residual formatting loss and is still not optional.
+> [`notes/merge-mechanism-results.md`](../notes/merge-mechanism-results.md)
+
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 040 | **The merge mechanism** — baseline stamping · server-side re-projection oracle · block copy-through · property inheritance for edited blocks *(ONE mechanism, one file-pass)* | FR-A01/02/03/04 | FULL | opus/max | ❌ | 031 | 🔲 |
+| 040 | **The merge mechanism** — server-side re-projection oracle · LCS alignment · block copy-through · property inheritance *(FR-A01 stamper promotion DROPPED — proved unnecessary)* | FR-A02/03/04 | FULL | opus/max | ❌ | 031 | ✅ |
 | 041 | **Opaque-atom payload carry** + table/atom identity (write model + `opaqueAtomNode.ts`) | FR-A05/06 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 042 | **Comment anchors + revision-id seeding under cloning** (dup-paraId consume-in-order, cross-boundary ranges) | FR-A11 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 043 | **Capability gate** → read-only + **"Edit a copy"** (`ConfirmModal`/ADR-050; fork stamped `Authored`; original never written) | FR-A07 | FULL | opus/xhigh | ❌ | 040 | 🔲 |

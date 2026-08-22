@@ -65,7 +65,7 @@ public sealed class MergePrototypeMeasurementTests : IClassFixture<MergePrototyp
         editApplied.Should().BeTrue($"[{fileName}] the corpus document must expose an editable run");
 
         var control = Render(source, edited, merge: false, out _, out var controlMs);
-        var stats = new MergePrototypeStats();
+        var stats = new ComposeMergeStats();
         var merged = Render(source, edited, merge: true, out stats, out var mergedMs);
 
         var controlReport = Measure(source, control);
@@ -100,6 +100,15 @@ public sealed class MergePrototypeMeasurementTests : IClassFixture<MergePrototyp
         (mergedReport.NearTierPreservationPercent ?? 100d).Should().BeGreaterThanOrEqualTo(
             controlReport.NearTierPreservationPercent ?? 100d,
             $"[{fileName}] the merge must not preserve LESS of the near tier than render-on-save already does");
+
+        // BOTH comparison levels (task 040 acceptance). Strict keeps w14:paraId/textId in the comparison, so
+        // it also catches identity churn on untouched blocks — content preserved but ids rewritten.
+        var controlStrict = MeasureStrict(source, control);
+        var mergedStrict = MeasureStrict(source, merged);
+        _output.WriteLine($"{fileName}: strict {Fmt(controlStrict.OverallPreservationPercent)} -> {Fmt(mergedStrict.OverallPreservationPercent)}");
+        (mergedStrict.OverallPreservationPercent ?? 100d).Should().BeGreaterThanOrEqualTo(
+            controlStrict.OverallPreservationPercent ?? 100d,
+            $"[{fileName}] the merge must not regress against the control at the STRICT level either");
 
         // ADR-049: a block the merge cannot handle degrades to a thin render + warning. It never refuses.
         merged.Should().NotBeEmpty($"[{fileName}] the merge must always produce a document — never a refusal");
@@ -142,7 +151,7 @@ public sealed class MergePrototypeMeasurementTests : IClassFixture<MergePrototyp
         // index but almost none of them match. This is a strictly harsher case than a real cut-paste.
         var reordered = model with { Blocks = model.Blocks.Reverse().ToList() };
 
-        var stats = new MergePrototypeStats();
+        var stats = new ComposeMergeStats();
         var bytes = Render(source, reordered, merge: true, out stats, out var ms);
 
         bytes.Should().NotBeEmpty("a heavy restructure must still produce a document (ADR-049: never a refusal)");
@@ -251,9 +260,9 @@ public sealed class MergePrototypeMeasurementTests : IClassFixture<MergePrototyp
     }
 
     private static byte[] Render(
-        byte[] carrier, ComposeContentModel model, bool merge, out MergePrototypeStats stats, out long elapsedMs)
+        byte[] carrier, ComposeContentModel model, bool merge, out ComposeMergeStats stats, out long elapsedMs)
     {
-        stats = new MergePrototypeStats();
+        stats = new ComposeMergeStats();
         var warnings = new List<ComposeProjectionWarning>();
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var bytes = new ComposeDocumentRenderer().RenderIntoCarrier(
@@ -265,6 +274,14 @@ public sealed class MergePrototypeMeasurementTests : IClassFixture<MergePrototyp
     private static ComposeBlockPreservationOracle.PreservationReport Measure(byte[] original, byte[] rendered) =>
         ComposeBlockPreservationOracle.Compare(
             original, rendered, EditMarker, ComposeBlockPreservationOracle.ComparisonLevel.Lenient);
+
+    /// <summary>The STRICT level — identical to lenient in exactly one bit: <c>w14:paraId</c>/<c>w14:textId</c>
+    /// are NOT normalized away. Task 040 asserts the gate at BOTH levels, because a merge that scored 100%
+    /// leniently while churning revision ids on every untouched block would be preserving content and
+    /// destroying identity, and only the strict level can see that.</summary>
+    private static ComposeBlockPreservationOracle.PreservationReport MeasureStrict(byte[] original, byte[] rendered) =>
+        ComposeBlockPreservationOracle.Compare(
+            original, rendered, EditMarker, ComposeBlockPreservationOracle.ComparisonLevel.Strict);
 
     private static int ReadBodyBlockCount(byte[] docx)
     {

@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-A01/A02/A03/A04 — The merge mechanism: baseline stamping · server-side re-projection oracle · block copy-through · property inheritance</title>
     <phase>4 Track A — Faithful Save</phase>
-    <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <gate>passed-031</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The project's central architectural change, landing in the single body author. PROVISIONAL — amendable by task 031's gate findings.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -19,6 +19,11 @@
   </metadata>
 
   <prompt>
+    ✅ **RECONCILED + COMPLETE (2026-08-21).** Five reconciliations against the gate findings are recorded
+    in `notes/merge-mechanism-results.md` §1 — most importantly FR-A01 (stamper promotion) was DROPPED as
+    proved-unnecessary, and pairing is by longest common subsequence rather than document order, because
+    positional pairing gives ZERO preservation on insert/delete (the prototype never measured either).
+
     ⚠️ **PROVISIONAL** — authored before the Phase-3 gate. Task 031 may amend this POML based on what the
     prototype learned. Re-read `notes/gate-decision.md` and `notes/merge-prototype-results.md` FIRST, and
     treat their findings as authoritative over anything here that conflicts.

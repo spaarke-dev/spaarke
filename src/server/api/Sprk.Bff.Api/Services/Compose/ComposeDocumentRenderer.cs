@@ -396,7 +396,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
-    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null, bool mergeUnchangedBlocks = false, MergePrototypeStats? mergeStats = null)
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null, bool mergeUnchangedBlocks = true, ComposeMergeStats? mergeStats = null)
     {
         if (carrierBytes is null || carrierBytes.Length == 0)
         {
@@ -447,60 +447,31 @@ public sealed partial class ComposeDocumentRenderer
             }
 
             // ═══════════════════════════════════════════════════════════════════════════════════
-            // TASK 030 PROTOTYPE — the three-way merge's BASE side.
+            // THE BASE SIDE (ADR-049 R8 third amendment · task 040).
             //
-            // `body.RemoveAllChildren()` on the next line is the single instruction that costs the
-            // project 82% of its untouched blocks: every tab stop, indent, style, spacing rule and
-            // numbering association in the carrier is discarded here, and the body is then rebuilt from
-            // a content model that carries justification, bold and italic.
+            // `body.RemoveAllChildren()` below is the single instruction that cost the project 82% of its
+            // untouched blocks: every tab stop, indent, style, spacing rule and numbering association in the
+            // carrier was discarded here, and the body rebuilt from a content model carrying justification,
+            // bold and italic.
             //
-            // The merge does not change that control flow (ADR-049 I-5: ONE body author, and this is
-            // it). It adds the BASE side R6 never had — the baseline's own blocks, captured before the
-            // swap and re-projected server-side, so a block the user never touched can be put back
-            // VERBATIM instead of re-authored from a lossy model.
+            // The merge does not change that control flow (ADR-049 I-5: ONE body author, and this is it). It
+            // adds the BASE side R6 never had — the baseline's own blocks, captured before the swap and
+            // re-projected server-side, so a block the user never touched is put back VERBATIM instead of
+            // re-authored from a lossy model.
             //
-            // Captured BEFORE the removal because RemoveAllChildren detaches the nodes; the clones are
-            // taken eagerly (CloneNode(true)) so they survive independent of the live DOM.
+            // Captured BEFORE the removal because RemoveAllChildren detaches the nodes.
             //
-            // Opt-in (`mergeUnchangedBlocks`) and default-OFF: this is a prototype answering whether
-            // task 040 should exist in this shape, not the production path.
-            List<OpenXmlElement>? baselineBlocks = null;
-            IReadOnlyList<ComposeBlock>? baseModelBlocks = null;
-            if (mergeUnchangedBlocks)
+            // `mergeUnchangedBlocks` defaults to TRUE and is a TEST SEAM, not a feature flag: it is bound to
+            // no configuration and exists so the seam measurement can run a control arm through the same
+            // renderer in the same test run. An instrument that reports two different answers for two inputs
+            // is measuring something; that is the anti-vacuity evidence behind the gate.
+            var mergeBaseline = mergeUnchangedBlocks ? ComposeBlockMerge.Capture(body, carrierBytes) : null;
+            if (mergeUnchangedBlocks && mergeBaseline is null)
             {
-                // DIRECT `w:body` children only. Never `body.Descendants<Paragraph>()` — that interleaves
-                // `w:txbxContent` paragraphs into the body sequence and mis-pairs everything after the
-                // first text box. `mc:AlternateContent` / `w:txbxContent` are carried WHOLE, never entered.
-                baselineBlocks = body.ChildElements
-                    .Where(e => e is not SectionProperties)
-                    .Select(e => e.CloneNode(true))
-                    .ToList();
-
-                // "Unchanged" is decided against a FRESH SERVER-SIDE RE-PROJECTION of the baseline —
-                // never raw text, never the client's copy of anything. The projection is the only
-                // coordinate system (project invariant 3): base and posted are then two values of the
-                // same type, produced by the same builder, and their comparison is total.
-                try
-                {
-                    var reprojected = new ComposeDocxProjectionBuilder().BuildContentModel(carrierBytes);
-                    if (reprojected.Status != ComposeProjectionStatus.Failed && reprojected.Model is not null)
-                    {
-                        baseModelBlocks = reprojected.Model.Blocks;
-                    }
-                }
-                catch (Exception)
-                {
-                    // FAIL-OPEN, mirroring ComposeBaselineParaIdStamper's stance: a baseline we cannot
-                    // re-project simply gets no merge, and the render proceeds exactly as R6 does today.
-                    // A save is never refused because the BASE side was unavailable (ADR-049: no 422).
-                    baseModelBlocks = null;
-                }
-
-                if (baseModelBlocks is null)
-                {
-                    baselineBlocks = null;
-                    mergeStats?.RecordBaselineUnavailable();
-                }
+                // Fail OPEN: a baseline we cannot re-project simply gets no merge and the render proceeds
+                // exactly as R6 does. A save is never refused because the base side was unavailable
+                // (ADR-049 invariant 1 — every save terminates in a defined outcome).
+                mergeStats?.RecordBaselineUnavailable();
             }
 
             body.RemoveAllChildren();
@@ -576,9 +547,9 @@ public sealed partial class ComposeDocumentRenderer
                 renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
 
-            if (baselineBlocks is not null && baseModelBlocks is not null)
+            if (mergeBaseline is not null)
             {
-                RenderBlocksMergingUnchanged(body, renderBlocks, baseModelBlocks, baselineBlocks, state, mergeStats);
+                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats);
             }
             else
             {
@@ -952,7 +923,7 @@ public sealed partial class ComposeDocumentRenderer
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
+    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state, IDictionary<int, int>? runCursor = null)
     {
         // Ordered-list continuity (task 021, review 020-R1 + Step-9.5 fix F1): the model contract — not
         // block adjacency — governs instance selection. An item carrying a source NumId resolves through
@@ -978,7 +949,10 @@ public sealed partial class ComposeDocumentRenderer
         //   - StartsNewList=true always allocates a fresh restart-at-1 instance.
         // State is local per container: a table-cell boundary starts fresh (a NumId-less list never
         // continues across cells).
-        var orderedRunByLevel = new Dictionary<int, int>();
+        // Task 040: the merge owns ONE cursor for the whole body and passes it here, so ordered-list run
+        // continuity spans cloned blocks and multiple calls. Every other caller passes null and gets the
+        // previous per-call behaviour — a table-cell boundary still starts fresh, which is the contract.
+        var orderedRunByLevel = runCursor ?? new Dictionary<int, int>();
 
         void CloseRunsDeeperThan(int level)
         {
@@ -1049,7 +1023,7 @@ public sealed partial class ComposeDocumentRenderer
 
     /// <summary>The nearest ACTIVE ordered run shallower than <paramref name="level"/> (a NumId-less
     /// nested ordered item joins its parent's instance at a deeper ilvl — Word's multi-level idiom).</summary>
-    private static bool TryNearestShallowerRun(Dictionary<int, int> orderedRunByLevel, int level, out int numId)
+    private static bool TryNearestShallowerRun(IDictionary<int, int> orderedRunByLevel, int level, out int numId)
     {
         for (var probe = level - 1; probe >= 0; probe--)
         {
@@ -1804,6 +1778,20 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private void AssignParaIds(Body body)
     {
+        // Task 040 investigated excluding paragraphs inside opaque regions (`mc:AlternateContent`,
+        // `w:txbxContent`) from this pass, because entering them MUTATES a block the merge cloned verbatim:
+        // Word writes the same box twice (Choice + Fallback) carrying the SAME w14:paraId, pass 1 treats the
+        // second copy as a malformed duplicate, and re-mints it. Measured cost at the STRICT comparison level:
+        // alternate-content-duplicate-paraid.docx 66.67%, AppligentNDA_Signed.docx 95.92% (both 100% LENIENT
+        // — content is preserved; only identity churns).
+        //
+        // REVERTED, deliberately. Excluding them breaks task 011's global-paraId-uniqueness guarantee, which
+        // RenderOnSaveSeamTests pins by name on the NDA's 2BBF07C9/CA/CB class — duplicate anchors were part
+        // of the production-422 failure chain. Strict is a no-regression RATCHET, not a gate (task 031 T5),
+        // and both documents clear it by a wide margin; trading a safety invariant for a better number on a
+        // non-gating metric is the exact move the ADR-049 paired-MUST exists to forbid. The residual is on the
+        // task-045 loss list with this reasoning; resolving it properly means changing what the identity map
+        // considers a block, which is not a rendering change.
         var paragraphs = body.Descendants<Paragraph>().ToList();
 
         // Pass 1: keep the first occurrence of each client id; null out duplicates so pass 2 re-mints them.
@@ -1835,6 +1823,7 @@ public sealed partial class ComposeDocumentRenderer
             p.ParagraphId = new HexBinaryValue(minted);
         }
     }
+
 
     private string MintUnique(HashSet<string> seen)
     {
@@ -2368,144 +2357,60 @@ public sealed partial class ComposeDocumentRenderer
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
-    // TASK 030 PROTOTYPE — three-way merge over the body sequence.
+    // THE MERGE, EXECUTED (ADR-049 R8 third amendment · task 040).
     //
     // Not a second body author (ADR-049 I-5): this method lives in the renderer, appends into the same
-    // `body`, and shares the same `ListRenderState` as `RenderBlocks`, which it delegates to for every
-    // block it does NOT clone. It decides, per block, between two authors of ONE body — it is not one.
+    // `body`, and shares the same `ListRenderState` as `RenderBlocks`, which it delegates to for every block
+    // it does not clone. `ComposeBlockMerge` decides; this executes. One component writes body children.
     //
-    //   posted[i] == base[i]   -> CLONE the baseline's own `w:p` subtree, with ZERO property logic.
-    //                             Nothing is re-derived, so nothing can be lost (project invariant 7).
-    //   posted[i] != base[i]   -> RENDER from the model, exactly as R6 does.
-    //   no counterpart         -> RENDER from the model (an inserted block has no base side).
-    //
-    // Consecutive render-blocks are batched into ONE `RenderBlocks` call so list-run adjacency semantics
-    // inside a run are identical to the unmerged path.
+    //   cloned  -> the baseline's own subtree, appended verbatim, with ZERO property logic. Nothing is
+    //              re-derived, so nothing can be lost (invariant 7).
+    //   rendered-> from the model, inheriting the base counterpart's unmodeled properties (FR-A04).
+    //   no base -> from the model alone. An inserted block has no base side; that is not a failure.
     // ═══════════════════════════════════════════════════════════════════════════════════════════
-    private void RenderBlocksMergingUnchanged(
+    private void RenderMergedBlocks(
         Body body,
         IReadOnlyList<ComposeBlock> posted,
-        IReadOnlyList<ComposeBlock> baseBlocks,
-        IReadOnlyList<OpenXmlElement> baselineBlocks,
+        ComposeMergeBaseline baseline,
         ListRenderState state,
-        MergePrototypeStats? stats)
+        ComposeMergeStats? stats)
     {
-        // Pairing is by DOCUMENT ORDER, with paraId as corroboration only — never as a key. Duplicates
-        // are spec-legal in `mc:AlternateContent` and Word regenerates ids on save, so a paraId-keyed
-        // pairing mis-binds exactly on the documents this project exists to survive.
-        var pending = new List<ComposeBlock>();
+        var steps = ComposeBlockMerge.Plan(posted, baseline, stats);
 
-        void FlushPending()
+        // ONE ordered-list run cursor for the entire body, observed by cloned and rendered blocks alike.
+        // The task-030 prototype batched renders and let each batch start a fresh cursor, so a rendered list
+        // item following cloned list items restarted at 1 (its limitation 3). Sharing the cursor — and
+        // recording every cloned block into it — is what makes a cloned list and a rendered continuation of
+        // it number as one list.
+        var runCursor = new Dictionary<int, int>();
+        var single = new ComposeBlock[1];
+
+        foreach (var step in steps)
         {
-            if (pending.Count == 0)
+            if (step.Action == ComposeMergeAction.Clone)
             {
-                return;
-            }
-
-            RenderBlocks(body, pending, state);
-            pending.Clear();
-        }
-
-        for (var i = 0; i < posted.Count; i++)
-        {
-            var hasCounterpart = i < baseBlocks.Count && i < baselineBlocks.Count;
-            var unchanged = hasCounterpart && BlocksAreEquivalent(posted[i], baseBlocks[i]);
-
-            if (!unchanged)
-            {
-                pending.Add(posted[i]);
-                stats?.RecordRendered(hasCounterpart);
+                var clone = baseline.Blocks[step.BaseIndex].CloneNode(true);
+                body.AppendChild(clone);
+                ComposeBlockMerge.ObserveClonedBlock(clone, runCursor);
                 continue;
             }
 
-            // A cloned block must be appended IN ORDER, so anything queued ahead of it renders first.
-            FlushPending();
-            body.AppendChild(baselineBlocks[i].CloneNode(true));
-            stats?.RecordCloned();
+            // Rendered one block at a time so the just-appended element can be identified for property
+            // inheritance. Continuity is unaffected: the run cursor is external and persists across calls.
+            var before = body.ChildElements.Count;
+            single[0] = posted[step.PostedIndex];
+            RenderBlocks(body, single, state, runCursor);
 
-            // The clone carries the baseline's OWN numbering references, which resolve against the
-            // carrier's preserved numbering part — its displayed number is correct by construction and
-            // the plan allocates nothing for it.
-            //
-            // PROTOTYPE LIMITATION, measured rather than hidden: a cloned block does not advance
-            // `ListRenderState`, so a RENDERED list item appearing after cloned list items computes its
-            // run continuity against a state that did not see them and may restart at 1. In the gate
-            // scenario at most one block per save is rendered, and the oracle excludes the edited block
-            // from its denominator, so this cannot flatter the measurement — but task 040 must thread
-            // cloned list items through the run bookkeeping. Recorded in the results note.
-        }
+            if (step.BaseIndex < 0)
+            {
+                continue;
+            }
 
-        FlushPending();
-    }
-
-    /// <summary>
-    /// Structural equality between the POSTED block and the block the baseline RE-PROJECTS to. Both
-    /// sides are produced by <see cref="ComposeDocxProjectionBuilder"/>, so this compares like with
-    /// like: if the user did not touch a paragraph, the model they posted for it is the model the
-    /// baseline projects to, field for field.
-    ///
-    /// <para>Deliberately NOT a text comparison. Two paragraphs with identical text can differ in
-    /// formatting, list level, comment anchors or revision state, and a text-equality shortcut would
-    /// clone a block the user actually changed — silently discarding their edit. That is a worse
-    /// failure than the one this whole mechanism exists to fix, so the comparison is total over the
-    /// model by construction (canonical JSON of the whole block), not a hand-maintained field list that
-    /// silently stops covering a field somebody adds later.</para>
-    /// </summary>
-    private static bool BlocksAreEquivalent(ComposeBlock posted, ComposeBlock baseBlock)
-    {
-        if (ReferenceEquals(posted, baseBlock))
-        {
-            return true;
-        }
-
-        try
-        {
-            return string.Equals(
-                System.Text.Json.JsonSerializer.Serialize(posted, BlockComparisonJson),
-                System.Text.Json.JsonSerializer.Serialize(baseBlock, BlockComparisonJson),
-                StringComparison.Ordinal);
-        }
-        catch (Exception)
-        {
-            // Fail CLOSED on the clone decision: a block we cannot compare is treated as CHANGED and
-            // re-rendered. The cost is losing that block's formatting (today's behaviour); the cost of
-            // failing open would be silently discarding a real edit.
-            return false;
+            var baseElement = baseline.Blocks[step.BaseIndex];
+            for (var i = before; i < body.ChildElements.Count; i++)
+            {
+                ComposeBlockMerge.InheritProperties(body.ChildElements[i], baseElement);
+            }
         }
     }
-
-    private static readonly System.Text.Json.JsonSerializerOptions BlockComparisonJson = new()
-    {
-        // Property ORDER is fixed by the record's declaration order, so serialization is deterministic
-        // for two instances of the same type — the comparison needs determinism, not canonical JSON.
-        WriteIndented = false,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
-    };
-}
-
-/// <summary>
-/// Task 030 prototype instrumentation — how the merge decided, per save. Not production telemetry; the
-/// measurement note is written from these counters.
-/// </summary>
-public sealed class MergePrototypeStats
-{
-    public int ClonedBlocks { get; private set; }
-    public int RenderedBlocks { get; private set; }
-    public int RenderedWithoutCounterpart { get; private set; }
-    public int BaselineUnavailable { get; private set; }
-
-    public int TotalBlocks => ClonedBlocks + RenderedBlocks;
-
-    public void RecordCloned() => ClonedBlocks++;
-
-    public void RecordRendered(bool hadCounterpart)
-    {
-        RenderedBlocks++;
-        if (!hadCounterpart)
-        {
-            RenderedWithoutCounterpart++;
-        }
-    }
-
-    public void RecordBaselineUnavailable() => BaselineUnavailable++;
 }

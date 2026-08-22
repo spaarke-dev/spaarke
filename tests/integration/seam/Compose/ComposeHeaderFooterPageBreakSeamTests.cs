@@ -213,7 +213,13 @@ public sealed class ComposeHeaderFooterPageBreakSeamTests
         projection.Model.Blocks.Should().HaveCount(3, "all three paragraphs' prose survives");
 
         // Round-trip still succeeds (no hard-fail; the content joins the final section).
-        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+// Task 040: pinned to the RENDER path (mergeUnchangedBlocks: false). This test asserts how the
+        // renderer RE-AUTHORS an interior section break (it flattens it), and it posts the projection unmodified — so with the merge on
+        // (the production default) every block is CLONED and the re-authoring never runs. Cloning is the
+        // correct behaviour for an unedited block; this test's subject is the render path itself, which
+        // still executes for every block the user actually changes. Merge-path coverage:
+        // ComposeMergeSeamTests.
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test", mergeUnchangedBlocks: false);
         using var doc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
         var body = doc.MainDocumentPart!.Document!.Body!;
         body.Descendants<Paragraph>().SelectMany(p => p.Descendants<Text>()).Select(t => t.Text)
