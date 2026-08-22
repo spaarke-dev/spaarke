@@ -169,19 +169,29 @@ public class OperationPolicyCharacterizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // CHARACTERIZATION — A-20 Read-ceiling: the snapshot can never carry more than Read
-    // (DataverseAccessDataSource.QueryUserPermissionsAsync:368-372), so every policy requiring
-    // Write or above is unsatisfiable in production.
-    // Flipped by: task 005 (FR-04, lift the Read ceiling).
+    // A-20 Read-ceiling — RULE-LEVEL half. See the scope note below: the ceiling itself is NOT
+    // observable here, and task 005 does not flip these.
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-20 — CURRENT (BROKEN) BEHAVIOR. These operations ARE valid policy keys, but each requires a
-    /// right above Read. Because DataverseAccessDataSource returns at most AccessRights.Read, a
-    /// Read-only snapshot is what production always presents — so all of these deny in practice.
+    /// A Read-only caller is denied every operation requiring more than Read — with a RIGHTS reason,
+    /// not <c>unknown_operation</c>.
     ///
-    /// FLIPPED BY: task 005 (FR-04) — once the data source returns real Write/Create/Delete/Share,
-    /// a caller with those rights is allowed and this test asserts Allow for a full-rights snapshot.
+    /// ⚠️ CORRECTED BY TASK 005. This was authored as
+    /// <c>Characterization_WritePlusOperation_DeniedUnderReadCeiling</c>, doc-commented "CURRENT
+    /// (BROKEN) BEHAVIOR … FLIPPED BY: task 005". That framing was wrong, and acting on it would have
+    /// been a security regression: the test hands the rule a Read-only snapshot, and denying Write+
+    /// operations to a Read-only caller is **permanently correct**. Task 005 changed which snapshot the
+    /// DATA SOURCE produces, not what the RULE decides — so there was nothing here to flip, and
+    /// "flipping" it would have meant allowing upload to a read-only user.
+    ///
+    /// The A-20 ceiling lived in <c>DataverseAccessDataSource.QueryUserPermissionsAsync</c> and is not
+    /// observable at this layer at all. Its real coverage is
+    /// <c>PermissionsEndpointCallerScopedTests.GetPermissions_ForCallerWithEveryRight_ReportsEveryCapabilityTrue</c>,
+    /// which exercises snapshot → policy → capability end to end.
+    ///
+    /// Kept (renamed) as a permanent negative: task 005 widened the rights a snapshot can carry, and
+    /// this pins that it did not also weaken the rule.
     /// </summary>
     [Theory]
     [InlineData("upload_file")]        // Write | Create
@@ -189,26 +199,25 @@ public class OperationPolicyCharacterizationTests
     [InlineData("download_file")]      // Write  (security policy: download requires Write)
     [InlineData("share_document")]     // Share
     [InlineData("delete_file")]        // Delete
-    public async Task Characterization_WritePlusOperation_DeniedUnderReadCeiling(string operation)
+    public async Task WritePlusOperation_WithReadOnlyRights_DeniedForInsufficientRights(string operation)
     {
-        // Arrange — the ceiling production can actually produce today.
-        var readOnlyCeiling = Snapshot(AccessRights.Read);
+        // Arrange
+        var readOnly = Snapshot(AccessRights.Read);
 
         // Act
-        var result = await Rule().EvaluateAsync(Context(operation), readOnlyCeiling);
+        var result = await Rule().EvaluateAsync(Context(operation), readOnly);
 
-        // Assert — the operation IS known (so this is not the A-3 unknown-operation path) but the
-        // Read ceiling cannot satisfy it.
+        // Assert — the operation IS known (so this is not the A-3 unknown-operation path) but Read
+        // alone cannot satisfy it.
         OperationAccessPolicy.IsOperationSupported(operation).Should().BeTrue(
-            "this test isolates the Read-ceiling effect, not the unknown-operation effect");
+            "this test isolates the insufficient-rights effect, not the unknown-operation effect");
         result.Decision.Should().Be(AuthorizationDecision.Deny);
         result.ReasonCode.Should().NotBe("sdap.access.deny.unknown_operation");
     }
 
     /// <summary>
-    /// A-20 — the same operations DO allow once the snapshot carries the rights the policy asks for.
-    /// This proves the defect is the data source's Read ceiling, not the policy table, and gives
-    /// task 005 an unambiguous target: make production produce a snapshot like this one.
+    /// The same operations DO allow once the snapshot carries the rights the policy asks for — the
+    /// shape of snapshot task 005 (FR-04) made producible in production.
     /// </summary>
     [Theory]
     [InlineData("upload_file")]
@@ -218,11 +227,53 @@ public class OperationPolicyCharacterizationTests
     [InlineData("delete_file")]
     public async Task EvaluateAsync_WhenSnapshotCarriesRequiredRights_Allows(string operation)
     {
-        var allRights = AccessRights.Read | AccessRights.Write | AccessRights.Delete
-                        | AccessRights.Create | AccessRights.Append | AccessRights.Share;
-
-        var result = await Rule().EvaluateAsync(Context(operation), Snapshot(allRights));
+        var result = await Rule().EvaluateAsync(Context(operation), Snapshot(EveryRight));
 
         result.Decision.Should().Be(AuthorizationDecision.Allow);
     }
+
+    /// <summary>
+    /// TASK 003's BINDING OBLIGATION ON TASK 005, discharged.
+    ///
+    /// Task 003 registered <c>entity.associate_document</c> → <see cref="AccessRights.AppendTo"/>, the
+    /// first use of that flag in the policy table, and recorded that task 005 MUST map Dataverse's
+    /// <c>AppendToAccess</c> into the snapshot or <c>POST /api/office/save</c> stays permanently 403
+    /// **while looking fixed** — the operation resolves, so the denial reads as a legitimate
+    /// <c>insufficient_rights</c> rather than the loud <c>unknown_operation</c> it replaced.
+    ///
+    /// Task 005 discharges it by routing rights through <c>MapDataverseAccessRights</c>, which maps all
+    /// seven Dataverse flags including <c>AppendToAccess</c> and <c>AppendAccess</c>. This pins the
+    /// consequence: a caller holding AppendTo is ALLOWED, and — the half that makes it non-vacuous — a
+    /// caller holding everything EXCEPT AppendTo is denied.
+    /// </summary>
+    [Fact]
+    public async Task AssociateDocument_WithAppendToRights_IsAllowed()
+    {
+        var result = await Rule().EvaluateAsync(
+            Context("entity.associate_document"), Snapshot(AccessRights.AppendTo));
+
+        result.Decision.Should().Be(AuthorizationDecision.Allow,
+            "a caller holding AppendTo on the target entity may attach a document to it (POST /api/office/save)");
+    }
+
+    [Fact]
+    public async Task AssociateDocument_WithEveryRightExceptAppendTo_IsDenied()
+    {
+        var everythingElse = EveryRight & ~AccessRights.AppendTo;
+
+        var result = await Rule().EvaluateAsync(Context("entity.associate_document"), Snapshot(everythingElse));
+
+        result.Decision.Should().Be(AuthorizationDecision.Deny,
+            "AppendTo is genuinely required — if this passes, the operation is not actually gated on it " +
+            "and task 003's rights choice has been silently loosened");
+        result.ReasonCode.Should().Be("sdap.access.deny.insufficient_rights");
+    }
+
+    /// <summary>
+    /// Every right the model can express. AppendTo is included deliberately: two earlier tests in this
+    /// project omitted it and would have mis-reported an AppendTo-gated operation as broken.
+    /// </summary>
+    private const AccessRights EveryRight =
+        AccessRights.Read | AccessRights.Write | AccessRights.Delete | AccessRights.Create
+        | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
 }

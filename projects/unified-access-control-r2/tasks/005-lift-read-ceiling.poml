@@ -4,7 +4,7 @@
     <title>FR-04: Lift the AccessRights.Read ceiling so Write+ policies can pass</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-004</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (rights derivation in Spaarke.Dataverse) — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,7 +90,31 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-04; finding A-20 Read-ceiling half (policy keys are task 003). File-disjoint from task 006 (PermissionsEndpoints) but conservatively parallel-safe:false because the rights read may extend DataverseWebApiService.cs.</notes>
+  <notes>Spec FR-04; finding A-20 Read-ceiling half (policy keys are task 003). File-disjoint from task 006 (PermissionsEndpoints) but conservatively parallel-safe:false because the rights read may extend DataverseWebApiService.cs.
+
+COMPLETED 2026-08-21. The Read ceiling is gone. DataverseWebApiService.cs was NOT touched — the change stayed inside DataverseAccessDataSource.cs plus one extracted mapper.
+
+KEY DISCOVERY — the fix was mostly RECONNECTION, not new code. MapDataverseAccessRights (all seven flags, AppendToAccess included) and PrincipalAccessResponse already existed in the file as DEAD CODE: the orphaned wiring of a RetrievePrincipalAccess implementation that was replaced long ago by a "can I retrieve the record -> therefore Read" probe. Confirmed repo-wide that RetrievePrincipalAccess had ZERO live call sites; every remaining reference is a doc comment. .claude/constraints/auth.md already carried the 2026-08-20 correction recording this.
+
+DESIGN: RetrievePrincipalAccess is called first and its full flag set mapped. The original probe SURVIVES AS A FALLBACK because the deleted comment's claim that RPA "may not be available" under OBO is unverified (nothing ever exercised it) and unverifiable offline. The composition cannot regress -- worst case is exactly today's behaviour -- and any failure logs the RPA-FALLBACK marker so a silent re-cap at Read is visible rather than invisible. null vs AccessRights.None carries the distinction between "no answer, fall back" and an authoritative "no rights".
+
+APP-ONLY PATH (step 3): satisfied, and it TIGHTENS. RetrievePrincipalAccess names the principal in the URL, so nothing is inferred from app visibility. The old probe read the document AS THE APP, granting the user Read whenever the app could see the record -- finding A-2's defect, now gone on this path too. Theoretical in practice: after task 004 the app-only branch is unreachable from all three consumers.
+
+BOTH ESCALATION TRIGGERS EVALUATED, NEITHER FIRED. (1) Round trips: RPA REPLACES the probe's GET -- success path is 1 call, unchanged; only the fallback path costs 2. (2) Consumers: all six readers of AccessSnapshot.AccessRights enumerated -- AiAuthorizationService checks HasFlag(Read) ONLY so wider rights cannot change its decisions; OperationAccessRule and PermissionsEndpoints are the intended beneficiaries; ExternalProjectDataEndpoints and PlaybookSharingService read a DIFFERENT rights model (external-access grant levels / POA), not AccessSnapshot.
+
+CORRECTED A MIS-FRAMED TASK-001 TEST: Characterization_WritePlusOperation_DeniedUnderReadCeiling was doc-commented "CURRENT (BROKEN) BEHAVIOR ... FLIPPED BY: task 005". Following that instruction would have been a SECURITY REGRESSION -- the test hands the rule a Read-only snapshot, and denying Write+ to a read-only caller is permanently correct. Task 005 changed what the DATA SOURCE produces, not what the RULE decides; the ceiling was never observable at that layer. Renamed to WritePlusOperation_WithReadOnlyRights_DeniedForInsufficientRights and re-documented as a permanent negative. Also fixed two "all rights" constants in that file that omitted AppendTo.
+
+SEAM CREATED (required by acceptance criterion 5, not scope creep): criterion 5 asks for the no-over-grant property "asserted by test with a mocked Dataverse answer", which was impossible -- the mapping was private (reflection = ADR-038 ban B8) behind an HTTP call (transport mock = ban B1). The pure function moved to internal static DataverseAccessRightsMapper + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the convention already used across Sprk.Bff.Api. Pure logic, no I/O -> tests/unit/domain/** (KEEP path).
+
+OBLIGATIONS DISCHARGED: task 003's AppendTo mapping (+ the required allow test, plus a non-vacuous "every right EXCEPT AppendTo is denied" companion) and task 006's "verify the eleven capabilities light up".
+
+TESTS: 15 mapper tests (incl. a property test over all 128 subsets of the seven rights) + 3 endpoint + 2 policy. Non-vacuity verified EMPIRICALLY: transposing "AppendToAccess" => AccessRights.Append -- precisely the failure task 003 predicted -- fails 4 of 15.
+
+UNTESTED BOUNDARY, stated rather than implied away: no test exercises the RetrievePrincipalAccess HTTP call itself. Its URL form and OBO availability need a live tenant -> folded into task 034 / Phase 4 acceptance.
+
+Gates: BFF 10,657 passed / 0 failed - ArchTests 36/36 - Core 45/45 - publish 43.65 MB compressed incl. PDBs, 0.00 MB delta, no packages added. NOTE: the first full run reported 1 failure; three subsequent runs were clean and 6/6 on the touched suites. Identity not captured (-v q suppresses it); matches the pre-existing unreproducible flake -- NOT attributed to this change and not exonerated. One latent race WAS found and fixed while investigating (unlocked enumeration of the test double's Calls list).
+
+Rationale: notes/task-005-rights-mapping.md</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

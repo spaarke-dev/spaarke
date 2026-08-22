@@ -30,6 +30,26 @@ public sealed class CallerScopedAccessDataSource : IAccessDataSource
     /// <summary>Rights granted to the matching caller on the accessible document.</summary>
     public const AccessRights GrantedRights = AccessRights.Read | AccessRights.Write;
 
+    /// <summary>
+    /// Every right the model can express, AppendTo included. Task 005 (FR-04) lifted the
+    /// <see cref="AccessRights.Read"/> ceiling in <c>DataverseAccessDataSource</c>, so a snapshot like
+    /// this is now producible in production; before it, only Read ever reached a consumer.
+    /// </summary>
+    public const AccessRights AllRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Delete | AccessRights.Create
+        | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
+
+    /// <summary>
+    /// Rights this caller holds per resource. A map rather than a single mutable field so tests never
+    /// depend on execution order — the class fixture is shared across the whole test class.
+    /// </summary>
+    private static readonly Dictionary<string, AccessRights> ResourceRights = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [CallerScopedAccessTestFixture.AccessibleDocumentId] = GrantedRights,
+        [CallerScopedAccessTestFixture.FullRightsDocumentId] = AllRights
+        // InaccessibleDocumentId is deliberately absent → AccessRights.None.
+    };
+
     public Task<AccessSnapshot> GetUserAccessAsync(
         string userId,
         string resourceId,
@@ -41,18 +61,28 @@ public sealed class CallerScopedAccessDataSource : IAccessDataSource
             Calls.Add((userId, resourceId, userAccessToken));
         }
 
-        // Access requires BOTH the caller's own token AND the one document they were granted. Keying on
-        // the token is what makes this caller-scoped; keying on the resource is what lets one caller
-        // have access to one document and not another.
-        var granted =
-            string.Equals(userAccessToken, WorkspaceTestConstants.TestBearerToken, StringComparison.Ordinal)
-            && string.Equals(resourceId, CallerScopedAccessTestFixture.AccessibleDocumentId, StringComparison.OrdinalIgnoreCase);
+        // Simulates a failure to resolve rights, so the endpoint's fail-closed path is exercised
+        // end-to-end rather than assumed (task 005 acceptance criterion 4).
+        if (string.Equals(resourceId, CallerScopedAccessTestFixture.ResolutionErrorDocumentId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("simulated Dataverse rights-resolution failure");
+        }
+
+        // Access requires BOTH the caller's own token AND a resource they hold rights on. Keying on the
+        // token is what makes this caller-scoped; keying on the resource is what lets one caller have
+        // access to one document and not another.
+        var callerMatches =
+            string.Equals(userAccessToken, WorkspaceTestConstants.TestBearerToken, StringComparison.Ordinal);
+
+        var rights = callerMatches && ResourceRights.TryGetValue(resourceId, out var granted)
+            ? granted
+            : AccessRights.None;
 
         return Task.FromResult(new AccessSnapshot
         {
             UserId = userId,
             ResourceId = resourceId,
-            AccessRights = granted ? GrantedRights : AccessRights.None
+            AccessRights = rights
         });
     }
 
@@ -64,6 +94,20 @@ public sealed class CallerScopedAccessDataSource : IAccessDataSource
             return Calls
                 .Where(c => string.Equals(c.ResourceId, resourceId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+        }
+    }
+
+    /// <summary>
+    /// A locked snapshot of every recorded call. Assertions MUST go through this rather than enumerating
+    /// <see cref="Calls"/> directly: the endpoint under test appends from request threads, and enumerating
+    /// a <see cref="List{T}"/> while another thread appends throws
+    /// <see cref="InvalidOperationException"/> — a flake that would surface as an unrelated failure.
+    /// </summary>
+    public IReadOnlyList<(string UserId, string ResourceId, string? UserAccessToken)> Snapshot()
+    {
+        lock (Calls)
+        {
+            return Calls.ToList();
         }
     }
 }
@@ -84,6 +128,12 @@ public sealed class CallerScopedAccessTestFixture : WorkspaceTestFixture
 
     /// <summary>A document the test caller has NO access to.</summary>
     public const string InaccessibleDocumentId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+    /// <summary>A document the test caller holds every right on (task 005 / FR-04).</summary>
+    public const string FullRightsDocumentId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
+    /// <summary>A document whose rights resolution throws, exercising the fail-closed path.</summary>
+    public const string ResolutionErrorDocumentId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 
     /// <summary>Another principal's oid, used to prove a body-supplied identity is not honoured.</summary>
     public const string OtherUserId = "victim-user-00000000-0000-0000-0000-000000000009";
@@ -250,6 +300,97 @@ public class PermissionsEndpointCallerScopedTests : IClassFixture<CallerScopedAc
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // A-20 Read-ceiling — task 005 (FR-04). This is where the ceiling is OBSERVABLE.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ✅ TASK 005 (FR-04) — the Read ceiling's observable outcome.
+    ///
+    /// <c>DataverseAccessDataSource.QueryUserPermissionsAsync</c> used to return a hard-coded
+    /// <see cref="AccessRights.Read"/> on success, so a snapshot carrying Write/Create/Delete/Share was
+    /// not producible in production and the eleven Write+ capabilities were false for every caller
+    /// however privileged. It now calls <c>RetrievePrincipalAccess</c> and maps the full flag set.
+    ///
+    /// This test asserts the consequence at the surface a user actually sees. It is the endpoint half of
+    /// task 006's binding constraint: "verify those flags actually light up — a Read-ceiling fix that
+    /// does not surface in the capabilities response means the snapshot widened somewhere the endpoint
+    /// does not read."
+    /// </summary>
+    [Fact]
+    public async Task GetPermissions_ForCallerWithEveryRight_ReportsEveryCapabilityTrue()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync(Route(CallerScopedAccessTestFixture.FullRightsDocumentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<CapabilitiesResponse>(Json);
+        body.Should().NotBeNull();
+
+        body!.AllCapabilities().Should().OnlyContain(c => c.Value == true,
+            "with every Dataverse right held, every capability must be reported — the eleven Write+ " +
+            "flags (CanDownload, CanUpload, CanReplace, CanDelete, CanUpdateMetadata, CanShare, " +
+            "CanRestoreVersion, CanMove, CanCopy, CanCheckOut, CanCheckIn) were unreachable under the " +
+            "A-20 Read ceiling that task 005 removed");
+    }
+
+    /// <summary>
+    /// Task 005 acceptance criterion 5: the reported capabilities never EXCEED the rights the snapshot
+    /// carries. Lifting a ceiling is only a fix if nothing downstream amplifies — a change that widened
+    /// rights AND loosened the projection would pass a "capabilities light up" test while over-granting.
+    ///
+    /// The Read|Write caller is the discriminating case: Write-requiring capabilities are true, while
+    /// Delete-, Share- and Create-requiring ones stay false.
+    /// </summary>
+    [Fact]
+    public async Task GetPermissions_ForPartialRights_ReportsOnlyCapabilitiesThoseRightsSatisfy()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync(Route(CallerScopedAccessTestFixture.AccessibleDocumentId));
+        var body = await response.Content.ReadFromJsonAsync<CapabilitiesResponse>(Json);
+
+        body.Should().NotBeNull();
+
+        // Satisfied by Read|Write.
+        body!.CanPreview.Should().BeTrue();
+        body.CanDownload.Should().BeTrue();
+        body.CanReplace.Should().BeTrue();
+        body.CanCheckOut.Should().BeTrue();
+        body.CanRestoreVersion.Should().BeTrue();
+
+        // NOT satisfied — each needs a right this caller does not hold.
+        body.CanDelete.Should().BeFalse("driveitem.delete requires Delete");
+        body.CanShare.Should().BeFalse("driveitem.createlink requires Share");
+        body.CanUpload.Should().BeFalse("driveitem.content.upload requires Write|Create; Create is absent");
+        body.CanCopy.Should().BeFalse("driveitem.copy requires Read|Create; Create is absent");
+        body.CanMove.Should().BeFalse("driveitem.move requires Write|Delete; Delete is absent");
+    }
+
+    /// <summary>
+    /// Task 005 acceptance criterion 4: an error while resolving rights denies — it must never fall back
+    /// to default or app-scoped rights. Exercised end-to-end through the endpoint rather than asserted
+    /// of the catch block by inspection.
+    /// </summary>
+    [Fact]
+    public async Task GetPermissions_WhenRightsResolutionThrows_ReportsNoCapabilities()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync(Route(CallerScopedAccessTestFixture.ResolutionErrorDocumentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<CapabilitiesResponse>(Json);
+        body.Should().NotBeNull();
+        body!.AllCapabilities().Should().OnlyContain(c => c.Value == false,
+            "a rights-resolution failure must yield no capabilities — fail closed, never a default grant");
+        body.AccessRights.Should().Be("None (Error)",
+            "the error is surfaced distinctly from a genuine no-rights answer");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // BATCH — same guarantee, plus the body-supplied-identity spoof.
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -321,7 +462,7 @@ public class PermissionsEndpointCallerScopedTests : IClassFixture<CallerScopedAc
         body.Permissions[0].UserId.Should().Be(WorkspaceTestConstants.TestUserId,
             "capabilities are reported for the AUTHENTICATED caller, never for a body-supplied identity");
 
-        _fixture.AccessDataSource.Calls.Should().NotContain(
+        _fixture.AccessDataSource.Snapshot().Should().NotContain(
             c => c.UserId == CallerScopedAccessTestFixture.OtherUserId,
             "the spoofed identity must never reach the access data source — reaching it would both " +
             "answer about the wrong principal and poison that principal's auth cache entry");

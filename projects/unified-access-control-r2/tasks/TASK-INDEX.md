@@ -29,7 +29,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | 🔲 002 | Authorize document download | FR-01 / A-1 | 001 | — | ❌ | sonnet | high |
 | ✅ 003 | `OperationAccessPolicy` keys + completeness test | FR-03 / A-3,A-20 | 001 | — | ❌ | sonnet | high |
 | ✅ 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
-| 🔲 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
+| ✅ 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
 | ✅ 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
 | 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
 | 🔲 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
@@ -107,6 +107,30 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > ⚠️ Until **task 005** lifts the Read ceiling, eleven of the fourteen capabilities are false for
 > everyone in production — the honest interim state, not a regression.
 > Rationale: [`notes/task-006-capability-rights-mapping.md`](../notes/task-006-capability-rights-mapping.md).
+
+> **Task 005 outcome (2026-08-21)**: the A-20 Read ceiling is gone. **Key discovery: the fix was mostly
+> RECONNECTION, not new code** — `MapDataverseAccessRights` (all seven flags, `AppendToAccess` included)
+> and `PrincipalAccessResponse` already existed in `DataverseAccessDataSource.cs` as **dead code**: the
+> orphaned wiring of a `RetrievePrincipalAccess` implementation replaced long ago by a
+> "can-I-retrieve-the-record → therefore Read" probe. Confirmed repo-wide: **`RetrievePrincipalAccess`
+> had ZERO live call sites** (every reference was a doc comment).
+> `RetrievePrincipalAccess` is now called first; **the old probe survives as a fallback** because the
+> deleted comment's claim that it "may not be available" under OBO is unverified and unverifiable
+> offline. The composition cannot regress — worst case is exactly today's behaviour — and failures log
+> the **`RPA-FALLBACK`** marker so a silent re-cap at Read is visible.
+> **Both escalation triggers evaluated, neither fired**: RPA *replaces* the probe (1 call, no extra round
+> trip), and all six consumers of `AccessSnapshot.AccessRights` were enumerated — `AiAuthorizationService`
+> checks Read only (unaffected), two are the intended beneficiaries, two read a different rights model
+> entirely.
+> ⚠️ **Corrected a mis-framed task-001 test**: `Characterization_WritePlusOperation_DeniedUnderReadCeiling`
+> was doc-commented "FLIPPED BY: task 005" — **following that would have been a security regression**. It
+> gives the rule a Read-only snapshot; denying Write+ there is permanently correct. The ceiling was never
+> observable at the rule layer. Renamed + re-documented; real coverage moved to the endpoint suite.
+> Task 003's `AppendTo` obligation and task 006's capability obligation are both **discharged**.
+> ⚠️ **Untested boundary (deliberate, not hidden)**: no test exercises the `RetrievePrincipalAccess` HTTP
+> call itself — mocking that transport is ADR-038 ban B1. Its URL form and OBO availability need a live
+> tenant → folded into **task 034** / Phase 4 acceptance.
+> Rationale: [`notes/task-005-rights-mapping.md`](../notes/task-005-rights-mapping.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 
