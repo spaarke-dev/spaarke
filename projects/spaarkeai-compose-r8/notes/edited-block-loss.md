@@ -1,4 +1,4 @@
-# WHAT THE EDITED BLOCK LOSES — task 041 baseline
+# WHAT THE EDITED BLOCK LOSES — task 041
 
 > **Measured** 2026-08-22, after task 040 · Instrument:
 > `ComposeBlockPreservationOracle.CompareEditedBlock` (additive — no gate number can move because it exists) ·
@@ -15,9 +15,34 @@ the user typed**.
 
 ---
 
-## Headline
+## Result after FR-A05 carry
 
-**10 of 18 documents come through with the edited block INTACT.**
+**12 of 18 documents come through with the edited block INTACT** — up from 10 at the baseline, and the two
+worst failure classes are closed.
+
+| | Baseline (after 040) | After FR-A05 carry |
+|---|---:|---:|
+| Edited block intact | 10 / 18 | **12 / 18** |
+| Bookmarks dropped | 2 docs | **0** |
+| Content control dissolved | 1 doc | **0** |
+| `PAT …CLAIMS…` differing paths | 8+ | **1** (attribute presence only) |
+
+`ref-cross-references.docx` and `content-controls-sdt.docx` both go from damaged to intact, and each has its
+own named test so the aggregate cannot rise for the wrong reason.
+
+### What remains
+
+| Loss | Docs | Real? |
+|---|---:|---|
+| `w:br` soft breaks | 1 | **Yes** — line breaks inside a paragraph collapse |
+| Run-level `rPr` variation (`smallCaps`, `sz`, `vertAlign`, `rPr/spacing`) | 2 | **Yes** — FR-A04's dominant-run residual |
+| `p/r/t` | 5 | **No** — `xml:space` attribute presence, text character-identical (see below) |
+
+---
+
+## Baseline, before the carry
+
+**10 of 18 documents came through with the edited block INTACT.**
 
 That is task 040's property inheritance working — before it, the edited block was rebuilt from a model
 carrying `w:jc`, `w:b`, `w:i` and nothing else. Eight documents still lose something.
@@ -99,13 +124,63 @@ is itself invalid makes every measurement taken against it ambiguous.
 
 ---
 
-## What FR-A05 must now deliver, in priority order
+## The `xml:space` class — investigated, not real, and an experiment that backfired
 
-1. **Bookmarks** — the highest-value carry. Dropping `w:bookmarkStart`/`w:bookmarkEnd` breaks cross-references
-   *elsewhere in the document*, which is a silent, non-local failure: the user edits paragraph 12 and a
-   reference in paragraph 40 stops resolving.
-2. **Block-level `w:sdt`** — the FR-A05 case as written in the POML.
-3. **`w:br`** and character-level run properties the model cannot represent.
+The `p/r/t` differences are **not text loss**. The renderer emits `xml:space="preserve"` on every `w:t`; the
+source documents carry it only on some. The text is character-identical.
+
+An obvious-looking fix — emit it only when the text has leading/trailing whitespace, which is when it is
+*needed* — was implemented and measured. **It made things markedly worse**: Word emits the attribute far more
+liberally than that rule, so the renderer went from disagreeing with 5 documents to disagreeing with 15, and
+the intact count fell from 12 to 2. Reverted, with the finding recorded at the call site so the class is not
+re-investigated as if it were content.
+
+The lesson is the one the `mc:AlternateContent` paraId experiment taught in task 040: a change that looks
+obviously right against a rule of thumb has to be measured against the corpus before it ships, because the
+corpus is the only thing that knows what Word actually does.
+
+---
+
+## Why the carry takes constructs from the BASE, not from a client payload
+
+The task POML anticipated extending the client's `composeBlockAtom` / `composeInlineAtom` nodes to ferry
+verbatim XML through the model. **Reconciled to base-carry instead**, on four counts:
+
+- The client never touches OOXML, so **ADR-049 I-2 holds trivially** rather than by discipline.
+- **No wire growth**, and no opportunity for a client to mangle a payload it cannot interpret.
+- It is the **same mechanism as FR-A04 property inheritance**, extended from `w:pPr`/`w:rPr` to sibling
+  constructs — one carry path rather than two (root §11: extend before you add).
+- It works for constructs the editor renders **invisibly**. A bookmark has no editor representation at all,
+  so there is nothing for a client-side atom node to attach to in the first place.
+
+What base-carry cannot do is track a construct the user **moved or deleted**. For bookmarks and content
+controls that is correct behaviour: neither is deletable through the editor, so re-instating them is right.
+
+**Bookmark spans widen to the paragraph.** The original extent was defined by positions among runs whose text
+the user has just changed, so the exact character range no longer exists to restore. Starts go at the front of
+the content and ends at the back — exact for a bookmark spanning the whole paragraph (the shape every
+cross-reference target takes), a widening for a partial one. Widening keeps the reference resolving; dropping
+it does not.
+
+**FR-A06 (table + atom identity) is not needed as specified.** Its stated rationale was "without identity the
+merge cannot decide whether a table changed" — but the merge compares the canonical JSON of the whole block,
+table contents included, so it already can. Recorded as a reconciliation rather than silently skipped.
+
+---
+
+## What FR-A05 delivered, in the priority order the measurement set
+
+1. **Bookmarks** — DONE. The highest-value carry, and the least visible failure without it: a bookmark is the
+   target of every `REF` field, so the user edits paragraph 12 and a reference in paragraph 40 stops
+   resolving, with nothing in the edited paragraph looking wrong. `CarryBookmarks`, asserted by
+   `EditedBlock_KeepsItsBookmarks_SoCrossReferencesStillResolve`.
+2. **Block-level `w:sdt`** — DONE. The rendered paragraph is re-wrapped in the base's own shell, so alias,
+   tag, id, placeholder and binding survive verbatim. `TryWrapInSdtShell`, asserted by
+   `EditedBlock_KeepsItsContentControlShell`. An unreconstructable shell degrades to the bare paragraph
+   **with a `content-control-flattened` warning** — never a malformed control, never a refusal.
+3. **`w:br` and character-level run properties** — STILL OPEN. Both need the *projection* to model them: they
+   are read-side gaps, not render-side, so base-carry cannot reach them. Carried to the task-045 residual
+   list for whoever next touches `ComposeDocxProjectionBuilder`.
 
 Each must go through the `ComposeFormatChange.PreviousPropertiesXml` carry-with-SDK-parse-gate pattern:
 carried XML is validated as parseable **before** it is written, and an unparseable payload degrades to thin

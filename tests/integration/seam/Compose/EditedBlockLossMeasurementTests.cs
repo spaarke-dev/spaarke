@@ -136,6 +136,57 @@ public sealed class EditedBlockLossMeasurementTests : IClassFixture<EditedBlockL
             "against it ambiguous");
     }
 
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // FR-A05 — the two carries, asserted individually.
+    //
+    // The aggregate "intact" count above can rise for the wrong reason, so each carry gets a test that
+    // names the construct and would fail if only the other one worked.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void EditedBlock_KeepsItsBookmarks_SoCrossReferencesStillResolve()
+    {
+        var source = LoadCorpus("ref-cross-references.docx");
+        var model = ProjectModel(source, "ref-cross-references.docx");
+        var edited = ApplyRepresentativeEdit(model, out var applied);
+        applied.Should().BeTrue();
+
+        var rendered = Render(source, edited);
+
+        using var before = WordprocessingDocument.Open(new MemoryStream(source, writable: false), false);
+        using var after = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), false);
+
+        var expected = before.MainDocumentPart!.Document!.Body!.Descendants<BookmarkStart>()
+            .Select(b => b.Name?.Value).Where(n => n is not null).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        var actual = after.MainDocumentPart!.Document!.Body!.Descendants<BookmarkStart>()
+            .Select(b => b.Name?.Value).Where(n => n is not null).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+        expected.Should().NotBeEmpty("the fixture exists to carry bookmarks");
+        actual.Should().BeEquivalentTo(expected,
+            "a bookmark is the TARGET of every REF field, so dropping one on the edited paragraph breaks " +
+            "cross-references ELSEWHERE in the document — a silent, non-local failure");
+    }
+
+    [Fact]
+    public void EditedBlock_KeepsItsContentControlShell()
+    {
+        var source = LoadCorpus("content-controls-sdt.docx");
+        var model = ProjectModel(source, "content-controls-sdt.docx");
+        var edited = ApplyRepresentativeEdit(model, out var applied);
+        applied.Should().BeTrue();
+
+        var rendered = Render(source, edited);
+
+        using var after = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), false);
+        var sdt = after.MainDocumentPart!.Document!.Body!.Descendants<SdtBlock>().FirstOrDefault();
+
+        sdt.Should().NotBeNull("editing the prose inside a content control must not dissolve the control");
+        sdt!.SdtProperties?.GetFirstChild<SdtAlias>()?.Val?.Value.Should().Be("Party Name",
+            "the shell is carried VERBATIM from the base — alias, tag, id and binding included");
+        sdt.InnerText.Should().Contain(EditMarker, "the user's new text belongs INSIDE the restored control");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
     private static byte[] LoadCorpus(string fileName)

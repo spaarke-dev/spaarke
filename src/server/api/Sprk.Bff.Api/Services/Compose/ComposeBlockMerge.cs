@@ -530,6 +530,215 @@ internal static class ComposeBlockMerge
         return best is { HasChildren: true } ? best : null;
     }
 
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // FR-A05 — CARRY, task 041.
+    //
+    // A block the user EDITED cannot be cloned: it is genuinely different, so it must come from the model.
+    // Everything in the base block that the model cannot represent therefore disappears — and the task-041
+    // corpus measurement says exactly what that costs: bookmarks on 2 documents, a block-level `w:sdt` on 1.
+    //
+    // The carry takes those constructs from the BASE BLOCK, not from a payload round-tripped through the
+    // client. That is a deliberate departure from the task POML, which anticipated extending the client's
+    // atom nodes to ferry verbatim XML. Base-carry is better here on four counts:
+    //
+    //   * The client never touches OOXML, so ADR-049 I-2 holds trivially rather than by discipline.
+    //   * No wire growth and no opportunity for a client to mangle a payload it cannot interpret.
+    //   * It is the SAME mechanism as FR-A04 property inheritance, extended from `w:pPr`/`w:rPr` to sibling
+    //     constructs — one carry path, not two (root §11: extend before you add).
+    //   * It works for constructs the editor renders INVISIBLY. A bookmark has no editor representation at
+    //     all, so there is nothing for a client-side atom node to attach to in the first place.
+    //
+    // What base-carry cannot do is track a construct the user MOVED or DELETED. For bookmarks and content
+    // controls that is the correct behaviour: neither is deletable through the editor, so re-instating them
+    // is right, not presumptuous.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Restores constructs the content model cannot represent onto the elements just rendered for one block,
+    /// taking them from that block's base counterpart. Returns the number of constructs carried.
+    /// </summary>
+    /// <param name="body">The body being authored. Elements may be REPLACED in place (the `w:sdt` case).</param>
+    /// <param name="firstRenderedIndex">Index of the first child this block's render appended.</param>
+    /// <param name="baseElement">The base counterpart for the block.</param>
+    /// <param name="warn">Invoked with a degradation code when a construct cannot be carried.</param>
+    public static int CarryUnmodeledConstructs(
+        Body body, int firstRenderedIndex, OpenXmlElement baseElement, Action<string>? warn = null)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(baseElement);
+
+        if (firstRenderedIndex < 0 || firstRenderedIndex >= body.ChildElements.Count)
+        {
+            return 0;
+        }
+
+        var carried = 0;
+
+        // ── 1. Bookmarks ────────────────────────────────────────────────────────────────────────
+        //
+        // The highest-value carry, and the least visible failure without it. A `w:bookmarkStart` is the
+        // TARGET of every `REF` field in the document, so dropping one breaks cross-references ELSEWHERE:
+        // the user edits paragraph 12 and a reference in paragraph 40 silently stops resolving. Nothing in
+        // the edited paragraph looks wrong, which is why this went unnoticed until it was measured.
+        var baseParagraph = FindCarrierParagraph(baseElement);
+        var renderedParagraph = body.ChildElements[firstRenderedIndex] as Paragraph
+            ?? FindCarrierParagraph(body.ChildElements[firstRenderedIndex]);
+
+        if (baseParagraph is not null && renderedParagraph is not null)
+        {
+            carried += CarryBookmarks(baseParagraph, renderedParagraph);
+        }
+
+        // ── 2. A block-level `w:sdt` shell ──────────────────────────────────────────────────────
+        //
+        // The projection emits an SDT's inner paragraph as an ordinary block, so editing it renders a bare
+        // `w:p` and the content control — its alias, tag, id, binding and placeholder — is gone. Re-wrapping
+        // the rendered paragraph in the BASE's own shell keeps the control intact while the prose inside it
+        // is the user's new text.
+        if (baseElement is SdtBlock baseSdt && body.ChildElements[firstRenderedIndex] is Paragraph rendered)
+        {
+            if (TryWrapInSdtShell(baseSdt, rendered, out var wrapped))
+            {
+                body.ReplaceChild(wrapped!, rendered);
+                carried++;
+            }
+            else
+            {
+                // The shell could not be reconstructed — degrade to the bare paragraph WITH a warning
+                // rather than emitting a malformed control. Never a refusal (ADR-049 invariant 1).
+                warn?.Invoke("content-control-flattened");
+            }
+        }
+
+        return carried;
+    }
+
+    /// <summary>
+    /// The paragraph that carries a block's prose — the element itself when it is a <c>w:p</c>, else the
+    /// first paragraph inside a content-control shell. Never descends into an opaque region.
+    /// </summary>
+    private static Paragraph? FindCarrierParagraph(OpenXmlElement element)
+    {
+        if (element is Paragraph paragraph)
+        {
+            return paragraph;
+        }
+
+        if (element is SdtBlock sdt)
+        {
+            return sdt.GetFirstChild<SdtContentBlock>()?.GetFirstChild<Paragraph>();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Copies the base paragraph's bookmark markers onto the rendered paragraph.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The span is widened to the paragraph, deliberately.</b> A bookmark's original extent is
+    /// defined by its position among runs whose text the user has just changed, so the exact character range
+    /// no longer exists to restore. Starts are placed at the beginning of the content and ends at the end,
+    /// which is EXACT for a bookmark spanning the whole paragraph (the shape every cross-reference target
+    /// takes) and a widening for a partial one. Widening keeps the reference resolving; dropping it does
+    /// not. Stating the trade here because a silently widened span is the kind of thing that should be
+    /// found in a comment rather than in a document.</para>
+    ///
+    /// <para>A marker whose partner lives in a different paragraph is carried on its own — that is a
+    /// multi-paragraph bookmark, and the other half rides along on its own (cloned) block.</para>
+    /// </remarks>
+    private static int CarryBookmarks(Paragraph baseParagraph, Paragraph rendered)
+    {
+        var starts = baseParagraph.Elements<BookmarkStart>().ToList();
+        var ends = baseParagraph.Elements<BookmarkEnd>().ToList();
+        if (starts.Count == 0 && ends.Count == 0)
+        {
+            return 0;
+        }
+
+        var existingIds = rendered.Descendants<BookmarkStart>().Select(b => b.Id?.Value)
+            .Concat(rendered.Descendants<BookmarkEnd>().Select(b => b.Id?.Value))
+            .Where(id => id is not null)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var carried = 0;
+
+        // Insert starts in reverse so their relative order survives: each goes immediately after w:pPr.
+        var anchor = rendered.ParagraphProperties as OpenXmlElement;
+        for (var i = starts.Count - 1; i >= 0; i--)
+        {
+            if (existingIds.Contains(starts[i].Id?.Value ?? string.Empty))
+            {
+                continue;
+            }
+
+            var clone = starts[i].CloneNode(true);
+            if (anchor is null)
+            {
+                rendered.InsertAt(clone, 0);
+            }
+            else
+            {
+                rendered.InsertAfter(clone, anchor);
+            }
+
+            carried++;
+        }
+
+        foreach (var end in ends)
+        {
+            if (existingIds.Contains(end.Id?.Value ?? string.Empty))
+            {
+                continue;
+            }
+
+            rendered.AppendChild(end.CloneNode(true));
+            carried++;
+        }
+
+        return carried;
+    }
+
+    /// <summary>
+    /// Rebuilds the base content control around the freshly rendered paragraph: the base <c>w:sdt</c> cloned
+    /// whole, with the prose inside its <c>w:sdtContent</c> replaced by the rendered paragraph.
+    /// </summary>
+    /// <remarks>
+    /// The shell — <c>w:sdtPr</c> with its alias, tag, id, placeholder and binding — is carried VERBATIM and
+    /// never re-derived, so a control property nobody enumerated survives for the same reason cloning
+    /// preserves formatting nobody enumerated. Returns false when the base has no <c>w:sdtContent</c> or the
+    /// clone does not come back as an <c>SdtBlock</c>; the caller then warns rather than emitting a control
+    /// that Word would reject.
+    /// </remarks>
+    private static bool TryWrapInSdtShell(SdtBlock baseSdt, Paragraph rendered, out OpenXmlElement? wrapped)
+    {
+        wrapped = null;
+
+        if (baseSdt.CloneNode(true) is not SdtBlock shell)
+        {
+            return false;
+        }
+
+        var content = shell.GetFirstChild<SdtContentBlock>();
+        if (content is null)
+        {
+            return false;
+        }
+
+        // The rendered paragraph replaces the shell's prose. Non-paragraph children (a nested table, say)
+        // are left in place: this carry is scoped to the block the projection emitted as a paragraph, and
+        // silently discarding a sibling would be a content loss dressed up as a fix.
+        foreach (var paragraph in content.Elements<Paragraph>().ToList())
+        {
+            paragraph.Remove();
+        }
+
+        content.AppendChild(rendered.CloneNode(true));
+        wrapped = shell;
+        return true;
+    }
+
     /// <summary>
     /// Mirrors <c>RenderBlocks</c>' ordered-list bookkeeping for a block that was CLONED rather than rendered.
     /// </summary>

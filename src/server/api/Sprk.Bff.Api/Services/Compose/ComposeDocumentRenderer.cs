@@ -1268,6 +1268,19 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         // Pending-deleted content authors as w:delText (Word rejects w:t inside w:del).
+        //
+        // Task 041 investigated emitting `xml:space="preserve"` only when the text NEEDS it (leading or
+        // trailing whitespace, or empty). The `p/r/t` difference class on five corpus documents is exactly
+        // this attribute: the text was character-identical and only the attribute had been added.
+        //
+        // REVERTED — the conditional rule was measurably WORSE. Word emits `xml:space="preserve"` far more
+        // liberally than "the text has edge whitespace", so matching that narrow rule made the renderer
+        // disagree with the source on 15 of 18 documents instead of 5. Emitting it unconditionally is safe
+        // (it only ever suppresses whitespace trimming) and agrees with the corpus more often.
+        //
+        // The residual `p/r/t` differences are therefore attribute-PRESENCE, not text loss — verified by
+        // inspecting the fixtures. Recorded on the loss list so the class is not re-investigated as if it
+        // were content.
         OpenXmlElement textElement = deleted
             ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
             : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
@@ -2411,6 +2424,11 @@ public sealed partial class ComposeDocumentRenderer
             {
                 ComposeBlockMerge.InheritProperties(body.ChildElements[i], baseElement);
             }
+
+            // FR-A05 (task 041): restore what the content model cannot represent — bookmarks (the target of
+            // every REF field, so dropping one breaks cross-references ELSEWHERE in the document) and a
+            // block-level content-control shell. Taken from the BASE block, never from a client payload.
+            ComposeBlockMerge.CarryUnmodeledConstructs(body, before, baseElement, code => state.Warn(code));
         }
     }
 }
