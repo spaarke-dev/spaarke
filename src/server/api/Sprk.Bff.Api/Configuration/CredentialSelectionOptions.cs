@@ -96,6 +96,31 @@ public sealed class CredentialSelectionOptions
     /// demoting on it would be the same silent downgrade by a different route.
     /// </summary>
     public int FailuresBeforeSuppression { get; set; } = 2;
+
+    /// <summary>
+    /// When <c>true</c>, startup FAILS outside the Development environment if
+    /// <see cref="CredentialKind.ClientSecret"/> is still listed in <see cref="Order"/>
+    /// (<c>IdentityConfigurationValidator</c> rule 6, spec FR-F3, auth-v4 task 062).
+    ///
+    /// <para><b>Defaults to false, and must stay false until task 033.</b> Until the secret is removed
+    /// it is the <i>intentional</i> lowest-priority fallback AND the rollback mechanism — a guard that
+    /// fired now would block the very rollout it exists to protect. Task 033 sets this to <c>true</c> in
+    /// the same change that drops <see cref="CredentialKind.ClientSecret"/> from the order. If 033
+    /// forgets, this stays silent rather than breaking anything, which is the correct direction for a
+    /// default to fail in.</para>
+    ///
+    /// <para><b>What it buys once enabled.</b> Ordered selection falls through by design. After the
+    /// migration that design becomes a hazard: a broken MI-FIC would resolve to the secret, serve every
+    /// request, and pass every health check — an outage that never appears. Asserting the ORDER rather
+    /// than an observed resolution makes the property structural: with the secret absent there is nothing
+    /// beneath MI-FIC to fall through to, so a broken MI-FIC fails loudly by construction. It also avoids
+    /// a startup token acquisition, which would both reintroduce the <c>#3b</c> eager-connect risk and
+    /// refuse to boot during Entra's measured ~2-minute federated-credential propagation flap.</para>
+    ///
+    /// <para>Set it to <c>false</c> for the duration of a deliberate emergency rollback, so the deviation
+    /// is recorded rather than hidden.</para>
+    /// </summary>
+    public bool RequireSecretFreeIdentity { get; set; }
 }
 
 /// <summary>

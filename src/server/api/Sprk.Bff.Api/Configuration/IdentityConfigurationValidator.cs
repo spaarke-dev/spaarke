@@ -34,12 +34,22 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
     private readonly IConfiguration _configuration;
     private readonly ILogger<IdentityConfigurationValidator> _logger;
 
+    /// <summary>
+    /// Host environment, used ONLY by rule 6 to exempt Development. Nullable with a null default so the
+    /// validator stays directly constructible in tests and outside a host; a null environment is treated
+    /// as non-Development, which is the conservative reading (rule 6 is a fail-fast guard, and defaulting
+    /// an unknown environment to "exempt" would make it silently inert wherever it matters most).
+    /// </summary>
+    private readonly IHostEnvironment? _environment;
+
     public IdentityConfigurationValidator(
         IConfiguration configuration,
-        ILogger<IdentityConfigurationValidator> logger)
+        ILogger<IdentityConfigurationValidator> logger,
+        IHostEnvironment? environment = null)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _environment = environment;
     }
 
     public ValidateOptionsResult Validate(string? name, CredentialSelectionOptions options)
@@ -234,10 +244,69 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
                 CredentialSelectionOptions.SectionName);
         }
 
+        // ── Rule 6 (auth-v4 task 062, FR-F3) ───────────────────────────────────────────────────────
+        // Outside Development, once the migration is complete, the BFF's identity MUST NOT be able to
+        // resolve to a client secret.
+        //
+        // THE WINDOW THIS CLOSES. Ordered selection falls through on purpose — that is correct during
+        // the migration and dangerous after it. Post-033, a broken MI-FIC with the secret still listed
+        // would resolve to the secret, serve every request successfully, and pass every health check.
+        // The failure mode is not an outage; it is an outage that never appears, and the project would
+        // quietly be back where it started.
+        //
+        // ASSERTED ON THE CONFIGURED ORDER, NOT ON AN OBSERVED RESOLUTION — deliberately, and the
+        // difference is load-bearing:
+        //
+        //   * Determining which credential ACTUALLY resolved requires acquiring one, which means a
+        //     network round trip on the startup path. That is the escalation trigger this task carries
+        //     ("cannot determine the resolved credential type without performing a token acquisition —
+        //     STOP"), and it is also the #3b SIGABRT shape.
+        //   * Worse, it would be WRONG even if it were safe. Entra federated-credential propagation was
+        //     measured at task 030 to flap for roughly two minutes (AADSTS70025). A startup probe during
+        //     a flap would resolve to the secret and refuse to boot — turning a transient Entra state
+        //     into a hard outage, which is exactly the class of harm this rule exists to prevent.
+        //   * And the configuration form is STRICTLY STRONGER. Observing one resolution says the secret
+        //     was not used this time. Asserting the order says it CANNOT be used at all: with
+        //     ClientSecret absent, there is nothing beneath MI-FIC to fall through to, so a broken MI-FIC
+        //     fails loudly by construction. That is the property FR-F3 actually wants.
+        //
+        // CONFIGURATION-GATED, NOT DATE-GATED, and inert by default. Until task 033 removes the secret,
+        // ClientSecret is the INTENTIONAL fallback and the rollback mechanism; a guard that fired now
+        // would block the very rollout it exists to protect. Task 033 sets
+        // Graph:Credentials:RequireSecretFreeIdentity=true in the same change that drops ClientSecret
+        // from the order — and if it forgets, this rule stays silent rather than breaking anything,
+        // which is the correct direction for a default.
+        //
+        // NOTE this runs under ValidateOnStart, NOT ValidateOnBuild: options validation, no singleton
+        // construction, no eager connect. No SIGABRT-class risk is introduced.
+        if (options.RequireSecretFreeIdentity
+            && !IsDevelopment()
+            && order.Contains(CredentialKind.ClientSecret))
+        {
+            failures.Add(
+                $"{CredentialSelectionOptions.SectionName}:RequireSecretFreeIdentity is true and the "
+                + $"environment is {_environment?.EnvironmentName ?? "(unknown)"}, but "
+                + $"{CredentialKind.ClientSecret} is still listed in "
+                + $"{CredentialSelectionOptions.SectionName}:Order ({string.Join(" > ", order)}). "
+                + "The BFF's identity must not be able to resolve to a client secret after the migration: "
+                + "with the secret still listed, a broken managed-identity federated credential would "
+                + "silently fall through to it and every health signal would stay green (ADR-028 A4, "
+                + $"spec FR-F3). Remove {CredentialKind.ClientSecret} from the order, or — if this is a "
+                + "deliberate emergency rollback — set RequireSecretFreeIdentity=false for its duration "
+                + "so the deviation is recorded rather than hidden.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;
     }
+
+    /// <summary>
+    /// Development is exempt from rule 6: a developer workstation has no route to IMDS, so MI-FIC cannot
+    /// be minted there and the user-secret fallback is the legitimate — and only — way to run OBO locally.
+    /// </summary>
+    private bool IsDevelopment()
+        => _environment is not null && _environment.IsDevelopment();
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));

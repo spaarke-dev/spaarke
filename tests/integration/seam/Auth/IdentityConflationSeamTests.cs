@@ -292,6 +292,124 @@ public class IdentityConflationSeamTests
                 Order = order.Select(k => k.ToString()).ToList(),
             });
 
+    // =============================================================================================
+    // Rule 6 (task 062, FR-F3) — no secret-backed BFF identity outside Development, once enabled
+    // =============================================================================================
+
+    [Fact]
+    public void Rule6_WhenEnabledOutsideDevelopment_AndTheSecretIsStillListed_FailsFast()
+    {
+        // The window this closes: ordered selection falls through by design, so after the migration a
+        // broken MI-FIC would resolve to the secret, serve every request and pass every health check.
+        // That failure mode is not an outage — it is an outage that never appears.
+        var result = ValidateRule6(
+            requireSecretFree: true,
+            environment: "Production",
+            order: new[] { CredentialKind.ManagedIdentityFederated, CredentialKind.ClientSecret });
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("RequireSecretFreeIdentity")
+            .And.Contain("ClientSecret")
+            .And.Contain("Production",
+                "the message must name the environment and the offending credential, not just say no");
+    }
+
+    [Fact]
+    public void Rule6_WhenEnabledOutsideDevelopment_AndTheSecretIsGone_Succeeds()
+    {
+        // The task-033 end state. This is what the whole project is for.
+        var result = ValidateRule6(
+            requireSecretFree: true,
+            environment: "Production",
+            order: new[] { CredentialKind.ManagedIdentityFederated });
+
+        result.Succeeded.Should().BeTrue(
+            "with the secret absent there is nothing beneath MI-FIC to fall through to, so a broken "
+            + "MI-FIC fails loudly by construction — which is the property FR-F3 actually wants");
+    }
+
+    [Fact]
+    public void Rule6_InDevelopment_IsExempt_EvenWithTheSecretListed()
+    {
+        // A developer workstation has no route to IMDS, so MI-FIC cannot be minted there at all. The
+        // user-secret fallback is the legitimate — and only — way to run OBO locally, and failing here
+        // would make the guard's first effect "nobody can run the BFF".
+        var result = ValidateRule6(
+            requireSecretFree: true,
+            environment: "Development",
+            order: new[] { CredentialKind.ManagedIdentityFederated, CredentialKind.ClientSecret });
+
+        result.Succeeded.Should().BeTrue("Development legitimately uses the user-secret fallback for OBO");
+    }
+
+    [Fact]
+    public void Rule6_WhileTheSecretIsStillTheIntentionalFallback_IsInert()
+    {
+        // THE negative control this task turns on, and the reason the flag defaults to false.
+        //
+        // Today — pre-033 — ClientSecret is the intentional lowest-priority fallback AND the rollback
+        // mechanism NFR-06 depends on. A guard that fired now would block the very rollout it exists to
+        // protect: task 031 deploys with the secret still listed, and 032 swaps with it still listed.
+        // Gated on configuration rather than on a date, and OFF by default, so forgetting to enable it
+        // at 033 leaves the guard silent rather than breaking a deployment.
+        var result = ValidateRule6(
+            requireSecretFree: false,
+            environment: "Production",
+            order: new[] { CredentialKind.ManagedIdentityFederated, CredentialKind.ClientSecret });
+
+        result.Succeeded.Should().BeTrue(
+            "pre-033 the secret is the intentional fallback; the guard must be inert until task 033 "
+            + "sets RequireSecretFreeIdentity=true in the same change that removes it");
+    }
+
+    [Fact]
+    public void Rule6_WithNoHostEnvironment_TreatsTheEnvironmentAsNonDevelopment()
+    {
+        // Conservative default. Defaulting an UNKNOWN environment to "exempt" would make a fail-fast
+        // guard silently inert exactly where its absence matters most — which is how the false premise
+        // this whole project exists to correct survived three audits.
+        var result = new IdentityConfigurationValidator(
+                Config(("Graph:ManagedIdentity:ClientId", Uami), ("API_APP_ID", AppRegistration)),
+                NullLogger<IdentityConfigurationValidator>.Instance,
+                environment: null)
+            .Validate(null, new CredentialSelectionOptions
+            {
+                Order = new List<string>
+                {
+                    nameof(CredentialKind.ManagedIdentityFederated),
+                    nameof(CredentialKind.ClientSecret),
+                },
+                RequireSecretFreeIdentity = true,
+            });
+
+        result.Failed.Should().BeTrue("an unknown environment must not be treated as Development");
+    }
+
+    private static ValidateOptionsResult ValidateRule6(
+        bool requireSecretFree,
+        string environment,
+        IEnumerable<CredentialKind> order)
+        => new IdentityConfigurationValidator(
+                Config(("Graph:ManagedIdentity:ClientId", Uami), ("API_APP_ID", AppRegistration)),
+                NullLogger<IdentityConfigurationValidator>.Instance,
+                new StubHostEnvironment(environment))
+            .Validate(null, new CredentialSelectionOptions
+            {
+                Order = order.Select(k => k.ToString()).ToList(),
+                RequireSecretFreeIdentity = requireSecretFree,
+            });
+
+    private sealed class StubHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public StubHostEnvironment(string environmentName) => EnvironmentName = environmentName;
+
+        public string EnvironmentName { get; set; }
+        public string ApplicationName { get; set; } = "Sprk.Bff.Api";
+        public string ContentRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+            new Microsoft.Extensions.FileProviders.NullFileProvider();
+    }
+
     private sealed class RecordingAssertionProvider : IClientAssertionProvider
     {
         private int _mintCount;
