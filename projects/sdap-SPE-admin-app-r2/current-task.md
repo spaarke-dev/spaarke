@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 complete (001 ✅ 002 ✅ 003 ✅ 005 ✅); **W2: 040 ✅**, 004 + 010 remain |
-| **Step** | Between tasks. Next is **task 004** (Search root cause), then **010** (auth spike) |
-| **Status** | clean — 0 uncommitted; local HEAD == origin at `8e3b954da` |
-| **Next Action** | Invoke `task-execute` on `tasks/004-fix-search.poml`. **Verify its premise first** — five for five have been wrong or incomplete. |
+| **Task** | **none in progress** — W1 ✅ · **W2 COMPLETE: 004 ✅ 010 ✅(UNWORKABLE) 040 ✅** |
+| **Step** | ⛔ **Workstream B is BLOCKED.** Awaiting a human path A/B/C decision — see [`BLOCKED.md`](BLOCKED.md) |
+| **Status** | clean — 0 uncommitted; local HEAD == origin at `958ceef8b` |
+| **Next Action** | **Operator decides A/B/C in `BLOCKED.md`.** Meanwhile unblocked work can proceed: **013**, **060/061/062**, or Workstream C tasks not gated on 011 (020 is gated; 029/030 are not). |
 
 ### Files Modified This Session
 
@@ -28,6 +28,8 @@ All committed and pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**):
 | `44a239aab` | **Task 005** — Audit Log read **and** write paths repaired; 19 tests |
 | `b6ffe09e5` | checkpoint |
 | `8e3b954da` | **Task 040** — WireMock Graph fixture; **unblocked WireMock repo-wide**; 10 tests. No `src/` change |
+| `b4922d9c1` | **Task 004** — Search repaired: wrong entity type + missing `region` + invalid `contentSources`; 16 tests. **Verified live** |
+| `958ceef8b` | **Task 010** — OBO spike ⛔ **UNWORKABLE**; `BLOCKED.md` written; 011/012 blocked |
 
 ⚠️ **Separate repo, NOT pushed**: `c:/code_files/spaarke-prototype` has **1 unpushed commit** `a53832a`
 (the `spe-admin-r2-uat` harness + shared `_infra` mock fixes) on `feature/uat-harness-framework`. Left
@@ -35,9 +37,16 @@ unpushed deliberately — pushing another repo needs the operator's say-so.
 
 ### Critical Context
 
-Every real defect found so far has the **same shape**, and **none was where its POML said to look**: a lower
-layer collapses a failure into an absent/empty result that an upper layer reads as success. Verify a task's
-premise before implementing to it — three of four premises were wrong.
+⛔ **Workstream B is blocked pending a human decision.** Task 010 proved the owning-app OBO shape
+**UNWORKABLE**: `sprk_owningappid` is `SDAP-PCF-CLIENT`, the SPA client the code page already signs in
+as — **there is no per-customer owning app**, so ADR-028 **E-1**, on which the §6.5 gate's path-C
+resolution rested, does not describe the situation. **Do not switch `Create(OwningAppId)` →
+`Create(BffAppId)`** — that is exactly what escalation trigger 1 forbids. Read `BLOCKED.md`.
+
+Every real defect found has the **same shape**, and **none was where its POML said to look**: a lower
+layer collapses a failure (or a real value) into an absent/empty result that an upper layer reads as
+benign. **Verify a task's premise before implementing to it — seven for seven have now been wrong,
+incomplete, or aimed at the wrong layer**, including the spec's own auth hypothesis and the §6.5 gate's.
 
 ---
 
@@ -48,9 +57,9 @@ premise before implementing to it — three of four premises were wrong.
 | Gate | Value |
 |---|---|
 | `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors (7 pre-existing warnings) |
-| Unit tests | **10,602 passed**, 0 failed, 97 skipped (+66 added this session) |
+| Unit tests | **10,618 passed**, 0 failed, 97 skipped (+82 added this session) |
 | ArchTests | 36/36 |
-| Publish (compressed, framework-dependent linux-x64) | **43.68 MB** — under the ~44.96 MB baseline, ceiling 60 |
+| Publish (compressed, framework-dependent linux-x64) | **43.66 MB** — under the ~44.96 MB baseline, ceiling 60 |
 | New NuGet | none |
 | CI | **deliberately not tracked** — operator said to disregard at this stage |
 
