@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-A11 — Comment anchors and revision-id seeding under cloning (dup-paraId consume-in-order, cross-boundary ranges)</title>
     <phase>4 Track A — Faithful Save</phase>
-    <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <gate>passed-031</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cloning interacts with comment ranges and tracked-change ids in ways that silently corrupt a document. PROVISIONAL — amendable by task 031.</rigor-reason>
     <model-tier>opus</model-tier>
