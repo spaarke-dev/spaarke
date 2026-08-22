@@ -99,8 +99,21 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 030 | **Merge prototype + measurement** — stamp → re-project → per-block compare → clone unchanged; answers spec §5.3; includes heavy-restructure (FR-G06) + N-cycle Word round-trip (FR-G07) | FULL | opus/max | ❌ | 023 | 🔲 |
+| 030 | **Merge prototype + measurement** — stamp → re-project → per-block compare → clone unchanged; answers spec §5.3; includes heavy-restructure (FR-G06) + N-cycle Word round-trip (FR-G07) | FULL | opus/max | ❌ | 023 | ✅ |
 | 031 | **GATE DECISION** + ADR-049 third-amendment draft. *Escalation trigger: a miss goes to the owner — do not improvise* | FULL | opus/max | ❌ | 030 | 🔲 |
+
+> **✅ 030 COMPLETE — the prototype clears every gate condition, 2026-08-21.** **18 of 18 documents at 100%
+> overall and 100% near-tier preservation**, against a control of 18.08% / 6.67%. The 109-block patent claims
+> document goes from preserving ONE block to preserving all 108 untouched blocks. All three R4-breakers pass.
+> **No miss condition fired; neither escalation trigger fired.** N=5 round trip shows **zero** cumulative
+> drift through paraId regeneration. Cost +2 to +19 ms per save (within NFR-07). Pure `DocumentFormat.OpenXml`
+> — no new package. Prototype is **opt-in, default OFF**; no production behaviour changed.
+>
+> **Read the caveat before celebrating**: the oracle measures UNTOUCHED blocks. The EDITED block is still
+> rebuilt from the lossy model, so it still loses its font, size, indentation and numbering — **FR-A04
+> property inheritance (041) is what closes that, and 030 does not exercise it.** Reorder also yields no
+> merge benefit (degrades to R6, never fails). Full analysis + what 040 must do differently:
+> [`notes/merge-prototype-results.md`](../notes/merge-prototype-results.md). **031 has its evidence.**
 
 ## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*
 

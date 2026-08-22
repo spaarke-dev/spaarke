@@ -3,8 +3,8 @@
   <metadata>
     <title>Merge prototype + measurement — stamp → re-project → per-block compare → clone unchanged; includes heavy-restructure (FR-G06) and N-cycle Word round-trip (FR-G07)</title>
     <phase>3 Model Proof — THE GATE</phase>
-    <gate>blocked-on-023</gate>
-    <status>pending</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Prototypes the project's central architectural bet and produces the evidence the gate decision is made on.</rigor-reason>
     <model-tier>opus</model-tier>
