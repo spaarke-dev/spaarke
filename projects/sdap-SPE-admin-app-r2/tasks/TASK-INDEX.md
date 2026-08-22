@@ -29,8 +29,8 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 004 | [Diagnose + fix Search](004-fix-search.poml) | 1 A | A04 | FULL | sonnet | xhigh | W2 | ❌ | 001 | ✅ |
 | 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | ✅ **UNWORKABLE** |
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
-| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | ⛔ **BLOCKED** |
-| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ⛔ **BLOCKED** |
+| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
+| 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | 🔲 unblocked |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔲 |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
@@ -105,7 +105,27 @@ everything from 020 onward depends on 011. The auth spike is not just first; it 
 
 ---
 
-## ⛔ WORKSTREAM B IS BLOCKED — read [`BLOCKED.md`](../BLOCKED.md) before touching auth
+## ✅ Workstream B unblocked 2026-08-22 — operator chose **path A** (BFF identity)
+
+Container types now run on `IGraphClientFactory.ForUserAsync`, the BFF's **existing** OBO exchange
+(already used by SPE files, Agent, Dataverse user client). **No new `.WithClientSecret` site** — the
+A4/E-3 concern was overstated; the BFF already had four OBO sites and SpeAdmin reuses one.
+
+**Task 011 is 🔄 partial**: the containerTypes delegated path is wired and building. What remains of
+011's original scope is whatever else assumed `SpeAdminTokenProvider` — that provider is now dead code
+on this path and should be assessed for removal.
+
+**🔴 Still outstanding (docs)**: ADR-028 **E-1** describes a per-customer owning app that does not exist
+for SpeAdmin. Amend it, or the next project rebuilds on the same false premise.
+
+**✅ Tenant isolation shipped** (`325511d5b`) — `SpeAdminTenantScope` + `SpeAdminTenantScopeFilter` on
+the `/api/spe` group. `configId` is no longer a bearer capability. **Every config MUST carry a business
+unit before a shared multi-customer environment counts as isolated** — a config with no BU is treated
+as accessible for upgrade compatibility. See [`notes/tenant-isolation-gap.md`](../notes/tenant-isolation-gap.md).
+
+---
+
+## Historical — the task-010 blocking record (resolved above)
 
 Task **010 returned UNWORKABLE** (2026-08-21). Escalation triggers 1 and 2 both fired; the CLAUDE.md
 §6.5 gate **must be re-run** with new evidence before task 011 starts.

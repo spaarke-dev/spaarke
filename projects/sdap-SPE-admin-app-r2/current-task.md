@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · **W2 COMPLETE: 004 ✅ 010 ✅(UNWORKABLE) 040 ✅** |
-| **Step** | ⛔ **Workstream B is BLOCKED.** Awaiting a human path A/B/C decision — see [`BLOCKED.md`](BLOCKED.md) |
-| **Status** | clean — 0 uncommitted; local HEAD == origin at `958ceef8b` |
-| **Next Action** | **Operator decides A/B/C in `BLOCKED.md`.** Meanwhile unblocked work can proceed: **013**, **060/061/062**, or Workstream C tasks not gated on 011 (020 is gated; 029/030 are not). |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ (004, 010, 040) · **auth decision made + tenant scope shipped** |
+| **Step** | Between tasks. **Next: Workstream C** — start with **029** or **030** (neither needs the god-file), then 020 |
+| **Status** | clean — 0 uncommitted; local HEAD == origin at `325511d5b` |
+| **Next Action** | Invoke `task-execute` on `tasks/029-billing-status-surface.poml` (client+DTO only, no god-file) or `030`. **Verify each POML's premise first** — every one so far has been wrong, incomplete, or aimed at the wrong layer. |
 
 ### Files Modified This Session
 
@@ -37,11 +37,19 @@ unpushed deliberately — pushing another repo needs the operator's say-so.
 
 ### Critical Context
 
-⛔ **Workstream B is blocked pending a human decision.** Task 010 proved the owning-app OBO shape
-**UNWORKABLE**: `sprk_owningappid` is `SDAP-PCF-CLIENT`, the SPA client the code page already signs in
-as — **there is no per-customer owning app**, so ADR-028 **E-1**, on which the §6.5 gate's path-C
-resolution rested, does not describe the situation. **Do not switch `Create(OwningAppId)` →
-`Create(BffAppId)`** — that is exactly what escalation trigger 1 forbids. Read `BLOCKED.md`.
+✅ **Auth resolved — operator chose path A (BFF identity).** Container types run on
+`IGraphClientFactory.ForUserAsync`, the BFF's **existing** OBO exchange. **No new `.WithClientSecret`
+site** — the BFF already had four; SpeAdmin reuses one. `SpeAdminTokenProvider` is now **dead code on
+this path** (it exchanges as `SDAP-PCF-CLIENT`, which exposes no `api://` URI → `AADSTS500011`).
+
+✅ **Tenant isolation shipped** (`325511d5b`). `configId` was a bearer capability — 15 endpoints took
+it with zero ownership check. Now `SpeAdminTenantScope` derives the caller's BU from the `oid` claim
+(self + descendants) and `SpeAdminTenantScopeFilter` enforces it once on the `/api/spe` group, 404 not
+403. ⚠️ **A config with no business unit is treated as accessible** (upgrade compatibility) — so
+**every config MUST carry a BU before a shared multi-customer environment counts as isolated.**
+
+🔴 **Outstanding docs debt**: ADR-028 **E-1** still describes a per-customer owning app that does not
+exist for SpeAdmin. Amend it or the next project rebuilds on the same false premise.
 
 Every real defect found has the **same shape**, and **none was where its POML said to look**: a lower
 layer collapses a failure (or a real value) into an absent/empty result that an upper layer reads as
