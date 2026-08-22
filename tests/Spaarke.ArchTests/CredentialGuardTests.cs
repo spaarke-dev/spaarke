@@ -37,8 +37,6 @@ namespace Spaarke.ArchTests;
 /// </summary>
 public class CredentialGuardTests
 {
-    private static readonly string RepoRoot = ResolveRepoRoot();
-
     // =============================================================================================
     // THE ALLOWLIST
     // ---------------------------------------------------------------------------------------------
@@ -220,7 +218,7 @@ public class CredentialGuardTests
         // AccessRights.None, so the selection is not observable behaviourally. Source analysis is both
         // the sanctioned shape and the stronger one — it fails at the SHAPE level rather than on one
         // sampled configuration.
-        var path = Path.Combine(RepoRoot, "src", "server", "shared", "Spaarke.Dataverse", "DataverseAccessDataSource.cs");
+        var path = Path.Combine(SourceScan.RepoRoot, "src", "server", "shared", "Spaarke.Dataverse", "DataverseAccessDataSource.cs");
         Assert.True(File.Exists(path), $"DataverseAccessDataSource.cs not found at {path}");
 
         var lines = File.ReadAllLines(path);
@@ -240,7 +238,7 @@ public class CredentialGuardTests
         //     re-entanglement arrives ("_confidentialClients = null" in the managed-identity arm).
         var branch = ExtractBranchSpan(lines, "if (useManagedIdentity)");
         var reassigned = branch
-            .Select((line, i) => (Text: StripLineComment(line), Index: i))
+            .Select((line, i) => (Text: SourceScan.StripLineComment(line), Index: i))
             .Where(l => Regex.IsMatch(l.Text, @"\b(_confidentialClients|_tenantId|_clientId)\s*=[^=]"))
             .Select(l => l.Text.Trim())
             .ToList();
@@ -271,15 +269,15 @@ public class CredentialGuardTests
         var names = new[] { "spaarke-bff-identity", "mi-bff-api-dev" };
         var violations = new List<string>();
 
-        foreach (var file in EnumerateServerSource())
+        foreach (var file in SourceScan.ServerSourceFiles())
         {
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {
-                var code = StripLineComment(lines[i]);
+                var code = SourceScan.StripLineComment(lines[i]);
                 if (names.Any(n => code.Contains(n, StringComparison.OrdinalIgnoreCase)))
                 {
-                    violations.Add($"{Relative(file)}:{i + 1}: {lines[i].Trim()}");
+                    violations.Add($"{SourceScan.Relative(file)}:{i + 1}: {lines[i].Trim()}");
                 }
             }
         }
@@ -312,12 +310,12 @@ public class CredentialGuardTests
         // compiler already guarantees, so a runtime test asserts either a banned shape or a tautology.
         var violations = new List<string>();
 
-        foreach (var file in EnumerateServerSource())
+        foreach (var file in SourceScan.ServerSourceFiles())
         {
             var lines = File.ReadAllLines(file);
             var readonlyFields = ReadonlyFieldNames(lines);
 
-            foreach (var (statement, line) in Statements(lines))
+            foreach (var (statement, line) in SourceScan.Statements(lines))
             {
                 if (!statement.Contains("new ManagedIdentityClientAssertion(", StringComparison.Ordinal))
                 {
@@ -326,7 +324,7 @@ public class CredentialGuardTests
 
                 if (!IsBoundToReadonlyField(statement, readonlyFields))
                 {
-                    violations.Add($"{Relative(file)}:{line}: {statement.Trim()}");
+                    violations.Add($"{SourceScan.Relative(file)}:{line}: {statement.Trim()}");
                 }
             }
         }
@@ -360,7 +358,7 @@ public class CredentialGuardTests
         };
 
         var readonlyFields = ReadonlyFieldNames(scratch);
-        var offending = Statements(scratch)
+        var offending = SourceScan.Statements(scratch)
             .Where(s => s.Statement.Contains("new ManagedIdentityClientAssertion(", StringComparison.Ordinal))
             .Where(s => !IsBoundToReadonlyField(s.Statement, readonlyFields))
             .ToList();
@@ -382,7 +380,7 @@ public class CredentialGuardTests
         };
 
         var sanctionedFields = ReadonlyFieldNames(sanctioned);
-        var falsePositives = Statements(sanctioned)
+        var falsePositives = SourceScan.Statements(sanctioned)
             .Where(s => s.Statement.Contains("new ManagedIdentityClientAssertion(", StringComparison.Ordinal))
             .Where(s => !IsBoundToReadonlyField(s.Statement, sanctionedFields))
             .ToList();
@@ -404,7 +402,7 @@ public class CredentialGuardTests
         var violations = new List<string>();
         var allowed = Allowlist.Select(e => e.FileName).ToHashSet(StringComparer.Ordinal);
 
-        foreach (var file in EnumerateServerSource())
+        foreach (var file in SourceScan.ServerSourceFiles())
         {
             if (allowed.Contains(Path.GetFileName(file)))
             {
@@ -417,7 +415,7 @@ public class CredentialGuardTests
                 var what = MatchSecretBinding(lines[i]);
                 if (what is not null)
                 {
-                    violations.Add($"{Relative(file)}:{i + 1}: {what} -- {lines[i].Trim()}");
+                    violations.Add($"{SourceScan.Relative(file)}:{i + 1}: {what} -- {lines[i].Trim()}");
                 }
             }
         }
@@ -432,7 +430,7 @@ public class CredentialGuardTests
     /// </summary>
     private static string? MatchSecretBinding(string line)
     {
-        var code = StripLineComment(line);
+        var code = SourceScan.StripLineComment(line);
         foreach (var (pattern, what) in SecretBindings)
         {
             if (code.Contains(pattern, StringComparison.Ordinal))
@@ -444,22 +442,13 @@ public class CredentialGuardTests
         return null;
     }
 
-    private static IEnumerable<string> EnumerateServerSource()
-    {
-        var serverRoot = Path.Combine(RepoRoot, "src", "server");
-        return Directory
-            .EnumerateFiles(serverRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
-    }
-
     /// <summary>Names of fields declared <c>readonly</c> in this file.</summary>
     private static HashSet<string> ReadonlyFieldNames(IReadOnlyList<string> lines)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var line in lines)
         {
-            var m = Regex.Match(StripLineComment(line), @"\breadonly\s+[\w<>,.?\[\]]+\s+(\w+)\s*[;=]");
+            var m = Regex.Match(SourceScan.StripLineComment(line), @"\breadonly\s+[\w<>,.?\[\]]+\s+(\w+)\s*[;=]");
             if (m.Success)
             {
                 names.Add(m.Groups[1].Value);
@@ -492,55 +481,6 @@ public class CredentialGuardTests
         return assignment.Success && readonlyFields.Contains(assignment.Groups[1].Value);
     }
 
-    /// <summary>
-    /// Splits source into statements — text between <c>;</c>, <c>{</c> and <c>}</c> boundaries — with the
-    /// 1-based line each began on. Comments are stripped first. Crude by design (this is arch-fitness
-    /// scanning, not compilation), but it is what makes a multi-line initialiser analysable as the single
-    /// assignment it is.
-    ///
-    /// <para><b>Braces are boundaries, and that is not cosmetic.</b> With <c>;</c> alone, a member
-    /// signature and its opening brace accumulate into the first statement of the body — so the ctor
-    /// signature ended up prefixed to the assignment, the <c>^\s*(\w+)\s*=</c> anchor matched <c>public</c>
-    /// instead of the field, and the SANCTIONED provider was reported as a violation. Caught by this
-    /// file's own positive control, which is the reason it exists.</para>
-    /// </summary>
-    private static IEnumerable<(string Statement, int Line)> Statements(IReadOnlyList<string> lines)
-    {
-        var buffer = string.Empty;
-        var startLine = 1;
-
-        for (var i = 0; i < lines.Count; i++)
-        {
-            var code = StripLineComment(lines[i]);
-            if (buffer.Length == 0)
-            {
-                if (string.IsNullOrWhiteSpace(code))
-                {
-                    continue;
-                }
-
-                startLine = i + 1;
-            }
-
-            buffer = buffer.Length == 0 ? code : buffer + " " + code.Trim();
-
-            var terminated = code.Contains(';', StringComparison.Ordinal)
-                             || code.Contains('{', StringComparison.Ordinal)
-                             || code.Contains('}', StringComparison.Ordinal);
-            if (!terminated)
-            {
-                continue;
-            }
-
-            yield return (buffer, startLine);
-            buffer = string.Empty;
-        }
-
-        if (buffer.Length > 0)
-        {
-            yield return (buffer, startLine);
-        }
-    }
 
     /// <summary>Lines of the member whose declaration starts with <paramref name="declaration"/>.</summary>
     private static IReadOnlyList<string> ExtractMemberBody(IReadOnlyList<string> lines, string declaration)
@@ -558,18 +498,13 @@ public class CredentialGuardTests
         Assert.True(start >= 0, $"member not found: {declaration}. If it was renamed, update this guard "
                                 + "rather than deleting it — the invariant it protects still holds.");
 
-        // Expression-bodied or block-bodied: take until the first line ending the member.
         var body = new List<string>();
         for (var i = start; i < lines.Count; i++)
         {
             body.Add(lines[i]);
-            var code = StripLineComment(lines[i]);
-            if (code.TrimEnd().EndsWith(";", StringComparison.Ordinal) && i > start)
-            {
-                break;
-            }
-
-            if (code.Contains('}', StringComparison.Ordinal) && i > start)
+            var code = SourceScan.StripLineComment(lines[i]);
+            if (i > start && (code.TrimEnd().EndsWith(";", StringComparison.Ordinal)
+                              || code.Contains('}', StringComparison.Ordinal)))
             {
                 break;
             }
@@ -600,7 +535,7 @@ public class CredentialGuardTests
 
         for (var i = start; i < lines.Count; i++)
         {
-            var code = StripLineComment(lines[i]);
+            var code = SourceScan.StripLineComment(lines[i]);
             span.Add(lines[i]);
             depth += code.Count(c => c == '{');
             depth -= code.Count(c => c == '}');
@@ -611,8 +546,7 @@ public class CredentialGuardTests
 
             if (opened && depth == 0)
             {
-                // Keep going through an `else` that follows the closing brace.
-                var next = i + 1 < lines.Count ? StripLineComment(lines[i + 1]).Trim() : string.Empty;
+                var next = i + 1 < lines.Count ? SourceScan.StripLineComment(lines[i + 1]).Trim() : string.Empty;
                 if (!next.StartsWith("else", StringComparison.Ordinal))
                 {
                     break;
@@ -621,32 +555,5 @@ public class CredentialGuardTests
         }
 
         return span;
-    }
-
-    /// <summary>Removes a <c>//</c> (and therefore <c>///</c>) line comment. Naive; adequate for scanning.</summary>
-    private static string StripLineComment(string line)
-    {
-        var idx = line.IndexOf("//", StringComparison.Ordinal);
-        return idx < 0 ? line : line[..idx];
-    }
-
-    private static string Relative(string file)
-        => file.Replace(RepoRoot + Path.DirectorySeparatorChar, string.Empty, StringComparison.Ordinal);
-
-    private static string ResolveRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, "src")) &&
-                Directory.Exists(Path.Combine(dir.FullName, "tests")))
-            {
-                return dir.FullName;
-            }
-
-            dir = dir.Parent;
-        }
-
-        return AppContext.BaseDirectory;
     }
 }
