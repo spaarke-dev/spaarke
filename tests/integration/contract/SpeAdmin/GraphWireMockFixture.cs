@@ -125,6 +125,27 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a POST — used for <c>/search/query</c> and other
+    /// action endpoints where the REQUEST BODY is the thing worth asserting.
+    /// </summary>
+    /// <remarks>
+    /// Pair with <see cref="RecordedGraphRequest.BodyAsJson"/>. Graph's search API takes its entity
+    /// types, query, and field list in the body rather than the query string, so for those endpoints
+    /// the body is where the wrong-property-name defect class lives.
+    /// </remarks>
+    public GraphWireMockFixture StubPost(string pathPrefix, string jsonBody, int statusCode = 200)
+    {
+        _server
+            .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPost())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Observation — the REQUEST half
     // ─────────────────────────────────────────────────────────────────────────

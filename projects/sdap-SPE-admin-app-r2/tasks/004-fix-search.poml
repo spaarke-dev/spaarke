@@ -4,7 +4,7 @@
     <title>Diagnose and fix the Search screen</title>
     <phase>1 Workstream A — Make failures visible</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph surface; brownfield root-cause work; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,26 @@
     <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-A04. Owner decision OC-02 makes this an uncapped commitment to fix. Effort is provisional — the root cause is not isolated, which is recorded as an Unresolved Question in spec.md.</notes>
+  <notes>Spec FR-A04. Owner decision OC-02 makes this an uncapped commitment to fix. Effort is provisional — the root cause is not isolated, which is recorded as an Unresolved Question in spec.md.
+
+COMPLETED 2026-08-21 — full record in notes/search-root-cause.md. Root cause proven by live app-only calls to real Graph against Spaarke Dev (az CLI + owning-app secret from Key Vault), then the fix replayed live and confirmed 200.
+
+VERDICT: classification (b) WRONG ENTITY TYPE. `fileStorageContainer` is NOT a supported entityTypes value on /search/query. A 10-probe differential matrix showed it is byte-identical to a deliberately nonexistent entity type — on beta AND v1.0, with and without region — while `driveItem` returns a specific error and then real results.
+
+🔔 THE SPEC'S LEADING HYPOTHESIS (a), the app-only permission limitation of §3.1, IS DISPROVEN. App-only search returns 200 with real hits once the request is valid. NEITHER escalation trigger fired, so this did NOT hand off to Workstream B / task 011. Task 011 must not inherit "Search is blocked on delegated auth" — it never was.
+
+THREE defects, not one — the Items screen was broken too and would still have been broken after "fixing" Search:
+  D1 SearchContainersAsync used /search/query with entityTypes fileStorageContainer -> 400 every time. Replaced with an OData $filter (contains on displayName/description) against /storage/fileStorage/containers. Verified 200 live.
+  D2 SearchItemsAsync omitted `region`, which Graph REQUIRES for application permissions ("Region is required when request with application permission."). Added as configurable SpeAdmin:SearchRegion, default NAM — region is a property of tenant provisioning, so a hardcoded value would pass here and fail for a non-NAM tenant.
+  D3 SearchItemsAsync sent `contentSources` to scope to a container, which Graph accepts ONLY for externalItem ("Content Source is required only for ExternalItem"). Removed; container scoping now filters hits by parentReference.driveId after the call, since Graph has no server-side way to scope a driveItem search.
+
+⚠️ "The call failed, please try again." is GRAPH'S OWN MESSAGE, not a Spaarke placeholder. Task 001's error surface reports it faithfully and it is still useless — no error-surfacing work could have diagnosed this; only a differential experiment did.
+
+ALSO ADDED: EscapeODataStringLiteral — the search term is interpolated into a single-quoted OData literal, so an unescaped apostrophe ("O'Brien") 400s the screen and a crafted term could append filter clauses.
+
+16 new contract tests on the task-040 WireMock fixture. 10,618 passed / 0 failed. ArchTests 36/36. Publish 43.66 MB (was 43.68). No new NuGet, no CVEs.
+
+FOR TASK 042: tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/SearchContainersTests.cs mirrors the old numeric-token logic in its own test bodies instead of calling production (ADR-038 B6) — which is exactly why it never caught any of this.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

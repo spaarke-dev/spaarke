@@ -315,6 +315,15 @@ public sealed class SpeAdminGraphService
     private readonly TimeSpan _cacheTtl;
 
     /// <summary>
+    /// Graph search region, sent on every app-only <c>/search/query</c> call (mandatory — see
+    /// <see cref="SearchItemsAsync"/>). Override with <c>SpeAdmin:SearchRegion</c>.
+    /// </summary>
+    private readonly string _searchRegion;
+
+    /// <summary>Fallback region when none is configured. North America.</summary>
+    internal const string DefaultSearchRegion = "NAM";
+
+    /// <summary>
     /// Token provider for multi-app OBO flows (Phase 3).
     /// Null when SpeAdminTokenProvider is not registered — falls back to single-app mode.
     /// </summary>
@@ -361,10 +370,17 @@ public sealed class SpeAdminGraphService
         var ttlMinutes = configuration.GetValue<int>("SpeAdmin:GraphClientCacheTtlMinutes", defaultValue: 30);
         _cacheTtl = TimeSpan.FromMinutes(ttlMinutes > 0 ? ttlMinutes : 30);
 
+        // Graph requires `region` on every app-only /search/query call. It is a property of where the
+        // tenant is provisioned, so it is configuration, not a constant — a tenant outside North
+        // America needs its own value (EUR, APC, …) or item search fails there while passing here.
+        var region = configuration.GetValue<string>("SpeAdmin:SearchRegion");
+        _searchRegion = string.IsNullOrWhiteSpace(region) ? DefaultSearchRegion : region;
+
         _logger.LogInformation(
             "SpeAdminGraphService initialized. Graph client cache TTL: {TtlMinutes} minutes. " +
-            "Multi-app (OBO) mode: {MultiAppEnabled}",
+            "Search region: {SearchRegion}. Multi-app (OBO) mode: {MultiAppEnabled}",
             ttlMinutes,
+            _searchRegion,
             tokenProvider != null);
     }
 
@@ -1542,7 +1558,7 @@ public sealed class SpeAdminGraphService
         ContainerTypeConfig config, string query, int? pageSize, string? skipToken, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await SearchContainersAsync(client, query, pageSize, skipToken, ct).ConfigureAwait(false); }
+        try { return await SearchContainersAsync(client, config.ContainerTypeId, query, pageSize, skipToken, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchContainers({query})"); }
     }
 
@@ -3023,18 +3039,43 @@ public sealed class SpeAdminGraphService
     // =========================================================================
 
     /// <summary>
-    /// Searches SPE containers using the Microsoft Graph Search API (/search/query) with
-    /// entity type <c>fileStorageContainer</c>.
+    /// Searches SPE containers by substring match on <c>displayName</c> / <c>description</c>, using an
+    /// OData <c>$filter</c> against <c>/storage/fileStorage/containers</c>.
     ///
     /// Returns domain model <see cref="ContainerSearchPage"/> — no Graph SDK types exposed (ADR-007).
-    ///
-    /// Pagination: Graph Search uses a 0-based <c>from</c> index and <c>size</c> page size.
-    /// The caller supplies a numeric <paramref name="skipToken"/> that encodes the start offset.
-    /// A <see cref="ContainerSearchPage.NextSkipToken"/> is returned when more results exist;
-    /// the token encodes the next <c>from</c> offset as a decimal integer string.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This deliberately does NOT use <c>/search/query</c>.</b> It used to, with
+    /// <c>entityTypes: ["fileStorageContainer"]</c>, and every call returned
+    /// <c>400 BadRequest "The call failed, please try again."</c> — which is Graph's own message, not a
+    /// Spaarke placeholder, so the Search screen has never worked.
+    /// </para>
+    /// <para>
+    /// Proven against the live tenant (task 004, <c>notes/search-root-cause.md</c>): a request for
+    /// <c>fileStorageContainer</c> is byte-for-byte indistinguishable from a request for a deliberately
+    /// nonexistent entity type, on beta and v1.0, with and without <c>region</c> — while
+    /// <c>driveItem</c> returns a specific, actionable error and then real results. <b>Graph does not
+    /// expose <c>fileStorageContainer</c> to <c>/search/query</c>.</b> The old code's serialization
+    /// comment was correct; the entity type was not. This is NOT the app-only permission limitation of
+    /// spec §3.1 — app-only search works fine once the request is valid.
+    /// </para>
+    /// <para>
+    /// <b>Accepted trade-off.</b> <c>contains()</c> is a substring match over two columns, not a
+    /// relevance-ranked full-text search over indexed content and custom properties. That is a real
+    /// reduction in capability — and the alternative on offer is a screen that returns nothing at all.
+    /// If richer container search is needed later, it requires a different mechanism, not a different
+    /// <c>entityTypes</c> value.
+    /// </para>
+    /// <para>
+    /// Pagination is OData: <c>$top</c> plus the opaque <c>$skiptoken</c> carried on
+    /// <c>@odata.nextLink</c>. The previous numeric <c>from</c>-offset token has no meaning here; the
+    /// endpoint contract already declared the token opaque, so callers are unaffected.
+    /// </para>
+    /// </remarks>
     /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
-    /// <param name="query">Full-text search query string. Required; must not be empty.</param>
+    /// <param name="containerTypeId">Container type GUID to scope the search to.</param>
+    /// <param name="query">Search term. Required; matched as a substring, not a full-text query.</param>
     /// <param name="pageSize">Number of results per page (1–50). Defaults to 25.</param>
     /// <param name="skipToken">
     /// Opaque pagination token from a previous <see cref="ContainerSearchPage.NextSkipToken"/>.
@@ -3044,134 +3085,102 @@ public sealed class SpeAdminGraphService
     /// <returns>A <see cref="ContainerSearchPage"/> containing results and an optional next-page token.</returns>
     public async Task<ContainerSearchPage> SearchContainersAsync(
         GraphServiceClient graphClient,
+        string containerTypeId,
         string query,
         int? pageSize,
         string? skipToken,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
-        // Clamp page size: Graph Search supports 1–500; keep to 25 default, 50 max for admin use.
         var size = Math.Clamp(pageSize ?? 25, 1, 50);
 
-        // Decode skip token: we encode the Graph Search 'from' offset as a decimal string.
-        var from = 0;
-        if (!string.IsNullOrWhiteSpace(skipToken) && int.TryParse(skipToken, out var parsedFrom))
-        {
-            from = Math.Max(0, parsedFrom);
-        }
-
         _logger.LogInformation(
-            "Searching SPE containers: query='{Query}', from={From}, size={Size}",
-            query, from, size);
+            "Searching SPE containers: query='{Query}', containerTypeId={ContainerTypeId}, size={Size}, hasSkipToken={HasSkipToken}",
+            query, containerTypeId, size, !string.IsNullOrWhiteSpace(skipToken));
 
-        // Build the Graph Search request body.
-        // "fileStorageContainer" is a beta-only entity type not yet in the EntityType enum.
-        // We use AdditionalData to inject the raw entityTypes array so it serialises correctly
-        // when posting to the Graph beta /search/query endpoint.
-        var searchRequest = new Microsoft.Graph.Models.SearchRequest
-        {
-            Query = new Microsoft.Graph.Models.SearchQuery { QueryString = query },
-            From = from,
-            Size = size,
-            Fields = new List<string>
-            {
-                "id", "displayName", "description", "containerTypeId"
-            },
-            AdditionalData = new Dictionary<string, object>
-            {
-                // Raw string array — Kiota serialises Dictionary<string, object> values
-                // as JSON, so a string[] here produces the correct JSON array in the request.
-                ["entityTypes"] = new string[] { "fileStorageContainer" }
-            }
-        };
-
-        var requestBody = new Microsoft.Graph.Search.Query.QueryPostRequestBody
-        {
-            Requests = new List<Microsoft.Graph.Models.SearchRequest> { searchRequest }
-        };
+        // containerTypeId is Edm.Guid — bare literal, no quotes (ADR-044 bare-lowercase).
+        // The search term IS quoted, so it must be OData-escaped; see EscapeODataStringLiteral.
+        var term = EscapeODataStringLiteral(query);
+        var filter =
+            $"containerTypeId eq {containerTypeId} and " +
+            $"(contains(displayName,'{term}') or contains(description,'{term}'))";
 
         try
         {
-            var response = await ExecuteWithRetryAsync(
-                () => graphClient.Search.Query.PostAsQueryPostResponseAsync(requestBody, cancellationToken: ct),
-                ct);
+            Microsoft.Graph.Models.FileStorageContainerCollectionResponse? response;
 
-            var items = new List<SearchContainerResult>();
-            long? totalCount = null;
-            string? nextSkipToken = null;
-
-            if (response?.Value != null)
+            if (string.IsNullOrWhiteSpace(skipToken))
             {
-                foreach (var searchResponse in response.Value)
-                {
-                    if (searchResponse.HitsContainers == null) continue;
-
-                    foreach (var hitsContainer in searchResponse.HitsContainers)
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.Containers.GetAsync(config =>
                     {
-                        // Capture total result count from first non-null value
-                        if (hitsContainer.Total.HasValue && totalCount is null)
-                        {
-                            totalCount = hitsContainer.Total.Value;
-                        }
+                        config.QueryParameters.Filter = filter;
+                        config.QueryParameters.Select = new[] { "id", "displayName", "description", "containerTypeId" };
+                        config.QueryParameters.Top = size;
+                    }, ct),
+                    ct);
+            }
+            else
+            {
+                // Continuation. The token is the opaque OData $skiptoken from the previous page's
+                // @odata.nextLink; the filter/select/top are re-stated so the page stays consistent.
+                var url =
+                    $"{graphClient.RequestAdapter.BaseUrl}/storage/fileStorage/containers" +
+                    $"?$filter={Uri.EscapeDataString(filter)}" +
+                    $"&$select={Uri.EscapeDataString("id,displayName,description,containerTypeId")}" +
+                    $"&$top={size}" +
+                    $"&$skiptoken={Uri.EscapeDataString(skipToken)}";
 
-                        if (hitsContainer.Hits == null) continue;
-
-                        foreach (var hit in hitsContainer.Hits)
-                        {
-                            var result = MapSearchHit(hit);
-                            if (result != null)
-                            {
-                                items.Add(result);
-                            }
-                        }
-
-                        // Emit a nextSkipToken when Graph reports more results are available.
-                        // Graph Search pagination is offset-based (from + size); we encode the
-                        // next 'from' position as the token.
-                        if (hitsContainer.MoreResultsAvailable == true)
-                        {
-                            nextSkipToken = (from + size).ToString();
-                        }
-                    }
-                }
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.Containers.WithUrl(url).GetAsync(cancellationToken: ct),
+                    ct);
             }
 
-            _logger.LogInformation(
-                "Container search '{Query}' returned {Count} hits (totalCount={TotalCount}, hasNext={HasNext})",
-                query, items.Count, totalCount, nextSkipToken != null);
+            var items = (response?.Value ?? [])
+                .Select(c => new SearchContainerResult(
+                    Id: c.Id ?? string.Empty,
+                    DisplayName: c.DisplayName ?? string.Empty,
+                    Description: c.Description,
+                    ContainerTypeId: c.ContainerTypeId?.ToString() ?? containerTypeId))
+                .ToList();
 
-            return new ContainerSearchPage(items, totalCount, nextSkipToken);
+            // Reuses the existing private nextLink parser rather than adding a second one.
+            var nextSkipToken = string.IsNullOrWhiteSpace(response?.OdataNextLink)
+                ? null
+                : ExtractSkipToken(response.OdataNextLink);
+
+            _logger.LogInformation(
+                "Container search '{Query}' returned {Count} matches (hasNext={HasNext})",
+                query, items.Count, nextSkipToken != null);
+
+            // TotalCount is null by design: the containers endpoint reports no total, and
+            // fabricating items.Count would make the last page indistinguishable from a
+            // complete result set.
+            return new ContainerSearchPage(items, TotalCount: null, NextSkipToken: nextSkipToken);
         }
         catch (ODataError odataError)
         {
             _logger.LogError(
                 odataError,
-                "Graph Search API error for query '{Query}': Status={Status}, Message={Message}",
+                "Container search failed for query '{Query}': Status={Status}, Message={Message}",
                 query, odataError.ResponseStatusCode, odataError.Error?.Message);
             throw;
         }
     }
 
     /// <summary>
-    /// Maps a Graph Search hit resource to a <see cref="SearchContainerResult"/> domain record.
-    /// Returns <c>null</c> when the hit resource is not a <see cref="Microsoft.Graph.Models.FileStorageContainer"/>.
-    /// ADR-007: No Graph SDK types are returned from public methods.
+    /// Escapes a user-supplied value for use inside a single-quoted OData string literal.
     /// </summary>
-    private static SearchContainerResult? MapSearchHit(Microsoft.Graph.Models.SearchHit hit)
-    {
-        if (hit.Resource is not Microsoft.Graph.Models.FileStorageContainer container)
-        {
-            return null;
-        }
+    /// <remarks>
+    /// OData escapes a quote by doubling it. Without this, a search for <c>O'Brien</c> terminates the
+    /// literal early and Graph rejects the filter — and a crafted term could otherwise append clauses
+    /// to a filter we build by concatenation.
+    /// </remarks>
+    internal static string EscapeODataStringLiteral(string value) => value.Replace("'", "''");
 
-        return new SearchContainerResult(
-            Id: container.Id ?? hit.HitId ?? string.Empty,
-            DisplayName: container.DisplayName ?? string.Empty,
-            Description: container.Description,
-            ContainerTypeId: container.ContainerTypeId?.ToString());
-    }
 
     /// <summary>
     /// Evicts all expired entries from the client cache (app-only clients and OBO clients).
@@ -4786,9 +4795,31 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// Searches for drive items within SPE containers using the Microsoft Graph search API.
     /// Uses POST /search/query with entityTypes: ["driveItem"].
-    /// When containerId is provided, search is scoped to that container via contentSources.
     /// Returns domain model SearchItemPage — no Graph SDK types exposed (ADR-007).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two defects were fixed here in task 004</b>, each of which 400'd every app-only call on its
+    /// own. Both were proven against the live tenant — see <c>notes/search-root-cause.md</c>.
+    /// </para>
+    /// <list type="number">
+    /// <item><b>Missing <c>region</c>.</b> Graph rejects an app-only search request without it:
+    /// <c>"Region is required when request with application permission."</c> Adding it turns the same
+    /// request into a 200 with real hits.</item>
+    /// <item><b><c>contentSources</c> is not valid for <c>driveItem</c>.</b> It was set to
+    /// <c>/drives/{driveId}</c> to scope the search to one container, and Graph answers
+    /// <c>"Content Source is required only for ExternalItem"</c>. So even with <c>region</c> added, a
+    /// container-scoped search still failed.</item>
+    /// </list>
+    /// <para>
+    /// <b>How container scoping works now.</b> Graph offers no server-side way to restrict a
+    /// <c>driveItem</c> search to one drive, so hits are filtered by <c>parentReference.driveId</c>
+    /// after they come back. The consequence is honest but real: paging is approximate, because Graph
+    /// counts pages before the filter is applied. A page can therefore come back partly empty while
+    /// more matches still exist — which is why <c>MoreResultsAvailable</c>, not the post-filter count,
+    /// decides whether a next-page token is issued.
+    /// </para>
+    /// </remarks>
     public async Task<SearchItemPage> SearchItemsAsync(
         GraphServiceClient graphClient,
         string query,
@@ -4813,7 +4844,8 @@ public sealed class SpeAdminGraphService
             "SearchItems: query='{Query}', containerId={ContainerId}, fileType={FileType}, pageSize={PageSize}, hasSkipToken={HasSkipToken}",
             query, containerId, fileType, size, skipToken != null);
 
-        // When scoping to a container, resolve its driveId for contentSources.
+        // When scoping to a container, resolve its driveId so hits can be filtered after the call.
+        // (contentSources cannot do this — Graph accepts it only for externalItem.)
         string? driveId = null;
         if (!string.IsNullOrWhiteSpace(containerId))
         {
@@ -4842,9 +4874,9 @@ public sealed class SpeAdminGraphService
                     },
                     Size = size,
                     From = fromOffset,
-                    ContentSources = !string.IsNullOrWhiteSpace(driveId)
-                        ? new List<string> { $"/drives/{driveId}" }
-                        : null,
+                    // Required for application permissions — without it Graph answers
+                    // "Region is required when request with application permission." (task 004).
+                    Region = _searchRegion,
                     Fields = new List<string>
                     {
                         "id", "name", "size", "lastModifiedDateTime", "webUrl",
@@ -4884,18 +4916,30 @@ public sealed class SpeAdminGraphService
 
                     foreach (var hit in hitsContainer.Hits)
                     {
-                        if (hit.Resource is Microsoft.Graph.Models.DriveItem driveItem)
+                        if (hit.Resource is not Microsoft.Graph.Models.DriveItem driveItem)
                         {
-                            results.Add(new SpeSearchItemResult(
-                                Id: driveItem.Id ?? string.Empty,
-                                Name: driveItem.Name ?? string.Empty,
-                                Size: driveItem.Size,
-                                LastModifiedDateTime: driveItem.LastModifiedDateTime,
-                                ContainerId: containerId,
-                                ContainerName: null,
-                                WebUrl: driveItem.WebUrl,
-                                MimeType: driveItem.File?.MimeType));
+                            continue;
                         }
+
+                        // Container scoping. Graph has no server-side way to restrict a driveItem
+                        // search to one drive (contentSources is externalItem-only), so a hit from
+                        // another container is dropped here. Without this the admin would be shown
+                        // files from containers they did not ask about.
+                        if (!string.IsNullOrWhiteSpace(driveId) &&
+                            !string.Equals(driveItem.ParentReference?.DriveId, driveId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        results.Add(new SpeSearchItemResult(
+                            Id: driveItem.Id ?? string.Empty,
+                            Name: driveItem.Name ?? string.Empty,
+                            Size: driveItem.Size,
+                            LastModifiedDateTime: driveItem.LastModifiedDateTime,
+                            ContainerId: containerId,
+                            ContainerName: null,
+                            WebUrl: driveItem.WebUrl,
+                            MimeType: driveItem.File?.MimeType));
                     }
                 }
             }
