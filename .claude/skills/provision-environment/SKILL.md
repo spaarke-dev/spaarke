@@ -340,6 +340,18 @@ foreach ($ns in $requiredProviders) {
 - If NO auto-grant path exists for a required resource AND operator has Support Plan → auto-file via `az support in-subscription tickets create`
 - If no Support Plan → HALT with actionable operator guidance
 
+**F10 — Global resource-name availability pre-check** (added 2026-08-22 after F10 discovery):
+```powershell
+# Service Bus namespace (Azure reserves suffixes like -sb globally)
+az rest --method post --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" `
+  --body "{`"name`":`"$sbName`",`"type`":`"Microsoft.ServiceBus/namespaces`"}"
+# Storage account (global namespace)
+az storage account check-name --name $storageName
+# Cognitive Services custom subdomain (global namespace)
+az cognitiveservices account check-domain-availability --subdomain-name $openAiName --type OpenAI
+```
+what-if does NOT run these checks — only actual create-time validation catches global-namespace conflicts. This gap wasted 16m35s on this session's first deploy attempt. Skill Step 2.5 MUST run these before invoking `az deployment sub create`.
+
 **F9 — Support Plan check**:
 ```powershell
 $plan = az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.Resources/checkResourceName?api-version=2020-10-01" 2>&1
@@ -1029,6 +1041,7 @@ The first live Model 1 Prod stand-up (2026-08-22, sub `cd95fcec-...`) surfaced 9
 | F7 | Portal Usage+Quotas provider dropdown empty on fresh subs (only shows providers with existing resources) | Preemptive operator warning + link to https://ai.azure.com Quotas | MVP: informational only |
 | F8 | Portal auto-denies fresh-sub quota requests + pushes to Support Ticket | Auto-file via `az support in-subscription tickets create` REST API if Support Plan available | TODO: not implemented — advanced; requires operator to have `Microsoft.Support/*` role |
 | F9 | Support Plan availability varies; skill must not queue ticket-dependent actions on plan-less sub | Check Support Plan presence in Step 2.5; downgrade approach if absent | TODO: not implemented |
+| F10 | Global resource-name reservations not caught by what-if (Service Bus `-sb` suffix, etc.) — burned 16m35s on this session's first deploy | Run `az {svc} check-name` for every resource with global namespace BEFORE `az deployment sub create` | Bicep fix committed; skill automation TODO |
 
 ### What r1 delivery still needs (roadmap)
 

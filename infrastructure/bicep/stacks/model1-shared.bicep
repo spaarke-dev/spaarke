@@ -101,8 +101,8 @@ param sharedAiSearchName string = '${sharedBaseName}-search'
 @description('SHARED PLATFORM — Redis Cache name (per-env per Q-E FR-12).')
 param sharedRedisName string = '${sharedBaseName}-redis'
 
-@description('SHARED PLATFORM — Service Bus namespace name.')
-param sharedServiceBusName string = '${sharedBaseName}-sb'
+@description('SHARED PLATFORM — Service Bus namespace name. AVOID -sb suffix — Azure reserves it globally on Service Bus namespaces (NamespaceUnavailable / InvalidSuffix). Canonical: sprkshared{env}-servicebus. Discovered 2026-08-22 during Model 1 Prod first-live deploy (customer-provisioning-orchestration-r1 finding F10) — see lessons-learned doc.')
+param sharedServiceBusName string = '${sharedBaseName}-servicebus'
 
 @description('SHARED PLATFORM — Storage account name (shared cross-tenant buffers: temp-files, ai-chunks, customer-exports). Per-tenant storage is separate.')
 param sharedStorageAccountName string = take(toLower(replace('${sharedBaseName}sa', '-', '')), 24)

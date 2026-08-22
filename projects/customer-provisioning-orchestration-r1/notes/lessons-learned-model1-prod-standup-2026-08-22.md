@@ -181,6 +181,40 @@ Two fix-at-discovery iterations were required before preflight passed. The fresh
 
 ---
 
+### F10: Azure Service Bus reserves the `-sb` suffix globally
+
+**Symptom**: Deploy failed at 16m35s into the resource-create phase (not preflight — the resource-name uniqueness check only fires at actual create time, NOT during what-if):
+```
+NamespaceUnavailable — Namespace name 'sprksharedprod-sb' is not available.
+Reason: InvalidSuffix. Message: Namespace with suffix '-sb' is reserved.
+```
+
+**Root cause**: Azure Service Bus reserves certain suffixes on namespace names GLOBALLY across all subs (probably to disambiguate from Microsoft internal namespaces). `-sb` is one of them. The Bicep stack default was `${sharedBaseName}-sb` = `sprksharedprod-sb` (fine syntactically, hit the global reserved-suffix rule at create time).
+
+**Impact**: The whole `az deployment sub create` failed at 16m35s. BUT — Bicep's `@batchSize(1)` semantics + module ordering meant **18 of 20 resources DID get created successfully before the SB module hit the failure**. Only SB namespace + BFF App Service (which depended on SB) were missing. Fix + re-deploy is idempotent — existing 18 resources are left alone.
+
+**Fix applied**: Changed stack default from `${sharedBaseName}-sb` → `${sharedBaseName}-servicebus`. Longer suffix (`-servicebus` unlikely to hit any reserved-suffix rule). Model 1 Prod SB name becomes `sprksharedprod-servicebus`.
+
+**Automation gap**: what-if does NOT validate resource-name uniqueness/availability against Azure's global namespace rules. what-if is happy with `sprksharedprod-sb` because it doesn't call the Service Bus namespace pre-check API. Only actual create-time validation catches this. Same class of issue can hit:
+- Storage account names (globally unique, some patterns reserved)
+- Cognitive Services custom subdomain names (globally unique)
+- Azure Front Door / CDN endpoints (globally unique)
+- Any resource with global namespace conflicts
+
+**Automation TODO (r1 fresh-sub Step 2.5)**: Add resource-name availability pre-check for all resources with global namespaces. Run `az servicebus namespace check-name` / `az storage account check-name` / etc. as part of Step 2.5. Catch these BEFORE the 16-minute deploy attempt.
+
+**Related Azure API calls** to add to skill Step 2.5:
+```bash
+# Service Bus namespace availability check
+az rest --method post --url "https://management.azure.com/subscriptions/{subId}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" --body '{"name":"sprksharedprod-servicebus","type":"Microsoft.ServiceBus/namespaces"}'
+# Storage account name check
+az storage account check-name --name sprksharedprodsa
+# Cognitive Services subdomain check
+az cognitiveservices account check-domain-availability --subdomain-name sprksharedprod-openai --type OpenAI
+```
+
+---
+
 ## Non-Blocking Observations
 
 ### O1: `az cognitiveservices model list` output shows separate "Deprecating" vs "Legacy" statuses; only "GA" or "Legacy" are deployable
