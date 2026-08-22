@@ -52,7 +52,7 @@ The template references these Key Vault secrets:
 | `ai-search-endpoint` | AI Search endpoint URL |
 | `ai-search-key` | AI Search admin key (legacy operational alias — mirrors AiSearch--AdminKey value) |
 | `AiSearch--AdminKey` | AI Search admin key (canonical per spec FR-21; added 2026-06-26 task 001 Option C remediation) |
-| `AzureAISearchApiKey` | AI Search admin key (legacy app-settings alias — mirrors AiSearch--AdminKey value; referenced by `AiSearch__ApiKeySecretName` + `AiSearch__ReferencesApiKey`) |
+| `AzureAISearchApiKey` | AI Search admin key (legacy app-settings alias — mirrors AiSearch--AdminKey value; referenced by `AiSearch__ReferencesApiKey`. The `AiSearch__ApiKeySecretName` reference was removed by auth-v4 task 053: the property it bound to was read by nothing) |
 | `PromptFlow-Endpoint` | AI Foundry Prompt Flow endpoint |
 | `PromptFlow-Key` | AI Foundry Prompt Flow API key |
 | `AppInsights-ConnectionString` | Application Insights connection string |

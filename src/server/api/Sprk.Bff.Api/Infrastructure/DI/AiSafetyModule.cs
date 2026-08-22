@@ -111,6 +111,7 @@ public static class AiSafetyModule
         services.AddSingleton<IVerificationProvider>(sp =>
             new InternalIndexProvider(
                 sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Azure.Core.TokenCredential>(),
                 sp.GetRequiredService<ILogger<InternalIndexProvider>>()));
 
 

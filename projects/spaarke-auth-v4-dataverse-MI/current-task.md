@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-22 (by `task-execute` 053) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
+> **Last Updated**: 2026-08-22 (by `task-execute` 053 — migration landed) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,10 +11,10 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — Group F: **055, 052, 050** closed; **053 ⛔ BLOCKED on owner** |
+| **Task** | **none active** — Group F: **055, 052, 050** closed; **053 🔄 code-complete, live cutover booked to 031** |
 | **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | `task-execute` on `tasks/056-bing-key-kv-by-name.poml` — the only Group F task with no owner gate left. **054 is PARTIALLY blocked by 053** (shares `DocumentIntelligenceOptions`; do NOT run them in parallel). 🔔 **Three items now need the owner: 050 safety defect, 053 Search auth flag, 051 SAS rotation** |
-| **Progress** | **18 of 26 active complete** · **8 remaining** (031,032,033,051,**053⛔**,054,056,090) · 3 deferred |
+| **Next Action** | `task-execute` on `tasks/054-doc-intelligence-to-entra.poml` — **now unblocked**: 053 migrated all three `DocumentIntelligence:AiSearchKey` consumers, so 054 confines itself to the DocIntel resource itself. Then 056. 🔔 **Owner items left: 050 safety defect, 051 SAS rotation** |
+| **Progress** | **18 of 26 active complete** · **8 remaining** (031,032,033,051,**053🔄**,054,056,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
 ### Files modified this session — ALL COMMITTED AND PUSHED (working tree clean)
@@ -57,7 +57,7 @@ each go and discover:
 
 | Task | What is already true |
 |---|---|
-| **053** AI Search | 🔴 **THIS LINE WAS WRONG — CORRECTED 2026-08-22.** The role assignment exists but is **INERT**: `spaarke-search-dev` is `authOptions: apiKeyOnly`, so the data plane returns **HTTP 403** to every Entra token before any role is evaluated. "The role exists" was carried forward as "Entra auth will work". It does not. See [053 record](notes/decisions/053-ai-search-to-entra.md) |
+| **053** AI Search | 🔴 **THAT LINE WAS WRONG — CORRECTED 2026-08-22.** The role was **INERT**: `spaarke-search-dev` was `apiKeyOnly`, so the data plane returned **HTTP 403** to every Entra token before any role was evaluated. **Owner authorised the fix and it is APPLIED** — the service is now `aadOrApiKey` (additive; reverse with `--auth-options apiKeyOnly`). Entra probe now returns **200** |
 | **051** Service Bus | UAMI holds **`Data Sender`** + **`Data Receiver`**, but **scoped to the `sprk-membership-changes` TOPIC ONLY**, not the namespace. Do NOT assume namespace-level access — any other topic/queue needs its own grant. ⚠️ This task also says "rotate the leaked SAS": `appsettings.Development.json` contains a live Service Bus SAS key. **Rotating a live shared credential is an outward-facing action — confirm with the owner first** |
 | **050** Content Safety | ✅ **DONE.** There IS no separate Content Safety resource — `spaarke-openai-dev` (kind=AIServices) *is* the endpoint, and the UAMI's `Cognitive Services User` is the correct role for it |
 | **033 / 055** | The Key Vault is **`spaarke-spekvcert`**, resource group **`SharePointEmbedded`** (UAMI holds `Key Vault Secrets User`). This answers the vault question task 055 could not resolve — it is where the secret purge happens |
@@ -82,6 +82,7 @@ Bus namespace is in `SharePointEmbedded`. **The dev estate spans at least four r
 | Task | Outcome |
 |---|---|
 | **053** | ⛔ **BLOCKED at step 1.** `spaarke-search-dev` is `apiKeyOnly` — Entra returns **403**, so the UAMI's `Search Index Data Contributor` is inert. Also found: **7 key sites, not the POML's 2** (the POML names a DEAD property and misses the single `SearchIndexClient` the whole RAG stack uses), and clearing the key would **un-register 6 services** (ADR-032 asymmetric registration). **No code changed.** [Record](notes/decisions/053-ai-search-to-entra.md) |
+| **053** | 🔄 **Code-complete.** Service unblocked to `aadOrApiKey` (owner-authorised). **6 of 7 sites migrated** onto a new `SearchClientFactory` — the POML said 2 and missed the only `SearchIndexClient` in the codebase. Fixed an **ADR-032 asymmetric registration** where clearing the key would have un-registered 6 services. Site 6 = E-1 carve-out; site 7 was **dead** (3rd this workstream). **Keys NOT cleared** — live cutover booked to 031. [Record](notes/decisions/053-ai-search-to-entra.md) |
 | **050** | Content Safety was **already on MI** — no key existed to clear. Verified RBAC + no-key + MI-enabled, removed a dead `ContentSafety-ApiKey` KV reference from the template. 🔴 **Found a live safety defect**: the Prompt Shield perimeter has failed OPEN on **122 of 122** scans over the full 90-day window — cause is the 100ms deadline, **not** auth (token = 7ms). **ESCALATED**, not fixed. [Record](notes/decisions/050-content-safety-to-mi.md) |
 | **055** | `Analysis:PromptFlowKey` — **DEAD, deleted** (`250a5faae`). Zero readers, never deployed, KV entries were never-updated placeholders. The one Prompt Flow artifact in the repo uses the Foundry SDK's `@tool` decorator and does not read this key. KV purge booked to 033. [Record](notes/decisions/055-promptflow-key-disposition.md) |
 | **052** | ADR-028 **E-2 RE-AFFIRMED**, key NOT cleared (`0ece27567`). Custom subdomain IS configured → the hoped-for one-config fix never existed. **Near-miss**: a user-token 200 nearly became "E-2 disproven", but E-2 already documents that exact test passing — the distinguishing fact is user-200 vs MI-401. The MI half is untestable from here (Kudu SCM has no `IDENTITY_ENDPOINT`). One cheap test booked to 031. [Record](notes/decisions/052-azure-openai-e2-retest.md) |

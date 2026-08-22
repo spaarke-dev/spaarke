@@ -3,8 +3,8 @@
   <metadata>
     <title>Azure AI Search: migrate both key sites to Entra/MI (FR-E4)</title>
     <phase>5 Group 2</phase>
-    <gate>blocked-on-owner</gate>
-    <status>blocked</status>
+    <gate>code-complete-pending-deploy</gate>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs on the RAG retrieval path.</rigor-reason>
     <model-tier>sonnet</model-tier>

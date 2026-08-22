@@ -3,7 +3,14 @@ namespace Sprk.Bff.Api.Configuration;
 public class AiSearchOptions
 {
     public string Endpoint { get; init; } = string.Empty;
-    public string ApiKeySecretName { get; init; } = string.Empty;
+
+    // REMOVED 2026-08-22 by auth-v4 task 053 (FR-E4): ApiKeySecretName. It was bound from
+    // AiSearch:ApiKeySecretName and read by NOTHING - verified by grep across src/: the only
+    // occurrence was its own declaration. Every real AI Search consumer reached the admin key
+    // through DocumentIntelligence:AiSearchKey, AiSearch:ReferencesApiKey or
+    // RecordSync:AiSearchApiKey instead. Third instance of this pattern in one workstream, after
+    // Analysis:PromptFlowKey (task 055) and AiSafety:ContentSafety:ApiKey (task 050): a bound
+    // options property that NAMES a credential and has no consumer. See task 090.
     public string KnowledgeIndexName { get; init; } = "spaarke-files-index";
 
     /// <summary>

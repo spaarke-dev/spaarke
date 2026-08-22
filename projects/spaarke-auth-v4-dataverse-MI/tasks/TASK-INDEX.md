@@ -28,7 +28,7 @@
 | 050 | Content Safety → MI (path already exists) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E1 |✅ |
 | 051 | Service Bus → namespace + MI; rotate the leaked SAS | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E2 | 🔲 |
 | 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 |✅ |
-| 053 | AI Search → Entra/MI (**×7, not ×2**) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | ⛔ |
+| 053 | AI Search → Entra/MI (**×7, not ×2**) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | 🔄 |
 | 054 | Document Intelligence ×3 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E5 | 🔲 |
 | 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 |✅ |
 | 056 | Bing key → KV-by-name (Group 1 hygiene) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E7 | 🔲 |
