@@ -25,7 +25,7 @@
 | 040 | ⚠️ Verify Power BI SP **profiles** under a managed identity | 4 PowerBI | FULL | **opus/xhigh** | 020 | — | ✅ | FR-D2 gate | ⏭️ |
 | 041 | Power BI tenant setting + rework both services | 4 PowerBI | FULL | sonnet/high | 040 | — | ✅ | FR-D1/D2 | ⏭️ |
 | 042 | Remove `PowerBi:ClientSecret` | 4 PowerBI | FULL | sonnet/high | 041 | — | ✅ | FR-D3 | ⏭️ |
-| 050 | Content Safety → MI (path already exists) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E1 | 🔲 |
+| 050 | Content Safety → MI (path already exists) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E1 |✅ |
 | 051 | Service Bus → namespace + MI; rotate the leaked SAS | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E2 | 🔲 |
 | 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 |✅ |
 | 053 | AI Search ×2 → Entra/MI | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | 🔲 |
