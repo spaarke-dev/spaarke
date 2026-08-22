@@ -125,7 +125,6 @@ public static class ContainerTypeEndpoints
     private static async Task<IResult> ListContainerTypesAsync(
         [Microsoft.AspNetCore.Mvc.FromQuery] Guid? configId,
         SpeAdminGraphService graphService,
-        IGraphClientFactory graphClientFactory,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -160,8 +159,7 @@ public static class ContainerTypeEndpoints
             // Container types are readable ONLY with a delegated token — app-only returns 403
             // accessDenied on v1.0 and beta alike (verified live, task 010). Use the BFF's existing
             // OBO exchange, the same one SPE file operations already run on.
-            var userGraphClient = await graphClientFactory.ForUserAsync(context, ct);
-            var containerTypes = await graphService.ListContainerTypesForUserAsync(userGraphClient, ct);
+            var containerTypes = await graphService.ListContainerTypesForUserAsync(context, ct);
 
             logger.LogInformation(
                 "GET /api/spe/containertypes — returned {Count} container types for config {ConfigId}. TraceId: {TraceId}",

@@ -102,26 +102,66 @@ public static class ConfigEndpoints
     // GET /api/spe/configs
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Lists the container type configs the CALLER may see.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>businessUnitId</c> is a narrowing filter, never a widening one.</b> It used to be the
+    /// only business-unit constraint applied, and it came straight from the query string — so
+    /// omitting it returned every customer's configuration, and supplying someone else's returned
+    /// theirs. The accessible set is now always derived from the caller's own Dataverse user; the
+    /// parameter can only intersect with it.
+    /// </para>
+    /// <para>
+    /// This is what makes the container-type / container dropdowns scope themselves. Filtering in the
+    /// client would be cosmetic — the API underneath would still answer.
+    /// </para>
+    /// </remarks>
     private static async Task<IResult> ListConfigsAsync(
         [FromQuery] Guid? businessUnitId,
         [FromQuery] Guid? environmentId,
         DataverseWebApiClient dataverseClient,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
         try
         {
-            // Build OData $filter from optional query parameters
-            var filters = new List<string>();
+            var accessible = await tenantScope.GetAccessibleBusinessUnitsAsync(context.User, ct);
 
-            if (businessUnitId.HasValue)
-                filters.Add($"_sprk_businessunit_value eq {businessUnitId.Value}");
+            if (accessible.Count == 0)
+            {
+                // The caller could not be resolved to a Dataverse user with a business unit. Fail
+                // closed: an empty accessible set means "nothing", never "no filter".
+                logger.LogWarning(
+                    "ListSpeConfigs: caller has no resolvable business unit — returning empty. TraceId={TraceId}",
+                    context.TraceIdentifier);
+                return TypedResults.Ok(new List<ConfigSummaryDto>());
+            }
+
+            // Optional narrowing by the caller. Intersect rather than replace, so the parameter can
+            // never reach outside the derived set.
+            var scopedUnits = businessUnitId.HasValue
+                ? accessible.Where(bu => bu == businessUnitId.Value).ToList()
+                : accessible.ToList();
+
+            if (scopedUnits.Count == 0)
+            {
+                return TypedResults.Ok(new List<ConfigSummaryDto>());
+            }
+
+            var filters = new List<string>
+            {
+                // Bare Edm.Guid literals (ADR-044) — a quoted GUID is Edm.String and Dataverse rejects it.
+                $"({string.Join(" or ", scopedUnits.Select(bu => $"_sprk_businessunit_value eq {bu:D}"))})"
+            };
 
             if (environmentId.HasValue)
-                filters.Add($"_sprk_environment_value eq {environmentId.Value}");
+                filters.Add($"_sprk_environment_value eq {environmentId.Value:D}");
 
-            var filter = filters.Count > 0 ? string.Join(" and ", filters) : null;
+            var filter = string.Join(" and ", filters);
 
             var rows = await dataverseClient.QueryAsync<ConfigDataverseRow>(
                 EntitySet,
@@ -132,8 +172,8 @@ public static class ConfigEndpoints
             var items = rows.Select(r => r.ToSummary()).ToList();
 
             logger.LogInformation(
-                "ListSpeConfigs: returned {Count} configs. businessUnitId={BuId} environmentId={EnvId} correlationId={CorrelationId}",
-                items.Count, businessUnitId, environmentId, context.TraceIdentifier);
+                "ListSpeConfigs: returned {Count} configs across {BuCount} accessible business unit(s). environmentId={EnvId} correlationId={CorrelationId}",
+                items.Count, scopedUnits.Count, environmentId, context.TraceIdentifier);
 
             return TypedResults.Ok(items);
         }

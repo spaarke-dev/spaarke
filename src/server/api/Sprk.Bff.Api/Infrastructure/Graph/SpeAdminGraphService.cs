@@ -324,6 +324,13 @@ public sealed class SpeAdminGraphService
     internal const string DefaultSearchRegion = "NAM";
 
     /// <summary>
+    /// Builds delegated (user-context) Graph clients via the BFF's existing OBO exchange.
+    /// Optional so existing constructor callers keep working; required only by
+    /// <see cref="ListContainerTypesForUserAsync"/>.
+    /// </summary>
+    private readonly IGraphClientFactory? _graphClientFactory;
+
+    /// <summary>
     /// Token provider for multi-app OBO flows (Phase 3).
     /// Null when SpeAdminTokenProvider is not registered — falls back to single-app mode.
     /// </summary>
@@ -352,8 +359,11 @@ public sealed class SpeAdminGraphService
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
         ILogger<SpeAdminGraphService> logger,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? tokenProvider = null)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? tokenProvider = null,
+        IGraphClientFactory? graphClientFactory = null)
     {
+        _graphClientFactory = graphClientFactory;
+
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(secretClient);
         ArgumentNullException.ThrowIfNull(dataverseClient);
@@ -1589,9 +1599,22 @@ public sealed class SpeAdminGraphService
     /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForUserAsync(
-        GraphServiceClient userGraphClient, CancellationToken ct = default)
+        HttpContext httpContext, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(userGraphClient);
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container types cannot be read app-only (Graph returns 403), so there is no fallback.");
+        }
+
+        // The client is built and consumed entirely inside this service. ADR-007: Graph SDK types
+        // must not surface above the facade — an earlier revision had the endpoint build the client
+        // and pass it in, which the ArchTests correctly rejected.
+        var userGraphClient = await _graphClientFactory.ForUserAsync(httpContext, ct).ConfigureAwait(false);
+
         try { return await ListContainerTypesAsync(userGraphClient, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes(delegated)"); }
     }
