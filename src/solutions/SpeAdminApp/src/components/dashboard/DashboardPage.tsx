@@ -17,10 +17,57 @@ import {
   CheckmarkCircle20Regular,
   DataBarVertical20Regular,
   Clock20Regular,
+  Warning20Regular,
+  ErrorCircle20Regular,
 } from "@fluentui/react-icons";
 import { speApiClient } from "../../services/speApiClient";
 import { useBuContext } from "../../contexts/BuContext";
-import type { DashboardMetrics } from "../../types/spe";
+import type { DashboardMetrics, SyncHealth } from "../../types/spe";
+
+/**
+ * Presentation for each sync-health state.
+ *
+ * ADR-021: colours come from Fluent v9 semantic palette tokens, which resolve per theme — the indicator
+ * adapts in dark mode with no hex literals and no theme-conditional logic here.
+ *
+ * The `value` strings matter: task 003 (spec FR-A03) exists because the tile read "OK" while a concern was
+ * failing. "Degraded"/"Failed" must never be renderable as "OK".
+ */
+const SYNC_HEALTH_PRESENTATION: Record<
+  SyncHealth,
+  { value: string; color: string; icon: React.ReactElement }
+> = {
+  Healthy: {
+    value: "OK",
+    color: tokens.colorPaletteGreenForeground1,
+    icon: <CheckmarkCircle20Regular />,
+  },
+  Degraded: {
+    value: "Degraded",
+    color: tokens.colorPaletteYellowForeground1,
+    icon: <Warning20Regular />,
+  },
+  Failed: {
+    value: "Failed",
+    color: tokens.colorPaletteRedForeground1,
+    icon: <ErrorCircle20Regular />,
+  },
+};
+
+/**
+ * Resolves the health to render.
+ *
+ * Falls back to the legacy `syncSucceeded` boolean when `syncHealth` is absent — a cached
+ * DashboardMetrics payload written before task 003 has no `syncHealth` field, and it survives in Redis for
+ * up to 2× the sync interval after deploy. Treating that `undefined` as "Healthy" would reintroduce the
+ * exact optimistic default this task removes, so an unrecognised value degrades to "Degraded", never "OK".
+ */
+function resolveSyncHealth(metrics: DashboardMetrics): SyncHealth {
+  if (metrics.syncHealth && metrics.syncHealth in SYNC_HEALTH_PRESENTATION) {
+    return metrics.syncHealth;
+  }
+  return metrics.syncSucceeded ? "Healthy" : "Degraded";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (ADR-021: makeStyles + Fluent design tokens; dark mode automatic)
@@ -71,6 +118,15 @@ const useStyles = makeStyles({
     gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
     gap: tokens.spacingVerticalM,
     flexShrink: 0,
+  },
+
+  /** Failed-concern list inside the sync-health MessageBar (FR-A03). */
+  concernList: {
+    margin: `${tokens.spacingVerticalXS} 0 0 0`,
+    paddingLeft: tokens.spacingHorizontalL,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
   },
 
   metricCard: {
@@ -296,6 +352,8 @@ interface MetricCardProps {
   label: string;
   value: string | number;
   subtext?: string;
+  /** Optional Fluent semantic token for the value text (ADR-021 — token only, never a hex literal). */
+  valueColor?: string;
 }
 
 /**
@@ -304,17 +362,24 @@ interface MetricCardProps {
  * Uses Fluent design tokens exclusively for colors/spacing (ADR-021).
  * Dark mode is automatic via the FluentProvider theme in App.tsx.
  */
-const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext }) => {
+const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext, valueColor }) => {
   const styles = useStyles();
   return (
     <div className={styles.metricCard} role="region" aria-label={label}>
       <div className={styles.metricCardHeader}>
-        <span className={styles.metricCardIcon}>{icon}</span>
+        <span className={styles.metricCardIcon} style={valueColor ? { color: valueColor } : undefined}>
+          {icon}
+        </span>
         <Text size={200} weight="semibold" className={styles.metricCardLabel}>
           {label}
         </Text>
       </div>
-      <Text size={700} weight="bold" className={styles.metricCardValue}>
+      <Text
+        size={700}
+        weight="bold"
+        className={styles.metricCardValue}
+        style={valueColor ? { color: valueColor } : undefined}
+      >
         {value}
       </Text>
       {subtext && (
@@ -571,13 +636,45 @@ export const DashboardPage: React.FC = () => {
               value={formatBytes(metrics.totalStorageUsedInBytes)}
               subtext="Across all containers"
             />
-            <MetricCard
-              icon={<CheckmarkCircle20Regular />}
-              label="Sync Status"
-              value={metrics.syncSucceeded ? "OK" : "Partial"}
-              subtext={metrics.syncStatus}
-            />
+            {(() => {
+              const health = resolveSyncHealth(metrics);
+              const presentation = SYNC_HEALTH_PRESENTATION[health];
+              return (
+                <MetricCard
+                  icon={presentation.icon}
+                  label="Sync Status"
+                  value={presentation.value}
+                  subtext={metrics.syncStatus}
+                  valueColor={presentation.color}
+                />
+              );
+            })()}
           </div>
+
+          {/* ── Failing concerns (FR-A03) ──
+              A count alone ("1 failed") tells an operator something broke but not what. This names each
+              failed concern and shows the reason the server captured. */}
+          {(metrics.concerns ?? []).some((c) => !c.succeeded) && (
+            <MessageBar intent={resolveSyncHealth(metrics) === "Failed" ? "error" : "warning"}>
+              <MessageBarBody>
+                <Text weight="semibold">
+                  {resolveSyncHealth(metrics) === "Failed"
+                    ? "Every concern in the last sync failed — these metrics are not trustworthy."
+                    : "Some concerns failed in the last sync. The metrics below are incomplete."}
+                </Text>
+                <ul className={styles.concernList}>
+                  {(metrics.concerns ?? [])
+                    .filter((c) => !c.succeeded)
+                    .map((c) => (
+                      <li key={c.concern}>
+                        <Text weight="semibold">{c.concern}</Text>
+                        {c.reason ? <Text> — {c.reason}</Text> : null}
+                      </li>
+                    ))}
+                </ul>
+              </MessageBarBody>
+            </MessageBar>
+          )}
 
           <Divider />
 

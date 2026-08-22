@@ -26,6 +26,14 @@ public class SpeAuditService
 {
     private const string AuditLogEntitySet = "sprk_speauditlogs";
 
+    // sprk_category option-set values, verified against the live Dataverse schema 2026-08-21 (task 005).
+    internal const int CategoryContainerType = 100000000;
+    internal const int CategoryContainer = 100000001;
+    internal const int CategoryPermission = 100000002;
+    internal const int CategoryFile = 100000003;
+    internal const int CategorySearch = 100000004;
+    internal const int CategorySecurity = 100000005;
+
     private readonly DataverseWebApiClient _dataverseClient;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<SpeAuditService> _logger;
@@ -157,33 +165,78 @@ public class SpeAuditService
     {
         var record = new SpeAuditLogPayload
         {
+            // sprk_name is NOT NULL in Dataverse and was never populated — on its own that rejected
+            // every create. Primary-name column, so it must read well in a Dataverse grid.
+            Name = BuildPrimaryName(operation, targetResource),
             Operation = operation,
-            Category = category,
-            TargetResource = targetResource,
+            Category = MapCategory(category),
+            TargetResourceId = targetResource,
             ResponseStatus = responseStatus,
             PerformedBy = performedBy,
             PerformedOn = DateTimeOffset.UtcNow
         };
 
-        // Bind lookup references using OData @odata.bind syntax.
-        // The Dataverse REST API requires this format for navigation properties:
-        //   "sprk_ContainerTypeConfigId@odata.bind": "/sprk_specontainertypeconfigs(guid)"
+        // Bind lookup references using OData @odata.bind syntax. The navigation property is the LOOKUP
+        // name from the table schema — `sprk_containertypeconfig`, not `sprk_ContainerTypeConfigId`.
+        // ADR-044: the GUID in a key predicate is bare-lowercase ("D" format), which Guid.ToString() gives.
         if (configId.HasValue)
         {
-            record.ContainerTypeConfigBind = $"/sprk_specontainertypeconfigs({configId.Value})";
+            record.ContainerTypeConfigBind = $"/sprk_specontainertypeconfigs({configId.Value:D})";
         }
 
         if (environmentId.HasValue)
         {
-            record.EnvironmentBind = $"/sprk_speenvironments({environmentId.Value})";
+            record.EnvironmentBind = $"/sprk_speenvironments({environmentId.Value:D})";
         }
 
         if (businessUnitId.HasValue)
         {
-            record.BusinessUnitBind = $"/businessunits({businessUnitId.Value})";
+            record.BusinessUnitBind = $"/businessunits({businessUnitId.Value:D})";
         }
 
         return record;
+    }
+
+    /// <summary>
+    /// Builds the required <c>sprk_name</c> primary-name value.
+    /// </summary>
+    private static string BuildPrimaryName(string operation, string targetResource)
+    {
+        var name = string.IsNullOrWhiteSpace(targetResource)
+            ? operation
+            : $"{operation} — {targetResource}";
+
+        // sprk_name is NVARCHAR(850); truncate rather than let Dataverse reject an over-length value.
+        return name.Length <= 850 ? name : name[..850];
+    }
+
+    /// <summary>
+    /// Maps a caller's free-text category onto the <c>sprk_category</c> option set.
+    /// </summary>
+    /// <remarks>
+    /// <c>sprk_category</c> is a Dataverse CHOICE, not a string. Callers pass free text
+    /// ("ContainerTypeRegistration", "Configuration", "RecycleBin", "FileUploaded", …) and only one of
+    /// those — "Permission" — happens to match an option name, so every other write was rejected on type
+    /// alone. Matching is by prefix because the caller vocabulary is finer-grained than the option set
+    /// (e.g. "ContainerCreated"/"ContainerUpdated" both belong to <c>Container</c>).
+    /// <para>
+    /// Unmapped input falls back to <see cref="CategorySecurity"/> rather than throwing: this runs inside a
+    /// best-effort audit path, and losing the row entirely is worse than filing it under a coarse category.
+    /// </para>
+    /// </remarks>
+    internal static int MapCategory(string? category)
+    {
+        var value = category?.Trim() ?? string.Empty;
+
+        // Order matters: "ContainerType*" must be tested before "Container*".
+        if (value.StartsWith("ContainerType", StringComparison.OrdinalIgnoreCase)) return CategoryContainerType;
+        if (value.StartsWith("Container", StringComparison.OrdinalIgnoreCase)) return CategoryContainer;
+        if (value.StartsWith("Permission", StringComparison.OrdinalIgnoreCase)) return CategoryPermission;
+        if (value.StartsWith("File", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("RecycleBin", StringComparison.OrdinalIgnoreCase)) return CategoryFile;
+        if (value.StartsWith("Search", StringComparison.OrdinalIgnoreCase)) return CategorySearch;
+
+        return CategorySecurity;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -198,14 +251,20 @@ public class SpeAuditService
     /// </summary>
     private sealed class SpeAuditLogPayload
     {
+        /// <summary>Required primary-name column (NVARCHAR 850, NOT NULL).</summary>
+        [JsonPropertyName("sprk_name")]
+        public string Name { get; set; } = string.Empty;
+
         [JsonPropertyName("sprk_operation")]
         public string Operation { get; set; } = string.Empty;
 
+        /// <summary>Option-set value, NOT a string — see <c>SpeAuditService.MapCategory</c>.</summary>
         [JsonPropertyName("sprk_category")]
-        public string Category { get; set; } = string.Empty;
+        public int Category { get; set; }
 
-        [JsonPropertyName("sprk_targetresource")]
-        public string TargetResource { get; set; } = string.Empty;
+        /// <summary>The real column is <c>sprk_targetresourceid</c>; <c>sprk_targetresource</c> never existed.</summary>
+        [JsonPropertyName("sprk_targetresourceid")]
+        public string TargetResourceId { get; set; } = string.Empty;
 
         [JsonPropertyName("sprk_responsestatus")]
         public int ResponseStatus { get; set; }
@@ -216,15 +275,15 @@ public class SpeAuditService
         [JsonPropertyName("sprk_performedon")]
         public DateTimeOffset PerformedOn { get; set; }
 
-        [JsonPropertyName("sprk_ContainerTypeConfigId@odata.bind")]
+        [JsonPropertyName("sprk_containertypeconfig@odata.bind")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? ContainerTypeConfigBind { get; set; }
 
-        [JsonPropertyName("sprk_EnvironmentId@odata.bind")]
+        [JsonPropertyName("sprk_environment@odata.bind")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? EnvironmentBind { get; set; }
 
-        [JsonPropertyName("businessunitid@odata.bind")]
+        [JsonPropertyName("sprk_businessunit@odata.bind")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? BusinessUnitBind { get; set; }
     }

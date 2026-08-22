@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Migrate GA'd container-type surfaces from /beta to /v1.0</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>011 complete, 040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph hot path; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified change across three known sites with an existing test harness to verify.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>011, 040</deps>
+    <tags>bff-api, api, refactor, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The app hardcodes https://graph.microsoft.com/beta at three sites. Container-type APIs are now GA on v1.0. Migrate the GA'd surfaces; beta schema drift is the standing generator of the wrong-property-name defect class this workstream is fixing.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Graph SDK v5 client construction and Graph v1.0 vs beta surface differences. Follow ADRs strictly.</role>
+
+  <goal>No /beta literal remains except container-type CREATE, which has no v1.0 equivalent and carries an inline comment stating why.</goal>
+
+  <context>
+    <background>Spec FR-C01 / §4.1. Verified sites: SpeAdminGraphService.cs:925 (a hand-built nextLink URL), :4195 and :4212 (GraphServiceClient base addresses). fileStorageContainerType, fileStorageContainerTypeRegistration, and the application permission-grant APIs are GA on v1.0. Container-type create remains beta-only — that exception must be deliberate and isolated, not an accident.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</file>
+      <file role="canonical-reference">knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">The delegated path — container-type calls must work before their endpoint version changes.</dependency>
+      <dependency task="040" status="pending">WireMock fixture to assert the request base address and path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the three /beta sites. Migrate ONLY surfaces confirmed GA on v1.0. Verify each against the current Graph docs before switching — a speculative migration re-creates the defect class this workstream removes.</constraint>
+    <constraint source="project">Scope: container-type CREATE. If no v1.0 equivalent exists, it stays on beta with an inline comment naming the reason. Record it as a deliberate isolated exception in task notes.</constraint>
+    <constraint source="project">Scope: the hand-built nextLink at :925. Pagination URLs MUST match the base address actually in use; a v1.0 client with a beta nextLink breaks paging silently.</constraint>
+    <constraint source="ADR-007">Scope: the facade boundary. Graph SDK types MUST NOT leak above the service.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph v1.0 vs beta for SPE container types</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Client construction and base address.</pattern>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Which SPE surfaces are GA on v1.0.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.1 and the platform research note.</step>
+    <step order="1">Enumerate the /beta sites: grep -n "graph.microsoft.com/beta" — expect :925, :4195, :4212.</step>
+    <step order="2">For each Graph operation reached through those clients, verify GA status on v1.0 against current docs. Record the verification per operation.</step>
+    <step order="3">Switch GA'd surfaces to v1.0, including the hand-built nextLink at :925 so paging matches the client base address.</step>
+    <step order="4">Isolate container-type CREATE on beta if it has no v1.0 equivalent; add the inline comment and record the exception.</step>
+    <step order="5">Add WireMock coverage on the task-040 fixture asserting the request base address per operation.</step>
+    <step order="6">Build and run tests — 0 errors, all green.</step>
+    <step order="7">Verify against Spaarke Dev: container-type list works on v1.0 and pagination advances correctly past page 1.</step>
+    <step order="8">Measure publish size; record. Update TASK-INDEX.md: task 020 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a surface believed GA turns out to behave differently on v1.0 than beta (different shape, missing field, changed pagination), STOP and escalate rather than adapting the mapping silently — a shape change may affect DTOs consumed by the client and is a scope question.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (base-address assertions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for "graph.microsoft.com/beta" returns only the container-type CREATE site, which carries an inline comment naming the reason.</criterion>
+    <criterion testable="true">Given a container-type list request, when it executes against Spaarke Dev, then it succeeds on v1.0.</criterion>
+    <criterion testable="true">Given a result set spanning more than one page, when pagination advances, then the nextLink resolves against the correct base address and page 2 returns data.</criterion>
+    <criterion testable="true">Each migrated operation's GA status is verified and recorded — no speculative migrations.</criterion>
+    <criterion testable="true">WireMock tests assert the request base address per operation.</criterion>
+    <criterion testable="true">Negative: an error response from v1.0 still surfaces as ProblemDetails with the real Graph error (task 001 surface intact).</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C01. Satisfies spec success criterion 14. The create-on-beta exception must be deliberate and documented, per spec acceptance.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

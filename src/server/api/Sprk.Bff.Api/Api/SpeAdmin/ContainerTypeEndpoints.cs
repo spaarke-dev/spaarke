@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -155,8 +156,10 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // List container types from Graph API
-            var containerTypes = await graphService.ListContainerTypesForConfigAsync(config, ct);
+            // Container types are readable ONLY with a delegated token — app-only returns 403
+            // accessDenied on v1.0 and beta alike (verified live, task 010). Use the BFF's existing
+            // OBO exchange, the same one SPE file operations already run on.
+            var containerTypes = await graphService.ListContainerTypesForUserAsync(context, ct);
 
             logger.LogInformation(
                 "GET /api/spe/containertypes — returned {Count} container types for config {ConfigId}. TraceId: {TraceId}",
@@ -187,15 +190,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error listing container types for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve container types from the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: "Could not retrieve container types.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -205,7 +204,7 @@ public static class ContainerTypeEndpoints
                 configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving container types.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving container types.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -297,15 +296,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error getting container type {TypeId} for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 typeId, configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve the container type from the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: $"Could not retrieve container type '{typeId}'.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -315,7 +310,7 @@ public static class ContainerTypeEndpoints
                 typeId, configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -448,15 +443,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error creating container type for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to create the container type via the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: "Could not create the container type.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -466,7 +457,7 @@ public static class ContainerTypeEndpoints
                 configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while creating the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while creating the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -672,8 +663,10 @@ public static class ContainerTypeEndpoints
                 typeId, request.AppId, (int?)httpEx.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "Failed to register the container type via the SharePoint REST API. " +
-                        "Verify the sharePointAdminUrl and app registration credentials.",
+                detail: ProblemDetailsHelper.Explain(
+                    $"Could not register container type '{typeId}' via the SharePoint REST API"
+                    + (httpEx.StatusCode is { } sc ? $" (HTTP {(int)sc})." : "."),
+                    httpEx),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "SharePoint REST API Error",
                 extensions: new Dictionary<string, object?>
@@ -690,7 +683,7 @@ public static class ContainerTypeEndpoints
                 typeId, configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while registering the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while registering the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>

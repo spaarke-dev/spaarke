@@ -71,7 +71,7 @@ import {
   FolderOpen20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
 
@@ -482,9 +482,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       setContainers(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load containers. Please try again.";
+        describeApiError(err, "Failed to load containers. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -552,9 +550,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       if (failed.length > 0) {
         const firstError = (failed[0] as PromiseRejectedResult).reason;
         const msg =
-          firstError instanceof ApiError
-            ? firstError.message
-            : "One or more operations failed.";
+          describeApiError(firstError, "One or more operations failed.");
         setActionError(
           failed.length === ids.length
             ? msg
@@ -565,7 +561,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       }
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Operation failed. Please try again.";
+        describeApiError(err, "Operation failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -632,7 +628,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       );
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Delete failed. Please try again.";
+        describeApiError(err, "Delete failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -657,7 +653,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
         await loadContainers();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to create container.";
+          describeApiError(err, "Failed to create container.");
         setActionError(message);
       } finally {
         setCreateSaving(false);

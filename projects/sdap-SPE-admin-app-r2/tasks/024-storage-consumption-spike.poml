@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>SPIKE + BRANCH — real storage consumption reporting, or remove the tile</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>023 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph hot path and .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Empirical determination followed by one of two well-specified branches.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs at four sites. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>023</deps>
+    <tags>bff-api, api, frontend, fluent-ui, spike</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>StorageUsedInBytes is hardcoded null at four sites with the comment "Not always returned by Graph" — the code asks Graph for the field, then discards it. Establish empirically whether Graph v1.0 exposes per-container consumption. If yes, implement real reporting. If no, remove the Dashboard tile and the Containers column. Never leave both null.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Graph SPE container entity model and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>Storage is either real or absent — never a silent 0 B or an em-dash. The empirical finding is recorded either way.</goal>
+
+  <context>
+    <background>Spec FR-C06 / §2.3, owner decision OC-04 (spike decides). Verified sites: SpeAdminGraphService.cs:645, :976, :1060, :1110. The Dashboard reads 0 B and every Containers row reads an em-dash — the purest instance of the §2.4 systemic defect. Task 023 has already separated ceiling from consumption, so this task deals only with consumption.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/dashboard</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/containers</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/storage-consumption-spike.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">The ceiling-vs-consumption split — required so this task cannot reintroduce the conflation.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the decision. Determine empirically against Spaarke Dev whether Graph returns per-container consumption. Record the finding BEFORE choosing a branch. Both branches are pre-authorized by owner decision OC-04.</constraint>
+    <constraint source="NFR-06">Scope: the outcome. A silent 0 B or em-dash is NOT an acceptable end state under either branch. Either real values render, or the tile and column are removed.</constraint>
+    <constraint source="project">Scope: if REMOVING. Remove the Dashboard tile AND the Containers column AND the hardcoded nulls at all four sites. Do not leave a dead field on the DTO that a future reader mistakes for live data.</constraint>
+    <constraint source="project">Scope: partial availability. If consumption is returned for SOME containers only, that is the IMPLEMENT branch with an explicit "not reported" state — distinct from zero, and never rendered as 0 B.</constraint>
+    <constraint source="ADR-021">Scope: the storage displays. Fluent v9 semantic tokens; dark-mode correct.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph SPE container storage reporting</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Request construction and $select.</pattern>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Which container fields each surface returns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §2.3 and FR-C06.</step>
+    <step order="1">Call the container list and container get against Spaarke Dev requesting every storage-related field the v1.0 entity declares. Record the raw responses.</step>
+    <step order="2">Determine: is per-container consumption returned? Always, sometimes, or never? Record in notes/storage-consumption-spike.md.</step>
+    <step order="3a">IF returned (always or sometimes): remove the four hardcoded nulls, map the real value, and render it. Add an explicit "not reported" state distinct from zero where it is absent.</step>
+    <step order="3b">IF never returned: remove the Dashboard tile, the Containers column, and the dead DTO field. Record the removal rationale.</step>
+    <step order="4">Add WireMock coverage for whichever branch was taken.</step>
+    <step order="5">Build BFF and code page; run tests.</step>
+    <step order="6">Verify against Spaarke Dev: no screen shows a silent 0 B or em-dash for storage.</step>
+    <step order="7">Measure publish size; record. Update TASK-INDEX.md: task 024 → ✅ with the branch taken. Document in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If per-container consumption is available only through a separate reporting API or a different permission scope than the app holds, STOP and escalate — that is a new capability with its own auth and cost implications, not a field-mapping fix.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No storage-reporting surface exists — StorageUsedInBytes is hardcoded null at SpeAdminGraphService.cs:645, :976, :1060, :1110. Task 023 already separated the quota ceiling from consumption, so no other component covers this.</existing>
+    <extension>Yes under the IMPLEMENT branch — extends the existing container read path and DTO rather than adding a service. Under the REMOVE branch this is net-negative surface. The only NEW file is a notes/ spike record, not code.</extension>
+    <cost-of-doing-nothing>The Dashboard reads 0 B and every Containers row reads an em-dash while the code asks Graph for the field and discards it. An operator cannot tell "no storage used" from "we never looked" — the purest instance of the spec §2.4 systemic defect.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="No silent zero">
+      <steps>
+        <step>Load the Dashboard and the Containers grid</step>
+        <step>Inspect every storage display</step>
+      </steps>
+      <expected>Either real values render, or the tile and column are absent. No display shows 0 B or an em-dash as a stand-in for unknown.</expected>
+    </test>
+    <test name="Not-reported is distinct from zero">
+      <steps><step>If some containers report consumption and others do not, inspect both</step></steps>
+      <expected>A container with no reported consumption shows an explicit "not reported" state, never 0 B.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect storage displays</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/dashboard</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/storage-consumption-spike.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The empirical finding (consumption returned always / sometimes / never) is recorded in notes/storage-consumption-spike.md with raw evidence, before the branch was chosen.</criterion>
+    <criterion testable="true">Given the IMPLEMENT branch, when the Containers grid renders, then real consumption values appear for containers that report them.</criterion>
+    <criterion testable="true">Given the REMOVE branch, when the Dashboard and Containers grid render, then no storage tile or column exists and the four hardcoded nulls are gone.</criterion>
+    <criterion testable="true">Negative: no screen displays 0 B or an em-dash as a stand-in for unknown storage (NFR-06).</criterion>
+    <criterion testable="true">Negative: under the IMPLEMENT branch with partial availability, a non-reporting container shows "not reported", not zero.</criterion>
+    <criterion testable="true">No code path treats consumption and the maxStoragePerContainerInBytes ceiling as the same concept (task 023's split preserved).</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C06, owner decision OC-04. Both branches are pre-authorized — removal is a valid, expected outcome, not a failure. Satisfies spec success criterion 2.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

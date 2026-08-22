@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Expand container-type settings from 4 properties to the real 9-property v1.0 shape</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>023 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (Graph service + DTO) and .tsx (settings screen); tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified expansion against a documented schema; no architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W9</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>023, 040</deps>
+    <tags>bff-api, api, frontend, fluent-ui, testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The app exposes four container-type settings; the real v1.0 surface is nine. Three of the missing ones — isSearchEnabled, isDiscoverabilityEnabled, and agent.chatEmbedAllowedHosts — govern whether container content is indexable and agent-discoverable at all, and an admin cannot see or control them today.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Graph fileStorageContainerType settings model and Fluent UI v9 forms. Follow ADRs strictly.</role>
+
+  <goal>All nine v1.0 settings are readable and, where writable, writable — each verified by read-back.</goal>
+
+  <context>
+    <background>Spec FR-C07 / §4.3, §4.5. The v1.0 shape is: urlTemplate, isDiscoverabilityEnabled, isSearchEnabled, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, isSharingRestricted, consumingTenantOverridables, agent.chatEmbedAllowedHosts. Task 023 already corrected two names; this task adds the rest. The search/discoverability trio is the only R2-relevant slice of the SPE-knowledge-source question, which is otherwise out of scope.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/UpdateContainerTypeSettingsRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/settings</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">Corrected property names and the ceiling/consumption split.</dependency>
+      <dependency task="040" status="pending">WireMock fixture for request/response shape assertions.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the nine properties. Each MUST be verified as present on the current v1.0 schema before wiring — do not add a property from this text without checking.</constraint>
+    <constraint source="project">Scope: read-only vs writable. Determine per property which are writable. A read-only property MUST NOT render as an editable control that silently fails on save.</constraint>
+    <constraint source="project">Scope: consumingTenantOverridables. This is override METADATA, not a simple value — model it as such. Task 026 renders the override state; do not duplicate that here.</constraint>
+    <constraint source="project">Scope: verification. Every writable property MUST be confirmed by read-back, not by a 200 response.</constraint>
+    <constraint source="ADR-021">Scope: the settings form. Fluent v9 semantic tokens; dark-mode correct; no hex literals.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph container-type settings surface</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">PATCH and $select handling.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.3 and the research note §3.</step>
+    <step order="1">Verify all nine properties against the current v1.0 schema; record which are writable.</step>
+    <step order="2">Extend the read path ($select) and the DTOs to carry all nine.</step>
+    <step order="3">Extend the write path for the writable subset only.</step>
+    <step order="4">Extend the settings UI, grouping search/discoverability/agent-host settings so their effect on indexability is legible.</step>
+    <step order="5">Render read-only properties as read-only — never as editable controls that silently fail.</step>
+    <step order="6">Add WireMock tests asserting the full $select field set and the PATCH body for writable properties.</step>
+    <step order="7">Build BFF and code page; run tests.</step>
+    <step order="8">Verify against Spaarke Dev: read all nine; write each writable one and read it back.</step>
+    <step order="9">Measure publish size; record. Update TASK-INDEX.md: task 025 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a property is documented as writable but read-back consistently shows no change, STOP and escalate rather than attributing it to replication lag — that attribution is exactly how the FR-C04/C05 no-op defect stayed invisible.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="All nine settings present">
+      <steps><step>Open container-type Settings and enumerate the controls</step></steps>
+      <expected>All nine v1.0 properties are represented; read-only ones are visibly non-editable.</expected>
+    </test>
+    <test name="Search and discoverability are controllable">
+      <steps>
+        <step>Toggle isSearchEnabled and save</step>
+        <step>Reload</step>
+      </steps>
+      <expected>The new value persists after reload.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the settings form</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (settings shape assertions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All nine v1.0 settings are readable and render in the UI.</criterion>
+    <criterion testable="true">Given a writable property, when it is set and read back from Spaarke Dev, then the new value persists.</criterion>
+    <criterion testable="true">Negative: a read-only property renders as non-editable — it never offers a control that silently fails on save.</criterion>
+    <criterion testable="true">Negative: an invalid value (e.g. a malformed host in agent.chatEmbedAllowedHosts) is rejected with a validation error, not silently dropped.</criterion>
+    <criterion testable="true">Each of the nine is verified present on the current v1.0 schema; the verification is recorded.</criterion>
+    <criterion testable="true">WireMock tests assert the full $select field set and the PATCH body.</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C07. The isSearchEnabled / isDiscoverabilityEnabled / agent.chatEmbedAllowedHosts trio is the only R2-relevant slice of the SPE-knowledge-source question (spec §4.5) — admin visibility only, no retrieval-architecture work.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

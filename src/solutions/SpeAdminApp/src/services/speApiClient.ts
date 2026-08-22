@@ -58,6 +58,56 @@ import type {
 export { ApiError, AuthError };
 
 // ---------------------------------------------------------------------------
+// Error description
+// ---------------------------------------------------------------------------
+
+/** Reads a ProblemDetails extension as a non-empty string, or undefined. */
+function extension(problem: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  const value = problem?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Describes a caught error for display, preserving everything the BFF sent.
+ *
+ * `ApiError.message` is already the RFC 7807 `detail` (authenticatedFetch puts it there), and since
+ * task 001 that detail carries the real Graph/Dataverse error rather than a hardcoded guess. What was
+ * still being dropped is the diagnostic set in `problemDetails` — the Graph error code and, most
+ * importantly, the **request id**, which is the value an admin quotes to Microsoft support. This appends
+ * them.
+ *
+ * @param err       The caught value. Anything — ApiError, Error, or a non-Error throw.
+ * @param fallback  Used ONLY when nothing descriptive can be recovered. Never overrides a real message.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 001 (spec FR-A01).
+ */
+export function describeApiError(err: unknown, fallback = ""): string {
+  if (err instanceof ApiError) {
+    const problem = err.problemDetails as Record<string, unknown> | null;
+    const base = err.message || extension(problem, "title") || fallback;
+
+    const graphCode = extension(problem, "graphErrorCode");
+    const requestId = extension(problem, "graphRequestId");
+    const traceId = extension(problem, "traceId");
+
+    const diagnostics = [
+      graphCode ? `Graph code ${graphCode}` : undefined,
+      requestId ? `request id ${requestId}` : undefined,
+      !requestId && traceId ? `trace id ${traceId}` : undefined,
+    ].filter(Boolean);
+
+    return diagnostics.length > 0 ? `${base} (${diagnostics.join(" · ")})` : base;
+  }
+
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+
+  const text = String(err ?? "");
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+// ---------------------------------------------------------------------------
 // Typed HTTP helpers
 // ---------------------------------------------------------------------------
 

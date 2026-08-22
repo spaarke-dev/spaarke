@@ -1,7 +1,9 @@
+using Sprk.Bff.Api.Services.SpeAdmin;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -94,11 +96,14 @@ public static class AuditLogEndpoints
         // Build OData $filter expression
         var filter = BuildODataFilter(configId.Value, from, to, category);
 
+        // Column names verified against the live Dataverse schema 2026-08-21 (task 005).
+        // `sprk_targetresource` was in this list and does not exist — that alone 400'd every query.
         var select = string.Join(",",
             "sprk_speauditlogid",
             "sprk_operation",
             "sprk_category",
-            "sprk_targetresource",
+            "sprk_targetresourceid",
+            "sprk_targetresourcename",
             "sprk_responsestatus",
             "sprk_performedby",
             "sprk_performedon");
@@ -135,7 +140,7 @@ public static class AuditLogEndpoints
                 configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "Failed to retrieve audit log entries from Dataverse.",
+                detail: ProblemDetailsHelper.Explain("Failed to retrieve audit log entries from Dataverse.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Audit Log Query Failed",
                 extensions: new Dictionary<string, object?>
@@ -154,9 +159,21 @@ public static class AuditLogEndpoints
     /// Builds an OData $filter expression for the sprk_speauditlog entity set.
     ///
     /// configId is required; from, to, and category are optional.
-    /// The sprk_ContainerTypeConfigId navigation property is filtered via its lookup id
-    /// using the Dataverse OData syntax: _sprk_containertypeconfigid_value eq '{guid}'.
+    /// The <c>sprk_containertypeconfig</c> lookup is filtered via its value field,
+    /// <c>_sprk_containertypeconfig_value</c>, with a BARE GUID literal.
     /// </summary>
+    /// <remarks>
+    /// Two defects were fixed here in task 005 (spec FR-A05), each of which 400'd every query on its own:
+    /// <list type="number">
+    /// <item>the lookup was named <c>_sprk_containertypeconfigid_value</c>; the schema lookup is
+    /// <c>sprk_containertypeconfig</c>, so the value field has no "id" segment;</item>
+    /// <item>the GUID was single-quoted. A <c>_x_value</c> field is <c>Edm.Guid</c>; a quoted literal is
+    /// <c>Edm.String</c>, which Dataverse rejects with "incompatible operand types". The removed comment
+    /// asserted the opposite rule, and was the only place in the codebase that did — 29 of the other 30
+    /// lookup filters in <c>src/</c> already used a bare literal.</item>
+    /// </list>
+    /// ADR-044: <c>Guid.ToString("D")</c> is bare-lowercase, the required key-predicate form.
+    /// </remarks>
     private static string BuildODataFilter(
         Guid configId,
         DateTimeOffset? from,
@@ -165,9 +182,8 @@ public static class AuditLogEndpoints
     {
         var clauses = new List<string>
         {
-            // configId is required — filter on the lookup FK
-            // Dataverse OData: _xxx_value lookup fields require the GUID wrapped in single quotes
-            $"_sprk_containertypeconfigid_value eq '{configId}'"
+            // configId is required — filter on the lookup FK (bare Edm.Guid literal, ADR-044 bare-lowercase)
+            $"_sprk_containertypeconfig_value eq {configId:D}"
         };
 
         if (from.HasValue)
@@ -183,9 +199,10 @@ public static class AuditLogEndpoints
 
         if (!string.IsNullOrWhiteSpace(category))
         {
-            // Escape single quotes in category value per OData 4.0 spec
-            var escapedCategory = category.Replace("'", "''");
-            clauses.Add($"sprk_category eq '{escapedCategory}'");
+            // sprk_category is a CHOICE (option set), not a string — filtering it with a quoted literal
+            // was a third 400. Map the caller's text onto the option-set value the same way the write path
+            // does, so a category filter matches what was actually stored.
+            clauses.Add($"sprk_category eq {SpeAuditService.MapCategory(category)}");
         }
 
         return string.Join(" and ", clauses);
@@ -229,11 +246,35 @@ public static class AuditLogEndpoints
         [JsonPropertyName("sprk_operation")]
         public string? Operation { get; set; }
 
+        /// <summary>Option-set value; <see cref="CategoryLabel"/> is what the client renders.</summary>
         [JsonPropertyName("sprk_category")]
-        public string? Category { get; set; }
+        public int? Category { get; set; }
 
-        [JsonPropertyName("sprk_targetresource")]
-        public string? TargetResource { get; set; }
+        /// <summary>
+        /// Human-readable category, derived from the option-set value.
+        /// </summary>
+        /// <remarks>
+        /// The client previously received a raw string here because the code assumed `sprk_category` was
+        /// text. It is a CHOICE, so the client would now get a bare integer with nothing to render. This
+        /// keeps the response self-describing without a second Dataverse round-trip for option metadata.
+        /// </remarks>
+        [JsonPropertyName("categoryLabel")]
+        public string CategoryLabel => Category switch
+        {
+            SpeAuditService.CategoryContainerType => "Container type",
+            SpeAuditService.CategoryContainer => "Container",
+            SpeAuditService.CategoryPermission => "Permission",
+            SpeAuditService.CategoryFile => "File",
+            SpeAuditService.CategorySearch => "Search",
+            SpeAuditService.CategorySecurity => "Security",
+            _ => "Unknown",
+        };
+
+        [JsonPropertyName("sprk_targetresourceid")]
+        public string? TargetResourceId { get; set; }
+
+        [JsonPropertyName("sprk_targetresourcename")]
+        public string? TargetResourceName { get; set; }
 
         [JsonPropertyName("sprk_responsestatus")]
         public int? ResponseStatus { get; set; }

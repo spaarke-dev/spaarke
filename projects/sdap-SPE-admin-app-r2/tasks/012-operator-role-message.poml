@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Surface the operator role prerequisite as an actionable message</title>
+    <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (auth filter) and .tsx; tags include auth and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified message + claim-check change; the architectural decision was made in 010/011.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>auth, authorization, bff-api, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>A signed-in admin missing the required Entra role must get a message that names the role. Today they get a generic 403. Note the existing SpeAdminAuthorizationFilter checks Spaarke Admin/SystemAdmin claims — a different thing from the SharePoint Embedded Administrator role the delegated Graph calls require.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core endpoint filters, claims, and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>A missing role produces an actionable message naming "SharePoint Embedded Administrator or Global Administrator", distinct from the Spaarke-side admin check.</goal>
+
+  <context>
+    <background>Spec FR-B03. Two distinct authorization layers are being conflated today: SpeAdminAuthorizationFilter guards the /api/spe group on Spaarke Admin/SystemAdmin claims, while the delegated Graph calls require an Entra directory role. A user can pass the first and fail the second, and the current message explains neither. Per spec §4.2b the SPE Admin role is NOT a hard prerequisite — list is ownership-filtered and create needs no admin role — so the message must describe what the role WIDENS, not claim the screen is unusable without it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminAuthorizationFilter.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/container-types</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">The spike's finding on which role is actually required vs which merely widens scope.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Scope: the /api/spe route group. Authorization stays in the endpoint filter. MUST NOT add global auth middleware.</constraint>
+    <constraint source="ADR-019">Scope: the denial response. Return ProblemDetails with the existing deny-code convention (sdap.access.deny.role_insufficient), extended to name the missing role.</constraint>
+    <constraint source="project">Scope: message accuracy. The message MUST NOT claim the SPE Administrator role is required for operations that work without it (spec §4.2b). Distinguish "you cannot do this" from "this view is scoped to what you own".</constraint>
+    <constraint source="ADR-021">Scope: the client-side message display. Fluent v9 semantic tokens; adapts in dark mode; no hex literals.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Endpoint-filter authorization + actionable denial messaging</topic>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">ADR-008 filter pattern.</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">ProblemDetails construction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-008, ADR-019, spec §4.2b.</step>
+    <step order="1">Read SpeAdminAuthorizationFilter.cs and document the two distinct authorization layers explicitly in code comments.</step>
+    <step order="2">From task 010's findings, determine which Graph operations genuinely require a directory role vs which are merely ownership-scoped.</step>
+    <step order="3">Extend the denial path so a role-insufficient response names the required role and states what it enables.</step>
+    <step order="4">Update the client to render that message actionably rather than as a generic error.</step>
+    <step order="5">Build BFF and the code page.</step>
+    <step order="6">Verify: signing in without the role yields the named-role message; signing in with it succeeds.</step>
+    <step order="7">Measure publish size; record. Update TASK-INDEX.md: task 012 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the required directory role cannot be detected from the token's claims (i.e. Entra directory roles are not present in the BFF's token), STOP and escalate — inferring role membership from a failed Graph call is a guess, and a wrong "you lack role X" message is exactly the misleading-error defect this project removes.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Missing role produces an actionable message">
+      <steps>
+        <step>Sign in as a user without the SharePoint Embedded Administrator role</step>
+        <step>Open the Container Types screen</step>
+      </steps>
+      <expected>The message names the required role and states what it enables. It does not present a generic 403 or claim credentials are wrong.</expected>
+    </test>
+    <test name="Ownership-scoped view is not mislabelled as denied">
+      <steps>
+        <step>Sign in as an ordinary owning-tenant user who owns at least one container type</step>
+        <step>Open Container Types</step>
+      </steps>
+      <expected>Owned container types are listed. Any notice explains the view is scoped to what the user owns — it does NOT claim access is denied.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Inspect the message surface in both themes</step>
+      </steps>
+      <expected>Colours use Fluent v9 semantic tokens per ADR-021; contrast remains legible; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminAuthorizationFilter.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/container-types</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a user without the required role, when a role-gated operation is attempted, then the response names "SharePoint Embedded Administrator or Global Administrator" and states what it enables.</criterion>
+    <criterion testable="true">Given an ordinary owning-tenant user, when Container Types loads, then owned types are listed and any notice describes scoping — not denial.</criterion>
+    <criterion testable="true">The two authorization layers (Spaarke admin claim vs Entra directory role) are documented distinctly in code.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request still returns 401, not the role message.</criterion>
+    <criterion testable="true">Negative: a user with the Spaarke admin claim but no Entra role gets the role message, not a success.</criterion>
+    <criterion testable="true">Message display uses Fluent v9 semantic tokens and adapts in dark mode.</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-B03. Parallel-safe: owns the filter + client screen, does NOT modify SpeAdminGraphService.cs — runs alongside task 011 in Wave 3.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

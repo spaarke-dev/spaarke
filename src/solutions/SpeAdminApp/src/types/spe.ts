@@ -635,10 +635,29 @@ export interface DashboardMetrics {
   containerCountByConfig: Record<string, number>;
   /** UTC timestamp when these metrics were last synced from Graph (ISO string) */
   lastSyncedAt: string;
-  /** True if the most recent sync completed without errors */
+  /** True if the most recent sync completed without errors. Mirrors `syncHealth === "Healthy"`. */
   syncSucceeded: boolean;
-  /** Human-readable sync status message */
+  /** Human-readable sync status message — names the failing concern(s) when any failed */
   syncStatus: string;
+  /** Overall sync health, derived server-side from `concerns`. Never optimistic. */
+  syncHealth: SyncHealth;
+  /** Per-concern outcome for every concern the sync pass attempted */
+  concerns: ConcernOutcome[];
+}
+
+/** Overall dashboard sync health (server: SpeDashboardSyncService.SyncHealth). */
+export type SyncHealth = "Healthy" | "Degraded" | "Failed";
+
+/**
+ * The outcome of one concern in a dashboard sync pass.
+ * Lets the dashboard NAME what failed instead of showing an opaque "Partial".
+ */
+export interface ConcernOutcome {
+  /** What was attempted — e.g. "Dataverse container-type configs" */
+  concern: string;
+  succeeded: boolean;
+  /** Redacted failure reason; null/absent when succeeded */
+  reason?: string | null;
 }
 
 // ---------------------------------------------------------------------------

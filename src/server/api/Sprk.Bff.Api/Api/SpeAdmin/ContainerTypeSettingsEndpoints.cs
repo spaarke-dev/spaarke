@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -191,16 +192,11 @@ public static class ContainerTypeSettingsEndpoints
                 "Status: {Status}. TraceId: {TraceId}",
                 typeId, configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to update container type settings via the Graph API. " +
-                        "Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: $"Could not update settings for container type '{typeId}'.",
+                errorCode: "spe.containertypes.settings.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.settings.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -211,7 +207,7 @@ public static class ContainerTypeSettingsEndpoints
                 typeId, configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while updating container type settings.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating container type settings.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>

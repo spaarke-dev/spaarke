@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Diagnose and fix the Search screen</title>
+    <phase>1 Workstream A — Make failures visible</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph surface; brownfield root-cause work; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-cause diagnosis in a known subsystem; escalates to opus only if the cause proves architectural (see escalation).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Infrastructure/Graph/SpeAdminGraphService.cs. One GraphService task per wave — see plan.md §3.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, endpoints, error-handling</tags>
+    <estimated-effort>4-8 hours (open-ended — root cause not isolated)</estimated-effort>
+  </metadata>
+
+  <prompt>The Search screen fails with "SearchContainers(...): The call failed, please try again." Using the real error surface from task 001, isolate the actual root cause and fix it. The leading hypothesis is the app-only auth root cause from spec §3.1, but that is a hypothesis — confirm it empirically, do not design around it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Graph /search/query, SPE container search, and OBO vs app-only permission models. Follow ADRs strictly.</role>
+
+  <goal>The Search screen returns results against the Spaarke Dev tenant. The confirmed root cause is recorded in task notes.</goal>
+
+  <context>
+    <background>Spec §2.2 / FR-A04. This is an uncapped commitment to fix (owner decision OC-02), not a surface-and-defer. The generic message hides the Graph error; task 001 removes that veil. Graph /search/query has narrow app-only coverage, which is why spec §3.1's auth root cause is the leading hypothesis — but Search was never isolated, so it may be unrelated (wrong entity type, missing scope, malformed query).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchContainersEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchItemsEndpoints.cs</file>
+      <file role="canonical-reference">.claude/patterns/auth/graph-endpoints-catalog.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The real error surface — required to see the Graph error behind the generic message.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: root-cause determination. The cause MUST be established empirically from a real Graph response, not inferred from the spec's hypothesis. Record the actual error code and message in task notes before writing a fix.</constraint>
+    <constraint source="project">Scope: auth. If the cause is the app-only limitation, do NOT implement a delegated path here — that is Workstream B (tasks 010/011) and is gated on the §6.5 ADR decision. Record the finding and coordinate.</constraint>
+    <constraint source="ADR-019">Scope: the search endpoints. Failures surface as ProblemDetails carrying the real Graph error.</constraint>
+    <constraint source="ADR-007">Scope: the facade boundary. Graph SDK types MUST NOT leak above the service.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph search + SPE container query</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Which Graph endpoints support app-only vs delegated.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">SDK request construction and error reading.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §2.2 and §3.1, ADR-028.</step>
+    <step order="1">Reproduce the failure against Spaarke Dev with the task-001 error surface in place. Capture the real Graph error code, message, and request id.</step>
+    <step order="2">Record the captured error in projects/sdap-SPE-admin-app-r2/notes/search-root-cause.md BEFORE writing any fix.</step>
+    <step order="3">Classify the cause: (a) app-only permission limitation, (b) malformed query or wrong entity type, (c) missing scope, (d) other.</step>
+    <step order="4">If (b), (c), or (d): implement the fix here.</step>
+    <step order="5">If (a): do NOT implement delegated auth here. Record the finding, add a note to task 011's dependency, and fire the escalation trigger.</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors.</step>
+    <step order="7">Verify: Search returns results against Spaarke Dev, or is documented as blocked on task 011 with evidence.</step>
+    <step order="8">Measure publish size; record in task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set task 004 status to ✅ (or 🔄 if blocked on 011).</step>
+    <step order="10">Document deviations in projects/sdap-SPE-admin-app-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the root cause is the app-only permission limitation (spec §3.1), STOP implementing and escalate per CLAUDE.md §6 — the fix belongs to Workstream B behind the §6.5 ADR gate, not here. Record the evidence and hand off to task 011.</trigger>
+    <trigger>If the root cause proves to be neither auth nor a query defect but something architectural (e.g. SPE container search requires an index that is not provisioned), STOP and escalate rather than building a workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchContainersEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/search-root-cause.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The real Graph error behind the generic message is captured and recorded in notes/search-root-cause.md with code, message, and request id.</criterion>
+    <criterion testable="true">Given a valid search term, when Search runs against Spaarke Dev, then results are returned — OR the task is documented as blocked on task 011 with the empirical evidence for that classification.</criterion>
+    <criterion testable="true">Negative: a search that legitimately matches nothing returns an empty result state distinguishable from a failure (per task 002's classification rule).</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to the search endpoint returns 401 ProblemDetails.</criterion>
+    <criterion testable="true">The fix is justified by the captured error, not by the spec's hypothesis.</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-A04. Owner decision OC-02 makes this an uncapped commitment to fix. Effort is provisional — the root cause is not isolated, which is recorded as an Unresolved Question in spec.md.
+
+COMPLETED 2026-08-21 — full record in notes/search-root-cause.md. Root cause proven by live app-only calls to real Graph against Spaarke Dev (az CLI + owning-app secret from Key Vault), then the fix replayed live and confirmed 200.
+
+VERDICT: classification (b) WRONG ENTITY TYPE. `fileStorageContainer` is NOT a supported entityTypes value on /search/query. A 10-probe differential matrix showed it is byte-identical to a deliberately nonexistent entity type — on beta AND v1.0, with and without region — while `driveItem` returns a specific error and then real results.
+
+🔔 THE SPEC'S LEADING HYPOTHESIS (a), the app-only permission limitation of §3.1, IS DISPROVEN. App-only search returns 200 with real hits once the request is valid. NEITHER escalation trigger fired, so this did NOT hand off to Workstream B / task 011. Task 011 must not inherit "Search is blocked on delegated auth" — it never was.
+
+THREE defects, not one — the Items screen was broken too and would still have been broken after "fixing" Search:
+  D1 SearchContainersAsync used /search/query with entityTypes fileStorageContainer -> 400 every time. Replaced with an OData $filter (contains on displayName/description) against /storage/fileStorage/containers. Verified 200 live.
+  D2 SearchItemsAsync omitted `region`, which Graph REQUIRES for application permissions ("Region is required when request with application permission."). Added as configurable SpeAdmin:SearchRegion, default NAM — region is a property of tenant provisioning, so a hardcoded value would pass here and fail for a non-NAM tenant.
+  D3 SearchItemsAsync sent `contentSources` to scope to a container, which Graph accepts ONLY for externalItem ("Content Source is required only for ExternalItem"). Removed; container scoping now filters hits by parentReference.driveId after the call, since Graph has no server-side way to scope a driveItem search.
+
+⚠️ "The call failed, please try again." is GRAPH'S OWN MESSAGE, not a Spaarke placeholder. Task 001's error surface reports it faithfully and it is still useless — no error-surfacing work could have diagnosed this; only a differential experiment did.
+
+ALSO ADDED: EscapeODataStringLiteral — the search term is interpolated into a single-quoted OData literal, so an unescaped apostrophe ("O'Brien") 400s the screen and a crafted term could append filter clauses.
+
+16 new contract tests on the task-040 WireMock fixture. 10,618 passed / 0 failed. ArchTests 36/36. Publish 43.66 MB (was 43.68). No new NuGet, no CVEs.
+
+FOR TASK 042: tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/SearchContainersTests.cs mirrors the old numeric-token logic in its own test bodies instead of calling production (ADR-038 B6) — which is exactly why it never caught any of this.
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

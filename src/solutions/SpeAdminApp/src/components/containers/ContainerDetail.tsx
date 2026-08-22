@@ -50,7 +50,7 @@ import {
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import { PermissionPanel } from "./PermissionPanel";
 import { ColumnEditor } from "./ColumnEditor";
 import { CustomPropertyEditor } from "./CustomPropertyEditor";
@@ -412,7 +412,7 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
       setContainer(data);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to load container details.";
+        describeApiError(err, "Failed to load container details.");
       setContainerError(message);
     } finally {
       setContainerLoading(false);
@@ -450,7 +450,7 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
       setColumnsLoaded(true);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to load columns.";
+        describeApiError(err, "Failed to load columns.");
       setColumnsError(message);
     } finally {
       setColumnsLoading(false);

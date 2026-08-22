@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Surface billingClassification and billingStatus, warn when billing is invalid</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>020 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (Graph read + DTO) and .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified read-only field exposure plus a warning state.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>bff-api, api, frontend, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Container types carry billingClassification and billingStatus. Invalid billing is a live operational failure mode with zero visibility today. Surface both and warn when billingStatus is not valid. This is READ-ONLY — attaching a billing profile belongs to provisioning, not this app.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Graph container-type model and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>Both fields render per container type, and a non-valid billingStatus produces a visible warning.</goal>
+
+  <context>
+    <background>Spec FR-C12 / §4.2d. Billing-profile ATTACH (Add-SPOContainerTypeBilling) is PowerShell, needs Azure subscription owner/contributor, and is a once-per-customer provisioning act — it belongs to customer-provisioning-orchestration-r1 and is out of scope here (task 062 raises it there). What SPE Admin does instead is read billing state and warn. Small, but genuinely missing.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/container-types</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">v1.0 endpoints — field names are v1.0 names.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: READ-ONLY. Do NOT implement billing-profile attach, change, or any billing write. That is provisioning's scope (spec §4.2d).</constraint>
+    <constraint source="project">Scope: the warning. It MUST state what invalid billing means operationally and where to fix it — not merely display a red badge. Routing beats stonewalling.</constraint>
+    <constraint source="project">Scope: field names. Verify billingClassification and billingStatus against the current v1.0 schema before use.</constraint>
+    <constraint source="NFR-06">Scope: these fields. If billing state is unavailable, show an explicit unknown state — never default to "valid".</constraint>
+    <constraint source="ADR-021">Scope: the warning UI. Fluent v9 semantic tokens; dark-mode correct; no hex literals.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Container-type billing fields</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">$select construction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.2d.</step>
+    <step order="1">Verify both field names against the current v1.0 schema; add to $select and the DTO.</step>
+    <step order="2">Render both on the container-types surface.</step>
+    <step order="3">Add a warning state for non-valid billingStatus explaining the operational consequence and where it is remediated (provisioning / SharePoint admin center).</step>
+    <step order="4">Add an explicit unknown state where billing data is unavailable.</step>
+    <step order="5">Build BFF and code page.</step>
+    <step order="6">Verify against Spaarke Dev: both fields render for the real container type.</step>
+    <step order="7">Measure publish size; record. Update TASK-INDEX.md: task 029 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If billingStatus cannot be read under the app's current permissions, STOP and escalate with the required permission named rather than hiding the field — silently omitting it recreates the zero-visibility problem this task removes.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Billing fields render">
+      <steps><step>Open the Container Types screen and inspect a container type</step></steps>
+      <expected>billingClassification and billingStatus both render.</expected>
+    </test>
+    <test name="Invalid billing warns actionably">
+      <steps><step>View a container type whose billingStatus is not valid</step></steps>
+      <expected>A warning explains the operational consequence and where to remediate. It is not a bare red badge.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the billing display and warning</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; warning contrast legible in both themes; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypeDtos.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/container-types</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">billingClassification and billingStatus render per container type against Spaarke Dev.</criterion>
+    <criterion testable="true">Given a non-valid billingStatus, when it renders, then a warning states the operational consequence and where to remediate.</criterion>
+    <criterion testable="true">Negative: no billing WRITE capability was added — attach remains out of scope (spec §4.2d).</criterion>
+    <criterion testable="true">Negative: when billing state is unavailable, an explicit unknown state renders — it never defaults to "valid" (NFR-06).</criterion>
+    <criterion testable="true">Both field names verified against the current v1.0 schema.</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C12. Pairs with task 062, which raises billing-attach on customer-provisioning-orchestration-r1. Parallel-safe: DTO + endpoint + client only — does NOT modify SpeAdminGraphService.cs.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
