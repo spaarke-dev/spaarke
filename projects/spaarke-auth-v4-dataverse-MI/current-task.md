@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-21 — **PHASE 2 AND PHASE 6 ARE BOTH COMPLETE.**
+> **Last Updated**: 2026-08-21 (by `context-handoff`) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -13,9 +13,39 @@
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
 | **Task** | **none active** — Phase 6 complete; Group F started (**055, 052** closed) |
 | **Status** | Full suite **10,596 / 0** · auth seams **60/60** · ArchTests **49/49** (36 + 13 new) · publish **44.99 MB** · CVE clean |
-| **Next Action** | **Group F: `050` → `053` → `054` → `056` → `051`.** Read the ⚠️ Group F block below FIRST — the RBAC sweep at task 052 already answered several of their prerequisites |
+| **Next Action** | `task-execute` on `tasks/050-content-safety-to-mi.poml`. **Read the ⚠️ Group F block below first** — task 052's RBAC sweep already answered several prerequisites. Then 053 → 054 → 056. **051 needs owner confirmation** (live SAS rotation) |
 | **Progress** | **17 of 26 active complete** · **9 remaining** (031,032,033,050,051,053,054,056,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) |
+
+### Files modified this session — ALL COMMITTED AND PUSHED (working tree clean)
+
+| Commit | Task | What |
+|---|---|---|
+| `243b514c1` | **022** | 9 files: the 4 OBO clients + 5 app-only credential sites → the provider. New `ConfidentialClientTokenCredential.cs`. `IdentityConfigurationValidator` rule 5 |
+| `bde4a640d` | **060** | New `tests/Spaarke.ArchTests/CredentialGuardTests.cs` (8 tests) |
+| `502f31395` | **061** | New `CredentialCensusTests.cs` (5) + `SourceScan.cs`; `CredentialGuardTests` rewired onto it |
+| `047a9ae40` | **062** | `IdentityConfigurationValidator` rule 6 + `CredentialSelectionOptions.RequireSecretFreeIdentity`; 5 seam tests. Booked the enable-flag onto 033's POML |
+| `05818d8b2` | **063** | `.claude/skills/test-diet/SKILL.md` heuristic 0 + seam drift fix; `tests/CLAUDE.md` fitness-function section |
+| `250a5faae` | **055** | `AnalysisOptions.cs` (2 dead properties), `appsettings.template.json`, 2 provisioning scripts |
+| `0ece27567` | **052** | `.claude/adr/ADR-028` E-2 re-affirmation block (no code) |
+| `7a15d8df1`, `153cf9f69`, `35bc0d9c7` | — | Checkpoints |
+
+### Critical context (3 sentences)
+
+Phase 2 and Phase 6 are done: every BFF-identity confidential client now takes its credential from
+`OrderedCredentialClientProvider`, and the forcing functions that prevent regression are in place and
+**demonstrated live** (a seeded ninth secret-bearing client fails the build). The remaining work splits
+cleanly in two: **Group F (050–056)** is safe autonomous code-and-config work, while **031→032→033** is
+blocked on an owner decision, a second test principal that does not exist, and a soak period that cannot
+be compressed. Nothing is broken and nothing is half-done — every task is committed with its decision
+record.
+
+### ⚠️ Two items needing the OWNER, not more work
+
+1. **ADR-038 path-B amendment** (task 063) — add `tests/Spaarke.ArchTests/**` as an eighth KEEP path.
+   The directive + skill changes already hold the line, so nothing is blocked.
+2. **Task 051's "rotate the leaked SAS"** — `appsettings.Development.json` holds a live Service Bus SAS
+   key. Rotating a shared live credential is outward-facing; do not run 051's rotation step unattended.
 
 ---
 
