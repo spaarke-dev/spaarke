@@ -215,6 +215,36 @@ az cognitiveservices account check-domain-availability --subdomain-name sprkshar
 
 ---
 
+### F11: Azure Cognitive Services holds a 3-5 min soft-lock after failed deploys
+
+**Symptom**: After F10 (Service Bus name fix), 3 subsequent deploy attempts (49s, 1m7s, 3-min-wait+retry) all failed with:
+```
+RequestConflict — Cannot modify resource with id '.../accounts/sprksharedprod-openai' because
+the resource entity provisioning state is not terminal.
+```
+
+BUT direct query `az cognitiveservices account deployment list` + `az rest GET .../accounts/sprksharedprod-openai` both showed **provisioningState: Succeeded** for the account + all 3 child model deployments. Everything was demonstrably terminal on the resource plane. Only Bicep's write attempt hit the conflict.
+
+**Root cause**: Azure Cognitive Services holds an internal write-lock on account resources for several minutes after a related operation completes (even successfully). This is invisible to `provisioningState` polling — Azure returns Succeeded while still enforcing the lock. Concurrent writes during this window fail with RequestConflict. Not documented in Cognitive Services API reference. Discovered empirically.
+
+**Retry timing observed**:
+- Immediately after failed deploy: RequestConflict
+- 49s later: RequestConflict
+- 1m7s later: RequestConflict
+- **~3 min later after explicit `sleep 180`: SUCCESS**
+
+**Fix applied**: Manual 3-min sleep between retry attempts. No Bicep change needed — the resource was fine, just needed Azure's internal lock to clear.
+
+**Automation gap**: The skill's retry logic (currently non-existent) needs to distinguish "transient write-lock" errors from "actual conflict" errors and back off appropriately. Simple linear-backoff retry would work: 30s → 90s → 180s → 300s → fail.
+
+**Automation TODO (r1 fresh-sub Step 2.5)**:
+- Detect `RequestConflict` on CognitiveServices/accounts writes AND the specific message "provisioning state is not terminal" AND the direct resource query returns Succeeded → treat as transient soft-lock, back off + retry
+- Cap total retry wait at ~10 min; escalate to operator if still blocked
+
+**Broader class of issue**: Cognitive Services is unusually strict about back-to-back writes. Related quirks observed on other Cognitive Services resources (Doc Intelligence, AI Search) — same class of transient write-lock. The retry-with-backoff pattern applies universally to `Microsoft.CognitiveServices/*` and `Microsoft.Search/*` post-failed-deploy scenarios.
+
+---
+
 ## Non-Blocking Observations
 
 ### O1: `az cognitiveservices model list` output shows separate "Deprecating" vs "Legacy" statuses; only "GA" or "Legacy" are deployable
