@@ -219,6 +219,8 @@ Wait for "yes" (bare "y" is insufficient at every gate in this skill — spec §
 
 ### Step 2: Preflight (invokes L2 H0 handler)
 
+> **BEFORE this step**, if the target Azure subscription was created within the last 90 days (i.e. "fresh sub"), invoke **Step 2.5 (Fresh-Sub Deployment Feasibility Check)** first. Fresh subs have region/quota/model gotchas that L2's H0 handler does NOT currently check for; skipping Step 2.5 leads to preflight failure loops that the operator cannot escape without editing Bicep. See "Fresh-Sub Automation Gaps" section at end of this file for the full evidence base (customer-provisioning-orchestration-r1 lessons learned 2026-08-22).
+
 Preflight is idempotent + fast (<30s). It:
 - Validates quota (Azure OpenAI regional TPM per NFR-12; App Service tier; SPE container-type headroom)
 - Runs DNS pre-check for reserved sub-domains
@@ -265,6 +267,115 @@ Preflight passed. Proceed to Step 3 (confirmation gate)? (yes/no)
 ```
 
 If H0 FAILS, present the failure + escalation instructions (per §4C 4-class taxonomy). Do NOT proceed to Step 3.
+
+---
+
+### Step 2.5: Fresh-Sub Deployment Feasibility Check (NEW — customer-provisioning-orchestration-r1 lessons 2026-08-22)
+
+**When to run**: Target Azure subscription was created within the last 90 days, OR this is the FIRST Bicep deploy attempt against this subscription in this region. Fresh subs have gotchas Microsoft has quietly introduced since 2024-2025 that break naive "just deploy" flows. These checks run OPERATOR-SIDE (in this skill) before invoking L2 H0, because L2 doesn't have the visibility (or the mandate) to modify region defaults or Bicep params.
+
+Full evidence base: `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` (findings F1-F9).
+
+Automated checks (each MUST pass or auto-remediate before Step 2):
+
+**F1 — OpenAI model pin freshness**:
+```powershell
+$pins = (Get-Content infrastructure/bicep/stacks/{stack}.bicep | Select-String "version: '(\d{4}-\d{2}-\d{2})'").Matches.Groups[1].Value
+foreach ($pin in $pins) {
+  $models = az cognitiveservices model list --location $openAiLocation --query "[?kind=='OpenAI' && model.version=='$pin']" -o json | ConvertFrom-Json
+  if ($models[0].model.lifecycleStatus -in @('Deprecating','Deprecated')) {
+    # HALT — pin is dead. Recommend bump to latest GA/Legacy in same family.
+  }
+}
+```
+
+**F2 — Deployment SKU compatibility**:
+- Verify each pinned model's `sku` field is in the list returned by `az cognitiveservices model list --query "[?...].model.skus"`
+- gpt-5.x family REQUIRES `GlobalStandard` (gpt-5-pro literally supports NO other SKU)
+- Legacy gpt-4o family accepts `Standard`
+
+**F3 — Primary region App Service quota feasibility**:
+```powershell
+# Deploy a throwaway S1 App Service Plan via what-if to test quota
+az deployment group what-if --resource-group $tempRg --template-file .claude/skills/provision-environment/refs/test-s1-plan.bicep `
+  --parameters location=$candidateRegion --subscription $subId
+# If SubscriptionIsOverQuotaForSku → this region has quota walls; auto-fallback to westus2 (Spaarke canonical)
+```
+
+**F4 — OpenAI region GA availability**:
+```powershell
+# Confirm all pinned models are GA in the intended sharedOpenAiLocation
+az cognitiveservices model list --location $sharedOpenAiLocation --query "[?kind=='OpenAI' && model.name=='$pinnedModelName']" -o table
+# Empty result → model not offered in this region; pivot sharedOpenAiLocation (canonical: westus3 when primary is westus2)
+```
+
+**F5 — Auto-allocated TPM detection**:
+```powershell
+az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.CognitiveServices/locations/$openAiRegion/usages?api-version=2023-05-01" `
+  --query "value[?limit != '0']" -o json
+```
+- Enumerate what's already granted
+- If pinned deployment set exceeds auto-granted TPM AND no auto-file-support-ticket flow available → auto-recompose deployment set to use ONLY auto-granted resources (documented downgrade with operator notification)
+
+**F6 — Provider registration retry-verify loop**:
+```powershell
+foreach ($ns in $requiredProviders) {
+  az provider register --namespace $ns --subscription $subId -o none
+  $deadline = (Get-Date).AddMinutes(5)
+  while ((Get-Date) -lt $deadline) {
+    $state = az provider show -n $ns --query registrationState -o tsv
+    if ($state -eq 'Registered') { break }
+    Start-Sleep 30
+  }
+  if ($state -ne 'Registered') {
+    # HALT — provide operator with Portal link: https://portal.azure.com/#view/HubsExtension/BrowseAll → subscription → Resource providers → search "$ns" → Register
+  }
+}
+```
+
+**F7 — Fresh-sub UX preamble**:
+- Warn operator: "Portal Usage+Quotas dropdown will show empty until resources exist; use https://ai.azure.com Quotas for OpenAI TPM visibility"
+
+**F8 — Auto-file support ticket** (advanced, requires `Microsoft.Support/*` permissions on the sub):
+- If NO auto-grant path exists for a required resource AND operator has Support Plan → auto-file via `az support in-subscription tickets create`
+- If no Support Plan → HALT with actionable operator guidance
+
+**F9 — Support Plan check**:
+```powershell
+$plan = az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.Resources/checkResourceName?api-version=2020-10-01" 2>&1
+# Check if sub has Support Plan attached; downgrade approach if not (never queue ticket-dependent action)
+```
+
+**Auto-remediation vs HALT decision matrix**:
+| Finding | Auto-remediate? | Fallback |
+|---|---|---|
+| F1 (pin stale) | NO (requires operator ADR-020 sign-off on new pin) | HALT + recommend bump |
+| F2 (SKU wrong) | YES (bicepparam auto-generation) | Log the change |
+| F3 (region quota wall) | YES (fallback to westus2) | Log region pivot with rationale |
+| F4 (OpenAI region absence) | YES (fallback sharedOpenAiLocation to westus3) | Log the split |
+| F5 (auto-quota mismatch) | YES (recompose deployment set to auto-granted subset) | Notify operator: MVP downgrade with upgrade path |
+| F6 (provider reg hang) | Retry 5 min, then HALT | Portal link |
+| F7 (UX preamble) | Informational — always show | N/A |
+| F8 (support ticket needed) | YES if Support Plan available | HALT if not |
+| F9 (no support plan) | Downgrade to no-ticket-dependent approach | N/A |
+
+**Skill output on completion of Step 2.5**:
+```
+FRESH-SUB FEASIBILITY (customer-provisioning-orchestration-r1 lessons):
+  [PASS/AUTO-FIX/HALT] F1 OpenAI pin freshness: 3 of 3 pins GA in westus3
+  [AUTO-FIX] F3 Primary region: eastus quota wall detected → auto-pivoted to westus2
+  [AUTO-FIX] F4 OpenAI region: gpt-5 absent in westus2 → sharedOpenAiLocation=westus3
+  [AUTO-FIX] F5 Auto-quota: gpt-5.4 GlobalStandard=0 TPM → recomposed to gpt-5-mini (500 TPM auto-granted)
+  [PASS] F6 All required providers registered
+  [PASS] F9 Support Plan available (Basic) — support-ticket path enabled if needed
+
+Proceeding to Step 2 (L2 H0 preflight)...
+```
+
+**Current status of Step 2.5 automation** (as of 2026-08-22):
+- MVP: Step 2.5 exists as INFORMATIONAL — operator is prompted to check findings F1-F9 manually with the queries above
+- Full E2E-no-human-interaction: Step 2.5 becomes FULLY AUTOMATED — the skill absorbs each check as an automation, with the auto-remediation matrix above driving behavior
+- Owner directive 2026-08-22: "the expectation for the final delivered solutions is that this process will run E2E with no human interaction. Ultimately the best solution is we have a 'Customer Deployment' web app that allows the user to input whatever information/setting choices and Claude Code / the scripts run everything." Absorbing F1-F9 into Step 2.5 automation is the largest single gap between MVP and full E2E.
 
 ---
 
@@ -896,3 +1007,50 @@ Dry-run is intended for pre-flight validation before a real customer deployment 
 ---
 
 *This skill is the operator's single entry point to the customer-provisioning platform. It wraps the L2 REST API — it does not reimplement provisioning logic. The state machine lives in Cosmos; the handlers live in BFF; this skill is thin UX driving it all.*
+
+---
+
+## Fresh-Sub Automation Gaps (customer-provisioning-orchestration-r1 lessons 2026-08-22)
+
+**Evidence base**: `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` (findings F1-F9)
+
+**Owner directive**: "the expectation for the final delivered solutions is that this process will run E2E with no human interaction. Ultimately the best solution is we have a 'Customer Deployment' web app that allows the user to input whatever information/setting choices and Claude Code / the scripts run everything."
+
+The first live Model 1 Prod stand-up (2026-08-22, sub `cd95fcec-...`) surfaced 9 gotchas Microsoft has quietly introduced since 2024-2025 that break naive "just deploy" flows for fresh Azure subscriptions. Each gotcha is an automation gap this skill MUST absorb before we can claim E2E-no-human-interaction. Step 2.5 (above) is where the automation lives.
+
+| # | Finding | Auto-remediation strategy | Status |
+|---|---|---|---|
+| F1 | OpenAI model version pins age ~4-6 months; Microsoft blocks new deploys of Deprecating pins | Pre-deploy `az cognitiveservices model list` check; HALT + operator sign-off for pin bump (ADR-020) | MVP: informational; TODO: fully automated with operator confirmation |
+| F2 | gpt-5.x family REQUIRES GlobalStandard SKU; module hardcoded 'Standard' broke this | Per-deployment `sku` field in openai module (safe-access default 'Standard') — DONE this session | ✅ Module fix committed in `798f61c9` |
+| F3 | East US fresh subs have 0 App Service quota AND Portal auto-denies quota request | Preflight test-deploy in candidate region; auto-fallback to westus2 (Spaarke canonical) | MVP: manual; TODO: automated region auto-selection |
+| F4 | West US 2 has NO gpt-5 family; West US 3 has all | Detect gpt-5 GA per region; auto-set `sharedOpenAiLocation` = westus3 when primary is westus2 | MVP: bicepparam manual; TODO: auto-composed |
+| F5 | Fresh subs auto-grant mini/embedding TPM generously (500+); frontier tiers (gpt-5.4, gpt-5-pro) = 0 | Query auto-grants; recompose deployment set from what's granted; deferred upgrade path documented | MVP: manual (this session recomposed); TODO: auto-compose from `az cognitiveservices usage list` |
+| F6 | `az provider register` reports success but state stays NotRegistered on fresh subs | Retry-verify loop 5 min; HALT with Portal link if not registered | TODO: not implemented |
+| F7 | Portal Usage+Quotas provider dropdown empty on fresh subs (only shows providers with existing resources) | Preemptive operator warning + link to https://ai.azure.com Quotas | MVP: informational only |
+| F8 | Portal auto-denies fresh-sub quota requests + pushes to Support Ticket | Auto-file via `az support in-subscription tickets create` REST API if Support Plan available | TODO: not implemented — advanced; requires operator to have `Microsoft.Support/*` role |
+| F9 | Support Plan availability varies; skill must not queue ticket-dependent actions on plan-less sub | Check Support Plan presence in Step 2.5; downgrade approach if absent | TODO: not implemented |
+
+### What r1 delivery still needs (roadmap)
+
+Before r1 can claim E2E-no-human-interaction:
+
+1. **Absorb F1-F9 into automated Step 2.5** (currently mostly informational)
+2. **Codify Spaarke canonical region defaults**: westus2 platform + westus3 OpenAI (baked into `Model 1 Prod` profile in `pac admin create`)
+3. **Parameterize `sharedOpenAiDeployments`** in `stacks/model1-shared.bicep` so skill can compute the deployment set at runtime (auto-quota compatible → full P5 progressive upgrade)
+4. **Auto-registration retry-verify** for all `Microsoft.*` providers
+5. **Auto-support-ticket flow** for cases where auto-grant path doesn't exist (advanced, gated on operator having Support Plan)
+
+### The Customer Deployment Web App (natural evolution)
+
+Owner-directed follow-on project: replace the operator-invoked skill with a self-service web UI. Prospect/ops user fills a form; the L3 skill (fully automated per above) executes end-to-end; SSE stream provides real-time progress.
+
+Prerequisites:
+- All F1-F9 absorbed into fully-automated Step 2.5
+- L2 control-plane `/api/runs` API surfaced via BFF
+- All handlers H0-H14 live-validated (in-progress; see current-task.md for status)
+
+Filing: proposed as `projects/customer-deployment-webapp-r1` (skeleton to be created after r1 completes).
+
+---
+
+*Fresh-Sub Automation Gaps section added 2026-08-22 during Model 1 Prod first-live stand-up. Preserves the discovery arc for future operators + subsequent r1 automation absorption.*
