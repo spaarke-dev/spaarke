@@ -4,7 +4,7 @@
     <title>FR-A08/A09 — Two document classes (Authored vs Imported; warnings suppressed for Authored) + PDF-sourced version-coordinate tracking</title>
     <phase>4 Track A — Faithful Save</phase>
     <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which documents produce degradation warnings and fixes a baseline-resolution defect for PDF-sourced documents. PROVISIONAL — amendable by task 031.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-23 (context-handoff) · **Pushed**: PR #806, 0 unpushed, working tree CLEAN
+> **Last Updated**: 2026-08-23 (task 044 complete) · **Pushed**: see Quick Recovery
 > **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
@@ -9,15 +9,16 @@
 
 | Field | Value |
 |-------|-------|
+| **Active task** | **none** — 044 closed. Pick 043 or 051 below. |
 | **Phases 1–3** | ✅ COMPLETE. Architecture gate **PASSED**. ADR-049 third amendment **APPLIED**. |
-| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · **044 🔄 OPEN (one requirement left)** · 043 🔲 not started · 045 🔲 |
-| **Next Action** | **FR-A09** — the only thing left in task 044. See "What FR-A09 needs" below. |
-| **Alternatives** | **043** (capability gate / "Edit a copy") · **051** (Track C — the *"wording differs slightly"* banner, independent of all Track A work) |
-| **Gate status** | Server **10,916 / 0** · Client (Jest) **1,127 / 0** · NetArchTest **36/36** · publish **43.69 MB** (−1.27 vs 44.96; ceiling 60) · no vulnerable packages |
+| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · **044 ✅** · 043 🔲 not started · 045 🔲 |
+| **Next** | **043** (capability gate → read-only + "Edit a copy") or **051** (Track C — the *"wording differs slightly"* banner, independent of all Track A work) |
+| **Gate status** | Server **10,920 / 0** · Client (Jest) **1,129 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs / 44.09 excl** (+0.03 vs the 44.96 documented net10 baseline; ceiling 60) · no vulnerable packages |
 
 ### The one thing to understand
 
-**Untouched blocks are now preserved; the block you edit is mostly preserved; nothing is deployed.**
+**Untouched blocks are preserved; the edited block is mostly preserved; a PDF now reopens as the document
+it became; nothing is deployed.**
 
 | | Control (master) | Now |
 |---|---:|---:|
@@ -25,104 +26,88 @@
 | Near tier | 6.67% | **100%** (14/14 measurable) |
 | Strict | 12.18% | **100% on 16 of 18** |
 | **Edited block intact** | — | **12 of 18 documents** |
+| **PDF → 2 documents after a refresh** | yes | **no** (1 item, 1 row, both edits) |
 
 ---
 
-## What FR-A09 needs (the only thing left in 044)
+## What shipped in 044 (2026-08-23)
 
-> PDF-sourced documents do not track their synthesized file's version coordinates, so after a page
-> **refresh**, save two cannot resolve its baseline and falls back to a full rebuild.
+**FR-A09 — measured first, and the diagnosis moved.** The POML said a PDF's second save after a refresh
+"falls back to a full rebuild". What actually happens is worse: re-opening projects the PDF *again*, so the
+user's saved work is **invisible** in a Word document they have no pointer to, and their next save mints a
+**duplicate** (the transient key is per-mount and never persisted). Fixed at **load** — resume on the
+document that already exists — which makes save two an ordinary imported save that resolves and clones.
 
-Not started. What a fresh session should establish first:
+The cheap save-side fix (stable transient key → dedup onto the existing doc) was **rejected**: after a
+refresh the client's model is the fresh PDF projection, so rendering it into the existing document
+overwrites the first save's edit. It trades a visible duplicate for silent data loss.
 
-1. **Reproduce it.** The POML is explicit that it must be verified across a page **REFRESH** (real client
-   state loss), not two saves in one session. Measure before building — on every task this project has
-   found the POML's assumption was at least partly wrong.
-2. **Trace the PDF intake path**: `ComposeService.cs` ~line 332 (`IsPdfSource` → `ProjectPdfToDocxAsync`
-   → `SynthesizeDocument`), then what `HasBaselineVersionCoordinates(request)` reads on save two.
-3. **Version-coordinate state MUST use `IDistributedCache`** (ADR-009). Never `IMemoryCache`.
-4. **Do not conflate it with FR-A08** (just shipped): a PDF-sourced document's second save is now correctly
-   treated as **Authored for warnings** via the durable marker, so its fidelity warnings are already
-   suppressed. FR-A09 is about **baseline resolution**, not warnings.
+**Mechanism**: two `IDistributedCache` keys (ADR-009) — `pdf-session:{sessionId}` carries the server's own
+bytes-first PDF determination from load to save; `pdf-derived:{driveId}:{speId}` records what that PDF
+became. Both best-effort; a miss degrades to the old behavior, never to a failure. **No version id is
+stored** — deliberately; the resumed load re-reads the current version, and a creation-time version id
+would be read-never and stale. That deviation from the requirement's literal wording is recorded, not
+buried.
 
-**Also open in 044**: the criterion *"an Authored document STILL receives save-outcome warnings"* has **no
-end-to-end test**. Two levers were tried and neither fired through the wire (mixed
-`contentModel`+`operationLog` → rejected as an unsupported op shape before reaching the warning; live-eTag
-change between load and save → the concurrency warning did not trigger from the metadata mock alone). The
-property holds structurally — every save-outcome warning is constructed after the provenance capture — but
-that is an argument from the code, not evidence from a run. Recorded in the test file and on the 045 list.
-
----
-
-## What shipped since the last handoff
-
-| Task | Result |
-|---|---|
-| **ADR-049 3rd amendment** | APPLIED — concise + a NEW `docs/adr/` twin + both ADR INDEXes + **root CLAUDE.md §17** (all three pointer surfaces still described R4's byte-patch as the current save contract) + `.claude/CHANGELOG.md` |
-| **040** merge in production | 18.08% → 100%. `ComposeBlockMerge.cs` — a renderer collaborator, no DI registration. **LCS alignment**, not document order (positional pairing gives ZERO preservation on insert/delete). Comparison **strips `ParaId`** — mandatory: the client's `data-paraid` is minted, the content model's is null. |
-| **041** baseline + FR-A05 carry | Edited block 10 → **12 of 18 intact**. Carries **bookmarks** (dropping one breaks cross-references *elsewhere in the document*) and the **content-control shell** — from the BASE block, not a client payload. |
-| **042** FR-A11 integrity | Four of five criteria already satisfied *structurally* by 040. **FR-G05 now RUNS** — headless LibreOffice opens four merged documents and the edit is still there. |
-| **044 (part)** warning taxonomy | The false banner was on the **client**, folding load-time flatten warnings into the save. No longer folded. And the **silent loss now warns**: `Engagement Letter` → `edited-paragraph-line-break-dropped ×2`. |
-| **044 FR-A08** | Authored ≠ Imported for warnings, read from the durable marker, scoped **by provenance** rather than a code list. |
+**FR-A08 was not fully done when it was reported done.** Its first acceptance criterion — enumerate every
+creation path and stamp it correctly — was skipped, and PDF-sourced rows were being stamped `Imported`
+(measured: `100000001`). The suppression FR-A08 built reads that marker, so **it could not fire for the
+class the requirement names first**. Now split: `origin` stays Imported-biased for routing (never forces an
+imported doc onto the clean branch — the SEV-1 shape), `originToPersist` is what the document *is*.
 
 ---
 
-## Defects found and fixed beyond task scope
+## Open items carried to task 045
 
-1. **Schema-invalid output from 040's own inheritance** — `w:pPr`/`w:rPr` are `xsd:sequence`; it appended.
-   Now inserts at the ECMA-376 position.
-2. **10 of 18 corpus fixtures were schema-invalid** (5 missing `xmlns:w14`, 2 out-of-order children, 1
-   duplicate VML id). Nine repaired — all project-authored; the four real-world documents were already
-   valid and were left exactly as received. `CorpusFixture_IsSchemaValidWordprocessingML` now holds the
-   corpus to this standard, and caught the next new fixture's defect within a day.
-3. **The op-log patch path re-serialized `word/comments.xml` on every save**, breaking its own
-   byte-identity guarantee — `commentsPart.Comments` materializes the DOM. Invisible for the whole project
-   because **no corpus fixture had a comments part**. Fixed with an `XmlReader` scan.
-4. **The corpus had ZERO comment ranges** — and FR-A11 is entirely about comment ranges, so 18 green rows
-   were evidence of nothing. New fixture `comment-ranges-multiparagraph.docx` (checked-in generator).
-5. **Two near-vacuous tests corrected** — revision-id uniqueness asserted over an empty set on a document
-   whose filename says "track changes" but which contains none; duplicate-paraId asserted the same
-   property for two fixtures carrying different collisions (body-level vs cross-part).
+1. **The untested FR-A08 criterion** — *"an Authored document STILL receives save-outcome warnings"* has no
+   end-to-end test. Two levers were tried; neither fired through the wire. The property holds structurally
+   (every save-outcome warning is constructed after the provenance capture) but that is an argument from the
+   code, not evidence from a run.
+2. **Browse/local-file PDF door** stamps `Imported` — `/api/compose/project` is contracted stateless and a
+   local file has no server identity to key on. First save shows one false warning; the second is correct.
+   [`notes/document-creation-paths.md`](notes/document-creation-paths.md) path 4.
+3. **Foreign session id on a save** would read another document's PDF marker. A client-contract violation,
+   but it is the SEV-1 direction, so it is written down rather than assumed away. Needs a server-side
+   binding check at save time if it is to be closed.
+4. **A redirected open wastes one PDF download** — detection is bytes-first so the mapping can only be
+   consulted after the fetch. The filename pre-check was rejected: it needs a second call site every test
+   would leave unexercised.
+5. **`ComposeService.cs` is now 4,373 lines** (was 4,031). Track D's file. The PDF-provenance code is one
+   self-contained region depending only on `_cache`/`_logger`/`_spe` — extraction is mechanical, same shape
+   as `ComposeBlockMerge.cs`.
+6. **`w:br` soft breaks** (1 doc) and **run-level `rPr` variation** (2 docs) on the edited block — read-side
+   projection gaps base-carry cannot reach. **`mc:AlternateContent` paraId re-mint** — 2 docs below 100%
+   strict (the reverted experiment).
 
 ---
 
 ## Experiments implemented, measured, and REVERTED (do not repeat)
 
-Both are recorded at their call sites, so the next reader finds the measurement rather than the temptation.
-
 | Change | Looked right because | Measured |
 |---|---|---|
-| Exclude opaque regions from `AssignParaIds` | Stops mutating cloned `mc:AlternateContent` subtrees | Takes 2 docs to 100% strict — but breaks task 011's paraId-uniqueness guarantee. **Strict is a ratchet, not a gate**; trading a safety invariant for a non-gating number is exactly what the ADR-049 paired MUST forbids. |
-| Emit `xml:space="preserve"` only when needed | Matches what Word "should" do | **Markedly worse**: intact fell 12 → 2. Word emits it far more liberally. The residual `p/r/t` class is attribute presence, not text loss. |
-
----
-
-## Residual for task 045
-
-- **`w:br` soft breaks** (1 doc) and **run-level `rPr` variation** (2 docs) on the edited block — both are
-  *projection* (read-side) gaps that base-carry structurally cannot reach.
-- **Reorder** yields no merge benefit (LCS matches never cross).
-- **`mc:AlternateContent` paraId re-mint** — 2 docs below 100% strict; the reverted experiment above.
-- **The untested FR-A08 outcome-warning criterion.**
+| Exclude opaque regions from `AssignParaIds` | Stops mutating cloned `mc:AlternateContent` subtrees | 2 docs to 100% strict — but breaks task 011's paraId-uniqueness guarantee. **Strict is a ratchet, not a gate**; trading a safety invariant for a non-gating number is what the ADR-049 paired MUST forbids. |
+| Emit `xml:space="preserve"` only when needed | Matches what Word "should" do | **Markedly worse**: intact fell 12 → 2. Word emits it far more liberally. |
 
 ---
 
 ## Traps (all live)
 
-- **`w:pPr` / `w:rPr` are `xsd:sequence`** — child ORDER is schema, not style. Use the order tables in
-  `ComposeBlockMerge`.
+- **`w:pPr` / `w:rPr` are `xsd:sequence`** — child ORDER is schema. Use the order tables in `ComposeBlockMerge`.
 - **The I-7 source audit scans source TEXT including comments.** A comment containing the banned membership
   call trips it. Move the code, not the guard.
-- **`mergeUnchangedBlocks` is a TEST SEAM, not a feature flag** — bound to no configuration; it exists so
-  the measurement can run a control arm through the same renderer.
-- **Three seam tests are pinned to `mergeUnchangedBlocks: false`** — they target the *render* path.
+- **`mergeUnchangedBlocks` is a TEST SEAM, not a feature flag.** Three seam tests are pinned to `false`.
+- **A test double that never remembers measures the double, not the behavior** — the promotion's idempotency
+  looks rows up by `sprk_graphitemid`; a double answering "no such row" forever reports a false duplicate.
 - **Corpus fixtures are held schema-valid.** Never "fix" a real-world fixture — their quirks are the test case.
 - **Compose.Components uses Jest, not vitest.**
 - **Run the FULL test project before closing a task**, never `--filter`.
 - Bash heredocs mangle escapes inside quoted Python — write patch scripts to the scratchpad and run them.
 - `git checkout <commit> -- <path>` writes the **INDEX**; the safe A/B form is `git show <commit>:<path> > <path>`.
 - `w14:paraId` must be **8 hex digits, non-zero, ≤ `0x7FFFFFFF`**.
-- **CI pushes auto-format commits to this branch** — fetch and rebase before pushing (happened twice).
+- **The pre-commit hook fails on `prettier` not being on PATH** (root install gap) — which is why CI keeps
+  landing auto-format commits. `dotnet format <csproj> --include <files>` and
+  `npx --no-install prettier --check` from the package dir both work; run them and commit the result.
+- **`dotnet format` needs a csproj/sln path** — a bare `--include` throws `MSBuildWorkspaceFinder`.
 - SpaarkeAi is Vite and aliases shared-lib SOURCE — clear `dist/ node_modules/.vite/ .vite/` before building.
 - Use `pwsh`, not `powershell`, for the deploy hash-verify step.
 
@@ -132,18 +117,18 @@ Both are recorded at their call sites, so the next reader finds the measurement 
 
 | Banner | Track | Status |
 |---|---|---|
-| "Some formatting was simplified when saving" | A | **Should now be gone** for documents that lose nothing — but **undeployed** |
+| "Some formatting was simplified when saving" | A | **Should now be gone** for documents that lose nothing, **and for PDF-sourced documents** — but **undeployed** |
 | "wording differs slightly from this document" | **C** | Untouched. **051–053**, independent of everything above |
 
 ## Not deployed
 
-**Nothing from Phases 3–4 is live.** Task 017's banner fix, the merge, the carry and the taxonomy all ship
-with the next paired **BFF + `sprk_spaarkeai`** deploy (NFR-05). Never build from a net8 tree.
+**Nothing from Phases 3–4 is live.** Task 017's banner fix, the merge, the carry, the taxonomy and 044's
+PDF work all ship with the next paired **BFF + `sprk_spaarkeai`** deploy (NFR-05). Never build from a net8 tree.
 
 ## Tasks complete
 
 **Phase 0** 001 · 002 — **Phase 1 (Track S)** 010–018 — **Phase 2** 020 · 021 · 022 · 023 —
-**Phase 3** 030 · 031 — **Phase 4** 040 · 041 · 042 — **Phase 5** 050
+**Phase 3** 030 · 031 — **Phase 4** 040 · 041 · 042 · **044** — **Phase 5** 050
 
 **Blocked**: 074 ⛔ (`ComposeShadowPatchEngine` subsumption NOT-CONFIRMED — gate-decision §5).
 
@@ -151,5 +136,5 @@ with the next paired **BFF + `sprk_spaarkeai`** deploy (NFR-05). Never build fro
 
 `projects/spaarkeai-compose-r8/notes/` — `gate-contract.md` · `control-measurement.md` ·
 `merge-prototype-results.md` · `gate-decision.md` · `merge-mechanism-results.md` · `edited-block-loss.md` ·
-`merge-integrity-results.md` · `adr-049-third-amendment-draft.md` · `track-s-uat.md` ·
-`honest-failure-set.md` · `document-size-ceilings.md`
+`merge-integrity-results.md` · **`pdf-refresh-baseline.md`** · **`document-creation-paths.md`** ·
+`adr-049-third-amendment-draft.md` · `track-s-uat.md` · `honest-failure-set.md` · `document-size-ceilings.md`
