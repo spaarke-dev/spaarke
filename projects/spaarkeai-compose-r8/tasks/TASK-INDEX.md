@@ -130,6 +130,20 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 ## Phase 4 — Track A: Faithful save *(blocked until 031 passes; POMLs provisional — amendable by 031)*
 
+> **✅ 041 / ✅ 042 / 🔄 044 — 2026-08-22..23.**
+> **041**: edited block **10 → 12 of 18 intact**. Carries bookmarks (dropping one breaks cross-references
+> ELSEWHERE — silent and non-local) and the content-control shell, from the BASE block rather than a client
+> payload (four reasons in `notes/edited-block-loss.md`). FR-A06 proved unnecessary as specified.
+> **042**: four of five criteria already satisfied STRUCTURALLY by 040; **FR-G05 now RUNS** (headless
+> LibreOffice opens four merged documents). Found and fixed the op-log path re-serializing `comments.xml`.
+> **044 (OPEN)**: the false save banner was on the CLIENT (folding load-time flatten warnings) — no longer
+> folded; the silent loss now warns (`edited-paragraph-line-break-dropped ×2`); FR-A08 Authored-vs-Imported
+> shipped, scoped by provenance. **FR-A09 is the only requirement left**, plus one untested FR-A08 criterion.
+> Beyond scope: 9 schema-invalid corpus fixtures repaired, a missing comment-range fixture added, two
+> near-vacuous tests corrected, and TWO experiments implemented → measured → reverted.
+> [`notes/edited-block-loss.md`](../notes/edited-block-loss.md) ·
+> [`notes/merge-integrity-results.md`](../notes/merge-integrity-results.md)
+
 > **✅ 040 — THE MERGE IS IN PRODUCTION, 2026-08-21.** Gate re-run against the production implementation:
 > **100.00% overall / 100% near-tier (lenient)** on 18/18 documents, and **100% STRICT on 16 of 18** — better
 > than the prototype, which only had to clear a no-regression ratchet. 253 blocks cloned, 18 rendered. Control
@@ -148,7 +162,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 041 | **Opaque-atom payload carry** + table/atom identity (write model + `opaqueAtomNode.ts`) | FR-A05/06 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 042 | **Comment anchors + revision-id seeding under cloning** (dup-paraId consume-in-order, cross-boundary ranges) | FR-A11 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 043 | **Capability gate** → read-only + **"Edit a copy"** (`ConfirmModal`/ADR-050; fork stamped `Authored`; original never written) | FR-A07 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
-| 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | 🔄 |
 | 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044 | 🔲 |
 
 ¹ `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
