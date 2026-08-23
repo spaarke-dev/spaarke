@@ -31,7 +31,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 004 | `AuthorizationService` caller-scoped | FR-02 / A-2 | 001,003,014 | — | ❌ | **opus** | **xhigh** |
 | ✅ 005 | Lift the Read ceiling | FR-04 / A-20 | 001,004 | — | ❌ | sonnet | high |
 | ✅ 006 | Caller-scoped `PermissionsEndpoints` | FR-05 / A-4 | 001,004 | — | ✅ | sonnet | high |
-| 🔲 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
+| ✅ 007 | Enforce grant expiry in the read filter | FR-06 / A-5 | 001 | — | ❌ | sonnet | high |
 | ✅ 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
 | 🔲 009 | Scope-check external To Do PATCH (+H-8a) | FR-08 / A-7 | 001 | — | ❌ | sonnet | high |
 | ✅ 010 | Idempotent grant + revoke-all | FR-09 / A-11 | 001 | — | ❌ | **opus** | **xhigh** |
@@ -246,6 +246,33 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > paths with no csproj glob, so a write-path test placed there compiled nowhere and ran never. **All
 > seven KEEP paths now compile.**
 > **(e) ADR-028 A4 exception ACCEPTED** by the owner → recorded in [`design.md` §9](../design.md).
+
+> **Task 007 outcome (2026-08-23)**: A-5 closed — `sprk_expiresdate` was written at grant time and read
+> NOWHERE (no `$filter`, no `$select`, no sweep job), so an expired grant conferred full access forever
+> while the UI presented expiry as a working control. Now enforced server-side on every conferring read.
+> **Closed read-path list (acceptance criterion 5)** — 3 paths gained the predicate
+> (`QueryGrantSetAsync`, `QueryOrganizationGrantRowsAsync`, and the `GetProjectContactIdsAsync` display
+> list whose contract says "active access"); **2 paths deliberately did NOT** —
+> `ExternalGrantLifecycle` (grant upsert + revoke sweep) and `ProjectClosureEndpoint`'s cascade. Adding
+> expiry there would make **expired grants unrevokable**, skipping exactly the rows an operator is
+> cleaning up. "Add it everywhere" was the obvious reading and would have introduced a new defect.
+> ⚠️ **`sprk_expiresdate` is DATE ONLY** — verified against LIVE Dataverse metadata (the escalation
+> trigger required checking, not trusting docs; the name matched so the trigger did not fire, but the
+> TYPE was new information). Two consequences: the comparison must be a bare `yyyy-MM-dd` (a datetime
+> literal risks a 400, and a 400 here returns an EMPTY grant set — a silent total access outage), and
+> **`ge` not `gt`**, deviating from the POML's prescribed `gt {utcNow}`. `gt` against a date-only column
+> kills a grant at 00:00 ON its own expiry date, silently shortening every dated grant in the system by
+> a day; "access until 30 June" means 30 June works. FR-06's acceptance is about an expiry IN THE PAST,
+> which `ge` satisfies.
+> ⚠️ **The `eq null` branch is load-bearing**: OData `ge` excludes nulls, and most grants have no expiry
+> — without it the predicate would revoke every open-ended grant, an outage rather than an expiry bug.
+> Per task-001's obligation the query builders were EXTRACTED as pure `internal static` members first
+> (task 001 could not pin A-5 because the queries were inline before `SendAsync`, and mocking transport
+> is ban B1). Perturbations: drop the predicate → 2/11 fail; drop `eq null` → 1/11; `ge`→`gt` → 1/11;
+> ungroup the org disjunction → 1/11 (without brackets the AND terms bind only to the LAST org and every
+> other org's grants leak through). ⚠️ **Honest limit**: these assert the QUERY, not Dataverse's
+> evaluation of it — end-to-end needs the tenant, filed on **task 034**.
+> Rationale: [`notes/task-007-grant-expiry.md`](../notes/task-007-grant-expiry.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

@@ -525,9 +525,24 @@ public class ExternalDataService
     // Private helpers
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// The Contacts holding an ACTIVE, UNEXPIRED grant on a project.
+    /// </summary>
+    /// <remarks>
+    /// Carries the same expiry predicate as the enforcement paths (task 007 / FR-06, finding A-5),
+    /// sharing <see cref="ExternalParticipationService.ExpiryPredicate"/> so the two cannot drift.
+    ///
+    /// <para>This one is a DISPLAY path, not an enforcement path — it answers "who is on this project",
+    /// and <see cref="ExternalParticipationService"/> is what actually gates access. It is filtered
+    /// anyway because the method's contract says "active access": listing someone whose grant lapsed
+    /// last month tells an operator they still have access when they do not, which is how a revocation
+    /// gets skipped. A participant list that disagrees with the enforcement path is its own hazard.</para>
+    /// </remarks>
     private async Task<IReadOnlyList<string>> GetProjectContactIdsAsync(Guid projectId, CancellationToken ct)
     {
-        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId} and statecode eq 0");
+        var expiry = ExternalParticipationService.ExpiryPredicate(DateOnly.FromDateTime(DateTime.UtcNow));
+        var filter = Uri.EscapeDataString(
+            $"_sprk_project_value eq {projectId} and statecode eq 0 and {expiry}");
         var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contact_value&$top=200";
 
         var rows = await GetCollectionAsync<AccessLinkRow>(url, ct);

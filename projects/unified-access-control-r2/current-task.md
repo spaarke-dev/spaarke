@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 008 + its owner-authorised follow-ups)
+> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 007)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,30 +10,30 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 008 + all three review follow-ups complete, committed and pushed |
+| **Task** | **none active** — task 007 completed, committed and pushed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **10 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 008 ✅ 010 ✅ 014 ✅ 019 ✅) |
+| **Phase** | Phase 0 — enforcement remediation · **11 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 019 ✅) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | Run **task 007** (`007-enforce-grant-expiry.poml` — **verify the filename**) via the `task-execute` skill. See "Why 007 next" below |
+| **Next Action** | Run **task 016** (`016-close-project-cascade-fix.poml` — **verify the filename**) via the `task-execute` skill. See "Why 016 next" below |
 
-### Why 007 next
+### Why 016 next
 
-The gate is done. **008 was the last task with a hard downstream dependency** (design.md §6 named it the
-blocking prerequisite for the PCF "+ User" button, task 065 — now unblocked). What remains in Phase 0 is
-nine independent fixes, so ordinary priority order applies again.
+Eight Phase 0 fixes remain, all independent — no hard ordering left. **016** (close-project cascade,
+A-12) is the strongest candidate because it is the *third* defect found in the same revocation family:
+010 fixed grant/revoke drift, 007 just established that the cascade sweep must deliberately NOT filter
+expiry, and 016 fixes the cascade missing organization grants entirely. Doing it while that reasoning is
+fresh is worth more than the ordering of the ids.
 
-**007** (grant expiry, A-5) is the first pending id and the most user-visible: expiry is *written* by
-`/grant` (`sprk_expiresdate`) but never *read* by the participation filter, so "access until 30 June" is
-a promise-shaped no-op — the grantee keeps access forever. Reasonable alternatives: **016** (close-project
-cascade misses org grants), **017** (SPE revoke matcher — carries binding constraints from 010 AND 008's
-neighbourhood), **012** (unblocked by 002), **013** (workforce email oid hijack).
+Reasonable alternatives: **017** (SPE revoke matcher — same file family, carries binding constraints
+from 010), **013** (workforce email `oid` hijack — the last unaddressed identity-confusion finding),
+**012** (anonymous share links, unblocked by 002), **009** / **011** / **015** / **018**.
 
 ### Last verified state
 
-**BFF 10,715 passed / 0 failed** (TRX confirms none) · **ArchTests 36/36** · **Core 45/45** ·
-publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60 — +0.03 across task 008 and its
-follow-ups, no packages added) · `dotnet list package --vulnerable` clean.
+**BFF 10,726 passed / 0 failed** (TRX confirms none) · **ArchTests 36/36** · **Core 45/45** ·
+publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60 — unchanged by task 007, no
+packages added) · `dotnet list package --vulnerable` clean.
 
 ---
 
@@ -49,8 +49,8 @@ follow-ups, no packages added) · `dotnet list package --vulnerable` clean.
 
 ## Session summary — what was accomplished
 
-Ten Phase 0 tasks, all on PR #812. **FR-01 → FR-05, FR-07, FR-09 and FR-13 are closed**, plus part of
-FR-17 and NFR-07.
+Eleven Phase 0 tasks, all on PR #812. **FR-01 → FR-09 and FR-13 are closed**, plus part of FR-17 and
+NFR-07.
 
 | Task | What it closed |
 |---|---|
@@ -60,6 +60,7 @@ FR-17 and NFR-07.
 | 004 | `AuthorizationService` evaluates **as the caller** |
 | 005 | The `AccessRights.Read` ceiling — `RetrievePrincipalAccess` replaces a "can I read it → therefore Read" probe |
 | 006 | `PermissionsEndpoints` caller-scoped; **FR-02's criterion closed** |
+| **007** | **A-5 — grant expiry.** `sprk_expiresdate` was written and read NOWHERE; expired grants conferred access forever while the UI showed expiry as working |
 | **008** | **A-6 — the delegation rule.** Six external-access mutations were behind bare `RequireAuthorization()`. **Unblocks task 065** |
 | 010 | **A-11, ranked #1 of 13** — `/grant` upserts, `/revoke` sweeps every row on the logical key |
 | 014 | Auth-mode segment in the cache key (`sp`/`obo`) |
@@ -80,6 +81,12 @@ caught real gaps every time.
 | **Detach the delegation filter (008)** | **17 of 36** |
 | **Weaken it to "any rights at all" (008)** | **8 of 36** |
 | **Resolve revoke's target from the request body (008)** | **1 of 19** — the one test that isolates it |
+| **Point the entity check back at `sprk_documents` (008 follow-up)** | **6 of 9** |
+| **Disable the provisioning idempotency guard (008 follow-up)** | **4 of 5** |
+| **Drop the expiry predicate (007)** | **2 of 11** |
+| **Drop the `eq null` branch (007)** | **1 of 11** |
+| **`ge` → `gt` on a Date Only column (007)** | **1 of 11** — the boundary-day test |
+| **Ungroup the org disjunction (007)** | **1 of 11** |
 
 **Capture failing-test identity with TRX**, not `-v q`:
 `dotnet test … --logger "trx;LogFileName=t.trx"`, then parse `outcome="Failed"`.
@@ -88,7 +95,17 @@ caught real gaps every time.
 
 ## Full State (Detailed)
 
-### Decisions made in task 008 (most recent)
+### Decisions made in task 007 (most recent)
+
+| Decision | Rationale |
+|---|---|
+| **`ge`, not the POML's prescribed `gt`** | `sprk_expiresdate` is **DATE ONLY** (verified live). `gt` kills a grant at 00:00 ON its expiry date, silently shortening every dated grant by a day. "Access until 30 June" means 30 June works. FR-06's acceptance is an expiry **in the past**, which `ge` satisfies |
+| **Bare `yyyy-MM-dd`, never a timestamp** | A datetime literal against a Date Only column risks a 400 — and a 400 here returns an EMPTY grant set, i.e. a silent total access outage, not a visible error |
+| **`eq null` branch is mandatory** | OData `ge` excludes nulls; most grants have no expiry. Without it the predicate revokes every open-ended grant — an outage, not an expiry bug |
+| **Revocation paths deliberately do NOT filter expiry** | `ExternalGrantLifecycle` (upsert + revoke sweep) and `ProjectClosureEndpoint`'s cascade must SEE expired rows — filtering there makes expired grants **unrevokable**. "Add it everywhere" was the obvious reading and would have introduced a new defect |
+| **The display path got the predicate too** | `GetProjectContactIdsAsync` feeds a list whose contract says "active access". A participant list that disagrees with enforcement tells an operator someone still has access when they do not — that is how a revocation gets skipped |
+
+### Decisions made in task 008
 
 | Decision | Rationale |
 |---|---|
@@ -105,7 +122,8 @@ caught real gaps every time.
 
 | Item | Detail |
 |---|---|
-| **POML paths are unreliable** | Tasks 002/005/006/**008** all named test paths that do not exist. **Verify every path before acting on it** |
+| **POML paths are unreliable** | Tasks 002/005/006/008/**007** all named test paths that do not exist — five of eleven. **Verify every path before acting on it** |
+| **Some POMLs are not valid XML** | `007` (and `017`) carry a raw `<` inside a constraint (`Mock<HttpMessageHandler>`), so `ET.parse` fails on them. Pre-existing; `scripts/Validate-TaskPoml.ps1` reports PASS because it is not a strict parse. Do not "fix" a POML on the strength of a parse error alone — check whether it predates you |
 | **KEEP paths** | Access-control → `tests/integration/auth/**`; pure domain logic → `tests/unit/domain/**`. Both globbed into `Sprk.Bff.Api.Tests.csproj` |
 | **Vacuity trap** | Offline, real auth dependencies fail closed, so "all denied" is true before AND after a fix. Substitute a double that CAN answer yes, then break the fix to prove the tests bite |
 | **Shared-fixture write logs bleed across tests** | `IClassFixture` gives ONE fixture per class; a `ConcurrentBag` recording writes accumulates across every test in it. A "created nothing" assertion then fails on another test's residue — or, worse, passes on it. Reset from the test-class constructor (`ProvisionProjectTestFixture.Reset()`) |
@@ -128,6 +146,7 @@ caught real gaps every time.
 | 4 | **D3 above** — download enforcement (Read) vs `CanDownload` (Write) |
 | ~~5~~ | ✅ **CONFIRMED AND FIXED 2026-08-23** — `EntityAccessFilter` WAS inert: `POST /api/office/save` with a `targetEntity` returned 403 for every caller. Now resolves the target's own collection via `CallerRecordAccessProbe`. **Should fold back into `AuthorizationService` when task 032 generalizes the seam** (constraint filed) |
 | 6 | **Needs its own task (002)**: `preview-url`, `view-url`, `office`, `preview` on `/api/documents` still have no per-document filter. They mint **URLs**, which outlive the request |
+| 7a | **Expiry enforcement is query-level only** (007) — the tests assert the emitted `$filter`, not Dataverse's evaluation of it (transport mocking is ban B1). Live confirmation of all three cases — past expiry gone, today's expiry still works, null expiry unaffected — filed on **task 034** |
 | 7 | **RPA is now load-bearing for six mutation endpoints AND the Office save gate** (008 + follow-up), as well as the document read path (005) — still unverified against a live tenant → **task 034** (constraint filed). Also verify the new not-found retry actually absorbs the wizard's replication lag |
 | 8 | **Duplicates remain invisible (010)** to the participation surface until Phase 1 replaces the read-side `GroupBy` collapse |
 | 9 | **019's product-semantics question**: `includeRelated: true` is a logged-warning no-op; visible in the Playbook Builder canvas, does nothing |
@@ -144,9 +163,9 @@ caught real gaps every time.
 | **005** ✅ done | 003 (`AppendToAccess`), 006 (verify capabilities light up) |
 | **017** | **010** — MUST NOT reduce the revoke sweep to a single row or weaken org/person isolation; also assess whether SPE removal should follow the logical key rather than `request.ContactId` |
 | **032** | 006 (one-access-path invariant), 005 (per-principal derivation + `AppendTo`), **008** (collapse `CallerRecordAccessProbe` into the generalized rights map; **and the `IAccessDataSource` must stay SCOPED** — a singleton would turn `DataverseAccessDataSource`'s `DefaultRequestHeaders` mutation into a cross-user OBO-token bleed) |
-| **034** | 005 (verify RPA live; grep `RPA-FALLBACK`), **008** (RPA now gates six MUTATIONS against `sprk_projects`/`sprk_matters`/`sprk_workassignments` — a different target from 005's `sprk_documents`, so 005 passing does not imply 008 passes; also grep `DELEGATION-RPA-UNAVAILABLE`) |
+| **034** | 005 (verify RPA live; grep `RPA-FALLBACK`), **007** (verify the Date Only expiry predicate live — check the null-expiry case FIRST, because if it is broken external access is down for nearly everyone), **008** (RPA now gates six MUTATIONS against `sprk_projects`/`sprk_matters`/`sprk_workassignments` — a different target from 005's `sprk_documents`, so 005 passing does not imply 008 passes; also grep `DELEGATION-RPA-UNAVAILABLE`) |
 | **065** | **008** — unblocked; MUST surface `sdap.access.deny.delegation_write_required` as a real message, MUST send `recordType`+`recordId` (not legacy `projectId`), MUST NOT add a client-side pre-check that skips the server call |
-| **007/012/013/015/016/017/018** | 001 (own-coverage obligation) |
+| **012/013/015/016/017/018** | 001 (own-coverage obligation) — 007 ✅ discharged its own |
 
 ### Decisions carried in from design (unchanged)
 

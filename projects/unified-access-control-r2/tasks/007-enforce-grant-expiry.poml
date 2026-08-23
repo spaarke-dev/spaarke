@@ -4,7 +4,7 @@
     <title>FR-06: Enforce external grant expiry on every grant read path</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (grant read filter) — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,7 +88,55 @@
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-06; finding A-5; register D-1 (enforce branch chosen — UI input stays because it now works). No sweep job: expired rows remain in the table as inactive-by-read; Phase 5 attestation will see them.</notes>
+  <notes>Spec FR-06; finding A-5; register D-1 (enforce branch chosen — UI input stays because it now works). No sweep job: expired rows remain in the table as inactive-by-read; Phase 5 attestation will see them.
+
+COMPLETED 2026-08-23. A-5 closed; FR-06 enforced server-side on every conferring read path.
+
+CLOSED READ-PATH LIST (acceptance criterion 5). Predicate ADDED: ExternalParticipationService
+.QueryGrantSetAsync (per-contact), .QueryOrganizationGrantRowsAsync (org grants -- omitting it would let
+any contact keep expired access via their firm), ExternalDataService.GetProjectContactIdsAsync (display
+list whose contract says "active access"; a participant list disagreeing with enforcement is its own
+hazard). Predicate DELIBERATELY OMITTED: ExternalGrantLifecycle.QueryActiveRowsAsync/RetrieveRowAsync
+(grant upsert + revoke sweep) and ProjectClosureEndpoint.BuildActiveProjectGrantsFilter (cascade revoke)
+-- filtering expiry there would make EXPIRED GRANTS UNREVOKABLE, skipping exactly the rows an operator is
+cleaning up. AccessibleRecordSetService holds no query of its own and inherits the fix.
+
+THE PREDICATE: (sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})
+
+DEVIATION FROM THIS TASK'S PRESCRIBED STEP 2, on new evidence. Step 2 specifies
+"(sprk_expiresdate eq null or sprk_expiresdate gt {utcNow})". Live Dataverse metadata shows
+sprk_expiresdate is DATE ONLY, which the task author did not know. (a) {utcNow} as a timestamp against a
+Date Only column risks a 400 -- and a 400 on this query returns an EMPTY grant set, i.e. a silent total
+access outage rather than a visible error; the literal must be a bare yyyy-MM-dd. (b) gt kills a grant at
+00:00 ON its own expiry date, silently shortening every dated grant in the system by one day; "access
+until 30 June" means 30 June works. ge still satisfies FR-06, whose acceptance is an expiry IN THE PAST.
+Pinned by ExpiryPredicate_OnTheExpiryDateItself_StillConfersAccess.
+
+THE eq null BRANCH IS LOAD-BEARING: OData "ge" excludes nulls and most grants have no expiry, so without
+it the predicate would revoke every open-ended grant -- an outage, not an expiry bug.
+
+ESCALATION TRIGGERS -- both evaluated, NEITHER fired. (1) Live logical name verified via Dataverse
+metadata; sprk_expiresdate is correct. The TYPE differed from the assumption and is handled above.
+(2) All three paths build OData $filter strings directly -- no FetchXML composed elsewhere, nothing
+filtered client-side.
+
+TASK-001 OBLIGATION HONORED: BuildContactGrantFilter / BuildOrganizationGrantFilter / ExpiryPredicate /
+GrantRowSelect extracted as pure internal static members BEFORE the predicate was added (task 001 could
+not pin A-5 because the queries were inline immediately before _httpClient.SendAsync, and observing the
+emitted $filter required a transport mock -- ban B1). No reflection (ban B8).
+
+TESTS: tests/integration/auth/UnifiedAccessControl/GrantExpiryCharacterizationTests.cs (11). NOTE the
+test path named in this file (tests/unit/.../AccessControl/) is NOT a KEEP path and does not exist -- the
+fifth POML in this project with a wrong test path. Perturbations: drop predicate 2/11 fail; drop eq null
+1/11; ge->gt 1/11; ungroup org disjunction 1/11.
+
+HONEST LIMIT: these assert the QUERY, not Dataverse's evaluation of it. End-to-end verification needs a
+live tenant and is filed on task 034.
+
+Full suite 10,726 passed / 0 failed; ArchTests 36/36; Core 45/45; publish 43.69 MB compressed
+(unchanged, ceiling 60); no vulnerable packages.
+
+Rationale: notes/task-007-grant-expiry.md</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
