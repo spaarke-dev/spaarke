@@ -94,6 +94,40 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * Reconcile the wire shape with the client's `ContainerType` type.
+ *
+ * The BFF's `ContainerTypeDto` serialises the identifier as `id`; this client declares it as
+ * `containerTypeId`. Nothing converted between them, and because the response is cast rather than
+ * parsed, TypeScript never noticed. The effect was silent and total: `getRowId` returned `undefined`
+ * for every row, so no row could be selected, `hasSelectedType` was permanently false, and the
+ * Register wizard always opened with no type. Selecting a row appeared to do nothing.
+ *
+ * Normalising here keeps the fix inside this screen. It does NOT recover `owningAppId`,
+ * `azureTenantId`, or `expiryDateTime` — the BFF never sends those (they are absent from both
+ * `SpeContainerTypeSummary` and `ContainerTypeDto`), which is a server-side gap recorded in
+ * `notes/task-030-findings.md`.
+ */
+function normalizeContainerType(raw: ContainerType & { id?: string }): ContainerType {
+  return {
+    ...raw,
+    containerTypeId: raw.containerTypeId ?? raw.id ?? "",
+  };
+}
+
+/**
+ * Whether a container type can be registered on a consuming tenant.
+ *
+ * A trial container type "is restricted to work in the developer tenant. It can't be deployed in
+ * other consuming tenants" (knowledge/sharepoint-embedded/docs/learn-containertypes.md:71), so
+ * offering Register for one is offering an action that cannot succeed — the failure mode this task
+ * exists to remove (spec FR-C13).
+ */
+function canRegister(ct: ContainerType | undefined): boolean {
+  if (!ct) return false;
+  return (ct.billingClassification ?? "").toLowerCase() !== "trial";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (ADR-021 — Fluent tokens only)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,7 +396,7 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
     setSelectedTypeId(null);
     try {
       const data = await speApiClient.containerTypes.list(selectedConfig.id);
-      setContainerTypes(data);
+      setContainerTypes(data.map(normalizeContainerType));
     } catch (err) {
       const message =
         describeApiError(err, "Failed to load container types. Please try again.");
@@ -452,7 +486,10 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
 
   // ── Render: Main View ───────────────────────────────────────────────────────
 
-  const hasSelectedType = !!selectedTypeId;
+  const selectedType = containerTypes.find((ct) => ct.containerTypeId === selectedTypeId);
+  const hasSelectedType = !!selectedType;
+  /** Trial types cannot be registered on a consuming tenant — see canRegister(). */
+  const registerAllowed = canRegister(selectedType);
 
   return (
     <div className={styles.root}>
@@ -489,19 +526,26 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
 
         <ToolbarDivider />
 
-        {/* Register */}
+        {/* Register — offered only when it can actually succeed.
+            Previously this was enabled with nothing selected (the wizard then opened with no type)
+            and for trial types (which Microsoft does not allow to be registered on another tenant).
+            Both were actions that could only fail. */}
         <Tooltip
           content={
-            hasSelectedType
-              ? "Register selected container type on consuming tenant"
-              : "Click a row to select a container type to register"
+            !hasSelectedType
+              ? "Click a row to select a container type to register"
+              : registerAllowed
+                ? "Register selected container type on consuming tenant"
+                : "Trial container types cannot be registered on another tenant — they only work in " +
+                  "the tenant that created them. Create a Standard or Direct to Customer type to " +
+                  "register it elsewhere."
           }
           relationship="description"
         >
           <ToolbarButton
             icon={<CloudLink20Regular />}
             onClick={() => setRegisterOpen(true)}
-            disabled={loading}
+            disabled={loading || !hasSelectedType || !registerAllowed}
             aria-label="Register container type"
           >
             <span className={styles.buttonLabel}>Register</span>
@@ -627,9 +671,12 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
       </div>
 
       {/* ── Create Container Type Dialog ── */}
+      {/* The loaded list feeds the quota assessment. It is a lower bound on the tenant's true count,
+          not a census — the dialog is careful about what it will assert from it. */}
       <CreateContainerTypeDialog
         open={createOpen}
         isSaving={createSaving}
+        existingContainerTypes={containerTypes}
         onClose={() => setCreateOpen(false)}
         onSubmit={(name, billing) => { void handleCreateSubmit(name, billing); }}
       />

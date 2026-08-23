@@ -4,7 +4,14 @@
     <title>Model container-type lifecycle constraints in the UI</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>011 complete</gate>
-    <status>not-started</status>
+    <status>partial</status>
+    <!-- 2026-08-23. Constraints 1 (already satisfied) and 2 (delivered in full, broadened to five
+         further constraints the POML omitted) are done. Constraint 3 (quota) fired this task's own
+         escalation trigger on its named case and is knowingly partial. Constraint 4 (conditional
+         delete) is undeliverable client-only — no delete affordance exists to make conditional.
+         Constraint 5 is stated but cannot show the owning-app value, which the BFF never sends.
+         See notes/task-030-findings.md. -->
+    <constraint-status>1 ✅ · 2 ✅ · 3 🔔 partial (escalated) · 4 ❌ not deliverable client-only · 5 ⚠️ stated only</constraint-status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx across the container-types screen; tags include frontend and fluent-ui.</rigor-reason>
     <model-tier>sonnet</model-tier>

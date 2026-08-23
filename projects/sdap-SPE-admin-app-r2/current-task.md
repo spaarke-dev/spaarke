@@ -1,6 +1,6 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-21 (by `context-handoff`)
+> **Last Updated**: 2026-08-23 (by `context-handoff`)
 > **Recovery**: read "Quick Recovery" first. History lives in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,10 +9,33 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ (012, 013) · **W4: 020 ✅**; 011 🔄 partial |
-| **Step** | Between tasks. **Next: 030** (client-only, W4) or **029**; then 021 / 022 / 023 now that 020 is done. |
-| **Status** | 012, 013, 020 committed + pushed |
-| **Next Action** | Invoke `task-execute` on `tasks/030-lifecycle-constraints-ui.poml` (client-only, no god-file). **Verify the POML's premise first** — 11 of 11 have now been wrong, incomplete, or aimed at the wrong layer. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 done: 020 ✅, 030 🔄 partial**; 011 🔄 partial |
+| **Step** | Between tasks. **Next: 029** (W10, client+DTO only) or **021** (W5, GraphService). |
+| **Status** | 012, 013, 020 committed + pushed. **030 complete in working tree, NOT yet committed.** |
+| **Next Action** | Commit 030 (3 client files + notes), then invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. 030 was the first whose *facts* held; its **scope** was still wrong. |
+
+### 🔑 Task 030 — what it changed, and the one thing NOT to undo
+
+Three client files, no server change: `containerTypeLifecycle.ts` (new — sourced constraint data),
+`CreateContainerTypeDialog.tsx`, `ContainerTypesPage.tsx`. Build ✅ (vite, 3,380 modules, 15.47 s);
+**0 type errors in the touched files** (38 pre-existing elsewhere, unrelated).
+
+**Do NOT add a "N of 25 remaining" quota figure.** `describeProductionQuota()` returns
+`atLimit: false` unconditionally *on purpose*: container-type LIST runs delegated, and task 012 proved
+the BFF cannot see whether the caller holds the Entra role that widens visibility tenant-wide. The list
+is a **lower bound, not a census**, so a remaining figure would be a guess presented as a fact. The
+trial limit *is* enforced, because seeing a trial type proves one exists — the asymmetry is deliberate.
+
+🔴 **Also fixed: row selection had never worked.** The DTO sends `id`, the client type declares
+`containerTypeId`, and `speApiClient` **casts** the response instead of parsing it — so `getRowId` was
+`undefined` for every row and the Register wizard always opened with no type. Normalised in-screen.
+
+🔴 **Still broken, handed off**: the BFF never sends `owningAppId`, `azureTenantId`, or
+`expiryDateTime` (absent from **both** `SpeContainerTypeSummary` and `ContainerTypeDto`). So the
+"Owning App" column is blank, the "Registered" badge reads **"No" for every row**, and the trial
+30-day-expiry warning **cannot render**. → tasks **023** / **025**, which already own those files.
+
+Full record: [`notes/task-030-findings.md`](notes/task-030-findings.md).
 
 ### Files Modified This Session
 
