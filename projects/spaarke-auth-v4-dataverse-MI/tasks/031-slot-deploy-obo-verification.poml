@@ -94,4 +94,34 @@
       nearly free) is the only repeatable protection these two invariants get. Use
       `Register-EntraAppRegistrations.ps1 -FicOnly -AssertionToken &lt;token&gt;`.</criterion>
   </acceptance-criteria>
+
+  <booked-obligations>
+    <!-- BOOKED BY TASK 051 (2026-08-23) — record: notes/decisions/051-sas-rotation.md -->
+    <obligation source="051" id="051-A">
+      The `staging` slot ALREADY EXISTS and is Running with its own app settings. This project's
+      notes previously said "0 exist" — that was false and caused a ~40-minute dev outage during
+      051. Do NOT assume the slot must be created. Verify its existing settings and
+      keyVaultReferenceIdentity before deploying to it, and establish who created it.
+    </obligation>
+    <obligation source="051" id="051-B">
+      Service Bus cutover. Set on production AND the staging slot:
+        ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
+      Namespace wins over the still-present SAS string, so this single setting IS the cutover and
+      removing it IS the rollback (NFR-06). RBAC is already granted: mi-bff-api-dev
+      (principal 9fd47efb-...) holds Azure Service Bus Data Sender + Data Receiver at NAMESPACE
+      scope. Leave BOTH SAS keys in place until 033.
+    </obligation>
+    <obligation source="051" id="051-C">
+      Verification for 051-B: /healthz must report the new `servicebus-job-processing` check
+      Healthy (it reports Degraded after one auth failure, Unhealthy after three), and sdap-jobs
+      must be observed draining. A 200 from /healthz alone is NOT sufficient evidence — during the
+      051 outage both slots returned 200 while processing zero messages, which is exactly why that
+      check now exists.
+    </obligation>
+    <obligation source="051" id="051-D">
+      Every az command in this project must carry an explicit --subscription. The dev subscription
+      is 484bc857-3802-427f-9ea5-ca47b43db0f0; the CLI default drifted to "Spaarke Model 1
+      Production" during 051, which briefly made verified-correct RBAC look absent.
+    </obligation>
+  </booked-obligations>
 </task>

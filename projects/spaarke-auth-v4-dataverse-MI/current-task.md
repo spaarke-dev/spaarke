@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`) — **Group F: 6 of 7 closed. 051 IS HALF-DONE — read §0 FIRST.**
+> **Last Updated**: 2026-08-23 (by `task-execute` 051) — **GROUP F COMPLETE (7 of 7). Remaining work is 031→032→033 + 090.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,75 +11,97 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **051 🔄 IN PROGRESS — the SAS key IS ALREADY ROTATED; the code migration is NOT done.** 055, 052, 050, 054, 056 closed; 053 🔄 code-complete |
-| **Status** | Full suite **10,603 / 0** · auth seams **60/60** · ArchTests **52/52** · publish **44.99 MB** · CVE clean · working tree clean, 0 unpushed |
-| **Next Action** | Finish **051's code half**: migrate `WorkersModule.cs:18`, `OfficeWorkersModule.cs:95` and `ServiceBusJobProcessor` to namespace + **DI `TokenCredential`** (RBAC is already granted), then relax `ServiceBusOptions.ConnectionString` `[Required]`, then write `notes/decisions/051-sas-rotation.md`. **Do NOT rotate anything — that half is DONE.** ⚠️ **Read §0 before touching Service Bus config.** |
-| **Progress** | **20 of 26 active complete** · **6 remaining** (031,032,033,**051🔄 half-done**,**053🔄**,090) · 3 deferred |
+| **Task** | **none active. Group F is CLOSED** — 055, 052, 050, 054, 056 done; **051 🔄 + 053 🔄 code-complete, cutover booked to 031/033** |
+| **Status** | Full suite **10,614 / 0** (97 skipped) · seam **891/891** · ArchTests **56/56** · publish **44.99 MB compressed** (delta 0.00) · CVE clean |
+| **Next Action** | **Owner-gated — no autonomous work remains in Group F.** Next is **031** (slot deploy + OBO verification), which now carries 4 booked obligations from 051 and 1 from 053. 031→032→033 need an owner decision, a second test principal that does not exist, and a soak that cannot be compressed. |
+| **Progress** | **21 of 26 active complete** · **5 remaining** (031,032,033,090 + **053🔄/051🔄 awaiting cutover**) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
-## §0 🔴 READ FIRST — 051 is HALF-DONE and I caused (then fixed) a dev outage
+## §0 🔴 READ FIRST — things that will mislead you if you don't
 
-**The SAS rotation is COMPLETE and IRREVERSIBLE. Do not repeat it. The code migration is NOT done.**
-
-### What is already true (verified 2026-08-23, do not re-derive)
+### 1. The SAS rotation is DONE and IRREVERSIBLE. Do not repeat it.
 
 | Fact | Evidence |
 |---|---|
-| The leaked key **was** the namespace **PRIMARY** of `RootManageSharedAccessKey` (Manage+Send+Listen, whole namespace) | fingerprint match against `C:/code_files/spaarke/src/server/api/Sprk.Bff.Api/appsettings.Development.json` (main worktree, gitignored, **never committed**) |
-| That key is **ROTATED and dead** — fp `348e57a64503` no longer exists | `az servicebus ... keys renew --key PrimaryKey` |
-| **Both** current keys are **VALID** — proven at the data plane, not inferred | hand-built SAS token → `POST /sdap-jobs/messages/head` → **HTTP 204** for primary AND secondary |
-| Prod slot **and** `staging` slot both run the **SECONDARY** connection string | fp `f6d0dfd1ac9f` on both |
-| UAMI now holds **namespace-level** `Azure Service Bus Data Sender` + `Data Receiver` | was topic-scoped to `sprk-membership-changes` only |
-| KV secret `ServiceBus-ConnectionString` (`spaarke-spekvcert`) holds the **new primary** | fp `3db62606e51e` |
-| Dev job processing is **HEALTHY** — 0 `InvalidSignature` since 20:36Z; both slots `healthz` 200 | App Insights |
+| The leaked key was the namespace **PRIMARY** of `RootManageSharedAccessKey` | fingerprint match vs `C:/code_files/spaarke/src/.../appsettings.Development.json` (gitignored, **never committed**) |
+| It is **rotated and dead** — fp `348e57a64503` no longer exists | `az servicebus ... keys renew --key PrimaryKey` |
+| **Both** current keys are valid — proven at the data plane | hand-built SAS → `POST /sdap-jobs/messages/head` → **HTTP 204** |
+| Prod + `staging` slots both run the **secondary** string | fp `f6d0dfd1ac9f` on both |
+| KV `ServiceBus-ConnectionString` holds the **new primary** | fp `3db62606e51e` |
 
-### 🔴 THE FINDING THAT MATTERS MOST — a `staging` slot EXISTS and is RUNNING
+A live SAS value was echoed in terminal output (it was a plaintext app setting). Never written to
+any file, commit or record — only fingerprints. That key is the rotated one, so it is dead.
 
-This project's own notes say *"P1v3, slots supported, **0 exist**"*. **That is now FALSE.**
-`spaarke-bff-dev` has a **`staging` slot, state=Running**, with its **own app settings**.
+### 2. 🔴 A `staging` slot EXISTS and is RUNNING — the note that said "0 exist" was FALSE
 
-It caused a ~40-minute dev outage that I misdiagnosed for six attempts: after rotating the key I
-fixed **production** settings repeatedly (KV refresh, version-pinned refs, literal values, secondary
-key, 4 restarts — each fingerprint-verified correct) while the *staging slot* kept looping on the
-dead key. It reports the **same `cloud_RoleName=spaarke-bff-dev`** to App Insights, so every
-diagnostic pointed at the app I was already fixing.
+It has its **own app settings** and reports the **same `cloud_RoleName`** to App Insights. It caused
+a ~40-minute dev outage I misdiagnosed for six attempts: I fixed *production* repeatedly (each fix
+fingerprint-verified correct) while the slot looped on the dead key.
 
-**The tell I misread**: the failure rate never dipped at *any* production restart. A process that
-restarts and still fails looks identical in aggregate to one that never restarted — unless you look
-for the gap. Check for slots the *second* time a restart changes nothing, not the sixth.
+**The tell I misread**: the failure rate never dipped at *any* production restart. Check for slots
+the **second** time a restart changes nothing, not the sixth.
 
-**Consequences for other tasks:**
-- **031 assumes it must CREATE the slot.** It already exists. Verify its settings + `keyVaultReferenceIdentity` before using it, and find out who created it.
-- **033 must purge secrets from BOTH slots** — already a booked obligation, now concrete.
-- Any future credential rotation must update **prod + every slot** before restarting.
+Corrected in `CLAUDE.md:86`. **031 must not create the slot — it exists. 033 must purge BOTH.**
 
-### Live environment changes made this session (all authorised)
+### 3. ⚠️ Always pass `--subscription` to `az`
+
+The CLI default drifted to **"Spaarke Model 1 Production"** during 051, which made correctly-granted
+RBAC look absent and surfaced a prod-named shared namespace. Owner decision #1 is **dev only**.
+Dev subscription: **`484bc857-3802-427f-9ea5-ca47b43db0f0`**.
+
+### 4. Live environment changes made across this project (all authorised)
 
 | Change | Reversible? |
 |---|---|
-| `spaarke-search-dev` `apiKeyOnly` → `aadOrApiKey` (task 053) | yes — `--auth-options apiKeyOnly` |
-| UAMI granted namespace-level SB `Data Sender` + `Data Receiver` | yes — delete the assignments |
+| `spaarke-search-dev` `apiKeyOnly` → `aadOrApiKey` (053) | yes |
+| UAMI granted namespace-level SB `Data Sender` + `Data Receiver` | yes |
 | **Service Bus PRIMARY key regenerated** | ❌ **NO — permanent** |
-| KV `ServiceBus-ConnectionString` → new primary | yes (versioned secret) |
+| KV `ServiceBus-ConnectionString` → new primary | yes (versioned) |
 | Prod + staging app settings → secondary connection string | yes |
-| Owner granted **my user** `Cognitive Services User` on `spaarke-openai-dev` (for the 050 measurement) | **STILL STANDING — offer to remove it** |
+| Owner granted **my user** `Cognitive Services User` on `spaarke-openai-dev` (050 measurement) | **STILL STANDING — offer to remove** |
 
-### ⚠️ A live SAS value was displayed in terminal output
+**Nothing changed in this session** — 051's code half used read-only Azure queries only.
 
-`ConnectionStrings__ServiceBus` was a **plaintext app setting** (not a KV reference), so `az` echoed
-it. It was **never** written to any file, commit, or record — only fingerprints were. That key is the
-one now rotated, so it is dead. Same handling rule as the client secret from task 022.
+---
 
-### What 051 still needs (the whole remaining task)
+## §0.1 What 051 delivered (code half, 2026-08-23)
 
-1. Migrate to namespace + **DI-injected `TokenCredential`** (the POML forbids inline `DefaultAzureCredential`, and notes `MembershipJunctionUpdaterHost.cs:120`'s inline construction is itself a deviation — **do not propagate it**):
-   - `Infrastructure/DI/WorkersModule.cs:18` — `new ServiceBusClient(connectionString)`
-   - `Workers/Office/OfficeWorkersModule.cs:95` — `new ServiceBusClient(options.Value.ConnectionString)`
-   - `Services/Jobs/ServiceBusJobProcessor.cs`
-2. **Relax `ServiceBusOptions.ConnectionString` `[Required]`** — same latent blocker class as 054 found in `DocumentIntelligenceOptionsValidator`; it will fail startup the moment the string is removed.
-3. `WorkersModule:18` gates `ServiceBusClient` registration on the connection string being non-empty — **the ADR-032 asymmetric-registration pattern again** (third instance). Gate on namespace instead.
-4. Write `notes/decisions/051-sas-rotation.md` (a POML `<output>`; **not yet written**).
-5. Remove the SAS from config + KV — **only after** the code is deployed and verified, i.e. **book to 031/033**, exactly like 053's cutover.
+Full record: [`notes/decisions/051-sas-rotation.md`](notes/decisions/051-sas-rotation.md).
+
+- **The census was wrong four ways.** The POML named `ServiceBusJobProcessor.cs` — it constructs
+  nothing (client is injected). Real state: **4 construction sites, 3 duplicate `ServiceBusClient`
+  singleton registrations**; last-registration-wins meant only `JobProcessingModule` was ever used,
+  and the two dead ones read a **different config key**, so the SAS credential was live under **two
+  spellings** (`ConnectionStrings:ServiceBus` + `ServiceBus:ConnectionString`).
+- **New `Infrastructure/Auth/ServiceBusClientFactory.cs`** — one credential decision, mirroring
+  `SearchClientFactory` (053). Namespace wins over a present SAS string → the cutover is one setting
+  and the rollback is removing it.
+- **One unconditional registration**; the ADR-032 asymmetric-registration gate removed (3rd instance).
+- **`ServiceBusOptions`**: `FullyQualifiedNamespace` added; `ConnectionString` `[Required]` relaxed.
+- **The two keys reconciled via `PostConfigure`** — without it this task would have caused a
+  **second outage** (the deployed app sets only the legacy key).
+- **`MembershipJunctionUpdaterHost` migrated** off its inline `DefaultAzureCredential`, so the new
+  guard needs **no allowlist**.
+- **Criterion 4 needed more than a throw**: RBAC-absent surfaces at *receive* time and the processor
+  retried forever while `/healthz` returned **200** — the observed outage. Auth failures now log
+  **Critical**; `ServiceBusJobProcessor` implements `IHealthCheck` (Degraded at 1, Unhealthy at 3).
+  Host deliberately **not** killed (FAILURE-MODES AP-7).
+- **`tests/Spaarke.ArchTests/ServiceBusClientGuardTests.cs`** (4 tests). Negative control fired on a
+  seeded violation — and **caught a defect in my own first version**, which could be evaded by
+  renaming a local.
+- **`adr-check` found one violation, mine**: a seam test using the ADR-038 ban-B4
+  `ArgumentNullException` shape. Replaced with a structural assertion (path C).
+
+**RBAC verified present** — escalation trigger did NOT fire: `mi-bff-api-dev` (principal
+`9fd47efb-…`) holds `Azure Service Bus Data Sender` + `Data Receiver` at **namespace** scope on
+`spaarke-servicebus-dev.servicebus.windows.net` (RG `SharePointEmbedded`).
+
+**Booked into the POMLs** (not just these notes): 031 obligations `051-A..D`, 033 obligations
+`051-E..F`. Includes the exact setting 031 must apply to prod **and** staging:
+`ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net`.
+
+**Open owner question**: principal `38f7693f-…` also holds Sender+Receiver on the dev namespace —
+unidentified.
 
 ---
 

@@ -73,4 +73,42 @@
     <criterion>Negative case: with RBAC absent, the processor fails loudly at startup rather than silently not processing jobs.</criterion>
     <criterion>Publish size reported; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <!-- auth-v4 task 051 — 2026-08-23. Record: notes/decisions/051-sas-rotation.md -->
+    Rotation: COMPLETE and irreversible (prior session). Code: COMPLETE.
+    Cutover + SAS removal: booked to 031/033 by design (cannot precede a deploy).
+
+    Census correction (4th in this workstream): this POML named ServiceBusJobProcessor.cs as a
+    site to modify — it CONSTRUCTS NOTHING; the client is injected. The real sites were four,
+    with THREE duplicate singleton registrations (WorkersModule:18, OfficeWorkersModule:95,
+    JobProcessingModule:64). Last-registration-wins meant only JobProcessingModule was ever
+    used; the other two were dead and read a DIFFERENT config key, so the SAS credential was
+    live under two spellings (ConnectionStrings:ServiceBus and ServiceBus:ConnectionString).
+
+    Built: Infrastructure/Auth/ServiceBusClientFactory.cs (mirrors SearchClientFactory from 053);
+    one unconditional registration; ServiceBusOptions.FullyQualifiedNamespace added and
+    ConnectionString [Required] relaxed; the two config keys reconciled via PostConfigure (without
+    which this task would have caused a second dev outage); MembershipJunctionUpdaterHost migrated
+    off its inline DefaultAzureCredential so the guard needs no allowlist.
+
+    Criterion 4 needed more than a throw: RBAC-absent surfaces at RECEIVE time, and the processor
+    retried forever while /healthz returned 200 — the observed 2026-08-23 outage. Auth failures now
+    log Critical and ServiceBusJobProcessor implements IHealthCheck (Degraded at 1, Unhealthy at 3
+    consecutive). Host is deliberately NOT killed (FAILURE-MODES AP-7).
+
+    RBAC verified present: mi-bff-api-dev (principal 9fd47efb-...) holds Azure Service Bus Data
+    Sender + Data Receiver at NAMESPACE scope on spaarke-servicebus-dev.servicebus.windows.net
+    (RG SharePointEmbedded, sub 484bc857-...). Escalation trigger did NOT fire.
+
+    031 must set, on production AND the staging slot:
+      ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
+    033 must remove BOTH ConnectionStrings__ServiceBus and ServiceBus__ConnectionString, then the
+    KV secret.
+
+    Gates: build 0 errors; unit 10,614/0; ArchTests 56/56 (+4, negative AND positive controls
+    demonstrated); publish 44.99 MB compressed incl. PDBs / 215 files (delta 0.00, ceiling 60);
+    no vulnerable packages. adr-check found one violation — my own seam test used the ADR-038
+    ban-B4 ArgumentNullException shape; replaced with a structural guard assertion (path C).
+  </notes>
 </task>
