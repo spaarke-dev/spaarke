@@ -1047,7 +1047,10 @@ public static class ComposeEndpoints
             // Task 050 (spaarkeai-compose-r7, FR-06): pass the sidecar fileName so a PDF upload forks onto
             // the intake leg (bytes-first detection also catches a mis-named .pdf); await the now-async
             // ProjectForMount (the docx path stays synchronous-fast — the PDF branch is the only awaited I/O).
-            var mount = await composeService.ProjectForMount(binary, fileName, ct);
+            // FR-A08 (task 044): this door HAS a session (required above), so a PDF upload records the
+            // server-side "PDF-sourced" fact and its first save stamps the record Authored. The sibling
+            // Browse door below deliberately passes none — it is contracted stateless.
+            var mount = await composeService.ProjectForMount(binary, fileName, ct, body.SessionId);
             var projection = mount.Projection;
             binary = mount.Content.ToArray();
             if (projection.Status == ComposeProjectionStatus.Failed)

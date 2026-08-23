@@ -316,6 +316,11 @@ export type ComposeWorkspaceAction =
       versionId: string | null;
       sessionId: string;
       sprkDocumentId?: string;
+      // FR-A09 (r8 task 044): the drive-item the server ACTUALLY served. Normally identical to the one
+      // requested, but a PDF that has already been saved as a Word document resolves to that document
+      // instead of being projected a second time — so the identity we save against must come from the
+      // response, not from what we asked for. Omitted by an older BFF → the requested id is retained.
+      speDriveItemId?: string;
       fileName?: string;
       // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): parsed defensively by the caller from an
       // optional Load response field — undefined (older BFF) is normalized to `[]` in the reducer.
@@ -580,6 +585,16 @@ export function composeWorkspaceReducer(
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
+              // FR-A09 (task 044): adopt the identity the server SERVED. This is normally the same id
+              // we asked for; it differs in exactly one case — re-opening a PDF that has already become
+              // a Word document, where the server resumes us on that document. Saving against the
+              // requested id there would target the .pdf item, which the save path refuses outright
+              // (and rightly: docx bytes must never be written over a PDF). Mirrors the existing
+              // saveSucceeded re-target, which adopts the created identity the same way.
+              speDriveItemId:
+                action.speDriveItemId && action.speDriveItemId.length > 0
+                  ? action.speDriveItemId
+                  : state.documentRef.speDriveItemId,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
               fileName: action.fileName ?? state.documentRef.fileName,
               // Task 041: the PDF dedup key (supplied only on PDF-sourced loads) — repeated saves

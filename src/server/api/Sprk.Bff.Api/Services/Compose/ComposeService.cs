@@ -311,7 +311,8 @@ public class ComposeService : IComposeService
     public async Task<ComposeMountProjection> ProjectForMount(
         ReadOnlyMemory<byte> content,
         string? fileName = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? sessionId = null)
     {
         // Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity, NFR-04 / ADR Tensions path A): give
         // the mount doors (Browse-project + Assistant-upload) the SAME PDF fork LoadAsync has (@502) so a
@@ -335,6 +336,17 @@ public class ComposeService : IComposeService
             (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
                     content, fileName ?? "(compose-mount)", driveId: "(mount)", documentSpeId: "(mount)", cancellationToken)
                 .ConfigureAwait(false);
+
+            // FR-A08 (task 044): the same server-determined "this was a PDF" carry LoadAsync makes, for the
+            // mount doors. There are no SOURCE drive-item coordinates here — an uploaded or browsed file has
+            // no SPE item to re-open — so this marker serves the STAMP only; the FR-A09 derived-document
+            // mapping needs a durable source pointer and is correctly skipped. Session-less callers (the
+            // stateless Browse door) record nothing, which is the documented residual.
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                await SetPdfSourceMarkerAsync(sessionId!, driveId: string.Empty, speId: string.Empty, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         var stamp = _baselineParaIdStamper.MintAndPersist(content);
@@ -488,9 +500,21 @@ public class ComposeService : IComposeService
     }
 
     /// <inheritdoc />
-    public async Task<LoadComposeDocumentResult> LoadAsync(
+    public Task<LoadComposeDocumentResult> LoadAsync(
         LoadComposeDocumentRequest request,
         HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => LoadAsync(request, httpContext, allowPdfRedirect: true, cancellationToken);
+
+    /// <param name="allowPdfRedirect">FR-A09 (task 044): true on the caller-facing entry point, false on
+    /// the ONE re-entry this method makes into itself when a PDF resolves to the Word document it already
+    /// became. The re-entry targets a <c>.docx</c>, so <see cref="IsPdfSource"/> is false there and the
+    /// redirect branch is unreachable by construction — this flag makes that non-recursion explicit rather
+    /// than relying on the reader to derive it.</param>
+    private async Task<LoadComposeDocumentResult> LoadAsync(
+        LoadComposeDocumentRequest request,
+        HttpContext httpContext,
+        bool allowPdfRedirect,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.DriveId))
@@ -546,6 +570,49 @@ public class ComposeService : IComposeService
         string? sourceFormat = null;
         if (IsPdfSource(metadata.Name, content.Span))
         {
+            // FR-A09 (task 044): this PDF may ALREADY have become a Word document. A PDF-sourced first
+            // save mints a NEW .docx item and the client re-targets onto it — but ONLY in that browser
+            // session. A refresh destroys every client-held coordinate (retained bytes, re-targeted
+            // documentRef, and the per-mount transientKey, which composeIdentity.ts deliberately never
+            // persists), so the client re-mounts against the only durable pointer it has: this PDF. Re-
+            // projecting it here would show the user the PDF again — their saved work invisible — and
+            // their next save would mint a DUPLICATE document. So: resume on the document that exists.
+            //
+            // This is the load half of the FR-A09 pair. It is what makes the second save ordinary: the
+            // resumed .docx has real version coordinates (unlike a .pdf item, whose version id is
+            // deliberately suppressed below), so the save resolves a baseline and CLONES untouched blocks
+            // exactly like any imported document, with no PDF-shaped special case anywhere in the save path.
+            //
+            // Best-effort in both directions — a cache miss, a Redis failure, or a derived document that
+            // has since been deleted all fall through to the intake below (today's behavior), never a
+            // failed Load.
+            if (allowPdfRedirect)
+            {
+                var derived = await ResolvePdfDerivedDocumentAsync(
+                        request.DriveId, request.DocumentSpeId, httpContext, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (derived is not null)
+                {
+                    _logger.LogInformation(
+                        "Compose load: PDF drive={DriveId} item={DocumentSpeId} already became Word document " +
+                        "drive={DerivedDriveId} item={DerivedSpeId} — resuming on it instead of re-projecting the PDF (FR-A09).",
+                        request.DriveId, request.DocumentSpeId, derived.DriveId, derived.SpeId);
+
+                    return await LoadAsync(
+                            request with
+                            {
+                                DriveId = derived.DriveId,
+                                DocumentSpeId = derived.SpeId,
+                                DocumentRecordId = derived.RecordId ?? request.DocumentRecordId,
+                            },
+                            httpContext,
+                            allowPdfRedirect: false,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+
             sourceFormat = "pdf";
             (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
                     content, metadata.Name ?? request.DocumentSpeId, request.DriveId, request.DocumentSpeId, cancellationToken)
@@ -779,6 +846,32 @@ public class ComposeService : IComposeService
         var referenceMap = BuildReferenceMap(paraIdMap);
         session = session with { ReferenceMap = referenceMap };
         await _sessions.UpdateSessionCacheAsync(session, cancellationToken).ConfigureAwait(false);
+
+        // FR-A08/FR-A09 (task 044): carry the SERVER-DETERMINED "this was a PDF" fact forward on the
+        // session, rather than re-deriving it at save time or trusting the client to say so. The
+        // discriminant is `IsPdfSource` above — bytes-first, ours, decided here (project CLAUDE.md
+        // invariant 7: deterministic information available at capture time MUST be carried, not
+        // re-derived). The save reads it back by the session id IT minted, and uses it for exactly two
+        // things: stamping the new record Authored (a PDF projection has no original .docx it could be a
+        // lossy view of) and recording what this PDF became. Best-effort — a miss degrades to today's
+        // behavior on both counts, never a failed Load.
+        //
+        // The else-branch matters more than the if. The marker's ONLY dangerous direction is a stale one
+        // surviving onto a document that is genuinely imported — that would stamp a real .docx Authored
+        // and put its later saves on the clean-apply branch, which is the SEV-1 shape (redlines dropped).
+        // A resumed session that is now serving a NON-PDF document therefore clears it, so the marker
+        // always describes what this session currently holds rather than what it once held. Missing the
+        // marker costs a false warning; a stale one costs redlines, and those are not the same stakes.
+        if (sourceFormat == "pdf")
+        {
+            await SetPdfSourceMarkerAsync(
+                    session.SessionId, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            await ClearPdfSourceMarkerAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        }
 
         // FR-33 (task 062, design.md §8): restore prior decisions from the ledger alongside the
         // FR-29 annotations — task 061's read-only GetActionHistory query over the resumed
@@ -1178,6 +1271,26 @@ public class ComposeService : IComposeService
         // (REQ-2 not regressed). Best-effort: a marker read failure degrades to tracked (safe — worst case an
         // authored doc shows redlines, never data loss). ContentModel-present saves take the renderer path
         // (no engine Apply) and are already clean by construction.
+        // FR-A08 (task 044) — THE STAMPING HALF. The routing `origin` above is deliberately
+        // Imported-biased: it sees the synthesized carrier bytes a PDF-sourced save carries and calls the
+        // save Imported, which is CORRECT for routing (it can never mis-stamp a genuinely imported doc
+        // Authored and force it onto the clean-apply branch — the SEV-1 UAT regression). But it is the
+        // WRONG thing to write down. What gets PERSISTED is what the document IS, and a PDF projection is
+        // our file: the content model IS the document, not a lossy view of some prior .docx. Stamped
+        // Imported, such a row makes the FR-A08 warning suppression unreachable for the very class the
+        // requirement names first — and warns the user about losing formatting relative to an original
+        // that never existed.
+        //
+        // The two values are therefore separated: `origin` continues to drive routing + the returned
+        // result untouched, and `originToPersist` is what the promotion writes. The discriminant is the
+        // SERVER's own bytes-first PDF detection at load, carried on the session (never a client claim,
+        // never a content match — NFR-02/I-7), so it cannot fire for a .docx load and the SEV-1 vector
+        // stays closed. Its downstream effect on a later save is also correct: reading Authored back puts
+        // a PDF-sourced document's own edits on the clean-apply branch, which is right — there are no
+        // redlines to drop, because there was never an original to redline against.
+        var pdfSource = await GetPdfSourceMarkerAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+        var originToPersist = pdfSource is not null ? ComposeOrigin.Authored : origin;
+
         var cleanApply = false;
         if (request.ContentModel is null && request.DocumentRecordId is { } originRecordId)
         {
@@ -1592,7 +1705,9 @@ public class ComposeService : IComposeService
             FilePath = saved.WebUrl,
             // G1 (FR-01, task 020): persisted onto sprk_composeorigin ONLY when this call actually
             // creates the row (PromoteIfEphemeralAsync's idempotent existing-row branch ignores it).
-            Origin = origin,
+            // FR-A08 (task 044): the PERSISTED value, which is what the document IS — not the
+            // Imported-biased routing value. See the originToPersist derivation above.
+            Origin = originToPersist,
             // G7 (FR-06, task 022): stamped onto sprk_composetransientkey ONLY when this call creates the
             // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
             // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
@@ -1634,6 +1749,28 @@ public class ComposeService : IComposeService
             return BuildRecordFailedResult(
                 request, effectiveSpeId, effectiveDriveId, saved, origin, observedAt,
                 detail: $"record step failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // FR-A09 (task 044) — THE SAVE HALF. Record what this PDF became, so the next open of the PDF
+        // resumes on the Word document instead of projecting the PDF a second time (the load half is in
+        // LoadAsync's IsPdfSource branch). Written after the promotion so the record id is known, and on
+        // EVERY PDF-sourced save rather than only the mint, so a re-save that dedups onto an existing
+        // record refreshes a mapping that may have expired.
+        //
+        // The mapping stores the POINTER — drive + item + record — and deliberately NOT a version id.
+        // The requirement says "track the version coordinates", and this is how they get tracked: the
+        // resumed load re-reads the CURRENT version through the ordinary path, which is strictly better
+        // than replaying one captured at creation. A stored version id would be read-never and stale the
+        // moment anyone edits the document in Word — pointing the recovery path at a version that is no
+        // longer the document. Storing what we would not read is how stale state becomes a bug.
+        if (pdfSource is not null
+            && !string.IsNullOrWhiteSpace(pdfSource.DriveId)
+            && !string.IsNullOrWhiteSpace(pdfSource.SpeId)
+            && !string.IsNullOrWhiteSpace(effectiveDriveId))
+        {
+            await SetPdfDerivedDocumentAsync(
+                    pdfSource, effectiveDriveId!, effectiveSpeId, promotion.DocumentRecordId, observedAt, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // ────────────────────────────────────────────────────────────────────────────
@@ -2115,6 +2252,211 @@ public class ComposeService : IComposeService
                 documentSpeId);
         }
     }
+
+    // =========================================================================
+    // FR-A08/FR-A09 (r8 task 044) — PDF provenance: what a session was opened FROM, and what that PDF
+    // BECAME. Two keys because they answer two different questions and neither substitutes for the other:
+    //
+    //   pdf-session:{sessionId}        -> the source PDF's coordinates. Written at load, read at save.
+    //                                    Carries the server's own bytes-first PDF determination forward
+    //                                    so the save neither re-derives it nor takes the client's word.
+    //   pdf-derived:{driveId}:{speId}  -> the Word document that PDF became. Written at save, read at the
+    //                                    NEXT load of that PDF. This is what survives a page refresh.
+    //
+    // IDistributedCache throughout (ADR-009 — never IMemoryCache): the refresh case is a DIFFERENT request
+    // on a possibly different instance, which is exactly the cross-request boundary the ADR is about.
+    //
+    // Every operation is best-effort and swallows its own failures. Losing either key degrades to the
+    // pre-044 behavior (re-project the PDF, stamp by routing origin) — worse, but never wrong in a way the
+    // user cannot see, and never a failed Load or Save. That asymmetry is deliberate: this is a recovery
+    // aid, and a recovery aid must not become a new way to fail.
+    // =========================================================================
+
+    private const string PdfSourceMarkerKeyPrefix = "sdap:compose:pdf-session:";
+    private const string PdfDerivedDocumentKeyPrefix = "sdap:compose:pdf-derived:";
+
+    /// <summary>How long a PDF keeps pointing at the document it became. Long enough to cover working on a
+    /// document across days; bounded so a PDF that is deleted and replaced at the same drive-item id cannot
+    /// redirect indefinitely. On expiry the behavior degrades to a fresh projection, never to an error.</summary>
+    private static readonly DistributedCacheEntryOptions PdfProvenanceCacheOptions = new()
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30),
+    };
+
+    /// <summary>The source PDF a Compose session was opened from (FR-A08/FR-A09).</summary>
+    private sealed record ComposePdfSourceMarker(
+        [property: JsonPropertyName("driveId")] string DriveId,
+        [property: JsonPropertyName("speId")] string SpeId);
+
+    /// <summary>The Word document a PDF became (FR-A09). Pointer only — see the SetPdfDerivedDocumentAsync
+    /// call site for why no version id is stored.</summary>
+    private sealed record ComposePdfDerivedDocument(
+        [property: JsonPropertyName("driveId")] string DriveId,
+        [property: JsonPropertyName("speId")] string SpeId,
+        [property: JsonPropertyName("recordId")] Guid? RecordId,
+        [property: JsonPropertyName("derivedAtUtc")] DateTimeOffset DerivedAtUtc);
+
+    private async Task SetPdfSourceMarkerAsync(string sessionId, string driveId, string speId, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            await _cache.SetStringAsync(
+                    PdfSourceMarkerKeyPrefix + sessionId,
+                    JsonSerializer.Serialize(new ComposePdfSourceMarker(driveId, speId), SaveStampJsonOptions),
+                    PdfProvenanceCacheOptions,
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: failed to record the PDF source marker for session={SessionId} (drive={DriveId} item={SpeId}) — " +
+                "a save on this session will stamp by routing origin and will not record what this PDF became (FR-A08/FR-A09 degrade).",
+                sessionId, driveId, speId);
+        }
+    }
+
+    private async Task ClearPdfSourceMarkerAsync(string sessionId, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            await _cache.RemoveAsync(PdfSourceMarkerKeyPrefix + sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: failed to clear the PDF source marker for session={SessionId} — a save on this session could " +
+                "stamp a non-PDF document Authored. Logged loudly because this is the marker's one unsafe direction.",
+                sessionId);
+        }
+    }
+
+    private async Task<ComposePdfSourceMarker?> GetPdfSourceMarkerAsync(string? sessionId, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await _cache.GetStringAsync(PdfSourceMarkerKeyPrefix + sessionId, ct).ConfigureAwait(false);
+            return json is null ? null : JsonSerializer.Deserialize<ComposePdfSourceMarker>(json, SaveStampJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to read the PDF source marker for session={SessionId} — treating the save as not PDF-sourced " +
+                "(stamps by routing origin; records no derived-document mapping).",
+                sessionId);
+            return null;
+        }
+    }
+
+    private async Task SetPdfDerivedDocumentAsync(
+        ComposePdfSourceMarker source,
+        string derivedDriveId,
+        string derivedSpeId,
+        Guid? derivedRecordId,
+        DateTimeOffset derivedAtUtc,
+        CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var derived = new ComposePdfDerivedDocument(derivedDriveId, derivedSpeId, derivedRecordId, derivedAtUtc);
+            await _cache.SetStringAsync(
+                    PdfDerivedDocumentKey(source.DriveId, source.SpeId),
+                    JsonSerializer.Serialize(derived, SaveStampJsonOptions),
+                    PdfProvenanceCacheOptions,
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to record that PDF drive={SourceDriveId} item={SourceSpeId} became drive={DerivedDriveId} " +
+                "item={DerivedSpeId} — the save itself succeeded; a re-open of the PDF will project it afresh (FR-A09 degrades).",
+                source.DriveId, source.SpeId, derivedDriveId, derivedSpeId);
+        }
+    }
+
+    /// <summary>
+    /// FR-A09: resolves the Word document a PDF already became, or null to project the PDF afresh.
+    /// <para>
+    /// A mapping is only honored when the derived document STILL EXISTS. Someone who deletes the Word
+    /// document is entitled to re-open the PDF and start over, and a dangling mapping would otherwise fail
+    /// their load with a 404 on an item they never asked for. The stale entry is evicted on the way past so
+    /// the check does not repeat on every open.
+    /// </para>
+    /// </summary>
+    private async Task<ComposePdfDerivedDocument?> ResolvePdfDerivedDocumentAsync(
+        string driveId,
+        string speId,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+
+        var key = PdfDerivedDocumentKey(driveId, speId);
+
+        try
+        {
+            var json = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+            if (json is null)
+            {
+                return null;
+            }
+
+            var derived = JsonSerializer.Deserialize<ComposePdfDerivedDocument>(json, SaveStampJsonOptions);
+            if (derived is null || string.IsNullOrWhiteSpace(derived.DriveId) || string.IsNullOrWhiteSpace(derived.SpeId))
+            {
+                return null;
+            }
+
+            var stillThere = await _spe.GetFileMetadataAsUserAsync(httpContext, derived.DriveId, derived.SpeId, ct)
+                .ConfigureAwait(false);
+            if (stillThere is not null)
+            {
+                return derived;
+            }
+
+            _logger.LogInformation(
+                "Compose load: PDF drive={DriveId} item={SpeId} mapped to drive={DerivedDriveId} item={DerivedSpeId}, which no " +
+                "longer exists — evicting the mapping and projecting the PDF afresh (FR-A09).",
+                driveId, speId, derived.DriveId, derived.SpeId);
+            await _cache.RemoveAsync(key, ct).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: failed to resolve the derived-document mapping for PDF drive={DriveId} item={SpeId} — projecting the " +
+                "PDF afresh (FR-A09 degrades; never a failed Load).",
+                driveId, speId);
+            return null;
+        }
+    }
+
+    private static string PdfDerivedDocumentKey(string driveId, string speId) =>
+        PdfDerivedDocumentKeyPrefix + driveId + ":" + speId;
 
     // =========================================================================
     // G10 (FR-09, task 040) — Document Profile re-run: reload/onload re-trigger (storm-safe) + the shared

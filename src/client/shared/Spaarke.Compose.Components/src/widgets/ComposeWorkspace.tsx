@@ -1378,6 +1378,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           versionId: payload.versionId ?? null,
           sessionId: payload.sessionId ?? '',
           sprkDocumentId: payload.documentRecordId,
+          // FR-A09 (task 044): the drive-item the server SERVED — see the reducer for why this must
+          // come from the response rather than from `docRef.speDriveItemId` we requested with.
+          speDriveItemId: payload.documentSpeId,
           fileName: payload.fileName,
           // Set ATOMICALLY with docxBytes (the ComposeEditor mount contract).
           paraIdMap: hydratedParaIdMap,

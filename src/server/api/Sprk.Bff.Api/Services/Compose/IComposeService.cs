@@ -119,10 +119,20 @@ public interface IComposeService
     /// <see cref="ComposeMountProjection.ContentModelWarnings"/> (the client's honest-lossiness surface),
     /// mirroring <see cref="LoadComposeDocumentResult"/>.
     /// </remarks>
+    /// <param name="content">The source bytes to project (DOCX, or a PDF that forks onto the intake leg).</param>
+    /// <param name="fileName">Optional; participates in source detection and intake diagnostics only.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="sessionId">FR-A08 (r8 task 044): the Compose session this mount belongs to, when there
+    /// is one. Supplied by the Assistant-upload door (which requires a session) and omitted by the
+    /// Browse/local-file door (<c>/api/compose/project</c>, contracted to leave zero server-side state).
+    /// When supplied AND the source is a PDF, the server records that fact against the session so the first
+    /// save stamps the new record <c>Authored</c> — a PDF projection is our file, with no original .docx it
+    /// could be a lossy view of. Omitting it costs only that stamp.</param>
     Task<ComposeMountProjection> ProjectForMount(
         ReadOnlyMemory<byte> content,
         string? fileName = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? sessionId = null);
 
     /// <summary>
     /// Load an existing document into the Compose workspace. Used by both Path A (open from
