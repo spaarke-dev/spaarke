@@ -1,5 +1,5 @@
-using System.Text;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
@@ -8,7 +8,6 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -18,6 +17,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Services.Compose.Operations;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Api;
 
