@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ · **W3: 012 ✅, 013 ✅**, 011 🔄 partial |
-| **Step** | Between tasks. **W3 is done. Next: Workstream C** — start with **029** or **030** (neither needs the god-file), then **020**, which unblocks most of C |
-| **Status** | 012 + 013 committed |
-| **Next Action** | Invoke `task-execute` on `tasks/029-billing-status-surface.poml` or `030-lifecycle-constraints-ui.poml` — both client + DTO only, no god-file contention. **Verify each POML's premise first** — 9 of 10 so far have been wrong, incomplete, or aimed at the wrong layer. |
+| **Task** | **020 ⛔ ESCALATED** (no code changed) — W1 ✅ · W2 ✅ · W3 ✅ (012, 013); 011 🔄 partial |
+| **Step** | 020 steps 1–2 done (site enumeration + live GA verification). **Stopped at the escalation trigger**: v1.0 lacks `storageUsedInBytes`, which task 024 needs. |
+| **Status** | 012 + 013 committed; 020 findings uncommitted |
+| **Next Action** | **Operator picks A / B / C** in [`notes/beta-vs-v1-surface-verification.md`](notes/beta-vs-v1-surface-verification.md) §7 (recommend **A** — keep containers on beta as a documented second exception). Meanwhile **030** and **029** are unblocked and need no god-file — good next work. |
 
 ### Files Modified This Session
 

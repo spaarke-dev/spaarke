@@ -32,7 +32,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | ✅ **granted; Secure Score live. Alerts blocked on a NON-permission cause — escalated** |
-| 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
+| 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | ⛔ **ESCALATED — v1.0 lacks `storageUsedInBytes`; conflicts with 024** |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
 | 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) 🔴 | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | 🔲 |
@@ -187,6 +187,40 @@ it is the exact failure mode this project exists to remove. Options in
 ✅ Also done (operator-authorized): two **expired** credentials removed from `170c98e1` — secret
 `SharePointEmbeddedVSCode` (exp. 2025-11-22), cert `CN=SharePoint Embedded VS Code Ext` (exp.
 2026-03-14). One valid secret + one valid cert retained, both to 2027.
+
+---
+
+## ⛔ Task 020 ESCALATED 2026-08-23 — `/beta` → v1.0 is not safe wholesale
+
+**Measured live**: `storageUsedInBytes` **does not exist in the v1.0 schema**. `$select` on it returns
+**400 "Could not find a property named 'storageUsedInBytes'"**, while the identical call on beta returns
+200 with the value. `ownershipType` is likewise beta-only. Both on `/storage/fileStorage/containers`.
+
+**Three consequences:**
+
+1. **Task 024's spike is answered in advance, and the answer is YES.** FR-C06's two-branch requirement
+   resolves to **implement** — Graph *does* expose consumption, on **beta**, and **LIST-only** (even beta's
+   GET-single omits it). 024 should start from the table in the note, not re-run the spike.
+2. **020 and 024 directly conflict.** 020 wants beta gone; 024 needs the one field only beta has. And it
+   is structural: `CreateGraphClient` (`:4261`) backs **every** `…ForConfigAsync` method, so flipping that
+   one base address flips containers, recycle bin, search, security and audit together.
+3. **FR-C01's premise is inverted here.** The rationale is "beta schema drift generates wrong-property
+   defects" — but for `containers`, **v1.0 is the version missing properties the app needs.** The rationale
+   still holds for container *types* (§4.1's `itemMajorVersionLimit` / `maxStoragePerContainerInBytes`).
+
+**Much of 020 is already done by 011**: container-type LIST runs on `ForUserAsync`, and that factory path
+already builds a **v1.0** client (`GraphClientFactory.cs:327`). ⚠️ But 011 left a **version split** —
+container-type LIST on v1.0, GET/CREATE still beta via `…ForConfigAsync`. One resource, two versions, no
+comment. Close that regardless of the decision.
+
+**A 4th `/beta` site exists that the POML never names**: `GraphClientFactory.cs:164` (`ForApp()`),
+BFF-wide. Out of R2 scope — it serves far more than SpeAdmin.
+
+**Site `:4278`** (`CreateGraphClientFromBearerToken`) is **dead code** since path A — delete, don't migrate.
+
+Options + recommendation (A: keep containers on beta as a documented second exception):
+[`notes/beta-vs-v1-surface-verification.md`](../notes/beta-vs-v1-surface-verification.md).
+**No code changed.**
 
 ---
 
