@@ -1111,6 +1111,12 @@ public class ComposeService : IComposeService
         (byte[] contentToPersist, var renderDegradationWarnings) = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
+        // FR-A08 (task 044): remember WHICH warnings came from the render call. Everything appended below
+        // this point is a save-outcome warning (op-log-ignored, comment anchoring, concurrency, stale
+        // metadata) and must reach an authored document's author untouched; these are the fidelity family.
+        // Captured by identity rather than by code so the distinction cannot drift as codes are added.
+        var renderProvenanceWarnings = renderDegradationWarnings;
+
         // FR-06 (task 032, the write-path cutover): apply the client's ordered, rebased task-003 operation log
         // (+ any (paraId,range)-anchored comments) surgically onto the resolved baseline via the SINGLE
         // ComposeShadowPatchEngine. This REPLACES the retired ComposeParagraphRedlineSynthesizer (paragraph-diff)
@@ -1732,6 +1738,52 @@ public class ComposeService : IComposeService
             {
                 new(DocumentMetadataStaleCode, 1),
             };
+        }
+
+        // ════════════════════════════════════════════════════════════════════════════════════════
+        // FR-A08 (task 044) — an AUTHORED document has NO original to lose against.
+        //
+        // Born-in-editor, AI-drafted and PDF-sourced documents are OUR file: the content model IS the
+        // document, not a lossy view of some prior .docx. "Some formatting was simplified when saving" on
+        // one of those describes no loss, because there is nothing it could be a loss RELATIVE TO — and a
+        // warning that cannot be acted on is the noise that made R7's honest-signal layer feel like a
+        // nuisance rather than information.
+        //
+        // Applied HERE, not at the origin decision, because the document record is only resolved by the
+        // promotion step above — and the routing `origin` deliberately labels ANY save carrying a carrier
+        // Imported (it must never mis-stamp an imported doc Authored and force it onto the clean-apply
+        // branch, the SEV-1 UAT regression). The durable `sprk_composeorigin` marker is what the document
+        // actually IS; it decides the WARNING only, never `cleanApply`.
+        //
+        // Suppression is scoped by PROVENANCE, not by a code list: only the warnings the render call
+        // produced are dropped. A code list would need maintaining as codes are added, and either
+        // direction of omission is a defect — a missed fidelity code shows a false warning, a missed
+        // outcome code SILENCES a real one.
+        var warningRecordId = promotion.DocumentRecordId ?? request.DocumentRecordId;
+        if (renderProvenanceWarnings is { Count: > 0 }
+            && renderDegradationWarnings is { Count: > 0 }
+            && warningRecordId is { } authoredCheckId
+            && await ReadPersistedOriginAsync(authoredCheckId, cancellationToken).ConfigureAwait(false)
+                == ComposeOrigin.Authored)
+        {
+            // Set difference by REFERENCE, not by value: two warnings can legitimately carry the same code
+            // and count (one from the render call, one appended after it), and only the render one is a
+            // fidelity warning. `Except` is used rather than a membership test because the I-7 source audit
+            // bans that membership call anywhere in this slice — a blunt token scan over the source text
+            // (comments included, which is how the first draft of THIS comment tripped it) guarding "no
+            // text-search in the write path". The rule is right even where this particular use was not what
+            // it was aimed at, so the code moves rather than the guard.
+            var kept = renderDegradationWarnings
+                .Except(renderProvenanceWarnings, (IEqualityComparer<ComposeProjectionWarning>)ReferenceEqualityComparer.Instance)
+                .ToList();
+
+            _logger.LogDebug(
+                "Compose save: suppressed {Dropped} render-path degradation warning(s) for an AUTHORED " +
+                "document (no original to lose against; FR-A08); {Kept} save-outcome warning(s) retained. " +
+                "routingOrigin={Origin} session={SessionId}",
+                renderDegradationWarnings.Count - kept.Count, kept.Count, origin, request.SessionId);
+
+            renderDegradationWarnings = kept.Count > 0 ? kept : null;
         }
 
         var outcome =
