@@ -480,6 +480,69 @@ az rest --method GET \
 
 Output should match Step 5a one-for-one. If counts differ, the MI will fail at Graph with `403 Insufficient Privileges` on first call.
 
+### Step 5e — SPE **owning app** Graph permissions (a DIFFERENT identity — per customer tenant)
+
+> Added 2026-08-23 by `sdap-SPE-admin-app-r2` task 013 (spec FR-B04).
+
+Steps 5a–5d cover the **BFF managed identity**. The SPE Admin application also calls Graph as a second,
+unrelated identity: the **container-type owning app** named by
+`sprk_specontainertypeconfig.sprk_owningappid`. `SpeAdminGraphService.GetClientForConfigAsync` resolves
+the config → reads its Key Vault secret → authenticates app-only **in the tenant named by that config's
+`sprk_speenvironment.sprk_tenantid`**.
+
+**Because a Spaarke environment can manage container types living in customers' own Entra tenants, these
+grants are per customer tenant and are part of customer onboarding — not a one-time platform setup.**
+Missing them does not break SPE file operations; it breaks the SPE Admin screens that depend on them.
+
+| Graph application permission | App role id | Needed for | Consequence if absent |
+|---|---|---|---|
+| `FileStorageContainer.Selected` | `40dc41bc-0f7e-42ff-89bd-d9516947e474` | container CRUD | Containers screen fails |
+| `FileStorageContainerTypeReg.Selected` | `2dcc6599-bd30-442b-8f11-90f88ad441dc` | container-type registration | Register wizard fails |
+| `Files.ReadWrite.All` | `75359482-378d-4052-8f01-80520e7db3cd` | item operations | Files screen fails |
+| `Files.SelectedOperations.Selected` | `bd61925e-3bf4-4d62-bc0b-06b06c96d95c` | scoped item operations | item-level ops fail |
+| `Files.ReadWrite.AppFolder` | `b47b160b-1054-4efd-9ca0-e2f614696086` | app-folder access | app-folder ops fail |
+| **`SecurityEvents.Read.All`** | `bf394140-e372-4bf9-a898-299cfc7564e5` | **Security screen** — Secure Score + alerts | **Security screen returns 403** |
+
+Grant **`SecurityEvents.Read.All` only** — the screen is read-only. Do **not** grant
+`SecurityEvents.ReadWrite.All` (`d903a879-88e0-4c09-b0c9-82f6a1333f84`).
+
+```bash
+# Run against the CUSTOMER tenant. Requires tenant admin consent in that tenant.
+OWNING_APP={sprk_owningappid from the customer's sprk_specontainertypeconfig}
+
+OWNING_SP=$(az ad sp show --id $OWNING_APP --query id -o tsv)
+GRAPH_SP=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+
+# Declare in the manifest (documentation; grants nothing on its own)
+az ad app permission add --id $OWNING_APP \
+  --api 00000003-0000-0000-c000-000000000000 \
+  --api-permissions bf394140-e372-4bf9-a898-299cfc7564e5=Role
+
+# Grant admin consent for EXACTLY this one permission.
+# Prefer this over `az ad app permission admin-consent`, which consents everything
+# declared in the manifest — including anything requested but deliberately unconsented.
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$OWNING_SP/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body "{\"principalId\":\"$OWNING_SP\",\"resourceId\":\"$GRAPH_SP\",\"appRoleId\":\"bf394140-e372-4bf9-a898-299cfc7564e5\"}"
+```
+
+**Verify** — a fresh app-only token must carry the role, and Secure Score must return 200:
+
+```bash
+# The token is issued for the CUSTOMER tenant id (sprk_speenvironment.sprk_tenantid)
+# Decode the token's `roles` claim and confirm SecurityEvents.Read.All is present, then:
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/security/secureScores?\$top=1"     # expect 200
+```
+
+> ⚠️ **`alerts_v2` needs more than this permission.** `GET /security/alerts_v2` also requires a
+> **Microsoft 365 Defender workload provisioned in the tenant**. Without it, Graph returns
+> `403 "Unauthorized request - Account is not provisioned."` — which is *not* a permissions failure and
+> **cannot be fixed by granting broader Graph permissions.** The legacy `GET /security/alerts` returns
+> `200` with an empty array in the same tenant, which is how to tell the two apart. Verified in Spaarke
+> Dev 2026-08-23; see `projects/sdap-SPE-admin-app-r2/notes/security-grant-record.md`.
+
 ---
 
 ## 6. Dataverse Application User for BFF managed identity

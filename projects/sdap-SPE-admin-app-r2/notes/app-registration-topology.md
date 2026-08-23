@@ -58,32 +58,44 @@ user's browser, so it still cannot hold a secret. Both things are true, and neit
 
 ---
 
-## What actually argues for moving the Security path
+## ❌ RETRACTED — the "modeling error" argument was wrong
 
-Not exposure — **modeling**.
+An earlier version of this note argued that routing tenant-wide security data through a container-type
+config's owning app was a modeling error, and that `SecurityEvents.Read.All` belonged on the BFF. **That
+is wrong. Retained here, struck, because the reasoning was persuasive and should not be re-invented.**
 
-Secure score and security alerts are **tenant-wide** data. `SecurityEndpoints` resolves them through
-`GetClientForConfigAsync(config)`, i.e. as the **owning app of a container-type config**. The config
-exists to say *which app owns this container type*; it has no relationship to tenant security posture.
+The argument was: *secure score is tenant-wide, so with two customer configs, which one's owning app
+should read "the" tenant's score? No answer ⇒ modeling error.*
 
-**The tell**: with two customer configs in one environment, which customer's owning app should read the
-*tenant's* secure score? The question has no answer. That is a modeling error, and it holds whatever the
-credential story is.
+**The hidden premise was one tenant per Spaarke environment. It is false.** A Spaarke environment can
+manage container types living in **customers' own Entra tenants** (operator-confirmed 2026-08-23) —
+which is exactly why `sprk_speenvironment` carries `sprk_tenantid` and why `GetClientForConfigAsync`
+threads it through. So the config selection **does** determine the answer: it selects *whose tenant* is
+being read. The wiring is correct.
 
-`GetSecurityAlertsForConfigAsync` / `GetSecureScoreForConfigAsync` (`SpeAdminGraphService.cs`) are the
-two methods; `SecurityEndpoints.cs` is already correct otherwise — its 403 handler was repaired by task
-001 and names the missing grant as a *hint*, not a certainty.
+And the proposed fix was not merely worse — it was **unworkable**. `IGraphClientFactory.ForApp()`
+authenticates in the BFF's own home tenant, so it could never read a customer tenant's secure score.
 
-### The alternative home
+**The POML's literal instruction — grant to the owning app — was right.** Executed and verified; see
+[`security-grant-record.md`](security-grant-record.md).
 
-`SDAP-BFF-SPE-API` (`1e40baad-e065-4aea-a8d4-4b7ab273458c`) already holds app-only
-`Directory.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All`, `User.ReadWrite.All`,
-`Group.ReadWrite.All`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Send`,
-`FileStorageContainer.Selected`, `FileStorageContainerTypeReg.Selected`,
-`Files.SelectedOperations.Selected`.
+### What the multi-tenant model means instead
 
-Against that, a **read-only** `SecurityEvents.Read.All` is a marginal addition to an identity that is
-already tenant-scoped by design — which is what tenant-wide data wants.
+The consequence is not a code change but an **onboarding obligation**: every customer tenant needs
+`SecurityEvents.Read.All` granted and admin-consented on **that customer's** owning app. Recorded in
+[`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) **§5e**.
+
+### It also partly rehabilitates ADR-028 E-1
+
+Task 010 concluded *"there is no per-customer owning app in this environment"* — true of **Spaarke Dev**,
+which is Spaarke's *own* tenant, so the owning app and the shared browser client collapse onto one
+registration (`170c98e1`). In a real customer tenant they are distinct, so **E-1's concept is real**; the
+Spaarke Dev collapse is an artifact of dogfooding, not evidence the model doesn't exist.
+
+**Task 010's OBO verdict is untouched.** That finding rests on assertion audience: the code page signs in
+against the BFF, so the assertion the BFF receives always carries `aud = 1e40baad` (the BFF). MSAL OBO
+requires the exchanging client to be that audience, so `Create(OwningAppId)` fails **even with a
+genuinely separate per-customer owning app**. Path A (BFF-identity OBO) remains correct.
 
 ---
 
@@ -139,7 +151,8 @@ Same false premise task 010 found under ADR-028 **E-1**; it appears in two place
 
 ## Status of task 013
 
-**Step 1 complete** (which registration, and confirmation the permission is absent). **Step 2 — the
-grant — is NOT done**: where it belongs depends on whether the Security path moves to the BFF, which is
-an operator decision. Nothing has been granted, and no broader permission was granted speculatively —
-the POML's second escalation trigger is respected.
+**Done 2026-08-23.** `SecurityEvents.Read.All` granted + admin-consented on `170c98e1` in the Spaarke
+tenant; exactly one permission added, verified by before/after diff. Secure Score returns **200** live.
+`alerts_v2` still 403s — but with a **different, non-permission cause** (Defender not provisioned),
+escalated rather than papered over with a broader grant. Full record:
+[`security-grant-record.md`](security-grant-record.md).

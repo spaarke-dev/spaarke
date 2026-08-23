@@ -4,7 +4,7 @@
     <title>Grant SecurityEvents.Read.All and verify the Security screen</title>
     <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Azure configuration change with verification. No .cs/.ts modification expected — the code is already correct and the message already names the real cause.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **013 🔄 step 1 done, grant HELD** — W1 ✅ · W2 ✅ · W3: 012 ✅, 011 🔄 partial |
-| **Step** | 013 step 1 (which registration + confirm absent) ✅. **Step 2 — the grant — awaits an operator decision** on whether the Security path moves to the BFF first. |
-| **Status** | task 012 committed; 013 notes uncommitted |
-| **Next Action** | **Operator decides**: grant `SecurityEvents.Read.All` to the **BFF** and move `GetSecurityAlertsForConfigAsync`/`GetSecureScoreForConfigAsync` off `GetClientForConfigAsync` (recommended), **or** grant to `170c98e1` as the POML literally says, **or** defer. See [`notes/app-registration-topology.md`](notes/app-registration-topology.md). If deferring, next is Workstream C via **029** / **030**. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ · **W3: 012 ✅, 013 ✅**, 011 🔄 partial |
+| **Step** | Between tasks. **W3 is done. Next: Workstream C** — start with **029** or **030** (neither needs the god-file), then **020**, which unblocks most of C |
+| **Status** | 012 + 013 committed |
+| **Next Action** | Invoke `task-execute` on `tasks/029-billing-status-surface.poml` or `030-lifecycle-constraints-ui.poml` — both client + DTO only, no god-file contention. **Verify each POML's premise first** — 9 of 10 so far have been wrong, incomplete, or aimed at the wrong layer. |
 
 ### Files Modified This Session
 
@@ -34,6 +34,29 @@ All committed and pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**):
 ⚠️ **Separate repo, NOT pushed**: `c:/code_files/spaarke-prototype` has **1 unpushed commit** `a53832a`
 (the `spe-admin-r2-uat` harness + shared `_infra` mock fixes) on `feature/uat-harness-framework`. Left
 unpushed deliberately — pushing another repo needs the operator's say-so.
+
+### 🔑 Task 013 — the multi-tenant fact, and a retraction
+
+**A Spaarke environment can manage container types in CUSTOMERS' OWN Entra tenants** (operator-confirmed
+2026-08-23). `sprk_speenvironment.sprk_tenantid` is why. This makes `GetClientForConfigAsync` **correct**:
+the config selection chooses *whose tenant* Graph is called against.
+
+❌ **Retracted**: I argued the Security path was a modeling error and the grant belonged on the BFF. That
+assumed one tenant per environment. `IGraphClientFactory.ForApp()` authenticates in the BFF's **home**
+tenant and could never read a customer's — so that option was unworkable, not just worse. The POML was
+right. Struck in `notes/app-registration-topology.md`; don't re-invent it.
+
+✅ Granted `SecurityEvents.Read.All` on `170c98e1` (exactly one permission; `ReadWrite` NOT granted).
+**Secure Score returns 200 live.** → **Per-customer onboarding step**, now in `auth-deployment-setup.md` §5e.
+
+🔔 **Alerts still 403 — different cause, escalated.** `Security.Alerts_v2` needs a **Defender workload**
+provisioned; Spaarke Dev has none. Proof it isn't permissions: legacy `/security/alerts` returns **200,
+empty array** on the same token/tenant/moment. **No broader grant can fix it.**
+
+Also: **ADR-028 E-1 is partly rehabilitated** — task 010's "no per-customer owning app" is true of
+Spaarke Dev only (Spaarke's own tenant, where owning app and browser client collapse onto `170c98e1`).
+**010's OBO verdict stands** — the assertion always carries `aud = BFF`, so `Create(OwningAppId)` fails
+regardless. Path A remains correct.
 
 ### 🔑 Task 012 — do not re-derive
 

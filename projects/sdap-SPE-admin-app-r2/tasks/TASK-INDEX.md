@@ -31,7 +31,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
-| 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | 🔄 **step 1 done — grant pending decision** |
+| 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | ✅ **granted; Secure Score live. Alerts blocked on a NON-permission cause — escalated** |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | 🔲 |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
@@ -151,26 +151,42 @@ task 004 proved it was a wrong Graph entity type and fixed it. 011 must not inhe
 
 ---
 
-## 🔎 Task 013 — step 1 done, grant held pending an operator decision
+## ✅ Task 013 done 2026-08-23 — and a multi-tenant fact that changes other reasoning
 
-`SecurityEvents.Read.All` (`bf394140-…`) is **absent** on both registrations — premise confirmed. But
-the Security screen authenticates as the **config's owning app**, which is `SDAP-PCF-CLIENT`
-(`170c98e1-…`) — a **four-hat registration**: shared browser client for every Spaarke surface, SPE
-owning app, confidential client whose secret the BFF uses, and originally a Microsoft SPE VS Code
-sample app.
+`SecurityEvents.Read.All` granted + admin-consented on the **owning app** `170c98e1` in the Spaarke
+tenant. Exactly one permission added (before/after diff); `SecurityEvents.ReadWrite.All` NOT granted.
+**`GET /security/secureScores` now returns 200 with real data** — it was 403 before.
 
-**The argument for moving the path is modeling, not exposure.** App-only roles are unreachable from a
-browser (they need `client_credentials`), so granting one here would *not* expose it to browser clients
-— an earlier draft claimed otherwise and was wrong. What does not survive scrutiny is routing
-**tenant-wide** security data through a **container-type config's** owning app: with two customer
-configs, which one reads the tenant's secure score? No answer — that's the tell.
+**🔑 Operator-confirmed: a Spaarke environment can manage container types living in CUSTOMERS' OWN
+Entra tenants.** That is why `sprk_speenvironment` carries `sprk_tenantid`, and it makes
+`GetClientForConfigAsync` **correct** — the config selection chooses *whose tenant* is read. Two
+consequences:
 
-✅ **Done meanwhile** (operator-authorized): two **expired** credentials removed from `170c98e1`
-(secret `SharePointEmbeddedVSCode` exp. 2025-11-22; cert `CN=SharePoint Embedded VS Code Ext` exp.
+1. **Per-customer onboarding, not one-time setup.** Every customer tenant needs this grant on *its*
+   owning app. Now in [`auth-deployment-setup.md` §5e](../../../docs/guides/auth-deployment-setup.md)
+   with the full owning-app permission table.
+2. **ADR-028 E-1 is partly rehabilitated.** Task 010's *"there is no per-customer owning app"* is true
+   of **Spaarke Dev only** — Spaarke's own tenant, where owning app and browser client collapse onto one
+   registration. In a customer tenant they are distinct. **Task 010's OBO verdict is untouched**: the
+   assertion always carries `aud = BFF`, so `Create(OwningAppId)` fails even with a real separate owning
+   app. Path A stands.
+
+❌ **Retracted**: an intermediate analysis argued this was a modeling error and the grant belonged on the
+BFF. It assumed one tenant per environment; the BFF's `ForApp()` authenticates in the BFF's home tenant
+and could never read a customer's. Struck in
+[`notes/app-registration-topology.md`](../notes/app-registration-topology.md) so it is not re-invented.
+
+🔔 **Escalated, not papered over — Alerts still fails, for a DIFFERENT reason.**
+`Security.Alerts_v2` ([`SpeAdminGraphService.cs:4593`](../../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs#L4593))
+returns `403 "Account is not provisioned"` — it needs a **Microsoft 365 Defender workload** in the
+tenant. Proof it is not permissions: legacy `/security/alerts` returns **200 with an empty array** on the
+same token, same tenant, same moment. **No broader permission can fix it**, and granting one to silence
+it is the exact failure mode this project exists to remove. Options in
+[`notes/security-grant-record.md`](../notes/security-grant-record.md) §"cause has changed".
+
+✅ Also done (operator-authorized): two **expired** credentials removed from `170c98e1` — secret
+`SharePointEmbeddedVSCode` (exp. 2025-11-22), cert `CN=SharePoint Embedded VS Code Ext` (exp.
 2026-03-14). One valid secret + one valid cert retained, both to 2027.
-
-Full analysis + the registration-split recommendation (filed for `spaarke-auth-v4-dataverse-MI`, not R2
-scope): [`notes/app-registration-topology.md`](../notes/app-registration-topology.md).
 
 ---
 
