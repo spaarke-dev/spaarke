@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **020 ⛔ ESCALATED** (no code changed) — W1 ✅ · W2 ✅ · W3 ✅ (012, 013); 011 🔄 partial |
-| **Step** | 020 steps 1–2 done (site enumeration + live GA verification). **Stopped at the escalation trigger**: v1.0 lacks `storageUsedInBytes`, which task 024 needs. |
-| **Status** | 012 + 013 committed; 020 findings uncommitted |
-| **Next Action** | **Operator picks A / B / C** in [`notes/beta-vs-v1-surface-verification.md`](notes/beta-vs-v1-surface-verification.md) §7 (recommend **A** — keep containers on beta as a documented second exception). Meanwhile **030** and **029** are unblocked and need no god-file — good next work. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ (012, 013) · **W4: 020 ✅**; 011 🔄 partial |
+| **Step** | Between tasks. **Next: 030** (client-only, W4) or **029**; then 021 / 022 / 023 now that 020 is done. |
+| **Status** | 012, 013, 020 committed + pushed |
+| **Next Action** | Invoke `task-execute` on `tasks/030-lifecycle-constraints-ui.poml` (client-only, no god-file). **Verify the POML's premise first** — 11 of 11 have now been wrong, incomplete, or aimed at the wrong layer. |
 
 ### Files Modified This Session
 
@@ -34,6 +34,29 @@ All committed and pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**):
 ⚠️ **Separate repo, NOT pushed**: `c:/code_files/spaarke-prototype` has **1 unpushed commit** `a53832a`
 (the `spe-admin-r2-uat` harness + shared `_infra` mock fixes) on `feature/uat-harness-framework`. Left
 unpushed deliberately — pushing another repo needs the operator's say-so.
+
+### 🔑 Task 020 — beta is DELIBERATE for containers; do not "clean it up"
+
+**`storageUsedInBytes` is not in the v1.0 schema.** `$select` on it → **400 "Could not find a property
+named 'storageUsedInBytes'"**; the identical call on beta → 200 with the value. `ownershipType` is
+beta-only too. Measured live 2026-08-23, same tenant/token/moment. **Operator chose option A**:
+containers stay on beta as a documented second exception.
+
+Guarded by `SpeContainerGraphBaseUrl` (constant carrying the verbatim 400) +
+`SpeAdminGraphVersionContractTests` — flip it to v1.0 and tests fail pointing at the evidence.
+
+**Paging no longer hardcodes a host** — `ResolveGraphBaseUrl(graphClient)` derives it from the client
+about to issue the request, so a nextLink can never point at a different version than page 1 (which
+fails as "no more results", not as an error).
+
+✅ **Task 024's spike is answered in advance: YES.** FR-C06 resolves to **implement**, not remove — Graph
+exposes consumption on **beta**, **LIST-only** (even beta's GET-single omits it). Don't re-run the spike.
+
+🔴 **Still broken, and it's 011's scope, not 020's**: container-type **GET and CREATE** route through
+`…ForConfigAsync` → an **app-only** client, but container types are **delegated-only** (403 app-only on
+both versions). 011 wired only LIST. One resource, two API versions *and* two auth models.
+`CreateGraphClientFromBearerToken` (`:4278`) is effectively-dead — its only caller is the multi-app OBO
+branch that can never succeed; removing it means removing `SpeAdminTokenProvider` too.
 
 ### 🔑 Task 013 — the multi-tenant fact, and a retraction
 

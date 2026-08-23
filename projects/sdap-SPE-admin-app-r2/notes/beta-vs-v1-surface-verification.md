@@ -131,7 +131,43 @@ working against the workstream's actual goal.
 
 ---
 
-## 8. What was NOT done
+## 8. ✅ RESOLVED — operator chose **A** (2026-08-23)
 
-No code changed. No migration performed. Stopped at the trigger per POML `mode="directional"` +
-CLAUDE.md §6 rather than picking a branch that silently forecloses task 024.
+### Done
+
+| Change | Why |
+|---|---|
+| **Pagination now derives its base address from the client** (`ResolveGraphBaseUrl`) instead of a hardcoded `https://graph.microsoft.com/beta` literal | The POML's explicit constraint. A synthetic nextLink pointing at a different version than the client sends page 2 somewhere page 1 never came from, and it fails as *"no more results"* rather than as an error. Now it cannot drift — the URL is built from whatever client is about to issue it. |
+| **`SpeContainerGraphBaseUrl` named constant** carrying the full measured justification, incl. the verbatim 400 | The vague `// Beta endpoint required for SPE FileStorage container APIs` invited exactly the "cleanup" that would have deleted the storage feature. |
+| **5 contract tests** (`SpeAdminGraphVersionContractTests`) | A decision with no test is a comment waiting to be tidied away by the next reader of FR-C01's title. |
+
+The load-bearing test: the fixture's client points at **loopback**, so a hardcoded `graph.microsoft.com`
+nextLink would send page 2 to the real Graph host and never reach the fixture. It asserts the page-2
+request arrives — which can only happen if the base address was derived.
+
+**Gates**: build 0 errors · **10,646** tests passing (+5) · ArchTests 36/36 · publish **43.67 MB, 0 MB
+delta** (ceiling 60) · no new NuGet.
+
+### Deviation from the POML — accepted with the option-A decision
+
+Acceptance criterion 1 (*"grep returns only the container-type CREATE site"*) is **not met**. Containers
+remain on beta as a **second documented exception**, for the measured reason in §2. This was the point of
+the escalation; the operator chose it knowingly.
+
+### ⏭️ Deferred to task 011 — NOT done here, and why
+
+Option A also named two items that turn out to be **task 011's remaining scope**, not task 020's:
+
+1. **Delete `CreateGraphClientFromBearerToken` (`:4278`).** It is not orphaned — it has one caller at
+   `:513`, the *multi-app OBO branch*. Removing it means removing that branch **and**
+   `SpeAdminTokenProvider`. The branch is reachable but can never succeed (task 010: `AADSTS500011` +
+   audience mismatch), so this is effectively-dead rather than literally-dead code.
+2. **🔴 Container-type GET and CREATE are still broken.** They route through
+   `GetContainerTypeForConfigAsync` / `CreateContainerTypeForConfigAsync` → `GetClientForConfigAsync` →
+   an **app-only** client. Container types are **delegated-only** — app-only returns **403 on both v1.0
+   and beta** (task 010, re-confirmed 2026-08-23). Task 011 wired only LIST onto `ForUserAsync`. So one
+   resource currently spans two API versions *and* two auth models, and two of its four operations
+   cannot work.
+
+Both belong with the `SpeAdminTokenProvider` removal that TASK-INDEX already records as 011's
+outstanding work. Doing them here would have meant an auth change inside a version-migration task.

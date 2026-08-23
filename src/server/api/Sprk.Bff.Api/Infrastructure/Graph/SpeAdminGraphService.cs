@@ -948,7 +948,14 @@ public sealed class SpeAdminGraphService
             // The Graph SDK's WithUrl() builder allows resumption from any OData nextLink.
             // We reconstruct the URL in the format Graph expects for skip-token continuation.
             // Note: Graph API containerTypeId is Edm.Guid — no single quotes in filter.
-            var nextLinkUrl = $"https://graph.microsoft.com/beta/storage/fileStorage/containers" +
+            //
+            // The base address is DERIVED from the client that is about to issue the request, never
+            // hardcoded. A synthetic nextLink pointing at a different API version than the client's own
+            // base address sends page 2 somewhere page 1 did not come from — which fails silently as
+            // "no more results" rather than as an error (task 020 / spec FR-C01 pagination constraint).
+            var baseUrl = ResolveGraphBaseUrl(graphClient);
+
+            var nextLinkUrl = $"{baseUrl}/storage/fileStorage/containers" +
                               $"?$filter=containerTypeId+eq+{containerTypeId}" +
                               $"&$skiptoken={Uri.EscapeDataString(skipToken)}";
 
@@ -4241,11 +4248,69 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// The Graph base address used for SPE FileStorage container operations.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Beta is deliberate here, and it is measured — not inherited.</b> Verified live against Spaarke
+    /// Dev on 2026-08-23 (task 020 / spec FR-C01), same tenant, token, container type and moment:
+    /// </para>
+    /// <code>
+    /// GET /v1.0/storage/fileStorage/containers?$select=id,displayName,storageUsedInBytes
+    ///   → 400  "Could not find a property named 'storageUsedInBytes'"
+    /// GET /beta/storage/fileStorage/containers?$select=id,displayName,storageUsedInBytes
+    ///   → 200  { "storageUsedInBytes": ... }
+    /// </code>
+    /// <para>
+    /// <b><c>storageUsedInBytes</c> is not defined in the v1.0 schema at all</b> — a property merely
+    /// omitted by default would have been returned on explicit <c>$select</c>; a 400 means v1.0 does not
+    /// know the name. <c>ownershipType</c> is likewise beta-only. Both are consumed by the SPE Admin
+    /// storage surface (spec FR-C06), so migrating this client to v1.0 would delete a feature rather
+    /// than modernise one.
+    /// </para>
+    /// <para>
+    /// FR-C01's rationale — that beta schema drift generates the wrong-property-name defect class — does
+    /// hold for container <i>types</i> (§4.1's <c>itemMajorVersionLimit</c> /
+    /// <c>maxStoragePerContainerInBytes</c>). It is <b>inverted</b> for containers: here v1.0 is the
+    /// version missing properties the application needs.
+    /// </para>
+    /// <para>
+    /// This client is reached through <c>GetClientForConfigAsync</c> and therefore backs EVERY
+    /// <c>…ForConfigAsync</c> method — containers, recycle bin, search, security, audit. Changing this one
+    /// address changes all of them at once. Do not flip it without re-running the probe above.
+    /// Full evidence: <c>projects/sdap-SPE-admin-app-r2/notes/beta-vs-v1-surface-verification.md</c>.
+    /// </para>
+    /// </remarks>
+    internal const string SpeContainerGraphBaseUrl = "https://graph.microsoft.com/beta";
+
+    /// <summary>
+    /// Returns the base address of the client that is about to issue a request, so synthetic
+    /// pagination URLs track the client instead of a hardcoded literal.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to <see cref="SpeContainerGraphBaseUrl"/> only when the adapter reports no base URL,
+    /// which the Graph SDK does not do in practice — the fallback exists so a null can never produce a
+    /// relative URL that silently fails to resolve.
+    /// </remarks>
+    internal static string ResolveGraphBaseUrl(GraphServiceClient graphClient)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+
+        var baseUrl = graphClient.RequestAdapter?.BaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? SpeContainerGraphBaseUrl
+            : baseUrl.TrimEnd('/');
+    }
+
+    /// <summary>
     /// Creates a <see cref="GraphServiceClient"/> using ClientSecretCredential (app-only).
-    /// Uses beta endpoint for SPE FileStorage APIs (required per graph-sdk-v5 pattern).
     /// Uses the shared "GraphApiClient" named HttpClient which provides centralized resilience
     /// (retry, circuit breaker, timeout) via GraphHttpMessageHandler.
     /// </summary>
+    /// <remarks>
+    /// Base address is <see cref="SpeContainerGraphBaseUrl"/> — see its remarks for why beta is the
+    /// measured-correct choice for container operations.
+    /// </remarks>
     private GraphServiceClient CreateGraphClient(string tenantId, string clientId, string clientSecret)
     {
         var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
@@ -4257,8 +4322,7 @@ public sealed class SpeAdminGraphService
         // Shared HttpClient with GraphHttpMessageHandler provides resilience (ADR-001)
         var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
 
-        // Beta endpoint required for SPE FileStorage container APIs
-        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+        return new GraphServiceClient(httpClient, authProvider, SpeContainerGraphBaseUrl);
     }
 
     /// <summary>

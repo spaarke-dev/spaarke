@@ -32,7 +32,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | ✅ **granted; Secure Score live. Alerts blocked on a NON-permission cause — escalated** |
-| 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | ⛔ **ESCALATED — v1.0 lacks `storageUsedInBytes`; conflicts with 024** |
+| 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | ✅ **option A — containers stay on beta (documented); paging now derives base addr** |
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔲 |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
 | 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) 🔴 | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | 🔲 |
@@ -190,7 +190,7 @@ it is the exact failure mode this project exists to remove. Options in
 
 ---
 
-## ⛔ Task 020 ESCALATED 2026-08-23 — `/beta` → v1.0 is not safe wholesale
+## ✅ Task 020 — resolved as **option A** (operator, 2026-08-23). `/beta` → v1.0 is NOT safe wholesale
 
 **Measured live**: `storageUsedInBytes` **does not exist in the v1.0 schema**. `$select` on it returns
 **400 "Could not find a property named 'storageUsedInBytes'"**, while the identical call on beta returns

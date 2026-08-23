@@ -4,7 +4,7 @@
     <title>Migrate GA'd container-type surfaces from /beta to /v1.0</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>011 complete, 040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>
