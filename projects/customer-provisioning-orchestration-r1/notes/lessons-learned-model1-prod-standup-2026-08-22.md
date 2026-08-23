@@ -243,6 +243,115 @@ BUT direct query `az cognitiveservices account deployment list` + `az rest GET .
 
 **Broader class of issue**: Cognitive Services is unusually strict about back-to-back writes. Related quirks observed on other Cognitive Services resources (Doc Intelligence, AI Search) — same class of transient write-lock. The retry-with-backoff pattern applies universally to `Microsoft.CognitiveServices/*` and `Microsoft.Search/*` post-failed-deploy scenarios.
 
+### F12: SpaarkeMaster leaky managed-export missing 240 dependencies on install to fresh env
+
+**Symptom**: Import of exported managed `SpaarkeMaster.zip` to fresh Model 1 Prod env failed with 240 `<MissingDependency>` entries in the manifest error. The zip built cleanly in spaarkedev1 (source env) and installs there via reset — but a fresh env with only baseline first-party solutions rejects it.
+
+**Root cause**: `scripts/Build-SpaarkeMaster.ps1` line 138 was calling the `AddSolutionComponent` action with `AddRequiredComponents = $false`. This adds top-level entities to the solution WITHOUT auto-including their subcomponents (attributes, ribbons, forms, views, relationships). The resulting managed export references those subcomponents AS EXTERNAL UNMANAGED CUSTOMIZATIONS in the source env's "Active" (unmanaged) layer — producing 105 self-referencing "leaky" deps. On top of that, 135 refs to legitimate D365 first-party solutions (msdynce_Activities, EnvironmentVariables, PowerAI, PowerAppsChecker, BaseCustomControlsCore, etc.) are unavoidable but expected — they're pre-installed on Production-tier envs.
+
+Diagnostic breakdown of the 240 missing deps on the pre-fix export:
+- **Category A (D365 first-party)**: ~135 refs to 25 well-known first-party solutions. Expected pre-installed on any Production-tier env.
+- **Category B (leaky self-refs)**: 105 refs to SpaarkeMaster's own subcomponents citing `solution="Active"`. Only produced by improper build. Fixable.
+
+**Fix applied**: `scripts/Build-SpaarkeMaster.ps1` line 138 changed `AddRequiredComponents = $false` → `$true`. Rebuilt in spaarkedev1 (485 components, up from prior 386 — proof that ~99 additional subcomponents were auto-included). Re-exported managed .zip and re-counted:
+
+| Metric | Before F12 | After F12 |
+|---|---|---|
+| Total MissingDependency | 240 | **77** (−163, −68%) |
+| Category B (leaky self-refs) | 105 | **0** ✅ |
+| Category A (D365 first-party) | ~135 | 77 |
+
+**Category B fully eliminated**. Category A dropped from ~135 to 77 (attributes that were previously listed as separate deps are now part of their parent entity's subcomponent block).
+
+**Automation gap**: No CI check catches the leaky-export flag. Anyone editing `Build-SpaarkeMaster.ps1` could revert this without detection until a fresh-env install fails.
+
+**Automation TODO**:
+- Add a build-verify step in `Build-SpaarkeMaster.ps1` that exports a test managed .zip, extracts `solution.xml`, counts `<MissingDependency>` entries with `solution="Active"`, and FAILS the script if any exist (Category B must always be 0)
+- Add a CI check on the exported .zip (nightly or on Build-SpaarkeMaster.ps1 edit): assert `MissingDependency` count with `solution="Active"` == 0
+- Add a smoke-install job that installs the managed .zip to a throwaway env once per PR that touches `Build-SpaarkeMaster.ps1`
+
+**Reference**: `scripts/Build-SpaarkeMaster.ps1` line 138 comment cites this section; per-commit rationale in `git log` on file.
+
+### F13: Fresh Production-tier envs do NOT auto-install Power BI Extensions (msft_PowerBI_Anchor)
+
+**Symptom**: After F12 fix + re-export, SpaarkeMaster import to Model 1 Prod failed within 50 seconds with:
+```
+Some dependencies are missing. The missing dependencies are :
+<MissingDependency canResolveMissingDependency="True">
+  <Required type="1" schemaName="powerbimashupparameter"
+            displayName="Power BI Mashup Parameter"
+            solution="msft_PowerBI_Entities (1.0.0.193)">
+    <package appName="Power BI" applicationName="Power BI Extensions (Preview)"
+             PackageSource="" resolutionAction="Install" resolutionActionValue="Install"
+             isFirstParty="False">
+  </Required>
+  <Dependent type="1" schemaName="environmentvariabledefinition" />
+</MissingDependency>
+```
+
+Only ONE dep — Power BI Entities — was missing. The other 76 Category A first-party deps (BaseCustomControlsCore, msdyn_PowerAppsChecker, msdynce_AppCommon, msdyn_TimelineExtended, msdyn_FlowApprovalsCore, msdyn_AISolution, etc.) were all satisfied by fresh Production baseline.
+
+**Root cause**: Power BI Extensions (application-name `msft_PowerBI_Anchor`, publisher solution `msft_PowerBI_Entities`) is `isFirstParty="False"` — it's an AppSource-installed extension, NOT part of the base D365 first-party pack. Fresh Production envs do NOT include it by default; it must be explicitly installed. spaarkedev1 has it because someone installed it at some earlier point.
+
+Why does SpaarkeMaster need it? A `sprk_*` `environmentvariabledefinition` in SpaarkeMaster picked up a dep on `powerbimashupparameter` — likely because an env variable was authored in an env where Power BI mashup UI was open. This is a SPURIOUS dep from Dataverse's dep-tracker being overly aggressive. Runtime does not actually need Power BI. But at import time, Dataverse enforces the dep regardless.
+
+**Fix applied (this session)**: Installed Power BI Extensions to Model 1 Prod via:
+```
+pac application install --environment https://spaarke-model1-prod.crm.dynamics.com \
+  --application-name msft_PowerBI_Anchor
+# Completed in ~6 min (polls every 30s)
+```
+
+`--skip-dependency-check` on `pac solution import` was tried first — it DOES NOT WORK for this class of dep (`ProductUpdatesOnly : False` in the error trailer means the flag only skips deps flagged as "product update", which Power BI Extensions is not).
+
+**Automation gap**: No pre-flight check for AppSource-app prereqs on the target env before attempting SpaarkeMaster import. The `provision-environment` skill has no Step 2.5 check for this.
+
+**Automation TODO (r1 fresh-sub Step 2.5 or H6 solution-import handler)**:
+- Add a `Required Applications` manifest to the r1 handler-catalog (config-driven list of AppSource apps that must be present on any Spaarke target env). Initial list: `msft_PowerBI_Anchor` (Power BI Extensions).
+- Add a pre-import check that calls `pac application list --environment {env}` → intersects with required-apps manifest → any missing → call `pac application install` in a loop. Wait for each install to complete before proceeding (poll status).
+- Longer-term (belongs to a follow-on): identify the specific SpaarkeMaster env variable(s) that carry the spurious Power BI dep and fix them at the source (either remove the dep or verify it's actually needed). If removed, F13 goes away.
+
+### F14: Fresh Production-tier envs default `maxuploadfilesize` to 5 MB, blocking large PCF web resources
+
+**Symptom**: After F13 fix (Power BI installed) + import retry, SpaarkeMaster import to Model 1 Prod failed 5 minutes in with:
+```
+Import Solution Failed: CustomControl with name Spaarke.Controls.UniversalDocumentUpload
+failed to import with error: Webresource content size is too big.
+```
+
+Only ONE PCF (`UniversalDocumentUpload`) failed — all other 5 PCFs (RecordHeader, MatterHeader, DatasetGrid, etc.) imported fine within the 5 MB limit.
+
+**Root cause**: Fresh Production-tier envs have `organization.maxuploadfilesize = 5,242,880` bytes (5 MB) — the platform default. UniversalDocumentUpload's compiled bundle exceeds this. spaarkedev1 has this setting raised to `25,600,000` (25 MB) — likely by a past manual `pac org update-settings` or Portal admin action. Model 1 Prod inherited only the default.
+
+Comparison via `pac org fetch` on both envs:
+```
+=== spaarkedev1 (reference) ===
+name        maxuploadfilesize  organizationid
+spaarkedev1 25,600,000         0c3e6ad9-...
+
+=== spaarke-model1-prod (target) ===
+name                maxuploadfilesize  organizationid
+spaarke-model1-prod 5,242,880          e9aa604f-...
+```
+
+**Fix applied (this session)**:
+```
+pac org update-settings --name maxuploadfilesize --value 25600000
+# Verified: setting now reports "25,600,000"
+```
+NOTE: setting name is lowercase `maxuploadfilesize` (not PascalCase); `pac org update-settings` uses the curated env-settings alias table.
+
+**Automation gap**: No preflight check for org-level `maxuploadfilesize` before attempting solution import.
+
+**Automation TODO (r1 fresh-sub Step 2.5 or H6 solution-import handler)**:
+- Add an `Org Settings Contract` to the r1 handler-catalog (config-driven map of `settingName → minValue` that MUST be applied to any Spaarke target env). Initial contract:
+  - `maxuploadfilesize`: 25_600_000 (25 MB) — required by UniversalDocumentUpload PCF and likely other large webresources
+- Add a pre-import check that calls `pac org list-settings` → compares against contract → any drift → auto-apply via `pac org update-settings`. This is idempotent and safe to run every provision.
+- Consider adding to the ADR-039 canonical config catalog if any other Spaarke component depends on env-level settings.
+- Longer-term: investigate whether UniversalDocumentUpload can be tree-shaken or split. But 25 MB org-setting is trivial to apply per-env and unblocks the current install — priority is E2E flow.
+
+**Combined F13 + F14 automation footprint**: TWO pre-import checks + TWO auto-remediations. Both idempotent (safe to re-run). Both fast (single API call each). Together they eliminate the two silent-fail traps between "F12-clean managed export" and "fresh env accepts import."
+
 ---
 
 ## Non-Blocking Observations
