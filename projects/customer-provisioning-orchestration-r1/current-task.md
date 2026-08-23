@@ -1,60 +1,65 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-23 T00:00Z (by /context-handoff) — **Model 1 Prod Azure infra 100% deployed + Dataverse env created; F12 (SpaarkeMaster leaky export) fix applied to script + REBUILD IN PROGRESS (background task b6q1x78ov) against spaarkedev1. Next session: check rebuild result → export new managed .zip → verify deps cleaned → Package Deployer wrap + install to prod env.**
+> **Last Updated**: 2026-08-23 T21:20Z (in-session) — **🎉 MAJOR MILESTONE: SpaarkeMaster (485 components) SUCCESSFULLY INSTALLED to fresh Model 1 Prod Dataverse env after F12/F13/F14 fixes. First-ever install of Spaarke on a fresh Production-tier env. E2E chain proven from Bicep-deploy → env-create → F12-clean managed-export → F13/F14 preflight → import. Next phase: BFF wire-up (Application User + KV seeding + healthz).**
 
 ## 🎯 QUICK RECOVERY — 2026-08-23 SESSION (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `d5e8504d1` (F11 CogSvc soft-lock docs) |
-| **Working tree** | ⚠️ **4 uncommitted items** — see "Uncommitted Changes" below |
-| **Background task** | ✅ `b6q1x78ov` COMPLETED SUCCESSFULLY — 485 components composed (up from prior 386). SpaarkeMaster in spaarkedev1 has been REBUILT with proper subcomponent inclusion. Ready to export. Detail: 113 entities, 34 option sets, 230 web resources, 21 env var defs, 6 PCF controls, 8 security roles, 14 app-module components. |
+| **HEAD** | `344f29485` (F12/F13/F14 docs + skill absorb — pushed to origin) |
+| **Working tree** | ✅ Clean (all F12+F13+F14 work committed + pushed) |
 | **Azure sub (LIVE)** | `Spaarke Model 1 Production` (`cd95fcec-6b89-49ea-8339-c2b579b12587`) — 20 resources deployed via WestUS2 (platform) + WestUS3 (OpenAI). Ralph is Owner. |
-| **Dataverse env (LIVE)** | `spaarke-model1-prod.crm.dynamics.com` — created, empty (import blocked by F12), `restrictGuestUserAccess=false` set |
-| **Session commits** | 5 landed: `798f61c9` (P5 gpt-5 tier) → `f90918f8` (WestUS2/3 region pivot) → `8c3cb97d` (lessons+skill+webapp proposal) → `9dd1c411d` (F10 SB name) → `d5e8504d1` (F11 CogSvc retry) |
-| **Findings this project** | **F1-F12** documented in `notes/lessons-learned-model1-prod-standup-2026-08-22.md` + skill Step 2.5 + skill Automation Gaps table + 3 Claude memory files (openai-model-pins + fresh-sub-regional + fresh-sub-openai-tier) |
-| **Research report** | ⚠️ UNCOMMITTED — `notes/research-dataverse-env-provisioning-2026-08-22.md` (2100 lines, R1-R14 recommendations). Runs the 8-API-surface framework for programmatic Dataverse env setup. |
+| **Dataverse env (LIVE)** | `spaarke-model1-prod.crm.dynamics.com` — **✅ SpaarkeMaster 1.0.0.0 INSTALLED (Managed=True), 485 components, import took 23 min (8:53 PM → 9:16 PM on 2026-08-23)** |
+| **Session commits (chained after last handoff)** | 2 more landed: `b4ba9ec2b` (F12 fix + research + prior handoff) → `344f29485` (F12/F13/F14 docs + skill absorb). Combined with prior 5, branch is 7 commits ahead of last-fetched origin — all pushed. |
+| **Findings this project** | **F1-F14** documented in `notes/lessons-learned-model1-prod-standup-2026-08-22.md` + skill Step 2.5 + Automation Gaps table (now covers F1-F14) + 4 Claude memory files |
+| **Research report** | ✅ COMMITTED `notes/research-dataverse-env-provisioning-2026-08-22.md` (723 lines, R1-R14 recommendations, 8-API-surface framework) |
 
-### 🔑 Uncommitted Changes (must commit these on next session before doing anything else)
+### 🎯 E2E CHAIN PROVEN THIS SESSION
 
 ```
-M  .claude/agent-memory/researcher/MEMORY.md          ← researcher subagent memory index update
-M  scripts/Build-SpaarkeMaster.ps1                    ← F12 FIX: AddRequiredComponents=$true (line 138)
-?? .claude/agent-memory/researcher/dataverse-env-provisioning-e2e-2026-08-22.md   ← researcher's persisted memory entry
-?? projects/customer-provisioning-orchestration-r1/notes/research-dataverse-env-provisioning-2026-08-22.md   ← 2100-line research report
+Bicep deploy (F1-F11 fixed)
+  → pac admin create env (Production, restrictGuestUserAccess=false)
+  → Build-SpaarkeMaster.ps1 rebuild (F12 fix, AddRequiredComponents=$true, 485 components)
+  → pac solution export --managed (24.5 MB zip, F12-clean: 240→77 MissingDep, Cat B refs 0)
+  → pac application install msft_PowerBI_Anchor (F13 preflight, ~6 min)
+  → pac org update-settings maxuploadfilesize 25600000 (F14 preflight, single API call)
+  → pac solution import --async (23 min, SUCCEEDED, 485 components installed clean)
 ```
 
-**Suggested commit** (after Build-SpaarkeMaster rebuild verifies successful):
-```
-git add scripts/Build-SpaarkeMaster.ps1 \
-        projects/customer-provisioning-orchestration-r1/notes/research-dataverse-env-provisioning-2026-08-22.md \
-        .claude/agent-memory/researcher/
-git commit -m "fix(solutions): F12 SpaarkeMaster leaky-export — AddRequiredComponents=\$true + Dataverse env research report"
-```
+This is the automation contract for the E2E "customer setup" workflow (owner directive: "run E2E with no human interaction"). Steps F12 + F13 + F14 need to become automated pre-import handlers in H6.
 
 ### 📍 EXPLICIT NEXT ACTION (on fresh session)
 
-**Prior rebuild step already succeeded — skip step 1, start at step 2.**
+**Import succeeded — move to BFF wire-up phase.** The 6 next tasks map to r1 handlers H4 (KV secrets), H10 (App User + Role), and post-install verification:
 
-1. ~~Check background task `b6q1x78ov` result~~ ✅ DONE — rebuild succeeded with 485 components (99 more than prior). See "Background task" row above.
-
-2. **Export the rebuilt SpaarkeMaster as managed**:
+1. **H10 (Application User create)**: Create BFF Application User for the shared BFF UAMI in spaarke-model1-prod Dataverse, assign System Administrator (or scoped Spaarke role).
    ```bash
-   pac solution export --environment https://spaarkedev1.crm.dynamics.com --name SpaarkeMaster --managed --path ./out/SpaarkeMaster-rebuilt.zip --async
-   ```
-   Then verify missing-deps count dropped from 240 (with 105 "Active" refs) to something small (only Category A D365 first-party refs remain):
-   ```bash
-   mkdir -p /tmp/spm-verify && cd /tmp/spm-verify && unzip -o ./out/SpaarkeMaster-rebuilt.zip solution.xml
-   grep -c "<MissingDependency" solution.xml
+   # Shared BFF UAMI to link: sprk-prod-shared-bff-uami (rg-spaarke-shared-prod)
+   # Get its clientId + principalId first:
+   az identity show -g rg-spaarke-shared-prod -n sprk-prod-shared-bff-uami --query "{clientId:clientId, principalId:principalId}" -o json
+   # Then create Application User in Dataverse via Web API (see scripts/... for pattern)
    ```
 
-3. **If rebuild FAILED**: read the failure carefully — the `AddRequiredComponents=$true` change may have surfaced a NEW issue (e.g. Spaarke intentionally excluded some Microsoft-owned entity that's now being pulled in). This becomes F13.
+2. **H4 (KV secret seed)**: Seed per-tenant KV `sprk-trial01-prod-kv` with required secrets (`Dataverse-ClientSecret`, `BFF-API-ClientSecret`, others). BINDING: NEVER DELETE these two. Follow ADR-028 21 MUSTs.
 
-4. **Proceed to Package Deployer wrap** (owner Q5 = YES) once the ZIP is clean:
-   - `pac package init` in a new folder
-   - Add SpaarkeMaster + any D365 first-party prereqs
-   - `pac package deploy` against `https://spaarke-model1-prod.crm.dynamics.com`
+3. **T1 (kvRefIdentity)**: PATCH `sprksharedprod-api` App Service `keyVaultReferenceIdentity` to per-tenant UAMI `sprk-prod-trial01-uami` on BOTH slots (production + staging).
+   ```bash
+   az webapp update -g rg-spaarke-shared-prod -n sprksharedprod-api \
+     --set keyVaultReferenceIdentity=<sprk-prod-trial01-uami-resource-id>
+   # And for staging slot if it exists
+   ```
+
+4. **Registry entry**: Register spaarke-model1-prod as a new `sprk_dataverseenvironment` record on the registry env (probably spaarkedev1 — verify which env holds the registry).
+
+5. **BFF /healthz verification**: Curl `sprksharedprod-api/healthz` and expect 200. Ideally with `X-Spaarke-Tenant: trial01` header to verify per-tenant routing works.
+
+6. **Sample sign-in flow**: Manual test — sign in to Model 1 Prod MDA app (`sprk_MatterManagement`) as Ralph → verify BFF token flow works E2E.
+
+### ⚠️ HOLD OFF UNTIL BFF WIRE-UP COMPLETE
+
+- Absorbing F1-F14 + R5-R14 into r1 design.md/spec.md — deferred; may surface F15 during BFF wire-up
+- Extending `sprk_dataverseenvironment` schema per owner Q7 — deferred to after Model 1 Prod is E2E-validated (schema extension is r1 delivery scope, not immediate blocker)
 
 ### 🧠 CRITICAL CONTEXT — Owner Directives (Q1-Q7, 2026-08-23)
 
