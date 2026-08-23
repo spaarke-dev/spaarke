@@ -35,11 +35,38 @@ public sealed class PromptShieldService : IPromptShieldService
     private const string ApiPath = "contentsafety/text:shieldPrompt";
     private const string ApiVersion = "2024-09-01";
 
+    /// <summary>Configuration key for the Prompt Shield call deadline, in milliseconds.</summary>
+    public const string TimeoutMsConfigKey = "AiSafety:PromptShield:TimeoutMs";
+
     /// <summary>
-    /// Hard deadline for the Content Safety call within the streaming first-token budget.
-    /// Matches the 100ms P95 target from the task spec and <see cref="PromptShieldTelemetry"/>.
+    /// Default hard deadline for the Content Safety call within the streaming first-token budget.
     /// </summary>
-    private static readonly TimeSpan CallTimeout = TimeSpan.FromMilliseconds(100);
+    /// <remarks>
+    /// <para><b>Raised from 100ms to 500ms on 2026-08-23</b> (auth-v4 task 050 / FR-E1) on the
+    /// strength of a measurement, after the 100ms budget was found to make the perimeter
+    /// unconditionally inoperative.</para>
+    /// <para><b>The evidence.</b> Over the full 90-day App Insights retention window, dev recorded
+    /// <b>122 Prompt Shield scans and ZERO completions</b> — every one cancelled at the 100ms
+    /// deadline and failed OPEN, while <c>AiSafety:PromptShield:ChatPipelineEnabled=true</c> asserted
+    /// the perimeter was live. Auth was never the cause
+    /// (<c>DefaultAzureCredential.GetToken</c> averages 7ms, p95 1ms, and the token is cached).
+    /// Direct timing of <c>text:shieldPrompt</c> on 2026-08-23, warm connection, 8 samples:
+    /// <b>total 261–351ms (p50 ≈ 272ms)</b> with ~57ms of that connection RTT, i.e. roughly
+    /// <b>205–295ms of server processing</b>. The API cannot answer in 100ms from anywhere.</para>
+    /// <para>The BFF (<c>West US 2</c>) also calls this account <b>cross-region</b> (<c>eastus</c>),
+    /// which adds RTT to every scan. Co-locating them is the cheapest latency win available and would
+    /// justify lowering this value again — measure before doing so.</para>
+    /// <para>500ms = measured p95 (~350ms) plus headroom for cross-region variance. It is a real
+    /// pre-first-token cost on every chat turn, and it is the price of the perimeter doing anything
+    /// at all; the previous value bought 0% coverage for 100ms. Tune via
+    /// <see cref="TimeoutMsConfigKey"/>. Watch <c>ai.safety.shield_evaluations</c> /
+    /// <c>scripts/kql/ai-metering/shield-coverage.kql</c> for a non-zero completed count — that is
+    /// the only proof this perimeter works.</para>
+    /// </remarks>
+    public const int DefaultTimeoutMs = 500;
+
+    /// <summary>Hard deadline for the Content Safety call. See <see cref="DefaultTimeoutMs"/>.</summary>
+    private readonly TimeSpan _callTimeout;
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -52,12 +79,17 @@ public sealed class PromptShieldService : IPromptShieldService
         IHttpClientFactory httpClientFactory,
         PromptShieldTelemetry telemetry,
         AiTelemetry aiTelemetry,
-        ILogger<PromptShieldService> logger)
+        ILogger<PromptShieldService> logger,
+        IConfiguration? configuration = null)
     {
         _httpClientFactory = httpClientFactory;
         _telemetry = telemetry;
         _aiTelemetry = aiTelemetry;
         _logger = logger;
+
+        // Nullable + default keeps existing fixtures compiling (the shape CLAUDE.md prescribes).
+        var configured = configuration?.GetValue<int?>(TimeoutMsConfigKey) ?? DefaultTimeoutMs;
+        _callTimeout = TimeSpan.FromMilliseconds(configured > 0 ? configured : DefaultTimeoutMs);
     }
 
     /// <inheritdoc/>
@@ -66,7 +98,7 @@ public sealed class PromptShieldService : IPromptShieldService
         var sw = Stopwatch.StartNew();
 
         // Combine the caller's cancellation token with our hard 100ms deadline.
-        using var timeoutCts = new CancellationTokenSource(CallTimeout);
+        using var timeoutCts = new CancellationTokenSource(_callTimeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
         try
@@ -104,7 +136,7 @@ public sealed class PromptShieldService : IPromptShieldService
             _logger.LogWarning(
                 "PromptShield scan timed out after {LatencyMs:F1}ms (limit={LimitMs}ms). " +
                 "Failing open — request will proceed to LLM. docCount={DocCount}",
-                latencyMs, CallTimeout.TotalMilliseconds, request.Documents?.Count ?? 0);
+                latencyMs, _callTimeout.TotalMilliseconds, request.Documents?.Count ?? 0);
 
             _telemetry.RecordFailOpen("timeout", latencyMs);
             _aiTelemetry.RecordShieldEvaluation(AiTelemetry.ShieldOutcomeFailedOpenTimeout);
