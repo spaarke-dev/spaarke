@@ -14,7 +14,7 @@
 | **Task** | **none active. Group F is CLOSED** — 055, 052, 050, 054, 056 done; **051 🔄 + 053 🔄 code-complete, cutover booked to 031/033** |
 | **Status** | Full suite **10,614 / 0** (97 skipped) · seam **891/891** · ArchTests **56/56** · publish **44.99 MB compressed** (delta 0.00) · CVE clean |
 | **Next Action** | **Owner-gated — no autonomous work remains in Group F.** Next is **031** (slot deploy + OBO verification), which now carries 4 booked obligations from 051 and 1 from 053. 031→032→033 need an owner decision, a second test principal that does not exist, and a soak that cannot be compressed. |
-| **Progress** | **21 of 26 active complete** · **5 remaining** (031,032,033,090 + **053🔄/051🔄 awaiting cutover**) · 3 deferred |
+| **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** Group F has no autonomous work left; the count does not move until then · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
 ## §0 🔴 READ FIRST — things that will mislead you if you don't
