@@ -604,7 +604,13 @@ public class ComposeService : IComposeService
                             {
                                 DriveId = derived.DriveId,
                                 DocumentSpeId = derived.SpeId,
-                                DocumentRecordId = derived.RecordId ?? request.DocumentRecordId,
+                                // NOT `?? request.DocumentRecordId`. When the derived document has no known
+                                // row (its promotion failed), falling back to the PDF's row would read the
+                                // PDF record's sprk_composeorigin and attribute it to the .docx, and would
+                                // re-trigger the profile against the wrong record. Null is the honest answer
+                                // — the load degrades to Path B, where origin is null and the binding
+                                // contract already treats that as Imported.
+                                DocumentRecordId = derived.RecordId,
                             },
                             httpContext,
                             allowPdfRedirect: false,
@@ -2398,10 +2404,13 @@ public class ComposeService : IComposeService
     /// <summary>
     /// FR-A09: resolves the Word document a PDF already became, or null to project the PDF afresh.
     /// <para>
-    /// A mapping is only honored when the derived document STILL EXISTS. Someone who deletes the Word
-    /// document is entitled to re-open the PDF and start over, and a dangling mapping would otherwise fail
-    /// their load with a 404 on an item they never asked for. The stale entry is evicted on the way past so
-    /// the check does not repeat on every open.
+    /// A mapping is only honored when the derived document is actually reachable by this caller. Someone who
+    /// deletes the Word document is entitled to re-open the PDF and start over, and a dangling mapping would
+    /// otherwise fail their load with a 404 on an item they never asked for.
+    /// </para>
+    /// <para>
+    /// The entry is deliberately NOT evicted on a miss — see the probe comment below. The reachability
+    /// signal is per-caller; the mapping is not.
     /// </para>
     /// </summary>
     private async Task<ComposePdfDerivedDocument?> ResolvePdfDerivedDocumentAsync(
@@ -2415,11 +2424,9 @@ public class ComposeService : IComposeService
             return null;
         }
 
-        var key = PdfDerivedDocumentKey(driveId, speId);
-
         try
         {
-            var json = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+            var json = await _cache.GetStringAsync(PdfDerivedDocumentKey(driveId, speId), ct).ConfigureAwait(false);
             if (json is null)
             {
                 return null;
@@ -2431,18 +2438,23 @@ public class ComposeService : IComposeService
                 return null;
             }
 
-            var stillThere = await _spe.GetFileMetadataAsUserAsync(httpContext, derived.DriveId, derived.SpeId, ct)
+            // The probe runs under the CALLER's identity (OBO), so a null here means "this user cannot see
+            // it" — which is NOT the same as "it is gone". Deleting the mapping on that signal would let one
+            // user without access destroy the recovery path for everyone else on a tenant-scoped, per-item
+            // mapping. So: fall through for this caller and leave the entry alone. It expires on its own TTL,
+            // and a genuinely deleted document simply falls through for every caller until it does.
+            var visibleToCaller = await _spe.GetFileMetadataAsUserAsync(httpContext, derived.DriveId, derived.SpeId, ct)
                 .ConfigureAwait(false);
-            if (stillThere is not null)
+            if (visibleToCaller is not null)
             {
                 return derived;
             }
 
             _logger.LogInformation(
-                "Compose load: PDF drive={DriveId} item={SpeId} mapped to drive={DerivedDriveId} item={DerivedSpeId}, which no " +
-                "longer exists — evicting the mapping and projecting the PDF afresh (FR-A09).",
+                "Compose load: PDF drive={DriveId} item={SpeId} maps to drive={DerivedDriveId} item={DerivedSpeId}, which this " +
+                "caller cannot see (deleted, or no access) — projecting the PDF afresh for them; the mapping is left intact " +
+                "for other callers (FR-A09).",
                 driveId, speId, derived.DriveId, derived.SpeId);
-            await _cache.RemoveAsync(key, ct).ConfigureAwait(false);
             return null;
         }
         catch (Exception ex)

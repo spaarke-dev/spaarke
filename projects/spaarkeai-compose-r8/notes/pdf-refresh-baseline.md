@@ -126,6 +126,40 @@ save's session id always comes from the load response — but it is the SEV-1 di
 recorded here rather than left implicit. Closing it needs a server-side binding check at save time;
 carried to task 045 as a question, not silently assumed away.
 
+## Accepted costs (found at the Step-9.5 review, kept deliberately)
+
+**A redirected open downloads the PDF for nothing.** Source detection is bytes-first, so the mapping
+can only be consulted *after* the PDF has been fetched. Every reopen of a converted PDF therefore
+pays one wasted download for the life of the mapping.
+
+The obvious fix — a cheap pre-check on the metadata filename, before the download — was considered
+and **rejected**. It needs a second redirect call site, and because every test uses a `.pdf` filename
+the early path would fire in all of them and leave the byte-detected path (the mis-named PDF)
+*untested*. One correct path beats two where one is unexercised; this project has been burned by
+exactly that shape. Revisit if the cost shows up in practice, with a mis-named-PDF test alongside it.
+
+**`ComposeService.cs` grew 4,031 → 4,373 lines.** It is one of the five files Track D exists to
+decompose, and this change made it bigger. The PDF-provenance code is written as one self-contained
+region with its own header, depending only on `_cache` / `_logger` / `_spe`, so extracting it into a
+collaborator is mechanical — the same shape `ComposeBlockMerge.cs` took in task 040. Flagged for
+Track D rather than done here, because splitting the save path mid-task is how R4 and R6 went wrong.
+
+## Two defects the review caught in the first cut
+
+Both were in code written earlier in this same task, and both were silent.
+
+1. **The resumed load attributed the PDF's Dataverse row to the `.docx`.** The redirect fell back to
+   `request.DocumentRecordId` when the derived record id was unknown, which would have read the PDF
+   record's `sprk_composeorigin` as the Word document's and re-triggered the profile against the wrong
+   record. Now passes `derived.RecordId` and nothing else; a null degrades to Path B, where the
+   binding contract already treats origin-null as Imported.
+
+2. **One user's lack of access could destroy the mapping for everyone.** The existence probe runs
+   under the caller's identity (OBO), so its null means "this caller cannot see it" — not "it is
+   gone". The first cut evicted the entry on that signal, letting any user without access delete a
+   tenant-scoped recovery path for all other users. The eviction is removed: the caller falls through,
+   the entry stays, and the TTL handles genuine deletion.
+
 ## Residual
 
 - **Browse/local-file PDF door** — no session, no server identity, and `/api/compose/project` is
