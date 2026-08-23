@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-22 (by `task-execute` 054 + 056) — **PHASE 2 AND PHASE 6 COMPLETE. Group F in progress.**
+> **Last Updated**: 2026-08-23 (by `context-handoff`) — **Group F: 6 of 7 closed. 051 IS HALF-DONE — read §0 FIRST.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,11 +11,77 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active** — **Group F COMPLETE except 051** (055, 052, 050, 054, 056 closed; 053 🔄 code-complete, cutover booked to 031) |
-| **Status** | Full suite **10,603 / 0** · auth seams **60/60** · ArchTests **52/52** · publish **44.99 MB** · CVE clean |
-| **Next Action** | **Group F is done except 051.** Remaining work is owner-gated: 051 (SAS rotation decision), 031→032→033 (rollout), 090 (wrap-up). Superseded: `tasks/054-doc-intelligence-to-entra.poml` — **now unblocked**: 053 migrated all three `DocumentIntelligence:AiSearchKey` consumers, so 054 confines itself to the DocIntel resource itself. Then 056. 🔔 **Owner items left: 050 safety defect, 051 SAS rotation** |
-| **Progress** | **20 of 26 active complete** · **6 remaining** (031,032,033,051,**053🔄**,090) · 3 deferred |
+| **Task** | **051 🔄 IN PROGRESS — the SAS key IS ALREADY ROTATED; the code migration is NOT done.** 055, 052, 050, 054, 056 closed; 053 🔄 code-complete |
+| **Status** | Full suite **10,603 / 0** · auth seams **60/60** · ArchTests **52/52** · publish **44.99 MB** · CVE clean · working tree clean, 0 unpushed |
+| **Next Action** | Finish **051's code half**: migrate `WorkersModule.cs:18`, `OfficeWorkersModule.cs:95` and `ServiceBusJobProcessor` to namespace + **DI `TokenCredential`** (RBAC is already granted), then relax `ServiceBusOptions.ConnectionString` `[Required]`, then write `notes/decisions/051-sas-rotation.md`. **Do NOT rotate anything — that half is DONE.** ⚠️ **Read §0 before touching Service Bus config.** |
+| **Progress** | **20 of 26 active complete** · **6 remaining** (031,032,033,**051🔄 half-done**,**053🔄**,090) · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
+
+## §0 🔴 READ FIRST — 051 is HALF-DONE and I caused (then fixed) a dev outage
+
+**The SAS rotation is COMPLETE and IRREVERSIBLE. Do not repeat it. The code migration is NOT done.**
+
+### What is already true (verified 2026-08-23, do not re-derive)
+
+| Fact | Evidence |
+|---|---|
+| The leaked key **was** the namespace **PRIMARY** of `RootManageSharedAccessKey` (Manage+Send+Listen, whole namespace) | fingerprint match against `C:/code_files/spaarke/src/server/api/Sprk.Bff.Api/appsettings.Development.json` (main worktree, gitignored, **never committed**) |
+| That key is **ROTATED and dead** — fp `348e57a64503` no longer exists | `az servicebus ... keys renew --key PrimaryKey` |
+| **Both** current keys are **VALID** — proven at the data plane, not inferred | hand-built SAS token → `POST /sdap-jobs/messages/head` → **HTTP 204** for primary AND secondary |
+| Prod slot **and** `staging` slot both run the **SECONDARY** connection string | fp `f6d0dfd1ac9f` on both |
+| UAMI now holds **namespace-level** `Azure Service Bus Data Sender` + `Data Receiver` | was topic-scoped to `sprk-membership-changes` only |
+| KV secret `ServiceBus-ConnectionString` (`spaarke-spekvcert`) holds the **new primary** | fp `3db62606e51e` |
+| Dev job processing is **HEALTHY** — 0 `InvalidSignature` since 20:36Z; both slots `healthz` 200 | App Insights |
+
+### 🔴 THE FINDING THAT MATTERS MOST — a `staging` slot EXISTS and is RUNNING
+
+This project's own notes say *"P1v3, slots supported, **0 exist**"*. **That is now FALSE.**
+`spaarke-bff-dev` has a **`staging` slot, state=Running**, with its **own app settings**.
+
+It caused a ~40-minute dev outage that I misdiagnosed for six attempts: after rotating the key I
+fixed **production** settings repeatedly (KV refresh, version-pinned refs, literal values, secondary
+key, 4 restarts — each fingerprint-verified correct) while the *staging slot* kept looping on the
+dead key. It reports the **same `cloud_RoleName=spaarke-bff-dev`** to App Insights, so every
+diagnostic pointed at the app I was already fixing.
+
+**The tell I misread**: the failure rate never dipped at *any* production restart. A process that
+restarts and still fails looks identical in aggregate to one that never restarted — unless you look
+for the gap. Check for slots the *second* time a restart changes nothing, not the sixth.
+
+**Consequences for other tasks:**
+- **031 assumes it must CREATE the slot.** It already exists. Verify its settings + `keyVaultReferenceIdentity` before using it, and find out who created it.
+- **033 must purge secrets from BOTH slots** — already a booked obligation, now concrete.
+- Any future credential rotation must update **prod + every slot** before restarting.
+
+### Live environment changes made this session (all authorised)
+
+| Change | Reversible? |
+|---|---|
+| `spaarke-search-dev` `apiKeyOnly` → `aadOrApiKey` (task 053) | yes — `--auth-options apiKeyOnly` |
+| UAMI granted namespace-level SB `Data Sender` + `Data Receiver` | yes — delete the assignments |
+| **Service Bus PRIMARY key regenerated** | ❌ **NO — permanent** |
+| KV `ServiceBus-ConnectionString` → new primary | yes (versioned secret) |
+| Prod + staging app settings → secondary connection string | yes |
+| Owner granted **my user** `Cognitive Services User` on `spaarke-openai-dev` (for the 050 measurement) | **STILL STANDING — offer to remove it** |
+
+### ⚠️ A live SAS value was displayed in terminal output
+
+`ConnectionStrings__ServiceBus` was a **plaintext app setting** (not a KV reference), so `az` echoed
+it. It was **never** written to any file, commit, or record — only fingerprints were. That key is the
+one now rotated, so it is dead. Same handling rule as the client secret from task 022.
+
+### What 051 still needs (the whole remaining task)
+
+1. Migrate to namespace + **DI-injected `TokenCredential`** (the POML forbids inline `DefaultAzureCredential`, and notes `MembershipJunctionUpdaterHost.cs:120`'s inline construction is itself a deviation — **do not propagate it**):
+   - `Infrastructure/DI/WorkersModule.cs:18` — `new ServiceBusClient(connectionString)`
+   - `Workers/Office/OfficeWorkersModule.cs:95` — `new ServiceBusClient(options.Value.ConnectionString)`
+   - `Services/Jobs/ServiceBusJobProcessor.cs`
+2. **Relax `ServiceBusOptions.ConnectionString` `[Required]`** — same latent blocker class as 054 found in `DocumentIntelligenceOptionsValidator`; it will fail startup the moment the string is removed.
+3. `WorkersModule:18` gates `ServiceBusClient` registration on the connection string being non-empty — **the ADR-032 asymmetric-registration pattern again** (third instance). Gate on namespace instead.
+4. Write `notes/decisions/051-sas-rotation.md` (a POML `<output>`; **not yet written**).
+5. Remove the SAS from config + KV — **only after** the code is deployed and verified, i.e. **book to 031/033**, exactly like 053's cutover.
+
+---
 
 ### Files modified this session — ALL COMMITTED AND PUSHED (working tree clean)
 

@@ -83,7 +83,7 @@ fallback the whole rollback story depends on must be **built**, not inherited.
 | FICs | 2 — GitHub OIDC + **`mi-bff-api-dev-assertion`** (`66bac39a-…`, created for this project) |
 | App Service | `spaarke-bff-dev` in `rg-spaarke-dev` — **UserAssigned only** |
 | UAMI | `mi-bff-api-dev` · clientId `5967251e-…` · **principalId `9fd47efb-…`** ← the FIC subject |
-| Plan | `spaarke-dev-plan` — **P1v3**, slots supported, **0 exist** |
+| Plan | `spaarke-dev-plan` — **P1v3**. 🔴 **CORRECTED 2026-08-23: a `staging` slot NOW EXISTS and is Running** (this row previously said "0 exist"). It has its OWN app settings and reports the same `cloud_RoleName` to App Insights — it caused a 40-min dev outage during task 051 by holding a rotated credential while prod was being fixed. **031 must not assume it needs creating; 033 must purge BOTH slots.** |
 
 FIC shape: issuer `https://login.microsoftonline.com/{tenant}/v2.0` · subject = UAMI **principalId** (not
 clientId — the commonest silent error) · audience exactly `api://AzureADTokenExchange`.

@@ -4,7 +4,7 @@
     <title>Service Bus: namespace + MI, and rotate the leaked SAS key (FR-E2)</title>
     <phase>5 Group 2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, modifies .cs on the background-job path; includes a live credential rotation.</rigor-reason>
     <model-tier>sonnet</model-tier>
