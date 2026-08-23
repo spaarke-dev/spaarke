@@ -1,6 +1,142 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-21 T19:15Z (by context-handoff) — **Wave H-3 CLOSED ✅ (all essentials green; TASK-INDEX 108/110/113 → ✅). Strategic pivot away from Wave H-4: instead of validating r1 REST API E2E against a fresh customer, we stand up the PRODUCTION Model 1 shared environment first (using existing `infrastructure/bicep/stacks/model1-shared.bicep`). Awaiting owner decision on new Azure subscription for Model 1 Prod.**
+> **Last Updated**: 2026-08-23 T00:00Z (by /context-handoff) — **Model 1 Prod Azure infra 100% deployed + Dataverse env created; F12 (SpaarkeMaster leaky export) fix applied to script + REBUILD IN PROGRESS (background task b6q1x78ov) against spaarkedev1. Next session: check rebuild result → export new managed .zip → verify deps cleaned → Package Deployer wrap + install to prod env.**
+
+## 🎯 QUICK RECOVERY — 2026-08-23 SESSION (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | `d5e8504d1` (F11 CogSvc soft-lock docs) |
+| **Working tree** | ⚠️ **4 uncommitted items** — see "Uncommitted Changes" below |
+| **Background task** | ✅ `b6q1x78ov` COMPLETED SUCCESSFULLY — 485 components composed (up from prior 386). SpaarkeMaster in spaarkedev1 has been REBUILT with proper subcomponent inclusion. Ready to export. Detail: 113 entities, 34 option sets, 230 web resources, 21 env var defs, 6 PCF controls, 8 security roles, 14 app-module components. |
+| **Azure sub (LIVE)** | `Spaarke Model 1 Production` (`cd95fcec-6b89-49ea-8339-c2b579b12587`) — 20 resources deployed via WestUS2 (platform) + WestUS3 (OpenAI). Ralph is Owner. |
+| **Dataverse env (LIVE)** | `spaarke-model1-prod.crm.dynamics.com` — created, empty (import blocked by F12), `restrictGuestUserAccess=false` set |
+| **Session commits** | 5 landed: `798f61c9` (P5 gpt-5 tier) → `f90918f8` (WestUS2/3 region pivot) → `8c3cb97d` (lessons+skill+webapp proposal) → `9dd1c411d` (F10 SB name) → `d5e8504d1` (F11 CogSvc retry) |
+| **Findings this project** | **F1-F12** documented in `notes/lessons-learned-model1-prod-standup-2026-08-22.md` + skill Step 2.5 + skill Automation Gaps table + 3 Claude memory files (openai-model-pins + fresh-sub-regional + fresh-sub-openai-tier) |
+| **Research report** | ⚠️ UNCOMMITTED — `notes/research-dataverse-env-provisioning-2026-08-22.md` (2100 lines, R1-R14 recommendations). Runs the 8-API-surface framework for programmatic Dataverse env setup. |
+
+### 🔑 Uncommitted Changes (must commit these on next session before doing anything else)
+
+```
+M  .claude/agent-memory/researcher/MEMORY.md          ← researcher subagent memory index update
+M  scripts/Build-SpaarkeMaster.ps1                    ← F12 FIX: AddRequiredComponents=$true (line 138)
+?? .claude/agent-memory/researcher/dataverse-env-provisioning-e2e-2026-08-22.md   ← researcher's persisted memory entry
+?? projects/customer-provisioning-orchestration-r1/notes/research-dataverse-env-provisioning-2026-08-22.md   ← 2100-line research report
+```
+
+**Suggested commit** (after Build-SpaarkeMaster rebuild verifies successful):
+```
+git add scripts/Build-SpaarkeMaster.ps1 \
+        projects/customer-provisioning-orchestration-r1/notes/research-dataverse-env-provisioning-2026-08-22.md \
+        .claude/agent-memory/researcher/
+git commit -m "fix(solutions): F12 SpaarkeMaster leaky-export — AddRequiredComponents=\$true + Dataverse env research report"
+```
+
+### 📍 EXPLICIT NEXT ACTION (on fresh session)
+
+**Prior rebuild step already succeeded — skip step 1, start at step 2.**
+
+1. ~~Check background task `b6q1x78ov` result~~ ✅ DONE — rebuild succeeded with 485 components (99 more than prior). See "Background task" row above.
+
+2. **Export the rebuilt SpaarkeMaster as managed**:
+   ```bash
+   pac solution export --environment https://spaarkedev1.crm.dynamics.com --name SpaarkeMaster --managed --path ./out/SpaarkeMaster-rebuilt.zip --async
+   ```
+   Then verify missing-deps count dropped from 240 (with 105 "Active" refs) to something small (only Category A D365 first-party refs remain):
+   ```bash
+   mkdir -p /tmp/spm-verify && cd /tmp/spm-verify && unzip -o ./out/SpaarkeMaster-rebuilt.zip solution.xml
+   grep -c "<MissingDependency" solution.xml
+   ```
+
+3. **If rebuild FAILED**: read the failure carefully — the `AddRequiredComponents=$true` change may have surfaced a NEW issue (e.g. Spaarke intentionally excluded some Microsoft-owned entity that's now being pulled in). This becomes F13.
+
+4. **Proceed to Package Deployer wrap** (owner Q5 = YES) once the ZIP is clean:
+   - `pac package init` in a new folder
+   - Add SpaarkeMaster + any D365 first-party prereqs
+   - `pac package deploy` against `https://spaarke-model1-prod.crm.dynamics.com`
+
+### 🧠 CRITICAL CONTEXT — Owner Directives (Q1-Q7, 2026-08-23)
+
+Owner answered the 7 open questions from research report:
+
+| # | Question | Owner Answer | Impact |
+|---|---|---|---|
+| Q1 | Managed Environments on Model 1? | **NO** — defer until E2E works | Skip R3 (`pac admin set-governance-config`) for now |
+| Q2 | Env Groups for Model 1? | **NO** | Skip R14; document as intentional in D21 |
+| Q3 | PAYG for Model 1? | **Leave default** (=no PAYG, Spaarke tenant licenses) | Correct — no action needed |
+| Q4 | `restrictGuestUserAccess=false` at H5-time? | **OK** — DONE this session | R4 ✅ |
+| Q5 | Package Deployer investment now? | **YES — try it** | R2 (revised) — bundle prereqs + SpaarkeMaster via `pac package` |
+| Q6 | Model 2 first-customer timeline? | **None specific — defer** | Phase 4 items (R12-R14) stay long-term |
+| Q7 | Extend `sprk_dataverseenvironment` registry schema? | **YES** — add columns for managed-env-enabled + env-group-id + payg-billing-plan-id | Follow-on task; cheap now |
+
+### 🚨 Owner directive — VERBATIM (do not paraphrase away)
+
+> "The goal is not to install a new environment as quick and easy as we can — it's to build a customer provisioning and deployment process."
+
+Meaning: **do not use `pac admin copy` from spaarke-demo as a shortcut.** Every gap discovered IS the value. Fix in this project.
+
+> "The expectation for the final delivered solutions is that this process will run E2E with no human interaction. Ultimately the best solution is we have a 'Customer Deployment' web app that allows the user to input whatever information/setting choices and Claude Code / the scripts run everything."
+
+Filed as follow-on `customer-deployment-webapp-r1` proposal at `notes/follow-on-customer-deployment-webapp-proposal.md`. Depends on all F1-F12 automation-gaps closed first.
+
+### 📖 Session narrative (why we got here)
+
+Session started with Wave H-3 CLOSED state (from 2026-08-21 handoff). Owner pivoted to Model 1 Prod stand-up. Session executed:
+
+1. **Provisioned fresh Azure sub** `Spaarke Model 1 Production` (Ralph is Owner)
+2. **Deployed Bicep** `stacks/model1-shared.bicep` after 4 iterations discovering F1-F11:
+   - F1: OpenAI gpt-4o pins deprecated (bumped to gpt-5)
+   - F2: gpt-5 requires GlobalStandard SKU (parameterized module)
+   - F3: East US new subs have 0 App Service quota (pivoted to WestUS2)
+   - F4: WestUS2 has no gpt-5 (pivoted OpenAI to WestUS3)
+   - F5: Frontier tier quotas auto-granted 0 (used gpt-5-mini which auto-grants generously)
+   - F6: `az provider register` silent-fail (Portal needed)
+   - F7: Portal empty-dropdown fresh-sub UX
+   - F8: Auto-denial + support-ticket loop (avoided via auto-grant path)
+   - F9: Support Plan availability check gap
+   - F10: Azure reserves `-sb` suffix on Service Bus namespaces globally (bumped to `-servicebus`)
+   - F11: CogSvc holds 3-5min soft-lock after failed deploys (3-min wait then retry succeeded)
+3. **Created Dataverse env** `spaarke-model1-prod.crm.dynamics.com` (Production tier, US region)
+4. **Import failed** with 240 missing dependencies → discovered **F12**: SpaarkeMaster.zip is a leaky export (uses `AddRequiredComponents=$false`), references its own subcomponents as "Active" layer external refs
+5. **Launched researcher subagent** for full Microsoft Dataverse-env-provisioning knowledge research (2100-line report + memory)
+6. **Owner reviewed research + answered Q1-Q7**
+7. **Applied F12 fix** to `Build-SpaarkeMaster.ps1` (AddRequiredComponents=$true) + kicked off rebuild in spaarkedev1 (background task b6q1x78ov)
+8. **`/context-handoff` invoked** here for fresh session
+
+### 🔍 R1 diagnostic results (240 missing deps categorized)
+
+| Category | Refs | Fix path |
+|---|---|---|
+| **A — 25 D365 first-party solutions** | ~135 | `pac application install` via Package Deployer (BaseCustomControlsCore 43 refs, AppNotifications 37, msdynce_AppCommon 15, msdyn_PowerAppsChecker 5, msdyn_AISolution 4, msdyn_FlowApprovalsCore 4, msdyn_TimelineExtended 3, +18 more small) |
+| **B — "Active" layer (leaky export)** | 105 | Fix `Build-SpaarkeMaster.ps1` (DONE this session; rebuild in progress) |
+
+### 🛑 What NOT to do on next session
+
+1. **Do NOT run `pac admin copy` from spaarke-demo** — explicitly rejected by owner as defeating project purpose
+2. **Do NOT enable Managed Environments yet** — owner deferred (Q1)
+3. **Do NOT introduce Environment Groups** for Model 1 — owner deferred (Q2)
+4. **Do NOT set up PAYG** for Model 1 — Spaarke absorbs cost via tenant licenses (Q3)
+
+### 📄 Reference documents (updated this session)
+
+- `notes/lessons-learned-model1-prod-standup-2026-08-22.md` — F1-F12 with symptom/root-cause/fix/automation-gap structure (~700 lines)
+- `notes/research-dataverse-env-provisioning-2026-08-22.md` — 2100-line Microsoft Learn-cited research report with R1-R14 recommendations ⚠️ UNCOMMITTED
+- `notes/follow-on-customer-deployment-webapp-proposal.md` — owner-directed Customer Deployment Web App vision (deferred until r1 completes)
+- `.claude/skills/provision-environment/SKILL.md` — added Step 2.5 (Fresh-Sub Feasibility Check) + Automation Gaps table (F1-F11)
+- 3 Claude project memory files added: `openai-model-pins-stale-fast`, `azure-fresh-sub-regional-gotchas`, `azure-fresh-sub-openai-tier-gates`
+- 1 researcher subagent memory: `dataverse-env-provisioning-e2e-2026-08-22` ⚠️ UNCOMMITTED
+
+### ✋ To resume next session — say ONE of these
+
+- **"export the rebuilt zip"** — RECOMMENDED opening move. Run the `pac solution export --managed` command in step 2 above, then verify the deps count dropped substantially from 240
+- **"commit what's uncommitted first"** — safe alternative opening move; then export
+- **"proceed with Package Deployer"** — if you want to skip verification and go straight to bundling + install (higher risk — recommend verifying the export first)
+- **"where was I?"** — /project-continue skill loads full context
+
+---
+
+## Prior session state (2026-08-21 — Wave H-3 CLOSED — retained for reference)
 
 ## 🎯 QUICK RECOVERY (READ THIS FIRST on fresh session)
 
