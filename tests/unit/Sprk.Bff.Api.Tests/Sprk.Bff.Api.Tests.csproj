@@ -143,6 +143,20 @@
     <Compile Include="..\..\integration\auth\**\*.cs" LinkBase="AuthTests" />
   </ItemGroup>
 
+  <!--
+    unified-access-control-r2 task 008 follow-up (2026-08-23) — first backfill of the
+    tests/integration/data-mutation/** KEEP category (ADR-038 §2 path #3: writes, transactions,
+    rollback semantics). It was the LAST of the seven deletion-protected paths with no glob, which
+    made it worse than merely empty: a write-path test placed there compiled nowhere and ran never,
+    so an author following tests/CLAUDE.md's routing table would get silent zero coverage. Same
+    fixture-coupling reason as the contract/regression/seam/domain/tenant/auth globs above.
+    Namespaces preserved. New write-path tests add files under
+    tests/integration/data-mutation/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\data-mutation\**\*.cs" LinkBase="DataMutationTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration

@@ -182,7 +182,14 @@ silent.
 | **ADR-003** | ⚠️ **Known tension, already owned.** ADR-003 says *"MUST implement new auth logic as `IAuthorizationRule`"* and *"MUST NOT create new service layers for auth"*. The project's own ADR-tensions table already routes ADR-003 to a **path-B amendment (task 030)** on exactly this ground: the rules-only shape *"cannot carry rights or vetoes"*. This filter is another instance of the same tension, not a new one. Cited, not silently violated |
 | **ADR-028 A4** | ❌ **NEW `.WithClientSecret(...)` site — needs an owner decision.** See below |
 
-### 🔔 ADR Conflict — Resolution Required
+### 🔔 ADR Conflict — ✅ RESOLVED: path A accepted by the owner, 2026-08-23
+
+> *"for ADR-028 yes add it and we will address as part of the broader MI migration."*
+> Recorded in [`design.md` §9 ADR tensions](../design.md). The site is now #8 on the E-3 migration
+> list; net operational impact today is none — it reads the same `AzureAd:ClientSecret` the other
+> seven already require, so it cannot fail independently of them.
+
+The conflict as raised:
 
 - **ADR in question**: ADR-028 Amendment A4 — secret-free confidential credential
 - **Specific rule**: no `.WithClientSecret(...)` on a BFF-identity client; use an MI-FIC assertion or a
@@ -259,9 +266,113 @@ would have proved nothing. The fixture now supplies the CIAM keys.
 
 | # | Obligation | Owner |
 |---|---|---|
-| 1 | **`provision-project`**: is Write-on-project the right gate for creating a **business unit**, or should it require a privileged role? Currently gated by the same rule as the rest | **owner decision** |
+| 1 | ~~**`provision-project`** gate question~~ — **RESOLVED 2026-08-23**, see §10 | ✅ done |
 | 2 | `RetrievePrincipalAccess` under a delegated token is still unverified against a live tenant. It now gates SIX mutation endpoints as well as the document read path. Grep production logs for `DELEGATION-RPA-UNAVAILABLE` and `RPA-FALLBACK` | **task 034** |
-| 3 | `EntityAccessFilter` passes `"{entityType}:{entityId}"` into the document-only `DataverseAccessDataSource`, which can only resolve `None`. If so, the Office save path's entity check is inert — the same defect class as A-20, on a surface no Phase 0 task covers | **needs triage** |
+| 3 | ~~`EntityAccessFilter` may be inert~~ — **CONFIRMED AND FIXED 2026-08-23**, see §10 | ✅ done |
 | 4 | When `IAccessDataSource` is generalized to non-document entities, `CallerRecordAccessProbe` should collapse into it — it exists only because that seam is document-only | **task 032** |
 | 5 | `IAccessDataSource` is **Scoped** over a transient typed HttpClient, which is what makes `DataverseAccessDataSource`'s `DefaultRequestHeaders.Authorization` mutation safe. Making it a singleton would turn that into a cross-user OBO-token bleed. Invariant, not a defect | **task 032** (that file) |
 | 6 | The PCF "+ User" button (**task 065**) is now unblocked: FR-07's gate is in place | task 065 |
+
+---
+
+## 10. Owner-authorised follow-ups (2026-08-23)
+
+Three items were surfaced at task-008 review. All three are now closed.
+
+### 10.1 `EntityAccessFilter` — confirmed inert, fixed
+
+**Confirmed before fixing.** `EntityAccessFilterCharacterizationTests` was written first and run against
+the unchanged code: **7 of 9 failed**, `ProbedTargets` was **empty**, and a caller Dataverse reports as
+holding `AppendToAccess` on the target matter received **403**. So the reading was right —
+`POST /api/office/save` carrying a `targetEntity` was refused for every caller, however privileged.
+
+**User-visible effect while broken**: filing an email or document to a matter from the Outlook/Word
+add-in failed; filing *without* choosing a matter worked, because the filter short-circuits when
+`TargetEntity` is null. That asymmetry is why it read as flakiness rather than a systematic break.
+
+**The fix.** `EntityAccessFilter` now resolves the target's own Dataverse collection from a closed map
+and asks `CallerRecordAccessProbe` — the entity-generic, caller-scoped (OBO) rights read built for
+task 008. `OperationAccessPolicy` remains the single authority for *which* right
+`entity.associate_document` costs (`AppendTo`); only the **source** of the rights changed. So there is
+still exactly one place that decides what the operation requires.
+
+The old `IsValidEntityType` boolean is gone, folded into the entity-set map. Validating a type and
+knowing where to look it up are the same question; keeping them apart is how a type gets accepted with
+nowhere to check it.
+
+**Why the probe rather than fixing `IAccessDataSource`**: that is task 032's seam change, and this
+filter should go back through `AuthorizationService` once it lands — noted in the code so the temporary
+second access path is not mistaken for the intended shape.
+
+**Verified by perturbation**: pointing the check back at `sprk_documents` fails **6 of 9**.
+
+### 10.2 `provision-project` — Write is the right gate; the risk was idempotency
+
+**The owner asked whether the scope should be `Create` rather than `Write`.** It should not, for two
+reasons:
+
+1. **Dataverse cannot express it.** `CreateAccess` is an entity-level privilege (`prvCreateX`), not a
+   right a principal holds *on an existing record*. `RetrievePrincipalAccess` answers about a specific
+   record, and for a record that already exists it does not report `CreateAccess`. Requiring it would
+   deny every caller and break secure-project creation outright.
+2. **Write is what the endpoint actually needs.** Provisioning's final act (`StoreProjectReferencesAsync`)
+   is an `UpdateAsync` stamping three fields onto the project row. Requiring Write means the caller can
+   perform, themselves, the write the endpoint performs on their behalf. That is the correct
+   correspondence — anything less and the endpoint launders a write the caller could not do.
+
+Also worth stating: the business unit is created by the **app-only identity**, so the caller's own
+BU-create privilege is never consulted by Dataverse regardless of what we check. Expressing "may create
+business units" would require either an entity-level privilege check on the caller (a different
+mechanism) or an App Role — and an admin role was explicitly ruled out.
+
+**So the real exposure was never the gate — it was that the operation was not idempotent.** That is now
+fixed, which removes the damage the gate question was worried about.
+
+**The guard.** Step 1b refuses with **409** when the project already carries `sprk_securitybuid` OR
+`sprk_specontainerid`. EITHER reference is enough: the reference-stamping step is non-fatal, so a
+half-provisioned project is a real state — and it is the state where a blind re-run does the most
+damage, because the unrecorded half becomes invisible garbage. The 409 names the existing BU and
+container so an operator can tell "already done" from "something is wrong" without guessing.
+
+**How double-provisioning was reachable** (the owner's question): not by double-clicking. Nothing on the
+path deduped — not the client (`provisioningService.ts` posts once and does not retry, but neither does
+it dedupe), not the route (unlike `/office/save`, this group has no `IdempotencyFilter`), not Dataverse.
+Provisioning makes three slow remote calls, so a client or proxy timeout mid-flight is ordinary, and
+Step 5 is deliberately non-fatal — a run that failed to record its own output still returns 200 having
+created real infrastructure. Both cases invite exactly one thing: run it again.
+
+**Verified by perturbation**: disabling the guard fails **4 of 5**.
+
+### 10.3 The replication-lag 403
+
+The wizard calls `/provision-project` within seconds of creating the project row, so the delegation
+check can ask Dataverse about a record that has not replicated. `CallerRecordAccessProbe` now retries a
+**bounded** schedule (400 ms, then 1200 ms) when Dataverse reports the target as not found.
+
+**The tradeoff is real and is documented in the code.** Under OBO, Dataverse answers "not found" both
+for a record that does not exist yet AND for one the caller cannot see — the two are indistinguishable
+by design. So the backoff also lands on genuine no-access denials, costing them ~1.6 s. Acceptable
+*here specifically*: these are six low-volume admin mutations plus the Office save gate, none
+latency-sensitive — and a caller who can SEE the record but lacks rights gets a 200 with a rights
+string, so the common denial is not the one being slowed.
+
+The schedule is a pure `internal static` (`NotFoundRetryDelay`) so it is assertable without a transport
+mock (ban B1), tested at `tests/unit/domain/Auth/`. One of those tests caps total added latency below
+2 s — the number that has to stay defensible, so a well-meant extra retry reads as a regression.
+
+`IStorageRetryPolicy` already exists for this lag class but its 2s/4s/8s schedule is far too slow to sit
+in front of an authorization decision; hence a separate, much shorter one.
+
+### 10.4 `tests/integration/data-mutation/**` backfilled
+
+The provisioning guard is a write-path idempotency test, which belongs in the `data-mutation` KEEP path
+— and that path turned out to be **the last of the seven with no csproj glob**. Worse than empty: a test
+placed there compiled nowhere and ran never, so an author following `tests/CLAUDE.md`'s routing table
+would have got silent zero coverage. Now globbed, matching the auth backfill task 001 did.
+
+**All seven ADR-038 KEEP paths now compile.**
+
+### 10.5 Gates
+
+BFF **10,715 passed / 0 failed** (+20 net) · ArchTests 36/36 · Core 45/45 · publish **43.69 MB**
+compressed incl. PDBs (unchanged) · no vulnerable packages.

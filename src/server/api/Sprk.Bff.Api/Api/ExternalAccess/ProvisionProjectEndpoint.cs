@@ -55,6 +55,8 @@ public static class ProvisionProjectEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            // 409: already provisioned — re-running would orphan the existing container (see the handler).
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -95,7 +97,8 @@ public static class ProvisionProjectEndpoint
             var rows = await dataverseClient.QueryAsync<ProjectRow>(
                 ProjectEntitySet,
                 filter: $"sprk_projectid eq {request.ProjectId}",
-                select: "sprk_projectid,sprk_projectname,sprk_issecure",
+                select: "sprk_projectid,sprk_projectname,sprk_issecure," +
+                        "_sprk_securitybuid_value,sprk_specontainerid",
                 top: 1,
                 cancellationToken: ct);
 
@@ -126,6 +129,49 @@ public static class ProvisionProjectEndpoint
             return ProblemDetailsHelper.ValidationError(
                 $"Project {request.ProjectId} is not a Secure Project (sprk_issecure is false or null). " +
                 "Enable the Secure Project toggle before provisioning.");
+        }
+
+        // ── Step 1b: Refuse to provision a project that is already provisioned ───
+        //
+        // Added 2026-08-23 (unified-access-control-r2, task 008 follow-up). Nothing on this path was
+        // idempotent: not the client (CreateProjectWizard's provisioningService posts once and does not
+        // retry, but neither does it dedupe), not the route (unlike /office/save, this group has no
+        // IdempotencyFilter), and not Dataverse. A second call therefore created a SECOND business unit,
+        // a SECOND SPE container and a SECOND account, then overwrote sprk_securitybuid,
+        // sprk_specontainerid and sprk_externalaccountid on the project — repointing it at empty
+        // infrastructure while its existing documents stayed in the original container. An external
+        // collaborator would simply stop seeing the project's documents, with no error anywhere.
+        //
+        // The realistic trigger is not a user double-clicking. It is a retry after an apparent failure
+        // that actually succeeded: provisioning makes three slow remote calls (BU create, Graph SPE
+        // container create, account create), so a client or proxy timeout mid-flight is entirely
+        // ordinary — and Step 5 below is deliberately NON-FATAL, so a run whose reference-stamping
+        // failed returns 200 having left real infrastructure behind.
+        //
+        // 409 rather than a silent success: the caller asked for something that cannot be done safely,
+        // and re-pointing a live secure project is not a decision this endpoint should make on its own.
+        // Re-provisioning deliberately requires clearing the references first, which is a human act.
+        if (projectRow.HasProvisionedInfrastructure)
+        {
+            logger.LogWarning(
+                "[PROVISION] Project {ProjectId} is already provisioned (BU={BuId}, Container={ContainerId}). " +
+                "Refusing to re-provision: a second run would orphan the existing container and repoint the " +
+                "project at empty infrastructure. TraceId={TraceId}",
+                request.ProjectId, projectRow._sprk_securitybuid_value, projectRow.sprk_specontainerid, traceId);
+
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Conflict",
+                detail: $"Project {request.ProjectId} has already been provisioned. Re-provisioning would " +
+                        "create a second Business Unit and SPE container and repoint the project at them, " +
+                        "orphaning the documents already stored. Clear the existing infrastructure " +
+                        "references on the project before provisioning again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = traceId,
+                    ["businessUnitId"] = projectRow._sprk_securitybuid_value,
+                    ["speContainerId"] = projectRow.sprk_specontainerid
+                });
         }
 
         var projectName = projectRow.sprk_projectname ?? request.ProjectRef ?? request.ProjectId.ToString();
@@ -570,6 +616,26 @@ public static class ProvisionProjectEndpoint
 
         [JsonPropertyName("sprk_issecure")]
         public bool? sprk_issecure { get; set; }
+
+        /// <summary>The child Business Unit stamped by a previous provisioning run, if any.</summary>
+        [JsonPropertyName("_sprk_securitybuid_value")]
+        public Guid? _sprk_securitybuid_value { get; set; }
+
+        /// <summary>The SPE container stamped by a previous provisioning run, if any.</summary>
+        [JsonPropertyName("sprk_specontainerid")]
+        public string? sprk_specontainerid { get; set; }
+
+        /// <summary>
+        /// Whether this project already carries provisioned infrastructure.
+        /// </summary>
+        /// <remarks>
+        /// EITHER reference is enough to refuse. Requiring both would let the partial state through —
+        /// and a half-provisioned project is precisely the one where a blind re-run does the most damage,
+        /// because Step 5's reference-stamping is non-fatal and can leave a real container unrecorded.
+        /// </remarks>
+        public bool HasProvisionedInfrastructure =>
+            (_sprk_securitybuid_value is { } bu && bu != Guid.Empty)
+            || !string.IsNullOrWhiteSpace(sprk_specontainerid);
     }
 
     private sealed class BuRow

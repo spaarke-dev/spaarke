@@ -65,6 +65,39 @@ public class CallerRecordAccessProbe
     internal const string FallbackMarker = "DELEGATION-RPA-UNAVAILABLE";
 
     /// <summary>
+    /// Backoff before re-asking Dataverse when it reports the target record as not found, or
+    /// <c>null</c> once the attempts are exhausted.
+    /// </summary>
+    /// <param name="attemptsMade">How many attempts have already returned "not found" (1-based).</param>
+    /// <remarks>
+    /// <para><b>Why a retry exists on an authorization path at all.</b> The Create Project wizard calls
+    /// <c>/provision-project</c> within seconds of creating the project row, so the delegation check
+    /// asks Dataverse about a record that may not have replicated yet. Without this, secure-project
+    /// creation fails intermittently with a 403 that looks like a permissions problem and is not one.
+    /// The same window exists whenever a caller grants access on a record they just created. This
+    /// codebase already carries an <c>IStorageRetryPolicy</c> for exactly this class of lag; its
+    /// 2s/4s/8s schedule is far too slow to sit in front of an authorization decision, hence a separate,
+    /// much shorter one here.</para>
+    ///
+    /// <para><b>The tradeoff, stated.</b> Under OBO, Dataverse answers "not found" both for a record
+    /// that does not exist yet AND for one the caller cannot see at all — the two are indistinguishable
+    /// by design (Dataverse hides existence). So this backoff also lands on genuine no-access denials,
+    /// costing them ~1.6s. That is acceptable here and only here: these are six low-volume admin
+    /// mutations plus the Office save gate, none latency-sensitive, and a caller who can SEE the record
+    /// but lacks rights gets a 200 with a rights string — no retry, no delay. The common denial is not
+    /// the one being slowed.</para>
+    ///
+    /// <para>Pure and <c>internal</c> so the schedule is assertable without a transport mock (ADR-038
+    /// ban B1) — the alternative was leaving the one piece of timing logic here untested.</para>
+    /// </remarks>
+    internal static TimeSpan? NotFoundRetryDelay(int attemptsMade) => attemptsMade switch
+    {
+        1 => TimeSpan.FromMilliseconds(400),
+        2 => TimeSpan.FromMilliseconds(1200),
+        _ => null
+    };
+
+    /// <summary>
     /// Process-wide MSAL confidential-client cache keyed by (authority, clientId). This type is a
     /// typed <see cref="HttpClient"/> (transient), so building a CCA per instance would discard
     /// MSAL's user-token cache and force a network OBO exchange on every mutation. Same reasoning,
@@ -255,54 +288,77 @@ public class CallerRecordAccessProbe
         Guid recordId,
         CancellationToken ct)
     {
-        try
+        var target = $"{{\"@odata.id\":\"{entitySet}({recordId})\"}}";
+        var url = $"{_environmentUrl}/api/data/v9.2/systemusers({principalSystemUserId})"
+                  + $"/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
+                  + $"?@p1={Uri.EscapeDataString(target)}";
+
+        for (var attempt = 1; ; attempt++)
         {
-            var target = $"{{\"@odata.id\":\"{entitySet}({recordId})\"}}";
-            var url = $"{_environmentUrl}/api/data/v9.2/systemusers({principalSystemUserId})"
-                      + $"/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
-                      + $"?@p1={Uri.EscapeDataString(target)}";
-
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                _logger.LogWarning(
-                    "[{Marker}] RetrievePrincipalAccess returned {StatusCode} for {EntitySet}({RecordId}). " +
-                    "Denying — there is no read-probe fallback here, because a read proves Read and Read " +
-                    "is not licence to grant.",
-                    FallbackMarker, (int)response.StatusCode, entitySet, recordId);
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    // "Not found" is the replication-lag signature: the wizard provisions seconds after
+                    // creating the project, and a caller may grant on a record they just created. It is
+                    // ALSO how Dataverse reports "you cannot see this record" — see NotFoundRetryDelay
+                    // for why paying that cost here is the right trade.
+                    if (response.StatusCode == System.Net.HttpStatusCode.NotFound &&
+                        NotFoundRetryDelay(attempt) is { } delay)
+                    {
+                        _logger.LogInformation(
+                            "[DELEGATION] {EntitySet}({RecordId}) not found on attempt {Attempt} — retrying in " +
+                            "{DelayMs}ms in case the record has not replicated yet.",
+                            entitySet, recordId, attempt, delay.TotalMilliseconds);
+
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    _logger.LogWarning(
+                        "[{Marker}] RetrievePrincipalAccess returned {StatusCode} for {EntitySet}({RecordId}) " +
+                        "after {Attempts} attempt(s). Denying — there is no read-probe fallback here, because " +
+                        "a read proves Read and Read is not licence to grant.",
+                        FallbackMarker, (int)response.StatusCode, entitySet, recordId, attempt);
+
+                    return AccessRights.None;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                using var document = JsonDocument.Parse(body);
+
+                var rightsString = document.RootElement.TryGetProperty("AccessRights", out var rights)
+                    ? rights.GetString()
+                    : null;
+
+                // An absent or empty rights string is an authoritative "no rights", not a parse failure:
+                // Dataverse answered, and the answer was nothing.
+                var mapped = DataverseAccessRightsMapper.FromAccessRightsString(rightsString);
+
+                _logger.LogInformation(
+                    "[DELEGATION] Caller rights on {EntitySet}({RecordId}): {AccessRights}",
+                    entitySet, recordId, mapped);
+
+                return mapped;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[{Marker}] RetrievePrincipalAccess threw for {EntitySet}({RecordId}). Denying.",
+                    FallbackMarker, entitySet, recordId);
 
                 return AccessRights.None;
             }
-
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            using var document = JsonDocument.Parse(body);
-
-            var rightsString = document.RootElement.TryGetProperty("AccessRights", out var rights)
-                ? rights.GetString()
-                : null;
-
-            // An absent or empty rights string is an authoritative "no rights", not a parse failure:
-            // Dataverse answered, and the answer was nothing.
-            var mapped = DataverseAccessRightsMapper.FromAccessRightsString(rightsString);
-
-            _logger.LogInformation(
-                "[DELEGATION] Caller rights on {EntitySet}({RecordId}): {AccessRights}",
-                entitySet, recordId, mapped);
-
-            return mapped;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[{Marker}] RetrievePrincipalAccess threw for {EntitySet}({RecordId}). Denying.",
-                FallbackMarker, entitySet, recordId);
-
-            return AccessRights.None;
         }
     }
 

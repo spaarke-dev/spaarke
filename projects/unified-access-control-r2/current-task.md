@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-22 (by `context-handoff`, after task 008)
+> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 008 + its owner-authorised follow-ups)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,7 +10,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 008 completed, committed and pushed |
+| **Task** | **none active** — task 008 + all three review follow-ups complete, committed and pushed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
 | **Phase** | Phase 0 — enforcement remediation · **10 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 008 ✅ 010 ✅ 014 ✅ 019 ✅) |
@@ -31,9 +31,9 @@ neighbourhood), **012** (unblocked by 002), **013** (workforce email oid hijack)
 
 ### Last verified state
 
-**BFF 10,695 passed / 0 failed** (TRX confirms none) · **ArchTests 36/36** · **Core 45/45** ·
-publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60 — +0.03 this task, no packages
-added) · `dotnet list package --vulnerable` clean.
+**BFF 10,715 passed / 0 failed** (TRX confirms none) · **ArchTests 36/36** · **Core 45/45** ·
+publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60 — +0.03 across task 008 and its
+follow-ups, no packages added) · `dotnet list package --vulnerable` clean.
 
 ---
 
@@ -41,8 +41,8 @@ added) · `dotnet list package --vulnerable` clean.
 
 | # | Decision | Where |
 |---|---|---|
-| **D1** | **ADR-028 A4 — path A/B/C ruling.** Task 008 added the **8th** `.WithClientSecret(...)` site. E-3 covers transitional sites and explicitly *does not license expansion*, but there is **no `WithClientAssertion` anywhere in the repo**, and A4 itself notes `DefaultAzureCredential` cannot perform an OBO exchange. **Path A proposed** (project-scoped exception; all 8 sites migrate together when the shared MI-FIC provider is built) | `notes/task-008-delegation-rule.md` §7 |
-| **D2** | **`provision-project` gate.** It now requires Write on the project — strictly better than the bare `RequireAuthorization()` it replaced. But provisioning creates a **business unit** (a tenant-level security object). Is Write on one project the right authority for that, or should it need a privileged role? The escalation trigger forbade inventing a role model silently, so none was invented | `notes/task-008-delegation-rule.md` §4 |
+| ~~D1~~ | ✅ **RESOLVED 2026-08-23** — ADR-028 A4 path A accepted; to be handled in the broader MI migration. Recorded in [`design.md` §9](design.md) | `notes/task-008-delegation-rule.md` §7 |
+| ~~D2~~ | ✅ **RESOLVED 2026-08-23** — Write stays (Dataverse `CreateAccess` is an entity-level privilege, not a right on an existing record, so requiring it would deny everyone; Write is also exactly what the endpoint's own `UpdateAsync` needs). The underlying risk was **idempotency**, now closed by a 409 guard. No admin role introduced, per the owner's constraint | `notes/task-008-delegation-rule.md` §10.2 |
 | **D3** | **Download enforcement vs `CanDownload`** (from 002/006): enforcement requires **Read**, the capability requires **Write**. Benign in effect but it IS the divergence FR-05 criterion 5 exists to prevent | `notes/task-002-download-authorization.md` §4 |
 
 ---
@@ -108,13 +108,15 @@ caught real gaps every time.
 | **POML paths are unreliable** | Tasks 002/005/006/**008** all named test paths that do not exist. **Verify every path before acting on it** |
 | **KEEP paths** | Access-control → `tests/integration/auth/**`; pure domain logic → `tests/unit/domain/**`. Both globbed into `Sprk.Bff.Api.Tests.csproj` |
 | **Vacuity trap** | Offline, real auth dependencies fail closed, so "all denied" is true before AND after a fix. Substitute a double that CAN answer yes, then break the fix to prove the tests bite |
+| **Shared-fixture write logs bleed across tests** | `IClassFixture` gives ONE fixture per class; a `ConcurrentBag` recording writes accumulates across every test in it. A "created nothing" assertion then fails on another test's residue — or, worse, passes on it. Reset from the test-class constructor (`ProvisionProjectTestFixture.Reset()`) |
+| **Moq + generic methods** | `QueryAsync<T>` returning `Task<List<T>>` cannot be stubbed with a plain lambda when `T` is the handler's own private DTO. Use `new InvocationFunc(...)` + reflection over `invocation.Method.GetGenericArguments()`, returning the JSON wire shape so the handler's own `[JsonPropertyName]` bindings stay under test (this is what keeps `_sprk_securitybuid_value` honest) |
 | **NEW (008): DI resolves BEFORE endpoint filters** | Minimal API binds a handler's DI arguments before the filter pipeline. `CiamUserProvisioningService` throws without `Ciam:Domain`, so `/invite*` answered 500 *before* the filter ran. Not a hole, but a 403-free assertion on such a route proves nothing. Test fixtures for this group need the CIAM keys |
 | **Doc comments in this area lie** | Five cases now: `CachedAccessDataSource`; `DataverseAccessDataSource`'s "Dataverse enforces Write/Delete separately"; a task-001 test claiming 005 would flip it; `RetrievePrincipalAccess` documented as used with zero call sites; and the POML's claim that `provision-project` has no target record (it does) |
 | **`/api/v1/external` fixture trap** | `AuthPolicies.ExternalCollaboration` pins `Ciam` + `Bearer`, bypassing `FakeAuthHandler` → 500. Use `ExternalCollaborationTestFixture` |
 | **Bash cwd drift** | A bare `cd` persists across calls. Prefix with `cd /c/code_files/spaarke-wt-unified-access-control-r2` |
 | **CI bot pushes** | A `dotnet format` bot auto-commits to the branch. **Pull/rebase before pushing** |
 | **Own-coverage obligation** | Tasks **007, 012, 013, 015, 016, 017, 018** have no pinned baseline — each supplies its own tests |
-| **`data-mutation` KEEP path** | Still un-backfilled — zero compiled files. A write-path test placed there silently will not run |
+| ~~`data-mutation` KEEP path~~ | ✅ **BACKFILLED 2026-08-23** — it was the last of the seven with no csproj glob. **All seven ADR-038 KEEP paths now compile** |
 
 ### Open items requiring owner attention
 
@@ -124,9 +126,9 @@ caught real gaps every time.
 | 2 | **D1 above** — ADR-028 A4 ruling (8th `WithClientSecret` site) |
 | 3 | **D2 above** — `provision-project`: Write-on-project vs a privileged role for creating a BU |
 | 4 | **D3 above** — download enforcement (Read) vs `CanDownload` (Write) |
-| 5 | **NEW (008), needs triage**: `EntityAccessFilter` passes `"{entityType}:{entityId}"` into the document-only `DataverseAccessDataSource`, which can only resolve `None` → the Office save path's entity check may be **inert**. Same class as A-20; **no Phase 0 task owns it** |
+| ~~5~~ | ✅ **CONFIRMED AND FIXED 2026-08-23** — `EntityAccessFilter` WAS inert: `POST /api/office/save` with a `targetEntity` returned 403 for every caller. Now resolves the target's own collection via `CallerRecordAccessProbe`. **Should fold back into `AuthorizationService` when task 032 generalizes the seam** (constraint filed) |
 | 6 | **Needs its own task (002)**: `preview-url`, `view-url`, `office`, `preview` on `/api/documents` still have no per-document filter. They mint **URLs**, which outlive the request |
-| 7 | **RPA is now load-bearing for six mutation endpoints** (008) as well as the document read path (005), and is still unverified against a live tenant → **task 034** (constraint filed) |
+| 7 | **RPA is now load-bearing for six mutation endpoints AND the Office save gate** (008 + follow-up), as well as the document read path (005) — still unverified against a live tenant → **task 034** (constraint filed). Also verify the new not-found retry actually absorbs the wizard's replication lag |
 | 8 | **Duplicates remain invisible (010)** to the participation surface until Phase 1 replaces the read-side `GroupBy` collapse |
 | 9 | **019's product-semantics question**: `includeRelated: true` is a logged-warning no-op; visible in the Playbook Builder canvas, does nothing |
 | 10 | **A-23**: `AddOfficeDocumentAccessFilter` is a second orphaned filter → **task 018** |

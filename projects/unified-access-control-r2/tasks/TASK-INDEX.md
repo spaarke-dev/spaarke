@@ -213,6 +213,40 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > to task 030's path-B amendment — cited, not re-escalated.
 > Rationale: [`notes/task-008-delegation-rule.md`](../notes/task-008-delegation-rule.md).
 
+> **Task 008 follow-ups (2026-08-23, owner-authorised)** — all three review items closed; details in
+> [`notes/task-008-delegation-rule.md` §10](../notes/task-008-delegation-rule.md).
+> **(a) `EntityAccessFilter` was inert — CONFIRMED, then FIXED.** The characterization suite was written
+> and run FIRST against unchanged code: 7 of 9 failed, `ProbedTargets` empty, and a caller holding
+> `AppendToAccess` on the target matter got **403**. `POST /api/office/save` carrying a `targetEntity`
+> was refused for every caller — filing an email/document to a matter from the Outlook/Word add-in could
+> not succeed, while filing WITHOUT a matter worked (the filter short-circuits on a null target), which
+> is why it read as flakiness. Fixed by resolving the target's own collection and asking
+> `CallerRecordAccessProbe`; `OperationAccessPolicy` still decides WHICH right the operation costs, so
+> there is one policy and only the rights SOURCE changed. Perturbation: point it back at
+> `sprk_documents` → 6 of 9 fail. Should fold back into `AuthorizationService` when **task 032**
+> generalizes the seam (noted in code).
+> **(b) `provision-project`: Write is correct; the real exposure was idempotency.** `Create` cannot be
+> used — `CreateAccess` is an entity-level privilege, not a right held ON an existing record, so
+> `RetrievePrincipalAccess` does not report it and requiring it would deny everyone. Write is also
+> exactly what the endpoint needs: its final act is an `UpdateAsync` stamping three fields on the
+> project. (The BU is created by the APP-ONLY identity, so the caller's own BU-create privilege is never
+> consulted regardless.) The damage the question was worried about is now removed by a **409
+> idempotency guard**: nothing on the path deduped — not the client, not the route (no
+> `IdempotencyFilter`, unlike `/office/save`), not Dataverse — so a retry after a timeout-that-actually-
+> succeeded created a second BU + container + account and repointed the project at empty infrastructure.
+> EITHER stamped reference triggers the refusal, because half-provisioned is where a blind re-run does
+> the most damage. Perturbation: disable the guard → 4 of 5 fail.
+> **(c) Replication-lag 403 fixed.** The wizard provisions seconds after creating the project, so the
+> delegation check could ask about an unreplicated record. `NotFoundRetryDelay` retries 400 ms then
+> 1200 ms on not-found. ⚠️ Documented tradeoff: under OBO, Dataverse cannot distinguish "not replicated"
+> from "you cannot see it", so this also slows genuine denials by ~1.6 s — acceptable only because these
+> are low-volume admin mutations and a caller who CAN see the record gets a 200 (no retry). Pure
+> `internal static` so it is testable without a transport mock (ban B1).
+> **(d) `tests/integration/data-mutation/**` BACKFILLED** — it was the last of the seven ADR-038 KEEP
+> paths with no csproj glob, so a write-path test placed there compiled nowhere and ran never. **All
+> seven KEEP paths now compile.**
+> **(e) ADR-028 A4 exception ACCEPTED** by the owner → recorded in [`design.md` §9](../design.md).
+
 ## Phase 1 — One evaluator (10 tasks)
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
