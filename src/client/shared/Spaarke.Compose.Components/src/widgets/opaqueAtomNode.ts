@@ -56,14 +56,42 @@
  */
 import { Node, mergeAttributes } from '@tiptap/core';
 
-/** The four atom-kind tokens the server projection emits (`AtomKindToken` in ComposeDocxProjectionBuilder.cs). */
-export type ComposeAtomKind = 'sdt' | 'field' | 'object' | 'unknown';
+/** The atom-kind tokens the server projection emits (`AtomKindToken` in ComposeDocxProjectionBuilder.cs). */
+export type ComposeAtomKind = 'sdt' | 'field' | 'object' | 'tab' | 'symbol' | 'unknown';
 
-/** Human-readable label per atom kind — the placeholder's visible "labeled with its kind" text. */
+/**
+ * Task 048: the kinds that render as THEMSELVES rather than as a labeled placeholder.
+ *
+ * `sdt` / `field` / `object` are OPAQUE — the server could not render them, so the editor shows a label
+ * saying what was there. `tab` and `symbol` are the opposite: they render exactly as they always did (an
+ * em space, the resolved glyph), and are atoms only in the caret sense — a leaf with no interior position,
+ * so the user can select or delete one but never type inside it and never split it in half.
+ *
+ * They are here at all because that identity is the ONLY thing that was missing. A tab reached the editor
+ * as an em space and a symbol as a glyph, so an edit anywhere in the paragraph rebuilt both as ordinary
+ * text. Nothing about their appearance needed to change — only whether the mapper can recognize them.
+ */
+const RENDERS_AS_ITSELF = new Set<ComposeAtomKind>(['tab', 'symbol']);
+
+/**
+ * Whether an atom of this kind renders as its own content rather than as a labeled placeholder.
+ *
+ * Exported because the MAPPER needs exactly this distinction (`docxBridge.ts`): a renderable atom's display
+ * text is the document's own character and belongs in the editor's text coordinate space, whereas an opaque
+ * atom's is a UI LABEL ("Field: 3") that must never be mistaken for content. One definition, two consumers.
+ */
+export function atomRendersAsItself(kind: string | null | undefined): boolean {
+  return RENDERS_AS_ITSELF.has(kind as ComposeAtomKind);
+}
+
+/** Human-readable label per OPAQUE atom kind — the placeholder's visible "labeled with its kind" text. */
 const ATOM_KIND_LABELS: Record<ComposeAtomKind, string> = {
   sdt: 'Content control',
   field: 'Field',
   object: 'Object',
+  // Never shown (RENDERS_AS_ITSELF), but present so the record stays total over the kind union.
+  tab: 'Tab',
+  symbol: 'Symbol',
   unknown: 'Unsupported content',
 };
 
@@ -71,9 +99,11 @@ function atomKindLabel(kind: string | null | undefined): string {
   return ATOM_KIND_LABELS[kind as ComposeAtomKind] ?? ATOM_KIND_LABELS.unknown;
 }
 
+const KNOWN_ATOM_KINDS: readonly string[] = ['sdt', 'field', 'object', 'tab', 'symbol'];
+
 function readAtomKind(element: HTMLElement): ComposeAtomKind {
   const raw = element.getAttribute('data-atom-kind');
-  return raw === 'sdt' || raw === 'field' || raw === 'object' ? raw : 'unknown';
+  return KNOWN_ATOM_KINDS.includes(raw ?? '') ? (raw as ComposeAtomKind) : 'unknown';
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +204,13 @@ export interface ComposeInlineAtomAttributes {
   paraId?: string | null;
   /** The server's cached display text (a field's resolved value, an SDT's rendered content), if any. */
   displayText?: string | null;
+  /**
+   * Task 048, `symbol` kind only: the symbol FONT (`w:sym/@w:font`, e.g. `Symbol`). Round-tripped so the
+   * save re-emits the original `w:sym` instead of the glyph the reader resolved for display.
+   */
+  symFont?: string | null;
+  /** Task 048, `symbol` kind only: the code point within that font (`w:sym/@w:char`, e.g. `F0A7`). */
+  symChar?: string | null;
 }
 
 /**
@@ -210,10 +247,25 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
       },
       displayText: {
         default: null,
-        parseHTML: (element: HTMLElement) => element.textContent?.trim() || null,
+        // Task 048: NOT trimmed any more. A tab's display text is a single em space — trimming it to the
+        // empty string would erase the one character the atom contributes to the editor's text coordinate
+        // space, which is exactly the space the server's offset table already counts for a `w:tab`. The
+        // opaque kinds are unaffected: their display text never has meaningful edge whitespace, and an
+        // empty string still falls back to the bare label below.
+        parseHTML: (element: HTMLElement) => element.textContent || null,
         // Not re-emitted as an attribute — re-rendered as the placeholder's visible label instead
         // (see renderHTML below), so it stays testable via getHTML() without a redundant data-*.
         renderHTML: () => ({}),
+      },
+      symFont: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-sym-font'),
+        renderHTML: attributes => (attributes.symFont ? { 'data-sym-font': attributes.symFont as string } : {}),
+      },
+      symChar: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-sym-char'),
+        renderHTML: attributes => (attributes.symChar ? { 'data-sym-char': attributes.symChar as string } : {}),
       },
     };
   },
@@ -223,8 +275,30 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    const kind = (node.attrs.kind as string) ?? 'unknown';
+    const kind = (node.attrs.kind as ComposeAtomKind) ?? 'unknown';
     const displayText = node.attrs.displayText as string | null;
+
+    // Task 048: a renderable atom IS its content — no label, and it keeps the class its appearance already
+    // depended on (`compose-tab`). Anything else is opaque and shows a labeled placeholder.
+    //
+    // `compose-atom-renderable` is what stops it LOOKING like a placeholder. `.compose-atom` styles an atom
+    // as a dashed, background-filled, italic chip — right for "a content control was here", very wrong for a
+    // tab or a section mark, which are ordinary document content and must render indistinguishably from the
+    // plain text they were before this change. The modifier class resets that chrome in ComposeEditor's
+    // `useStyles()`. The `compose-atom` class itself has to stay: it is half the parse selector.
+    if (RENDERS_AS_ITSELF.has(kind)) {
+      const classes = ['compose-atom', 'compose-atom-inline', 'compose-atom-renderable'];
+      if (kind === 'tab') classes.push('compose-tab');
+      return [
+        'span',
+        mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+          class: classes.join(' '),
+          contenteditable: 'false',
+        }),
+        displayText ?? '',
+      ];
+    }
+
     const label = atomKindLabel(kind);
     const content = displayText ? `${label}: ${displayText}` : label;
     return [

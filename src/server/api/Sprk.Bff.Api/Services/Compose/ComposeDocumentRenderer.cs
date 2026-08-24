@@ -1289,8 +1289,17 @@ public sealed partial class ComposeDocumentRenderer
         // The residual `p/r/t` differences are therefore attribute-PRESENCE, not text loss — verified by
         // inspecting the fixtures. Recorded on the loss list so the class is not re-investigated as if it
         // were content.
-        OpenXmlElement textElement = deleted
-            ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
+        // Task 048: the tab and symbol markers swap the run's TEXT CHILD rather than returning early like the
+        // two break markers above. The difference is deliberate: run properties are meaningless on a break but
+        // load-bearing here — an underlined tab is the fill-in leader on a signature block, and a symbol run
+        // carries bold/italic like any other. Returning early would have silently dropped both.
+        //
+        // Both are schema-legal inside a w:del wrapper as-is (only w:t must become w:delText), so `deleted`
+        // needs no special case.
+        OpenXmlElement textElement =
+            run.IsTab ? new TabChar()
+            : run.Symbol is { } symbol ? new SymbolChar { Font = symbol.Font, Char = symbol.CharCode }
+            : deleted ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
             : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
         element.AppendChild(textElement);
 

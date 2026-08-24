@@ -62,8 +62,13 @@ public sealed class ComposeResidualLossParityTests
         // marker run. Kept in the table with a null code so the preserve direction is enforced: if a
         // future change starts dropping breaks again, this row fails rather than going quiet.
         new object?[] { "br", "br", null },
-        new object?[] { "sym", "sym", "symbol-flattened" },
-        new object?[] { "tab", "tab", "tab-flattened" },
+        // Task 048: both are now CARRIED through an edit to their own block, like `br` above — a tab
+        // round-trips as an IsTab marker run and a symbol as ComposeInlineRun.Symbol (font + code point
+        // verbatim, NOT the glyph the reader resolved for display). Kept in the table with a null code so
+        // the preserve direction is enforced: a regression fails this row instead of going quiet, and the
+        // doc-parity half below fails if the published list still calls either one lost.
+        new object?[] { "sym", "sym", null },
+        new object?[] { "tab", "tab", null },
         // Preserved even in the EDITED block — task 041's two carries. Listing them here is what makes the
         // over-claim direction testable: if the published document ever calls these lost, parity fails.
         new object?[] { "bookmark", "bookmarkStart", null },

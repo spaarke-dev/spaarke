@@ -56,6 +56,10 @@ import type {
 // current reject-state text against the load-time baseline — the SAME word-level LCS engine the live
 // Track Changes decoration overlay uses, so what the save persists is what the overlay showed.
 import { diffTokens, diffToRegions } from '../widgets/hooks/trackChangesDiff';
+// Task 048: the ONE definition of "this atom renders as its own content" — see its doc comment for why the
+// mapper needs exactly that distinction (a renderable atom's text is the document's; an opaque atom's is a
+// UI label that must never enter the coordinate space).
+import { atomRendersAsItself } from '../widgets/opaqueAtomNode';
 
 // ---------------------------------------------------------------------------
 // R3 FR-08/FR-09/FR-10 — `w14:paraId` identity carry (design §5)
@@ -169,10 +173,38 @@ function rejectStateText(block: TipTapNode): string {
       out += '\n';
       return;
     }
+    const atomText = renderableAtomText(n);
+    if (atomText !== null) {
+      out += atomText;
+      return;
+    }
     (n.content ?? []).forEach(walk);
   };
   (block.content ?? []).forEach(walk);
   return out;
+}
+
+/**
+ * Task 048: the character a RENDERABLE inline atom (`tab`, `symbol`) contributes to the text coordinate
+ * space, or `null` if this node is not one.
+ *
+ * This is the load-bearing detail of the whole change, so it is worth stating plainly: the contribution is
+ * exactly what the same construct contributed BEFORE it became an atom. A tab was an em space in a plain
+ * text node and is now an em space held by a leaf; a symbol was its resolved glyph and still is. The server
+ * already counted one editor position for each (`RunEditorLength`), and a ProseMirror inline atom is one
+ * position. So no offset moves, no diff coordinate shifts, and no baseline text changes — the only thing
+ * that changed is that the mapper can now tell these characters apart from typed ones.
+ *
+ * OPAQUE atoms (`field`, `sdt`, `object`) deliberately contribute NOTHING, which is also unchanged: their
+ * display text is a UI label ("Field: 3"), and injecting a label into the document's coordinate space would
+ * be worse than the zero it contributes today. (That zero does not match the server's own offset table for
+ * those kinds — a pre-existing divergence this task neither introduces nor fixes; see the task 048 notes.)
+ */
+function renderableAtomText(n: TipTapNode): string | null {
+  if (n.type !== 'composeInlineAtom') return null;
+  const attrs = (n.attrs ?? {}) as Record<string, unknown>;
+  if (!atomRendersAsItself(typeof attrs.kind === 'string' ? attrs.kind : null)) return null;
+  return typeof attrs.displayText === 'string' ? attrs.displayText : '';
 }
 
 /** Visit every paraId-bearing block (paragraph/heading), descending into lists + table cells (server parity). */
@@ -420,10 +452,24 @@ interface RevisionMarkFacts {
   ledgerRef?: string;
 }
 
-/** One inline segment of a block: a text node with its resolved mark set, or a hardBreak ('\n'). */
+/** Facts a renderable inline atom carries back to the write model (task 048). */
+interface AtomFacts {
+  kind: 'tab' | 'symbol';
+  /** `symbol` only — `w:sym/@w:font`. */
+  font?: string;
+  /** `symbol` only — `w:sym/@w:char`, the four-hex code point. */
+  charCode?: string;
+}
+
+/**
+ * One inline segment of a block: a text node with its resolved mark set, a hardBreak ('\n'), or a
+ * renderable atom (task 048 — a tab or a symbol, contributing its own one character).
+ */
 interface InlineSegment {
   text: string;
   isHardBreak: boolean;
+  /** Task 048: set when this segment IS a tab or symbol rather than typed text. */
+  atom?: AtomFacts;
   bold: boolean;
   italic: boolean;
   underline: boolean;
@@ -498,6 +544,29 @@ function collectSegments(block: TipTapNode): InlineSegment[] {
     }
     if (n.type === 'hardBreak') {
       out.push({ text: '\n', isHardBreak: true, bold: false, italic: false, underline: false, commentIds: [] });
+      return;
+    }
+    // Task 048: a renderable atom is one segment carrying one character — the same character it contributed
+    // as plain text before, so this walk stays byte-identical to rejectStateText's (the contract this
+    // function's doc comment states, and the diff coordinate space depends on).
+    const atomText = renderableAtomText(n);
+    if (atomText !== null) {
+      const attrs = (n.attrs ?? {}) as Record<string, unknown>;
+      const kind = attrs.kind === 'symbol' ? 'symbol' : 'tab';
+      const facts: AtomFacts = { kind };
+      if (kind === 'symbol') {
+        facts.font = typeof attrs.symFont === 'string' ? attrs.symFont : '';
+        facts.charCode = typeof attrs.symChar === 'string' ? attrs.symChar : '';
+      }
+      out.push({
+        text: atomText,
+        isHardBreak: false,
+        atom: facts,
+        bold: false,
+        italic: false,
+        underline: false,
+        commentIds: [],
+      });
       return;
     }
     (n.content ?? []).forEach(walk);
@@ -706,6 +775,22 @@ function buildRunsFromNode(block: TipTapNode, ctx: MapperContext, baselineText: 
       // the address block, the party block and the signature block are all held together by these.
       runs.push({ text: '', isLineBreak: true });
       cursor += seg.text.length;
+    } else if (seg.atom) {
+      // Task 048: a tab / symbol round-trips as its own marker run rather than as the one character it
+      // happens to look like. Before this, editing a paragraph turned every tab into an em space and every
+      // symbol into whatever glyph the reader had resolved — so a definitions list lost its alignment and a
+      // Symbol-font § became a look-alike character (or, unresolvable, the U+FFFD placeholder that exists
+      // only to be honest on screen).
+      //
+      // Marks are deliberately NOT carried: a tab or symbol is a leaf with no interior position, so the
+      // editor never applies a mark to one in isolation. The SERVER preserves the run properties from the
+      // base document instead, which is the property-inheritance path an edited block already uses.
+      runs.push(
+        seg.atom.kind === 'tab'
+          ? { text: '', isTab: true }
+          : { text: '', symbol: { font: seg.atom.font ?? '', charCode: seg.atom.charCode ?? '' } }
+      );
+      cursor += seg.text.length;
     } else if (seg.insertion) {
       // Pending insert: parity excludes it (reject-state); imported translates it to an Inserted fact.
       if (imported) {
@@ -869,9 +954,25 @@ function forceDeletedBlock(block: ComposeContentBlock): ComposeContentBlock {
  * kept (physically present), marker runs skipped. */
 function loadedRejectText(block: ComposeContentBlock): string {
   return (block.runs ?? [])
-    .filter(r => !r.isPageBreak && !r.isLineBreak && !r.commentAnchor && r.revision?.kind !== 'Inserted')
+    .filter(r => !isMarkerRun(r) && r.revision?.kind !== 'Inserted')
     .map(r => r.text)
     .join('');
+}
+
+/**
+ * A run that IS a construct rather than a span of text — every other field on it is ignored by contract, and
+ * its `text` is empty. Task 048 added `isTab` / `symbol` to the set the two break markers and the comment
+ * anchor already formed; naming the predicate once keeps the derivations below from drifting apart as the
+ * set grows (they had already been written out longhand in two places).
+ */
+function isMarkerRun(r: ComposeInlineRun): boolean {
+  return (
+    r.isPageBreak === true ||
+    r.isLineBreak === true ||
+    r.isTab === true ||
+    r.symbol !== undefined ||
+    r.commentAnchor !== undefined
+  );
 }
 
 /** One character's inline-formatting signature (F1 — step-9.5 review). */
@@ -901,7 +1002,12 @@ function formattingUnchanged(segments: readonly InlineSegment[], loaded: Compose
   const editorText: string[] = [];
   const editorFormats: CharFormat[] = [];
   for (const s of segments) {
-    if (s.insertion !== undefined || s.isHardBreak) continue;
+    // Task 048: an atom segment is skipped here for the same reason a hardBreak is — it has no marks of its
+    // own, and its counterpart on the loaded side is a marker run contributing no characters. Skipping on
+    // BOTH sides is what keeps the two char streams positionally aligned; counting it on one side only would
+    // desynchronize every paragraph containing a tab, so an untouched definitions list would be reported as
+    // changed and rebuilt instead of cloned verbatim.
+    if (s.insertion !== undefined || s.isHardBreak || s.atom !== undefined) continue;
     for (let i = 0; i < s.text.length; i++) {
       editorText.push(s.text[i]);
       editorFormats.push({ bold: s.bold, italic: s.italic, underline: s.underline, href: s.href });
@@ -910,7 +1016,7 @@ function formattingUnchanged(segments: readonly InlineSegment[], loaded: Compose
   const loadedText: string[] = [];
   const loadedFormats: CharFormat[] = [];
   for (const r of loaded.runs ?? []) {
-    if (r.isPageBreak || r.isLineBreak || r.commentAnchor !== undefined || r.revision?.kind === 'Inserted') continue;
+    if (isMarkerRun(r) || r.revision?.kind === 'Inserted') continue;
     for (let i = 0; i < r.text.length; i++) {
       if (r.text[i] === '\n') continue;
       loadedText.push(r.text[i]);

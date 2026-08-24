@@ -86,6 +86,37 @@ public enum ComposeCommentAnchorKind
     End,
 }
 
+/// <summary>
+/// A symbol-font glyph carried as a dedicated marker run (task 048 — same mechanism as
+/// <see cref="ComposeInlineRun.IsPageBreak"/>): the run IS a <c>w:sym</c>, and the renderer re-emits it from
+/// these two scalars rather than from the resolved glyph the editor showed.
+/// <para>
+/// The two fields are the ONLY thing <c>w:sym</c> carries, and neither is document prose — a font name and a
+/// four-hex code point. Round-tripping them is therefore not "the client handling OOXML" (ADR-049 I-2): no
+/// markup crosses the wire, only the same two scalars any font picker would hold. That is what makes a symbol
+/// self-describing where a field or a content control is not — those need their original subtree, which is why
+/// they stay on the base-carry path instead.
+/// </para>
+/// <para>
+/// Why it matters: § and ¶ in a legal document are typically Symbol-font glyphs, not the Unicode characters
+/// they resemble. Until this record existed, editing the paragraph replaced the glyph with whatever the read
+/// path had resolved it to — silently downgrading § to a look-alike, or (for an unmapped code point) to the
+/// U+FFFD placeholder the reader had substituted for display.
+/// </para>
+/// </summary>
+public sealed record ComposeSymbol
+{
+    /// <summary>The symbol font (<c>w:sym/@w:font</c>) — e.g. <c>Symbol</c>, <c>Wingdings</c>.</summary>
+    public required string Font { get; init; }
+
+    /// <summary>
+    /// The code point within that font (<c>w:sym/@w:char</c>), as the four-hex-digit string OOXML uses
+    /// (e.g. <c>F0A7</c>). Kept as the source string rather than parsed to an int so a round trip is
+    /// byte-identical to what the document declared.
+    /// </summary>
+    public required string CharCode { get; init; }
+}
+
 /// <summary>Revision kind for <see cref="ComposeRevision"/> (task 025). Serialized as its STRING name.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeRevisionKind
@@ -317,6 +348,26 @@ public sealed record ComposeInlineRun
     /// </para>
     /// </summary>
     public bool IsLineBreak { get; init; }
+
+    /// <summary>
+    /// Task 048 (r8, FR-A10 residual): this run IS a tab (<c>w:tab</c> / <c>w:ptab</c>). Marker-run contract
+    /// like <see cref="IsPageBreak"/> for <see cref="Text"/>, but — unlike the break markers — run PROPERTIES
+    /// still apply: an underlined tab is the fill-in leader line on a signature block, so dropping the
+    /// underline would lose visible formatting. The renderer therefore builds the run normally and swaps only
+    /// the text child (see <c>BuildRun</c>).
+    /// <para>
+    /// Tabs are what hold a definitions list, a signature block and a table-of-contents line in alignment.
+    /// Flattening one to a space is invisible in a diff and obvious on the page.
+    /// </para>
+    /// </summary>
+    public bool IsTab { get; init; }
+
+    /// <summary>
+    /// Task 048 (r8, FR-A10 residual): this run IS a symbol-font glyph (<c>w:sym</c>) — see
+    /// <see cref="ComposeSymbol"/>. Same marker/property contract as <see cref="IsTab"/>. Mutually exclusive
+    /// with it and with the two break markers.
+    /// </summary>
+    public ComposeSymbol? Symbol { get; init; }
 
     /// <summary>
     /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null

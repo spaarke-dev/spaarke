@@ -132,6 +132,62 @@ architectural one.
 **That is roughly two pieces of work where §3 lists six.** The sizing table below is kept as written
 because it records what was believed at each step, but rows 1, 2, 3, 5 and 6b are all subsumed by this.
 
+## 2c. What building it actually taught (task 048, 2026-08-24) — **tab + symbol are DONE**
+
+The plan above said to wire the round trip generically first and add the two kinds second. **Implementation
+inverted that, and the inversion was right.** Tab and symbol turned out not to need the generic mechanism at
+all, because of a distinction that only became visible while writing it:
+
+> **A tab and a symbol are SELF-DESCRIBING. A field, an inline SDT and a complex object are not.**
+
+A `w:tab` has no payload whatsoever. A `w:sym` has exactly two scalars — a font name and a four-hex code
+point — and neither is document prose. Round-tripping those is **not** "the client handling OOXML" (ADR-049
+I-2): no markup crosses the wire, only the same two values any font picker would hold. A field or a content
+control is the opposite: reconstructing one needs its original subtree, which is exactly what task 041
+declined to ferry through the client and solved with **base-carry** instead.
+
+So the two halves split cleanly, and the split is the ADR-049 I-2 line, not a convenience:
+
+| | Carries | Mechanism |
+|---|---|---|
+| **tab, symbol** | Nothing / two scalars | **Marker runs** — `IsTab`, `Symbol { Font, CharCode }`, alongside `IsPageBreak` / `IsLineBreak` / `CommentAnchor` |
+| **field, inline SDT, object** | Their own OOXML subtree | **Base-carry** (task 041's path) — the server takes the bytes from the base block; the client never sees them |
+
+### The three things that were not obvious until it was built
+
+1. **Run properties had to survive.** The two break markers return early from `BuildRun` — bold on a page
+   break is meaningless. Copying that would have been wrong here: **an underlined tab is the fill-in leader
+   line on a signature block**, and a symbol run carries bold/italic like any other. So tab and symbol swap
+   the run's *text child* instead, keeping `w:rPr`. Returning early would have shipped a silent
+   formatting loss inside the fix for a silent content loss.
+2. **The coordinate space had to not move — and it didn't.** A tab was already an em space (U+2003) and a
+   symbol already its resolved glyph; the server's offset table already counted **1** for each. A ProseMirror
+   inline atom is also 1. So the atom carries *the same character it always did* and every offset, diff
+   coordinate and baseline text is byte-identical to before. This is why the change is small.
+3. **`.compose-atom` styles an atom as a dashed, filled, italic CHIP** — right for "a content control was
+   here", very wrong for a tab or a §. Without a reset the fidelity fix would have drawn a visible dashed box
+   around every tab in the document. Added `compose-atom-renderable`, and pinned it with a test.
+
+### Also settled here
+
+- **`w:ptab`** degrades to a plain `w:tab` (it did before too, via the same flatten). Its absolute-position
+  attributes are not modeled — noted rather than silently implied to round-trip.
+- **A pre-existing divergence, found and deliberately NOT fixed here**: an OPAQUE inline atom (a field)
+  contributes **0** characters to the client's text coordinate space while the server's offset table counts
+  its display length. Real, older than this task, and orthogonal — folding a second fix into this change
+  would have made both harder to review. Pinned by a test so it cannot drift further, and left for whoever
+  wires the opaque round trip.
+
+### Where that leaves the plan
+
+Rows 1 and 2 of §3 are **done and measured** — both flipped from §2 (lost) to §3 (carried) in the published
+residual list, enforced in both directions by `ComposeResidualLossParityTests`. Remaining, unchanged:
+
+1. **Wire the atom round trip for the opaque kinds** (field, inline SDT, object) — or extend base-carry to be
+   position-aware, which may now be the better answer given how cleanly the self-describing/opaque line held.
+2. **The §1b editor-native losses** (code block, horizontal rule, image) — still the worse direction, still
+   step 0.
+
 ## 3. Sizing
 
 | # | Construct | Needs | Size | Why this order |

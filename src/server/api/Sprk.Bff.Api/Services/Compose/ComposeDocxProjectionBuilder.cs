@@ -812,7 +812,13 @@ public sealed class ComposeDocxProjectionBuilder
                 case TabChar:
                 case PositionalTab:
                     // Non-collapsing tab representation (GPT §9.1) — never a bare "\t".
-                    ctx.Append("<span class=\"compose-tab\"> </span>");
+                    //
+                    // Task 048: now emitted as an ATOM, keeping the `compose-tab` class and the SAME em-space
+                    // content so it looks exactly as it did. That the content is unchanged is what makes this
+                    // invisible to every coordinate space: RunEditorLength already counted a tab as 1, and the
+                    // atom node is a ProseMirror leaf of size 1 contributing that same one character. The only
+                    // thing that changed is that the client can now tell this em space from a typed one.
+                    ctx.AppendAtom(ComposeAtomKind.Tab, " ", extraClass: "compose-tab");
                     break;
                 case Break br:
                     // Task 022 WS-2 construct audit (design section 4: "w:br type=page - currently a line
@@ -840,8 +846,19 @@ public sealed class ComposeDocxProjectionBuilder
                     // visible placeholder (U+FFFD) AND raise the intra-run glyph-loss warning — F-1 never
                     // allows a silent drop. This was previously the FR-06 characterization gap pinned by
                     // ComposeDocxProjectionBuilderTests.Build_ParagraphWithSymbolCharRun_..., now flipped.
+                    //
+                    // Task 048: the glyph is unchanged — this is still exactly what the user sees — but it is
+                    // now wrapped in an ATOM carrying the font + code point verbatim, so a save re-emits the
+                    // ORIGINAL w:sym rather than the resolved look-alike. That matters most in precisely the
+                    // unmapped case: without this the U+FFFD placeholder, which exists to be honest about a
+                    // glyph we could not resolve for DISPLAY, would have been written back into the document
+                    // as the user's content.
                     var glyph = ResolveSymbolGlyph(sym, out var mapped);
-                    ctx.AppendEscaped(glyph);
+                    ctx.AppendAtom(ComposeAtomKind.Symbol, glyph, dataAttributes: new[]
+                    {
+                        ("data-sym-font", sym.Font?.Value ?? string.Empty),
+                        ("data-sym-char", sym.Char?.Value ?? string.Empty),
+                    });
                     if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
                     break;
                 case Ruby ruby:
@@ -2688,10 +2705,21 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case TabChar:
                 case PositionalTab:
-                    // The model has no tab (the read walk renders a non-collapsing compose-tab span):
-                    // flatten to a space with a counted warning — never silently (review finding 020-R3).
-                    sb.Append(' ');
-                    ctx.AddWarning("tab-flattened", 1);
+                    // Task 048: a tab is model data now (ComposeInlineRun.IsTab), emitted at its exact inline
+                    // position — mirroring the break markers below. It was previously flattened to a space
+                    // with a counted warning, so any edit to the paragraph collapsed its alignment:
+                    // definitions lists, signature blocks and table-of-contents lines are all held together by
+                    // exactly these tabs. Budget-guarded like the breaks (a clipped projection must not trail
+                    // stray tabs).
+                    //
+                    // w:ptab (PositionalTab) degrades to a plain w:tab, as it did when both flattened to the
+                    // same space. Its absolute-position attributes are not modeled — recorded on the residual
+                    // loss list rather than silently implied to round-trip.
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        sink.Add(new ComposeInlineRun { IsTab = true, Revision = revision });
+                    }
                     break;
                 case Break pageBreak when pageBreak.Type is not null && pageBreak.Type.Value == BreakValues.Page:
                     // Task 023: a MANUAL PAGE BREAK is model data (ComposeInlineRun.IsPageBreak) — emitted
@@ -2725,9 +2753,30 @@ public sealed class ComposeDocxProjectionBuilder
                     sb.Append('‑');
                     break;
                 case SymbolChar sym:
-                    var glyph = ResolveSymbolGlyph(sym, out var mapped);
-                    sb.Append(glyph);
-                    if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                    // Task 048: a symbol is model data now (ComposeInlineRun.Symbol) — the font + code point
+                    // verbatim, NOT the glyph the reader resolved for display. That distinction is the whole
+                    // point: § in a legal document is usually Symbol-font F0A7, and re-authoring the resolved
+                    // look-alike (or, for an unmapped code point, the U+FFFD placeholder) is a wrong glyph in
+                    // a legal document — the exact failure ResolveSymbolGlyph's curation exists to avoid.
+                    //
+                    // The unmapped-symbol-char warning still fires: it describes the READ (what the editor
+                    // shows the user), which is unchanged. The WRITE is now lossless either way, which is why
+                    // "symbol-flattened" left ReportableConstructs.
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        ResolveSymbolGlyph(sym, out var symMapped);
+                        if (!symMapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                        sink.Add(new ComposeInlineRun
+                        {
+                            Symbol = new ComposeSymbol
+                            {
+                                Font = sym.Font?.Value ?? string.Empty,
+                                CharCode = sym.Char?.Value ?? string.Empty,
+                            },
+                            Revision = revision,
+                        });
+                    }
                     break;
                 case Ruby ruby:
                     sb.Append(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
@@ -3023,11 +3072,40 @@ public sealed class ComposeDocxProjectionBuilder
         /// (it sits inside the paragraph's own <c>data-paraid</c> block); <see cref="RunBoundary.AtomKind"/>
         /// in the offset-addressing table is the matching signal that no intra-atom operation may target it.
         /// </summary>
-        public void AppendAtom(ComposeAtomKind kind, string? displayText)
+        /// <param name="extraClass">
+        /// Task 048: an additional class on the span, so a RENDERABLE atom keeps the exact appearance it had
+        /// before it became one (the tab's existing <c>compose-tab</c> rule). Styling only — never identity.
+        /// </param>
+        /// <param name="dataAttributes">
+        /// Task 048: extra <c>data-*</c> attributes carrying an atom's self-describing payload back to the
+        /// client, so the client can return it on save without ever handling OOXML (ADR-049 I-2). Today only
+        /// <c>w:sym</c>'s font + code point use this. Names MUST be literal <c>data-*</c> tokens; values are
+        /// attribute-escaped.
+        /// </param>
+        public void AppendAtom(
+            ComposeAtomKind kind,
+            string? displayText,
+            string? extraClass = null,
+            (string Name, string Value)[]? dataAttributes = null)
         {
-            Append("<span class=\"compose-atom\" data-atom-kind=\"");
+            Append("<span class=\"compose-atom");
+            if (!string.IsNullOrEmpty(extraClass))
+            {
+                Append(" ");
+                Append(extraClass);
+            }
+            Append("\" data-atom-kind=\"");
             Append(AtomKindToken(kind));
-            Append("\" contenteditable=\"false\">");
+            Append("\"");
+            foreach (var (name, value) in dataAttributes ?? Array.Empty<(string, string)>())
+            {
+                Append(" ");
+                Append(name);
+                Append("=\"");
+                AppendEscapedAttr(value);
+                Append("\"");
+            }
+            Append(" contenteditable=\"false\">");
             if (!string.IsNullOrEmpty(displayText)) AppendEscaped(displayText);
             Append("</span>");
         }
@@ -3037,6 +3115,8 @@ public sealed class ComposeDocxProjectionBuilder
             ComposeAtomKind.Sdt => "sdt",
             ComposeAtomKind.Field => "field",
             ComposeAtomKind.ComplexObject => "object",
+            ComposeAtomKind.Tab => "tab",
+            ComposeAtomKind.Symbol => "symbol",
             _ => "unknown",
         };
 

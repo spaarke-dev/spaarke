@@ -5,7 +5,8 @@
 > (which covers the read path: one reader, text exactness, numbering, references, page/line).
 > Governed by [`ADR-049`](../../.claude/adr/ADR-049-compose-shadow-document.md).
 >
-> **Status**: published 2026-08-23 by `spaarkeai-compose-r8` task 045 (FR-A10).
+> **Status**: published 2026-08-23 by `spaarkeai-compose-r8` task 045 (FR-A10);
+> **two rows retired 2026-08-24** by task 048 — tabs and symbols moved from §2 (lost) to §3 (carried).
 > **Owner sign-off**: ⏳ *pending* — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
@@ -42,8 +43,6 @@ silent.
 | Embedded object / image / chart (`w:drawing`, `w:object`, `w:pict`) | Removed from the paragraph. The underlying part stays in the file | `complex-object-dropped` |
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
-| Symbol (`w:sym`) — §, ¶, Wingdings glyphs | Flattened to ordinary text | `symbol-flattened` |
-| Tab (`w:tab`) | Flattened; tabbed alignment inside the paragraph is lost | `tab-flattened` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
 
 **The prior version is always recoverable.** Every save creates a new SPE version, so a paragraph you did
@@ -58,6 +57,8 @@ of the list is enforced too — if a future change starts losing one, the parity
 |---|---|
 | **Bookmarks** (`w:bookmarkStart`/`End`) | Dropping one breaks cross-references **elsewhere in the document** — a silent, non-local failure |
 | **Soft line breaks** (`w:br`) | Round-trip as a marker run. Address blocks, party blocks and signature blocks are held together by these, so the paragraphs users edit most were the ones collapsing (fixed task 046) |
+| **Tabs** (`w:tab`) | Round-trip as a marker run. Definitions lists, signature blocks and table-of-contents lines are held in alignment by exactly these; flattening one to a space is invisible in a diff and obvious on the page (fixed task 048) |
+| **Symbols** (`w:sym`) — §, ¶, Wingdings glyphs | Round-trip as their **font + code point**, not as the glyph the reader resolved for display. § in a legal document is usually Symbol-font `F0A7`, so re-authoring the resolved look-alike would quietly change the character the document contains — and for a code point we cannot resolve, it would have written the on-screen placeholder into the file as content (fixed task 048) |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
 | Comments, tracked changes, hyperlinks | Carried on the content model itself |
@@ -89,7 +90,7 @@ edited block — and holds this document to the result in **both** directions:
   "safely conservative" — it tells you we damage things we do not, which is how a document stops being
   read.
 
-### Measured 2026-08-23
+### Measured 2026-08-24 (task 048; `sym` + `tab` rows changed since the 2026-08-23 publication)
 
 | Family | Untouched block | Edited block | Code emitted |
 |---|---|---|---|
@@ -101,8 +102,8 @@ edited block — and holds this document to the result in **both** directions:
 | `footnoteReference` | 1/1 kept | 0/1 | `unrepresented-footnote-reference` |
 | `endnoteReference` | 1/1 kept | 0/1 | `unrepresented-endnote-reference` |
 | `br` | 1/1 kept | **1/1 kept** | *(none — carried, task 046)* |
-| `sym` | 1/1 kept | 0/1 | `symbol-flattened` |
-| `tab` | 1/1 kept | 0/1 | `tab-flattened` |
+| `sym` | 1/1 kept | **1/1 kept** | *(none — carried, task 048)* |
+| `tab` | 1/1 kept | **1/1 kept** | *(none — carried, task 048)* |
 | `sdt` (inline) | 1/1 kept | 0/1 | `hard-tier-sdt-flattened` |
 | `bookmarkStart` | 1/1 kept | **1/1 kept** | *(none — carried)* |
 

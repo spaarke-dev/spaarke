@@ -1331,6 +1331,23 @@ const useStyles = makeStyles({
       display: 'inline-block',
       padding: `0 ${tokens.spacingHorizontalXXS}`,
     },
+    // Task 048: RENDERABLE atoms (tab, symbol) — content, not placeholders. They are atoms so the mapper can
+    // recognize them on save, which is what stopped tabs and symbol glyphs being flattened; they were never
+    // meant to LOOK like anything new. Without this reset the `.compose-atom` chrome above would put a
+    // dashed bordered box around every tab and render every § as an italic chip — a visible regression
+    // introduced by a fidelity fix. Everything here is a reset to the surrounding text's own appearance;
+    // no new color is invented, so ADR-021's semantic-token rule is satisfied by having no color at all.
+    '& .compose-atom-renderable': {
+      color: 'inherit',
+      backgroundColor: 'transparent',
+      border: 'none',
+      borderRadius: 0,
+      fontStyle: 'inherit',
+      padding: 0,
+      // Selectable as a whole node (that is what makes it deletable), but never a text-editing target.
+      userSelect: 'none',
+    },
+    // The selected-node outline still applies — a user who selects a tab should see that they have.
     '& .ProseMirror-selectednode.compose-atom': {
       outlineWidth: '2px',
       outlineStyle: 'solid',
@@ -1780,8 +1797,7 @@ function distinctiveAnchorPrefix(text: string): string {
 /** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
  *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
 type AdvisoryAnchorResolution =
-  | { span: { from: number; to: number }; kind?: undefined }
-  | { span: null; kind: 'not_found' | 'ambiguous' };
+  { span: { from: number; to: number }; kind?: undefined } | { span: null; kind: 'not_found' | 'ambiguous' };
 
 /**
  * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an

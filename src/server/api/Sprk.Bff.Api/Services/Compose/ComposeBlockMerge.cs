@@ -650,8 +650,11 @@ internal static class ComposeBlockMerge
         // ("br", …) REMOVED in task 046 — a soft line break is no longer lost. It round-trips as the
         // ComposeInlineRun.IsLineBreak marker run, so there is nothing to report and reporting it would
         // be a false warning. The residual-loss parity test fails if this list and the renderer disagree.
-        ("sym", "symbol-flattened"),
-        ("tab", "tab-flattened"),
+        // ("sym", …) and ("tab", …) REMOVED in task 048 — neither is lost any more. A tab round-trips as the
+        // ComposeInlineRun.IsTab marker run and a symbol as ComposeInlineRun.Symbol (font + code point
+        // verbatim, not the resolved glyph), so reporting either would be a false warning. Same forcing
+        // function as task 046's `br`: the residual-loss parity test fails if this list and the renderer
+        // disagree in EITHER direction, so a regression here cannot pass silently.
         // Task 045: the INLINE `w:sdt` — a content control sitting inside a paragraph (a party name, an
         // effective date, a defined-term placeholder: the common shape in a legal template). The
         // block-level SdtBlock case was handled below since 041, but an inline control was dropped in

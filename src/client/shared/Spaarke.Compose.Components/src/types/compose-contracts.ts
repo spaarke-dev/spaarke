@@ -498,6 +498,22 @@ export interface ComposeInlineRun {
    * dropped from every edited paragraph because the model had nowhere to put them.
    */
   isLineBreak?: boolean;
+
+  /**
+   * Task 048 (r8): this run IS a tab (`w:tab`). Marker-run contract for {@link text}, but — unlike the
+   * break markers — run PROPERTIES still apply server-side (an underlined tab is the fill-in leader on a
+   * signature block). The editor carries these as `composeInlineAtom` nodes of kind `tab`.
+   */
+  isTab?: boolean;
+
+  /**
+   * Task 048 (r8): this run IS a symbol-font glyph (`w:sym`). Carries the font + code point VERBATIM, not
+   * the glyph the reader resolved for display — re-authoring the resolved look-alike would turn a
+   * Symbol-font § into a different character, and an unresolvable one into the U+FFFD placeholder that
+   * exists only to be honest on screen. Same marker/property contract as {@link isTab}.
+   */
+  symbol?: { font: string; charCode: string };
+
   /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
    * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
    * Server-set; preserve untouched on re-post. */
