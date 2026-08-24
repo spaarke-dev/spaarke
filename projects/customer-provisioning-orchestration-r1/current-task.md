@@ -1,6 +1,127 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T03:15Z (in-session, SESSION 3) — **🎯 H4-shared (task 200) + H4b-BulkAppSettings (task 201) POMLs DESIGNED. Both handlers close the F17+F19+F20 cluster (H9 code deploy + H4-shared KV secret extract-from-source + H4b bulk app-settings from canonical manifest). Handler catalog updated in provision-environment SKILL.md. TASK-INDEX.md updated (80 total tasks). Ready for next-session execution via task-execute.**
+> **Last Updated**: 2026-08-24 T05:30Z (in-session, SESSION 4) — **🎯 PHASE H-PRIME CLOSED. Tasks 200 (H4-shared) + 201 (H4b) BOTH SHIPPED end-to-end via delegated sub-agents. 1555 tests passing (42 new: 19 H4-shared + 23 H4b). All 4 commits pushed. F17+F19+F20 cluster now automatable. Live-fire smoke against Model 1 Prod is the next unblocked task pending Bicep RBAC hardening.**
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T05:30Z SESSION 4 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | `ce3c4f0b7` (task 201 landing) — Model 1 Prod state UNCHANGED (no live Azure ops SESSION 4) |
+| **Working tree** | CLEAN (all changes committed + pushed) |
+| **What SESSION 4 shipped** | 4 commits: POML corrections (`d642e58c5`) + Task 200 Phase A (`ad32b3a8c`) + Task 200 Phase B+C (`e4cc57bf0`) + Task 201 (`ce3c4f0b7`) |
+| **Model 1 Prod state** | Unchanged from SESSION 2. BFF still in F20-chain SIGABRT state until H4-shared + H4b execute live |
+
+### 🎯 WHAT SESSION 4 ACCOMPLISHED (2026-08-24 T02:45Z → T05:30Z)
+
+Executed user's "execute task 084 → 200 → 201" instruction with THREE pre-execution reconnaissance agents surfacing key corrections to my SESSION 3 POMLs:
+
+1. **Pre-flight discovered task 084 already ✅** (marked completed in TASK-INDEX but POML header said `not-started`). Verified truly done: `-Verify` exit 0, `-DryRun` exit 0, 32 secrets, BINDING guard OK, dev exception OK. Reconciled POML header + added detailed completion notes.
+
+2. **L2 layout recon** revealed 4-project split (`.Api / .Core / .Worker / .Tests`) — my POMLs had assumed 1-project scaffold. Recon also caught H4 uses SDK-native `SecretClientKvWriter`, NOT az CLI shell-out. And DI is a 3-file dance (`HandlerIds.cs` + `HandlerDispatchRegistrationModule.cs` + `.Worker/Program.cs`) enforced by `HandlerRegistrationCompletenessTests`.
+
+3. **Manifest recon** revealed BIG SHIFT for task 201: existing `Configure-AppServiceSettings.generated.ps1` ALREADY does batched `az webapp config appsettings set --settings @settings` per slot. My SESSION 3 task 201 design (author brand-new handler + new manifest + new generator) was 70% redundant. User confirmed Option A design: extend existing manifest with `per_env_settings:` top-level list + thin H4b handler shells to the existing generated script.
+
+4. **Consumer contracts recon** confirmed additive schema extensions (task 200's `from-shared-service` + task 201's `per_env_settings:`) don't break tasks 085/086 (they only read `canonical_name` + `aliases`).
+
+5. **POML corrections landed** (`d642e58c5`) — 3 POMLs corrected + task 084 status reconciled. 319 insertions / 225 deletions.
+
+6. **Task 200 Phase A landed** (`ad32b3a8c`) — sub-agent extended generator + manifest additively. 5 files, 73 insertions / 62 deletions. `-Verify` exit 0.
+
+7. **Task 200 Phase B+C landed** (`e4cc57bf0`) — sub-agent authored H4SharedKvSecretsPopulationHandler + 5-branch SdkSourceServiceKeyExtractor (Azure.ResourceManager SDK) + ISharedKvSecretAccessor seam + 19 tests. 20 files, 2405 insertions. **1531 tests pass** (0 failures). Sub-agent added critical correctness fix: H4-per-tenant now filters `FromSharedService` entries to avoid quarantining on every run.
+
+8. **Task 201 landed** (`ce3c4f0b7`) — sub-agent extended manifest with 8-entry `per_env_settings:` list + generator emits per-env-literal lines in same batched `$settings` array + authored 4 new seams (`IProcessRunner`, `IHealthzProbe`, `IContainerLogFetcher`, `IPerEnvSettingsManifest`) + thin H4bBulkAppSettingsHandler + 23 tests. 21 files, 3051 insertions. **1555 tests pass** (0 failures, 42 new: 19 + 23). `-Verify` exit 0 with 32 secrets + 8 per_env_settings.
+
+### 🎯 PHASE H-PRIME CLOSED
+
+```
+H4-per-tenant (047, landed) || H4-shared (200, SESSION 4 e4cc57bf0)
+   → H4b (201, SESSION 4 ce3c4f0b7)
+   → H9 (052, landed but not yet live-deployed)
+   → BFF boots configured (kills F17+F19+F20 cluster permanently)
+```
+
+All three cluster components now automatable end-to-end. Live-fire pending Bicep RBAC hardening.
+
+### 📍 EXPLICIT NEXT ACTIONS (SESSION 5)
+
+**RECOMMENDED — Bicep RBAC hardening (2 items block live-fire)**:
+
+1. **Task-TBD: L2 UAMI needs 5 RBAC grants on source Azure services** (per task 200 escalation trigger):
+   - `Cognitive Services User` on `sprksharedprod-openai`
+   - `Cognitive Services User` on `sprksharedprod-docintel`
+   - `Search Service Contributor` on `sprksharedprod-search`
+   - `Azure Service Bus Data Owner` on `sprksharedprod-servicebus`
+   - `Storage Account Contributor` on `sprksharedprodsa`
+   - `Redis Cache Contributor` on `sprksharedprod-redis`
+   - Impl: extend `stacks/model1-shared.bicep` (or `platform-shared.bicep`) with role-assignment resources for the L2 UAMI on each source service.
+
+2. **Task-TBD: L2 UAMI needs `Website Contributor` on target BFF App Service** (per task 201 for Kudu docker-log fetch):
+   - Grant on `sprksharedprod-api` for L2 UAMI (currently only has RBAC via UAMI attached as `keyVaultReferenceIdentity`)
+   - Impl: extend the same stack Bicep with role-assignment for L2 UAMI on the App Service resource.
+
+3. **THEN Live-fire smoke against Model 1 Prod**: dispatch H4-shared + H4b + BFF restart + verify `/healthz` returns 200 within 8-min backoff. First real evidence the customer-provisioning platform works E2E for the KV-secret + app-settings + BFF-boot flow.
+
+**Non-blocking follow-on deferred items** (see current TodoWrite for full list):
+- Reconciler DAG edge wiring for H4Shared + H4b (both keyed-registered but not yet DAG-referenced)
+- Nightly IOptions-inventory-drift ArchTest
+- Manifest cleanup: dedupe AzureAd__ClientId + AzureAd__TenantId
+- Register spaarke-model1-prod as `sprk_dataverseenvironment` record on registry env
+- Sample sign-in flow verification against Model 1 Prod MDA app
+- Absorb F1-F20 + R5-R14 into r1 design.md/spec.md/handlers
+
+### 🚨 CRITICAL LEDGER (values needed for live-fire)
+
+Extracted from source services SESSION 2, ALREADY seeded to `sprk-prod-kv`:
+- `AiSearch--AdminKey` (sprksharedprod-search)
+- `DocumentIntelligence-ApiKey` (sprksharedprod-docintel)
+- `AzureOpenAI-ApiKey` (sprksharedprod-openai)
+- `ServiceBus-ConnectionString` (canonical PascalCase; alias `servicebus-connection-string`)
+- `Storage-ConnectionString` (canonical PascalCase; alias `storage-connection-string`)
+- `Redis-ConnectionString` (canonical PascalCase; alias `redis-connection-string`)
+
+For live-fire H4-shared execution, no additional extraction needed — H4-shared will re-extract from source services via SDK, detect no drift, NO-OP.
+
+For live-fire H4b execution, ALL 8 per-env inputs must be present in HandlerEnvelope.Parameters.NonSecret:
+- `tenant_id` (Ralph's tenant OR the Model 1 Prod tenant — depends on which flow is being tested)
+- `bff_app_client_id` (H3 output — currently NOT run for Model 1 Prod; may need dev-mode override)
+- `kv_vault_uri` = `https://sprk-prod-kv.vault.azure.net/`
+- `cosmos_endpoint` (from Model 1 Prod Cosmos account — not yet extracted; check `az cosmosdb show`)
+- `container_type_id` (H8 output — needs SPE container-type creation for Model 1 Prod)
+- `uami_client_id` = `64b920f1-a063-42b0-94dd-4222fa46aa19` (shared UAMI clientId, per SESSION 2 ledger)
+
+Values NOT yet extracted/needed for live-fire (some are H8-dependent):
+- `WebhookSigningKey` (H8 output)
+- `WebhookClientState` (H8 output)
+- `EmailProcessing:WebhookSigningKey` (H14 output — likely OK to defer)
+
+### 🔁 To resume next session — say ONE of these
+
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context
+- **"design + execute the Bicep hardening task"** — 5-source-service RBAC + BFF-App-Service Website Contributor
+- **"live-fire H4-shared + H4b against Model 1 Prod"** — needs Bicep hardening first; may 403 without it
+- **"wire the DAG edges for H4Shared + H4b"** — non-blocking follow-on
+
+### 🧠 SESSION 4 SUMMARY
+
+**Approach**: 3 pre-execution reconnaissance sub-agents (L2 layout + manifest surface + consumer contracts) BEFORE POML corrections; then 3 delegated execution sub-agents (Phase A + task 200 Phase B+C + task 201 end-to-end). Every commit atomically included TASK-INDEX + completion notes updates.
+
+**Design decisions locked in**:
+- Additive schema extensions preserved `-Verify` determinism (byte-identical regen)
+- SDK-native extractors (not az CLI shell-out) — testable, structured error handling
+- Sibling seams (`ISharedKvSecretAccessor`, `IPerEnvSettingsManifest`) not extending existing interfaces — preserves ADR-028 cleartext discipline
+- Single-source-of-truth manifest preserved (Option A per user AskUserQuestion) — new BFF settings tomorrow = 1 manifest entry + 0 handler changes
+- Thin H4b handler shells to generated PS script (~600 LOC total with rejection-code catalog) — pattern break from H4 SDK-based writer, but well-justified and testable
+
+**BINDING guards enforced**:
+- H4-shared: 6 F19 entries all `never_delete: false`; Dataverse-ClientSecret + BFF-API-ClientSecret untouched
+- H4b: `Test-PerEnvSettingsShape` refuses any per_env_settings entry whose `key` matches a never_delete secret name; BFF-API-ClientSecret verified NOT in per_env_settings
+
+**Owner directives (unchanged from SESSION 2)**: Q1-Q7 answers per prior handoff. Do NOT `pac admin copy`. Do NOT enable Managed Environments yet. Do NOT set up Env Groups for Model 1. Do NOT set up PAYG for Model 1.
+
+---
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T03:15Z SESSION 3 (retained for reference)
 
 ## 🎯 QUICK RECOVERY — 2026-08-24 T03:15Z SESSION 3 (READ THIS FIRST)
 
