@@ -289,24 +289,45 @@ function buildColumns(): TableColumnDefinition<ContainerType>[] {
     createTableColumn<ContainerType>({
       columnId: "owningAppId",
       renderHeaderCell: () => "Owning App",
+      // An absent owning app is unknown, not absent — a blank cell would claim there isn't one.
       renderCell: (ct) => (
         <Text truncate style={{ color: tokens.colorNeutralForeground2 }}>
-          {ct.owningAppId}
+          {ct.owningAppId ?? "—"}
         </Text>
       ),
     }),
     createTableColumn<ContainerType>({
       columnId: "isRegistered",
       renderHeaderCell: () => "Registered",
-      renderCell: (ct) => (
-        <Badge
-          color={ct.isRegistered === true ? "success" : "warning"}
-          appearance="filled"
-          size="small"
-        >
-          {ct.isRegistered === true ? "Yes" : "No"}
-        </Badge>
-      ),
+      /*
+       * Three states, not two. Registration status comes from the containerTypeRegistrations
+       * endpoint, which this screen does not call — so here the value is `undefined`, meaning NOT
+       * DETERMINED. Collapsing that to "No" (as this did until 2026-08-23) told an administrator
+       * that every container type in the tenant was unregistered, which the data never said.
+       */
+      renderCell: (ct) => {
+        if (ct.isRegistered === undefined) {
+          return (
+            <Tooltip
+              content="Registration status is not returned with the container type list. Open the type to check its consuming tenants."
+              relationship="label"
+            >
+              <Badge color="informative" appearance="outline" size="small">
+                Unknown
+              </Badge>
+            </Tooltip>
+          );
+        }
+        return (
+          <Badge
+            color={ct.isRegistered ? "success" : "warning"}
+            appearance="filled"
+            size="small"
+          >
+            {ct.isRegistered ? "Yes" : "No"}
+          </Badge>
+        );
+      },
     }),
     createTableColumn<ContainerType>({
       columnId: "createdDateTime",

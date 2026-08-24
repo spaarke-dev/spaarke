@@ -11,14 +11,13 @@
 |---|---|
 | **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 done: 020 ✅, 030 🔄 partial**; 011 🔄 partial |
 | **Step** | Between tasks. **Next: 029** (W10, client+DTO only) or **021** (W5, GraphService). |
-| **Status** | 012, 013, 020 committed + pushed. **030 complete in working tree, NOT yet committed.** |
-| **Next Action** | Commit 030 (3 client files + notes), then invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. 030 was the first whose *facts* held; its **scope** was still wrong. |
+| **Status** | 012, 013, 020 committed + pushed. **030 committed (`0a7220849` + follow-up), not yet pushed.** |
+| **Next Action** | Push, then invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. 030 was the first whose *facts* held; its **scope** was still wrong. |
 
 ### 🔑 Task 030 — what it changed, and the one thing NOT to undo
 
-Three client files, no server change: `containerTypeLifecycle.ts` (new — sourced constraint data),
-`CreateContainerTypeDialog.tsx`, `ContainerTypesPage.tsx`. Build ✅ (vite, 3,380 modules, 15.47 s);
-**0 type errors in the touched files** (38 pre-existing elsewhere, unrelated).
+4 client files + 3 server files + 1 new test file. Gates: BFF build 0 errors · **10,652 tests** (+6) ·
+ArchTests 36/36 · publish **43.67 MB, 0 MB delta** · code page builds · 0 type errors in touched files.
 
 **Do NOT add a "N of 25 remaining" quota figure.** `describeProductionQuota()` returns
 `atLimit: false` unconditionally *on purpose*: container-type LIST runs delegated, and task 012 proved
@@ -30,10 +29,27 @@ trial limit *is* enforced, because seeing a trial type proves one exists — the
 `containerTypeId`, and `speApiClient` **casts** the response instead of parsing it — so `getRowId` was
 `undefined` for every row and the Register wizard always opened with no type. Normalised in-screen.
 
-🔴 **Still broken, handed off**: the BFF never sends `owningAppId`, `azureTenantId`, or
-`expiryDateTime` (absent from **both** `SpeContainerTypeSummary` and `ContainerTypeDto`). So the
-"Owning App" column is blank, the "Registered" badge reads **"No" for every row**, and the trial
-30-day-expiry warning **cannot render**. → tasks **023** / **025**, which already own those files.
+✅ **Field gap FIXED here** (operator decision, not deferred to 023/025). `owningAppId` and
+`expiryDateTime` now flow Graph → summary → DTO → client. Root cause was the **`$select`**, not the
+mapping: a hand-maintained projection never asked for them. **The `$select` was removed, not
+extended** — naming properties explicitly re-arms the 400-on-a-wrong-name failure this workstream
+exists to remove, and a tenant is capped at 25 container types so there is no size argument.
+
+### 🔴 The real find — `billingClassification` has been null since 2026-08-13
+
+Writing the **first test ever** over this mapping made 3 of 5 fail, one of them on pre-existing
+behaviour. `MapContainerType` read the value only from `AdditionalData`, justified by a comment saying
+*"Graph SDK 5.101.0 does not include the typed enum"*. True at 5.101.0 — but `dotnet-10-upgrade-r1`
+task 033 moved the repo to **Graph 6.5.0, which types it**, so Kiota bound it to the typed property
+and `AdditionalData` stopped carrying it. **Null for every container type since.**
+
+Every lifecycle rule keys off that field. Both of 030's client blocks (trial-Register, trial-quota)
+would have silently no-opped. Fixed typed-first / `AdditionalData`-second, plus
+`NormalizeBillingClassification` (the SDK enum stringifies `Trial`; Graph and every client comparison
+use `trial`).
+
+**→ Task 023 must audit the other 6 `AdditionalData` fallbacks in that file** — all written under the
+same expired 5.x assumption. A comment naming a dependency version is a claim with an expiry date.
 
 Full record: [`notes/task-030-findings.md`](notes/task-030-findings.md).
 

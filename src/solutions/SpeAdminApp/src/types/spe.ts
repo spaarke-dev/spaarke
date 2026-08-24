@@ -184,13 +184,25 @@ export interface ContainerType {
   containerTypeId: string;
   /** Display name */
   displayName: string;
-  /** Owning Azure App Registration Client ID */
-  owningAppId: string;
+  /**
+   * Owning Azure App Registration Client ID.
+   *
+   * Optional because Graph may not return it — and `undefined` means UNKNOWN, not "none". Rendering
+   * an absent owning app as a blank cell (as this screen did until 2026-08-23) reads as "there
+   * isn't one", which is a different and wrong claim.
+   */
+  owningAppId?: string;
   /** Billing classification (trial / standard / directToCustomer) */
   billingClassification: ContainerTypeStatus;
-  /** Azure AD tenant ID of the owning tenant */
-  azureTenantId: string;
-  /** Whether the container type is registered on the consuming tenant */
+  /** Azure AD tenant ID of the owning tenant. Not currently returned by the BFF. */
+  azureTenantId?: string;
+  /**
+   * Whether the container type is registered on the consuming tenant.
+   *
+   * Sourced from the containerTypeRegistrations endpoint, NOT from the container-type list — so on
+   * the list screen it is `undefined`, meaning **not yet determined**. Treating that as `false`
+   * makes the grid state "No" for every row, which is an assertion the data does not support.
+   */
   isRegistered?: boolean;
   /** Creation date ISO string */
   createdDateTime?: string;

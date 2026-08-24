@@ -147,12 +147,35 @@ public sealed class SpeAdminGraphService
     /// <param name="Description">Optional description of the container type's purpose.</param>
     /// <param name="BillingClassification">Billing classification (e.g., "standard"). Null when not returned by Graph.</param>
     /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
+    /// <param name="OwningAppId">
+    /// Entra application (client) ID of the owning application. SharePoint Embedded mandates a 1:1
+    /// relationship between an owning app and a container type, and the coupling is permanent — so
+    /// this is what identifies a container type to an administrator, not just its GUID.
+    /// <para>
+    /// Null when Graph does not return it. Deliberately NOT defaulted to a placeholder: an absent
+    /// owning app must read as unknown, never as a value.
+    /// </para>
+    /// </param>
+    /// <param name="ExpirationDateTime">
+    /// When a trial container type expires. Trial types are valid for 30 days and are not renewable
+    /// (knowledge/sharepoint-embedded/docs/learn-containertypes.md:69), which is the one lifecycle
+    /// fact an administrator is otherwise never told. Null for non-trial types, and null when Graph
+    /// does not return it.
+    /// </param>
+    /// <remarks>
+    /// Trailing parameters are optional so the positional construction in existing tests keeps
+    /// compiling. Added 2026-08-23 by task 030 — the client asks for both fields
+    /// (<c>types/spe.ts</c>) but nothing above this record ever supplied them, so the grid's
+    /// "Owning App" column rendered blank and the trial-expiry warning could never fire.
+    /// </remarks>
     public sealed record SpeContainerTypeSummary(
         string Id,
         string DisplayName,
         string? Description,
         string? BillingClassification,
-        DateTimeOffset CreatedDateTime);
+        DateTimeOffset CreatedDateTime,
+        string? OwningAppId = null,
+        DateTimeOffset? ExpirationDateTime = null);
 
     /// <summary>
     /// An application permission entry on an SPE container type, returned from the Graph
@@ -3312,15 +3335,19 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Listing SPE container types from Graph API");
 
+        // NO $select — deliberate (task 030).
+        //
+        // The previous hand-maintained list ("id", "name", "billingClassification", "createdDateTime")
+        // was the reason owningAppId and expirationDateTime never reached the client: a property the
+        // projection does not ask for is a property the caller silently never sees. Naming them
+        // explicitly would fix that but re-arms the failure this workstream exists to remove — a
+        // wrong or version-absent property name in $select is a hard 400 that breaks the whole list,
+        // exactly as `storageUsedInBytes` does on v1.0 (see notes/beta-vs-v1-surface-verification.md).
+        //
+        // Omitting $select returns the resource's default projection instead. There is no size
+        // argument against it here: Microsoft caps a tenant at 25 container types.
         var response = await ExecuteWithRetryAsync(
-            () => graphClient.Storage.FileStorage.ContainerTypes
-                .GetAsync(config =>
-                {
-                    config.QueryParameters.Select = new[]
-                    {
-                        "id", "name", "billingClassification", "createdDateTime"
-                    };
-                }, ct),
+            () => graphClient.Storage.FileStorage.ContainerTypes.GetAsync(cancellationToken: ct),
             ct);
 
         var results = new List<SpeContainerTypeSummary>();
@@ -3488,12 +3515,26 @@ public sealed class SpeAdminGraphService
         // BillingClassification: Graph SDK 5.101.0 does not include the typed enum
         // FileStorageContainerTypeBillingClassification in the installed version.
         // Extract the raw string value from AdditionalData as a fallback.
-        string? billingClassification = null;
-        if (ct.AdditionalData != null &&
-            ct.AdditionalData.TryGetValue("billingClassification", out var billingObj))
-        {
-            billingClassification = billingObj?.ToString();
-        }
+        // 🔴 REGRESSION FIXED HERE (task 030, 2026-08-23). This previously read ONLY from
+        // AdditionalData, on the strength of a comment saying "Graph SDK 5.101.0 does not include the
+        // typed enum". That was true at 5.101.0. The repo moved to Microsoft.Graph 6.5.0 on
+        // 2026-08-13 (dotnet-10-upgrade-r1 task 033), which DOES type it — so Kiota began binding the
+        // value to the typed property and AdditionalData stopped carrying it. Billing classification
+        // has been null for every container type ever since, and nothing noticed, because no test
+        // exercised the mapping. Every lifecycle rule in the UI keys off this field: which types are
+        // deletable, which can be registered, which quota applies.
+        //
+        // Typed first, AdditionalData second, so this survives the SDK typing it OR untyping it.
+        var billingClassification = NormalizeBillingClassification(
+            ct.BillingClassification?.ToString() ?? ReadAdditionalString(ct, "billingClassification"));
+
+        // owningAppId and expirationDateTime come through AdditionalData for the same reason
+        // billingClassification does: the installed Graph SDK does not type them on
+        // FileStorageContainerType. Reading them here rather than adding SDK-typed properties keeps
+        // this resilient to SDK model drift — if a future SDK types them, AdditionalData simply stops
+        // carrying them and both fall back to null rather than throwing.
+        var owningAppId = ct.OwningAppId?.ToString() ?? ReadAdditionalString(ct, "owningAppId");
+        var expirationDateTime = ct.ExpirationDateTime ?? ReadAdditionalTimestamp(ct, "expirationDateTime");
 
         // FileStorageContainerType uses "Name" (not "DisplayName") as the display label in Graph SDK.
         // There is no Description property on the containerType Graph API resource.
@@ -3502,7 +3543,70 @@ public sealed class SpeAdminGraphService
             DisplayName: ct.Name ?? string.Empty,
             Description: null,
             BillingClassification: billingClassification,
-            CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow);
+            // ⚠️ KNOWN DEFECT, deliberately left for task 023 to avoid widening this change into the
+            // DTO contract: when Graph omits createdDateTime this substitutes *now*, so a container
+            // type of unknown age renders as "created today". Fabricating a value to fill an absence
+            // is this project's core defect class — see notes/task-030-findings.md §7.
+            CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow,
+            OwningAppId: owningAppId,
+            ExpirationDateTime: expirationDateTime);
+    }
+
+    /// <summary>
+    /// Normalizes a billing classification to the value Graph puts on the wire.
+    /// </summary>
+    /// <remarks>
+    /// The SDK enum stringifies to its C# member name (<c>Trial</c>, <c>DirectToCustomer</c>), while
+    /// Graph, the API contract, and every client comparison use camelCase (<c>trial</c>,
+    /// <c>directToCustomer</c>). Emitting the C# spelling would make the DTO's value depend on which
+    /// SDK version happened to be installed — the exact coupling that hid the regression above.
+    /// Lowercasing only the first character preserves the rest of the identifier.
+    /// </remarks>
+    private static string? NormalizeBillingClassification(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    /// <summary>
+    /// Reads a string property from a Graph model's untyped <c>AdditionalData</c> bag.
+    /// Returns null when absent, null-valued, or blank — an absent property must never become "".
+    /// </summary>
+    private static string? ReadAdditionalString(
+        Microsoft.Graph.Models.FileStorageContainerType ct, string propertyName)
+    {
+        if (ct.AdditionalData is null ||
+            !ct.AdditionalData.TryGetValue(propertyName, out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        var value = raw.ToString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Reads a timestamp from a Graph model's untyped <c>AdditionalData</c> bag.
+    /// </summary>
+    /// <remarks>
+    /// Returns null on an unparseable value rather than throwing or substituting a default. A date we
+    /// cannot read is unknown, and the caller must be able to tell that apart from a real date —
+    /// substituting one is how "expires in 30 days" silently becomes "expires today".
+    /// </remarks>
+    private static DateTimeOffset? ReadAdditionalTimestamp(
+        Microsoft.Graph.Models.FileStorageContainerType ct, string propertyName)
+    {
+        var value = ReadAdditionalString(ct, propertyName);
+        if (value is null) return null;
+
+        return DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed)
+            ? parsed
+            : null;
     }
 
     // =========================================================================

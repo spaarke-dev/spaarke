@@ -33,6 +33,32 @@ public sealed record ContainerTypeDto
     /// <summary>When the container type was created (UTC).</summary>
     [JsonPropertyName("createdDateTime")]
     public DateTimeOffset CreatedDateTime { get; init; }
+
+    /// <summary>
+    /// Entra application (client) ID of the owning application, or null when Graph does not return it.
+    /// </summary>
+    /// <remarks>
+    /// SharePoint Embedded binds one owning app to one container type, permanently — so this is what
+    /// identifies a container type to an administrator. The client has always asked for it
+    /// (<c>types/spe.ts</c>) and nothing ever supplied it, which is why the grid's "Owning App" column
+    /// rendered blank for every row. Added 2026-08-23 by task 030.
+    /// <para>
+    /// Null means <b>unknown</b>, not "none". Callers must render the difference.
+    /// </para>
+    /// </remarks>
+    [JsonPropertyName("owningAppId")]
+    public string? OwningAppId { get; init; }
+
+    /// <summary>
+    /// When a trial container type expires, or null for non-trial types and when Graph omits it.
+    /// </summary>
+    /// <remarks>
+    /// A trial container type is valid for 30 days and is not renewable. Without this field the UI
+    /// could not warn about it at all, so an administrator's first sign of the deadline was a
+    /// container type that had stopped working. Added 2026-08-23 by task 030.
+    /// </remarks>
+    [JsonPropertyName("expiryDateTime")]
+    public DateTimeOffset? ExpiryDateTime { get; init; }
 }
 
 /// <summary>

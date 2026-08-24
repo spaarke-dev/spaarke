@@ -173,7 +173,11 @@ public static class ContainerTypeEndpoints
                     DisplayName = ct2.DisplayName,
                     Description = ct2.Description,
                     BillingClassification = ct2.BillingClassification,
-                    CreatedDateTime = ct2.CreatedDateTime
+                    CreatedDateTime = ct2.CreatedDateTime,
+                    // Both are nullable all the way to the client. An absent owning app must render
+                    // as unknown, and an absent expiry must not read as "never expires" (task 030).
+                    OwningAppId = ct2.OwningAppId,
+                    ExpiryDateTime = ct2.ExpirationDateTime
                 })
                 .ToList();
 
@@ -296,7 +300,9 @@ public static class ContainerTypeEndpoints
                 DisplayName = containerType.DisplayName,
                 Description = containerType.Description,
                 BillingClassification = containerType.BillingClassification,
-                CreatedDateTime = containerType.CreatedDateTime
+                CreatedDateTime = containerType.CreatedDateTime,
+                OwningAppId = containerType.OwningAppId,
+                ExpiryDateTime = containerType.ExpirationDateTime
             });
         }
         catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
@@ -452,7 +458,9 @@ public static class ContainerTypeEndpoints
                 DisplayName = created.DisplayName,
                 Description = created.Description,
                 BillingClassification = created.BillingClassification,
-                CreatedDateTime = created.CreatedDateTime
+                CreatedDateTime = created.CreatedDateTime,
+                OwningAppId = created.OwningAppId,
+                ExpiryDateTime = created.ExpirationDateTime
             };
 
             return Results.Created($"/api/spe/containertypes/{created.Id}", dto);

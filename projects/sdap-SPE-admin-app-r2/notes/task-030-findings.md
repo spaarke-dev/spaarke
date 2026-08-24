@@ -66,7 +66,10 @@ the upper layer reads as benign absence. **Fixed** in this task, contained to th
 
 ---
 
-## 3. 🔴 The server drops three fields the constraints need
+## 3. 🔴 The server dropped the fields the constraints need — **FIXED** (operator decision, 2026-08-23)
+
+> Originally recorded here as a handoff to tasks 023/025. The operator chose to fix it inside 030
+> instead. Writing the first test over this mapping then surfaced something worse — see §7.
 
 `owningAppId`, `azureTenantId`, and `expiryDateTime` are **absent from both** the domain record and
 the DTO — they are not merely unmapped at the edge:
@@ -85,8 +88,28 @@ The client asks for all three (`types/spe.ts:182-199`), so today:
 - `ContainerTypeDetail.tsx:740` guards the **trial-expiry warning** on `expiryDateTime`, so the
   warning about the 30-day expiry **can never render**.
 
-Fixing this means editing `SpeAdminGraphService.cs` (the god-file) and `ContainerTypeDtos.cs` — outside
-this task's declared `<outputs>`, and inside territory tasks **023** and **025** already own.
+### The root cause was the projection, not the mapping
+
+The Graph request carried a hand-maintained `$select`:
+
+```csharp
+config.QueryParameters.Select = new[] { "id", "name", "billingClassification", "createdDateTime" };
+```
+
+**A property the projection does not ask for is a property the caller silently never sees.** No amount
+of mapping downstream could have recovered these fields.
+
+**Fix: the `$select` was removed entirely, not extended.** Naming the properties explicitly would work
+today but re-arms the failure this workstream exists to remove — a wrong or version-absent name in
+`$select` is a hard 400 that breaks the whole list, exactly as `storageUsedInBytes` does on v1.0
+(`notes/beta-vs-v1-surface-verification.md`). Omitting `$select` returns the resource's default
+projection instead, and there is no size argument against it: Microsoft caps a tenant at 25 container
+types.
+
+`owningAppId` and `expirationDateTime` now flow through `SpeContainerTypeSummary` (optional trailing
+params, so existing positional construction still compiles) → `ContainerTypeDto` → all three endpoint
+mapping sites → the client. `azureTenantId` was **not** added: the Graph container-type resource does
+not expose one, and inventing a mapping would be the fabrication this project removes.
 
 ---
 
@@ -153,13 +176,30 @@ What *was* done instead: the creation flow now states plainly, before submit, th
 pass-through type **can never be deleted** — which is the decision point where that fact actually
 changes an admin's behaviour.
 
-### Files changed (all client, all inside `<outputs>`)
+### Files changed
+
+**Client** (inside `<outputs>`, plus the type contract those files depend on):
 
 | File | Change |
 |---|---|
 | `containerTypeLifecycle.ts` **(new)** | The sourced constraint data — every fact carries a line reference into the knowledge corpus. Pure data, no JSX, so it is assertable in tests and re-checkable when the corpus refreshes (task 061). |
 | `CreateContainerTypeDialog.tsx` | Per-classification consequences shown live before submit, severity-coded; quota bar; acknowledgment gate for the classifications that can never be deleted; blocks submit when a limit is proven. |
-| `ContainerTypesPage.tsx` | `normalizeContainerType` (§2); Register disabled when nothing is selected **or** the selection is trial, with a tooltip naming the reason; feeds the visible list to the dialog. |
+| `ContainerTypesPage.tsx` | `normalizeContainerType` (§2); Register disabled when nothing is selected **or** the selection is trial, with a tooltip naming the reason; "Owning App" renders `—` rather than blank; **"Registered" gained a third state** — `undefined` now reads *Unknown*, not *No*. |
+| `types/spe.ts` | `owningAppId` and `azureTenantId` made optional, with the reason: absent means **unknown**, not "none". |
+
+**Server** (added by operator decision — see §3, §7):
+
+| File | Change |
+|---|---|
+| `SpeAdminGraphService.cs` | `$select` removed from the container-type list (§3); `OwningAppId` + `ExpirationDateTime` on `SpeContainerTypeSummary` as optional trailing params; `MapContainerType` reads typed-first / `AdditionalData`-second; `NormalizeBillingClassification`, `ReadAdditionalString`, `ReadAdditionalTimestamp` helpers. |
+| `ContainerTypeDtos.cs` | `OwningAppId` + `ExpiryDateTime` on `ContainerTypeDto`, both nullable. |
+| `ContainerTypeEndpoints.cs` | All three DTO construction sites (list, get, create) pass the new fields through. |
+| `SpeAdminContainerTypeMappingTests.cs` **(new)** | 6 WireMock contract tests. Three failed on first run — that is how §7 was found. |
+
+**Placement justification (root CLAUDE.md §10):** no new endpoint, service, DI registration, package,
+or background work. This is a mapping correction inside an existing `Infrastructure/Graph` method plus
+two nullable fields on an existing DTO — the narrowest change that makes the response carry what the
+client already asked for. Publish size unchanged (0 MB delta).
 
 **Design note — the acknowledgment gate is proportionate, not blanket.** Trial is deletable and
 expires, so showing the consequences is enough. Standard and pass-through can *never* be deleted, so
@@ -168,12 +208,19 @@ interrupt.
 
 ### Gates
 
-- **Build ✅** — `vite build`, 3,380 modules, 15.47 s.
-- **Type-check** — **0 errors in the three touched files.** 38 pre-existing errors elsewhere in the
+- **BFF build ✅** — 0 errors, 7 pre-existing warnings.
+- **Tests ✅** — **10,652 passing** (+6), 0 failed, 97 skipped. **ArchTests 36/36** (ADR-007 holds — the
+  Graph client is still built and consumed entirely inside the service).
+- **Publish size ✅** — **43.67 MB compressed incl. PDBs, 0 MB delta** vs the task-020 baseline.
+  Ceiling 60 MB. No new NuGet, so no new CVE surface.
+- **Code page build ✅** — `vite build`, 19.26 s.
+- **Client type-check** — **0 errors in the 4 files touched.** 38 pre-existing errors elsewhere in the
   app (unrelated: unresolved `@lexical/*`, `@azure/msal-browser`, `@hello-pangea/dnd` in the shared
   libraries, plus `"tinted"`/`"tint"` typos in `containers/`). Not introduced here, not in scope.
-- **No server file touched** — no publish-size, NuGet, or CVE surface. No `.cs` change.
 - **No destructive action** — AC-7 holds; nothing was created, modified, or deleted in any tenant.
+- ⚠️ **The UI itself is unverified.** The `<ui-tests>` need a deployed app; and container-type GET and
+  CREATE still return 403 (task 011), so the creation flow cannot be exercised end-to-end regardless.
+  Same standing gap as tasks 001 / 003 / 012.
 
 ### ADR compliance
 
@@ -187,11 +234,59 @@ interrupt.
 
 ---
 
-## 6. Handoff
+## 7. 🔴 The biggest finding — `billingClassification` has been null since the Graph 6 upgrade
+
+Found only because §3's fix came with the first test ever written over this mapping. **Three of the
+five new tests failed on the first run, and one of them was testing pre-existing behaviour.**
+
+`MapContainerType` read the value exclusively from the untyped `AdditionalData` bag, on the strength
+of this comment:
+
+```csharp
+// BillingClassification: Graph SDK 5.101.0 does not include the typed enum
+// FileStorageContainerTypeBillingClassification in the installed version.
+```
+
+That was true at 5.101.0. **The repo moved to `Microsoft.Graph` 6.5.0 on 2026-08-13**
+(`dotnet-10-upgrade-r1` task 033), and 6.5.0 *does* type it. So Kiota began binding the value to the
+typed property, `AdditionalData` stopped carrying it, and the read has returned **null for every
+container type ever since**. The comment stayed accurate about 5.101.0 and became a lie about the
+code.
+
+**Blast radius.** Every lifecycle rule in the UI keys off this field — which types are deletable,
+which can be registered, which quota applies — as does the grid's classification badge. The whole of
+task 030's UI would have been driven by a permanently-null input. Both of this task's other client
+fixes (the trial-Register block, the trial quota block) depend on it and would have silently no-opped.
+
+**Why nothing caught it.** The upgrade was verified by build + test suite, and the suite contained no
+test that exercised this mapping — the 359 SpeAdmin tests made no HTTP call and stood up no host
+(project design.md §1). This is precisely the gap FR-D01 exists to close, and its stated acceptance
+criterion — *"a wrong property name fails CI"* — is now met for this surface by demonstration rather
+than by assertion.
+
+**Fix**: typed property first, `AdditionalData` second, so the mapping survives the SDK typing the
+property *or* untyping it again. Plus `NormalizeBillingClassification`, because the SDK enum
+stringifies to its C# member name (`Trial`, `DirectToCustomer`) while Graph, the API contract, and
+every client comparison use camelCase (`trial`, `directToCustomer`) — emitting the C# spelling would
+make the DTO's value depend on which SDK version happened to be installed, which is the same coupling
+that hid the bug.
+
+**The generalisable lesson**: a comment naming a specific dependency version is a claim with an expiry
+date. Six `AdditionalData` fallbacks elsewhere in `SpeAdminGraphService.cs` were written under the
+same 5.x assumption and are worth auditing on the same basis — handed to task 023.
+
+---
+
+## 8. Handoff
 
 | Item | Owner |
 |---|---|
-| `owningAppId` / `azureTenantId` / `expiryDateTime` on summary + DTO (§3) — unblocks constraints 1, 5, the "Registered" badge, and the trial-expiry warning | **023** or **025** (both already in `SpeAdminGraphService.cs` + DTOs) |
+| ~~`owningAppId` / `expiryDateTime` on summary + DTO~~ | ✅ **done here** (§3), operator decision |
+| ~~`billingClassification` null since Graph 6~~ | ✅ **done here** (§7) |
+| **Audit the other 6 `AdditionalData` fallbacks** in `SpeAdminGraphService.cs` — all written under the same "SDK 5.x does not type this" assumption that §7 proved expired | **023** |
+| **`CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow`** — a container type of unknown age renders as *created today*. Left deliberately: fixing it makes the DTO field nullable, which is a contract change reaching the client | **023** |
+| `azureTenantId` — the client declares it; the Graph resource does not expose one. Either source it elsewhere or drop it from the client type | **023** or **025** |
 | Container-type DELETE endpoint + trial-conditional affordance (§5) | new task, or **050**'s wave — needs a throwaway type |
-| `speApiClient` casts responses instead of parsing them (§2) — the class of bug, not just this instance | **042** (test retirement) or a follow-up |
+| `speApiClient` **casts** responses instead of parsing them (§2) — the class of bug, not just this instance. §2 and §7 are both instances of it | **042** (test retirement) or a follow-up |
 | Quota census (§4 option B) | blocked on the delegated-only constraint from task 010 |
+| **Container-type GET and CREATE are still 403** (app-only against a delegated-only API) — so the detail panel cannot load and nothing in this task's creation flow can be exercised end-to-end yet | **011** (already 🔄 partial) |

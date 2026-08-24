@@ -33,7 +33,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | ✅ **granted; Secure Score live. Alerts blocked on a NON-permission cause — escalated** |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | ✅ **option A — containers stay on beta (documented); paging now derives base addr** |
-| 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔄 **partial — quota escalated; delete affordance does not exist** |
+| 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | 🔄 **partial — quota escalated; delete affordance does not exist. 🔴 Found + fixed: `billingClassification` null since the Graph 6 upgrade** |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | 🔲 |
 | 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) 🔴 | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | 🔲 |
 | 023 | [Property names + quota/consumption split](023-property-names-and-quota-split.poml) | 3 C | C04, C05 | FULL | sonnet | high | W7 | ❌ | 020, 040 | 🔲 |
