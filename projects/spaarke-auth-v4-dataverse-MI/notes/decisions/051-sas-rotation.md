@@ -215,10 +215,11 @@ project's "no in-session flips" non-negotiable, it is a controlled step for 031.
   exists**; do not create it.
 - **Task 033** — remove `ConnectionStrings__ServiceBus` **and** `ServiceBus__ConnectionString` from
   both slots, then the KV secret. Two keys, not one.
-- **Owner** — should the `staging` slot be Running? Its creator is not recoverable (activity log
-  retains 90 days and has no entry, so it predates 2026-05-26). This matters most for **032**: a slot
-  swap promotes whatever is in `staging` into the default slot. (The `38f7693f-…` principal is
-  resolved — see §8 — and needed a lookup in this project's own notes, not the owner.)
+- **✅ Closed 2026-08-24 — not an owner question at all.** The `staging` slot was created by **this
+  project's own task 001** on 2026-08-20 (`notes/decisions/001-slot-creation.md`). My claim above that
+  its creator was unrecoverable came from an activity-log query returning zero rows — including for
+  my own changes hours earlier — i.e. a broken query read as evidence of absence. The slot is retired
+  by the rescoped **032**. (The `38f7693f-…` principal is likewise resolved — see §8.)
 - **Owner decision, closed 2026-08-23: the `Cognitive Services User` grant on the owner's account
   STAYS.** It is on the owner's *user* account, not on the BFF's identity — the platform authenticates
   to Content Safety / OpenAI as `mi-bff-api-dev` and is unaffected either way. Retained for future

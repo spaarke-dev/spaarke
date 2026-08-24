@@ -84,10 +84,25 @@ made the 2026-08-23 outage take 40 minutes. Keeping it keeps that trap armed.
 The slot may only be deleted if **031's secret-first re-verification passed**, since that is the
 evidence the third mode works. Written into 032 as a constraint *and* an escalation trigger.
 
-**Who created the `staging` slot is unknown and probably unknowable**: the Azure activity log retains
-90 days and shows nothing for it, so it predates 2026-05-26. Its `lastModified` (2026-08-23T20:35Z)
-is just my own outage fix. The open question is not "who owns it" — it is **should it be Running at
-all**, which matters most for **032**, where a slot swap would promote whatever is in it.
+**✅ CORRECTED 2026-08-24 — the slot's origin was never a mystery: THIS PROJECT CREATED IT.**
+Task **001** (`001-create-dev-deployment-slot.poml`, Phase 0 Spike, status ✅) created it on
+**2026-08-20**, deliberately, with a full record at
+[`notes/decisions/001-slot-creation.md`](notes/decisions/001-slot-creation.md) — the same document whose
+Findings A/B/C are cited throughout 031/032/033.
+
+I previously wrote here that its creator was "unknown and probably unknowable" and that it "predates
+2026-05-26". **Both statements were wrong.** They came from an activity-log query that returned zero
+rows — including for my own changes hours earlier, which I noticed was suspicious and did not follow
+up. A broken query was read as evidence of absence.
+
+The `CLAUDE.md` line saying "0 exist" was not false so much as **stale**: it described the state
+*before* task 001 ran, and was never refreshed when task 001 created the slot four days later.
+
+**Why this project has a slot when no other project does**: it is the only one performing a credential
+cutover on a **fail-closed** auth path. A bad deploy elsewhere is recoverable; a bad credential deploy
+locks out every user at once, and `#3b` attempt 1 proved the failure mode is a **crash at startup**,
+which config-rollback cannot fix. Task 001 created a safe place to verify MI-FIC before flipping.
+Nothing about Dataverse or managed identity needs a slot.
 
 ### 2b. Scope check — this project deploys to ONE app, and it is dev
 
