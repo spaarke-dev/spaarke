@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 done: 020 ✅, 030 🔄 partial**; 011 🔄 partial |
-| **Step** | Between tasks. **Next: 029** (W10, client+DTO only) or **021** (W5, GraphService). |
-| **Status** | 012, 013, 020 committed + pushed. **030 committed (`0a7220849` + follow-up), not yet pushed.** |
-| **Next Action** | Push, then invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. 030 was the first whose *facts* held; its **scope** was still wrong. |
+| **Task** | **021 in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)**; 011 🔄 partial |
+| **Step** | Starting 021 (Graph Endpoint setting — wire or delete). W5, GraphService + config + client. |
+| **Status** | 012, 013, 020, 030 committed + **pushed** (`c5790afa3`). Quota → **option A**, operator-confirmed. |
+| **Next Action** | Invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. Note 021 interacts with 020's decision: the base address is now derived per-client (`ResolveGraphBaseUrl`), so a "Graph Endpoint" config field must not reintroduce a hardcoded one. |
 
 ### 🔑 Task 030 — what it changed, and the one thing NOT to undo
 

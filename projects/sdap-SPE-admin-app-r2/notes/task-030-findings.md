@@ -152,6 +152,16 @@ blocked on proof. The "remaining" figure is **knowingly not implemented**, per t
 | **B — make the count authoritative** | Have the BFF read container types with an identity holding the SPE Administrator role, so the list is a true census. | New app-only path for a **delegated-only** API (403 on both versions — task 010). Not currently possible. |
 | **C — display remaining from the visible count** | Compute `25 − observed`. | Publishes a guess as a fact. This is the defect class the project removes. **Rejected.** |
 
+### ✅ RESOLVED — operator chose **A** (2026-08-23)
+
+No code change: option A is what shipped. The deviation from acceptance criterion 3 is **accepted
+knowingly** — the limits are stated and trial creation is blocked on proof, but no "remaining" figure
+is published anywhere.
+
+**Do not add one later.** `describeProductionQuota()` returns `atLimit: false` unconditionally on
+purpose, and says so in a comment. Reopening this requires an identity that can enumerate the tenant's
+container types, which option B describes and task 010 proved unavailable today.
+
 ---
 
 ## 5. What was delivered
