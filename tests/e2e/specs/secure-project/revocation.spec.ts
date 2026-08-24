@@ -9,17 +9,21 @@
  * - Revoking access removes Contact from SPE container membership (Plane 2: SPE Files)
  * - After revocation, Dataverse Web API returns no project data for the contact (Plane 1 enforcement)
  * - After revocation, AI Search excludes project documents from the contact's results (Plane 3)
- * - Web role is removed when no active access records remain (Plane 1: Power Pages)
- * - Web role is retained when the contact still has other active participations
+ * - Revoking one project's grant leaves another project's grant active (no over-sweep)
+ *
+ * REMOVED by unified-access-control-r2 task 017 (register H-8b): the two Power Pages web-role tests.
+ * `WebRoleRemoved` was hard-coded to `false` at every call site because Spaarke does not manage Power
+ * Pages web roles, so the 'web role removed' test asserted `true` against a constant `false` and could
+ * only ever fail live, while its sibling passed vacuously. The field is gone from the contract.
  *
  * Architecture:
  * - Endpoint: POST /api/v1/external-access/revoke
  * - Auth: Azure AD Bearer token (internal caller — Core User initiates revocation)
  * - Request: RevokeAccessRequest { AccessRecordId, ContactId, ProjectId, ContainerId? }
- * - Response: RevokeAccessResponse { SpeContainerMembershipRevoked, WebRoleRemoved }
+ * - Response: RevokeAccessResponse { SpeContainerMembershipRevoked, SpeContainerOutcome, DeactivatedCount }
  *
  * UAC Three-Plane Model (uac-access-control.md):
- * - Plane 1: Dataverse — sprk_externalrecordaccess statecode deactivated, Power Pages web role removed
+ * - Plane 1: Dataverse — sprk_externalrecordaccess statecode deactivated
  * - Plane 2: SPE Files  — Contact removed from SPE container membership via Graph API
  * - Plane 3: AI Search  — BFF excludes project from search filter (participation record inactive)
  *
@@ -27,7 +31,6 @@
  * - BFF API deployed to dev: https://spe-api-dev-67e2xz.azurewebsites.net
  * - Dataverse dev environment: https://spaarkedev1.crm.dynamics.com
  * - Test service principal has: Dataverse System Customizer + BFF API access
- * - Power Pages environment configured with SecureProjectParticipant web role
  * - Redis cache available (for cache invalidation verification)
  *
  * @see docs/architecture/uac-access-control.md
@@ -41,14 +44,14 @@ import { DataverseAPI } from '../../utils/dataverse-api';
 
 const BFF_API_URL = process.env.BFF_API_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
 const DATAVERSE_API_URL = process.env.DATAVERSE_API_URL || 'https://spaarkedev1.crm.dynamics.com/api/data/v9.2';
-const POWER_PAGES_URL = process.env.POWER_PAGES_URL || 'https://spaarkedev1.powerappsportals.com';
+// POWER_PAGES_URL removed by task 017 — the only consumers were the deleted web-role tests (H-8b).
 
 /** Dataverse entity sets */
 const ENTITY_SETS = {
   externalRecordAccess: 'sprk_externalrecordaccesses',
   contact: 'contacts',
   project: 'sprk_projects',
-  webrole: 'mspp_webroles',
+  // `webrole: 'mspp_webroles'` removed by task 017 — no remaining reference (H-8b).
 } as const;
 
 /** Access level option set values (sprk_accesslevel) */
@@ -168,7 +171,16 @@ async function grantAccess(
 }
 
 /**
- * Query sprk_externalrecordaccess records for a given contact + project
+ * Query sprk_externalrecordaccess records for a given contact + project.
+ *
+ * Column names corrected by task 017. This filtered on `_sprk_contactid_value` and
+ * `_sprk_projectid_value` — neither attribute exists on `sprk_externalrecordaccess`. Task 016 verified
+ * the live metadata: the lookups are `sprk_contact` and `sprk_project`, and FetchXML filters a lookup by
+ * its ATTRIBUTE name, not the OData `_..._value` projection. So this helper could only ever have errored
+ * against real Dataverse.
+ *
+ * Third appearance of the same stale-column mistake: task 070 fixed the project lookup in
+ * ProjectClosureEndpoint, task 016 the contact lookup there, and this is the e2e helper.
  */
 async function queryAccessRecords(dataverseApi: DataverseAPI, contactId: string, projectId: string): Promise<any[]> {
   const fetchXml = `
@@ -179,8 +191,8 @@ async function queryAccessRecords(dataverseApi: DataverseAPI, contactId: string,
         <attribute name="statuscode" />
         <attribute name="sprk_accesslevel" />
         <filter>
-          <condition attribute="_sprk_contactid_value" operator="eq" value="${contactId}" />
-          <condition attribute="_sprk_projectid_value" operator="eq" value="${projectId}" />
+          <condition attribute="sprk_contact" operator="eq" value="${contactId}" />
+          <condition attribute="sprk_project" operator="eq" value="${projectId}" />
         </filter>
       </entity>
     </fetch>`.trim();
@@ -188,32 +200,10 @@ async function queryAccessRecords(dataverseApi: DataverseAPI, contactId: string,
   return dataverseApi.fetchRecords(ENTITY_SETS.externalRecordAccess, fetchXml);
 }
 
-/**
- * Check if a contact has the Secure Project Participant web role
- */
-async function contactHasSecureProjectWebRole(
-  request: APIRequestContext,
-  bearerToken: string,
-  contactId: string,
-  webRoleId: string
-): Promise<boolean> {
-  const response = await request.get(
-    `${DATAVERSE_API_URL}/${ENTITY_SETS.contact}(${contactId})/mspp_contact_mspp_webrole_powerpagecomponent`,
-    {
-      headers: {
-        Authorization: `Bearer ${bearerToken}`,
-        'OData-MaxVersion': '4.0',
-        'OData-Version': '4.0',
-        Accept: 'application/json',
-      },
-    }
-  );
-
-  if (!response.ok()) return false;
-  const data = await response.json();
-  const roles: any[] = data.value || [];
-  return roles.some((r: any) => r.mspp_webrolesid === webRoleId || r.mspp_systemname === 'SecureProjectParticipant');
-}
+// `contactHasSecureProjectWebRole` was DELETED by task 017 (register H-8b) along with the two web-role
+// tests that were its only callers. Spaarke does not manage Power Pages web roles, so a live query against
+// mspp_contact_mspp_webrole_powerpagecomponent implied a subsystem that is not wired up — which is exactly
+// the kind of dead branch H-8b asks us not to leave behind.
 
 // ============================================
 // Test Suite: Access Revocation — UAC Planes
@@ -456,27 +446,22 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
   });
 
   // ============================================
-  // Test: Step 7 — Web role removed when last access is revoked
+  // Test: Step 7 — revoking one grant must not sweep another project's grant
+  //
+  // ✅ REWRITTEN BY TASK 017 (register H-8b). This block held two Power Pages web-role tests.
+  // `WebRoleRemoved` was hard-coded `false` at every call site — Spaarke does not manage web roles — so
+  // 'Web role removed when contact has no remaining active participations' asserted `true` against a
+  // constant `false` and could only ever fail against the real API, and its sibling asserting `false`
+  // passed for no reason at all. The field is deleted from the contract, so both are gone.
+  //
+  // The second test did carry a real invariant underneath the dead assertion — revoking one project's
+  // grant must leave another project's grant active — so it is kept, re-pointed at Dataverse state,
+  // which is where that invariant actually lives. (.NET coverage:
+  // GrantLifecycleCharacterizationTests.Revoke_DoesNotDeactivateAnotherContactsGrantOnSameRoot and
+  // ProjectClosureCascadeTests.CloseProject_DoesNotDeactivateGrantsOnAnotherProject.)
   // ============================================
 
-  test('Web role removed when contact has no remaining active participations', async ({ request }) => {
-    const { contactId, projectId, accessRecordId } = await setupGrantedAccess(request);
-
-    // Revoke the ONLY participation
-    const result = await revokeAccess(request, bearerToken, {
-      accessRecordId,
-      contactId,
-      projectId,
-    });
-
-    expect(result.status).toBe(200);
-
-    // webRoleRemoved should be true when no other active participations remain
-    // (The endpoint checks remaining active records after deactivation)
-    expect(result.body.webRoleRemoved).toBe(true);
-  });
-
-  test('Web role retained when contact still has other active participations', async ({ request }) => {
+  test('Revoking one project does not deactivate the contact grant on another project', async ({ request }) => {
     // Create one contact and two projects — grant access to both
     const contactId = await dataverseApi.createRecord(ENTITY_SETS.contact, makeTestContact());
     cleanup.push({ entitySet: ENTITY_SETS.contact, id: contactId });
@@ -516,8 +501,14 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
 
     expect(result.status).toBe(200);
 
-    // webRoleRemoved should be FALSE — contact still participates in Project 2
-    expect(result.body.webRoleRemoved).toBe(false);
+    // Project 1's grant is deactivated...
+    const project1Records = await queryAccessRecords(dataverseApi, contactId, projectId1);
+    expect(project1Records.every(r => r.statecode === STATE.Inactive)).toBe(true);
+
+    // ...and Project 2's grant is untouched. Over-sweeping is a privilege-LOSS bug and the mirror risk
+    // of the sweep-by-logical-key introduced in task 010.
+    const project2Records = await queryAccessRecords(dataverseApi, contactId, projectId2);
+    expect(project2Records.some(r => r.statecode === STATE.Active)).toBe(true);
   });
 
   // ============================================
@@ -570,7 +561,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
 test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () => {
   // ── Revoke success ─────────────────────────────────────────────────────────
 
-  test('mocked: revoke cascade — Dataverse deactivated, SPE removed, web role removed', async ({ page }) => {
+  test('mocked: revoke cascade — Dataverse deactivated, SPE permission removed', async ({ page }) => {
     // Mock the BFF revoke endpoint
     await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       await route.fulfill({
@@ -578,7 +569,8 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
         contentType: 'application/json',
         body: JSON.stringify({
           speContainerMembershipRevoked: true,
-          webRoleRemoved: true,
+          speContainerOutcome: 'PermissionRemoved',
+          deactivatedCount: 1,
         }),
       });
     });
@@ -607,10 +599,10 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
 
     expect(status).toBe(200);
     expect(body.speContainerMembershipRevoked).toBe(true);
-    expect(body.webRoleRemoved).toBe(true);
+    expect(body.speContainerOutcome).toBe('PermissionRemoved');
   });
 
-  test('mocked: revoke with no containerId — SPE not removed, web role removed', async ({ page }) => {
+  test('mocked: revoke with no containerId — SPE removal not attempted', async ({ page }) => {
     await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       const body = JSON.parse((await route.request().postData()) || '{}');
 
@@ -618,9 +610,11 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          // No containerId → SPE step skipped
+          // No containerId → nothing in scope. Task 017 made this state nameable: NotAttempted is
+          // distinct from NoPermissionFound ('we looked and there was none').
           speContainerMembershipRevoked: false,
-          webRoleRemoved: !body.containerId, // No other participations
+          speContainerOutcome: body.containerId ? 'NoPermissionFound' : 'NotAttempted',
+          deactivatedCount: 1,
         }),
       });
     });
@@ -642,7 +636,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
 
     const body = await page.evaluate(() => (window as any).__revokeBody);
     expect(body.speContainerMembershipRevoked).toBe(false);
-    expect(body.webRoleRemoved).toBe(true);
+    expect(body.speContainerOutcome).toBe('NotAttempted');
   });
 
   // ── Error cases ────────────────────────────────────────────────────────────
@@ -733,7 +727,8 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
           contentType: 'application/json',
           body: JSON.stringify({
             speContainerMembershipRevoked: true,
-            webRoleRemoved: true,
+            speContainerOutcome: 'PermissionRemoved',
+            deactivatedCount: 1,
           }),
         });
       } else {
@@ -826,7 +821,13 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
  *   }
  *
  * EXPECTED RESPONSE: HTTP 200
- *   { "speContainerMembershipRevoked": true, "webRoleRemoved": true }
+ *   { "speContainerMembershipRevoked": true, "speContainerOutcome": "PermissionRemoved",
+ *     "deactivatedCount": 1 }
+ *
+ *   NOTE (task 017): under broker-only, Spaarke ADDS no container ACLs, so against a freshly
+ *   provisioned container the correct outcome is "NoPermissionFound" — there is genuinely nothing to
+ *   remove, and speContainerMembershipRevoked is then false. "PermissionRemoved" applies only where a
+ *   legacy or admin-created ACL actually exists. What must never appear is "Failed".
  *
  * VERIFICATION:
  *   Plane 1 — Dataverse Record:
@@ -834,12 +835,12 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
  *     Expected: statecode = 1, statuscode = 2
  *
  *   Plane 1 — Web API Exclusion:
- *     GET /api/data/v9.2/sprk_externalrecordaccesses?$filter=_sprk_contactid_value eq <contactId> and statecode eq 0
+ *     GET /api/data/v9.2/sprk_externalrecordaccesses?$filter=_sprk_contact_value eq <contactId> and statecode eq 0
  *     Expected: empty results (value: [])
  *
- *   Plane 1 — Web Role Removal:
- *     GET /api/data/v9.2/contacts(<contactId>)/mspp_contact_mspp_webrole_powerpagecomponent
- *     Expected: SecureProjectParticipant role NOT in the list
+ *   Plane 1 — Web Role Removal: REMOVED by task 017 (register H-8b). Spaarke does not manage Power
+ *     Pages web roles; the WebRoleRemoved response field was hard-coded false at every call site and is
+ *     now deleted from the contract. There is nothing to verify here.
  *
  *   Plane 2 — SPE Container:
  *     GET https://graph.microsoft.com/v1.0/storage/fileStorage/containers/<containerId>/permissions
@@ -857,7 +858,6 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
  * EXPECTED:
  *   - sprk_externalrecordaccess for Project 1: inactive
  *   - sprk_externalrecordaccess for Project 2: still ACTIVE
- *   - webRoleRemoved: false (contact still participates in Project 2)
  *   - SPE container for Project 1: Contact removed (if containerId provided)
  *   - SPE container for Project 2: Contact still present (not affected)
  *   - GET /api/v1/external/me: Project 1 absent, Project 2 present
