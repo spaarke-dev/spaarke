@@ -189,8 +189,17 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 043 | **Capability gate** → read-only + "Edit a copy" — **SUPERSEDED** (owner 2026-08-23): no construct family needs a gate; corpus gap closed, 4 fixtures, all 100% strict + named warnings | FR-A07 | FULL | opus/xhigh | ❌ | 040 | ⊘ |
 | 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044 | 🔲 |
+| 046 | **Soft line breaks carried** — `IsLineBreak` marker run (first row retired from the residual list) | FR-A10 residual | FULL | opus/xhigh | ❌ | 045 | ✅ |
+| 047 | **Editor node-inventory survey** — found a SECOND loss direction (editor-native content the model cannot name) + the opaque-atom pipeline already exists | — | STANDARD | opus/xhigh | ❌ | 046 | ✅ |
+| 048 | **Tabs + symbols carried** — `IsTab` / `Symbol{Font,CharCode}` marker runs on the existing atom node; two more rows retired | FR-A10 residual | FULL | opus/xhigh | ❌ | 047 | ✅ |
 
 ¹ `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
+
+> **046–048 are owner-directed follow-ons to 045**, not planned WBS tasks — they exist because the owner
+> ruled the residual list's exceptions unacceptable for release: *"we cannot have the Compose editor to just
+> 'lose' content; and pushing to r9 is just semantic."* Each retires rows from the published list and is
+> enforced by `ComposeResidualLossParityTests` in both directions. Remaining scope + sizing:
+> [`notes/zero-loss-scope.md`](../notes/zero-loss-scope.md) (§2c records what building 048 taught).
 
 ## Phase 5 — Track C: AI edit placement
 
