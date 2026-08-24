@@ -118,7 +118,22 @@ param(
     [string]$ExchangeScope = "https://graph.microsoft.com/.default",
     [ValidateRange(0, 3600)][int]$PropagationRetrySeconds = 600,
     [switch]$ForceFederatedCredentialUpdate,
-    [switch]$AllowUnverified
+    [switch]$AllowUnverified,
+
+    # ── Secret-free registration — added 2026-08-24, task 033 / ADR-028 A4 ──
+    # Suppresses the 24-month client-secret mint in Step 3 and the Key Vault write that follows it.
+    #
+    # Why this exists: before this switch, COMBINED mode (-CreateFederatedCredential WITHOUT -FicOnly)
+    # minted a client secret unconditionally. After task 033 removed the BFF-identity secret, that would
+    # have re-minted a per-customer secret on every customer-provisioning onboarding — which ADR-028
+    # exception E-3 explicitly does not license ("E-3 is transitional and does not license expansion").
+    # Task 030 saw this and deliberately left it: the secret was still the live rollback mechanism then,
+    # and FR-C3 assigns this file to task 033.
+    #
+    # NOT defaulted to on. Flipping the default would silently change behaviour for every existing
+    # caller of a script that provisions identities — including customer-provisioning-orchestration-r1,
+    # whose Wave G-3 consumes it. Opt-in keeps the change visible at the call site.
+    [switch]$SkipClientSecret
 )
 
 $ErrorActionPreference = "Stop"
@@ -1259,6 +1274,35 @@ if (-not $SkipBffApi) {
     }
 
     # Step 3: Generate client secret
+    if ($SkipClientSecret) {
+        Write-Step 4 "Client secret: SKIPPED (-SkipClientSecret) — ADR-028 A4, secret-free identity"
+        Write-Info "  No client secret will be minted and none will be written to Key Vault."
+        Write-Info "  Provision a federated credential instead: -CreateFederatedCredential -UamiResourceId <id>"
+        Write-Info "  Then set on the app: Graph__Credentials__Order__0=ManagedIdentityFederated"
+        Write-Info "                       Graph__Credentials__RequireSecretFreeIdentity=true"
+
+        # The non-secret Key Vault entries are still required — they are identifiers, not credentials,
+        # and downstream configuration resolves them by name. Only the secret is suppressed.
+        if (-not $DryRun -and $BffApiAppId) {
+            Store-SecretInKeyVault -VaultName $KeyVaultName `
+                -SecretName "BFF-API-ClientId" `
+                -SecretValue $BffApiAppId `
+                -Description "BFF API client ID ($BffApiDisplayName)"
+
+            Store-SecretInKeyVault -VaultName $KeyVaultName `
+                -SecretName "BFF-API-Audience" `
+                -SecretValue "api://$BffApiAppId" `
+                -Description "BFF API audience URI ($BffApiDisplayName)"
+
+            Store-SecretInKeyVault -VaultName $KeyVaultName `
+                -SecretName "TenantId" `
+                -SecretValue $TenantId `
+                -Description "Entra ID tenant ID"
+        } else {
+            Write-Info "DRY RUN: Would store BFF-API-ClientId, BFF-API-Audience, TenantId (NO client secret)"
+        }
+    } else {
+
     Write-Step 4 "Generating client secret (valid $SecretExpiryMonths months)"
 
     if (-not $DryRun -and $BffApiAppId) {
@@ -1305,6 +1349,8 @@ if (-not $SkipBffApi) {
         Write-Info "  - BFF-API-Audience"
         Write-Info "  - TenantId"
     }
+
+    }  # end if/else on -SkipClientSecret (task 033)
 
     # Step 4: Create service principal
     Write-Step 5 "Creating service principal"

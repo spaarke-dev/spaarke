@@ -318,7 +318,23 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Creates:**
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
-- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience
+- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
+
+> 🔴 **Pass `-SkipClientSecret` for any new registration (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).**
+> The BFF identity is **secret-free** per ADR-028 **A4**: it authenticates as a confidential client using a
+> federated credential issued to its user-assigned managed identity. `BFF-API-ClientSecret` and its lowercase
+> duplicate were deleted from Key Vault on 2026-08-24.
+>
+> Without the switch, COMBINED mode (`-CreateFederatedCredential` **without** `-FicOnly`) still mints a client
+> secret unconditionally — which would re-introduce a per-customer secret on every onboarding. ADR-028 exception
+> **E-3** is transitional and explicitly *does not license expansion*. The switch is **opt-in, not the default**,
+> because flipping the default would silently change behaviour for every existing caller of an identity-provisioning
+> script (notably `customer-provisioning-orchestration-r1` Wave G-3).
+>
+> Provision the credential instead:
+> `-CreateFederatedCredential -UamiResourceId <resourceId>` — subject is the UAMI's **principalId**, *not* its
+> clientId (the commonest silent failure), audience exactly `api://AzureADTokenExchange`. Then set
+> `Graph__Credentials__Order__0=ManagedIdentityFederated` and `Graph__Credentials__RequireSecretFreeIdentity=true`.
 
 > **Note (2026-08-14, code-quality-and-assurance-r3 task 060):** the separate
 > `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault secrets
@@ -383,9 +399,16 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 # Test using Key Vault secrets
 .\Test-EntraAppRegistrations.ps1
 
-# Test with explicit credentials
+# Test with explicit credentials (only for a NON-migrated environment — see note)
 .\Test-EntraAppRegistrations.ps1 -BffApiClientId "abc123" -BffApiClientSecret "secret"
 ```
+
+> **Note (2026-08-24, task 033):** the client-credentials token test now reports **SKIPPED** against a migrated
+> environment, and that is the correct result — not a missing credential. The BFF identity is secret-free, and a
+> managed-identity federated credential cannot be exercised from a workstation (no route to IMDS). To verify the
+> live credential, look for `Ordered credential selection active: ManagedIdentityFederated.` in the app's startup
+> logs. The suite also now asserts the **inverse**: `BFF-API-ClientSecret` must stay **absent** from Key Vault —
+> a re-appearance means a provisioning run without `-SkipClientSecret`.
 
 ---
 

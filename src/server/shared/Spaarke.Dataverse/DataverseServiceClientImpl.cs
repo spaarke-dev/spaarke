@@ -15,9 +15,15 @@ namespace Spaarke.Dataverse;
 /// <remarks>
 /// Auth (ADR-028 §24 / #3b): prefers <b>Managed Identity</b> via a ServiceClient token-provider function when
 /// <c>Graph:ManagedIdentity:Enabled=true</c> (resolving the UAMI from <c>ManagedIdentity:ClientId</c>);
-/// otherwise falls back to <b>ClientSecret</b> (connection-string method) requiring <c>TENANT_ID</c> /
-/// <c>API_APP_ID</c> / <c>API_CLIENT_SECRET</c>. The secret path is retained as a local-dev fallback and MUST
-/// NOT be removed until MI attribution is proven live per env.
+/// otherwise falls back to the <b>ordered credential provider</b> (<see cref="IConfidentialClientProvider"/>),
+/// which resolves whatever credential that environment has configured.
+/// <para><b>Corrected 2026-08-24 (auth-v4 task 033).</b> This paragraph used to read: <i>"falls back to
+/// ClientSecret (connection-string method) requiring TENANT_ID / API_APP_ID / API_CLIENT_SECRET. The secret
+/// path is retained as a local-dev fallback and MUST NOT be removed until MI attribution is proven live per
+/// env."</i> That was true until task 022, which replaced the <c>AuthType=ClientSecret</c> connection string
+/// with the ordered provider — after which this class read no secret at all. The comment was never refreshed,
+/// so it kept asserting a dependency that no longer existed and instructing readers not to remove it. MI
+/// attribution IS proven live (task 031/032), and the BFF-identity secret was removed at task 033.</para>
 /// Ref: https://learn.microsoft.com/power-apps/developer/data-platform/authenticate-dot-net-framework
 /// </remarks>
 public class DataverseServiceClientImpl : IDataverseService, IDisposable
@@ -57,8 +63,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; ClientSecret is the local-dev fallback.
-        // The secret path is retained (do NOT remove API_CLIENT_SECRET) until MI attribution is proven live.
+        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; otherwise use the ordered credential
+        // provider. This line used to read "The secret path is retained (do NOT remove API_CLIENT_SECRET)
+        // until MI attribution is proven live" — stale since task 022 moved this class off the secret and
+        // onto IConfidentialClientProvider. Corrected at task 033; API_CLIENT_SECRET is gone and this class
+        // never read it directly in the first place.
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 

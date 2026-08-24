@@ -63,22 +63,31 @@ $settings = @(
     "API_APP_ID=$(KVRef 'BFF-API-ClientId')",
     "DEFAULT_CT_ID=$(KVRef 'SPE-ContainerTypeId')",
 
+    # --- Credential selection (ADR-028 A4 — the BFF identity is secret-free) ---
+    # The BFF authenticates as a confidential client using a Managed-Identity-issued federated
+    # credential. There is deliberately NO ClientSecret entry beneath it: with nothing to fall
+    # through to, a broken MI-FIC fails loudly instead of silently reverting to a secret while
+    # every health signal stays green. RequireSecretFreeIdentity makes the app refuse to start
+    # outside Development if ClientSecret is ever re-added to the order.
+    # Removed 2026-08-24 by spaarke-auth-v4 task 033: Graph__ClientSecret, AzureAd__ClientSecret
+    # and Dataverse__ClientSecret (all three were KV references to `BFF-API-ClientSecret`, which
+    # no longer exists in Key Vault). Do NOT re-add them.
+    "Graph__Credentials__Order__0=ManagedIdentityFederated",
+    "Graph__Credentials__RequireSecretFreeIdentity=true",
+
     # --- Graph Configuration ---
     "Graph__TenantId=$(KVRef 'TenantId')",
     "Graph__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "Graph__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "Graph__Scopes__0=https://graph.microsoft.com/.default",
 
     # --- Azure AD Authentication ---
     "AzureAd__TenantId=$(KVRef 'TenantId')",
     "AzureAd__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "AzureAd__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "AzureAd__Audience=$(KVRef 'BFF-API-Audience')",
 
     # --- Dataverse ---
     "Dataverse__EnvironmentUrl=$(KVRef 'Dataverse-ServiceUrl')",
     "Dataverse__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "Dataverse__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "Dataverse__TenantId=$(KVRef 'TenantId')",
 
     # --- Service Bus ---

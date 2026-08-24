@@ -1,7 +1,7 @@
 # Task 033 — remove the secret and reconcile the estate
 
 > **Status**: 🔄 IN PROGRESS — steps 1–3 done. **The secret is GONE from the app AND from Key Vault**
-> (soft-deleted, recoverable until 2026-11-22). Remaining: the script/doc sweep, ADR-028 E-3, step 7.
+> 2026-11-22); 15 scripts swept. Remaining: the doc sweep (5), ADR-028 E-3 (6), Graph-API-ClientSecret (7).
 > **Date**: 2026-08-24
 
 ---
@@ -338,7 +338,64 @@ Following that doc today produces a local dev environment that silently cannot a
 
 ---
 
-## 4. Steps 4–7 — REMAINING
+---
+
+## 4. Step 4 — COMPLETE. The script sweep
+
+**15 scripts reference a client secret, not the POML's 11** — the corrected count, re-derived rather than
+trusted. Classified before editing, because most of them are *not* about this credential:
+
+### 4.1 Modified — 7
+
+| Script | Change |
+|---|---|
+| `Configure-ProductionAppSettings.ps1` | removed `Graph__ClientSecret`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret` (all three were KV refs to a secret that no longer exists) and **added** `Graph__Credentials__Order__0` + `RequireSecretFreeIdentity` so the script provisions the end state rather than just omitting the old one |
+| `Reconcile-DemoEnvironment.ps1` | removed `AgentToken__ClientSecret`; added the two credential-selection keys **plus the FIC prerequisite** the demo environment now needs (subject = UAMI principalId, not clientId) |
+| `Seed-ProductionKeyVault.ps1` | **no longer seeds a placeholder `BFF-API-ClientSecret`.** A placeholder is worse than nothing here: it looks like the credential, so an operator "fixes" auth by populating it and silently restores a secret path |
+| `Rotate-Secrets.ps1` | the EntraId rotation is now an explicit **audited no-op**, not a deletion. `-SecretType All` is a documented entry point; silently dropping a branch would make `All` quietly narrower than its name while still reporting success |
+| `Register-EntraAppRegistrations.ps1` | **`-SkipClientSecret` added** — the acceptance criterion (task 030 carry-forward W-1) |
+| `Test-EntraAppRegistrations.ps1` | dropped `BFF-API-ClientSecret` from `$expectedSecrets`, **added the inverse assertion** that it must stay absent, and rewrote the skip message |
+| `README.md` | documented `-SkipClientSecret` as required for new registrations, and that a SKIPPED token test is now the correct result |
+
+### 4.2 Left alone, with the reason recorded — 8
+
+| Script(s) | Why it stays |
+|---|---|
+| `Create-NewContainerType.ps1`, `Register-BffApiWithContainerType.ps1`, `Test-SharePointToken.ps1` | **ADR-028 E-1** — the SPE *owning-app* credential. Container-type registration is a client-credentials call a managed identity cannot make, so a secret is correct here. Their dead *"retrieve it from Key Vault"* instruction was corrected: in dev the owning app **is** the BFF app registration, so its secret went with the migration |
+| `Deploy-DataverseSolutions.ps1`, `Deploy-Release.ps1`, `Provision-Customer.ps1` | a **different** credential — the service principal for Dataverse solution import (`SPAARKE_SP_CLIENT_SECRET`) and per-customer provisioning. Out of scope |
+| `naming-conformance-check.ps1` | it **flags** the duplicate alias as a rotation hazard; it never consumed it. Its `BFF-API-ClientSecret` occurrences are **synthetic self-test fixtures** exercising rule R2. Editing them would break the checker's own tests to no purpose. Added a note that the live instance is resolved while R2 itself is unchanged |
+| `_archive/Get-ContainerMetadata-PCFApp.ps1` | archived |
+
+### 4.3 The `-SkipClientSecret` design decision
+
+**Opt-in, not the default.** Flipping the default would silently change behaviour for every existing
+caller of an identity-provisioning script — including `customer-provisioning-orchestration-r1`, whose
+Wave G-3 consumes this exact file. A silent behaviour change in provisioning is how you get an
+environment that is subtly different from the one you tested. Opt-in keeps the change visible at the
+call site; `scripts/README.md` now states it is required for new registrations.
+
+The switch suppresses the secret mint **and** its Key Vault write, but still stores `BFF-API-ClientId`,
+`BFF-API-Audience` and `TenantId` — those are identifiers, not credentials, and downstream config
+resolves them by name.
+
+### 4.4 The two stale C# comments (§2.1) — corrected, not deleted
+
+`DataverseServiceClientImpl.cs:18-20` and `:61` both instructed readers **not** to remove
+`API_CLIENT_SECRET`. Both were true before task 022 and were never refreshed. Rewritten to state what is
+true now **and to quote what they used to say and why it was wrong** — the same treatment given to
+`auth.md:108`, and for the same reason: a silently-corrected falsehood teaches nobody why it survived.
+
+### 4.5 Verification
+
+- All 10 modified `.ps1` files parse (`System.Management.Automation.Language.Parser`) — a brace mismatch
+  in `Register-EntraAppRegistrations.ps1` would have shipped a broken provisioning script.
+- `-SkipClientSecret` confirmed exposed and bound as `SwitchParameter` (18 params, 7 switches).
+- `dotnet build src/server/api/Sprk.Bff.Api/` — **Build succeeded**, 0 errors, 7 pre-existing unrelated
+  `CS0618` warnings.
+
+---
+
+## 5. Steps 5–7 — REMAINING
 
 | | |
 |---|---|
@@ -346,9 +403,8 @@ Following that doc today produces a local dev environment that silently cannot a
 | Key Vault | ✅ both BFF-identity copies deleted (recoverable to 2026-11-22) |
 | Credential order | `[ManagedIdentityFederated]` — explicit, no fallback |
 | `RequireSecretFreeIdentity` | **true** |
+| Scripts | ✅ 7 modified, 8 documented |
 | Rollback | `secret recover` → restore app settings → remove the order override |
-
-4. Sweep the **15** scripts (not 11). Includes the two stale `DataverseServiceClientImpl` comments (§2.1).
 5. Sweep the 13 docs/config/workflow files — including correcting the false add-in claim in 4 places.
 6. Close ADR-028 E-3; update `.claude/constraints/auth.md` + `Sprk.Bff.Api/CLAUDE.md:110,221`.
    **CONTENDED with PR #812 — see §0.2.**

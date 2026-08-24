@@ -73,8 +73,21 @@ $settings = @{
     'AgentToken__AgentAppId'              = 'f257a0a9-1061-4f9b-8918-3ad056fe90db'
     'AgentToken__CacheTtlMinutes'         = '55'
     'AgentToken__ClientId'                = $DemoBffAppId
-    'AgentToken__ClientSecret'            = "@Microsoft.KeyVault(VaultName=$DemoKeyVault;SecretName=BFF-API-ClientSecret)"
+    # AgentToken__ClientSecret REMOVED 2026-08-24 (spaarke-auth-v4 task 033). It was a KV reference to
+    # `BFF-API-ClientSecret`, which no longer exists. AgentTokenService takes its confidential client
+    # from the ordered credential provider (task 022) and never read this key again after that change;
+    # the demo environment must supply a Managed-Identity federated credential instead — see the
+    # credential-selection keys below.
     'AgentToken__CopilotAudience'         = "api://auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb/$DemoBffAppId"
+
+    # Credential selection (ADR-028 A4). MI-FIC only, with nothing beneath it to fall through to.
+    # PREREQUISITE for the demo environment: the demo app registration needs a federated identity
+    # credential whose subject is the demo UAMI's *principalId* (NOT its clientId — the commonest
+    # silent failure, FR-B4), issuer https://login.microsoftonline.com/{tenant}/v2.0, audience
+    # exactly api://AzureADTokenExchange. `scripts/Register-EntraAppRegistrations.ps1
+    # -CreateFederatedCredential` creates it.
+    'Graph__Credentials__Order__0'                  = 'ManagedIdentityFederated'
+    'Graph__Credentials__RequireSecretFreeIdentity' = 'true'
     'AgentToken__DataverseEnvironmentUrl' = $DemoDataverseUrl
     'AgentToken__TenantId'                = $DemoTenantId
 
