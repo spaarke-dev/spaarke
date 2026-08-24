@@ -9,10 +9,41 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W9 done (**020, 030, 021, 022, 023, 024, 025**); 011 🔄 · 023 🔄 · 025 🔄 |
-| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 10 commits this session. |
-| **Status** | All work committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). |
-| **Next Action** | **W10: tasks 026 + 029 run together** (both client+DTO only, no god-file contention). Invoke `task-execute` on `tasks/026-replication-and-override-state.poml` and `tasks/029-billing-status-surface.poml`. **Verify each POML's premise first** — 16 of 16 have now been wrong, incomplete, or mis-scoped. |
+| **Task** | **none in progress** — W1–W9 done + **029** (W10 half); 011 🔄 · 023 🔄 · 025 🔄 · 029 🔄 |
+| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 12 commits this session. |
+| **Status** | All work committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). Latest: `3c5c0205b`. |
+| **Next Action** | **Task 026** — `task-execute` on `tasks/026-replication-and-override-state.poml`. **Verify its premise first** (17 of 17 POMLs have now been wrong, incomplete, or mis-scoped) and **re-check its `parallel-safe` flag** — 029's proved false. See the two 026-specific warnings below. |
+
+### ⚠️ Before starting 026 — three things already known
+
+1. **Its `parallel-safe=true` is suspect.** 029's was wrong: surfacing a new Graph field needs the
+   mapping layer, i.e. the god-file. 026 and 029 *also* both list `ContainerTypeDtos.cs` **and**
+   `components/container-types/` as modify targets, so W10's "no god-file contention" premise was false
+   twice over. They were run serially; check before ever dispatching 026 as an agent.
+2. **Its step 6 is blocked by the open PATCH escalation below.** 026 step 6 says *"save a setting and
+   confirm the pending state renders rather than a bare success"* — but **every** container-type PATCH
+   returns 400. Steps 1–5 (replication signal, override state, rendering) are unaffected and
+   deliverable; only the live save is blocked. This is the same shared escalation as 023/025, not a new one.
+3. **The 24-hour claim is sourced** — `knowledge/sharepoint-embedded/docs/learn-containertypes.md:101`:
+   *"Updating settings on a container type may take up to **24 hours** ... If a consuming tenant applied
+   overrides on container type settings, the new values aren't applied and the overrides remain in
+   place."* That one sentence supports both of 026's states. Note it says nothing about a replication
+   *progress* signal, so 026's honesty constraint likely resolves to "state the expectation", not "track it".
+
+### ✅ Task 029 done 2026-08-24 (AC-1 partial)
+
+`billingStatus` existed in **0 files repo-wide** before this. Now end-to-end, with the warning branching
+on classification (only `standard` needs a billing profile in the developer tenant — a single generic
+warning would be wrong for the other two). Fixed in passing: settings-save returned `"Trial"` where the
+list returned `"trial"`. **AC-1 partial** — live render not re-confirmed; needs a delegated device-code
+sign-in (~20s), *not* a permission grant. See [`notes/task-029-findings.md`](notes/task-029-findings.md).
+
+**Two measurement gaps found, neither fixed (both out of 029's scope):**
+- **SpeAdminApp has no ESLint dependency, config, or install** — its `lint` script has never run. Step
+  9.5's lint gate is unavailable for this code page; `tsc --noEmit` vs a stashed baseline was substituted.
+- **The publish-size baseline is unreproducible.** Measured 44.99 MB vs a recorded 43.67 MB. Stashing the
+  changes and remeasuring gave **44.99 MB** too — so the true delta is **0.00 MB** and the *method*
+  drifted, not the artifact. Don't chase the phantom +1.32 MB; pick one command and record it.
 
 ### 🔑 Live verification is UNBLOCKED — use it
 
