@@ -372,7 +372,7 @@ resource name**.
 | ✅ Conformant | ❌ Violation | Why |
 |---|---|---|
 | `Dataverse-ServiceUrl` | `SPRK-DEV-DATAVERSE-URL` | env token (`DEV`) baked into a replicated secret name |
-| `BFF-API-ClientSecret` (one casing everywhere) | `BFF-API-ClientSecret` + `bff-api-client-secret` | same logical secret under two casings — rotate one, break the other |
+| ~~`BFF-API-ClientSecret` (one casing everywhere)~~ | ~~`BFF-API-ClientSecret` + `bff-api-client-secret`~~ | **RESOLVED 2026-08-24** — both deleted (auth-v4 task 033); the BFF identity is secret-free, so the casing-drift hazard is gone rather than reconciled. The rule itself still applies to every other secret |
 | vault `sprk-demo-kv` / `sprk-prod-kv` | vault `sprk-platform-prod-kv`, `kv-sdap-dev`, `spaarke-kv-dev` | non-canonical vault form (extra qualifier / wrong scheme) |
 
 ### The four standard rules

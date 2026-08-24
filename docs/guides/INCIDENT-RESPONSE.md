@@ -95,7 +95,13 @@ az ad sp show --id 720bcc53-3399-488d-9a93-dafde5d9e290 --query "displayName" -o
 1. Check Microsoft 365 Service Health for Dataverse outages
 2. If authentication issue: Verify app registration credentials in Key Vault have not expired
 3. If Dataverse environment-specific: Verify the `Dataverse__ServiceUrl` app setting is correct
-4. If token/credential issue: Re-create the BFF API app registration client secret (`BFF-API-ClientSecret`) and update Key Vault — this credential also serves the Dataverse service path (the separate Dataverse S2S secret was removed 2026-08-14, task 060)
+4. If token/credential issue: 🔴 **DO NOT re-create a client secret.** This step said to re-create `BFF-API-ClientSecret` and update Key Vault; that secret was **deleted 2026-08-24** (task 033, ADR-028 **A4**) and re-creating it would make the BFF **refuse to start** outside Development (`Graph:Credentials:RequireSecretFreeIdentity=true`). The BFF identity — including the Dataverse service path — now uses a **managed-identity federated credential**. Diagnose instead:
+   - **a.** Confirm the credential the app selected — startup log should read `Ordered credential selection active: ManagedIdentityFederated.` and `... built with credential ManagedIdentityFederated.` (emitted on **cache miss only**, so force a restart to see it).
+   - **b.** Confirm the FIC still exists and its **subject is the UAMI's `principalId`, not its `clientId`**: `az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table`. A wrong subject yields `AADSTS700213`.
+   - **c.** If the FIC was just (re)created, expect `AADSTS70025` to **flap for ~2 minutes** — do not conclude failure inside that window.
+   - **d.** Confirm the UAMI is still attached to the App Service and still registered as the Dataverse Application User.
+   - **e.** ⚠️ **A 200 does not clear the credential.** While anything sits beneath `ManagedIdentityFederated` in `Graph:Credentials:Order`, a completely broken FIC still serves traffic off the fallback. Check the log line, not the status code.
+   - **f.** Genuine emergency rollback (last resort, dev only): `az keyvault secret recover --vault-name spaarke-spekvcert --name BFF-API-ClientSecret` (**available until 2026-11-22**), restore the app settings, remove the order override, and set `RequireSecretFreeIdentity=false` **so the deviation is recorded rather than hidden**.
 
 ```bash
 # Check current Dataverse URL setting

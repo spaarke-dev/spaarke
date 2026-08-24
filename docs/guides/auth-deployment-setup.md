@@ -400,7 +400,7 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 
 **All values are generated per environment. Never commit. Use Key Vault as the single source of truth.**
 
-> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: as of Phase C, server-side Dataverse access uses the App Service MI via `DefaultAzureCredential` (see §6). The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths. `Dataverse-ClientSecret` can be removed from Key Vault after the deploy is verified.
+> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: server-side Dataverse app-only access uses the App Service MI via `DefaultAzureCredential` (see §6). 🔴 **Corrected 2026-08-24 (task 033):** this note used to end *"The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths."* **That is no longer true** — OBO runs on the managed-identity federated credential and `BFF-API-ClientSecret` was deleted from Key Vault. Neither key should be set.
 
 ---
 
@@ -714,7 +714,7 @@ curl -i -H "Authorization: Bearer $USER_TOKEN" \
 # Expect: HTTP/1.1 200 OK + JSON body
 ```
 
-A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) OBO token exchange to Graph works (`BFF-API-ClientSecret` valid).
+A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) the OBO token exchange to Graph works. ⚠️ It does **not** tell you *which credential* performed the exchange — while anything sits beneath `ManagedIdentityFederated` in `Graph:Credentials:Order`, a broken federated credential still returns 200 off the fallback. For that, read the startup line `Ordered credential selection active: ...` (emitted on cache miss).
 
 ### 9c. MI → Dataverse — managed identity path exercised
 
@@ -769,7 +769,7 @@ Spaarke's per-tenant deployment model puts certain controls firmly in the custom
 |---|---|---|
 | **Conditional Access policies** | Customer | Apply CA policies to the BFF app registration and any user-facing apps per the customer's security baseline. Spaarke is CAE-aware (Phase D) and will honor revocation events. |
 | **Multi-factor authentication (MFA)** | Customer | Enforce via CA. Spaarke does not impose its own MFA layer. |
-| **Secret rotation cadence** | Customer | `BFF-API-ClientSecret`: 90 days or per customer policy. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
+| **Secret rotation cadence** | Customer | ~~`BFF-API-ClientSecret`: 90 days~~ — **n/a since 2026-08-24**: the BFF identity is secret-free and a federated assertion has no expiry to roll. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
 | **Identity governance / lifecycle** | Customer | User provisioning, access reviews, and offboarding flow through the customer's existing IGA. |
 | **Audit log retention + SIEM integration** | Customer | Spaarke emits structured audit logs (Phase C task 048). Pipe to the customer's Sentinel / Monitor workspace via App Service *Diagnostic Settings* — no code change per customer. |
 | **Network egress / private endpoints** | Customer | If the customer requires private network paths to Dataverse, Graph, or Key Vault, configure via VNet integration / Private Endpoints on the App Service. |
@@ -811,7 +811,8 @@ Graph__ManagedIdentity__Enabled      = true
 Communication__WebhookSigningKey     = @Microsoft.KeyVault(...)   # generated per env
 EmailProcessing__WebhookSigningKey   = @Microsoft.KeyVault(...)   # generated per env
 AgentToken__CopilotAudience          = api://{copilot-sso-provider-app-id}/{bff-app-id}
-AzureAd__ClientSecret                = @Microsoft.KeyVault(SecretUri=.../BFF-API-ClientSecret/)
+Graph__Credentials__Order__0                  = ManagedIdentityFederated   # replaces AzureAd__ClientSecret (2026-08-24)
+Graph__Credentials__RequireSecretFreeIdentity = true
 
 # Graph permissions granted to MI (§5) — record the count + the list
 Permissions granted (count): __________
