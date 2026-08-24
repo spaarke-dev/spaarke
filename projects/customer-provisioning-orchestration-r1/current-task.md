@@ -1,17 +1,39 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T~19:00Z (in-session, SESSION 5) — **🎯 SESSION 5 CORRECTIVE PIVOT. Started by attempting manual F20-chain patching on Model 1 Prod BFF (5 App Service settings + 1 code fix `e3a15db91` for IActionSeam ADR-032 asymmetric-registration bug — deployed to `sprksharedprod-api`). Owner (Ralph) recognized this was symptom-fixing, NOT platform validation. Corrective sequence NOW IN EFFECT: task 202 (pre-live-fire lessons audit + formalize PROVISIONING-PREREQUISITES.md + design provisioning-run project structure) → task 203 (apply the punch list) → task 186 E2E live-fire. Owner directive: E2E target sub is `cd95fcec-6b89-49ea-8339-c2b579b12587` (Spaarke Model 1 Production) — do NOT create a fresh sub. Sweep legacy artifacts, re-provision via platform.**
+> **Last Updated**: 2026-08-24 T~20:30Z (by context-handoff, SESSION 5 END) — **🎯 SESSION 5 END. Task 202 authored + committed + pushed; task-execute invoked but Step 3 (Context Budget Check) triggered handoff. Task 202 remains not-started. User will `/compact` + start task 202 in fresh session. Everything needed for continuation is captured below + on origin (commits `e3a15db91` + `7519f32eb` + `dac4aa38c`).**
 
-## 🎯 QUICK RECOVERY — 2026-08-24 T~19:00Z SESSION 5 (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 T~20:30Z SESSION 5 END (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
+| **Task** | 202 - Pre-live-fire lessons audit + formalize PROVISIONING-PREREQUISITES + design provisioning-run structure |
+| **Task file** | `projects/customer-provisioning-orchestration-r1/tasks/202-pre-live-fire-lessons-audit-and-prereqs-formalization.poml` |
+| **Step** | Not started (0 of 10) — task-execute invoked SESSION 5 end but stopped at Step 3 context-budget check |
+| **Status** | not-started (queued, next up per TASK-INDEX Phase Pre-Live-Fire) |
+| **Rigor** | POML says STANDARD; decision tree says FULL (10 steps > 6-step trigger + `skill-directives`+`root-claude` tags). Task-execute agent should override up to FULL and note change. |
+| **Model / Effort** | opus / high (per POML `<model-tier>opus</model-tier>` + `<effort>high</effort>`) — session must be on Opus |
+| **Step mode** | directional (per POML — sequence adaptable) |
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `e3a15db91` (IActionSeam ADR-032 code fix — deployed live to Model 1 Prod BFF) + task 202 POML + TASK-INDEX update + this current-task.md update landing in next commit |
-| **Working tree** | Dirty until next commit (task 202 POML + TASK-INDEX + current-task.md) |
-| **Model 1 Prod BFF state** | Still SIGABRT in F20 chain — CosmosPersistence Endpoint + CORS + DocumentIntelligence + Dataverse ServiceUrl set + IActionSeam code fix deployed; next fail-fast blocks on `TENANT_ID/API_APP_ID/API_CLIENT_SECRET` (Entra app-reg creds). NOT progressing further this session — corrective pivot to task 202. |
-| **E2E target sub (per owner directive)** | `cd95fcec-6b89-49ea-8339-c2b579b12587` (Spaarke Model 1 Production) — DO NOT create fresh sub, use this one |
-| **Next action** | Invoke `task-execute 202` in fresh session (6-10h, STANDARD rigor, opus/high) |
+| **HEAD** | `dac4aa38c` (task 202 amendment adding BFF-routing constraint) — ALL SESSION 5 commits pushed to origin, in sync |
+| **Working tree** | CLEAN as of context-handoff timestamp (only current-task.md timestamp bump lands next) |
+| **Next action** | Fresh session: `task-execute projects/customer-provisioning-orchestration-r1/tasks/202-pre-live-fire-lessons-audit-and-prereqs-formalization.poml` — start at Step 0 (Context Recovery) → Step 1 (Load Task File) → walk 10-step POML sequence |
+
+### Files Modified This Session (all committed + pushed)
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` — IActionSeam hoisted out of DocIntel/Analysis compound gate (commit `e3a15db91`, deployed live to `sprksharedprod-api`)
+- `projects/customer-provisioning-orchestration-r1/tasks/202-pre-live-fire-lessons-audit-and-prereqs-formalization.poml` — NEW, authored + amended (commits `7519f32eb` + `dac4aa38c`)
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — added Phase Pre-Live-Fire section with 202 + 203 placeholder rows + header count 140→142 (commit `7519f32eb`)
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — this file, SESSION 5 handoff block prepended above retained SESSION 4 (commit `7519f32eb` + this handoff-timestamp bump)
+
+**Uncommitted at handoff time**: only this current-task.md timestamp/handoff-block update (will be committed as the handoff checkpoint).
+
+### Critical Context (1-3 sentences)
+
+**Task 202 is authored + pushed. Task-execute invoked but stopped at Step 3 due to accumulated context from SESSION 5's manual BFF patching + POML authoring — fresh session is required to give the audit (90+ notes files) adequate runway.** The POML has FULL scope guidance in its `<steps>`, `<constraints>`, `<acceptance-criteria>`, and `<escalation>` sections; a fresh task-execute invocation with clean context will follow them exactly. Owner directives (verbatim, BINDING) already codified in the POML: formalize prereqs as codified file/YAML; provisioning-runs get project structure; BFF-owned lessons route OUT of task 203 scope (extract-and-relocate to BFF worktree); E2E target sub is `cd95fcec-6b89-49ea-8339-c2b579b12587`.
+
+### Model 1 Prod BFF state (unchanged this session past initial patching)
+
+Still SIGABRT in F20 chain — CosmosPersistence Endpoint + CORS + DocumentIntelligence + Dataverse ServiceUrl set + IActionSeam code fix deployed; next fail-fast blocks on `TENANT_ID/API_APP_ID/API_CLIENT_SECRET` (Entra app-reg creds). NOT progressing further — corrective pivot to task 202 → 203 → 186 E2E sequence.
 
 ### 🎯 WHAT SESSION 5 ACCOMPLISHED
 
