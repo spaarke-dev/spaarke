@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (by `context-handoff`) — **031 IS LIVE-VERIFIED IN PART. MI-FIC OBO IS PROVEN. 032 IS UNBLOCKED.**
+> **Last Updated**: 2026-08-24 (task 031 continued) — **EVERY 031 CHECKLIST SURFACE IS NOW VERIFIED EXCEPT THE OFFICE ADD-INS.** MI-FIC OBO proven at credential level on chat/SPE/email. 032 unblocked.
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,9 +11,9 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **031 🔄 IN PROGRESS — live-verified on the `staging` slot.** ✅ MI-FIC OBO · ✅ inbound validation · ✅ row-level auth · ✅ SPE-over-OBO · ✅ **secret-first rollback (unblocks 032)**. Group F closed; 051 🔄 + 053 🔄 await cutover |
+| **Task** | **031 🔄 IN PROGRESS.** ✅ MI-FIC OBO · ✅ inbound validation (all 3 schemes) · ✅ row-level auth · ✅ **SPE upload/download/preview (byte-exact round-trip)** · ✅ **chat SSE `dataverse.*`** · ✅ **send-as-user email** · ✅ `/api/agent` · ✅ **secret-first rollback (unblocks 032)**. Group F closed; 051 🔄 + 053 🔄 await cutover |
 | **Status** | Suite **10,614 / 0** · seam **891/891** · ArchTests **56/56** · publish **44.99 MB** · CVE clean · **working tree clean, 0 unpushed** · slot `/healthz` 200 |
-| **Next Action** | Finish 031's remaining surfaces (all HTTP-testable except three): **chat SSE `dataverse.*` tool calls · `/api/agent` · send-as-user email (AUTHORIZED, owner as SOLE recipient) · long-running OBO · Ciam + RagApiKey inbound schemes**. Then Office add-in save flows via **Outlook + Word**, which still need a human. Full state: [`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md) §5. **Do NOT re-run the rollback test — §5.6 is done.** |
+| **Next Action** | **Two items only.** (1) **Office add-in save flows (Outlook + Word)** — the last checklist surface; needs a human in the Office host, cannot be driven over HTTP. (2) 🔔 **owner decision on the task-030 carry-forward criteria** — see [`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md) §6.1; recommended path is a throwaway app registration, NOT a FIC change on `1e40baad-…`. **Do NOT re-run: rollback (§5.6), SPE (§5.5), chat SSE (§5.7), email (§5.8), inbound schemes (§5.2/§5.10).** |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
@@ -27,19 +27,28 @@ Full evidence: [`notes/decisions/031-obo-verification-dev.md`](notes/decisions/0
 |---|---|
 | **MI-FIC OBO works — the project's whole thesis** | `built with credential ManagedIdentityFederated.` → `OBO token exchange successful` (§5.1) |
 | `AZURE_CLIENT_ID` trap is dead at runtime | CCA logs `configured with ClientId from API_APP_ID` (§5.1) |
-| Inbound validation, 4 identities, rejecting at the INBOUND layer | 200/200/401/401; malformed dies at `IDX10504` inside `JwtBearerHandler` (§5.2) |
+| Inbound validation — **all three schemes** | workforce 200/200/401/401, malformed dies at `IDX10504` (§5.2); CIAM dual-scheme group 200/401/401 and RagApiKey rejects even a valid workforce JWT (§5.10) |
 | Row-level authorization | `AccessRights=None` is a COMPUTED denial, not a failed lookup (§5.4) |
-| SPE over OBO | `GET /api/obo/containers/{id}/children` → 200 (§5.5) |
+| **SPE upload / download / preview over OBO** | PUT 200 → GET **55 bytes byte-identical** → DELETE 204 → 404. §5.5. ⚠️ **the earlier "SPE proven" claim was RETRACTED** — see the trap note below |
+| **Chat SSE `dataverse.*` tool calls** | `built with credential ManagedIdentityFederated.` at 13:55:47 (cache-miss build) + 2 `dataverse.read_query` calls returning 3 real `sprk_matter` rows (§5.7) |
+| **Send-as-user email over OBO** | 200, `from: ralph.schroeder@spaarke.com` — the OBO branch, not the shared mailbox (§5.8) |
+| `/api/agent` | 200 with real data — but via the chat pipeline; **`AgentTokenService` is unreachable dead code** (§5.9) |
+| Long-running OBO | MSAL's long-running-OBO API is **used nowhere** in the repo; covered in substance by the 18.2 s SSE stream (§5.11) |
 | **Secret-first rollback — the gate 032 rests on** | `built with credential ClientSecret.` → `OBO token exchange successful`, then restored (§5.6) |
 
 ### ⚠️ The methodological trap that nearly produced a false claim
 
-**HTTP 200 does NOT prove which credential was used.** The ordered provider falls through on failure,
-so a broken `ClientSecret` would have been silently served by MI-FIC and returned the identical 200.
-Only the `built with credential …` log line separates them, and it is emitted **on cache miss only** —
-which is why §5.6 required a deliberate slot restart. The same fail-closed ambiguity produced two
-other near-misses this session (§5.3, §5.4). **On this project, never conclude a credential outcome
-from a status code.**
+**A status code never establishes an outcome on this codebase.** Three distinct shapes of this bit, and
+one of them got past me into the written record before I caught it:
+
+| Shape | Where | What it looks like |
+|---|---|---|
+| **fail-closed** | §5.3, §5.4 | a broken lookup and a legitimate denial return the *same* 403 |
+| **fall-through** | §5.6 | the ordered provider silently uses the next credential, so a broken `ClientSecret` still returns 200. Only `built with credential …` separates them — emitted **on cache miss only**, hence the deliberate restart |
+| **error-open** | §5.5 | `GET /api/obo/containers/{id}/children` turns a Graph **404** into `200 {"items":[]}`. **This produced a WRONG §5.5 that I published and have since retracted** |
+
+The rule: find the log line, the Graph status, or a byte-level artifact. §5.5's replacement rests on 55
+bytes going in and the same 55 bytes coming out — the one thing none of these three shapes can fake.
 
 ### Environment left in this state — all intentional, all cleared by 032
 

@@ -315,14 +315,71 @@ auth-plumbing one, and does not bear on this criterion.
 Incidentally confirmed in the same capture: outbound Dataverse traffic targets
 `https://spaarkedev1.crm.dynamics.com/api/data/v9.2/` — the expected dev environment.
 
-### 5.5 ✅ SPE over OBO
+### 5.5 ⚠️ CORRECTED — SPE over OBO passes, but the FIRST version of this section was WRONG
 
-| Route | ralph | Reading |
+**Retracted claim.** This section previously read *"`GET /api/obo/containers/{id}/children` → 200
+`{"items":[],"nextLink":null}` — the OBO→Graph→SPE call completed. A permission failure would surface as
+an error, not an empty success."* **That reasoning was invalid and the conclusion was unproven.** Log
+evidence, 2026-08-24:
+
+```
+13:59:22.276  GET https://graph.microsoft.com/v1.0/storage/fileStorage/containers/b!21yLRd.../drive
+13:59:22.915  Received HTTP response headers after 638.8696ms - 404
+13:59:22.917  Request finished GET /api/obo/containers/b!21yLRd.../children - 200 application/json
+```
+
+Graph answered **404**. The endpoint returned **200 with an empty list**. `GET /api/obo/containers/{id}/children`
+is **error-OPEN**: it converts "container does not exist" into "container is empty, all is well". The
+container id came from the only `sprk_container` row in Dataverse, and that row is **stale — the container
+does not exist in SPE**. So the original 200 proved nothing about SPE at all.
+
+**This is the third distinct form of the same trap in this task** (§5.3 fail-closed 403, §5.6 fall-through
+200, and now an error-open 200). The rule generalises past credentials: *on this codebase, a status code
+never establishes an outcome. Find the log line, the Graph status, or a byte-level artifact.*
+
+#### Re-run against the REAL container — full OBO CRUD cycle, all green
+
+Real container resolved from `GET /api/spe/containers?configId=…`:
+`b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy` ("Full Flow Test 2025-09-30").
+
+| Step | Route | Result |
 |---|---|---|
-| `GET /api/obo/containers/{id}/children` | **200** `{"items":[],"nextLink":null}` | **the OBO→Graph→SPE call completed.** A permission failure would surface as an error, not an empty success |
-| `GET /api/containers/{containerId}/drive` | 403 | consistent with §5.4 — this route DOES carry a resource id, so `ResourceAccessHandler` ran the real check and got `AccessRights=None`. Correct denial, same data reason as the document permissions result |
+| **Upload** (OBO) | `PUT /api/obo/containers/{id}/files/auth-v4-031-probe.txt` | **200** — driveItem `01PHTGTFRY6MF5NO5MLNDYT5ID4MRF2H3I`, 55 bytes, real `webUrl` under `spaarke.sharepoint.com/contentstorage/CSP_dc5a0bac-…` |
+| **Download** (OBO) | `GET /api/obo/drives/{driveId}/items/{itemId}/content` | **200, 55 bytes, byte-identical to the uploaded content** |
+| **Preview** | `GET /api/spe/containers/{id}/items/{itemId}/preview?configId=…` | **200** with a live `…/_layouts/15/embed.aspx?uniqueId=…` URL |
+| **Delete** (OBO, cleanup) | `DELETE /api/obo/drives/{driveId}/items/{itemId}` | **204**, then download → **404**. Probe file removed; dev SPE left as found |
 
-Container used: `b!21yLRdWEOAdkaWXskuRfByIRiz1S9kb_...` (the one `sprk_container` row in dev).
+The byte-exact upload→download round-trip is the strongest evidence in this whole task: **no fail-closed,
+fall-through or error-open path can fabricate 55 identical bytes that were not there beforehand.**
+
+Note on preview: it runs the **app-only SpeAdmin** path under owning app `170c98e1-…`, which is ADR-028
+**E-1** territory and explicitly out of this project's scope — it is recorded as a working surface, not as
+evidence about the BFF identity. The BFF-identity evidence is upload/download/delete.
+
+#### Three PRE-EXISTING defects surfaced — none caused by this project
+
+1. **Stale `sprk_container` row.** The single row in dev holds a container id that 404s in SPE.
+2. **`GET /api/obo/containers/{id}/children` is error-open** — swallows a Graph 404 into `200 {"items":[]}`.
+3. **`obo.children.list` sends `$skip` to Graph.** Against the *real* container it returns **400**
+   `invalidRequest: Query option 'Skip' is not allowed`. It only appeared to work against the dead
+   container because the 404 short-circuited before the query was built. **Defect 1 was masking defect 3.**
+
+**Proof they are pre-existing** (§F.3 Empirical-Reproduction-FIRST): the identical requests were replayed
+against the **default slot**, which runs the pre-migration build on the client secret and was not touched
+by this project.
+
+| Request | `staging` (MI-FIC, migrated) | default slot (secret, pre-migration) |
+|---|---|---|
+| `PUT …/files/…` on the stale container | 500 `Item not found` | **500 `Item not found`** |
+| `GET …/children` on the stale container | 200 `{"items":[]}` | **200** |
+
+Same behaviour on both credentials and both builds ⇒ **not credential-caused**. The 031 escalation trigger
+("ANY checklist item fails — STOP") does **not** fire: no checklist item failed under MI-FIC that also
+passes under the secret. Booked for the documents surface, not fixed here.
+
+Also corrected from the original table: `GET /api/containers/{containerId}/drive` → **403**, consistent
+with §5.4 — that route *does* carry a resource id, so `ResourceAccessHandler` ran the real check and got
+`AccessRights=None`. Correct denial, same data reason as the document-permissions result.
 
 ### 5.6 ✅ ROLLBACK RE-VERIFIED AT CREDENTIAL LEVEL — the evidence 032 depends on
 
@@ -383,9 +440,191 @@ absence of an error. `Graph__Credentials__Order__*` deleted; slot back to **213 
 build, on this slot, at credential level. The 032 escalation trigger *"031's secret-first
 re-verification did not pass — STOP before the slot deletion step"* does **not** fire.
 
-### 5.7 Not yet exercised
+### 5.7 ✅ Chat SSE `dataverse.*` tool calls — proven AT CREDENTIAL LEVEL
 
-SPE upload/download/preview · `dataverse.*` chat tool calls over SSE · Office add-in save flows ·
-`/api/agent` · row-level authorization on `PermissionsEndpoints` · send-as-user email (authorized by the
-owner, recipient = owner only) · long-running OBO · the Ciam and RagApiKey inbound schemes · **the
-secret-first rollback re-verification, which 032 depends on**.
+The POML's step 5 surface, and the one that exercises `DataverseUserClient` (FR-B3 site 3).
+
+`POST /api/ai/chat/sessions` → **201**. `POST /api/ai/chat/sessions/{id}/messages` asking the assistant to
+query `sprk_matter` via `dataverse.read_query` → **200 `text/event-stream`, 18.2 s**, terminating in a
+`done` frame.
+
+What came back was **real data, not an empty success**: two `SYS-Dataverse_Read_Query` tool calls
+(`resultCount: 3`, `citationCount: 3`, `durationMs: 999`) and three citations carrying live record ids —
+`tables/sprk_matter/records/accb692e-647c-f111-ab0e-7ced8ddc4a05` and two more.
+
+The credential-level evidence, captured live on the slot:
+
+```
+13:55:42  [dataverse.*] DataverseUserClient OBO configured via the ordered credential provider
+          (user-context only; no app-only path)
+13:55:47  Confidential client for 1e40baad-e065-4aea-a8d4-4b7ab273458c
+          built with credential ManagedIdentityFederated.
+13:55:47  IDataverseUserClient  HTTP request → 200
+13:55:48  IDataverseUserClient  HTTP request → 200
+```
+
+This is a **cache-miss build** — the `built with credential` line is emitted only when the confidential
+client is constructed, so this is the §5.6 standard of proof, not an inferred 200.
+
+**FR-A2 corroborated as a side effect.** That build at 13:55:47 was the only one for the rest of the
+session: the SPE, agent, email and inbound probes at 13:58–14:05 produced **no further build lines**. One
+confidential client, reused across every OBO surface — which is exactly what the singleton lifetime change
+in task 011 was for.
+
+### 5.8 ✅ Send-as-user email over OBO — owner-authorised, owner as sole recipient
+
+`POST /api/communications/send` with `sendMode: 1` (User → `GraphClientFactory.ForUserAsync` → `/me/sendMail`):
+
+```
+HTTP 200 in 4.23 s
+{"communicationId":"2c2b4523-c39f-f111-aaad-7ced8ddc4a05",
+ "from":"ralph.schroeder@spaarke.com", "sentAt":"2026-08-24T13:53:12Z", …}
+```
+
+`from` is the **authenticated user**, not the shared mailbox — the OBO branch ran. A `sprk_communication`
+row was created in Dataverse as a side effect (authorised). One email, one recipient: the owner.
+
+First attempt returned **400 `CHANNEL_NOT_SUPPORTED`** because the enums are Dataverse option-set integers
+(`CommunicationType.Email = 100000000`, `BodyFormat.HTML = 100000001`), not 0/1. Recorded because the 400
+is itself evidence: inbound auth and `CommunicationAuthorizationFilter` had both already passed to reach
+channel dispatch.
+
+### 5.9 ⚠️ `/api/agent` — the endpoints work, but the agent OBO service is UNREACHABLE
+
+| Route | Result |
+|---|---|
+| `GET /api/agent/playbooks` | **200** `[]` (empty catalogue — a data condition, not an auth failure) |
+| `POST /api/agent/message` | **200** in 19.4 s, returning real matter names and record links |
+
+`/api/agent/message` genuinely exercises OBO — but **through the chat pipeline's `DataverseUserClient`**
+(§5.7), not through `AgentTokenService`.
+
+**`AgentTokenService` has no production consumer at all.** It is registered
+(`AgentModule.cs:31`) and fully migrated to the ordered provider (`GetConfidentialClientAsync` →
+`_confidentialClients.GetClientAsync`, throwing if the provider is absent), but a repo-wide search finds
+its only mention inside a handler is a **TODO comment** at `SpaarkeAgentHandler.cs:25`
+(*"Inject AgentTokenService when MCI-014 is implemented"*). `AcquireGraphTokenAsync` /
+`AcquireDataverseTokenAsync` are called from exactly one place: the seam test
+`tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs:123`.
+
+**Consequence for this task, stated honestly:** FR-B3 site 4 (`AgentTokenService`) **cannot be verified
+over HTTP**, because no HTTP path reaches it. Its migration is verified at the seam-test level only. A 200
+on `/api/agent/message` must NOT be read as evidence about it — same discipline as §5.5.
+
+### 5.10 ✅ Inbound schemes — Ciam and RagApiKey (NFR-05, POML step 9)
+
+Completes §5.2, which covered the workforce default scheme.
+
+**CIAM group** `/api/v1/external/me` — policy `ExternalCollaboration`, deliberately **dual-scheme**
+(accepts a CIAM JWT *or* a workforce JWT), with `AuthSchemes.Ciam` pinned onto the group by task 021:
+
+| Credential | Result |
+|---|---|
+| workforce JWT | **200** with real payload (`contactId`, project list with access levels) |
+| no token | **401** |
+| malformed token | **401** |
+
+Registering the named `Ciam` JwtBearer scheme has **not** displaced the workforce default — the spec FR-07
+negative criterion holds live. A real CIAM token was not mintable (no external-identity credential in this
+session); the workforce half of the dual-scheme policy and both negative cases are proven.
+
+**RagApiKey scheme** `POST /api/ai/rag/enqueue-indexing`:
+
+| Credential | Result |
+|---|---|
+| no `X-Api-Key` | **401** |
+| wrong `X-Api-Key` | **401** |
+| **valid workforce JWT, no API key** | **401** |
+
+The third row is the one that matters: a token that is valid everywhere else does **not** get in. The
+endpoint is genuinely pinned to `AuthSchemes.RagApiKey` and does not fall back to the default JwtBearer.
+The real key was never fetched — proving rejection is the regression check; proving acceptance would have
+required handling a live secret for no additional signal.
+
+### 5.11 ✅/n-a Long-running OBO (POML step 8) — the MSAL feature is not used in this codebase
+
+`InitiateLongRunningProcessInWebApi`, `AcquireTokenInLongRunningProcess`, `WithLongRunningProcess`:
+**zero occurrences** across `src/` and `tests/`. MSAL's long-running-OBO API is not part of this system, so
+the step cannot be executed as written and there is nothing to regress.
+
+The real surface it was pointing at — **an OBO exchange inside a long-lived request** — was exercised in
+§5.7: an SSE stream held open **18.2 s**, with the confidential client built at 13:55:47 and two
+OBO-backed Dataverse tool calls completing at 13:55:47 and 13:55:48, mid-stream. Recorded as
+*not-applicable-as-written, covered-in-substance* rather than silently ticked.
+
+### 5.12 Still not exercised
+
+**Office add-in save flows (Outlook and Word)** — the only remaining checklist item, and the only one
+that still needs a human at a keyboard. It cannot be driven over HTTP: the add-ins run inside the Office
+host, which mints its own token and calls the BFF from the client.
+
+Everything else on the POML checklist is now recorded: SPE upload/download/preview (§5.5), chat SSE
+`dataverse.*` (§5.7), `/api/agent` (§5.9, with the reachability caveat), row-level authorization (§5.4),
+send-as-user email (§5.8), long-running OBO (§5.11, n/a-as-written), all three inbound schemes (§5.2,
+§5.10), and the secret-first rollback 032 depends on (§5.6).
+
+**Also outstanding, deliberately not attempted in this session:** the two task-030 carry-forward criteria
+(a FIC whose subject is the UAMI *clientId* must be rejected at exchange; AADSTS70021 immediately after
+creation must be retried). Both require minting a real managed-identity assertion, which only code running
+on the App Service can do, and the natural way to test the negative case touches the app registration's
+federated credentials — the measured consequence of which is a **~2-minute token-acquisition flap on the
+shared app registration**, i.e. a dev outage on both slots. This is an owner decision, not something to
+improvise on a live fail-closed path.
+
+---
+
+## 6. Open items this task is booking, not resolving
+
+### 6.1 🔔 OWNER DECISION — the two task-030 carry-forward criteria
+
+The 031 acceptance criteria require re-exercising task 030 criteria **(3)** *a FIC whose subject is the
+UAMI's **clientId** (not principalId) is rejected at exchange* and **(4)** *AADSTS70021 immediately after
+creation is retried, not surfaced as failure* — "here, where a real managed-identity assertion IS
+mintable".
+
+**Why they were not run in this session.** Two blockers, one of them dangerous:
+
+1. **Minting the assertion.** A workstation cannot mint one. Only code running on the App Service (with
+   `IDENTITY_ENDPOINT` / IMDS for `mi-bff-api-dev`) can obtain a token for `api://AzureADTokenExchange`.
+   Extracting it to run `Register-EntraAppRegistrations.ps1 -FicOnly -AssertionToken <token>` from the
+   workstation would mean **moving a live credential capable of authenticating as the BFF app** through
+   the console and the shell history. That is precisely what this project exists to stop doing.
+2. **Blast radius of the negative case.** Testing criterion (3) means putting a wrong-subject FIC on an
+   app registration. Doing that on `1e40baad-…` is out of the question: task 030 **measured** a
+   ~2-minute token-acquisition flap (8 failures over ~130 s, AADSTS70025) after any FIC change, and both
+   slots share that registration. On a fail-closed OBO path, that is a dev outage for every user.
+
+**Recommended path (cheap, zero blast radius) — needs owner sign-off before execution:**
+
+- Create a **throwaway app registration** (e.g. `sdap-fic-conflation-probe`), add a FIC whose subject is
+  the UAMI **clientId** `5967251e-…` instead of its principalId `9fd47efb-…`, and attempt the exchange.
+  Criterion (3) is then proven against a real assertion with **no exposure to `1e40baad-…`**, and the
+  scratch app is deleted afterwards.
+- Run the exchange **from inside the container** (Kudu/SSH on the `staging` slot) so the assertion is
+  minted and consumed in one place and never transits chat, a file, or shell history.
+- Criterion (4) — the AADSTS70021 retry — is exercised by the same run: create the FIC and attempt
+  immediately, inside the convergence window.
+
+This is a genuine scope decision (a new Entra object, however small), so it is surfaced rather than
+improvised. **It does not block 032**: 032's gate is §5.6, which passed.
+
+### 6.2 Booked for the documents / SPE surface — three pre-existing defects (see §5.5)
+
+None are caused by this project; all three were reproduced identically on the untouched default slot.
+
+| # | Defect | Impact |
+|---|---|---|
+| 1 | The only `sprk_container` row in dev holds a container id that **404s in SPE** | any code trusting that row silently operates on nothing |
+| 2 | `GET /api/obo/containers/{id}/children` is **error-open** — turns a Graph 404 into `200 {"items":[]}` | a missing container is indistinguishable from an empty one; this is what made the original §5.5 conclusion wrong |
+| 3 | `obo.children.list` sends **`$skip`** to Graph → `400 invalidRequest: Query option 'Skip' is not allowed` on any real container | the OBO children listing is broken for every live container |
+
+Defect 2 masked defect 3, and defect 1 masked both. Worth stating plainly: **the endpoint most likely to
+be used as a health probe for SPE returns 200 whether or not SPE works** — the same failure shape as the
+`/api/containers` runbook probe corrected in §5.3.
+
+### 6.3 Booked — `AgentTokenService` is dead code (see §5.9)
+
+Registered, migrated, tested at the seam, and reachable from **no HTTP path**. Either wire it up
+(`SpaarkeAgentHandler.cs:25` TODO / MCI-014) or delete it. A migrated confidential-client construction
+site with no caller is exactly the kind of surface the Phase 6 census (task 061) exists to keep honest.
+

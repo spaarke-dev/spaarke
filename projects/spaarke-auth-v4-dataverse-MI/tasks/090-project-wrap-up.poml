@@ -125,5 +125,66 @@
       What remains for the owner of the documents surface: delete the two dead endpoints, or re-guard
       them with an app-role/admin policy instead of a per-resource one. Do NOT fix this inside a
       credential-migration project.
+    </obligation>
+
+    <!-- BOOKED BY TASK 031 (2026-08-24) - record: notes/decisions/031-obo-verification-dev.md sections 5.5, 5.9, 6.2, 6.3 -->
+    <obligation source="031" id="031-B">
+      DOCUMENTS / SPE SURFACE - three PRE-EXISTING defects found while verifying SPE over OBO. None is
+      caused by this project: every one was reproduced identically against the DEFAULT slot, which runs
+      the pre-migration build on the client secret (empirical-reproduction-first, CLAUDE.md section 10 F.3).
+
+      (1) STALE DATA. The only sprk_container row in dev holds SPE container id
+          b!21yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50, which returns 404 from
+          GET https://graph.microsoft.com/v1.0/storage/fileStorage/containers/{id}/drive. The real
+          container behind the same display name ("Full Flow Test 2025-09-30 14:51:26") is
+          b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy, resolvable via
+          GET /api/spe/containers?configId=c3a25b9a-e81f-f111-88b2-7c1e525abd8b.
+
+      (2) ERROR-OPEN ENDPOINT. GET /api/obo/containers/{id}/children converts a Graph 404 into
+          HTTP 200 {"items":[],"nextLink":null}. Measured live: Graph 404 at 13:59:22.915, endpoint
+          returned 200 at 13:59:22.917. A missing container is therefore indistinguishable from an empty
+          one. This is the same failure shape as the /api/containers runbook probe corrected under 031-A:
+          an endpoint a reader would reach for as an SPE health signal returns 200 whether or not SPE
+          works. It also caused a WRONG conclusion to be written into this project's own 031 record
+          (retracted in section 5.5) - so it has already cost real diagnostic time once.
+
+      (3) BROKEN QUERY. obo.children.list sends $skip to Graph. Against a REAL container it returns
+          HTTP 400 invalidRequest "Query option 'Skip' is not allowed. To allow it, set the
+          'AllowedQueryOptions' property on EnableQueryAttribute or QueryValidationSettings." SPE drives
+          do not accept $skip; use $top + @odata.nextLink paging.
+
+      Defect 2 masked defect 3, and defect 1 masked both. Fixing 3 without fixing 2 leaves the masking in
+      place. Do NOT fix inside a credential-migration project.
+
+      What DOES work, verified 2026-08-24 over OBO under MI-FIC against the real container:
+        PUT    /api/obo/containers/{id}/files/{path}          -> 200, real driveItem
+        GET    /api/obo/drives/{driveId}/items/{itemId}/content -> 200, byte-identical round-trip
+        DELETE /api/obo/drives/{driveId}/items/{itemId}       -> 204
+        GET    /api/spe/containers/{id}/items/{itemId}/preview?configId={guid} -> 200 (app-only SpeAdmin
+               path under owning app 170c98e1-..., ADR-028 E-1 - not the BFF identity)
+    </obligation>
+
+    <obligation source="031" id="031-C">
+      DECISION NEEDED: AgentTokenService is DEAD CODE - wire it up or delete it.
+
+      It is registered as a singleton (Infrastructure/DI/AgentModule.cs:31) and was fully migrated to the
+      ordered credential provider by task 022 (GetConfidentialClientAsync -> _confidentialClients
+      .GetClientAsync, throwing if the provider is absent). But NO production code path reaches it. A
+      repo-wide search finds its only mention inside a handler is a TODO comment at
+      Api/Agent/SpaarkeAgentHandler.cs:25 ("Inject AgentTokenService when MCI-014 is implemented").
+      AcquireGraphTokenAsync / AcquireDataverseTokenAsync are invoked from exactly one place in the repo:
+      tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs:123.
+
+      Consequence recorded honestly in 031: FR-B3 site 4 CANNOT be verified over HTTP, because no HTTP
+      path reaches it. Its migration is proven at the seam-test level only. /api/agent/message returns 200
+      with real data, but it does so through the chat pipeline's DataverseUserClient - that 200 is NOT
+      evidence about AgentTokenService.
+
+      Why this belongs in wrap-up rather than being ignored: a migrated confidential-client construction
+      site with no caller is precisely what the Phase 6 credential census (task 061) exists to keep
+      honest. Either it is a real site (wire it up, then it is verifiable end-to-end) or it is not
+      (delete it, and the census count drops by one). Leaving it registered-but-unreachable makes the
+      census number true but meaningless.
+    </obligation>
   </booked-obligations>
 </task>
