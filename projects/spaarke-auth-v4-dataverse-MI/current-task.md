@@ -100,8 +100,10 @@ Full record: [`notes/decisions/051-sas-rotation.md`](notes/decisions/051-sas-rot
 `051-E..F`. Includes the exact setting 031 must apply to prod **and** staging:
 `ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net`.
 
-**Open owner question**: principal `38f7693f-…` also holds Sender+Receiver on the dev namespace —
-unidentified.
+**Resolved, not an open question**: the second principal with Sender+Receiver on the dev namespace is
+`sprk-controlplane-dev-uami` (`38f7693f-…`, `rg-spaarke-platform-dev`) — it drives the
+`sprk-provisioning-jobs` queue for `customer-provisioning-orchestration-r1`. Expected; no action.
+All five dev UAMIs are inventoried by principalId in [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md) §2.3 — **check there before treating a principalId as unknown.**
 
 ---
 

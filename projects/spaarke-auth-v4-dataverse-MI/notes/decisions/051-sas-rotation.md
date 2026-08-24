@@ -174,7 +174,7 @@ Given owner decision #1 is **dev only**, every `az` command in this project shou
 | Namespace | **`spaarke-servicebus-dev.servicebus.windows.net`** · RG `SharePointEmbedded` · sub `484bc857-…` |
 | Job queue | `sdap-jobs` present (with `sdap-communication`, `office-*`, `document-events`, `sprk-provisioning-jobs`) |
 | UAMI `mi-bff-api-dev` (principal `9fd47efb-…`) | **`Azure Service Bus Data Sender` + `Data Receiver`, both at NAMESPACE scope** ✅ |
-| Second principal `38f7693f-…` | also holds both at namespace scope — unidentified; worth an owner check |
+| Second principal `38f7693f-…` | **`sprk-controlplane-dev-uami`** (`rg-spaarke-platform-dev`) — also holds both at namespace scope. **Expected, not an anomaly**: the namespace carries a `sprk-provisioning-jobs` queue, and this is `customer-provisioning-orchestration-r1`'s control-plane identity. **No action.** I flagged it as unidentified before cross-referencing §2.3 of this project's own `PHASE-0-LIVE-VERIFICATION.md`, which already inventories all five dev UAMIs by principalId |
 
 The escalation trigger *"Service Bus RBAC cannot be granted — STOP"* did **not** fire: it is granted.
 
@@ -215,8 +215,8 @@ project's "no in-session flips" non-negotiable, it is a controlled step for 031.
   exists**; do not create it.
 - **Task 033** — remove `ConnectionStrings__ServiceBus` **and** `ServiceBus__ConnectionString` from
   both slots, then the KV secret. Two keys, not one.
-- **Owner** — who is principal `38f7693f-…` with Sender+Receiver on the dev namespace, and who
-  created the `staging` slot?
+- **Owner** — who created the `staging` slot, and is it meant to be running? (The `38f7693f-…`
+  principal is resolved — see §8; it needed a lookup in this project's own notes, not the owner.)
 - **Owner** — the standing `Cognitive Services User` grant on your account from task 050 is still in
   place; say the word and it comes off.
 - **Task 090** — `WorkersModule` and `OfficeWorkersModule` each carried a shadowed registration that
