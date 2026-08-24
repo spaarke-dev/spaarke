@@ -21,7 +21,7 @@
 | 030 | `Register-EntraAppRegistrations.ps1` FIC extension **⏩ PULLED FORWARD** | 3 Rollout | FULL | sonnet/high | 020 | **E** | ✅ | FR-C4 | ✅ |
 | 031 | Deploy to slot + §6.1 OBO checklist (**MI-FIC OBO PROVEN live 2026-08-24; rollback verified — 032 unblocked. ALL checklist surfaces verified EXCEPT Office add-ins, which need a human in the Office host. Open owner decision: §6.1 task-030 carry-forward**) | 3 Rollout | FULL | sonnet/high | 022 | — | ❌ | FR-C1 | 🔄 |
 | 032 | Promote by swap + retire slot (**DONE 2026-08-24: swapped 14:50:59Z, MI-FIC proven on the default slot at credential level; staging slot DELETED 15:37:45Z. Rollback is now credential-reorder only — proven in 031 §5.6**) | 3 Rollout | FULL | sonnet/high | 031 | — | ❌ | FR-C2 | ✅ |
-| 033 | Remove the secret + reconcile 11 scripts / ~25 docs | 3 Rollout | FULL | sonnet/high | 032 | — | ❌ `.claude/` | FR-C3 | 🔲 |
+| 033 | Remove the secret + reconcile the estate (**DONE 2026-08-24: 4 app settings + 3 KV secrets deleted; order=[MI-FIC] with no fallback; RequireSecretFreeIdentity=true; ADR-028 E-3 CLOSED; 15 scripts + 33 docs swept. Caught a near-miss: its own carried-forward obligation to narrow the CODE default would have broken every unconfigured environment — reverted, guarantee delivered by config instead**) | 3 Rollout | FULL | sonnet/high | 032 | — | ❌ `.claude/` | FR-C3 | ✅ |
 | 040 | ⚠️ Verify Power BI SP **profiles** under a managed identity | 4 PowerBI | FULL | **opus/xhigh** | 020 | — | ✅ | FR-D2 gate | ⏭️ |
 | 041 | Power BI tenant setting + rework both services | 4 PowerBI | FULL | sonnet/high | 040 | — | ✅ | FR-D1/D2 | ⏭️ |
 | 042 | Remove `PowerBi:ClientSecret` | 4 PowerBI | FULL | sonnet/high | 041 | — | ✅ | FR-D3 | ⏭️ |

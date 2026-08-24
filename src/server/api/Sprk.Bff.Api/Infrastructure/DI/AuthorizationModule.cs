@@ -403,10 +403,32 @@ public static class AuthorizationModule
             {
                 if (!credentialOrderConfigured)
                 {
+                    // ⚠️ ClientSecret STAYS IN THIS DEFAULT even though ADR-028 E-3 is CLOSED (task 033,
+                    // 2026-08-24). This looks like an oversight. It is not — it was tried and reverted,
+                    // and the reason is recorded here so it is not "fixed" again.
+                    //
+                    // Task 033 carried an obligation reading "also delete ClientSecret from the default
+                    // order in AddCredentialSelection". Executing it literally BREAKS EVERY UNCONFIGURED
+                    // ENVIRONMENT. CredentialSelectionOptionsValidator fails fast when
+                    // ManagedIdentityFederated is the ONLY credential and no UAMI clientId is set —
+                    // correctly, since there would be nothing to fall through to. But every test fixture
+                    // in this repo and every local `dotnet run` has NO Graph:Credentials section AND no
+                    // UAMI (a workstation has no route to IMDS), so a MI-FIC-only default makes all of
+                    // them refuse to start. Caught by CredentialOrderingSeamTests; task 010 shipped this
+                    // exact regression once already (FAILURE-MODES AP-7 — converting a silent fallback
+                    // into fail-fast has unbounded blast radius; the default is what bounds it).
+                    //
+                    // The secret-free guarantee is delivered where it actually matters, by CONFIGURATION
+                    // on the deployed environments: Graph:Credentials:Order = [ManagedIdentityFederated]
+                    // plus RequireSecretFreeIdentity = true. That is strictly better than a narrower
+                    // default, because it is explicit, auditable, per-environment, and it cannot silently
+                    // disable local development. And it is not weaker: the secret is deleted from app
+                    // settings AND Key Vault, so on a deployed environment this default has nothing left
+                    // to resolve even if it is reached.
                     options.Order = new List<string>
                     {
                         nameof(CredentialKind.ManagedIdentityFederated),
-                        nameof(CredentialKind.ClientSecret),   // ADR-028 E-3, transitional; removed at task 033
+                        nameof(CredentialKind.ClientSecret),   // see the note above before removing
                     };
                 }
             })

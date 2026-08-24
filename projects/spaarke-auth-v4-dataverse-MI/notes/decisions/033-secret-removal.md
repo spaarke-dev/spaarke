@@ -1,8 +1,7 @@
 # Task 033 — remove the secret and reconcile the estate
 
-> **Status**: 🔄 IN PROGRESS — steps 1–4 done. **The secret is GONE from the app AND from Key Vault**
-> (soft-deleted, recoverable until 2026-11-22); 15 scripts swept.
-> Remaining: the doc sweep (5), ADR-028 E-3 (6), `Graph-API-ClientSecret` (7).
+> **Status**: ✅ **COMPLETE — all 7 steps.** The BFF identity is secret-free: nothing in app settings,
+> nothing in Key Vault, nothing beneath MI-FIC in the credential order. **ADR-028 exception E-3 is CLOSED.**
 > **Date**: 2026-08-24
 
 ---
@@ -396,16 +395,142 @@ true now **and to quote what they used to say and why it was wrong** — the sam
 
 ---
 
-## 5. Steps 5–7 — REMAINING
+## 5. Steps 5–7 — COMPLETE
+
+### 5.1 Step 5 — the doc sweep: **33 files, not the POML's ~25 / the notes' 13**
+
+Classified before editing. **Historical records were deliberately NOT rewritten** —
+`.claude/CHANGELOG.md`, `docs/assessments/*`, `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` are point-in-time,
+and rewriting them would destroy the audit trail this project's whole argument depends on.
+
+**The false premise was hunted as a sentence-shape, not a string**, and two live instances had survived the
+2026-08-17 A4 pass:
+- `docs/standards/oauth-obo-patterns.md:13` — *"Requires confidential client (**has secret**)"*. The
+  canonical OBO standard doc, still asserting the thing that made three audits conclude the secret was
+  permanent.
+- `docs/guides/auth-deployment-setup.md` ×3 — *"Still required for OBO (OAuth spec mandates middle-tier
+  confidential credential)"*.
+
+Also corrected: *"A 200 confirms … OBO token exchange to Graph works (`BFF-API-ClientSecret` valid)"* — a
+200 identifies no credential while anything sits beneath MI-FIC in the order. The same trap, one more place.
+
+**Method, stated plainly**: 16 operational guides received a prominent banner at the top; 5 files received
+targeted line edits where the text instructs an *action* rather than describing state. A banner is a real
+correction at the point of use, but it is **not** the same as rewriting all 33 files line by line — where a
+page has many descriptive mentions, the banner supersedes them collectively and says so.
+
+**The most dangerous stale text in the estate** was `appsettings.template.json`, a live artifact:
+
+> *"WARNING: DO NOT remove the secret backing this setting — the shared-lib Dataverse path STILL
+> hard-requires it; removing it from Key Vault CRASHES the BFF at startup."*
+
+True when written (2026-08-13), invalidated by task 022 (migrated the call sites) and 024 (relaxed
+`[Required]`+`ValidateOnStart`), never refreshed — a direct instruction not to do what this task just did,
+**disproven empirically the same afternoon**. Old text quoted in the replacement so it cannot quietly return.
+
+### 5.2 Step 6 — ADR-028 E-3 CLOSED
+
+Four edits to ADR-028 (closure banner, the `Remediation TODO: OPEN` line discharged, and both
+forward-referencing MUST-NOTs, so the exception cannot be cited by someone who reads only the rules).
+
+**`.claude/skills/adr-check/SKILL.md` was the load-bearing one.** Its ADR-028 A4 row told agents to *cite
+E-3 and NOT report those sites as violations*. With E-3 closed and its enumeration empty, that directive
+would have gone on excusing precisely what this project removed. It now reports them as violations and adds
+two checks: a secret listed **beneath** MI-FIC in the order, and `RequireSecretFreeIdentity` absent/false
+outside Development.
+
+`.claude/constraints/auth.md` — both halves of the task-030 carry-forward (ADR-check W-6) discharged:
+the stale `Last Updated: 2026-05-19` header (with a comment explaining that stale review metadata **on this
+file** is itself part of how the false sentence survived three audits), and the **FIC provisioning shape**
+the file never carried: subject = **principalId, not clientId** (`AADSTS700213`), issuer, audience,
+same-tenant requirement, the ~2-minute `AADSTS70025` propagation flap, and resolve-by-resource-ID.
+
+> ⚠️ Merged into `.claude/constraints/auth.md` while **PR #812** also modifies it (§0.2). Edits were kept
+> additive and localised to reduce conflict surface, but a merge conflict there is expected and should be
+> resolved in favour of keeping **both** changes.
+
+### 5.3 Step 7 — `Graph-API-ClientSecret` deleted
+
+Provenance confirmed the orphan diagnosis: created **2025-09-29**, **never once updated**, zero code/config
+consumers (my grep and `code-quality-and-assurance-r3` HYGIENE-2 agree independently). Deleted 17:34:10Z,
+24 → 23, recoverable to 2026-11-22. It was **not** an alias of `BFF-API-ClientSecret` despite five documents
+calling it one — different fingerprint, measured (§2.2).
+
+---
+
+## 6. 🔴 The near-miss: the task's own carried-forward obligation was unsafe
+
+The obligation read: *"also delete `ClientSecret` from the default order in `AddCredentialSelection`."*
+
+**Executing it literally breaks every unconfigured environment**, and it was caught only because a test was
+watching. `CredentialSelectionOptionsValidator` fails fast when `ManagedIdentityFederated` is the *only*
+credential and no UAMI clientId is set — correctly, since there would be nothing to fall through to. But
+**every test fixture in this repo and every local `dotnet run` has neither** a `Graph:Credentials` section
+nor a UAMI (a workstation has no route to IMDS). A MI-FIC-only *default* stops all of them booting.
+
+`CredentialOrderingSeamTests.Startup_WithNoCredentialSectionAtAll_BootsOnTheCanonicalOrder` failed
+immediately. Its own comment had already predicted this — *"task 010 already shipped that exact regression
+once in this project"* — as had the `AddCredentialSelection` comment (FAILURE-MODES **AP-7**: converting a
+silent fallback into fail-fast has unbounded blast radius; **the default is what bounds it**).
+
+**Reverted.** `ClientSecret` stays in the canonical default, with the reasoning recorded at the code so it
+is not "fixed" again. This is not a weakening:
 
 | | |
 |---|---|
-| App settings | ✅ 4 BFF-identity secret keys deleted; `PowerBi__ClientSecret` correctly remains |
-| Key Vault | ✅ both BFF-identity copies deleted (recoverable to 2026-11-22) |
-| Credential order | `[ManagedIdentityFederated]` — explicit, no fallback |
-| `RequireSecretFreeIdentity` | **true** |
-| Scripts | ✅ 7 modified, 8 documented |
-| Rollback | `secret recover` → restore app settings → remove the order override |
+| Where the guarantee is delivered | **Configuration on deployed environments** — `Order=[ManagedIdentityFederated]` + `RequireSecretFreeIdentity=true` |
+| Why that is *better* than a narrower default | explicit, auditable, per-environment, and it cannot silently disable local development |
+| Why it is not weaker | the secret is deleted from app settings **and** Key Vault — on a deployed environment the default has nothing left to resolve even if reached |
+
+The ClientSecret **branch** in `OrderedCredentialClientProvider` is likewise kept deliberately: removing it
+would make rollback a redeploy, violating **NFR-06** ("rollback is config-only at every phase") on the
+highest-blast-radius auth surface in the system.
+
+Two tests now pin this: the canonical-default assertion (with the reasoning), and a new
+`Startup_WithTheDeployedSecretFreeConfiguration_BootsAndCannotReachAClientSecret` pinning the post-033
+deployed shape — including that narrowing the order **actually takes effect** rather than having the binder
+merge a trailing `ClientSecret` back in.
+
+---
+
+## 7. Final state and verification
+
+```
+17:41:26Z   slots ................ default only (staging deleted at 032)
+            app settings ......... NO BFF-identity secret. Only PowerBi__ClientSecret (task 042, deferred)
+            Graph__Credentials__Order__0 .................. ManagedIdentityFederated
+            Graph__Credentials__RequireSecretFreeIdentity . true
+            Key Vault ............ zero BFF-identity secrets; spe-owning-app-secret INTACT (E-1)
+17:40:36Z   OBO .................. all green, 68 bytes BYTE-IDENTICAL, 15/15 + 15/15
+            dotnet build ......... 0 errors
+            BFF test suite ....... 10,615 passed / 0 failed / 97 skipped
+            ArchTests ............ 56 passed / 0 failed
+            PowerShell ........... all 10 modified scripts parse
+```
+
+### Acceptance criteria
+
+| Criterion | |
+|---|---|
+| Secret removed from **both slots** | ✅ one slot exists (032 deleted staging); negative case satisfied by construction |
+| No BFF-identity code path resolves a secret | ✅ order has no fallback; nothing left in KV or app settings to resolve |
+| Secret + lowercase alias gone from Key Vault | ✅ both, soft-deleted (recoverable to 2026-11-22, **not purged**) |
+| Office add-in deploy still succeeds | ✅ **never depended on it** (§0.1) — the premise was false; deploy path untouched |
+| All scripts stop referencing it or document why | ✅ 15 scripts: 7 modified, 8 documented |
+| ADR-028 E-3 closed + `auth.md` reflects end state | ✅ incl. both task-030 carry-forward specifics |
+| `Register-EntraAppRegistrations.ps1` no longer mints unconditionally | ✅ `-SkipClientSecret` (opt-in — §4.3) |
+| Negative: E-1 + PowerBi untouched | ✅ verified live |
+| Negative: §6.1 OBO checklist still passes | ✅ green at every rung |
+
+### Left for the owner (booked to 090)
+
+1. 🔴 **Partial secret values are in git history** (§5, commit `c1803e99a`, 2026-03-09). Redacted in the
+   working tree; history untouched. `Dataverse-Checkout-20251218` is still a valid credential until
+   2027-12-18. **Recommended: rotate/delete it — cheap now precisely because nothing reads it.**
+2. 🔔 **Local-dev OBO has no credential path for a fresh setup** (§3.3). Recoverable in one command; the
+   owner may want a deliberate replacement rather than inheriting this.
+3. `AZURE_CLIENT_ID` is still set and logs an ERROR every boot (§2.9) — 031 hygiene, never done,
+   deliberately not bundled here because the Azure Identity SDK reads that variable itself.
 5. Sweep the 13 docs/config/workflow files — including correcting the false add-in claim in 4 places.
 6. Close ADR-028 E-3; update `.claude/constraints/auth.md` + `Sprk.Bff.Api/CLAUDE.md:110,221`.
    **CONTENDED with PR #812 — see §0.2.**

@@ -55,9 +55,14 @@ public class CredentialCensusTests
     //      accident — remove one site, add another, and the census still passes while the estate has
     //      changed. Per-file counts localise the failure to the file that changed.
     //
-    //   4. When task 033 removes BFF-API-ClientSecret, the provider's CredentialSource line changes from
-    //      "MI-FIC, then certificate, then transitional secret" to drop the secret. If it still says
-    //      "transitional secret" after 033, the migration did not finish.
+    //   4. DONE 2026-08-24 (task 033). This step read: "When task 033 removes BFF-API-ClientSecret, the
+    //      provider's CredentialSource line changes from 'MI-FIC, then certificate, then transitional
+    //      secret' to drop the secret. If it still says 'transitional secret' after 033, the migration did
+    //      not finish." It has been updated below, and the migration DID finish: four secret app settings
+    //      and both Key Vault copies are deleted, the live order is [ManagedIdentityFederated] with no
+    //      fallback, and Graph:Credentials:RequireSecretFreeIdentity=true. ADR-028 E-3 is CLOSED.
+    //      The check this step describes has therefore served its purpose; leave it here as the record of
+    //      why the line reads as it now does.
     //
     // =============================================================================================
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
@@ -66,7 +71,7 @@ public class CredentialCensusTests
             FileName: "OrderedCredentialClientProvider.cs",
             Sites: 1,
             Identity: "The BFF's own app registration",
-            CredentialSource: "Ordered selection: MI-FIC, then Key Vault certificate, then the transitional secret (ADR-028 A4 / E-3)",
+            CredentialSource: "Ordered selection: MI-FIC, then Key Vault certificate. NO client secret — ADR-028 A4; exception E-3 CLOSED 2026-08-24 (task 033)",
             Reason:
                 "THE consolidated site. Auth-v4 task 022 removed the four OBO clients and five app-only "
                 + "credential constructions and routed all of them here. This entry is a REDUCTION from "

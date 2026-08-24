@@ -384,10 +384,58 @@ public class CredentialOrderingSeamTests
 
         await act.Should().NotThrowAsync();
 
+        // NOTE (2026-08-24, task 033): ClientSecret is STILL in the canonical default, deliberately, even
+        // though ADR-028 E-3 is closed. Task 033 tried removing it — as its own carried-forward obligation
+        // instructed — and THIS TEST CAUGHT THE REGRESSION: the validator fails fast when MI-FIC is the
+        // only credential and no UAMI clientId is set, and every fixture here (and every local `dotnet
+        // run`) has neither a Graph:Credentials section nor a UAMI. A MI-FIC-only default would stop all
+        // of them starting. Task 010 shipped that exact regression once already.
+        //
+        // The secret-free guarantee is delivered by CONFIGURATION on deployed environments instead
+        // (Order=[ManagedIdentityFederated] + RequireSecretFreeIdentity=true) — explicit, auditable, and
+        // unable to break local development. See AuthorizationModule.AddCredentialSelection.
         host.Services.GetRequiredService<IOptions<CredentialSelectionOptions>>().Value.Order
             .Should().Equal(
                 nameof(CredentialKind.ManagedIdentityFederated),
                 nameof(CredentialKind.ClientSecret));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task Startup_WithTheDeployedSecretFreeConfiguration_BootsAndCannotReachAClientSecret()
+    {
+        // The post-033 deployed shape, pinned as a contract: narrowing the order to MI-FIC alone must
+        // (a) actually take effect — the config binder MERGES into collections, so a pre-populated default
+        // could silently hand ClientSecret back and leave the secret live while an operator believed they
+        // had eliminated it — and (b) boot cleanly when a UAMI IS present.
+        //
+        // This is the property that matters after E-3 closed: with nothing beneath MI-FIC there is nothing
+        // for a broken federated credential to fall through to, so it fails loudly instead of leaving
+        // every health signal green (ADR-028 A4, spec FR-F3).
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Graph:Credentials:Order:0"] = nameof(CredentialKind.ManagedIdentityFederated),
+            ["Graph:ManagedIdentity:ClientId"] = "5967251e-171c-46fe-a6c2-ef843c90309d",
+        }).Build();
+
+        using var host = new HostBuilder()
+            .ConfigureServices(services =>
+            {
+                // The conflation/completeness validator resolves IConfiguration from DI to find the UAMI,
+                // so passing the config to AddCredentialSelection alone is not enough to satisfy it.
+                services.AddSingleton<IConfiguration>(config);
+                services.AddCredentialSelection(config);
+            })
+            .Build();
+
+        await host.StartAsync();
+
+        host.Services.GetRequiredService<IOptions<CredentialSelectionOptions>>().Value.Order
+            .Should().Equal(nameof(CredentialKind.ManagedIdentityFederated))
+            .And.Subject.Should().NotContain(nameof(CredentialKind.ClientSecret),
+                "the canonical default must not merge a trailing ClientSecret back into an order the "
+                + "operator deliberately narrowed — that would leave the secret live while looking removed");
 
         await host.StopAsync();
     }
