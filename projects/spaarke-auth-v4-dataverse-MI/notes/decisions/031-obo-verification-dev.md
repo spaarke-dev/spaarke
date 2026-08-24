@@ -247,9 +247,40 @@ reaches the access check for *either* of them.
 `ResourceAccessHandler.cs` nor `DocumentsEndpoints.cs` is touched on this branch; the handler's last
 commit is a project-wide rename.
 
-**It is still a real defect** — an endpoint that cannot authorize anyone is dead code with a
-misleading 403 — but it is **out of scope for 031**, which verifies credentials, and out of scope for
-this project, which does not own that endpoint. Filed for task 090 to route onward.
+**Is it a required capability that is broken? No — checked, not assumed.** Container create and list
+both work via the SpeAdmin group at **`/api/spe/containers`**
+(`Api/SpeAdmin/ContainerEndpoints.cs:67`), and provisioning creates containers directly through
+`SpeFileStore.CreateContainerAsync` (`ExternalAccess/ProvisionProjectEndpoint.cs:390`). A repo-wide
+grep finds **no client code calling `/api/containers` at all** — only docs, API baselines, and one
+CORS `OPTIONS` test. These two are **superseded duplicates**, not a missing capability.
+
+**Exactly two endpoints are affected**, and the reason is a near-miss worth recording:
+
+| Route | Resource id present? | Result |
+|---|---|---|
+| `POST /api/containers` (`:16`, policy `:61`) | none | **always 403** |
+| `GET /api/containers?containerTypeId=` (`:64`, policy `:106`) | query is `containerTypeId`; the fallback matches `containerId` | **always 403** |
+| `GET /api/containers/{containerId}/drive` (`:110`) | ✅ | works |
+| `GET /api/drives/{driveId}/…` ×3 (`:152`, `:195`, `:248`) | ✅ | works |
+
+`ExtractResourceId` reads route values `containerId`/`driveId`/`documentId`/`resourceId`/`id`, then
+falls back to query `containerId`/`driveId`/`documentId`/`resourceId`
+(`ResourceAccessHandler.cs:139-159`). One character class away from matching.
+
+**The real damage was documentation, and it is fixed here rather than deferred.** Three docs pointed
+at the dead path, and one of them was dangerous:
+
+- `docs/guides/INCIDENT-RESPONSE.md` told operators to **health-probe `/api/containers` during an SPE
+  incident**. It always returns 403, so the runbook would have sent someone chasing an auth fault that
+  does not exist — the same failure mode as the stale "0 slots exist" note that cost 40 minutes on
+  2026-08-23. Now points at `/healthz` and `/api/spe/containers`, with the reason stated.
+- `docs/architecture/sdap-overview.md` advertised it as the container-CRUD path.
+- `docs/standards/INTEGRATION-CONTRACTS.md` listed it as the container-management contract.
+
+**What is left for the owner of the documents surface** (booked as 090 obligation `031-A`, as a
+decision, not a silent deferral): delete the two dead endpoints, or re-guard them with an
+app-role/admin policy rather than a per-resource one. That choice is not a credential-migration
+project's to make.
 
 ### 5.4 ✅ Row-level authorization verified — a computed denial, not a failing lookup
 

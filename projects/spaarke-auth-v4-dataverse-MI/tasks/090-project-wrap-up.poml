@@ -88,18 +88,42 @@
   <booked-obligations>
     <!-- BOOKED BY TASK 031 (2026-08-24) — record: notes/decisions/031-obo-verification-dev.md §5.3 -->
     <obligation source="031" id="031-A">
-      ROUTE ONWARD, do not fix here: `GET /api/containers` cannot authorize ANY caller. It is a
-      collection route carrying .RequireAuthorization("canmanagecontainers") ->
-      ResourceAccessRequirement("create_container"), but ResourceAccessHandler is a PER-RESOURCE
-      handler — it calls ExtractResourceId(httpContext) and Fail()s when the route has no resource id
-      (ResourceAccessHandler.cs:51-57). A collection route never has one, so every request 403s in
-      ~2.7ms before any Dataverse call. Verified live 2026-08-24 with an admin and a read-only user;
-      identical 403s.
+      DECISION NEEDED (not a silent deferral): DELETE or RE-GUARD two superseded endpoints in
+      DocumentsEndpoints.cs that return 403 to EVERY caller.
 
-      PRE-EXISTING and NOT caused by this project: `git diff origin/master...HEAD` shows neither
-      ResourceAccessHandler.cs nor DocumentsEndpoints.cs is touched on this branch. Out of scope for
-      auth-v4, which owns credentials, not this endpoint's policy wiring. Raise it with whoever owns
-      the documents surface rather than silently fixing it inside a credential-migration project.
-    </obligation>
+      Affected — exactly two, both lacking a resource id:
+        POST /api/containers            (DocumentsEndpoints.cs:16, policy at :61)   create container
+        GET  /api/containers            (DocumentsEndpoints.cs:64, policy at :106)  list containers
+
+      Mechanism: both carry .RequireAuthorization("canmanagecontainers") ->
+      ResourceAccessRequirement("create_container"), but ResourceAccessHandler is PER-RESOURCE. It
+      reads route values containerId/driveId/documentId/resourceId/id, then falls back to query
+      containerId/driveId/documentId/resourceId (ResourceAccessHandler.cs:139-159). A collection
+      route supplies none of them — and note the near-miss: GET /api/containers takes
+      containerTypeId, which the fallback does not match. So Fail() is called and the request 403s
+      in ~2.7ms, before any Graph/Dataverse call. The other four endpoints on the same policy
+      (/api/containers/{containerId}/drive and the three /api/drives/{driveId}/... routes) DO carry a
+      resource id and work correctly.
+
+      THE CAPABILITY IS NOT MISSING — verified 2026-08-24. Container create and list both work via
+      the SpeAdmin group at /api/spe/containers (Api/SpeAdmin/ContainerEndpoints.cs:67), and
+      provisioning creates containers directly via SpeFileStore.CreateContainerAsync
+      (ExternalAccess/ProvisionProjectEndpoint.cs:390). No client code calls /api/containers at all
+      (repo-wide grep: only docs, API baselines, and one CORS OPTIONS test). These two are
+      superseded duplicates, not a broken required capability.
+
+      PRE-EXISTING, not caused by auth-v4: git diff origin/master...HEAD touches neither
+      ResourceAccessHandler.cs nor DocumentsEndpoints.cs.
+
+      Docs were the real damage and are ALREADY FIXED by task 031 (2026-08-24):
+        docs/guides/INCIDENT-RESPONSE.md      told operators to health-probe /api/containers during
+                                              an SPE incident — a permanent 403 that would send them
+                                              chasing a non-existent auth fault
+        docs/architecture/sdap-overview.md    advertised it as the container CRUD path
+        docs/standards/INTEGRATION-CONTRACTS.md  listed it as the container-management contract
+
+      What remains for the owner of the documents surface: delete the two dead endpoints, or re-guard
+      them with an app-role/admin policy instead of a per-resource one. Do NOT fix this inside a
+      credential-migration project.
   </booked-obligations>
 </task>

@@ -253,7 +253,13 @@ curl -vI https://api.spaarke.com 2>&1 | grep -E "SSL|issuer|expire"
 **Diagnosis**:
 ```bash
 # 1. Check SPE endpoint through BFF
-curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/api/containers
+#    NOTE (2026-08-24, auth-v4 task 031): do NOT probe /api/containers.
+#    That endpoint returns 403 to EVERY caller, always — it is a collection route
+#    guarded by a per-resource policy, so authorization fails before any SPE call
+#    is made. A 403 there tells you nothing about SPE health and will send you
+#    chasing an auth problem that does not exist.
+curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/healthz          # liveness
+curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/api/spe/containers  # real SPE path (expect 401 unauthenticated, not 403)
 
 # 2. Verify BFF API app registration has Graph permissions
 az ad app show --id 92ecc702-d9ae-492d-957e-563244e93d8c --query "requiredResourceAccess" -o json
