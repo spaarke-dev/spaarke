@@ -35,6 +35,33 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class ProvisionProjectEndpoint
 {
     private const string ProjectEntitySet = "sprk_projects";
+
+    /// <summary>
+    /// The columns Step 1 reads from <c>sprk_project</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Regression, introduced by this project and caught by the 2026-08-24 review.</b> Commit
+    /// <c>95d3f0f68</c> (task 008 follow-up, the idempotency guard) added
+    /// <c>_sprk_securitybuid_value,sprk_specontainerid</c> to this projection. <b>Neither column exists.</b>
+    /// Live <c>sprk_project</c> metadata declares the lookup <c>sprk_securitybu</c> (→
+    /// <c>_sprk_securitybu_value</c>) and the text column <c>sprk_containerid</c>; <c>sprk_specontainerid</c>
+    /// exists only on <c>sprk_container</c>, which is evidently where the name was borrowed from.</para>
+    ///
+    /// <para>Consequence while it was wrong: Dataverse answered 400 on Step 1, the <c>catch</c> turned it
+    /// into a 500 whose message hid the cause, and provisioning created nothing. The idempotency guard
+    /// built on the same two columns read null forever, so the 409 protection could never fire — the
+    /// guard and the thing it guards were broken by the same typo.</para>
+    ///
+    /// <para>This is the FIFTH instance of the stale-column class in this codebase (task 070 fixed the
+    /// project lookup in the closure cascade, task 016 the contact lookup in the same file, task 017 two
+    /// in an e2e helper, this is the fifth) — and the first one this project INTRODUCED rather than found.
+    /// Every instance was silent: a wrong name reads as "nothing to act on".</para>
+    ///
+    /// Internal (not private) so a test can regression-guard the exact names against the live column set,
+    /// which is the guard task 016 built for the closure cascade and this endpoint did not get.
+    /// </remarks>
+    internal const string ProjectProvisioningSelect =
+        "sprk_projectid,sprk_projectname,sprk_issecure,_sprk_securitybu_value,sprk_containerid";
     private const string BusinessUnitEntitySet = "businessunits";
     private const string AccountEntitySet = "accounts";
 
@@ -97,8 +124,7 @@ public static class ProvisionProjectEndpoint
             var rows = await dataverseClient.QueryAsync<ProjectRow>(
                 ProjectEntitySet,
                 filter: $"sprk_projectid eq {request.ProjectId}",
-                select: "sprk_projectid,sprk_projectname,sprk_issecure," +
-                        "_sprk_securitybuid_value,sprk_specontainerid",
+                select: ProjectProvisioningSelect,
                 top: 1,
                 cancellationToken: ct);
 
@@ -157,7 +183,7 @@ public static class ProvisionProjectEndpoint
                 "[PROVISION] Project {ProjectId} is already provisioned (BU={BuId}, Container={ContainerId}). " +
                 "Refusing to re-provision: a second run would orphan the existing container and repoint the " +
                 "project at empty infrastructure. TraceId={TraceId}",
-                request.ProjectId, projectRow._sprk_securitybuid_value, projectRow.sprk_specontainerid, traceId);
+                request.ProjectId, projectRow._sprk_securitybu_value, projectRow.sprk_containerid, traceId);
 
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,
@@ -169,8 +195,8 @@ public static class ProvisionProjectEndpoint
                 extensions: new Dictionary<string, object?>
                 {
                     ["traceId"] = traceId,
-                    ["businessUnitId"] = projectRow._sprk_securitybuid_value,
-                    ["speContainerId"] = projectRow.sprk_specontainerid
+                    ["businessUnitId"] = projectRow._sprk_securitybu_value,
+                    ["speContainerId"] = projectRow.sprk_containerid
                 });
         }
 
@@ -489,6 +515,28 @@ public static class ProvisionProjectEndpoint
     {
         try
         {
+            // 🛑 KNOWN BROKEN — all three property names are wrong, and this has been silently failing
+            // since 2026-03. Confirmed against live sprk_project metadata (2026-08-24): there is no
+            // sprk_securitybuid, no sprk_specontainerid and no sprk_externalaccountid. The real columns are
+            // the lookups sprk_securitybu and sprk_externalaccount, and the text column sprk_containerid.
+            //
+            // So this PATCH 400s every time, the catch below logs a WARNING, and the endpoint returns 200.
+            // Provisioning therefore creates a real business unit, a real SPE container and a real account,
+            // and then leaves the project pointing at none of them — external collaborators see no
+            // documents and nothing indicates a problem.
+            //
+            // NOT FIXED HERE, deliberately. The two lookups need `@odata.bind` NAVIGATION PROPERTY names,
+            // which are case-sensitive and are NOT derivable from the attribute name (this repo's verified
+            // examples are PascalCase: sprk_BusinessUnit, sprk_Contact, sprk_Organization, sprk_GrantedBy).
+            // They must be read from $metadata, which cannot be done offline, and no secure project exists
+            // in dev to read them back from. Guessing the casing would reproduce the exact silent-failure
+            // class this comment is about — a wrong nav property is accepted as an unknown property and the
+            // write simply does not happen.
+            //
+            // Task 021 fixes this: verify all three names against $metadata, then make the failure LOUD.
+            // The swallow is why this survived five months, so the name fix and the fail-loud change must
+            // land together — fixing only the names would leave the next drift equally invisible, and
+            // fixing only the swallow would hard-block provisioning on names we know are wrong.
             var updatePayload = new Dictionary<string, object?>
             {
                 // Child BU ID for Dataverse row-level security isolation
@@ -618,12 +666,12 @@ public static class ProvisionProjectEndpoint
         public bool? sprk_issecure { get; set; }
 
         /// <summary>The child Business Unit stamped by a previous provisioning run, if any.</summary>
-        [JsonPropertyName("_sprk_securitybuid_value")]
-        public Guid? _sprk_securitybuid_value { get; set; }
+        [JsonPropertyName("_sprk_securitybu_value")]
+        public Guid? _sprk_securitybu_value { get; set; }
 
         /// <summary>The SPE container stamped by a previous provisioning run, if any.</summary>
-        [JsonPropertyName("sprk_specontainerid")]
-        public string? sprk_specontainerid { get; set; }
+        [JsonPropertyName("sprk_containerid")]
+        public string? sprk_containerid { get; set; }
 
         /// <summary>
         /// Whether this project already carries provisioned infrastructure.
@@ -634,8 +682,8 @@ public static class ProvisionProjectEndpoint
         /// because Step 5's reference-stamping is non-fatal and can leave a real container unrecorded.
         /// </remarks>
         public bool HasProvisionedInfrastructure =>
-            (_sprk_securitybuid_value is { } bu && bu != Guid.Empty)
-            || !string.IsNullOrWhiteSpace(sprk_specontainerid);
+            (_sprk_securitybu_value is { } bu && bu != Guid.Empty)
+            || !string.IsNullOrWhiteSpace(sprk_containerid);
     }
 
     private sealed class BuRow

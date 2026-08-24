@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -155,5 +156,52 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             .Should().Contain(existingBu.ToString(), "the operator needs to know which BU is already in use");
         problem.RootElement.GetProperty("speContainerId").GetString()
             .Should().Be("b!existing-container");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The guard that was missing — added 2026-08-24 after the review found that this
+    // project INTRODUCED the fifth instance of the stale-column class here.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Every column the provisioning read projects must exist on <c>sprk_project</c>.
+    ///
+    /// <para><b>Why this test exists.</b> Commit <c>95d3f0f68</c> — the commit that added the idempotency
+    /// guard these very tests cover — put <c>_sprk_securitybuid_value,sprk_specontainerid</c> into the
+    /// Step 1 projection. Neither column exists on the table (live metadata: the lookup is
+    /// <c>sprk_securitybu</c>, the text column is <c>sprk_containerid</c>). Dataverse answers a bad
+    /// projection with 400, the endpoint's <c>catch</c> turned that into a 500 with the cause hidden, and
+    /// provisioning created nothing — while the guard built on those same two columns read null forever
+    /// and could never fire.</para>
+    ///
+    /// <para>All five tests above stayed green throughout, because the fixture returned canned rows
+    /// regardless of the projection. Task 016 had already built the fix for that failure mode —
+    /// a fake that rejects unknown columns the way Dataverse does — and it was not carried across to this
+    /// fixture. It is now, and this test pins the projection directly so the constant cannot drift either.</para>
+    /// </summary>
+    [Fact]
+    public void ProjectProvisioningSelect_NamesOnlyColumnsThatExistOnTheTable()
+    {
+        var columns = ProvisionProjectEndpoint.ProjectProvisioningSelect
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        columns.Should().OnlyContain(c => ProvisionProjectTestFixture.LiveProjectColumns.Contains(c),
+            "a $select naming a nonexistent column returns 400, which surfaces as a failed provision " +
+            "rather than as a schema mistake — this is the fifth instance of that class in this codebase");
+    }
+
+    /// <summary>
+    /// The two specific names that broke it, pinned by name so a revert is impossible to do quietly.
+    /// </summary>
+    [Fact]
+    public void ProjectProvisioningSelect_UsesTheLiveSecurityBuAndContainerColumns()
+    {
+        var select = ProvisionProjectEndpoint.ProjectProvisioningSelect;
+
+        select.Should().Contain("_sprk_securitybu_value").And.Contain("sprk_containerid");
+        select.Should().NotContain("_sprk_securitybuid_value",
+            "sprk_securitybuid does not exist on sprk_project");
+        select.Should().NotContain("sprk_specontainerid",
+            "sprk_specontainerid exists on sprk_container, not sprk_project — that is where the name was borrowed from");
     }
 }

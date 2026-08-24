@@ -75,8 +75,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // The handler reads every row through its OWN private DTOs, which this assembly cannot name.
             // So the double answers in Dataverse's WIRE shape (JSON) and lets the handler's own
             // deserialization run — which keeps the [JsonPropertyName] bindings under test rather than
-            // bypassed. That matters specifically for `_sprk_securitybuid_value`: it is the field the new
-            // guard reads, and a wrong attribute name there would make the guard silently never fire.
+            // bypassed. That matters specifically for `_sprk_securitybu_value`: it is the field the guard
+            // reads, and a wrong attribute name there makes the guard silently never fire — which is
+            // exactly what happened, so the projection is now validated by RejectUnknownColumns below.
             client
                 .Setup(c => c.QueryAsync<It.IsAnyType>(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -86,8 +87,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     var rowType = invocation.Method.GetGenericArguments()[0];
                     var entitySet = (string)invocation.Arguments[0];
                     var filter = invocation.Arguments[1] as string;
+                    var select = invocation.Arguments[2] as string;
 
-                    var json = RowsJsonFor(entitySet, filter);
+                    var json = RowsJsonFor(entitySet, filter, select);
                     var listType = typeof(List<>).MakeGenericType(rowType);
                     var rows = JsonSerializer.Deserialize(json, listType)
                                ?? Activator.CreateInstance(listType)!;
@@ -128,8 +130,53 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// case can actually reach Business Unit creation — otherwise root-BU resolution fails first and the
     /// test would pass for the wrong reason (no 409, but also nothing created).
     /// </remarks>
-    private string RowsJsonFor(string entitySet, string? filter)
+    /// <summary>
+    /// Every column live <c>sprk_project</c> actually exposes that this endpoint may read.
+    /// </summary>
+    /// <remarks>
+    /// Verified against live metadata 2026-08-24. Note what is NOT here and why it matters:
+    /// <c>sprk_securitybuid</c>, <c>sprk_specontainerid</c> and <c>sprk_name</c> do not exist on this
+    /// table — the first two are what commit <c>95d3f0f68</c> wrongly added to the Step 1 projection,
+    /// breaking provisioning outright and rendering its own idempotency guard inert.
+    /// </remarks>
+    internal static readonly HashSet<string> LiveProjectColumns = new(StringComparer.OrdinalIgnoreCase)
     {
+        "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription",
+        "sprk_issecure", "sprk_accesspermission", "sprk_containerid", "sprk_searchindexname",
+        "_sprk_securitybu_value", "_sprk_externalaccount_value", "_sprk_mattertype_value",
+        "_sprk_practicearea_value", "statecode", "statuscode", "createdon", "modifiedon", "ownerid"
+    };
+
+    /// <summary>
+    /// Dataverse's own behaviour: a projection naming a column the table lacks is a 400.
+    /// </summary>
+    /// <remarks>
+    /// <para>THIS IS THE GUARD THAT WAS MISSING. Task 016 built exactly this for the closure cascade
+    /// (<c>ProjectClosureCascadeTests.RejectUnknownColumns</c>) and wrote in its notes that "a fake that
+    /// returned canned rows regardless of the projection would have gone green on the exact code that
+    /// shipped A-12". This fixture had no such check, so when the same session added two nonexistent
+    /// columns to the provisioning projection, all five idempotency tests stayed green while the endpoint
+    /// was 500ing in production. The guard existed and was not ported one directory over.</para>
+    /// </remarks>
+    private static void RejectUnknownColumns(string entitySet, string? select)
+    {
+        if (entitySet != ProjectEntitySet || string.IsNullOrWhiteSpace(select)) return;
+
+        foreach (var column in select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!LiveProjectColumns.Contains(column))
+            {
+                throw new InvalidOperationException(
+                    $"Dataverse 400: Could not find a property named '{column}' on type " +
+                    "'Microsoft.Dynamics.CRM.sprk_project'.");
+            }
+        }
+    }
+
+    private string RowsJsonFor(string entitySet, string? filter, string? select = null)
+    {
+        RejectUnknownColumns(entitySet, select);
+
         var payload = new List<Dictionary<string, object?>>();
 
         switch (entitySet)
@@ -148,10 +195,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     };
 
                     if (seeded.BusinessUnitId is { } bu)
-                        row["_sprk_securitybuid_value"] = bu;
+                        row["_sprk_securitybu_value"] = bu;
 
                     if (seeded.SpeContainerId is { } container)
-                        row["sprk_specontainerid"] = container;
+                        row["sprk_containerid"] = container;
 
                     payload.Add(row);
                 }
