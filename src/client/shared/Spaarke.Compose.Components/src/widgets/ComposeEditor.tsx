@@ -2812,14 +2812,27 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       const entered = await promptForInstruction(action);
       if (!entered || !entered.trim()) return;
       const instruction = entered.trim();
+      const requestId = `${action.id}#caret-${(caretRunSeqRef.current += 1)}`;
+      // FR-C01 (task 051) — the CARET anchor source. Like the review-note path, this one already knew
+      // exactly which paragraph it meant (it resolved the enclosing textblock two statements up) and
+      // then sent only raw ProseMirror offsets, which are session-local and drift across the model
+      // round-trip — so its edit was placed by text search like everything else. Same controller, same
+      // Mapping rebasing, same return handling as the selection and note paths; the only difference is
+      // that the bookmark is anchored at the caret's enclosing block.
+      const bookmarkContext = aiGenerateBookmark.beginGenerate({
+        requestId,
+        range: { from: blockStart, to: blockEnd },
+      });
       void enqueueComposeAction({
-        id: `${action.id}#caret-${(caretRunSeqRef.current += 1)}`,
+        id: requestId,
         bindingId: action.bindingId,
         args: {
           slots: {
             selectionText,
             selectionAnchorStart: blockStart,
             selectionAnchorEnd: blockEnd,
+            // The durable anchor the model anchors its returned operations to (I-7).
+            ...(bookmarkContext.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
             documentSpeId: documentRef?.speDriveItemId,
             documentRecordId: documentRef?.sprkDocumentId,
             sessionId,
@@ -2830,8 +2843,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // an inline redline (independent of the registry's `materializesInEditor` flag, which the catalog
         // seed may not preserve — same rationale as `dispatchNoteToolRequest`).
         documentSessionId: sessionId,
-      }).catch(() => undefined);
-    }, [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]);
+      })
+        .then(result => {
+          // Resolve the bookmark against the RETURNED payload, exactly as the note/selection paths do —
+          // one edit-capture mechanism (invariant 6), and the bookmark is released either way.
+          const outcome = aiGenerateBookmark.resolveOnReturn(requestId, result?.result);
+          if (outcome?.status === 'operations') void aiApplyValidation.validateAndApply(outcome);
+        })
+        .catch(() => {
+          aiGenerateBookmark.clearBookmark(requestId);
+        });
+    }, [
+      editor,
+      enqueueComposeAction,
+      sessionId,
+      documentRef,
+      promptForInstruction,
+      aiGenerateBookmark,
+      aiApplyValidation,
+    ]);
 
     // Keep the fresh runner reachable from the (initial-render-closed) editorProps.handleKeyDown, per the
     // ref convention above (mirrors commentThreadsRef / selectedThreadIdRef assignment effects).
