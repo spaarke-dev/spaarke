@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-23 (by `task-execute` 051) — **GROUP F COMPLETE (7 of 7). Remaining work is 031→032→033 + 090.**
+> **Last Updated**: 2026-08-24 (by `context-handoff`) — **031 IS LIVE-VERIFIED IN PART. MI-FIC OBO IS PROVEN. 032 IS UNBLOCKED.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,11 +11,64 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **none active. Group F is CLOSED** — 055, 052, 050, 054, 056 done; **051 🔄 + 053 🔄 code-complete, cutover booked to 031/033** |
-| **Status** | Full suite **10,614 / 0** (97 skipped) · seam **891/891** · ArchTests **56/56** · publish **44.99 MB compressed** (delta 0.00) · CVE clean |
-| **Next Action** | 🛑 **031 needs the owner present — it cannot be run autonomously.** Its pre-flight IS done ([`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md)): SIGABRT trap not armed, both slots healthy, `AZURE_CLIENT_ID` obligation resolved as "record why not". **Blockers are a real delegated user token, a human in Outlook/Word/Copilot, and a SECOND TEST PRINCIPAL that does not exist** (create it, or descope the fail-closed criterion in writing). The soak blocker is gone — 032 was rescoped 2026-08-23. |
-| **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** Group F has no autonomous work left; the count does not move until then · 3 deferred |
+| **Task** | **031 🔄 IN PROGRESS — live-verified on the `staging` slot.** ✅ MI-FIC OBO · ✅ inbound validation · ✅ row-level auth · ✅ SPE-over-OBO · ✅ **secret-first rollback (unblocks 032)**. Group F closed; 051 🔄 + 053 🔄 await cutover |
+| **Status** | Suite **10,614 / 0** · seam **891/891** · ArchTests **56/56** · publish **44.99 MB** · CVE clean · **working tree clean, 0 unpushed** · slot `/healthz` 200 |
+| **Next Action** | Finish 031's remaining surfaces (all HTTP-testable except three): **chat SSE `dataverse.*` tool calls · `/api/agent` · send-as-user email (AUTHORIZED, owner as SOLE recipient) · long-running OBO · Ciam + RagApiKey inbound schemes**. Then Office add-in save flows via **Outlook + Word**, which still need a human. Full state: [`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md) §5. **Do NOT re-run the rollback test — §5.6 is done.** |
+| **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
+
+## §0.0 🟢 031 LIVE STATE (2026-08-24) — read before touching the slot
+
+Full evidence: [`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md) §5.
+
+### What is PROVEN (do not re-derive, do not re-run)
+
+| Criterion | Evidence |
+|---|---|
+| **MI-FIC OBO works — the project's whole thesis** | `built with credential ManagedIdentityFederated.` → `OBO token exchange successful` (§5.1) |
+| `AZURE_CLIENT_ID` trap is dead at runtime | CCA logs `configured with ClientId from API_APP_ID` (§5.1) |
+| Inbound validation, 4 identities, rejecting at the INBOUND layer | 200/200/401/401; malformed dies at `IDX10504` inside `JwtBearerHandler` (§5.2) |
+| Row-level authorization | `AccessRights=None` is a COMPUTED denial, not a failed lookup (§5.4) |
+| SPE over OBO | `GET /api/obo/containers/{id}/children` → 200 (§5.5) |
+| **Secret-first rollback — the gate 032 rests on** | `built with credential ClientSecret.` → `OBO token exchange successful`, then restored (§5.6) |
+
+### ⚠️ The methodological trap that nearly produced a false claim
+
+**HTTP 200 does NOT prove which credential was used.** The ordered provider falls through on failure,
+so a broken `ClientSecret` would have been silently served by MI-FIC and returned the identical 200.
+Only the `built with credential …` log line separates them, and it is emitted **on cache miss only** —
+which is why §5.6 required a deliberate slot restart. The same fail-closed ambiguity produced two
+other near-misses this session (§5.3, §5.4). **On this project, never conclude a credential outcome
+from a status code.**
+
+### Environment left in this state — all intentional, all cleared by 032
+
+| Thing | State |
+|---|---|
+| `staging` slot | runs the **branch build** (was the 2026-08-20 task-001 build) |
+| Filesystem application logging on the slot | **ENABLED** (was off) |
+| `Graph__Credentials__Order__*` on the slot | **REMOVED** — canonical default `[ManagedIdentityFederated, ClientSecret]` restored and verified; A4 deviation warning absent |
+| Slot app settings | back to **213**; `/healthz` 200 |
+| Default slot | **never touched**, 200 throughout |
+| No FIC created or modified | so **no AADSTS70025 flap window** applies to any §5 result |
+
+### Tokens — how to get them again
+
+- **Owner:** `az account get-access-token --scope api://1e40baad-e065-4aea-a8d4-4b7ab273458c/SDAP.Access` (works from the operator's own `az` session).
+- **`testuser1@spaarke.com`** (created by the owner 2026-08-24 for the negative case): acquire by **device-code flow against client `04b07795-8ddb-461a-bbee-02f9e1bf7b46`** so the operator's CLI session is not disturbed and the token never transits chat. Its cached copy was **deleted from disk** after use.
+- Always pass `--subscription 484bc857-3802-427f-9ea5-ca47b43db0f0`.
+
+### 🔔 Owner decision now open — `/api/containers`
+
+Two endpoints (`POST /api/containers`, `GET /api/containers`) return **403 to every caller, always**:
+a collection route under a per-resource policy. **The capability is NOT missing** — create/list both
+work at `/api/spe/containers`, and no client calls the dead pair. Pre-existing; not caused by this
+project. The three docs that pointed at it are **already fixed**, including an INCIDENT-RESPONSE
+runbook that told operators to health-probe it during an SPE incident. Booked as **090 obligation
+`031-A`** as a decision — delete the dead endpoints, or re-guard with an app-role policy. Not a
+credential project's call.
+
+---
 
 ## §0 🔴 READ FIRST — things that will mislead you if you don't
 

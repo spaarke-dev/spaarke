@@ -4,7 +4,7 @@
     <title>Deploy to slot and run the full OBO verification checklist (FR-C1)</title>
     <phase>3 Rollout</phase>
     <gate>022 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, deployment; the gate before touching a live environment.</rigor-reason>
     <model-tier>sonnet</model-tier>
