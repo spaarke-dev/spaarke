@@ -113,7 +113,8 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
             // virtual seam (ADR-038 §4) rather than mocking transport (ban B1) keeps the production
             // RetrieveRowAsync + DeriveKey path under test.
             var clientMock = new Mock<DataverseWebApiClient>(
-                ClientConfig(), NullLogger<DataverseWebApiClient>.Instance) { CallBase = false };
+                ClientConfig(), NullLogger<DataverseWebApiClient>.Instance)
+            { CallBase = false };
 
             clientMock
                 .Setup(c => c.RetrieveAsync<ExternalGrantRow>(
