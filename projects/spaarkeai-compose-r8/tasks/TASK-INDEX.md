@@ -206,8 +206,10 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 050 | **ADR-043 + ADR-041 assessment** (ADR-043 explicitly names "compose edit"; is FR-C05's "apply anyway?" a Gate?). *Escalation trigger* | — | FULL | opus/xhigh | ✅ | — | ✅ |
-| 051 | **Anchor supply** — thread the captured `(paraId, span)` request→response→apply · wire `CitationResolver` · closed-set paraId return for review passes *(three sources, one code path)* | FR-C01/02/03 | FULL | opus/max | ❌ | 050 | 🔲 |
-| 052 | **Retire the text-search path** (`ComposeEditValidator`, `FindAll`, `target_text`/`match_mode`, client matchers) + deterministic stale/deleted outcomes | FR-C04/05 | FULL | opus/xhigh | ❌ | 051 | 🔲 |
+| 051 | **Anchor supply** — thread the captured `(paraId, span)` request→response→apply · wire `CitationResolver` · closed-set paraId VALIDATION · the three selection-scoped Actions can now return an anchor *(five dispatch sites, one code path)* | FR-C01/02/03 | FULL | opus/max | ❌ | 050 | ✅ |
+| 054 | **Whole-document closed set — SUPPLY** · enumerate the paragraph set for `compose-revise-document` and deliver it via the ADR-043 Amendment 1 declared-input channel; catalog change lands WITH it, never before | FR-C03 | FULL | opus/xhigh | ❌ | 051 | 🔲 |
+| 055 | **Whole-document — PLACEMENT** · anchored `edits[]` + `comments[]` (the `flag-risks` intent's entire output, today 100% prose-anchored); per-item failure isolation preserved | FR-C03 | FULL | opus/xhigh | ❌ | 054 | 🔲 |
+| 052 | **DEMOTE the text-search path** — retire it as the PRIMARY targeting channel (`ComposeEditValidator`, `FindAll`, `target_text`/`match_mode`, client matchers) + deterministic stale/deleted outcomes. *Blocked until EVERY source has an anchor — deleting early breaks whichever was missed* | FR-C04/05 | FULL | opus/xhigh | ❌ | 051, **054, 055** | 🔲 |
 | 053 | **Bounded confirmable fallback** + verify the dead-end is **unreachable**; no UAT-21 regression | FR-C06/07 | FULL | opus/xhigh | ❌ | 052 | 🔲 |
 
 ## Phase 6 — Track B: Durable session files *(the only genuinely parallel track)*

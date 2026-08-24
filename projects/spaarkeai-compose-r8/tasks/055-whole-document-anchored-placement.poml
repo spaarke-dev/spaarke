@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C03 (whole-document half) — place a whole-document change list AND its review flags by anchor, end to end, with zero text matching</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>blocked-on-054</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes how whole-document revisions and review flags land in the editor — the surface where a mis-placed legal edit is most damaging (many changes at once, reviewed in bulk).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: `comments[]` (review flags) is a SECOND anchor consumer that no prior task covered, and it currently overlaps with the advisory-comment path's own `sectionRef` citation resolution. Deciding whether those converge on one placement primitive or stay separate — and getting per-item failure isolation right so one bad anchor in a fifty-change list does not sink the batch — is the judgment. Placing a single anchored edit is already solved.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same client edit path as 051/052/053/054.</parallel-reason>
+    <deps>054</deps>
+    <tags>frontend, compose, ai, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Task 054 makes the whole-document review pass ABLE to return anchors. This task makes the editor place
+    them, for BOTH halves of that payload — and closes the last prose-matching dependency in the AI flow.
+
+    **`edits[]` — mostly already done, verify rather than assume.** `usePendingRedline.materializeMany`
+    gained the anchor-first branch in task 051 (`resolveAnchoredSpans`, deterministic → legacy text, with an
+    anchor failure REFUSING rather than falling back to a search). Confirm it holds for a REAL
+    whole-document payload — many changes, mixed anchored/legacy, per-item failure isolation intact — rather
+    than assuming the single-edit tests generalize.
+
+    **`comments[]` — genuinely uncovered.** `ComposeDraftComment` is `{ target_text, comment }`: a review
+    flag anchored by quoted prose, with no anchor field at all. It is the `flag-risks` intent's ENTIRE
+    output (that intent emits an empty `edits` array by contract), so today the highest-volume
+    whole-document capability is 100% prose-anchored.
+
+    **The design question this task owns.** `ComposeEditor.placeAdvisoryComments` ALREADY resolves review
+    findings deterministically — via `sectionRef` through the client `CitationResolver` mirror, with a fixed
+    deterministic-then-legacy ordering. That is a second, older anchor path for the same kind of object.
+    Decide deliberately whether `comments[]` converges onto it (one placement primitive for every anchored
+    review flag) or stays separate, and justify it against CLAUDE.md §11 — "prefer one component that works
+    exceptionally well over five that partially overlap". Do not leave two overlapping mechanisms by default.
+
+    Nothing is retired here. Task 052 owns retirement, and it must not run until this task lands — a
+    whole-document flag with no anchor would still depend on the search.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in `usePendingRedline`, `ComposeEditor.placeAdvisoryComments`, the client `CitationResolver` mirror, and the compose ledger materialize seam.</role>
+
+  <goal>
+    A whole-document revision places every edit AND every review flag at a deterministic anchor, with zero
+    text matching invoked for anchored items and per-item failure isolation preserved. One placement
+    primitive for anchored review flags, or a documented reason there are two.
+  </goal>
+
+  <context>
+    <background>
+      Per-item failure isolation is a shipped property of `materializeMany` (UAT round-4 item 1): one
+      unplaceable change is skipped, recorded, and surfaced as a calm batched "N of M" banner while the rest
+      apply. An anchored batch MUST keep that. Regressing it to all-or-nothing would be a worse UX than the
+      prose matching it replaces, on the surface where volume is highest.
+
+      UAT-21 is binding here: never silently mis-place, and never report `applied` for something that was
+      not placed. An anchor that does not resolve REFUSES — it does not fall back to searching, because
+      falling back would re-introduce the wrong-occurrence risk for exactly the items that named their
+      target exactly.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts (collectBlocks)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r7/notes/uat-issues.md (UAT-21, UAT-24)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project invariant 3">All placement resolves through the projection's paraId map. MUST NOT introduce a second coordinate system.</constraint>
+    <constraint source="CLAUDE.md §11">If `comments[]` does NOT converge onto `placeAdvisoryComments`' resolution, answer the three-question template concretely — name the behavior that fails without a second mechanism.</constraint>
+    <constraint source="UAT-21">An unresolved anchor REFUSES and reports honestly. MUST NOT fall back to a text search, and MUST NOT report `applied` for an item that was not placed.</constraint>
+    <constraint source="project">Per-item failure isolation MUST hold: one bad anchor in an N-item batch skips that item only.</constraint>
+    <constraint source="project">MUST NOT delete or retire anything — task 052 owns that.</constraint>
+    <constraint source="ADR-038">Client tests + a seam slice over a REAL whole-document payload shape, not a single-edit payload standing in for one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Whole-document redline materialization, advisory comment anchoring</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load UAT-21/24 and the §11 component-justification rule.</step>
+    <step order="1">Verify `materializeMany`'s anchor branch against a REAL multi-change whole-document payload — mixed anchored/legacy, per-item isolation, banner counts.</step>
+    <step order="2">Decide the `comments[]` question: converge onto `placeAdvisoryComments`' deterministic resolution, or justify two paths per §11. Record the reasoning.</step>
+    <step order="3">Implement anchored placement for `comments[]` on the chosen path; add the anchor field to `ComposeDraftComment`.</step>
+    <step order="4">Prove zero text matching for anchored items structurally (the throwing-collaborator tripwire, as in `ComposeEditAnchorPassSeamTests`), not by inspecting output.</step>
+    <step order="5">Prove per-item failure isolation and honest reporting under a partially-anchored batch.</step>
+    <step order="6">Confirm nothing was retired; confirm 052's remaining scope is now genuinely unreachable-in-practice for the AI flow.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If converging `comments[]` onto `placeAdvisoryComments` would regress the advisory path's shipped behavior (its fixed deterministic-then-legacy ordering, or its range-citation spanning), STOP and surface it — the two objects may be genuinely different and forcing convergence would be scope creep in the other direction.</trigger>
+    <trigger>If a whole-document payload with per-item anchors breaches the ADR-040 128 KB inline cap (task 050 C-4), STOP: `ProjectComposeOutputs` SKIPS truncated entries, so the whole revision would silently vanish from the read projection rather than degrade.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/055-review-flag-placement-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A whole-document `edits[]` payload places every anchored change at its paraId with ZERO text matching invoked (asserted structurally by a throwing collaborator).</criterion>
+    <criterion>A whole-document `comments[]` payload (the `flag-risks` intent's entire output) places every anchored flag deterministically.</criterion>
+    <criterion>Per-item failure isolation holds: one unresolvable anchor skips ONLY that item, and the banner reports honest N-of-M counts.</criterion>
+    <criterion>An unresolved anchor REFUSES — it never falls back to a text search and never reports `applied` (UAT-21).</criterion>
+    <criterion>The `comments[]` convergence decision is documented and justified per §11.</criterion>
+    <criterion>NEGATIVE: no second coordinate system; all placement resolves through the paraId map.</criterion>
+    <criterion>NEGATIVE: nothing deleted or retired (`target_text`, `match_mode`, `resolveTargetSpans` all still present).</criterion>
+    <criterion>Payload size under the ADR-040 128 KB cap for a realistic whole-document revision, or the degradation stated.</criterion>
+  </acceptance-criteria>
+</task>

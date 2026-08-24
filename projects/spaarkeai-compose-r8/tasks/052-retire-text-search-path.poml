@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deletes across `Services/Compose/` and the Compose client widgets.</parallel-reason>
-    <deps>051</deps>
+    <deps>051, 054, 055</deps>
     <tags>bff-api, frontend, compose, ai, deletion, testing</tags>
     <estimated-effort>8 hours</estimated-effort>
   </metadata>
@@ -69,6 +69,8 @@
   </context>
 
   <constraints>
+    <constraint source="owner 2026-08-24">SCOPE REFRAMING — this task DEMOTES text matching; it does not eliminate the capability. Three roles are legitimate and survive: (1) the ADR-sanctioned return-from-Word re-anchor (`AnnotationReanchorService`, already KEEP), (2) genuinely anchorless input — replayed/legacy edits — as task 053's bounded CONFIRMABLE fallback, (3) user-invoked find/replace, where matching text IS the semantics rather than a fallback. What is retired is text matching as the PRIMARY targeting channel for an AI edit that had a deterministic anchor available and discarded it (project invariant 7). Do not read the task title more broadly than this.</constraint>
+    <constraint source="owner 2026-08-24">DECIDE `match_mode: 'all'` EXPLICITLY, not by omission. A defined-term change across a whole document ("every instance of 'Company' becomes 'Supplier'") is genuinely text-semantic; under a paraId-only model the model must enumerate every affected paragraph, which is more explicit and checkable but costs tokens and can miss one. State the decision and its reasoning in the task notes either way.</constraint>
     <constraint source="spec FR-C04">MUST KEEP `ComposeTextFold` (used by the baseline stamper) and `AnnotationReanchorService` (ADR-sanctioned return-from-Word). Deleting either breaks Track A or the sanctioned re-anchor case.</constraint>
     <constraint source="project">Before deleting ANY symbol, grep for consumers across the WHOLE repo — not just Compose. Record the consumer check per deleted symbol. A missed consumer is how a deletion task breaks production.</constraint>
     <constraint source="ADR-049 I-7">MUST NOT use text search as a placement mechanism. After this task, no placement path may search document text.</constraint>
