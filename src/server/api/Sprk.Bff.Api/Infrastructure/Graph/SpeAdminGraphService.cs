@@ -173,7 +173,7 @@ public sealed class SpeAdminGraphService
         string DisplayName,
         string? Description,
         string? BillingClassification,
-        DateTimeOffset CreatedDateTime,
+        DateTimeOffset? CreatedDateTime,
         string? OwningAppId = null,
         DateTimeOffset? ExpirationDateTime = null);
 
@@ -1714,10 +1714,10 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
-        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isVersioningEnabled, int? majorVersionLimit, long? storageUsedInBytes, CancellationToken ct = default)
+        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes, ct).ConfigureAwait(false); }
+        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId})"); }
     }
 
@@ -3543,11 +3543,9 @@ public sealed class SpeAdminGraphService
             DisplayName: ct.Name ?? string.Empty,
             Description: null,
             BillingClassification: billingClassification,
-            // ⚠️ KNOWN DEFECT, deliberately left for task 023 to avoid widening this change into the
-            // DTO contract: when Graph omits createdDateTime this substitutes *now*, so a container
-            // type of unknown age renders as "created today". Fabricating a value to fill an absence
-            // is this project's core defect class — see notes/task-030-findings.md §7.
-            CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow,
+            // Fixed by task 023 (handed over by 030): was `?? DateTimeOffset.UtcNow`, which rendered
+            // a container type of unknown age as "created today". Unknown now stays unknown.
+            CreatedDateTime: ct.CreatedDateTime,
             OwningAppId: owningAppId,
             ExpirationDateTime: expirationDateTime);
     }
@@ -4072,14 +4070,31 @@ public sealed class SpeAdminGraphService
     /// The set of valid sharing capability values accepted by the Graph API for container type settings.
     /// These map to the allowed values for the <c>allowedRoles</c> or equivalent Graph property.
     /// </summary>
+    /// <summary>
+    /// The sharing-capability values Graph actually accepts on a container type.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 CORRECTED 2026-08-24 (task 023). This set previously read
+    /// <c>{ "disabled", "view", "edit", "full" }</c>. Three of those four are not Graph values at all
+    /// — the real ones are the members of <c>Microsoft.Graph.Models.SharingCapabilities</c>, and the
+    /// SPE Admin client has always sent exactly those (<c>types/spe.ts</c> <c>SharingCapability</c>).
+    /// <para>
+    /// The consequence was total: this set is the endpoint's validation allow-list, so **every value
+    /// the client could send except "disabled" was rejected with a 400 by our own validator**, before
+    /// the request ever reached Graph. Sharing capability could not be changed to anything but
+    /// "disabled", and the failure looked like the caller's fault.
+    /// </para>
+    /// <para>
+    /// Derived from the SDK enum rather than hand-listed, so it cannot drift from it again.
+    /// <c>UnknownFutureValue</c> is excluded — it is Kiota's forward-compatibility sentinel, not a
+    /// value anyone may set.
+    /// </para>
+    /// </remarks>
     public static readonly IReadOnlySet<string> ValidSharingCapabilities =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "disabled",
-            "view",
-            "edit",
-            "full"
-        };
+        new HashSet<string>(
+            Enum.GetNames<Microsoft.Graph.Models.SharingCapabilities>()
+                .Where(n => n != nameof(Microsoft.Graph.Models.SharingCapabilities.UnknownFutureValue)),
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Result returned by <see cref="UpdateContainerTypeSettingsAsync"/> after a successful PATCH.
@@ -4090,11 +4105,16 @@ public sealed class SpeAdminGraphService
     /// <param name="DisplayName">Human-readable display name for the container type.</param>
     /// <param name="BillingClassification">Billing classification string (e.g., "standard"). Null when not returned.</param>
     /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
+    /// <param name="CreatedDateTime">
+    /// When the container type was created, or null when Graph does not report it. Nullable since
+    /// 2026-08-24 (task 023): the previous <c>?? DateTimeOffset.UtcNow</c> fallback rendered a
+    /// container type of unknown age as "created today".
+    /// </param>
     public sealed record ContainerTypeSettingsResult(
         string Id,
         string DisplayName,
         string? BillingClassification,
-        DateTimeOffset CreatedDateTime);
+        DateTimeOffset? CreatedDateTime);
 
     /// <summary>
     /// Updates settings on an SPE container type via PATCH /storage/fileStorage/containerTypes/{typeId}.
@@ -4102,30 +4122,65 @@ public sealed class SpeAdminGraphService
     /// Only non-null fields from the request are included in the PATCH body. The Graph API
     /// applies partial updates (merge-patch semantics) — fields not included are left unchanged.
     ///
-    /// Settings patched:
-    ///   - SharingCapability (via AdditionalData as "allowedRoles" property)
-    ///   - Versioning (via AdditionalData as "isMajorVersionLimitEnabled"/"majorVersionLimit")
-    ///   - StorageUsedInBytes (via AdditionalData as "quota"/"storagePlanInformation")
-    ///
     /// Returns <c>null</c> when Graph responds with 404 (container type not found).
     /// Returns <see cref="ContainerTypeSettingsResult"/> on success.
     /// Returns domain record only — no Graph SDK types exposed (ADR-007).
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>REBUILT 2026-08-24 (task 023, spec FR-C04 + FR-C05).</b> Every settings write this method
+    /// made was a silent no-op, for three independent reasons — any one of which was sufficient:
+    /// <list type="number">
+    /// <item>
+    /// <b>Wrong shape.</b> The values were written as <i>top-level</i> properties on the container
+    /// type. Settings live in a <b>nested <c>settings</c> object</b>
+    /// (<c>Microsoft.Graph.Models.FileStorageContainerTypeSettings</c>). Graph ignores unknown
+    /// top-level members on a merge-PATCH, so the request returned <b>200 and changed nothing</b>.
+    /// This alone made correcting the property names insufficient.
+    /// </item>
+    /// <item>
+    /// <b>Wrong names.</b> <c>majorVersionLimit</c> and <c>storageUsedInBytes</c> — the real names are
+    /// <c>itemMajorVersionLimit</c> and <c>maxStoragePerContainerInBytes</c>. <c>isVersioningEnabled</c>
+    /// was wrong too (<c>isItemVersioningEnabled</c>), which the spec had not caught.
+    /// </item>
+    /// <item>
+    /// <b>Wrong meaning.</b> <c>storageUsedInBytes</c> is a consumption <i>metric</i>;
+    /// <c>maxStoragePerContainerInBytes</c> is a per-container quota <i>ceiling</i>. Modelling a limit
+    /// as a measurement is why the storage story never cohered (spec §3.2).
+    /// </item>
+    /// </list>
+    /// <para>
+    /// The fix uses the SDK's <b>typed</b> settings model rather than an untyped dictionary, so every
+    /// property name is now <b>compiler-enforced</b>. This defect class cannot recur here: a
+    /// misspelled setting is a build error, not a 200 that does nothing. (SDK 6.5.0 types all nine
+    /// settings; the remaining five are task 025's surface.)
+    /// </para>
+    /// </remarks>
     /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
     /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
-    /// <param name="sharingCapability">New sharing capability ("disabled", "view", "edit", "full"). Null = no change.</param>
-    /// <param name="isVersioningEnabled">Enable or disable versioning. Null = no change.</param>
-    /// <param name="majorVersionLimit">Max major versions to retain. Null = no change.</param>
-    /// <param name="storageUsedInBytes">Storage quota limit in bytes. Null = no change.</param>
+    /// <param name="sharingCapability">
+    /// New sharing capability — a member of <c>SharingCapabilities</c> (<c>disabled</c>,
+    /// <c>externalUserSharingOnly</c>, <c>existingExternalUserSharingOnly</c>,
+    /// <c>externalUserAndGuestSharing</c>), matched case-insensitively. Null = no change.
+    /// </param>
+    /// <param name="isItemVersioningEnabled">Enable or disable item versioning. Null = no change.</param>
+    /// <param name="itemMajorVersionLimit">Max major versions to retain per item. Null = no change.</param>
+    /// <param name="maxStoragePerContainerInBytes">
+    /// Per-container storage <b>ceiling</b> in bytes — a limit, never a usage figure. Null = no change.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Updated container type summary, or <c>null</c> if the container type was not found.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="sharingCapability"/> is not a recognised value. Rejected here rather than
+    /// forwarded, because Graph's response to an unparseable enum is not reliably distinguishable
+    /// from success.
+    /// </exception>
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsAsync(
         GraphServiceClient graphClient,
         string containerTypeId,
         string? sharingCapability,
-        bool? isVersioningEnabled,
-        int? majorVersionLimit,
-        long? storageUsedInBytes,
+        bool? isItemVersioningEnabled,
+        long? itemMajorVersionLimit,
+        long? maxStoragePerContainerInBytes,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
@@ -4133,37 +4188,47 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation(
             "Updating SPE container type settings for {ContainerTypeId}. " +
-            "SharingCapability: {SharingCapability}, IsVersioningEnabled: {IsVersioningEnabled}, " +
-            "MajorVersionLimit: {MajorVersionLimit}, StorageUsedInBytes: {StorageUsedInBytes}",
-            containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes);
+            "SharingCapability: {SharingCapability}, IsItemVersioningEnabled: {IsItemVersioningEnabled}, " +
+            "ItemMajorVersionLimit: {ItemMajorVersionLimit}, " +
+            "MaxStoragePerContainerInBytes (ceiling): {MaxStoragePerContainerInBytes}",
+            containerTypeId, sharingCapability, isItemVersioningEnabled,
+            itemMajorVersionLimit, maxStoragePerContainerInBytes);
 
-        // Build the PATCH body using AdditionalData for settings not represented
-        // as typed properties in the Graph SDK FileStorageContainerType model.
-        var patchBody = new Microsoft.Graph.Models.FileStorageContainerType
-        {
-            AdditionalData = new Dictionary<string, object>()
-        };
+        // Settings are a NESTED object on the container type, and every member is typed — so the
+        // property names below are checked by the compiler rather than by Graph's silence.
+        var settings = new Microsoft.Graph.Models.FileStorageContainerTypeSettings();
 
         if (!string.IsNullOrWhiteSpace(sharingCapability))
         {
-            // Graph API accepts sharingCapability as a string value on the container type resource.
-            patchBody.AdditionalData["sharingCapability"] = sharingCapability.ToLowerInvariant();
+            if (!Enum.TryParse<Microsoft.Graph.Models.SharingCapabilities>(
+                    sharingCapability, ignoreCase: true, out var parsedSharing) ||
+                parsedSharing == Microsoft.Graph.Models.SharingCapabilities.UnknownFutureValue)
+            {
+                throw new ArgumentException(
+                    $"'{sharingCapability}' is not a valid sharing capability. Valid values: " +
+                    $"{string.Join(", ", ValidSharingCapabilities)}.",
+                    nameof(sharingCapability));
+            }
+
+            settings.SharingCapability = parsedSharing;
         }
 
-        if (isVersioningEnabled.HasValue)
+        if (isItemVersioningEnabled.HasValue)
         {
-            patchBody.AdditionalData["isVersioningEnabled"] = isVersioningEnabled.Value;
+            settings.IsItemVersioningEnabled = isItemVersioningEnabled.Value;
         }
 
-        if (majorVersionLimit.HasValue)
+        if (itemMajorVersionLimit.HasValue)
         {
-            patchBody.AdditionalData["majorVersionLimit"] = majorVersionLimit.Value;
+            settings.ItemMajorVersionLimit = itemMajorVersionLimit.Value;
         }
 
-        if (storageUsedInBytes.HasValue)
+        if (maxStoragePerContainerInBytes.HasValue)
         {
-            patchBody.AdditionalData["storageUsedInBytes"] = storageUsedInBytes.Value;
+            settings.MaxStoragePerContainerInBytes = maxStoragePerContainerInBytes.Value;
         }
+
+        var patchBody = new Microsoft.Graph.Models.FileStorageContainerType { Settings = settings };
 
         try
         {
@@ -4191,7 +4256,9 @@ public sealed class SpeAdminGraphService
                 Id: updated.Id ?? containerTypeId,
                 DisplayName: updated.Name ?? string.Empty,
                 BillingClassification: billingClassification,
-                CreatedDateTime: updated.CreatedDateTime ?? DateTimeOffset.UtcNow);
+                // Was `?? DateTimeOffset.UtcNow` — a container type of unknown age rendered as
+                // "created today". Handed here by task 030; unknown now stays unknown.
+                CreatedDateTime: updated.CreatedDateTime);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {

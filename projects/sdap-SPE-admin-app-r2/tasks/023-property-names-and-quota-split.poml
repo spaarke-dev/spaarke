@@ -4,7 +4,10 @@
     <title>Fix container-type PATCH property names and split quota-ceiling from consumption</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>020 complete, 040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- 2026-08-24. Names confirmed correct via SDK reflection. Three further breaks found and
+         fixed (nesting, DTO-boundary name mismatch, sharing allow-list). AC-2 (live read-back) not
+         verified - no interactive Azure login available. See notes/task-023-findings.md. -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path plus a request DTO; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>

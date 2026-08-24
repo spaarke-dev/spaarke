@@ -480,7 +480,14 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
           sharingCapability: settings.sharingCapability,
           isItemVersioningEnabled: settings.isItemVersioningEnabled,
           itemMajorVersionLimit: settings.itemMajorVersionLimit,
-          maxStoragePerBytes: settings.maxStoragePerBytes,
+          // Renamed from `maxStoragePerBytes` 2026-08-24 (task 023). That was the Dataverse config
+          // column's name leaking onto the wire; the BFF contract key is the Graph property name.
+          // It is a per-container CEILING, never a usage figure — the two must not share a name
+          // anywhere in the chain (spec FR-C05).
+          maxStoragePerContainerInBytes: settings.maxStoragePerBytes,
+          // ⚠️ The BFF has no `isSearchEnabled` on its settings request, so this value is currently
+          // discarded on arrival. It is one of the five remaining settings task 025 (FR-C07) wires
+          // up; the control is left in place because 025 is the next task to touch this surface.
           isSearchEnabled: settings.isSearchEnabled,
         }
       );

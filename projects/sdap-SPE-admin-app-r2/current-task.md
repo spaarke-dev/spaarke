@@ -9,10 +9,35 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)** · **W5 ✅ (021)** · **W6 ✅ (022)**; 011 🔄 partial |
-| **Step** | Between tasks. **Next: 023** (W7, property names + quota/consumption split — load-bearing semantic split). |
-| **Status** | 012, 013, 020, 030, 021, 022 committed. Quota → **option A**, operator-confirmed. |
-| **Next Action** | Invoke `task-execute` on `tasks/023-property-names-and-quota-split.poml`. **Verify the POML's premise first** — 14 of 14 have now been wrong, incomplete, or mis-scoped. **023 has inherited work**: (a) audit the remaining ~6 `AdditionalData` fallbacks in `SpeAdminGraphService.cs` — the `billingClassification` one was silently broken by the Graph 6 upgrade (task 030 §7); (b) `CreatedDateTime ?? DateTimeOffset.UtcNow` renders an unknown-age container type as *created today*; (c) `azureTenantId` is declared client-side but the Graph resource has no such field. |
+| **Task** | **none in progress** — W1–W7 ✅ (**020, 030, 021, 022, 023**); 011 🔄 partial |
+| **Step** | Between tasks. **Next: 024** (W8, storage-consumption spike + branch). |
+| **Status** | 012, 013, 020, 030, 021, 022, 023 committed. Quota → **option A**, operator-confirmed. |
+| **Next Action** | Invoke `task-execute` on `tasks/024-storage-consumption-spike.poml`. ⚡ **024's spike is PRE-ANSWERED — do not re-run it.** Task 020 measured it live: `storageUsedInBytes` **exists on beta, LIST-only** (absent from GET even on beta; a `$select` for it on v1.0 returns 400). So FR-C06 resolves to **implement**, not remove. Start from `notes/beta-vs-v1-surface-verification.md` §2–3. **024 also inherits**: the 4 `CreatedDateTime ?? DateTimeOffset.UtcNow` fabrications at `:693`, `:1031`, `:1115`, `:1165` — the *same four methods* 024 edits for `StorageUsedInBytes`, so fix both in one pass. |
+
+### 🔑 Task 023 — first POML whose claim held, and it still wasn't the bug
+
+`itemMajorVersionLimit` / `maxStoragePerContainerInBytes` were **correct** — confirmed by reflecting
+over `Microsoft.Graph` 6.5.0 (stronger than docs, and no live call needed; the SDK types **all nine**
+settings). **But fixing the names alone would have changed nothing.** Three independent breaks, any one
+sufficient:
+
+1. Settings written **top-level** when they are a **nested `settings` object** → Graph ignores unknown
+   top-level members on merge-PATCH → 200, nothing changed.
+2. Server-side names wrong (`majorVersionLimit`, `storageUsedInBytes`, `isVersioningEnabled`).
+3. 🔴 **The client already sent the CORRECT names** `isItemVersioningEnabled` / `itemMajorVersionLimit`
+   — the **server DTO** spelled them differently, so JSON binding dropped both to null before the
+   service ever ran. Nobody could see this from either side alone.
+
+🔴 **Fourth defect, not in the POML, defended by its own tests.** `ValidSharingCapabilities` was
+`{disabled, view, edit, full}` — three are not Graph values, and this set **is the endpoint's
+allow-list**, so every value the client can send except `disabled` got a **400 from our own validator**.
+**10 tests asserted the wrong values were correct**, so correcting it would have "broken tests". Now
+derived from the SDK enum; retired names kept as explicit negatives.
+
+**Fix uses the SDK's typed settings model** → property names are compiler-enforced. A misspelled
+setting is now a build error, not a 200 that does nothing.
+
+⚠️ **AC-2 not live-verified** — write→read-back needs an interactive Azure login this session can't do.
 
 ### 🔑 Task 022 — the POML described a bug that did not exist
 

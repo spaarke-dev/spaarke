@@ -30,9 +30,14 @@ public sealed record ContainerTypeDto
     [JsonPropertyName("billingClassification")]
     public string? BillingClassification { get; init; }
 
-    /// <summary>When the container type was created (UTC).</summary>
+    /// <summary>When the container type was created (UTC), or null when Graph does not report it.</summary>
+    /// <remarks>
+    /// Nullable since 2026-08-24 (task 023). The mapper previously substituted
+    /// <c>DateTimeOffset.UtcNow</c> when Graph omitted the value, so a container type of unknown age
+    /// rendered as "created today" — a fabricated fact presented exactly like a real one.
+    /// </remarks>
     [JsonPropertyName("createdDateTime")]
-    public DateTimeOffset CreatedDateTime { get; init; }
+    public DateTimeOffset? CreatedDateTime { get; init; }
 
     /// <summary>
     /// Entra application (client) ID of the owning application, or null when Graph does not return it.
@@ -85,9 +90,14 @@ public sealed record ContainerTypeSettingsResponseDto
     [JsonPropertyName("billingClassification")]
     public string? BillingClassification { get; init; }
 
-    /// <summary>When the container type was created (UTC).</summary>
+    /// <summary>When the container type was created (UTC), or null when Graph does not report it.</summary>
+    /// <remarks>
+    /// Nullable since 2026-08-24 (task 023). The mapper previously substituted
+    /// <c>DateTimeOffset.UtcNow</c> when Graph omitted the value, so a container type of unknown age
+    /// rendered as "created today" — a fabricated fact presented exactly like a real one.
+    /// </remarks>
     [JsonPropertyName("createdDateTime")]
-    public DateTimeOffset CreatedDateTime { get; init; }
+    public DateTimeOffset? CreatedDateTime { get; init; }
 }
 
 /// <summary>
