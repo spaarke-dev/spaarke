@@ -15,11 +15,16 @@ Two properties worth recording because the gates depend on them:
 - **It fails closed.** `OperationAccessPolicy.GetRequiredRights` **throws** on an unknown operation string, and the filter's `catch (Exception)` returns 500. So a typo'd operation denies rather than allows.
 - **That is also a trap.** The file's own header records the prior incident: an unmapped operation produced `"unknown_operation"` for *every* caller — an unconditional 403 on the finance surface, the Office save path, and three document read routes. **New operation keys must be added to `OperationAccessPolicy` BEFORE a filter is attached with them.**
 
-### Available bare-string operation keys today
+### Available bare-string operation keys
 
-`read` · `finance.read` · `finance.confirm` · `entity.associate_document`
+Before this task: `read` · `finance.read` · `finance.confirm` · `entity.associate_document`
+Added by this task: **`write`** (→ `Write`) · **`delete`** (→ `Delete`)
 
-**There is no bare `write` or `delete` key.** Every write/delete gate in this task therefore requires a new key with the per-key rationale comment this table uses (which resource is authorized, and why that specific right — the `entity.associate_document` entry is the model: `AppendTo`, not `Write`, because attaching a document to a matter does not modify the matter).
+There was no bare `write` or `delete` key — **even though `AddDocumentAuthorizationFilter`'s own `<param>` doc has always read `'e.g. "read", "write", "delete"'`.** The extension point documented a contract that two thirds of it could not honour, and honouring it would have produced an unconditional 403 rather than a compile error. That is the sharpest form of the trap in the header above.
+
+Both new keys were verified reachable before being added: `DataverseAccessRightsMapper` maps `WriteAccess → Write` and `DeleteAccess → Delete`, and `RetrievePrincipalAccess` returns the full comma-separated rights string, so the snapshot can actually carry them. Skipping that check would have re-created the 403 by a different route — the hazard the `entity.associate_document` comment records for `AppendTo`.
+
+⚠️ **Both depend on RPA being live.** `DataverseAccessDataSource`'s fallback probe caps rights at Read *by construction*, so on an RPA outage every `write`/`delete` gate denies. Correct fail-closed direction and the same trade task 008 accepted for the delegation gate — but it means these routes are unavailable, not degraded, if RPA is misconfigured. Live verification is task 034's (`RPA-FALLBACK` log marker).
 
 ---
 
@@ -94,12 +99,52 @@ Not part of the per-document class; listed so the inventory is provably complete
 
 This is the **sixth** instance of the stale-column class in this project. The reason it survived every prior review: the `$select` and the `$orderby` are on adjacent lines and disagree, so eyeballing the select gives a false all-clear. A repo-wide grep confirms no other `sprk_projects` query orders by `sprk_name`.
 
+### ✅ Keys added, then C2 + C3 + H2 + H3 gated
+
+**Keys first, gates second, in one commit** — see the section above.
+
+| Finding | Route | Operation |
+|---|---|---|
+| **C2** | `DELETE /api/documents/{documentId}` | `delete` |
+| **C3** | `DELETE /api/v1/documents/{id}` | `delete` |
+| **H2** | `PUT /api/v1/documents/{id}` | `write` |
+| **H2** | `GET /api/v1/documents/{id}` | `read` |
+| **H3** | `POST /api/documents/{documentId}/checkout` | `write` |
+| **H3** | `POST /api/documents/{documentId}/checkin` | `write` |
+| **H3** | `POST /api/documents/{documentId}/discard` | `write` |
+| **H3** | `GET /api/documents/{documentId}/checkout-status` | `read` |
+
+**Correction to this file's own earlier claim.** It said C2 "is NOT a filter attachment" because `DocumentCheckoutService.DeleteAsync(Guid, string, CancellationToken)` has no user-identity parameter, and called it "a signature change with call-site fallout". **That was wrong.** `DocumentAuthorizationFilter` reads the caller from `ClaimTypes.NameIdentifier` on the `HttpContext` and the resource from route values — it never needs the service to accept an identity. C2 is an ordinary filter attachment.
+
+What the missing parameter *does* mean is worth keeping, just not as a blocker: the delete runs **app-only**, so Dataverse's own row-level security never sees the caller and there is **no defence in depth** — the filter is the entire boundary. Every sibling (`CheckoutAsync`, `CheckInAsync`, `DiscardAsync`, `GetCheckoutStatusAsync`) takes a `ClaimsPrincipal`; the destroy is the one that does not. That asymmetry is now recorded in `DeleteAsync`'s own doc comment so a future call-site added without the filter is visibly an unauthenticated destroy path.
+
+Also corrected: the `/checkout` route's old comment claimed "PCF controls button visibility based on Dataverse security profile / actual permissions enforced by Graph API via OBO". **Both halves were false for that route** — client-side button visibility is not enforcement, and the checkout path is app-only, so nothing downstream evaluated the caller either. This is the sixth doc-comment-lies instance in this area.
+
+`DeleteAsync` was made `virtual` (ADR-038 §4 substitution seam), same justification as task 009's `UpdateTodoAsync`: the gate is only meaningfully verifiable if a test can assert the destroy **did not happen**, and this one destroys the SPE file as well as the row.
+
+**Tests**: 21 in `tests/integration/auth/UnifiedAccessControl/DocumentDestroyAuthorizationTests.cs` + `DocumentDestroyAuthorizationTestFixture.cs`. The fixture substitutes `IAccessDataSource` so rights ride on the bearer token (`Bearer rights=ReadAccess,DeleteAccess`) — the `OfficeSaveTestFixture` convention — because offline the real data source fails closed and every negative assertion would otherwise be vacuous. Both destroy paths and the PUT are recorded, so "denied" means *nothing was mutated*, not merely *the response said no*.
+
+**Perturbations — 10 of 10 bite, baseline 0/21:**
+
+| Perturbation | Failures |
+|---|---|
+| Remove the C2 filter | 2 of 21 |
+| Remove the C3 filter | 2 of 21 |
+| `delete` key also requires Write (over-restrictive) | 4 of 21 |
+| `delete` key downgraded to Read (over-permissive) | 5 of 21 |
+| `delete` key removed entirely | 6 of 21 |
+| `write` key removed entirely | 9 of 21 |
+| Remove the H2 PUT `write` filter | 1 of 21 |
+| Remove the H2 GET `read` filter | 1 of 21 |
+| Downgrade `/checkout` from `write` to `read` | 1 of 21 |
+| Remove the checkout-status `read` filter | 1 of 21 |
+
+⚠️ **The first sweep produced fake numbers and had to be redone.** The harness restored files with `shutil.copy2`, which preserves the *backup's* mtime — older than the built DLL, so MSBuild skipped recompiling and some runs measured a **stale binary still carrying the previous perturbation**. It reported 3 failures for the `write`-key removal; the true value is 1. Caught because an unexplained count was checked rather than accepted. Fixes: `os.utime(f, None)` on restore, plus a **clean-tree baseline run** (must be 0) before the sweep — without that baseline, every count is measured against unknown noise. Any future perturbation harness in this project needs both.
+
 ### Remaining, in order
 
-1. **Add the missing `OperationAccessPolicy` keys** before attaching any write/delete gate — no bare `write`/`delete` key exists, and an unmapped operation is an unconditional 403 (the trap this file's header already documents).
-2. **C2 + C3** — the two destroy paths. C2 needs caller identity threaded into `DocumentCheckoutService.DeleteAsync`, which currently has no identity parameter, so this is a signature change with call-site fallout.
-3. **C1** — bulk. Needs a per-item decision *plus* an explicit partial-failure contract: the `_FAILED.txt` manifest currently distinguishes "denied" from "missing", which is an enumeration oracle even once per-item authorization exists.
-4. **H2, H3** — mutate/disclose, per-route operations.
-5. **The four URL-minting reads** — these outlive the request; decide whether `read` is the right operation or whether minting deserves its own key.
-6. **The six OBO read routes** — decide whether OBO alone suffices or a record check is still required, and record the reasoning either way (POML escalation trigger if a check is needed that does not exist).
-7. Tests per gated route + perturbation for each gate.
+1. **C1** — bulk. Needs a per-item decision *plus* an explicit partial-failure contract: the `_FAILED.txt` manifest currently distinguishes "denied" from "missing", which is an enumeration oracle even once per-item authorization exists.
+2. **`POST /api/documents/{documentId}/analyze`** — the one H3 route deliberately left ungated pending a decision: it reads the document and writes an analysis to a *different* entity, so `read` is the least-privilege answer against the resource this filter authorizes (same reasoning as `finance.confirm`'s "deliberately NOT Create" note). But it also spends money and enqueues background work, which is an argument for `write`. Decide explicitly; do not let it fall through because it is ambiguous.
+3. **The five URL-minting reads** (`preview-url`, `preview`, `office`, `view-url`, `open-links`) — these outlive the request; decide whether `read` is the right operation or whether minting deserves its own key.
+4. **The six OBO read routes** — decide whether OBO alone suffices or a record check is still required, and record the reasoning either way (POML escalation trigger if a check is needed that does not exist).
+5. **The 3 collection-shaped routes** — collection scoping is Phase 1 evaluator work; confirm they stay out of scope rather than silently dropping them.

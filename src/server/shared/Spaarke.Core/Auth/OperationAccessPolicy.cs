@@ -183,7 +183,41 @@ public static class OperationAccessPolicy
         // DataverseAccessDataSource.QueryUserPermissionsAsync:305-379) MUST map Dataverse's
         // AppendToAccess into the snapshot, or this route stays permanently 403 — a silent failure.
         // Recorded as an explicit obligation on task 005.
-        ["entity.associate_document"] = AccessRights.AppendTo
+        ["entity.associate_document"] = AccessRights.AppendTo,
+
+        // ========================================================================
+        // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
+        // ========================================================================
+        // DocumentAuthorizationFilterExtensions.AddDocumentAuthorizationFilter's own <param> doc
+        // reads: 'The operation being authorized (e.g., "read", "write", "delete")'. Task 003 added
+        // "read"; "write" and "delete" were advertised by that contract but never registered. Every
+        // ungated mutation route on the document surface therefore had no key to be gated WITH — and
+        // attaching a filter with an unregistered string is not a no-op, it is an unconditional 403
+        // for every caller (the incident recorded above). So these land BEFORE any filter uses them.
+        //
+        // Naming follows task 003's record-scoped convention (bare names, resource = the Dataverse
+        // record named by the route), NOT the driveitem.*/container.* Graph-shaped families above.
+        // These filters authorize an sprk_document ROW; driveitem.delete authorizes an SPE item. The
+        // rights happen to coincide, but reusing a driveitem.* key here would misdescribe the
+        // resource, and the legacy delete_file/download_file aliases already show what happens when
+        // one table carries two conventions for the same act.
+        //
+        // ⚠️ BOTH depend on RetrievePrincipalAccess being live. DataverseAccessDataSource's fallback
+        // probe (QueryReadAccessByProbeAsync) caps rights at Read by construction, so on an RPA
+        // outage every "write"/"delete" gate denies. That is the correct fail-closed direction and
+        // the same trade task 008 accepted deliberately for the delegation gate — but it does mean
+        // these routes are unavailable, not merely degraded, if RPA is misconfigured. Live RPA
+        // verification is owned by task 034; see the RPA-FALLBACK log marker.
+
+        // "write" — mutation of the authorized record's own fields (PUT /api/v1/documents/{id}), and
+        // the checkout family, which mints an EDITABLE url and moves the record's lock state.
+        // Deliberately not Write|Create: these change an existing row, they do not create one.
+        ["write"] = AccessRights.Write,
+
+        // "delete" — destruction of the authorized record. Delete alone, not Delete|Write: Dataverse
+        // models these as independent rights and a principal holding Delete without Write may still
+        // legitimately destroy. Requiring both would deny that caller for no security gain.
+        ["delete"] = AccessRights.Delete
     };
 
     /// <summary>
