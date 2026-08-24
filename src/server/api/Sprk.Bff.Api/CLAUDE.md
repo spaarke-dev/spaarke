@@ -110,8 +110,27 @@ services.AddScoped<ISpeFileStore, SpeFileStore>();  // Unnecessary interface
 > `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md`.
 >
 > **Do not re-derive "OBO needs a secret" from any doc you encounter. If you find one, fix it.**
+>
+> **✅ COMPLETED 2026-08-24 by task 033 — ADR-028 exception E-3 is CLOSED.** The transitional secret is gone
+> from every deployed surface: four app settings deleted, and both Key Vault copies
+> (`BFF-API-ClientSecret` + `bff-api-client-secret`) deleted. The credential order is
+> `[ManagedIdentityFederated]` — a **single entry, with nothing beneath it** — and
+> `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if
+> `ClientSecret` ever returns to the order. Verified with a byte-exact SPE round-trip over OBO.
 
-**Server outbound (canonical)**: Graph + Dataverse use `DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`. `ClientSecretCredential` is local-dev fallback only.
+**Server outbound (canonical)**: the BFF identity is **secret-free** (ADR-028 **A4**). Confidential-client
+credentials — for **OBO** and app-only alike — come from `OrderedCredentialClientProvider`, which resolves
+the credential named in `Graph:Credentials:Order`. Graph + Dataverse app-only additionally use
+`DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`.
+
+> ⚠️ **Never add a new `.WithClientSecret(...)` site.** `tests/Spaarke.ArchTests/CredentialGuardTests.cs`
+> fails the build on one, and `CredentialCensusTests` asserts the construction-site count. E-3 is closed;
+> it never licensed expansion in the first place. The only sanctioned secret-bearing credentials left are
+> ADR-028 **E-1** (per-customer SPE owning apps) and `PowerBi:ClientSecret` (task 042, deferred).
+>
+> `ClientSecretCredential` is **not** a local-dev fallback for OBO any more either — see
+> [`docs/SPE.BFF.API-SECRETS-SETUP.md`](docs/SPE.BFF.API-SECRETS-SETUP.md) for what local development
+> actually needs (short answer: `az login` covers everything except OBO).
 
 **Three auth paths** in the BFF:
 
@@ -207,12 +226,18 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
   "AzureAd": {
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "{tenant-id}",
-    "ClientId": "{bff-client-id}",
-    "ClientSecret": "{bff-client-secret}"  // TRANSITIONAL (ADR-028 E-3). OBO needs a confidential CREDENTIAL, not a secret -- the canonical credential is a MI-issued federated client assertion (A4). Retained only as the ordered fallback + local-dev path until auth-v4 task 033.
+    "ClientId": "{bff-client-id}"
+    // NO ClientSecret. Removed 2026-08-24 by auth-v4 task 033; ADR-028 E-3 CLOSED.
+    // OBO needs a confidential CREDENTIAL, not a secret -- here it is a MI-issued federated
+    // client assertion (A4). Adding one back re-arms the silent fall-through this removed.
   },
   "Graph": {
     "ManagedIdentity": {
       "Enabled": "true"  // CANONICAL in Azure environments per ADR-028
+    },
+    "Credentials": {
+      "Order": ["ManagedIdentityFederated"],   // single entry -- nothing to fall through to
+      "RequireSecretFreeIdentity": true        // refuses startup outside Development if ClientSecret returns
     }
   },
   "SharePointEmbedded": {
