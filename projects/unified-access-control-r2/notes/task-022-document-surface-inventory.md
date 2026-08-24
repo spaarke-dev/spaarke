@@ -41,11 +41,13 @@ Both new keys were verified reachable before being added: `DataverseAccessRights
 
 ### 🛑 Gated in form only — no authorization decision (1)
 
-| Route | File | Finding |
-|---|---|---|
-| `POST /api/documents/bulk-download` | DocumentsBulkEndpoints.cs:43 | **C1** |
+| Route | File | Finding | Status |
+|---|---|---|---|
+| `POST /api/documents/bulk-download` | DocumentsBulkEndpoints.cs:43 | **C1** | ✅ fixed — see below |
 
-`BulkDownloadAuthorizationFilter.InvokeAsync` confirmed verbatim: reads a `tid`/tenant claim (401 if absent), extracts the `BulkDownloadRequest`, logs `"Bulk download authorization granted: tenant={TenantId}, requestedCount={Count}"`, and returns `await next(context)`. **No per-document decision at any point.** 500 GUIDs per request, streamed app-only, and failures are listed in a `_FAILED.txt` manifest while zipping continues — so one call both exfiltrates and enumerates.
+`BulkDownloadAuthorizationFilter.InvokeAsync` confirmed verbatim: read a `tid`/tenant claim (401 if absent), extracted the `BulkDownloadRequest`, logged `"Bulk download authorization granted: tenant={TenantId}, requestedCount={Count}"`, and returned `await next(context)`. **No per-document decision at any point.** 500 GUIDs per request, streamed app-only, and failures listed in a `_FAILED.txt` manifest while zipping continues — so one call both exfiltrated and enumerated.
+
+**The doc comment is why it survived review.** It asserted — twice — that "per-document access is enforced at Dataverse lookup time via the user's identity (same model as `GET /api/documents/{id}/preview-url`)". Both halves false: the lookup is `IDocumentDataverseService.GetDocumentAsync`, which is app-only and carries no caller identity; and `preview-url` had no per-document authorization either, so the claim derived its authority from a route making the same empty claim. **A comment asserting that enforcement happens elsewhere is a claim to verify, not evidence.**
 
 ### 🛑 Ungated — destroy (2, both Critical)
 
@@ -141,10 +143,42 @@ Also corrected: the `/checkout` route's old comment claimed "PCF controls button
 
 ⚠️ **The first sweep produced fake numbers and had to be redone.** The harness restored files with `shutil.copy2`, which preserves the *backup's* mtime — older than the built DLL, so MSBuild skipped recompiling and some runs measured a **stale binary still carrying the previous perturbation**. It reported 3 failures for the `write`-key removal; the true value is 1. Caught because an unexplained count was checked rather than accepted. Fixes: `os.utime(f, None)` on restore, plus a **clean-tree baseline run** (must be 0) before the sweep — without that baseline, every count is measured against unknown noise. Any future perturbation harness in this project needs both.
 
+### ✅ C1 — bulk download gated, and the oracle closed with it
+
+`BulkDownloadAuthorizationFilter` now authorizes the caller for `read` against **every** requested document, through the same `AuthorizationService` and the same `"read"` key the single-document `/download` route uses, and publishes the allowed set on `HttpContext.Items` — mirroring how `CallerPrincipalAuthorizationFilter` hands a resolved principal to its handlers. The decision stays in a filter (ADR-008); only the manifest-building stayed in the handler, which already owned it.
+
+The handler **fails closed on an absent verdict**: a missing key means the filter did not run (route mapped without it, or reordered), which is a wiring fault, not a rights outcome — so it returns 500, not 403. Saying 403 would claim the caller's rights were evaluated and found wanting when nothing evaluated them.
+
+**Both halves, because closing one alone makes things worse.** Per-item authorization introduces a *new* distinguishable outcome ("denied") which, next to the existing "not found in Dataverse", turns `_FAILED.txt` into an **enumeration oracle amplified 500× per request**. There was no such oracle before the fix — every document was simply returned, so there was no denial to distinguish. Both now collapse to one string, `NotAccessibleReason`. Shape errors (null, empty, non-GUID) stay distinguishable: they describe the caller's own input. Failures *after* a successful authorization stay distinguishable too — that caller holds Read, so the record's state is theirs to know.
+
+#### 🚨 NEW finding, unrelated to authorization: the endpoint threw on its happy path
+
+Writing the **first ever test for this route** — there were none; `grep` for `bulk-download` across `tests/` returned only the new files — surfaced a production defect:
+
+`ZipArchive` is a **synchronous** API. In Create mode it writes to the stream it wraps with blocking calls, and the handler wraps `HttpResponse.Body` directly. Kestrel has `AllowSynchronousIO = false` by default since .NET 3.0, and **`AllowSynchronousIO` appears nowhere in this repo**. So the first entry flush threw `InvalidOperationException: Synchronous operations are disallowed`, followed by a cascading `IOException: Entries cannot be created while previously created entries are still open` when `_FAILED.txt` was written over the entry that had failed to close. Response headers (200 + `application/zip`) commit *before* that point, so a caller got a truncated archive on a broken connection rather than a readable error.
+
+Fixed by opting **this one request** into synchronous body IO via `IHttpBodyControlFeature`. Buffering the archive instead would defeat the endpoint's stated reason for existing (bounded memory for 500 documents, per its own Placement Justification), and the BCL has no async `ZipArchive`. Global default unchanged.
+
+**This nuances C1's exploitability and the honest reading is worth recording**: the *download* half was broken, so an attacker got at most a corrupt partial zip. The **enumeration half worked perfectly** — the pre-flight loop ran 500 app-only Dataverse lookups and the 404 total-failure branch returned per-document `failedItems` reasons. So C1 was a working enumeration primitive and a broken exfiltration primitive. Both are closed.
+
+**Why no test caught any of this**: `WorkspaceTestFixture`'s `FakeAuthHandler` issues `oid`, `NameIdentifier`, `name` and `roles` but **no `tid`** — so every route behind a tenant check answers 401 under the shared fixture regardless of the code under test. The route was effectively unreachable from the test suite. Solved with a `tid`-bearing scheme in the task-022 fixture rather than by widening the shared handler, whose claims back a large number of tests.
+
+**Perturbations — 5 of 6 bite, baseline 0/30:**
+
+| Perturbation | Failures |
+|---|---|
+| Handler ignores the authorized set | 5 of 30 |
+| Filter authorizes everything | 5 of 30 |
+| Denial reason renamed to "Access denied" (re-opens the oracle) | 2 of 30 |
+| Filter never publishes its verdict (the wiring fault) | 3 of 30 |
+| `AuthorizationService`'s fail-closed catch inverted to ALLOW | 2 of 30 |
+| Filter's own catch inverted to authorize | **0 — expected** |
+
+That last zero is **not** a test gap, and chasing it as one would have been wrong. `AuthorizationService.AuthorizeAsync` already has a catch-all returning `IsAllowed=false`, so a failing access data source is denied one layer down and never reaches the filter's catch — it is unreachable defence-in-depth. The load-bearing guard is `AuthorizationService`'s, and perturbing *that* fails 2 tests, so the fail-closed path IS covered. Both facts are now in the filter's own comment so the next reader does not repeat the investigation. **Lesson: before "fix the test", check whether the perturbed code is reachable at all — a zero can mean redundant code rather than absent coverage.**
+
 ### Remaining, in order
 
-1. **C1** — bulk. Needs a per-item decision *plus* an explicit partial-failure contract: the `_FAILED.txt` manifest currently distinguishes "denied" from "missing", which is an enumeration oracle even once per-item authorization exists.
-2. **`POST /api/documents/{documentId}/analyze`** — the one H3 route deliberately left ungated pending a decision: it reads the document and writes an analysis to a *different* entity, so `read` is the least-privilege answer against the resource this filter authorizes (same reasoning as `finance.confirm`'s "deliberately NOT Create" note). But it also spends money and enqueues background work, which is an argument for `write`. Decide explicitly; do not let it fall through because it is ambiguous.
+1. **`POST /api/documents/{documentId}/analyze`** — the one H3 route deliberately left ungated pending a decision: it reads the document and writes an analysis to a *different* entity, so `read` is the least-privilege answer against the resource this filter authorizes (same reasoning as `finance.confirm`'s "deliberately NOT Create" note). But it also spends money and enqueues background work, which is an argument for `write`. Decide explicitly; do not let it fall through because it is ambiguous.
 3. **The five URL-minting reads** (`preview-url`, `preview`, `office`, `view-url`, `open-links`) — these outlive the request; decide whether `read` is the right operation or whether minting deserves its own key.
 4. **The six OBO read routes** — decide whether OBO alone suffices or a record check is still required, and record the reasoning either way (POML escalation trigger if a check is needed that does not exist).
 5. **The 3 collection-shaped routes** — collection scoping is Phase 1 evaluator work; confirm they stay out of scope rather than silently dropping them.
