@@ -58,7 +58,10 @@ public sealed class ComposeResidualLossParityTests
         new object?[] { "pict", "pict", "complex-object-dropped" },
         new object?[] { "footnoteReference", "footnoteReference", "unrepresented-footnote-reference" },
         new object?[] { "endnoteReference", "endnoteReference", "unrepresented-endnote-reference" },
-        new object?[] { "br", "br", "edited-paragraph-line-break-dropped" },
+        // Task 046: a soft line break is now CARRIED, not lost — it round-trips as an IsLineBreak
+        // marker run. Kept in the table with a null code so the preserve direction is enforced: if a
+        // future change starts dropping breaks again, this row fails rather than going quiet.
+        new object?[] { "br", "br", null },
         new object?[] { "sym", "sym", "symbol-flattened" },
         new object?[] { "tab", "tab", "tab-flattened" },
         // Preserved even in the EDITED block — task 041's two carries. Listing them here is what makes the
@@ -193,7 +196,13 @@ public sealed class ComposeResidualLossParityTests
             "unrepresented-endnote-reference", "edited-paragraph-line-break-dropped", "symbol-flattened",
             "tab-flattened", "hard-tier-sdt-flattened", "content-control-flattened",
         };
-        return known.Where(k => markdown.Contains(k, StringComparison.Ordinal));
+        // Only TABLE ROWS count as a claim. The document also discusses codes in prose — including, by
+        // design, the story of a code that USED to be emitted and no longer is — and scanning prose would
+        // make an honest explanation of a fixed loss read as a fresh claim of it. (Found the hard way: the
+        // paragraph explaining that `edited-paragraph-line-break-dropped` had been fixed failed this check
+        // by containing the words it was retiring. Same shape as the I-7 audit tripping on a comment.)
+        var rows = markdown.Split('\n').Where(l => l.TrimStart().StartsWith('|')).ToList();
+        return known.Where(k => rows.Any(r => r.Contains(k, StringComparison.Ordinal)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════

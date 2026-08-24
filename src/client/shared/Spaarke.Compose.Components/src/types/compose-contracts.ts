@@ -490,6 +490,14 @@ export interface ComposeInlineRun {
   /** Server task 023: this run IS a manual page break (`w:br w:type="page"`); every other field is
    * ignored when true. Server-set by the docx→model projection; preserve untouched on re-post. */
   isPageBreak?: boolean;
+
+  /**
+   * Task 046 (r8): this run IS a SOFT line break (`w:br` with no type). Same marker-run contract as
+   * {@link isPageBreak} — when true every other field on the run is ignored — and mutually exclusive
+   * with it. The editor carries these as TipTap `hardBreak` nodes; before this field existed they were
+   * dropped from every edited paragraph because the model had nowhere to put them.
+   */
+  isLineBreak?: boolean;
   /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
    * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
    * Server-set; preserve untouched on re-post. */

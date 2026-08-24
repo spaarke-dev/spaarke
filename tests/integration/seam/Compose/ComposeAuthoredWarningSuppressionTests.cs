@@ -33,7 +33,11 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
     // The corpus document whose edited paragraph genuinely loses w:br soft breaks — the one document that
     // produces a REAL fidelity warning after task 044's shortfall reporting. Using the document that warns
     // is what makes the Authored assertion mean something.
-    private const string WarningFixtureFileName = "Engagement Letter.docx";
+    // Task 046 re-levered this fixture. It was "Engagement Letter.docx", whose only loss was two dropped
+    // soft breaks — and task 046 taught soft breaks to round-trip, so that document now loses NOTHING and
+    // this test would have been proving suppression against a save that would not have warned anyway. The
+    // lever moved to a still-lossy construct (a complex field) rather than the assertion being weakened.
+    private const string WarningFixtureFileName = "ref-cross-references.docx";
     private const string EditMarker = " [A08-SUPPRESSION]";
 
     private readonly ComposeFidelitySeamFixture _fixture;
@@ -54,7 +58,7 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
             "an IMPORTED document has an original to lose against, and this edit genuinely drops soft " +
             "breaks — suppressing that would be exactly the silence this project exists to end");
         warnings!.Should().Contain(
-            w => w.Contains("line-break", StringComparison.OrdinalIgnoreCase),
+            w => w.Contains("field-flattened", StringComparison.OrdinalIgnoreCase),
             "the warning must name what was lost");
     }
 
@@ -155,10 +159,11 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
         var loadedModel = loadRoot["contentModel"];
         loadedModel.Should().NotBeNull("the fixture must project into a canonical model");
 
-        // Edit the first run that has text — the same representative edit every other measurement uses.
+        // Edit the LAST block with text — the fixture's field lives in its final paragraph, and an edit
+        // that misses the construct measures a save that had nothing to report.
         var editedModel = loadedModel!.DeepClone()!.AsObject();
         var edited = false;
-        foreach (var block in editedModel["blocks"]!.AsArray())
+        foreach (var block in editedModel["blocks"]!.AsArray().Reverse())
         {
             foreach (var run in block!["runs"]?.AsArray() ?? new JsonArray())
             {

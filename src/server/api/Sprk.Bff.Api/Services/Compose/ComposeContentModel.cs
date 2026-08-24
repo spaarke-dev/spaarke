@@ -299,10 +299,24 @@ public sealed record ComposeInlineRun
     /// Task 023: this run IS a manual page break (<c>w:br w:type="page"</c>). When true the renderer emits
     /// exactly that break run and every other field on this run (<see cref="Text"/>, marks,
     /// <see cref="Href"/>) is ignored. Captured by the server projection at the break's exact inline
-    /// position (splitting the surrounding text into separate runs); soft line/column breaks remain the
-    /// counted <c>line-break-flattened</c> degradation.
+    /// position (splitting the surrounding text into separate runs).
     /// </summary>
     public bool IsPageBreak { get; init; }
+
+    /// <summary>
+    /// Task 046 (r8, FR-A10 residual): this run IS a SOFT line break (<c>w:br</c> with no type, or
+    /// <c>w:cr</c>). Same marker-run contract as <see cref="IsPageBreak"/> — when true every other field
+    /// is ignored — and mutually exclusive with it.
+    /// <para>
+    /// Until this field existed, an edit anywhere in a paragraph flattened its line breaks: the model had
+    /// no way to say "a break sits here", so the client rebuilt the paragraph without them and the
+    /// renderer had nothing to emit. Address blocks, party blocks and signature blocks are held together
+    /// by exactly these breaks, so the paragraph a user is most likely to edit was the one most likely to
+    /// collapse. The editor already carried the break as a TipTap <c>hardBreak</c>; the only thing missing
+    /// was somewhere to put it.
+    /// </para>
+    /// </summary>
+    public bool IsLineBreak { get; init; }
 
     /// <summary>
     /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null

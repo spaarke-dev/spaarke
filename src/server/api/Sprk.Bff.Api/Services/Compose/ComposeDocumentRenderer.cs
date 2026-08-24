@@ -1236,6 +1236,14 @@ public sealed partial class ComposeDocumentRenderer
             return new Run(new Break { Type = BreakValues.Page });
         }
 
+        // Task 046: the SOFT break marker — a bare <w:br/>, the same marker-run contract as the page break
+        // above. A soft break carries no type attribute; emitting one WITH a type would silently promote a
+        // line break into a page break.
+        if (run.IsLineBreak)
+        {
+            return new Run(new Break());
+        }
+
         var element = new Run();
         // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
         // the change record lives inside it (LAST in CT_RPr order). A record whose opaque carry fails the

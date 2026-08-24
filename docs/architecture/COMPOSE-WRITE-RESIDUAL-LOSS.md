@@ -42,7 +42,6 @@ silent.
 | Embedded object / image / chart (`w:drawing`, `w:object`, `w:pict`) | Removed from the paragraph. The underlying part stays in the file | `complex-object-dropped` |
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
-| Soft line break (`w:br`) | Removed; the surrounding text is joined | `edited-paragraph-line-break-dropped` |
 | Symbol (`w:sym`) — §, ¶, Wingdings glyphs | Flattened to ordinary text | `symbol-flattened` |
 | Tab (`w:tab`) | Flattened; tabbed alignment inside the paragraph is lost | `tab-flattened` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
@@ -58,6 +57,7 @@ of the list is enforced too — if a future change starts losing one, the parity
 | Construct | Why it is carried |
 |---|---|
 | **Bookmarks** (`w:bookmarkStart`/`End`) | Dropping one breaks cross-references **elsewhere in the document** — a silent, non-local failure |
+| **Soft line breaks** (`w:br`) | Round-trip as a marker run. Address blocks, party blocks and signature blocks are held together by these, so the paragraphs users edit most were the ones collapsing (fixed task 046) |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
 | Comments, tracked changes, hyperlinks | Carried on the content model itself |
@@ -100,7 +100,7 @@ edited block — and holds this document to the result in **both** directions:
 | `pict` | 1/1 kept | 0/1 | `complex-object-dropped` |
 | `footnoteReference` | 1/1 kept | 0/1 | `unrepresented-footnote-reference` |
 | `endnoteReference` | 1/1 kept | 0/1 | `unrepresented-endnote-reference` |
-| `br` | 1/1 kept | 0/1 | `edited-paragraph-line-break-dropped` |
+| `br` | 1/1 kept | **1/1 kept** | *(none — carried, task 046)* |
 | `sym` | 1/1 kept | 0/1 | `symbol-flattened` |
 | `tab` | 1/1 kept | 0/1 | `tab-flattened` |
 | `sdt` (inline) | 1/1 kept | 0/1 | `hard-tier-sdt-flattened` |
@@ -119,6 +119,12 @@ would have inherited the same blind spot: you cannot document a loss you do not 
 
 Fixed in task 045 by adding `sdt` to the reportable set and reusing the code whose client copy already
 said the right thing.
+
+And on its second run it caught the document going stale in the other direction: task 046 taught soft
+line breaks to round-trip, and the parity check failed because this document still listed
+`edited-paragraph-line-break-dropped` as a loss that no longer happens. That is the accretion failure the
+both-directions rule exists for — a list that keeps claiming losses the code has already fixed looks
+maintained while quietly becoming fiction.
 
 Corroborating corpus evidence (23 documents, `tests/fixtures/compose-corpus/`): 100% overall and 100%
 near-tier preservation, 100% strict on 16 of 18 of the original set and on all four of the construct

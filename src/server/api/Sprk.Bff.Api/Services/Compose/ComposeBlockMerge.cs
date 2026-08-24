@@ -647,7 +647,9 @@ internal static class ComposeBlockMerge
         ("pict", "complex-object-dropped"),
         ("footnoteReference", "unrepresented-footnote-reference"),
         ("endnoteReference", "unrepresented-endnote-reference"),
-        ("br", "edited-paragraph-line-break-dropped"),
+        // ("br", …) REMOVED in task 046 — a soft line break is no longer lost. It round-trips as the
+        // ComposeInlineRun.IsLineBreak marker run, so there is nothing to report and reporting it would
+        // be a false warning. The residual-loss parity test fails if this list and the renderer disagree.
         ("sym", "symbol-flattened"),
         ("tab", "tab-flattened"),
         // Task 045: the INLINE `w:sdt` — a content control sitting inside a paragraph (a party name, an

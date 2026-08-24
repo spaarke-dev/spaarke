@@ -2709,10 +2709,17 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case Break:
                 case CarriageReturn:
-                    // The model has no intra-paragraph soft line/column break: flatten to a space rather
-                    // than fusing words, with a counted warning. (Manual PAGE breaks are model data above.)
-                    sb.Append(' ');
-                    ctx.AddWarning("line-break-flattened", 1);
+                    // Task 046: a SOFT line/column break is model data too (ComposeInlineRun.IsLineBreak),
+                    // emitted at its exact inline position — mirroring the manual page break above. It was
+                    // previously flattened to a space with a counted warning, which meant any edit to the
+                    // paragraph collapsed its line structure: address blocks, party blocks and signature
+                    // blocks all lost their layout. Budget-guarded like the page break, for the same reason
+                    // (a clipped projection must not trail stray breaks).
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        sink.Add(new ComposeInlineRun { IsLineBreak = true, Revision = revision });
+                    }
                     break;
                 case NoBreakHyphen:
                     sb.Append('‑');

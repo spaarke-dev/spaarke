@@ -700,9 +700,11 @@ function buildRunsFromNode(block: TipTapNode, ctx: MapperContext, baselineText: 
     }
 
     if (seg.isHardBreak) {
-      // Not representable in a rendered body run (server BuildRun: one w:t, no '\n' split) — dropped,
-      // never silently, on the imported path; silently on parity (legacy buildContentModel behavior).
-      if (imported) warn(ctx, 'edited-paragraph-line-break-dropped');
+      // Task 046: a hardBreak is now REPRESENTABLE — it round-trips as an `isLineBreak` marker run, the
+      // same contract `isPageBreak` has used since task 023. It used to be dropped here (warned on the
+      // imported path, silent on parity), which meant editing any paragraph collapsed its line structure:
+      // the address block, the party block and the signature block are all held together by these.
+      runs.push({ text: '', isLineBreak: true });
       cursor += seg.text.length;
     } else if (seg.insertion) {
       // Pending insert: parity excludes it (reject-state); imported translates it to an Inserted fact.
@@ -867,7 +869,7 @@ function forceDeletedBlock(block: ComposeContentBlock): ComposeContentBlock {
  * kept (physically present), marker runs skipped. */
 function loadedRejectText(block: ComposeContentBlock): string {
   return (block.runs ?? [])
-    .filter(r => !r.isPageBreak && !r.commentAnchor && r.revision?.kind !== 'Inserted')
+    .filter(r => !r.isPageBreak && !r.isLineBreak && !r.commentAnchor && r.revision?.kind !== 'Inserted')
     .map(r => r.text)
     .join('');
 }
@@ -908,7 +910,7 @@ function formattingUnchanged(segments: readonly InlineSegment[], loaded: Compose
   const loadedText: string[] = [];
   const loadedFormats: CharFormat[] = [];
   for (const r of loaded.runs ?? []) {
-    if (r.isPageBreak || r.commentAnchor !== undefined || r.revision?.kind === 'Inserted') continue;
+    if (r.isPageBreak || r.isLineBreak || r.commentAnchor !== undefined || r.revision?.kind === 'Inserted') continue;
     for (let i = 0; i < r.text.length; i++) {
       if (r.text[i] === '\n') continue;
       loadedText.push(r.text[i]);

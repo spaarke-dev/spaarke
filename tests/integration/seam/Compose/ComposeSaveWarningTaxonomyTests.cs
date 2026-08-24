@@ -115,9 +115,16 @@ public sealed class ComposeSaveWarningTaxonomyTests
     [Fact]
     public void SaveWarnings_FireWhenAnEditedBlockLosesAConstructTheModelCannotHold()
     {
-        var source = LoadCorpus("Engagement Letter.docx");
+    // Task 046 re-levered this test. It used to edit "Engagement Letter.docx", whose loss was two
+    // dropped soft breaks — and task 046 taught soft breaks to round-trip, so that document now
+    // loses NOTHING and the test would have been asserting a loss that no longer happens. The lever
+    // moved to a still-lossy construct rather than the assertion being weakened: a complex field,
+    // which the content model genuinely cannot hold.
+
+        var source = LoadCorpus("ref-cross-references.docx");
         var model = Project(source);
-        var edited = EditFirstNonEmptyRun(model, out var applied);
+        // The field lives in the LAST paragraph, so the representative first-run edit would miss it.
+        var edited = EditLastNonEmptyRun(model, out var applied);
         applied.Should().BeTrue();
 
         var warnings = new List<ComposeProjectionWarning>();
@@ -128,12 +135,13 @@ public sealed class ComposeSaveWarningTaxonomyTests
         stats.RenderedBlocks.Should().Be(1, "exactly one block was edited");
         _output.WriteLine($"warnings: {string.Join(", ", warnings.Select(w => $"{w.Code}×{w.Count}"))}");
 
-        warnings.Should().Contain(w => w.Code == "edited-paragraph-line-break-dropped",
-            "the edited paragraph carries w:br soft breaks that the content model cannot hold, so they are " +
-            "genuinely lost — and a loss the save does not report is the failure this whole project exists " +
-            "to end. Suppressing FALSE warnings is only safe if the TRUE ones fire in the same change");
+        warnings.Should().Contain(w => w.Code == "field-flattened-to-text",
+            "the edited paragraph carries a complex field (w:fldChar begin/separate/end) that the content " +
+            "model cannot hold, so it is genuinely lost — and a loss the save does not report is the " +
+            "failure this whole project exists to end. Suppressing FALSE warnings is only safe if the TRUE " +
+            "ones fire in the same change");
 
-        warnings.Where(w => w.Code == "edited-paragraph-line-break-dropped").Sum(w => w.Count).Should().Be(2,
+        warnings.Where(w => w.Code == "field-flattened-to-text").Sum(w => w.Count).Should().Be(3,
             "the count must be the number of things actually lost, not the number of KINDS of thing — a " +
             "banner that says 'something was simplified' without saying how much is barely a signal");
     }
@@ -178,6 +186,33 @@ public sealed class ComposeSaveWarningTaxonomyTests
         var path = ComposeCorpusFixtureLocator.EnumerateDocumentPaths()
             .Single(p => string.Equals(Path.GetFileName(p), fileName, StringComparison.OrdinalIgnoreCase));
         return ComposeCorpusFixtureLocator.LoadVerifiedBytes(path);
+    }
+
+    /// <summary>Edits the LAST block that has text — for fixtures whose construct is not in the first
+    /// paragraph. Same single-run edit as the first-run variant, from the other end.</summary>
+    private static ComposeContentModel EditLastNonEmptyRun(ComposeContentModel model, out bool applied)
+    {
+        var blocks = model.Blocks.ToList();
+        for (var b = blocks.Count - 1; b >= 0; b--)
+        {
+            var runs = blocks[b].Runs;
+            for (var r = 0; r < runs.Count; r++)
+            {
+                if (string.IsNullOrEmpty(runs[r].Text))
+                {
+                    continue;
+                }
+
+                var newRuns = runs.ToList();
+                newRuns[r] = newRuns[r] with { Text = newRuns[r].Text + EditMarker };
+                blocks[b] = blocks[b] with { Runs = newRuns };
+                applied = true;
+                return model with { Blocks = blocks };
+            }
+        }
+
+        applied = false;
+        return model;
     }
 
     private static ComposeContentModel EditFirstNonEmptyRun(ComposeContentModel model, out bool applied)
