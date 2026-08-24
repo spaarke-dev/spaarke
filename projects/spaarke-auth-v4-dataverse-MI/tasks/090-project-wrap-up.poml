@@ -84,4 +84,22 @@
       <!-- Booked 2026-08-21 by task 020 (code review W-8). -->
     <criterion>/test-diet explicitly adjudicates the three auth files now living under tests/integration/seam/Auth/ (CredentialSelectionSeamTests, ConfidentialClientSharingSeamTests, ClientAssertionProviderSeamTests). ADR-038 defines seam/** as the AI convergence spine (dispatch -&gt; executor -&gt; ledger -&gt; disposition); these are credential-seam tests placed there because tests/integration/auth/** is EMPTY and NOT COMPILED into any csproj -- a test authored there would run never. Resolve deliberately: broaden the seam README with an auth/credential sub-category, or wire auth/** into the csproj and relocate. Either way do not let three files inherit deletion protection by accident.</criterion>
 </acceptance-criteria>
+
+  <booked-obligations>
+    <!-- BOOKED BY TASK 031 (2026-08-24) — record: notes/decisions/031-obo-verification-dev.md §5.3 -->
+    <obligation source="031" id="031-A">
+      ROUTE ONWARD, do not fix here: `GET /api/containers` cannot authorize ANY caller. It is a
+      collection route carrying .RequireAuthorization("canmanagecontainers") ->
+      ResourceAccessRequirement("create_container"), but ResourceAccessHandler is a PER-RESOURCE
+      handler — it calls ExtractResourceId(httpContext) and Fail()s when the route has no resource id
+      (ResourceAccessHandler.cs:51-57). A collection route never has one, so every request 403s in
+      ~2.7ms before any Dataverse call. Verified live 2026-08-24 with an admin and a read-only user;
+      identical 403s.
+
+      PRE-EXISTING and NOT caused by this project: `git diff origin/master...HEAD` shows neither
+      ResourceAccessHandler.cs nor DocumentsEndpoints.cs is touched on this branch. Out of scope for
+      auth-v4, which owns credentials, not this endpoint's policy wiring. Raise it with whoever owns
+      the documents surface rather than silently fixing it inside a credential-migration project.
+    </obligation>
+  </booked-obligations>
 </task>

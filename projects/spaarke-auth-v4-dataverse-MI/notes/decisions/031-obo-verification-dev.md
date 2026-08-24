@@ -8,8 +8,9 @@
 > Managed-Identity federated credential, with no client secret involved.** See §5.1 — that is the thing
 > three prior audits concluded was impossible.
 >
-> **Task 031 is NOT complete.** Several checklist surfaces are unexercised and one result (§5.3) is
-> explicitly unexplained. Do not mark it complete on the strength of this document.
+> **Task 031 is NOT complete** — several checklist surfaces remain unexercised (§5.5), including the
+> secret-first rollback re-verification that 032 depends on. But nothing is unexplained: the one
+> anomalous result (§5.3) was chased to root cause, and row-level authorization is verified (§5.4).
 
 ---
 
@@ -216,28 +217,74 @@ JwtBearerHandler[1] Failed to validate the token.
 — signature validation, before any OBO code runs. And for the absent-token case:
 `DenyAnonymousAuthorizationRequirement: Requires an authenticated user.` **✅ criterion met.**
 
-### 5.3 🟡 UNEXPLAINED: `/api/containers` returns 403 to BOTH identities
+### 5.3 ✅ RESOLVED: the `/api/containers` 403 is a pre-existing route/policy mismatch
 
 | | ralph (admin) | testuser1 (read-only) | no token | malformed |
 |---|---|---|---|---|
-| `GET /api/containers` | **403** | **403** | 401 | 401 |
-| `GET /api/containers?containerTypeId=<guid>` | **403** | — | — | — |
+| `GET /api/containers` | 403 | 403 | 401 | 401 |
 
-The endpoint requires policy `canmanagecontainers` → `ResourceAccessRequirement("create_container")`,
-resolved through Dataverse **over OBO**.
+**Root cause, from the slot log:**
 
-**This is NOT evidence of an OBO failure** — §5.1 shows the exchange succeeding in the same run. But
-**neither is it yet proven to be a correct denial**, and the distinction matters more here than
-anywhere else in the task: *this path fails closed, so a broken authorization lookup and a legitimate
-"no permission" produce the identical 403.* The status code cannot separate them, and I did not capture
-the specific denial — the log-tail window closed before these probes landed.
+```
+warn: Sprk.Bff.Api.Infrastructure.Authorization.ResourceAccessHandler[0]
+      Authorization failed: No resource ID found in route for user c74ac1af-...
+      Authorization failed. Fail() was explicitly called.
+Request finished ... 403 0 - 2.6780ms
+```
 
-**Open. Must be resolved before 031 can be called green.** The discriminator is a slot-scoped log
-capture spanning the `/api/containers` call, showing either a `ResourceAccessRequirement` denial
-(correct) or an access-lookup error (a defect). Identical 403s for an admin and a read-only user is at
-least mildly suspicious and deserves the check rather than an assumption.
+`GET /api/containers` is a **collection** route carrying `.RequireAuthorization("canmanagecontainers")`
+→ `ResourceAccessRequirement("create_container")`. But `ResourceAccessHandler` is a **per-resource**
+handler: it calls `ExtractResourceId(httpContext)` and, finding no resource id in the route, calls
+`context.Fail()` (`ResourceAccessHandler.cs:51-57`). A collection route has no resource id, so the
+policy **can never be satisfied on this endpoint, for any caller.**
 
-### 5.4 Not yet exercised
+**Not a credential problem, and provably so**: it fails in **2.68 ms**, before any Dataverse call or
+token use, and §5.1 shows the OBO exchange succeeding in the same session. The identical 403 for an
+admin and a read-only user — which is what made it look suspicious — is explained: the handler never
+reaches the access check for *either* of them.
+
+**Not caused by this project.** `git diff origin/master...HEAD` shows neither
+`ResourceAccessHandler.cs` nor `DocumentsEndpoints.cs` is touched on this branch; the handler's last
+commit is a project-wide rename.
+
+**It is still a real defect** — an endpoint that cannot authorize anyone is dead code with a
+misleading 403 — but it is **out of scope for 031**, which verifies credentials, and out of scope for
+this project, which does not own that endpoint. Filed for task 090 to route onward.
+
+### 5.4 ✅ Row-level authorization verified — a computed denial, not a failing lookup
+
+The task names `PermissionsEndpoints` as the row-level authorization surface. Tested against a real
+`sprk_document` (`d9ad4750-829d-f111-b8de-70a8a590c51c`, found via Dataverse):
+
+| Identity | `GET /api/documents/{id}/permissions` | Body |
+|---|---|---|
+| ralph (admin) | **200** | every flag `false`, `userId` hash `d12L59F…` |
+| testuser1 (read-only) | **200** | every flag `false`, `userId` hash `QO9TTMN…` |
+| no token | **401** | — |
+| malformed token | **401** | — |
+
+All-false for an admin looked like the §5.3 ambiguity again — a broken lookup failing closed is
+indistinguishable from a real denial by response alone. It is not:
+
+```
+Retrieving permissions for user d12L59F... on document d9ad4750-...
+Sprk.Bff.Api.Infrastructure.Caching.CachedAccessDataSource[0]
+Permissions retrieved for document d9ad4750-...: AccessRights=None, CanPreview=False, CanDownload=False
+Request finished ... 200 ... 11.8368ms
+```
+
+**`AccessRights=None` is a computed result, not an error.** The lookup ran through
+`CachedAccessDataSource`, completed without exception, and returned an explicit "no rights" answer
+which the endpoint rendered as false flags. So the pipeline resolves identity per-user (the two hashes
+differ), evaluates access, and denies — under a credential chain rooted in MI-FIC.
+
+Whether ralph *ought* to hold rights on that particular document is a Dataverse data question, not an
+auth-plumbing one, and does not bear on this criterion.
+
+Incidentally confirmed in the same capture: outbound Dataverse traffic targets
+`https://spaarkedev1.crm.dynamics.com/api/data/v9.2/` — the expected dev environment.
+
+### 5.5 Not yet exercised
 
 SPE upload/download/preview · `dataverse.*` chat tool calls over SSE · Office add-in save flows ·
 `/api/agent` · row-level authorization on `PermissionsEndpoints` · send-as-user email (authorized by the
