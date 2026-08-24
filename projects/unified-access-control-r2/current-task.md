@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 007)
+> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 007 + a CI repair)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,12 +10,24 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 007 completed, committed and pushed |
+| **Task** | **none active** — task 007 complete; CI red from task 008 found and repaired |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
 | **Phase** | Phase 0 — enforcement remediation · **11 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 019 ✅) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
 | **Next Action** | Run **task 016** (`016-close-project-cascade-fix.poml` — **verify the filename**) via the `task-execute` skill. See "Why 016 next" below |
+
+### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
+
+On `/grant`, `/revoke` and `/close-project`, a body carrying an **empty identifier** now returns
+**403** (`sdap.access.deny.delegation_target_unresolved`) where it previously returned **400**. The
+delegation rule runs before the handler and must first work out WHICH record — an empty id resolves
+nothing, and task 008's ADR-003 constraint says deny rather than fall through. Still RFC 7807, and the
+reason code distinguishes "your request named no record" from "you lack permission".
+
+Low practical impact — `AccessGrantModal` and the external SPA send well-formed bodies — but it is a
+real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
+flipped to match, with the rationale in their doc comments.
 
 ### Why 016 next
 
@@ -31,9 +43,27 @@ from 010), **013** (workforce email `oid` hijack — the last unaddressed identi
 
 ### Last verified state
 
-**BFF 10,726 passed / 0 failed** (TRX confirms none) · **ArchTests 36/36** · **Core 45/45** ·
-publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60 — unchanged by task 007, no
-packages added) · `dotnet list package --vulnerable` clean.
+**ALL SEVEN test projects — 11,338 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,726 ·
+`Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
+`Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
+Publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60) · `--vulnerable` clean.
+
+### 🚨 Process failure found 2026-08-23 — READ THIS BEFORE CLAIMING A GREEN SUITE
+
+**There are SEVEN test projects. Tasks 002–008 were verified against THREE.** CI went red on task
+008's commit (`SDAP CI` → genuine `failure`, not a supersession cancel) with 9 failures in
+`Spe.Integration.Tests`, a project no local run had touched. Repaired in `3e5b9d373`.
+
+**The gate is `dotnet test` at the repo root, plus the three projects it does NOT pick up:**
+
+```
+dotnet test -c Debug                                              # 4 projects
+dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj
+dotnet test tests/unit/Spaarke.Core.Tests/Spaarke.Core.Tests.csproj
+dotnet test tests/unit/RecordSyncJob.IsolatedTests/RecordSyncJob.IsolatedTests.csproj
+```
+
+Running one project and reporting "full suite green" is how this was missed for six tasks.
 
 ---
 
@@ -122,6 +152,7 @@ caught real gaps every time.
 
 | Item | Detail |
 |---|---|
+| **SEVEN test projects, not one** | See the process-failure box above. `dotnet test` at root covers 4; ArchTests / Core.Tests / RecordSyncJob.IsolatedTests need explicit invocation |
 | **POML paths are unreliable** | Tasks 002/005/006/008/**007** all named test paths that do not exist — five of eleven. **Verify every path before acting on it** |
 | **Some POMLs are not valid XML** | `007` (and `017`) carry a raw `<` inside a constraint (`Mock<HttpMessageHandler>`), so `ET.parse` fails on them. Pre-existing; `scripts/Validate-TaskPoml.ps1` reports PASS because it is not a strict parse. Do not "fix" a POML on the strength of a parse error alone — check whether it predates you |
 | **KEEP paths** | Access-control → `tests/integration/auth/**`; pure domain logic → `tests/unit/domain/**`. Both globbed into `Sprk.Bff.Api.Tests.csproj` |

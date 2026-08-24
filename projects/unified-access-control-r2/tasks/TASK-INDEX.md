@@ -274,6 +274,21 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > evaluation of it — end-to-end needs the tenant, filed on **task 034**.
 > Rationale: [`notes/task-007-grant-expiry.md`](../notes/task-007-grant-expiry.md).
 
+> **⚠️ CI repair (2026-08-23, commit `3e5b9d373`) — and a process failure worth keeping.**
+> **There are SEVEN test projects; tasks 002–008 were verified against THREE.** CI went red on task
+> 008's commit with 9 failures in `Spe.Integration.Tests`, which no local run had touched. Two causes,
+> two different correct responses: **five were fixture** (contract tests with no substituted
+> `CallerRecordAccessProbe`, so the real probe correctly denied offline — fixed by entitling the
+> fixture's caller, NOT by weakening the rule), and **four were a real contract change** (an empty
+> identifier names no resolvable target, so the delegation rule denies 403 before the handler's 400 —
+> task 008's ADR-003 constraint verbatim). Those four tests were flipped with rationale.
+> **The local gate is `dotnet test` at the repo root PLUS** `Spaarke.ArchTests`, `Spaarke.Core.Tests`
+> and `RecordSyncJob.IsolatedTests`, which the root run does not pick up. Running one project and
+> reporting "full suite green" is how this survived six tasks.
+> Verified after repair: **11,338 passed / 0 failed** across all seven.
+> 🔔 **Client-visible**: `/grant`, `/revoke`, `/close-project` now answer **403**
+> (`sdap.access.deny.delegation_target_unresolved`) instead of 400 for a body with an empty identifier.
+
 ## Phase 1 — One evaluator (10 tasks)
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
