@@ -115,11 +115,11 @@ public sealed class ComposeSaveWarningTaxonomyTests
     [Fact]
     public void SaveWarnings_FireWhenAnEditedBlockLosesAConstructTheModelCannotHold()
     {
-    // Task 046 re-levered this test. It used to edit "Engagement Letter.docx", whose loss was two
-    // dropped soft breaks — and task 046 taught soft breaks to round-trip, so that document now
-    // loses NOTHING and the test would have been asserting a loss that no longer happens. The lever
-    // moved to a still-lossy construct rather than the assertion being weakened: a complex field,
-    // which the content model genuinely cannot hold.
+        // Task 046 re-levered this test. It used to edit "Engagement Letter.docx", whose loss was two
+        // dropped soft breaks — and task 046 taught soft breaks to round-trip, so that document now
+        // loses NOTHING and the test would have been asserting a loss that no longer happens. The lever
+        // moved to a still-lossy construct rather than the assertion being weakened: a complex field,
+        // which the content model genuinely cannot hold.
 
         var source = LoadCorpus("ref-cross-references.docx");
         var model = Project(source);
