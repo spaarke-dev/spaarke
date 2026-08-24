@@ -21,7 +21,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 
 ---
 
-## Phase 0 — Enforcement remediation (19 tasks)
+## Phase 0 — Enforcement remediation (20 tasks)
 
 | # | Task | FR / finding | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
@@ -44,8 +44,9 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
 | 🔲 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | — | ❌ | sonnet | high |
 | ✅ 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
+| 🔲 **020** | **Org-grant SPE member cleanup** | **FR-16b** / 017 §6 | 017 | — | ❌ | sonnet | high |
 
-**Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 · plus 002 → 012
+**Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 → **020** · plus 002 → 012
 
 > **Task 001 outcome (2026-08-21)**: 62 tests green at `tests/integration/auth/UnifiedAccessControl/`
 > (the ADR-038 §2 security-auth KEEP path — **first backfill**; it had zero compiled files and was
@@ -377,6 +378,25 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > `npm install --legacy-peer-deps` first — `node_modules` is absent in a fresh worktree). Publish
 > **43.69 MB** compressed, unchanged. Rationale:
 > [`notes/task-017-spe-revoke-matcher.md`](../notes/task-017-spe-revoke-matcher.md).
+
+> **Task 020 ADDED 2026-08-24 by owner decision.** Task 017 assessed the organization-grant SPE cleanup
+> gap and FILED it (task 010's constraint permitted "assess and either fix or file"). The owner ruled it must
+> be **scoped into this project, not deferred**, so it is now Phase 0 task **020** rather than a note.
+> **The gap**: an org-grant revoke passes `ContactId = Guid.Empty`, so there is no single grantee email to
+> match a container permission on — Dataverse rows are swept for every member but SPE cleanup reports
+> `NotAttempted`. **What bounds it**: broker-only creates no member ACLs, so the exposure is LEGACY ACLs
+> (pre-broker versions, or admin-added) — which is also the only population nothing else will ever clean up.
+> **Scoping work done up front so execution does not re-derive it**: the membership junction is
+> `sprk_contactorganization` — lookups `sprk_contact` / `sprk_organization`, i.e. `_sprk_contact_value` /
+> `_sprk_organization_value`, plus `statecode` — **verified live 2026-08-24**, which also resolves the
+> standing "confirm against the created junction schema" caveat in
+> `ExternalParticipationService.QueryActiveOrgIdsAsync` (the assumption there is CORRECT; 020 deletes the
+> caveat). The reference impl to mirror is that same method, inverted.
+> ⚠️ **Also found while scoping**: the junction carries `sprk_enddate`, and the READ path
+> (`QueryActiveOrgIdsAsync`) considers `statecode` only — so a membership ended by date but never deactivated
+> still confers inherited access today. 020 deliberately does NOT change read behaviour (that would alter who
+> has access, beyond its scope); it sweeps by `statecode` alone so revoke stays at least as aggressive as the
+> read path, and files the asymmetry onto **task 043** (FR-24/FR-25 org expansion).
 
 ## Phase 1 — One evaluator (10 tasks)
 
