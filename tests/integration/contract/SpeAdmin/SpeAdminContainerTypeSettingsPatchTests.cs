@@ -215,6 +215,87 @@ public class SpeAdminContainerTypeSettingsPatchTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Task 025 — the full nine, and the two properties the SDK gets wrong
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_CarriesAllNineV1Properties()
+    {
+        // Nine, verified against Graph's OData metadata rather than documentation prose. FR-C07 listed
+        // `agent.chatEmbedAllowedHosts`, which exists in NEITHER api version, and omitted
+        // `sharingCapability`, which does. See notes/task-025-schema-verification.md.
+        using var graph = new GraphWireMockFixture();
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: "externalUserSharingOnly", isItemVersioningEnabled: true,
+            itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: 10_737_418_240L,
+            isSearchEnabled: true, isDiscoverabilityEnabled: false, isSharingRestricted: true,
+            urlTemplate: "https://example.invalid/{containerId}",
+            consumingTenantOverridables: "sharingCapability,itemMajorVersionLimit");
+
+        var settings = graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+            .GetProperty("settings");
+
+        foreach (var name in new[]
+                 {
+                     "sharingCapability", "isItemVersioningEnabled", "itemMajorVersionLimit",
+                     "maxStoragePerContainerInBytes", "isSearchEnabled", "isDiscoverabilityEnabled",
+                     "isSharingRestricted", "urlTemplate", "consumingTenantOverridables",
+                 })
+        {
+            settings.TryGetProperty(name, out _).Should().BeTrue($"'{name}' is one of the nine");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_SendsOverridablesAsTheRawFlagString_NotTheSdkEnum()
+    {
+        // 🔴 The SDK's generated FileStorageContainerTypeSettingsOverride declares only
+        // UrlTemplate/IsDiscoverabilityEnabled/IsSearchEnabled/IsItemVersioningEnabled/
+        // ItemMajorVersionLimit/MaxStoragePerContainerInBytes. The LIVE tenant returns
+        // "sharingCapability,itemMajorVersionLimit,isOfficeRestricted" — two flags the enum does not
+        // contain. Routing this through the typed enum would drop or reject real values, so the raw
+        // string is deliberate. This is the opposite of task 023's typed-over-untyped choice, because
+        // here the type is provably narrower than reality.
+        const string live = "sharingCapability,itemMajorVersionLimit,isOfficeRestricted";
+        using var graph = new GraphWireMockFixture();
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: null,
+            itemMajorVersionLimit: null, maxStoragePerContainerInBytes: null,
+            consumingTenantOverridables: live);
+
+        graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+            .GetProperty("settings").GetProperty("consumingTenantOverridables")
+            .GetString().Should().Be(live, "flags outside the SDK enum must survive round-tripping");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_NeverSendsTheFictionalAgentProperty()
+    {
+        // Guards against FR-C07's phantom being "restored" by a future reader of the spec.
+        using var graph = new GraphWireMockFixture();
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: null,
+            itemMajorVersionLimit: 10, maxStoragePerContainerInBytes: null);
+
+        (graph.RequestsFor(ContainerTypesPath).Single().Body ?? "")
+            .Should().NotContain("chatEmbedAllowedHosts")
+            .And.NotContain("\"agent\"",
+                "no such property exists in v1.0 or beta metadata");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private static SpeAdminGraphService CreateSut()
     {

@@ -168,6 +168,36 @@ public sealed class SpeAdminGraphService
     /// (<c>types/spe.ts</c>) but nothing above this record ever supplied them, so the grid's
     /// "Owning App" column rendered blank and the trial-expiry warning could never fire.
     /// </remarks>
+    /// <summary>
+    /// The container-type settings block, as returned by Graph.
+    /// </summary>
+    /// <remarks>
+    /// The nine v1.0 properties, verified against Graph's OData metadata
+    /// (notes/task-025-schema-verification.md), plus the beta-only <c>isOfficeRestricted</c>.
+    /// <para>
+    /// Every member is nullable and means <b>not reported</b> when null — never a default. A settings
+    /// block we could not read must not present as "search is off".
+    /// </para>
+    /// </remarks>
+    /// <param name="ConsumingTenantOverridables">
+    /// The raw comma-delimited flag string (e.g. <c>"sharingCapability,itemMajorVersionLimit"</c>),
+    /// deliberately NOT the SDK's typed enum — the live tenant uses flags that are not members of it.
+    /// </param>
+    /// <param name="IsOfficeRestricted">
+    /// Beta-only; absent from the v1.0 schema and from the SDK's typed model. Read-only here.
+    /// </param>
+    public sealed record SpeContainerTypeSettings(
+        string? SharingCapability,
+        bool? IsItemVersioningEnabled,
+        long? ItemMajorVersionLimit,
+        long? MaxStoragePerContainerInBytes,
+        bool? IsSearchEnabled,
+        bool? IsDiscoverabilityEnabled,
+        bool? IsSharingRestricted,
+        string? UrlTemplate,
+        string? ConsumingTenantOverridables,
+        bool? IsOfficeRestricted);
+
     public sealed record SpeContainerTypeSummary(
         string Id,
         string DisplayName,
@@ -175,7 +205,8 @@ public sealed class SpeAdminGraphService
         string? BillingClassification,
         DateTimeOffset? CreatedDateTime,
         string? OwningAppId = null,
-        DateTimeOffset? ExpirationDateTime = null);
+        DateTimeOffset? ExpirationDateTime = null,
+        SpeContainerTypeSettings? Settings = null);
 
     /// <summary>
     /// An application permission entry on an SPE container type, returned from the Graph
@@ -1722,10 +1753,10 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
-        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes, CancellationToken ct = default)
+        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes, bool? isSearchEnabled = null, bool? isDiscoverabilityEnabled = null, bool? isSharingRestricted = null, string? urlTemplate = null, string? consumingTenantOverridables = null, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, ct).ConfigureAwait(false); }
+        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, isSearchEnabled, isDiscoverabilityEnabled, isSharingRestricted, urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId})"); }
     }
 
@@ -3555,7 +3586,8 @@ public sealed class SpeAdminGraphService
             // a container type of unknown age as "created today". Unknown now stays unknown.
             CreatedDateTime: ct.CreatedDateTime,
             OwningAppId: owningAppId,
-            ExpirationDateTime: expirationDateTime);
+            ExpirationDateTime: expirationDateTime,
+            Settings: MapContainerTypeSettings(ct.Settings));
     }
 
     /// <summary>
@@ -3648,6 +3680,50 @@ public sealed class SpeAdminGraphService
                 out var parsed) => parsed,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Maps the Graph settings block to the domain record. Returns null when Graph sent no settings —
+    /// which is different from every setting being false, and must stay different.
+    /// </summary>
+    private static SpeContainerTypeSettings? MapContainerTypeSettings(
+        Microsoft.Graph.Models.FileStorageContainerTypeSettings? s)
+    {
+        if (s is null) return null;
+
+        // consumingTenantOverridables and isOfficeRestricted are read from AdditionalData rather than
+        // the typed surface: the first because the SDK enum is narrower than the live values, the
+        // second because it is beta-only and the SDK models v1.0. See the schema note §3.
+        var overridables =
+            s.ConsumingTenantOverridables?.ToString()
+            ?? (s.AdditionalData is not null
+                && s.AdditionalData.TryGetValue("consumingTenantOverridables", out var raw)
+                    ? raw?.ToString()
+                    : null);
+
+        bool? officeRestricted = null;
+        if (s.AdditionalData is not null &&
+            s.AdditionalData.TryGetValue("isOfficeRestricted", out var rawOffice))
+        {
+            officeRestricted = rawOffice switch
+            {
+                bool b => b,
+                string str when bool.TryParse(str, out var parsed) => parsed,
+                _ => null,
+            };
+        }
+
+        return new SpeContainerTypeSettings(
+            SharingCapability: NormalizeBillingClassification(s.SharingCapability?.ToString()),
+            IsItemVersioningEnabled: s.IsItemVersioningEnabled,
+            ItemMajorVersionLimit: s.ItemMajorVersionLimit,
+            MaxStoragePerContainerInBytes: s.MaxStoragePerContainerInBytes,
+            IsSearchEnabled: s.IsSearchEnabled,
+            IsDiscoverabilityEnabled: s.IsDiscoverabilityEnabled,
+            IsSharingRestricted: s.IsSharingRestricted,
+            UrlTemplate: s.UrlTemplate,
+            ConsumingTenantOverridables: string.IsNullOrWhiteSpace(overridables) ? null : overridables,
+            IsOfficeRestricted: officeRestricted);
     }
 
     /// <summary>
@@ -4167,11 +4243,16 @@ public sealed class SpeAdminGraphService
     /// 2026-08-24 (task 023): the previous <c>?? DateTimeOffset.UtcNow</c> fallback rendered a
     /// container type of unknown age as "created today".
     /// </param>
+    /// <param name="Settings">
+    /// Settings as Graph reports them after the update — the read-back that lets a caller confirm the
+    /// write applied rather than trusting a 200. Added by task 025.
+    /// </param>
     public sealed record ContainerTypeSettingsResult(
         string Id,
         string DisplayName,
         string? BillingClassification,
-        DateTimeOffset? CreatedDateTime);
+        DateTimeOffset? CreatedDateTime,
+        SpeContainerTypeSettings? Settings = null);
 
     /// <summary>
     /// Updates settings on an SPE container type via PATCH /storage/fileStorage/containerTypes/{typeId}.
@@ -4238,6 +4319,11 @@ public sealed class SpeAdminGraphService
         bool? isItemVersioningEnabled,
         long? itemMajorVersionLimit,
         long? maxStoragePerContainerInBytes,
+        bool? isSearchEnabled = null,
+        bool? isDiscoverabilityEnabled = null,
+        bool? isSharingRestricted = null,
+        string? urlTemplate = null,
+        string? consumingTenantOverridables = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
@@ -4285,6 +4371,37 @@ public sealed class SpeAdminGraphService
             settings.MaxStoragePerContainerInBytes = maxStoragePerContainerInBytes.Value;
         }
 
+        // ── The remaining v1.0 settings (task 025, spec FR-C07) ──────────────
+        // Nine properties total, verified against Graph's OData metadata; task 023 wired four.
+        if (isSearchEnabled.HasValue)
+        {
+            settings.IsSearchEnabled = isSearchEnabled.Value;
+        }
+
+        if (isDiscoverabilityEnabled.HasValue)
+        {
+            settings.IsDiscoverabilityEnabled = isDiscoverabilityEnabled.Value;
+        }
+
+        if (isSharingRestricted.HasValue)
+        {
+            settings.IsSharingRestricted = isSharingRestricted.Value;
+        }
+
+        if (urlTemplate is not null)
+        {
+            settings.UrlTemplate = urlTemplate;
+        }
+
+        if (!string.IsNullOrWhiteSpace(consumingTenantOverridables))
+        {
+            // Written through AdditionalData as the raw flag string, NOT the typed enum: the live
+            // tenant uses flags (`sharingCapability`, `isOfficeRestricted`) that are not members of
+            // the SDK's generated enum, so the typed path cannot round-trip real values.
+            // See notes/task-025-schema-verification.md §3.
+            settings.AdditionalData["consumingTenantOverridables"] = consumingTenantOverridables;
+        }
+
         var patchBody = new Microsoft.Graph.Models.FileStorageContainerType { Settings = settings };
 
         try
@@ -4315,7 +4432,8 @@ public sealed class SpeAdminGraphService
                 BillingClassification: billingClassification,
                 // Was `?? DateTimeOffset.UtcNow` — a container type of unknown age rendered as
                 // "created today". Handed here by task 030; unknown now stays unknown.
-                CreatedDateTime: updated.CreatedDateTime);
+                CreatedDateTime: updated.CreatedDateTime,
+                Settings: MapContainerTypeSettings(updated.Settings));
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {

@@ -205,6 +205,48 @@ export interface ContainerType {
   createdDateTime?: string;
   /** Expiry date for trial container types */
   expiryDateTime?: string;
+  /**
+   * The container type's settings, or undefined when Graph did not return them.
+   * Added by task 025 — before it, no settings value reached the client at all.
+   */
+  settings?: ContainerTypeSettings;
+}
+
+/**
+ * Container-type settings as returned by the BFF — the nine v1.0 properties plus the beta-only
+ * `isOfficeRestricted`.
+ *
+ * Verified against Graph's own OData metadata (notes/task-025-schema-verification.md), not docs prose.
+ * FR-C07 named `agent.chatEmbedAllowedHosts`, which exists in neither API version, and omitted
+ * `sharingCapability`, which does.
+ *
+ * Every member is optional and `undefined` means NOT REPORTED, never a default. A settings block that
+ * could not be read must not present as "search is off".
+ */
+export interface ContainerTypeSettings {
+  /** Which external sharing is permitted (Graph SharingCapabilities). */
+  sharingCapability?: SharingCapability;
+  isItemVersioningEnabled?: boolean;
+  itemMajorVersionLimit?: number;
+  /** Per-container CEILING in bytes — a limit, never a usage figure (task 023's split). */
+  maxStoragePerContainerInBytes?: number;
+  /** Whether container content is indexed for search. */
+  isSearchEnabled?: boolean;
+  /** Whether containers of this type are discoverable. */
+  isDiscoverabilityEnabled?: boolean;
+  /** Distinct from `sharingCapability` — a separate restriction flag. */
+  isSharingRestricted?: boolean;
+  urlTemplate?: string;
+  /**
+   * Which settings a consuming tenant may override, as the raw comma-delimited flag string
+   * (e.g. "sharingCapability,itemMajorVersionLimit,isOfficeRestricted").
+   *
+   * Override METADATA, not a value. Kept as a string because the live tenant uses flags that are not
+   * members of the SDK's typed enum. Task 026 renders its meaning.
+   */
+  consumingTenantOverridables?: string;
+  /** Beta-only and READ-ONLY — absent from the v1.0 schema and the SDK's typed model. */
+  isOfficeRestricted?: boolean;
 }
 
 /** Application permissions entry for a container type registration */

@@ -73,4 +73,59 @@ public sealed record UpdateContainerTypeSettingsRequest
     /// </remarks>
     [JsonPropertyName("maxStoragePerContainerInBytes")]
     public long? MaxStoragePerContainerInBytes { get; init; }
+
+    // ── Added by task 025 (spec FR-C07) ──────────────────────────────────────
+    // The v1.0 settings complex type has exactly nine properties, verified against Graph's own OData
+    // metadata (notes/task-025-schema-verification.md). Four were wired by task 023; these are the
+    // remaining five. FR-C07's list named `agent.chatEmbedAllowedHosts`, which does not exist in
+    // either API version, and omitted `sharingCapability`, which does — so this is five, not nine.
+
+    /// <summary>
+    /// Whether container content is indexed for search. Null means "do not change".
+    /// </summary>
+    /// <remarks>
+    /// Together with <see cref="IsDiscoverabilityEnabled"/> this governs whether content is findable
+    /// at all. An administrator had no way to see or set either — spec §4.5 flags this as the one
+    /// R2-relevant slice of the SPE-knowledge-source question.
+    /// </remarks>
+    [JsonPropertyName("isSearchEnabled")]
+    public bool? IsSearchEnabled { get; init; }
+
+    /// <summary>
+    /// Whether containers of this type are discoverable. Null means "do not change".
+    /// </summary>
+    [JsonPropertyName("isDiscoverabilityEnabled")]
+    public bool? IsDiscoverabilityEnabled { get; init; }
+
+    /// <summary>
+    /// Whether sharing is restricted for containers of this type. Null means "do not change".
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="SharingCapability"/>: that selects WHICH sharing is allowed, this is a
+    /// separate restriction flag. Both exist on the resource and neither substitutes for the other.
+    /// </remarks>
+    [JsonPropertyName("isSharingRestricted")]
+    public bool? IsSharingRestricted { get; init; }
+
+    /// <summary>
+    /// URL template applied to containers of this type. Null means "do not change".
+    /// </summary>
+    [JsonPropertyName("urlTemplate")]
+    public string? UrlTemplate { get; init; }
+
+    /// <summary>
+    /// Which settings a consuming tenant may override, as the comma-delimited flag list Graph uses
+    /// (e.g. <c>"sharingCapability,itemMajorVersionLimit,isOfficeRestricted"</c>).
+    /// Null means "do not change".
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a <b>string</b>, not the SDK's typed enum. The live tenant returns
+    /// <c>sharingCapability</c> and <c>isOfficeRestricted</c> as flags, and <b>neither is a member of
+    /// the SDK's generated <c>FileStorageContainerTypeSettingsOverride</c></b> — so parsing through
+    /// the typed enum would drop or reject real data. This is the opposite of the typed-over-untyped
+    /// choice task 023 made, and deliberately so: there the type was authoritative, here it is
+    /// provably narrower than reality. Task 026 owns rendering the override state.
+    /// </remarks>
+    [JsonPropertyName("consumingTenantOverridables")]
+    public string? ConsumingTenantOverridables { get; init; }
 }

@@ -184,6 +184,11 @@ public static class ContainerTypeSettingsEndpoints
                 request.IsItemVersioningEnabled,
                 request.ItemMajorVersionLimit,
                 request.MaxStoragePerContainerInBytes,
+                request.IsSearchEnabled,
+                request.IsDiscoverabilityEnabled,
+                request.IsSharingRestricted,
+                request.UrlTemplate,
+                request.ConsumingTenantOverridables,
                 ct);
 
             if (result is null)
@@ -206,7 +211,9 @@ public static class ContainerTypeSettingsEndpoints
                 Id = result.Id,
                 DisplayName = result.DisplayName,
                 BillingClassification = result.BillingClassification,
-                CreatedDateTime = result.CreatedDateTime
+                CreatedDateTime = result.CreatedDateTime,
+                // The read-back. A 200 is not proof a settings write applied (spec FR-C04).
+                Settings = ContainerTypeSettingsDto.FromDomain(result.Settings)
             });
         }
         catch (SpaarkeStorageException sse)

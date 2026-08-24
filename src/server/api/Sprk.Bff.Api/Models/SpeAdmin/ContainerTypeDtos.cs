@@ -4,6 +4,89 @@ using System.Text.Json.Serialization;
 namespace Sprk.Bff.Api.Models.SpeAdmin;
 
 /// <summary>
+/// Container-type settings as returned by Graph — the nine v1.0 properties plus the beta-only
+/// <c>isOfficeRestricted</c>.
+/// </summary>
+/// <remarks>
+/// Verified against Graph's own OData metadata rather than documentation prose; see
+/// <c>projects/sdap-SPE-admin-app-r2/notes/task-025-schema-verification.md</c>. Added by task 025
+/// (spec FR-C07) — until then no settings value reached the client at all, so the Settings screen
+/// could only ever show what the user had just typed.
+/// <para>
+/// <b>Every member is nullable and null means NOT REPORTED, never a default.</b> A settings block that
+/// could not be read must not present as "search is off".
+/// </para>
+/// </remarks>
+public sealed record ContainerTypeSettingsDto
+{
+    /// <summary>Which external sharing is permitted. A member of Graph's SharingCapabilities.</summary>
+    [JsonPropertyName("sharingCapability")]
+    public string? SharingCapability { get; init; }
+
+    /// <summary>Whether item versioning is enabled for containers of this type.</summary>
+    [JsonPropertyName("isItemVersioningEnabled")]
+    public bool? IsItemVersioningEnabled { get; init; }
+
+    /// <summary>Maximum major versions retained per item.</summary>
+    [JsonPropertyName("itemMajorVersionLimit")]
+    public long? ItemMajorVersionLimit { get; init; }
+
+    /// <summary>
+    /// Per-container storage <b>CEILING</b> in bytes — a limit, never a usage figure. Consumption is
+    /// <c>storageUsedInBytes</c> on a container (task 023's split; spec FR-C05).
+    /// </summary>
+    [JsonPropertyName("maxStoragePerContainerInBytes")]
+    public long? MaxStoragePerContainerInBytes { get; init; }
+
+    /// <summary>Whether container content is indexed for search.</summary>
+    [JsonPropertyName("isSearchEnabled")]
+    public bool? IsSearchEnabled { get; init; }
+
+    /// <summary>Whether containers of this type are discoverable.</summary>
+    [JsonPropertyName("isDiscoverabilityEnabled")]
+    public bool? IsDiscoverabilityEnabled { get; init; }
+
+    /// <summary>Whether sharing is restricted. Distinct from <see cref="SharingCapability"/>.</summary>
+    [JsonPropertyName("isSharingRestricted")]
+    public bool? IsSharingRestricted { get; init; }
+
+    /// <summary>URL template applied to containers of this type.</summary>
+    [JsonPropertyName("urlTemplate")]
+    public string? UrlTemplate { get; init; }
+
+    /// <summary>
+    /// Which settings a consuming tenant may override, as the raw comma-delimited flag string.
+    /// Override METADATA, not a value — task 026 renders its meaning.
+    /// </summary>
+    [JsonPropertyName("consumingTenantOverridables")]
+    public string? ConsumingTenantOverridables { get; init; }
+
+    /// <summary>
+    /// Beta-only, and <b>read-only here</b>: absent from the v1.0 schema and from the SDK's typed
+    /// model, so writing it would mean reintroducing the untyped string-key pattern task 023 removed.
+    /// </summary>
+    [JsonPropertyName("isOfficeRestricted")]
+    public bool? IsOfficeRestricted { get; init; }
+
+    /// <summary>Maps the domain record to this DTO. Null in, null out — absence is preserved.</summary>
+    public static ContainerTypeSettingsDto? FromDomain(
+        Infrastructure.Graph.SpeAdminGraphService.SpeContainerTypeSettings? s) =>
+        s is null ? null : new ContainerTypeSettingsDto
+        {
+            SharingCapability = s.SharingCapability,
+            IsItemVersioningEnabled = s.IsItemVersioningEnabled,
+            ItemMajorVersionLimit = s.ItemMajorVersionLimit,
+            MaxStoragePerContainerInBytes = s.MaxStoragePerContainerInBytes,
+            IsSearchEnabled = s.IsSearchEnabled,
+            IsDiscoverabilityEnabled = s.IsDiscoverabilityEnabled,
+            IsSharingRestricted = s.IsSharingRestricted,
+            UrlTemplate = s.UrlTemplate,
+            ConsumingTenantOverridables = s.ConsumingTenantOverridables,
+            IsOfficeRestricted = s.IsOfficeRestricted,
+        };
+}
+
+/// <summary>
 /// Represents a single SharePoint Embedded container type returned from the Graph API.
 ///
 /// Mapped from the Graph <c>/storage/fileStorage/containerTypes</c> response.
@@ -64,6 +147,13 @@ public sealed record ContainerTypeDto
     /// </remarks>
     [JsonPropertyName("expiryDateTime")]
     public DateTimeOffset? ExpiryDateTime { get; init; }
+
+    /// <summary>
+    /// The container type's settings, or null when Graph did not return them.
+    /// </summary>
+    /// <remarks>Added by task 025 — no settings value reached the client before it.</remarks>
+    [JsonPropertyName("settings")]
+    public ContainerTypeSettingsDto? Settings { get; init; }
 }
 
 /// <summary>
@@ -98,6 +188,13 @@ public sealed record ContainerTypeSettingsResponseDto
     /// </remarks>
     [JsonPropertyName("createdDateTime")]
     public DateTimeOffset? CreatedDateTime { get; init; }
+
+    /// <summary>
+    /// The settings as they stand AFTER the update — the read-back the caller needs to confirm the
+    /// write actually applied, rather than trusting a 200 (spec FR-C04 constraint).
+    /// </summary>
+    [JsonPropertyName("settings")]
+    public ContainerTypeSettingsDto? Settings { get; init; }
 }
 
 /// <summary>
