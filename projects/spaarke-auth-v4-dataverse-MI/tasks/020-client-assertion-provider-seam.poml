@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Build the IClientAssertionProvider seam and raise the ADR-010 ceiling (FR-B1)</title>
+    <phase>2 Provider</phase>
+    <gate>011 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, NEW component, cross-assembly architecture, touches a live CI gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural seam spanning two assemblies under a CI-enforced layer constraint; a wrong shape here propagates to every downstream task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Everything in Phase 2 onward depends on this seam; must land alone.</parallel-reason>
+    <deps>011</deps>
+    <tags>auth,bff-api,dataverse,architecture,new-component</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Introduce a one-method IClientAssertionProvider contract declared in Spaarke.Dataverse, with ManagedIdentityAssertionProvider implemented in the BFF, so all confidential clients can obtain a MI-issued client assertion. Raise the ADR010_DITests 1:1-interface ceiling in the same PR — it will otherwise fail the build.</prompt>
+  <role>SPAARKE platform architect. Respect the CI-enforced shared-library layering absolutely.</role>
+  <goal>A registered singleton assertion provider, injected as a nullable parameter into the shared-lib types, with all 46 existing test fixtures still compiling and green.</goal>
+
+  <justification>
+    <existing>No assertion abstraction exists anywhere — verified: zero WithClientAssertion / ClientAssertionCredential in src/**. ManagedIdentityCredentialFactory.cs:26-41 provides a UAMI-pinned TokenCredential for Azure.Identity app-only calls, but no MSAL client assertion and no CCA cache; it is used by none of the 8 CCA sites.</existing>
+    <extension>The IMPLEMENTATION extends the existing Infrastructure/Auth/ seam and reuses ManagedIdentityCredentialFactory's UAMI resolution. The CONTRACT cannot live there: Spaarke.Dataverse cannot reference Sprk.Bff.Api (dependency direction) and cannot reference Spaarke.Core (circular — Spaarke.Core.csproj:32 already references Dataverse; blocked by LayerDependencyTests.cs:43 FR-14). Dependency inversion is the only legal seam.</extension>
+    <cost-of-doing-nothing>Without it, DataverseAccessDataSource and the other shared-lib sites cannot obtain a client assertion at all, so the OBO paths — including row-level authorization for every document and AI endpoint — must keep using the client secret. The project's primary goal fails. Additionally each of the 6 call sites would need independent assertion plumbing, and the credential type could not be switched by configuration, which is the entire rollback mechanism (NFR-06).</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>E4' established that Microsoft.Identity.Web's declarative ClientCredentials list is unusable here — zero EnableTokenAcquisition / ITokenAcquisition / IDownstreamApi / ClientCredentials in any .cs, and Spaarke.Dataverse has no Identity.Web reference at all. The mechanism is .WithClientAssertion + ManagedIdentityClientAssertion. The seam shape mirrors the nullable TokenCredential already injected at DataverseAccessDataSource.cs:32 from Program.cs:46-48.</background>
+    <relevant-files>
+      <file role="new">src/server/shared/Spaarke.Dataverse/IClientAssertionProvider.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/ADR010_DITests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </relevant-files>
+    <dependencies><dependency task="011" status="pending">Singleton-cached CCAs — assertions require shared clients</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the CONTRACT is declared in Spaarke.Dataverse; the IMPLEMENTATION and Microsoft.Identity.Web.Certificateless live in the BFF ONLY. Spaarke.Dataverse gains NO ProjectReference and NO new PackageReference.</constraint>
+    <constraint source="ADR-010">Scope: raise knownOneToOneCeiling in ADR010_DITests.cs:164 from 153 to 154 IN THIS PR, with a comment citing this project and the FR-14 cross-assembly justification — the maintenance procedure the test's own comment documents at :144-146. Without it the build fails.</constraint>
+    <constraint source="ADR-010">Scope: register the provider inside an existing DI feature module. Do NOT add an inline AddSingleton to Program.cs — ADR-010 MUST NOT "inline registrations". The TokenCredential precedent at Program.cs:46-48 is itself inline and must not be mirrored.</constraint>
+    <constraint source="ADR-028">Scope: use ManagedIdentityClientAssertion and REUSE the instance — it caches the signed assertion until expiry.</constraint>
+    <constraint source="project">Scope: shared-lib constructors take IClientAssertionProvider? assertion = null with a NULL DEFAULT. Adding a required parameter breaks all 46 test fixtures (NFR-04).</constraint>
+    <constraint source="project">Scope: do NOT migrate any call site in this task — that is task 022. This task only creates and registers the seam.</constraint>
+    <constraint source="ADR-028">Scope: DESIGN THE PROVIDER AS THE HOME FOR A SINGLE SHARED CONFIDENTIAL-CLIENT CACHE. Booked by task 011 (adr-check finding W2, 2026-08-20). After task 011 there are THREE separate per-class static CCA caches keyed (tenant|client) -- DataverseUserClient.cs:55, DataverseAccessDataSource.cs (CcaCache), AgentTokenService.cs (CcaCache) -- so one process can hold three distinct confidential clients, and three distinct token caches, for the SAME (tenant|client). Each is individually correct; collectively they are exactly the per-call-site duplication ADR-028 A4 line 207 was written against ("seven call sites each rolling their own credential handling is what made the previous state unfixable in one place"). This task must not leave that unaddressed by design: the provider's shape must be able to own the shared cache so task 022 can collapse all three onto it. Task 011 accepted this as a time-boxed A4 path-A exception EXPIRING AT TASK 022 -- if 022 does not consolidate, it becomes a standing A4 violation with no owner.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Client assertions, dependency inversion, shared-library layering</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/shared/CLAUDE.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Declare IClientAssertionProvider (one method returning Task&lt;string&gt;, taking a CancellationToken) in Spaarke.Dataverse.</step>
+    <step>Add Microsoft.Identity.Web.Certificateless to Sprk.Bff.Api.csproj ONLY.</step>
+    <step>Implement ManagedIdentityAssertionProvider in Infrastructure/Auth/, reusing ManagedIdentityCredentialFactory's UAMI resolution; cache the ManagedIdentityClientAssertion instance.</step>
+    <step>Register it as a singleton in an existing DI feature module (not Program.cs).</step>
+    <step>Add the nullable parameter to the shared-lib constructors WITHOUT changing behaviour yet.</step>
+    <step>Raise ADR010_DITests.cs:164 ceiling 153 to 154 with the justification comment.</step>
+    <step>Run dotnet test tests/Spaarke.ArchTests/ and confirm both FR-14 and the ADR-010 ceiling pass.</step>
+    <step>Measure publish size (Certificateless is new) and run the CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Adding Certificateless pulls a transitive package that raises publish size by 5 MB or more, or introduces a HIGH CVE — STOP and report per CLAUDE.md §10.</trigger>
+    <trigger>The nullable parameter still breaks test fixtures — STOP; NFR-04 is a hard constraint and the seam shape is wrong if it does.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="new">src/server/shared/Spaarke.Dataverse/IClientAssertionProvider.cs</output>
+    <output type="new">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs</output>
+    <output type="modify">tests/Spaarke.ArchTests/ADR010_DITests.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Spaarke.Dataverse.csproj shows NO added ProjectReference and NO added PackageReference.</criterion>
+    <criterion>LayerDependencyTests FR-14 passes unmodified.</criterion>
+    <criterion>ADR010_DITests passes with the ceiling at 154 and a justification comment naming this project.</criterion>
+    <criterion>The provider is registered in a feature module; Program.cs gains no new inline AddSingleton.</criterion>
+    <criterion>All 46 existing test fixtures compile and pass unchanged.</criterion>
+    <criterion>Negative case: resolving the provider twice returns the same singleton and the same cached assertion instance.</criterion>
+    <criterion>The provider's shape can host ONE shared confidential-client cache keyed (tenant|client), so task 022 can collapse the three existing per-class CcaCache statics onto it. State explicitly in the PR description whether the provider owns the cache or task 022 adds it -- silence here is what turns task 011's time-boxed A4 exception into a permanent one.</criterion>
+    <criterion>Negative case: with no managed identity present (local dev), the provider fails gracefully rather than throwing at startup.</criterion>
+    <criterion>Publish size + delta reported vs 44.96 MB; no new HIGH CVE; Placement Justification stated in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-21. FULL rigor, opus/xhigh, steps mode=prescriptive.
+    Full suite 10,554/0; ArchTests 36/36; publish 43.68 MB compressed incl. PDBs (delta 0.00 vs the
+    pre-change publish of this worktree; ceiling 60); CVE clean; Spaarke.Dataverse.csproj ZERO diff.
+
+    PRESCRIPTIVE-STEP DEVIATION, ESCALATED (step 6). The step said raise ADR010_DITests 153 to 154,
+    "without it the build fails". FALSE, verified twice: ArchTests pass at 153, the real count is 151,
+    and IClientAssertionProvider is ABSENT from the counted list because the test scans
+    typeof(Program).Assembly (BFF only) while the interface lives in Spaarke.Dataverse. A cross-assembly
+    1:1 seam is structurally invisible to that ratchet. Raising it would have widened slack from 2 to 3,
+    letting a future IN-assembly interface land unreviewed. Ceiling left at 153. Both quality gates
+    independently reproduced the finding and endorsed the refusal. Blind spot filed as #809; the
+    LayerDependencyTests PackageReference gap found alongside it filed as #810.
+
+    KEY DESIGN FINDING (gate V1 / W-7, then taken further). Task 021's ordered selection is
+    MI-FIC -> KV certificate -> dev secret. Only the FIRST is an assertion -- a certificate uses
+    .WithCertificate and a secret uses .WithClientSecret. So ordered selection CANNOT live behind
+    Task&lt;string&gt; GetAssertionAsync, and neither can the shared confidential-client cache. Resolved as
+    CLAUDE.md 6.5 path A, with the work done here not deferred: task 021 now owns authoring the
+    client-level seam, task 022's criterion was rewritten (it required a grep result that cannot exist),
+    and two stale code comments pointing at the impossible mechanism were corrected.
+
+    THE GATES REFUTED TWO OF MY CLAIMS BY MEASUREMENT, not opinion:
+    (1) "a per-instance ManagedIdentityClientAssertion costs an IMDS round trip per call" -- measured
+    ZERO extra IMDS calls across five fresh instances; MSAL's MI token cache is process-static and keyed
+    by identity. The claim had spread to FIVE places incl. one cited forward into task 022. All corrected.
+    (2) "asserting the failure path means waiting out a timeout" -- measured ~80ms. Test added; it covers
+    the one property task 021 depends on.
+    Also corrected: a blank UAMI clientId built a user-assigned assertion while logging system-assigned
+    (W-2); "same code path as every app-only consumer" was false, four sites use reversed precedence
+    (W-3); the doc claimed a KV certificate needs no contract change, which is unsafe (Q4).
+
+    BOOKED ONWARD: 021 (client-level seam + fall-through predicate where managed_identity_request_failed
+    must FAIL LOUD not fall through + negative memo + the contract-widening decision) - 022 (cache
+    consolidation, mechanism-agnostic; UAMI precedence convergence) - 061 (census must scan ALL server
+    assemblies) - 090 (/test-diet must adjudicate the three auth files under seam/**; note
+    tests/integration/auth/** is empty AND not compiled).
+
+    Acceptance criterion "resolving the provider twice returns the same singleton" NOT asserted --
+    ADR-038 ban B3. Second time this project's authored criteria specified a banned shape.
+
+    Record: notes/decisions/020-assertion-seam.md
+  </notes>
+</task>

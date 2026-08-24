@@ -83,8 +83,11 @@ public sealed class MembershipJunctionUpdaterOptions
     /// Fully-qualified Service Bus namespace (e.g.,
     /// <c>spaarkesb-dev.servicebus.windows.net</c>). Empty by default;
     /// operator populates alongside flipping <see cref="Enabled"/> to
-    /// <c>true</c>. The host uses <c>DefaultAzureCredential</c> against
-    /// this FQDN (ADR-028 canonical outbound auth).
+    /// <c>true</c>. The host authenticates against this FQDN with the
+    /// DI-injected managed-identity credential, via
+    /// <c>ServiceBusClientFactory.CreateForNamespace</c> (ADR-028 canonical
+    /// outbound auth). Requires <c>Azure Service Bus Data Receiver</c> on
+    /// the subscription or namespace.
     /// </summary>
     public string ServiceBusNamespace { get; set; } = string.Empty;
 

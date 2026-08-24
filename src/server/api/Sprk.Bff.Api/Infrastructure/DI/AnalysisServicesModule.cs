@@ -1606,14 +1606,28 @@ public static class AnalysisServicesModule
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
     {
         var docIntelOptions = configuration.GetSection(DocumentIntelligenceOptions.SectionName).Get<DocumentIntelligenceOptions>();
-        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint) && !string.IsNullOrEmpty(docIntelOptions?.AiSearchKey))
+        // auth-v4 task 053 (FR-E4): the gate is the ENDPOINT, not the key.
+        //
+        // It previously read `endpoint != null && key != null`, which made the ADMIN KEY'S PRESENCE
+        // the feature flag for this entire block - SearchIndexClient plus IRagService,
+        // IFileIndexingService, IKnowledgeDeploymentService, IEmbeddingCache and IVisualizationService.
+        // Clearing the key to finish the Entra migration would therefore not have degraded retrieval;
+        // it would have SILENTLY UN-REGISTERED six services at startup, and every consumer would have
+        // failed with an unrelated "service not registered" error. That is the asymmetric-registration
+        // anti-pattern (CLAUDE.md 10 F.1 / ADR-032) and the same shape as this project's own FR-A1
+        // finding, where secret *presence* selected the Dataverse auth path.
+        //
+        // Gating on the endpoint keeps registration symmetric across both credential modes: with Entra
+        // selected and no key configured, RAG still registers and an auth problem surfaces as an auth
+        // error at call time instead of a missing dependency at startup.
+        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint))
         {
             services.AddSingleton(sp =>
-            {
-                return new Azure.Search.Documents.Indexes.SearchIndexClient(
+                Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateIndexClient(
                     new Uri(docIntelOptions.AiSearchEndpoint),
-                    new Azure.AzureKeyCredential(docIntelOptions.AiSearchKey));
-            });
+                    docIntelOptions.AiSearchKey,
+                    sp.GetRequiredService<IConfiguration>(),
+                    sp.GetRequiredService<Azure.Core.TokenCredential>()));
 
             services.AddSingleton<IKnowledgeDeploymentService, KnowledgeDeploymentService>();
             services.AddSingleton<IEmbeddingCache, EmbeddingCache>();

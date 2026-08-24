@@ -265,12 +265,20 @@ Dynamics CRM (Dataverse):
   - user_impersonation (delegated) - For OBO token exchange
 ```
 
-**Client Secret:**
+**Client Secret:** *(historical — see note)*
 - Created: 2025-12-18
 - Expires: 2027-12-18
-- First 6 chars: `l8b8Q~J`
-- Configuration key: `API_CLIENT_SECRET`
-- Used by: GraphClientFactory, DataverseAccessDataSource, PlaybookService
+- Fingerprint: `[redacted 2026-08-24]`
+- Configuration key: ~~`API_CLIENT_SECRET`~~ — **removed 2026-08-24**
+- Used by: ~~GraphClientFactory, DataverseAccessDataSource, PlaybookService~~ — **nothing.** All three take
+  their credential from `OrderedCredentialClientProvider` since auth-v4 task 022, and the BFF identity
+  became secret-free at task 033 (ADR-028 A4).
+
+> 🔴 **Redacted 2026-08-24.** This bullet published **7 characters of a live 40-character Entra client
+> secret** under a "First 6 chars" caption. The value is redacted here but **remains in git history**. Record
+> the SHA-256 prefix instead — never any part of the value itself. Same finding as
+> `docs/architecture/auth-azure-resources.md`; the owner decision (rotate vs accept) is booked to task 090.
+> This is a historical project record, so only the exposure is corrected — the rest is left as written.
 
 **Storage Locations:**
 ```

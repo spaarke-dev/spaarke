@@ -1,6 +1,10 @@
 # Spaarke Auth v4 — Zero-Secret BFF Confidential Credential (OBO → MI Federated Credentials)
 
-> **Status**: RESEARCH COMPLETE · design drafted · **ready for `/design-to-spec`** · **Epic**: Auth / Code Quality (#427)
+> **Portfolio**: [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Parent Epic [#426 — AUTH & SSO](https://github.com/spaarke-dev/spaarke/issues/426) · [Board](https://github.com/users/spaarke-dev/projects/2)
+> Registered 2026-08-19 · Type Infrastructure · Status Active (Planning) · Start 2026-08-17 · 0/29 tasks
+> Related backlog: [#791](https://github.com/spaarke-dev/spaarke/issues/791) — items 1–2 are now in scope as FR-A1/FR-A2 (tasks 010/011)
+
+> **Status**: **SPEC COMPLETE** — `spec.md` generated + ADR-checked 2026-08-19 · **ready for `/project-pipeline`** · **Epic**: AUTH & SSO (#426)
 > **Origin**: surfaced during `code-quality-and-assurance-r3` task 011 / #3b (app-only Dataverse → MI, done + live)
 > **Type**: auth architecture (**ADR-028 amendment — §6.5 path B**) · **Surface**: BFF confidential clients + `Spaarke.Dataverse`
 > **Risk**: HIGH (OBO = all delegated user auth; fails closed)
@@ -33,8 +37,11 @@ true zero-secret BFF.
   (`SDAP-BFF-SPE-API`, `1e40baad-…`) **already has a working federated identity credential** (GitHub Actions OIDC,
   audience `api://AzureADTokenExchange`, 1 of 20 used), and the App Service runs **user-assigned MI only**
   (`mi-bff-api-dev`) — exactly what MI-FIC requires.
-- **Adoption is largely declarative** — `Microsoft.Identity.Web`'s ordered `ClientCredentials` list
-  (MI-FIC → KV cert → dev secret), which also solves the local-dev story.
+- ~~**Adoption is largely declarative**~~ — **CORRECTED 2026-08-19 (E4′).** `Microsoft.Identity.Web`'s ordered
+  `ClientCredentials` list is the documented mechanism, but **this codebase cannot use it**: zero
+  `EnableTokenAcquisition` / `ITokenAcquisition` / `ClientCredentials` in any `.cs`, and `Spaarke.Dataverse` has no
+  Identity.Web reference at all. The mechanism is `.WithClientAssertion(...)`, and the ordered fallback the whole
+  rollback story rests on must be **built**, not inherited.
 - **No downstream service constrains the credential type** — Dataverse, Graph/SPE, Power BI and Azure OpenAI
   validate only the resulting token.
 - **The scope is bigger than the seed drew it**: 8 confidential-client sites, 5 config keys plus a 6th lowercase
@@ -49,21 +56,46 @@ work. Formal §6.5 escalation is in [`design.md` §7](design.md).
 
 ## Sequencing
 
-- **After** #3b (done, live on dev). **Let `dataverse-access-unification-r1` land first** where possible — it
-  deletes `DataverseWebApiClient` (a secret consumer) for free.
-- **Coordinate with `customer-provisioning-orchestration-r1` now, not later** — it is **executing** (PR #779, ~68%),
-  and H3/H4/H9/H10 are already shipped on that branch. Auth-v4's outcome lands as a change request against them.
-- Operator + Azure AD admin needed to create the federated identity credential per environment. **No FIC automation
-  exists in the repo today** — that is build cost for either secret-free option.
-- **Tenancy is settled**: every deployment shape — Model 1, Model 2-in-Spaarke-tenant, Model 2-in-customer-tenant —
-  is **intra-tenant**, so **MI-FIC covers all of them** with no special cases and **no certificate path to build**.
-  The app registration is created in whichever tenant hosts the deployment. The 20-FIC cap **does not bind** in any
-  of our shapes.
+- **After** #3b (done, live on dev). **`dataverse-access-unification-r1` is NOT a prerequisite** — the earlier
+  "let it land first" framing is retracted; expect parallel execution against a four-file interlock.
+- **`customer-provisioning-orchestration-r1` has ACCEPTED and APPLIED the change request** (2026-08-19,
+  [`notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md)): Model 1 = one shared
+  multitenant app registration (no per-customer FIC); Model 2 = per-customer app registration + FIC; invariant
+  **I6** adopted; risk **R23** closed; pluggability contract accepted as their FR-39.
+- **FIC provisioning automation is now ours to land** — no FIC automation exists in the repo (the dev FIC was
+  created by hand 2026-08-19). Their **task 130 (Wave G-3)** will invoke our extension to
+  `Register-EntraAppRegistrations.ps1` if it lands first, else build its own. This is **spec FR-C4**, the one item
+  outside the dev-only boundary.
+- **Tenancy**: Model 1 and Model 2-in-Spaarke-tenant are intra-tenant and covered by MI-FIC. ⚠️ **One check
+  outstanding** — provisioning's reply describes Model 2 as trusting the *shared* BFF UAMI, which would be
+  cross-tenant (and therefore impossible for MI-FIC) in the customer-tenant shape. Raised back in
+  [`notes/PROVISIONING-CHANGE-REQUEST.md`](notes/PROVISIONING-CHANGE-REQUEST.md) §9.2; must settle before their
+  Wave G-3. The 20-FIC cap does not bind in any shape.
 - Staged, slot-based rollout with explicit rollback. **Dev is P1v3, so slots are available** (the IaC's `B1` is
   drift). No in-session flips — #3b attempt 1 took dev down.
 
 ## Next step
 
-Run **`/design-to-spec`** against [`design.md`](design.md), then `/project-pipeline`. Five open questions are
-listed in [`design.md` §11](design.md) — the scope boundary (include Power BI? defer API keys?) and the Model-2
-identity topology are the two that most change the work.
+Run **`/project-pipeline projects/spaarke-auth-v4-dataverse-MI`**.
+
+[`spec.md`](spec.md) is generated and ADR-checked — **23 FRs across 6 workstreams**, 6 NFRs, 16 success criteria.
+All five design §11 open questions are closed, Phase 0's external-admin dependency is gone, and both cross-project
+coordination documents have been sent (provisioning has replied and applied).
+
+`/adr-check` (2026-08-19) returned **9 compliant · 4 warnings · 1 violation**, all folded into the spec. The
+violation was mechanical and would have reddened CI on the first PR: the new `IClientAssertionProvider` →
+`ManagedIdentityAssertionProvider` pair pushes `ADR010_DITests.cs:164`'s 1:1-interface ceiling from 153 to 154, so
+the ceiling must be raised in the same PR with the seam justification.
+
+Read alongside `design.md`:
+
+- **[`spec.md`](spec.md)** — the implementation specification (`/project-pipeline` input).
+
+- **[`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md)** — live tenant state; the dev
+  MI-FIC was created 2026-08-19; the E4′ correction (the declarative `ClientCredentials` path does **not** exist in
+  this codebase — the mechanism is `.WithClientAssertion`).
+- **[`notes/PROVISIONING-CHANGE-REQUEST.md`](notes/PROVISIONING-CHANGE-REQUEST.md)** — hand to
+  `customer-provisioning-orchestration-r1`. One decision needed from them (§5.1), one doc fix (§5.2), one
+  pluggability contract (§5.3). Answers their risk R23.
+- **[`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md)** —
+  hand to `dataverse-access-unification-r1`. Four-file interlock; not a prerequisite in either direction.

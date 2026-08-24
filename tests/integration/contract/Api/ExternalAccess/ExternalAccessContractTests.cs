@@ -596,11 +596,35 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         : base(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
-            ["Dataverse:ClientId"] = "x",
-            ["Dataverse:ClientSecret"] = "x",
-            ["Dataverse:TenantId"] = "x",
-        }).Build(), NullLogger<DataverseWebApiClient>.Instance)
+        }).Build(), NullLogger<DataverseWebApiClient>.Instance, NoOpCredential.Instance)
     { }
+
+    /// <summary>
+    /// Never used — this double overrides every virtual seam and issues no HTTP. It exists so the
+    /// base constructor needs no credential CONFIGURATION at all.
+    ///
+    /// <para>History, because this stub has now broken twice for unrelated reasons. It originally
+    /// passed <c>Dataverse:ClientId</c> / <c>:ClientSecret</c> / <c>:TenantId</c> — keys
+    /// <see cref="DataverseWebApiClient"/> never reads (it reads <c>API_APP_ID</c> /
+    /// <c>API_CLIENT_SECRET</c> / <c>TENANT_ID</c>) — and worked only because the constructor
+    /// silently fell through to <c>DefaultAzureCredential</c>. Task 010 replaced that silent fallback
+    /// with fail-fast validation, deliberately, since credential-selection-by-accident is the exact
+    /// defect FR-A1 exists to fix; 13 tests failed. Setting the managed-identity flag fixed it, but
+    /// bound the stub to the branch tasks 020/022/033 are about to rewrite. Injecting a credential
+    /// decouples it from both branches permanently. Code-review finding W-6.</para>
+    /// </summary>
+    private sealed class NoOpCredential : TokenCredential
+    {
+        public static readonly NoOpCredential Instance = new();
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "StubDataverseWebApiClient issues no HTTP; if this is reached, a virtual seam was left unoverridden.");
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "StubDataverseWebApiClient issues no HTTP; if this is reached, a virtual seam was left unoverridden.");
+    }
 
     /// <summary>JSON array returned from the next <see cref="QueryAsync{T}"/> (deserialized to List&lt;T&gt;).</summary>
     public string ContactQueryResult { get; set; } = "[]";

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Content Safety: select the existing MI path (FR-E1)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs on a request-path component with a hard latency deadline.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The MI path already exists; this selects it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,ai,api-key</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ContentSafetyAuthHandler prefers the API key when set, but a working Managed Identity path already exists at ContentSafetyTokenProvider.cs:55 and is simply not selected. Clear the key and select bearer auth.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Content Safety authenticates via Managed Identity, with the Prompt Shield 100ms deadline still met.</goal>
+
+  <context>
+    <background>This is the clearest instance of the project's core pattern: a credential retained because nobody re-checked whether the alternative worked. The alternative is already built and documented as an extension of ManagedIdentityCredentialFactory (ContentSafetyTokenProvider.cs:15-22).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ContentSafetyAuthHandler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ContentSafetyTokenProvider.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiSafetyModule.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent of the OBO migration</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the MI path exists — SELECT it, do not rebuild it.</constraint>
+    <constraint source="project">Scope: the Prompt Shield 100ms hard deadline must still be met. Token acquisition must not be on the synchronous critical path uncached.</constraint>
+    <constraint source="project">Scope: the RBAC role assignment for the UAMI on the Content Safety resource must exist before the key is cleared. Verify first.</constraint>
+    <constraint source="ADR-038">Scope: ContentSafetyAuthHandlerTests already covers auth-mode branches — update it, do not duplicate it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure AI Content Safety, managed identity</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Verify the UAMI has the required RBAC role on the Content Safety resource.</step>
+    <step>Clear the key so the existing bearer path is selected.</step>
+    <step>Measure latency against the 100ms deadline.</step>
+    <step>Update ContentSafetyAuthHandlerTests for the new default.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The MI path cannot meet the 100ms deadline — STOP and report rather than degrading safety latency.</trigger>
+    <trigger>The RBAC role cannot be granted — STOP; do not clear the key.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ContentSafetyAuthHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Content Safety authenticates via Managed Identity with no API key configured.</criterion>
+    <criterion>The 100ms Prompt Shield deadline is still met, with a measurement recorded.</criterion>
+    <criterion>Negative case: with MI unavailable, the handler fails in a way that does not silently disable safety checks.</criterion>
+    <criterion>ContentSafetyAuthHandlerTests updated and green.</criterion>
+  </acceptance-criteria>
+</task>

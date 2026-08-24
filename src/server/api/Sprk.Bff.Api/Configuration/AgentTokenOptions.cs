@@ -31,11 +31,17 @@ public class AgentTokenOptions
     public string ClientId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Client secret for the BFF API app registration.
-    /// Required for OBO token exchange.
+    /// Client secret for the BFF API app registration, used for the agent OBO token exchange.
     /// Store in Key Vault (production) or user-secrets (development).
+    ///
+    /// <para><b>No longer <c>[Required]</c> (auth-v4 task 024, FR-B5).</b> A secret is one of three ways
+    /// to satisfy OBO's confidential-credential requirement, and ADR-028 Amendment A4 ranks it last.
+    /// Mandating it here made a secret-free deployment impossible for the agent path specifically.
+    /// Unlike <c>DataverseOptions.ClientSecret</c>, this property <b>is</b> consumed —
+    /// <c>AgentTokenService.cs:105</c> — so relaxing the attribute changes what is <i>required</i>, not
+    /// what is <i>used</i>; task 022 migrates that call site to the ordered credential provider and
+    /// task 033 removes the secret.</para>
     /// </summary>
-    [Required(ErrorMessage = "AgentToken:ClientSecret is required")]
     public string ClientSecret { get; set; } = string.Empty;
 
     /// <summary>
@@ -87,8 +93,19 @@ public class AgentTokenOptionsValidator : IValidateOptions<AgentTokenOptions>
         if (string.IsNullOrWhiteSpace(options.ClientId))
             errors.Add("AgentToken:ClientId is required");
 
-        if (string.IsNullOrWhiteSpace(options.ClientSecret))
-            errors.Add("AgentToken:ClientSecret is required (store in Key Vault or user-secrets)");
+        // ── RELAXED (auth-v4 task 024, FR-B5) ──────────────────────────────────────────────────────
+        // Previously: ClientSecret unconditionally required. A secret is one of three ways to satisfy
+        // OBO's confidential-credential requirement and ADR-028 A4 ranks it last, so mandating it here
+        // made a secret-free agent path impossible.
+        //
+        // Whether a usable credential exists is a question about the ordered credential list
+        // (Graph:Credentials:Order), which this options type cannot see. It is answered at startup by
+        // CredentialSelectionOptionsValidator + IdentityConfigurationValidator. Duplicating that
+        // judgement here would be exactly the per-call-site credential handling A4 exists to end.
+        //
+        // NOT relaxed: TenantId, ClientId, AgentAppId, DataverseEnvironmentUrl. Those identify WHO the
+        // exchange is between and are required regardless of which credential proves it.
+        // ───────────────────────────────────────────────────────────────────────────────────────────
 
         if (string.IsNullOrWhiteSpace(options.AgentAppId))
             errors.Add("AgentToken:AgentAppId is required (the M365 Copilot agent app registration)");

@@ -66,9 +66,23 @@ services.AddSingleton<IResourceStore, SpeFileStore>();  // No other implementati
 
 ```csharp
 // These are the ONLY interfaces with multiple implementations
-services.AddSingleton<IAccessDataSource, DataverseAccessDataSource>();
+services.AddScoped<IAccessDataSource>(/* CachedAccessDataSource decorating DataverseAccessDataSource */);
 services.AddSingleton<IEnumerable<IAuthorizationRule>>(/* rules */);
 ```
+
+> **Lifetime corrected 2026-08-20** (`spaarke-auth-v4-dataverse-MI` task 011, code-review finding S-14).
+> The example previously read `AddSingleton<IAccessDataSource, DataverseAccessDataSource>()`, which is
+> **not** what the code does and must not be copied: `DataverseAccessDataSource` is a **transient typed
+> HttpClient** (`SpaarkeCore.AddSpaarkeCore`) decorated by a scoped `CachedAccessDataSource`. It holds
+> mutable per-instance auth state (`_currentToken`, the `HttpClient`'s `Authorization` header), so a
+> singleton registration is a **data race that can bleed a token between users** — not merely an
+> efficiency question. Expensive shared state is handled *inside* the class via a static
+> `(tenant|client|secret-fingerprint)` confidential-client cache, which is the pattern to copy when a
+> type must share a credential without sharing an instance. See
+> `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md`.
+>
+> The *point* the example is making — that `IAccessDataSource` is one of only two sanctioned
+> multi-implementation seams — is unchanged and still correct.
 
 ---
 

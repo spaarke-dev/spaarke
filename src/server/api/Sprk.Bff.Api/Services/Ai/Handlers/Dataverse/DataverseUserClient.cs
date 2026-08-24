@@ -45,32 +45,38 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// </remarks>
 public sealed class DataverseUserClient : IDataverseUserClient
 {
-    /// <summary>
-    /// Process-wide MSAL confidential-client cache keyed by (authority, clientId). This type is
-    /// a typed HttpClient (transient); constructing a fresh CCA per instance would discard
-    /// MSAL's in-memory user token cache and force an OBO network exchange on EVERY tool call.
-    /// Sharing the CCA amortizes OBO exchanges across calls within/across chat turns while the
-    /// per-user isolation stays intact (MSAL caches OBO tokens per user assertion).
-    /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
-        CcaCache = new();
-
     private readonly HttpClient _httpClient;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<DataverseUserClient> _logger;
     private readonly string? _environmentUrl;
-    private readonly IConfidentialClientApplication? _cca;
+
+    /// <summary>
+    /// Ordered credential provider (auth-v4 task 021). Injected as the CONCRETE type: only
+    /// <c>DataverseAccessDataSource</c> — which lives in the base layer and cannot see this assembly —
+    /// needs the <c>IConfidentialClientProvider</c> interface, and ADR-010 prefers concretes elsewhere.
+    ///
+    /// <para>It also replaces this type's own static confidential-client cache. That cache existed
+    /// because this is a transient typed HttpClient and a per-instance MSAL client would discard the
+    /// OBO user-token cache on every tool call; the provider's single cache serves the same purpose for
+    /// every consumer at once, which is what closes task 011's time-boxed ADR-028 A4 exception.</para>
+    /// </summary>
+    private readonly OrderedCredentialClientProvider? _confidentialClients;
+
+    private readonly string? _tenantId;
+    private readonly string? _clientId;
 
     public DataverseUserClient(
         HttpClient httpClient,
         IOptions<DataverseOptions> dataverseOptions,
         IConfiguration configuration,
         IHttpContextAccessor httpContextAccessor,
-        ILogger<DataverseUserClient> logger)
+        ILogger<DataverseUserClient> logger,
+        OrderedCredentialClientProvider? confidentialClients = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confidentialClients = confidentialClients;
 
         var options = dataverseOptions?.Value;
         _environmentUrl = FirstNonEmpty(
@@ -78,33 +84,34 @@ public sealed class DataverseUserClient : IDataverseUserClient
             configuration["Dataverse:ServiceUrl"])?.TrimEnd('/');
 
         // BFF confidential client (audience of the inbound user token). AzureAd:* is the
-        // canonical OBO configuration (module CLAUDE.md); TENANT_ID / API_APP_ID /
-        // API_CLIENT_SECRET are the legacy keys DataverseAccessDataSource uses.
-        var tenantId = FirstNonEmpty(configuration["AzureAd:TenantId"], configuration["TENANT_ID"]);
-        var clientId = FirstNonEmpty(configuration["AzureAd:ClientId"], configuration["API_APP_ID"]);
-        var clientSecret = FirstNonEmpty(configuration["AzureAd:ClientSecret"], configuration["API_CLIENT_SECRET"]);
+        // canonical OBO configuration (module CLAUDE.md); TENANT_ID / API_APP_ID are the legacy
+        // keys DataverseAccessDataSource uses. The client SECRET is no longer read here at all —
+        // whether the identity is proven by MI-FIC, a certificate or the transitional secret is the
+        // provider's ordered decision (task 022, FR-B3).
+        _tenantId = FirstNonEmpty(configuration["AzureAd:TenantId"], configuration["TENANT_ID"]);
+        _clientId = FirstNonEmpty(configuration["AzureAd:ClientId"], configuration["API_APP_ID"]);
 
-        if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret))
+        if (OboAvailable)
         {
-            // Shared per (tenant, client) so MSAL's user token cache survives across the
-            // transient typed-HttpClient lifetimes — see CcaCache doc comment.
-            _cca = CcaCache.GetOrAdd($"{tenantId}|{clientId}", _ =>
-                ConfidentialClientApplicationBuilder
-                    .Create(clientId)
-                    .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
-                    .WithClientSecret(clientSecret)
-                    .Build());
-            _logger.LogDebug("[dataverse.*] DataverseUserClient resolved OBO confidential client (user-context only; no app-only path)");
+            _logger.LogDebug("[dataverse.*] DataverseUserClient OBO configured via the ordered credential provider (user-context only; no app-only path)");
         }
         else
         {
             // Fail-closed by construction: without OBO config, every call errors. We do NOT
             // fall back to managed identity / client credentials — that would create the
             // app-only authorization side-channel the spec MUST rule forbids.
-            _cca = null;
             _logger.LogWarning("[dataverse.*] DataverseUserClient missing OBO configuration — dataverse.* tools will fail closed (no app-only fallback by design)");
         }
     }
+
+    /// <summary>
+    /// Whether an OBO exchange can be attempted. Requires an identity and a credential provider —
+    /// deliberately NOT a client secret, which was the pre-task-022 precondition.
+    /// </summary>
+    private bool OboAvailable =>
+        _confidentialClients is not null
+        && !string.IsNullOrEmpty(_tenantId)
+        && !string.IsNullOrEmpty(_clientId);
 
     /// <inheritdoc />
     public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
@@ -145,7 +152,7 @@ public sealed class DataverseUserClient : IDataverseUserClient
                 "Dataverse environment URL is not configured (Dataverse:EnvironmentUrl).");
         }
 
-        if (_cca is null)
+        if (!OboAvailable)
         {
             return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboNotConfigured,
                 "OBO confidential-client configuration is missing; dataverse.* tools require user-context OBO and have no app-only fallback.");
@@ -174,8 +181,15 @@ public sealed class DataverseUserClient : IDataverseUserClient
         string dataverseToken;
         try
         {
+            // Asked per exchange: the provider owns the ONE client cache and re-evaluates the
+            // credential when a suppressed higher-priority one recovers, so holding the client here
+            // would pin this path to a fallback after one blip.
+            var cca = await _confidentialClients!
+                .GetClientAsync(_tenantId!, _clientId!, cancellationToken)
+                .ConfigureAwait(false);
+
             // MSAL user token cache makes repeat exchanges within a chat turn cheap.
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            var result = await cca.AcquireTokenOnBehalfOf(
                     new[] { $"{_environmentUrl}/.default" },
                     new UserAssertion(userToken))
                 .ExecuteAsync(cancellationToken)
@@ -188,6 +202,16 @@ public sealed class DataverseUserClient : IDataverseUserClient
             _logger.LogWarning("[dataverse.*] OBO exchange failed: {ErrorCode}", ex.ErrorCode);
             return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed,
                 $"On-Behalf-Of token exchange for Dataverse failed ({ex.ErrorCode}).");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Every configured credential was exhausted (IConfidentialClientProvider's contract). That
+            // is a configuration fault, not an exchange fault, so it maps to OboNotConfigured — and it
+            // is caught HERE rather than left to propagate because dataverse.* tools must fail closed
+            // with a tool-shaped error, never with an unhandled exception escaping into the SSE stream.
+            _logger.LogWarning("[dataverse.*] no usable confidential credential: {Message}", ex.Message);
+            return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboNotConfigured,
+                "No usable confidential credential is available for the On-Behalf-Of exchange.");
         }
 
         using var request = new HttpRequestMessage(method, $"{_environmentUrl}{apiPath}");

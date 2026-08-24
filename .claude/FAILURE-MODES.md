@@ -26,6 +26,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-4: Silent dev/demo deployed-bundle drift causing /api-prefix bug](#ap-4-silent-devdemo-deployed-bundle-drift-causing-api-prefix-bug)
 - [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
 - [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
+- [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -594,6 +595,49 @@ Full pattern documented at [`.claude/patterns/ui/navigateto-popup-result-bridge.
 
 **Cross-references**:
 - Every Spaarke wizard: `CreateEventWizard`, `CreateMatterWizard`, `CreateProjectWizard`, `WorkspaceLayoutWizard`, `DocumentUploadWizard`, `PlaybookLibrary`, `AllDocuments`, `SummarizeFilesWizard`, `FindSimilar`, `CreateTodoWizard`, `CreateWorkAssignmentWizard`. If any of them uses `target: 2` and returns a result to its opener, audit for this same pattern.
+
+---
+
+### AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only
+
+**Date**: 2026-08-20 · **Class**: Anti-pattern · **Source**: `spaarke-auth-v4-dataverse-MI` task 010, caught at task 011
+
+**What happened.** Task 010 fixed a real defect: `DataverseWebApiClient` selected its credential from
+*secret presence* rather than from the `Graph:ManagedIdentity:Enabled` flag. Part of the fix replaced a
+**silent fallback** (`no secret → quietly use DefaultAzureCredential`) with **fail-fast validation**
+(`no secret and flag off → throw, naming the missing setting`). That is the right change — selecting a
+credential by accident is exactly the defect being fixed.
+
+It was verified with the new seam tests, a build, a publish-size measurement and a CVE scan. All green.
+It shipped **13 failing contract tests**, found only when the *next* task ran the full suite.
+
+**Root cause.** A test double had been passing config keys the class never reads
+(`Dataverse:ClientId` instead of `API_APP_ID`), and worked *only* because the silent fallback caught it.
+The general shape:
+
+> Callers that depend on a silent fallback are, by definition, **not visible at the change site**.
+> They are the ones that supplied nothing — so there is no reference, no call, no type dependency to
+> grep for. A targeted test run selects tests *near the change*, which is precisely the set that
+> excludes them.
+
+**Prevention.** When a change converts a silent fallback / default / permissive branch into a throw,
+a rejection, or a required value:
+
+1. **Run the FULL test suite, not a targeted filter.** This is the whole rule. The blast radius is
+   unbounded by construction and cannot be scoped by inspection.
+2. Do not report the task verified on the strength of targeted tests + build + publish + CVE. That
+   combination looks thorough and is blind to exactly this class.
+3. If failures appear in a *later* task, **check whether they are yours before calling them
+   pre-existing** — stash your changes and re-run the same filter on the clean baseline. "It fails on
+   master too" and "it fails without my current edits" are different claims; only the first means
+   pre-existing.
+
+**Fix applied.** Set the double's config to declare its branch explicitly, then (per code review) gave
+`DataverseWebApiClient` an optional `TokenCredential? credential = null` parameter — the shape its
+sibling `DataverseAccessDataSource` already had — so doubles need no credential configuration at all
+and cannot break again when tasks 020/022/033 rewrite either branch.
+
+**Evidence**: `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md` §8.
 
 ---
 

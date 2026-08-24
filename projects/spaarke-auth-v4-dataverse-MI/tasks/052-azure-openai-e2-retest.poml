@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Azure OpenAI: re-test ADR-028 exception E-2, custom subdomain first (FR-E3)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag; touches an ADR exception registry entry.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documented root cause with a specific first check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,ai,api-key,adr</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ADR-028 exception E-2 records that Azure OpenAI returns 401 under managed identity. Microsoft documents the usual root cause as a MISSING CUSTOM SUBDOMAIN — regional endpoints reject Entra tokens. Check that first; if it is the cause, this may be a one-config-change elimination.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Either the key is cleared and MI works, or E-2 is re-affirmed with current evidence rather than inherited assumption.</goal>
+
+  <context>
+    <background>AiModule.cs:115,122-128 selects ApiKeyCredential when the key is set, else the DI TokenCredential — so clearing the key restores MI in one config change IF the underlying 401 is fixed. Research established the documented causes: missing custom subdomain, missing Cognitive Services OpenAI User role, and up to 5 minutes of role propagation.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file role="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: CHECK THE CUSTOM SUBDOMAIN FIRST on spaarke-openai-dev before anything else. It is the documented root cause of exactly this symptom.</constraint>
+    <constraint source="project">Scope: allow up to 5 minutes for role propagation before concluding MI does not work.</constraint>
+    <constraint source="ADR-028">Scope: if MI still fails, RE-AFFIRM E-2 with current evidence and a dated note. Do not leave it standing on a stale assumption — that is the failure mode this project exists to fix.</constraint>
+    <constraint source="project">Scope: .claude/adr edits are main-session only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure OpenAI, Entra auth, custom subdomains</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Check whether spaarke-openai-dev has a custom subdomain configured.</step>
+    <step>Verify the UAMI holds Cognitive Services OpenAI User on the account.</step>
+    <step>Clear the key in a non-production context and test inference under MI, allowing for propagation.</step>
+    <step>If it works, clear the key and update E-2 to resolved.</step>
+    <step>If it fails, capture the exact error and re-affirm E-2 with dated current evidence.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Adding a custom subdomain would change the endpoint URL consumers depend on — STOP; that is a breaking change beyond this task's scope.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/052-openai-e2-retest.md</output>
+    <output type="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The custom-subdomain hypothesis is explicitly tested and the result recorded.</criterion>
+    <criterion>Either the key is cleared and inference works under MI, or E-2 carries dated current evidence.</criterion>
+    <criterion>Negative case: E-2 is NOT left standing on the original stale assumption under any outcome.</criterion>
+    <criterion>Negative case: no consumer-visible endpoint URL changed.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-08-21. Outcome: E-2 RE-AFFIRMED with current dated evidence. Key NOT cleared.
+    Record: notes/decisions/052-azure-openai-e2-retest.md
+
+    Custom subdomain checked FIRST as the constraint demands: it IS configured
+    (customSubDomainName=spaarke-openai-dev). The hoped-for one-config fix does not exist and was
+    never the cause. RBAC re-verified present (both Cognitive Services OpenAI User and Cognitive
+    Services User at account scope). User-token chat completion returns 200 on BOTH endpoint hosts.
+
+    NEAR-MISS WORTH READING: those 200s nearly became "E-2 disproven". They are not. E-2's own Why
+    already records "Direct curl with the same audience using my own bearer token returned HTTP 200
+    to the same URL" -- my result REPRODUCES the prior finding. The distinguishing fact has always
+    been the PAIR: user token 200 vs managed-identity token 401 with verified-correct idtyp=app
+    claims. Concluding from the half already known to pass is the exact failure mode this project
+    exists to eliminate.
+
+    The MI half is NOT testable from here: a workstation has no IMDS, and the Kudu SCM container does
+    not receive the MI env vars (verified: has_endpoint=no, IMDS_HTTP=000). An earlier Kudu run
+    appeared to give MI_INFERENCE_HTTP=401, which would have looked like confirmation -- but
+    token_len=0 showed it was a 401 from an EMPTY bearer. Reporting it would have been a fabricated
+    confirmation.
+
+    ONE CHEAP TEST REMAINS, booked onto 031: this kind=AIServices account's own endpoint is
+    ...cognitiveservices.azure.com but the app is configured with ...openai.azure.com. Set the
+    endpoint to the account's own host AND clear AzureOpenAI__ApiKey on the slot, then exercise one
+    completion. Two settings, instantly reversible. That host alias is the one variable E-2 never
+    isolated.
+
+    Nothing was changed in any live environment. ADR-028 E-2 gains a dated re-affirmation block; the
+    exception text itself is unchanged.
+  </notes>
+</task>
