@@ -58,6 +58,15 @@ public static class HandlerIds
     /// <summary>H4 -- KV secrets population + T1 keyVaultReferenceIdentity PATCH.</summary>
     public const string H4 = "H4";
 
+    /// <summary>
+    /// H4-shared (task 200) -- shared-tier KV secrets population via
+    /// Azure.ResourceManager SDK extraction from source services
+    /// (AI Search / Cognitive Services / Service Bus / Storage / Redis).
+    /// Sibling of H4; targets the SHARED KV, not per-tenant. Owns the
+    /// F19 automation gap; runs BEFORE H4b (task 201) + H9 (task 052).
+    /// </summary>
+    public const string H4Shared = "H4-shared";
+
     /// <summary>H5 -- Dataverse environment creation.</summary>
     public const string H5 = "H5";
 
@@ -121,6 +130,6 @@ public static class HandlerIds
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4Shared, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

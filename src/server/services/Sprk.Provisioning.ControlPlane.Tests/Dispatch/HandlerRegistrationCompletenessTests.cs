@@ -83,9 +83,11 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
     }
 
     [Fact]
-    public void Dispatchable_ContainsExactlyNineteenIds()
+    public void Dispatchable_ContainsExactlyTwentyIds()
     {
-        HandlerIds.Dispatchable.Should().HaveCount(19);
+        // Task 200 bumped 19 → 20 (added H4Shared for F19 automation —
+        // shared-tier KV secrets population via source-service SDK extraction).
+        HandlerIds.Dispatchable.Should().HaveCount(20);
     }
 
     [Theory]

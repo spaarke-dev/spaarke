@@ -477,6 +477,27 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
 });
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
+// Task 200: H4-shared handler + two new collaborator seams (source-service
+// key extractor + shared-KV per-secret accessor). Reuses H4's IKvSecretManifest
+// (from-shared-service entries filtered in the handler), IArmKeyVaultRefProbe
+// (T1 post-condition), and KvSecretsPopulationOptions (no divergent knobs
+// required today). ArmClient instance reuses the shared UAMI-pinned
+// TokenCredential singleton via the same factory-lambda pattern as the H4
+// collaborators above.
+builder.Services.AddSingleton<ISourceServiceKeyExtractor>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    return new SdkSourceServiceKeyExtractor(armClient);
+});
+builder.Services.AddSingleton<ISharedKvSecretAccessor>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var logger = sp.GetRequiredService<ILogger<SecretClientKvSharedSecretAccessor>>();
+    return new SecretClientKvSharedSecretAccessor(credential, logger);
+});
+builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
+
 // Task 070 / 150: H12a AI seed chain handler + two collaborator seams
 // (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
 // retired-artifact scan; ISeedManifestRunner = task 150's

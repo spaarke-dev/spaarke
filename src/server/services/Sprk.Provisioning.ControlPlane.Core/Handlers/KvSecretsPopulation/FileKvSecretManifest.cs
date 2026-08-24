@@ -178,7 +178,24 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 var diagnostic =
                     $"manifest.yaml entry '{secret.CanonicalName}' has unrecognized value_source " +
                     $"'{secret.ValueSource}' (expected one of: from-existing-kv, from-bicep-output, " +
-                    "from-run-parameter, generated).";
+                    "from-run-parameter, generated, from-shared-service).";
+                _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
+                return new KvSecretManifestReadResult.Failure(diagnostic);
+            }
+
+            // Task 200: enforce parser-side that from-shared-service entries
+            // carry a non-empty service_ref (mirrors the PowerShell generator's
+            // conditional-required check in Test-ManifestShape). Without a
+            // service_ref the downstream H4-shared handler has no source to
+            // extract from, so the entry is malformed — fail loud rather than
+            // silently swallow.
+            if (valueSource == KvSecretValueSource.FromSharedService
+                && string.IsNullOrWhiteSpace(secret.ServiceRef))
+            {
+                var diagnostic =
+                    $"manifest.yaml entry '{secret.CanonicalName}' has value_source=from-shared-service " +
+                    "but missing/empty service_ref. service_ref is CONDITIONALLY required for this " +
+                    "value_source (format '<type>:<az-resource-name>', e.g. 'search:sprksharedprod-search').";
                 _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
                 return new KvSecretManifestReadResult.Failure(diagnostic);
             }
@@ -186,7 +203,11 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
             // Operation is always Upsert — manifest.yaml never declares a
             // per-entry operation field; Delete ops are a manual, pre-checked
             // alias-collapse action (task 085 pattern), never generator-emitted.
-            entries.Add(new KvSecretEntry(secret.CanonicalName, KvSecretOperation.Upsert, valueSource));
+            entries.Add(new KvSecretEntry(
+                secret.CanonicalName,
+                KvSecretOperation.Upsert,
+                valueSource,
+                ServiceRef: valueSource == KvSecretValueSource.FromSharedService ? secret.ServiceRef : null));
         }
 
         // Determinism contract parity with the PowerShell generator: sort
@@ -216,6 +237,12 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
             case "generated":
                 valueSource = KvSecretValueSource.Generated;
                 return true;
+            case "from-shared-service":
+                // Task 200: shared-tier secrets extracted by H4-shared from
+                // source Azure services (Search / CognitiveServices / Service
+                // Bus / Storage / Redis).
+                valueSource = KvSecretValueSource.FromSharedService;
+                return true;
             default:
                 valueSource = default;
                 return false;
@@ -234,5 +261,14 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
         public string? CanonicalName { get; set; }
         public bool NeverDelete { get; set; }
         public string? ValueSource { get; set; }
+
+        /// <summary>
+        /// Task 200 addition. CONDITIONALLY required (populated) only when
+        /// <see cref="ValueSource"/> == <c>from-shared-service</c>. Format
+        /// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c>. Absent for every other
+        /// value_source — the deserializer leaves this null, which the loop
+        /// above enforces explicitly.
+        /// </summary>
+        public string? ServiceRef { get; set; }
     }
 }

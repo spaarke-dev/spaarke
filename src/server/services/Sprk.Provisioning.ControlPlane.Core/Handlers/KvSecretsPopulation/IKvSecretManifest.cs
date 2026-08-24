@@ -78,10 +78,21 @@ public interface IKvSecretManifest
 /// (cleartext never traverses handler code — ADR-028 MUST rule); it delegates
 /// value resolution to the writer.
 /// </param>
+/// <param name="ServiceRef">
+/// Task 200 addition — populated ONLY for entries with
+/// <see cref="KvSecretValueSource.FromSharedService"/>. Format
+/// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c> (e.g.
+/// <c>search:sprksharedprod-search</c>) mirrored verbatim from the canonical
+/// secret-catalog manifest's <c>service_ref:</c> field. Consumed by
+/// H4SharedKvSecretsPopulationHandler to build a
+/// <see cref="System.String"/>-parsed <c>SharedKvSecretSource</c> for the
+/// <c>ISourceServiceKeyExtractor</c>. NULL for every other value_source.
+/// </param>
 public sealed record KvSecretEntry(
     string CanonicalName,
     KvSecretOperation Operation,
-    KvSecretValueSource ValueSource);
+    KvSecretValueSource ValueSource,
+    string? ServiceRef = null);
 
 /// <summary>What H4 must do with a manifest entry.</summary>
 public enum KvSecretOperation
@@ -110,6 +121,20 @@ public enum KvSecretValueSource
 
     /// <summary>Value is generated in-place (webhook signing keys, random bytes, etc.).</summary>
     Generated = 4,
+
+    /// <summary>
+    /// Task 200 addition — value is EXTRACTED at run time from a source Azure
+    /// service (AI Search admin key, Cognitive Services Key1, Service Bus
+    /// RootManageSharedAccessKey, Storage account key1 composed connection
+    /// string, Redis primary-key composed connection string). Owned by
+    /// H4SharedKvSecretsPopulationHandler (task 200), NOT the per-tenant H4
+    /// handler — the sibling H4-shared flow reads the target vault, extracts
+    /// fresh source value, and rotates on drift. The per-tenant H4 handler
+    /// SKIPS these entries (they don't belong to per-tenant KVs).
+    /// Accompanying <see cref="KvSecretEntry.ServiceRef"/> carries the
+    /// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c> lookup key.
+    /// </summary>
+    FromSharedService = 5,
 }
 
 /// <summary>

@@ -105,6 +105,10 @@ public static class HandlerDispatchRegistrationModule
             HandlerIds.H3, (sp, _) => sp.GetRequiredService<H3EntraAppRegHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4, (sp, _) => sp.GetRequiredService<H4KvSecretsPopulationHandler>());
+        // Task 200: H4-shared (F19 automation) — sibling of H4; targets the
+        // SHARED KV via source-service SDK extraction.
+        services.AddKeyedScoped<IProvisioningHandler>(
+            HandlerIds.H4Shared, (sp, _) => sp.GetRequiredService<H4SharedKvSecretsPopulationHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvCreationHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

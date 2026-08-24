@@ -190,6 +190,13 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "this resolver branch when the secret does NOT already exist. H4 has no plumbing today " +
                     "to read ARM deployment outputs directly (InterStepState is a locked enumerated POCO " +
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
+            KvSecretValueSource.FromSharedService => Task.FromResult<KvSecretValueResolution>(
+                new KvSecretValueResolution.Failed(
+                    $"value_source=FromSharedService on '{entry.CanonicalName}' is owned by " +
+                    "H4SharedKvSecretsPopulationHandler (task 200) — NOT the per-tenant H4 flow. " +
+                    "The per-tenant H4 handler filters these entries out before invoking the writer; " +
+                    "if this resolver call is reached, the per-tenant filter has regressed. See " +
+                    "H4SharedKvSecretsPopulationHandler.cs for the source-extraction pipeline.")),
             _ => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"Unrecognized KvSecretValueSource '{entry.ValueSource}' for '{entry.CanonicalName}'.")),

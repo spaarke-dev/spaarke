@@ -77,7 +77,12 @@ public sealed class FileKvSecretManifestTests
     [Theory]
     [InlineData("Dataverse-ClientSecret", KvSecretValueSource.FromExistingKvSecret)]
     [InlineData("TenantId", KvSecretValueSource.FromRunParameters)]
-    [InlineData("AiSearch--AdminKey", KvSecretValueSource.FromBicepOutput)]
+    // Task 200: AiSearch--AdminKey flipped from-bicep-output → from-shared-service
+    // when the F19 automation manifest additions landed (Phase A of task 200).
+    // Kept as an inline case here because it exercises the FromSharedService
+    // parser mapping end-to-end against the real embedded manifest.
+    [InlineData("AiSearch--AdminKey", KvSecretValueSource.FromSharedService)]
+    [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromBicepOutput)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
@@ -101,6 +106,33 @@ public sealed class FileKvSecretManifestTests
         var firstSuccess = first.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         var secondSuccess = second.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         secondSuccess.Entries.Count.Should().Be(firstSuccess.Entries.Count);
+    }
+
+    // Task 200: from-shared-service entries MUST carry a non-empty ServiceRef
+    // (parser enforces conditional-required; downstream H4-shared handler
+    // parses it as '<type>:<az-resource-name>'). Non-shared-service entries
+    // MUST leave ServiceRef null (no leakage of the shared-only field into
+    // the per-tenant flow).
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_FromSharedServiceEntries_CarryServiceRef()
+    {
+        var manifest = NewManifest();
+
+        var result = await manifest.ReadAsync(CancellationToken.None);
+
+        var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
+        var sharedEntries = success.Entries
+            .Where(e => e.ValueSource == KvSecretValueSource.FromSharedService)
+            .ToList();
+        sharedEntries.Should().NotBeEmpty("Phase A of task 200 added 6 shared-service entries");
+        sharedEntries.Should().OnlyContain(e => !string.IsNullOrWhiteSpace(e.ServiceRef));
+        sharedEntries.Should().OnlyContain(e => e.ServiceRef!.Contains(':'),
+            "service_ref format is '<type>:<az-resource-name>'");
+
+        var nonSharedEntries = success.Entries
+            .Where(e => e.ValueSource != KvSecretValueSource.FromSharedService);
+        nonSharedEntries.Should().OnlyContain(e => e.ServiceRef == null,
+            "ServiceRef is scoped to from-shared-service entries only — no leakage");
     }
 
     [Fact]

@@ -431,9 +431,21 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
+        // Task 200: FromSharedService entries belong to
+        // H4SharedKvSecretsPopulationHandler (targets the SHARED KV, not the
+        // per-tenant KV). Filter them out here BEFORE the writer sees them so
+        // the KvSecretValueResolver never hits its FromSharedService branch
+        // during a per-tenant H4 run. The manifest is the single source of
+        // truth for both flows; the tier-split lives in the handler.
+        var perTenantEntries = entries
+            .Where(e => e.ValueSource != KvSecretValueSource.FromSharedService)
+            .ToList();
+
         _logger.LogInformation(
-            "H4 manifest loaded: runId={RunId} customerId={CustomerId} entryCount={EntryCount} upgradeMode={UpgradeMode} rotate={Rotate}",
-            envelope.RunId, envelope.CustomerId, entries.Count, upgradeMode, rotateExisting);
+            "H4 manifest loaded: runId={RunId} customerId={CustomerId} entryCount={EntryCount} " +
+            "perTenantCount={PerTenantCount} sharedSkipped={SharedSkipped} upgradeMode={UpgradeMode} rotate={Rotate}",
+            envelope.RunId, envelope.CustomerId, entries.Count, perTenantEntries.Count,
+            entries.Count - perTenantEntries.Count, upgradeMode, rotateExisting);
 
         // (6) Invoke the writer. Domain outcomes (per-entry Failed / whole-writer
         //     Failure) do NOT throw; only infra faults do. Classification:
@@ -448,7 +460,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 CustomerId: envelope.CustomerId,
                 TargetKeyVaultName: keyVaultName,
                 SubscriptionId: subscriptionId,
-                Entries: entries,
+                Entries: perTenantEntries,
                 UpgradeMode: upgradeMode,
                 RotateExisting: rotateExisting,
                 SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
