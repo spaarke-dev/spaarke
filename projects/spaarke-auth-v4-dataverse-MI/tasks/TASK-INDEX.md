@@ -26,9 +26,9 @@
 | 041 | Power BI tenant setting + rework both services | 4 PowerBI | FULL | sonnet/high | 040 | — | ✅ | FR-D1/D2 | ⏭️ |
 | 042 | Remove `PowerBi:ClientSecret` | 4 PowerBI | FULL | sonnet/high | 041 | — | ✅ | FR-D3 | ⏭️ |
 | 050 | Content Safety → MI (path already exists) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E1 |✅ |
-| 051 | Service Bus → namespace + MI (**rotation DONE**, code DONE; cutover booked to 031/033) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E2 | 🔄 |
+| 051 | Service Bus SAS -> MI (**LIVE CUTOVER DONE 2026-08-24: namespace set, BOTH SAS spellings deleted; health check reports 'authorized for queue sdap-jobs'; MSAL token from the UAMI partition. KV ServiceBus-ConnectionString RETAINED as the UAT rollback source**) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E2 | ✅ |
 | 052 | Azure OpenAI E-2 — custom-subdomain check first | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E3 |✅ |
-| 053 | AI Search → Entra/MI (**×7, not ×2**) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | 🔄 |
+| 053 | AI Search -> Entra (**LIVE CUTOVER DONE 2026-08-24: MI flag on + all 4 key settings deleted; RAG returns IDENTICAL results (12/18, same documents) with no key configured; zero 403s. KV AiSearch--AdminKey RETAINED as the UAT rollback source**) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E4 | ✅ |
 | 054 | Document Intelligence ×3 → Entra/MI (1 done by 053, 2 retained w/ reason) | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E5 |✅ |
 | 055 | `Analysis:PromptFlowKey` disposition | 5 Group2 | STANDARD | sonnet/med | — | **F** | ✅ | FR-E6 |✅ |
 | 056 | Bing key → KV-by-name + **stop fabricating web results** | 5 Group2 | FULL | sonnet/high | — | **F** | ✅ | FR-E7 |✅ |
