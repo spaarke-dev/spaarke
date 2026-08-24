@@ -104,7 +104,8 @@
       keyVaultReferenceIdentity before deploying to it, and establish who created it.
     </obligation>
     <obligation source="051" id="051-B">
-      Service Bus cutover. Set on production AND the staging slot:
+      Service Bus cutover. Set on BOTH SLOTS of the dev app spaarke-bff-dev (the default slot,
+      which Azure calls "production", and the slot named "staging"):
         ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
       Namespace wins over the still-present SAS string, so this single setting IS the cutover and
       removing it IS the rollback (NFR-06). RBAC is already granted: mi-bff-api-dev

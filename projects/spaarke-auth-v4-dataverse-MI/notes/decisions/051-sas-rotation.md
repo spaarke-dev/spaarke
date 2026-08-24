@@ -14,7 +14,7 @@
 | The leaked key was the namespace **PRIMARY** of `RootManageSharedAccessKey` (Manage+Send+Listen, whole namespace) | fingerprint match against `C:/code_files/spaarke/src/server/api/Sprk.Bff.Api/appsettings.Development.json` — gitignored, **never committed** |
 | That key is **rotated and dead** — fp `348e57a64503` no longer exists | `az servicebus namespace authorization-rule keys renew --key PrimaryKey` |
 | **Both** current keys are valid — proven at the data plane, not inferred | hand-built SAS token → `POST /sdap-jobs/messages/head` → **HTTP 204** for primary and secondary |
-| Prod slot and `staging` slot both run the **secondary** connection string | fp `f6d0dfd1ac9f` on both |
+| Both slots of `spaarke-bff-dev` (default + `staging`) run the **secondary** connection string | fp `f6d0dfd1ac9f` on both |
 | KV secret `ServiceBus-ConnectionString` (`spaarke-spekvcert`) holds the **new primary** | fp `3db62606e51e` |
 | Dev job processing healthy — 0 `InvalidSignature` since 20:36Z | App Insights |
 
@@ -25,13 +25,13 @@ handling rule as the client secret from task 022.
 
 ## 2. The outage, and the tell I misread
 
-After rotating the key I fixed **production** app settings six times — Key Vault refresh,
+After rotating the key I fixed the **default slot's** app settings six times — Key Vault refresh,
 version-pinned references, literal values, the secondary key, four restarts, each one
 fingerprint-verified correct — while a **`staging` slot** kept looping on the dead key. It reports
 the same `cloud_RoleName=spaarke-bff-dev` to App Insights, so every diagnostic pointed at the app I
 was already fixing.
 
-**The tell**: the failure rate never dipped at *any* production restart. A process that restarts and
+**The tell**: the failure rate never dipped at *any* default-slot restart. A process that restarts and
 keeps failing looks identical in aggregate to one that never restarted — unless you look for the
 gap. *Check for slots the second time a restart changes nothing, not the sixth.*
 
@@ -178,7 +178,7 @@ Given owner decision #1 is **dev only**, every `az` command in this project shou
 
 The escalation trigger *"Service Bus RBAC cannot be granted — STOP"* did **not** fire: it is granted.
 
-**The exact setting 031 must apply**, on production **and** the `staging` slot:
+**The exact setting 031 must apply**, on **both slots of `spaarke-bff-dev`** (the default slot and `staging`):
 
 ```
 ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
@@ -215,10 +215,14 @@ project's "no in-session flips" non-negotiable, it is a controlled step for 031.
   exists**; do not create it.
 - **Task 033** — remove `ConnectionStrings__ServiceBus` **and** `ServiceBus__ConnectionString` from
   both slots, then the KV secret. Two keys, not one.
-- **Owner** — who created the `staging` slot, and is it meant to be running? (The `38f7693f-…`
-  principal is resolved — see §8; it needed a lookup in this project's own notes, not the owner.)
-- **Owner** — the standing `Cognitive Services User` grant on your account from task 050 is still in
-  place; say the word and it comes off.
+- **Owner** — should the `staging` slot be Running? Its creator is not recoverable (activity log
+  retains 90 days and has no entry, so it predates 2026-05-26). This matters most for **032**: a slot
+  swap promotes whatever is in `staging` into the default slot. (The `38f7693f-…` principal is
+  resolved — see §8 — and needed a lookup in this project's own notes, not the owner.)
+- **Owner decision, closed 2026-08-23: the `Cognitive Services User` grant on the owner's account
+  STAYS.** It is on the owner's *user* account, not on the BFF's identity — the platform authenticates
+  to Content Safety / OpenAI as `mi-bff-api-dev` and is unaffected either way. Retained for future
+  latency measurements. Do not re-raise this.
 - **Task 090** — `WorkersModule` and `OfficeWorkersModule` each carried a shadowed registration that
   had been dead long enough to drift onto a different config key. Nothing looks for duplicate
   singleton registrations of the same type; that is a general BFF hygiene gap, not a Service Bus one.

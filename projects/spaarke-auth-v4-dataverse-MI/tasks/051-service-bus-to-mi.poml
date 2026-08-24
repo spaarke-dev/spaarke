@@ -101,7 +101,7 @@
     Sender + Data Receiver at NAMESPACE scope on spaarke-servicebus-dev.servicebus.windows.net
     (RG SharePointEmbedded, sub 484bc857-...). Escalation trigger did NOT fire.
 
-    031 must set, on production AND the staging slot:
+    031 must set, on BOTH SLOTS of spaarke-bff-dev (default + staging):
       ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
     033 must remove BOTH ConnectionStrings__ServiceBus and ServiceBus__ConnectionString, then the
     KV secret.

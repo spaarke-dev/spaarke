@@ -32,16 +32,39 @@
 A live SAS value was echoed in terminal output (it was a plaintext app setting). Never written to
 any file, commit or record — only fingerprints. That key is the rotated one, so it is dead.
 
-### 2. 🔴 A `staging` slot EXISTS and is RUNNING — the note that said "0 exist" was FALSE
+### 2. 🔴 There are TWO SLOTS on `spaarke-bff-dev` — the note that said "0 exist" was FALSE
 
-It has its **own app settings** and reports the **same `cloud_RoleName`** to App Insights. It caused
-a ~40-minute dev outage I misdiagnosed for six attempts: I fixed *production* repeatedly (each fix
+**Terminology first, because the wrong words caused real confusion.** There is **one** App Service,
+`spaarke-bff-dev`, and it is a **dev** app. It has two deployment slots:
+
+| Slot | Host | State |
+|---|---|---|
+| the **default slot** — Azure's UI/API calls this one "production" | `spaarke-bff-dev.azurewebsites.net` | Running |
+| a slot named **`staging`** | `spaarke-bff-dev-staging.azurewebsites.net` | Running |
+
+**"Production" here NEVER means a production environment.** Spaarke does not run one. It is Azure's
+label for the default slot of this dev app. Earlier notes said "I fixed production" meaning "I fixed
+the default slot"; that wording has been corrected throughout — do not reintroduce it.
+
+The `staging` slot has its **own app settings** and reports the **same `cloud_RoleName`** to App Insights. It caused
+a ~40-minute dev outage I misdiagnosed for six attempts: I fixed the **default slot** of `spaarke-bff-dev` repeatedly (each fix
 fingerprint-verified correct) while the slot looped on the dead key.
 
-**The tell I misread**: the failure rate never dipped at *any* production restart. Check for slots
+**The tell I misread**: the failure rate never dipped at *any* default-slot restart. Check for slots
 the **second** time a restart changes nothing, not the sixth.
 
 Corrected in `CLAUDE.md:86`. **031 must not create the slot — it exists. 033 must purge BOTH.**
+
+**Measured 2026-08-23 (endpoint host only; no key printed):** both slots point at
+**`spaarke-servicebus-dev.servicebus.windows.net`** — so the rotation was **dev-only, no production
+blast radius**. Both slots carry **both** config keys (`ConnectionStrings__ServiceBus` *and*
+`ServiceBus__ConnectionString`), confirming the two-key fan-out on the live app rather than by
+inference from Bicep. `ServiceBus__FullyQualifiedNamespace` is **absent on both** — that is 031's job.
+
+**Who created the `staging` slot is unknown and probably unknowable**: the Azure activity log retains
+90 days and shows nothing for it, so it predates 2026-05-26. Its `lastModified` (2026-08-23T20:35Z)
+is just my own outage fix. The open question is not "who owns it" — it is **should it be Running at
+all**, which matters most for **032**, where a slot swap would promote whatever is in it.
 
 ### 3. ⚠️ Always pass `--subscription` to `az`
 
@@ -58,7 +81,7 @@ Dev subscription: **`484bc857-3802-427f-9ea5-ca47b43db0f0`**.
 | **Service Bus PRIMARY key regenerated** | ❌ **NO — permanent** |
 | KV `ServiceBus-ConnectionString` → new primary | yes (versioned) |
 | Prod + staging app settings → secondary connection string | yes |
-| Owner granted **my user** `Cognitive Services User` on `spaarke-openai-dev` (050 measurement) | **STILL STANDING — offer to remove** |
+| Owner granted **their user** `Cognitive Services User` on `spaarke-openai-dev` (050 measurement) | **STAYS — owner decision 2026-08-23. Do not re-raise.** It is on the owner's user account, not the BFF's identity; the platform uses `mi-bff-api-dev` either way |
 
 **Nothing changed in this session** — 051's code half used read-only Azure queries only.
 
