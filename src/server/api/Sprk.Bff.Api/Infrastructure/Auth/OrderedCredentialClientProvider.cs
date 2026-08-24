@@ -420,78 +420,78 @@ public sealed class OrderedCredentialClientProvider : IConfidentialClientProvide
         switch (kind)
         {
             case CredentialKind.ManagedIdentityFederated:
-            {
-                if (_assertionProvider is null)
                 {
-                    return null;
+                    if (_assertionProvider is null)
+                    {
+                        return null;
+                    }
+
+                    // Mint once, here. This is not the availability probe task 021's constraints forbid:
+                    // ManagedIdentityClientAssertion caches the signed assertion until expiry, so the
+                    // callback below returns this very assertion rather than issuing a second request.
+                    // A credential is only bound once it has been shown to exist.
+                    await _assertionProvider.GetAssertionAsync(ct).ConfigureAwait(false);
+
+                    var identity = ManagedIdentityCredentialFactory.ResolveUamiClientId(_configuration)
+                        ?? "system-assigned";
+
+                    return new CredentialDescriptor(
+                        identity,
+                        builder => builder.WithClientAssertion(
+                            options => _assertionProvider.GetAssertionAsync(options.CancellationToken)));
                 }
-
-                // Mint once, here. This is not the availability probe task 021's constraints forbid:
-                // ManagedIdentityClientAssertion caches the signed assertion until expiry, so the
-                // callback below returns this very assertion rather than issuing a second request.
-                // A credential is only bound once it has been shown to exist.
-                await _assertionProvider.GetAssertionAsync(ct).ConfigureAwait(false);
-
-                var identity = ManagedIdentityCredentialFactory.ResolveUamiClientId(_configuration)
-                    ?? "system-assigned";
-
-                return new CredentialDescriptor(
-                    identity,
-                    builder => builder.WithClientAssertion(
-                        options => _assertionProvider.GetAssertionAsync(options.CancellationToken)));
-            }
 
             case CredentialKind.KeyVaultCertificate:
-            {
-                var certificateName = _options.KeyVaultCertificateName;
-                if (string.IsNullOrWhiteSpace(certificateName))
                 {
-                    return null;
+                    var certificateName = _options.KeyVaultCertificateName;
+                    if (string.IsNullOrWhiteSpace(certificateName))
+                    {
+                        return null;
+                    }
+
+                    if (_secretClient is null)
+                    {
+                        // The operator listed this credential AND named a certificate, so an absent Key
+                        // Vault client is a deployment-shape error, not an environment without certificates.
+                        // Falling through here would be the silent downgrade in a different costume.
+                        throw new InvalidOperationException(
+                            $"{CredentialSelectionOptions.SectionName}:Order includes "
+                            + $"{CredentialKind.KeyVaultCertificate} and names certificate "
+                            + $"'{certificateName}', but no Key Vault SecretClient is registered. Configure "
+                            + "SpeAdmin:KeyVaultUri (or KeyVaultUri) so the certificate can be loaded.");
+                    }
+
+                    var certificate = await KeyVaultCertificateLoader
+                        .LoadAsync(_secretClient, certificateName, ct)
+                        .ConfigureAwait(false);
+
+                    // Fingerprinted on the certificate NAME, not its thumbprint, because the key has to be
+                    // computable without a Key Vault round trip on the cache-hit path. Consequence, stated
+                    // rather than discovered: rotating a certificate under the same name needs a process
+                    // restart to take effect. That is exactly how CiamGraphClientFactory already behaves —
+                    // it caches its built client for the process lifetime — so this is parity with the
+                    // certificate exemplar, not a new limitation.
+                    return new CredentialDescriptor(
+                        $"cert:{certificateName}",
+                        builder => builder.WithCertificate(certificate),
+                        certificate);
                 }
-
-                if (_secretClient is null)
-                {
-                    // The operator listed this credential AND named a certificate, so an absent Key
-                    // Vault client is a deployment-shape error, not an environment without certificates.
-                    // Falling through here would be the silent downgrade in a different costume.
-                    throw new InvalidOperationException(
-                        $"{CredentialSelectionOptions.SectionName}:Order includes "
-                        + $"{CredentialKind.KeyVaultCertificate} and names certificate "
-                        + $"'{certificateName}', but no Key Vault SecretClient is registered. Configure "
-                        + "SpeAdmin:KeyVaultUri (or KeyVaultUri) so the certificate can be loaded.");
-                }
-
-                var certificate = await KeyVaultCertificateLoader
-                    .LoadAsync(_secretClient, certificateName, ct)
-                    .ConfigureAwait(false);
-
-                // Fingerprinted on the certificate NAME, not its thumbprint, because the key has to be
-                // computable without a Key Vault round trip on the cache-hit path. Consequence, stated
-                // rather than discovered: rotating a certificate under the same name needs a process
-                // restart to take effect. That is exactly how CiamGraphClientFactory already behaves —
-                // it caches its built client for the process lifetime — so this is parity with the
-                // certificate exemplar, not a new limitation.
-                return new CredentialDescriptor(
-                    $"cert:{certificateName}",
-                    builder => builder.WithCertificate(certificate),
-                    certificate);
-            }
 
             case CredentialKind.ClientSecret:
-            {
-                var secret = ResolveClientSecret();
-                if (string.IsNullOrWhiteSpace(secret))
                 {
-                    return null;
+                    var secret = ResolveClientSecret();
+                    if (string.IsNullOrWhiteSpace(secret))
+                    {
+                        return null;
+                    }
+
+                    // Fingerprint, never the secret itself: a raw secret in a dictionary key widens its
+                    // memory-dump surface and leaks through any future key-listing diagnostic (task 011 W-1).
+                    var fingerprint = Convert.ToHexString(
+                        SHA256.HashData(Encoding.UTF8.GetBytes(secret)))[..16];
+
+                    return new CredentialDescriptor(fingerprint, builder => builder.WithClientSecret(secret));
                 }
-
-                // Fingerprint, never the secret itself: a raw secret in a dictionary key widens its
-                // memory-dump surface and leaks through any future key-listing diagnostic (task 011 W-1).
-                var fingerprint = Convert.ToHexString(
-                    SHA256.HashData(Encoding.UTF8.GetBytes(secret)))[..16];
-
-                return new CredentialDescriptor(fingerprint, builder => builder.WithClientSecret(secret));
-            }
 
             default:
                 return null;
