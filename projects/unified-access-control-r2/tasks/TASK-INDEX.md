@@ -50,11 +50,12 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 
 ---
 
-## Phase 0b — Review remediation (8 tasks, filed 2026-08-24)
+## Phase 0b — Review remediation (9 tasks, filed 2026-08-24)
 
 Filed by owner decision from the multi-agent re-review of the 13 completed Phase 0 tasks.
 Findings: [`notes/review-2026-08-24-findings.md`](../notes/review-2026-08-24-findings.md).
-**021–027** are the review's §6 proposals; **028** was found while resolving task 009's escalation.
+**021–027** are the review's §6 proposals; **028** and **029** were both found while resolving
+task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix created.
 
 | # | Task | Finding | Deps | Safe | Tier | Effort | Why |
 |---|---|---|---|---|---|---|---|
@@ -62,13 +63,19 @@ Findings: [`notes/review-2026-08-24-findings.md`](../notes/review-2026-08-24-fin
 | 🔲 **021** | Provisioning stamping PATCH: 3 wrong names + swallowed 400 | Critical (C4/C5) | 008 | ❌ | **opus** | **xhigh** | Creates real infra since 2026-03, leaves the project pointing at none. ⚠️ nav-prop names MUST come from `$metadata` — do not guess |
 | 🔲 **025** | Test-integrity: 4 untested seams + gate mechanism + false-claim tests | H6,M3,M7 | 003,007,017 | ❌ | **opus** | **xhigh** | This is WHY the rest could hide — the central gate can return blanket rights with the suite green |
 | 🔲 **023** | Grant upsert must write `sprk_expiresdate` (+ FR-09 acceptance) | H1 | 007,010 | ❌ | sonnet | high | A-5's shape resurrected on the write path by the two tasks that closed it on the read path |
+| 🔲 **029** | External To Do read + create parity (matter + WA) | (task 009 asymmetry) | 009 | ❌ | sonnet | high | Task 009 widened PATCH but not list/create — **the write plane is now wider than the read plane**. Owner intent: parent flows from creation context |
 | 🔲 **028** | Service request: the missing 4th core accessible set | (task 009 escalation) | 009 | ❌ | sonnet | high | Model names 4 core types; `CallerPrincipal` carries 3. Completes the owner parity decision |
 | 🔲 **024** | SPE Graph paging + `/revoke` status parity | M1,M2 | 016,017 | ❌ | sonnet | high | `container_not_cleared` currently gives FALSE assurance on a multi-page container |
 | 🔲 **026** | Schema-truth doc repair | M4,M5 | — | ✅ | sonnet | medium | Cheapest, and the only one attacking the CAUSE of five stale-column recurrences |
 | 🔲 **027** | e2e tier reconciliation — or deliberate retirement | M6 | — | ✅ | sonnet | high | A suite that reads as coverage, pins 4 nonexistent contracts, and runs in no workflow |
 
-**Recommended order**: 022 → 021 → 025 → 023 → 028 → 024, with 026 and 027 runnable
+**Recommended order**: 022 → 021 → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
 in parallel at any time (both `parallel-safe: true`, no deps, no contended code).
+
+**029 before 028**: 029 closes a live incoherence on the shipped surface (writable-but-not-listable
+records) using two patterns that already exist — the `documents` module's OR'd `ScopeDimension` list
+and the already-entity-generic `ApplyResolverFieldsAsync`. 028 adds a root that nothing yet consumes.
+Running 029 first also means 028 has exactly one place to add its fourth root on each path.
 
 **Not filed as tasks** (recorded as constraints on existing tasks): H4 `/share-link` missing
 authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.ok` → task 065.

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="unified-access-control-r2">
+  <metadata>
+    <title>External To Do read + create parity with PATCH -- matter and work assignment, per the owner's regarding decision</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the external-access read AND write path; adds a Dataverse write shape (new @odata.bind nav props) and changes a client-visible contract.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The pattern exists twice already -- the documents module's OR'd ScopeDimension list for the read half, and CreateTodoAsync's own project path for the write half. This is a third instance, not a new mechanism.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/ExternalDataService.cs, Api/ExternalAccess/ExternalProjectDataEndpoints.cs and Infrastructure/DI/ExternalAccessModule.cs -- all contended external-access paths.</parallel-reason>
+    <deps>009</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <origin>Filed 2026-08-24 by owner decision, from the task-009 read/write asymmetry. Task 009 widened PATCH /todos/{id} to matter and work assignment per the owner's ruling that "matter and work assignment should have same functionality as project"; the read and create paths were left project-only, so PATCH is now WIDER than list. The owner also stated the product intent directly: a To Do must be associable to ANY regarding entity, and the parent must flow from the creation context (create a To Do while on a Matter -> sprk_regardingmatter plus the four resolver fields).</origin>
+  </metadata>
+
+  <prompt>Task 009 widened the external To Do PATCH to matter- and work-assignment-parented to-dos per the owner's parity decision, but left GetTodosAsync and CreateTodoAsync project-only. The write plane is therefore wider than the read plane: a caller can PATCH a matter-parented to-do the same plane will not list and cannot create. Close the asymmetry in the direction the owner specified -- read and create reach matter and work assignment too, with the parent flowing from creation context and the four ADR-024 resolver fields stamped for whichever parent type it is.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the external-access data plane (ExternalDataService, ExternalModuleRegistry ScopeDimension scoping, Tier2ScopeFilterInjector) and ADR-024 multi-entity regarding on sprk_todo.</role>
+
+  <goal>The external To Do surface is symmetric across read, create and update for all three A-9 accessible roots: a caller who can PATCH a matter-parented to-do can also list and create matter-parented to-dos, and no caller can read or create outside their accessible sets. The four ADR-024 resolver fields are stamped correctly for whichever parent type the create names.</goal>
+
+  <context>
+    <background>Task 009 (commits b8414aeb3, 9294f0182) added GetTodoRootAsync + a root-scoped gate to PATCH /api/v1/external/todos/{id}, covering project, matter and work assignment. GetTodosAsync still filters on `_sprk_regardingproject_value eq {projectId}` only, and CreateTodoAsync still hard-codes the project parent. The result is a real asymmetry, not a cosmetic one: the SPA cannot show or create the very records it is now allowed to edit.
+
+The owner's product intent (stated 2026-08-24): "To Do need to be able to be associated to any of the 'regarding' entities; this should flow when the To Do was created 'from' or in context of its parent (e.g., if I'm on a Matter, and 'Create To Do', the matter is set as the To Do's sprk_regardingmatter and sprk_regardingrecord, sprk_regardingrecordnumber, sprk_regardingrecordtype etc.)". The authorization boundary of THIS project caps that at the three roots that have accessible sets; service request is task 028, and the remaining nine regarding types have no accessible set at all (see the GetTodoRootAsync remarks).
+
+TWO EXISTING MECHANISMS ALREADY DO MOST OF THIS -- find them before writing anything new (CLAUDE.md §11):
+
+(1) READ. `ExternalAccessModule.cs:189-195` registers the `documents` external module with exactly the OR'd three-dimension scope this needs:
+      new ScopeDimension { Attribute = "sprk_project",        AccessibleIds = p =&gt; p.GetAccessibleProjectIds().ToHashSet() },
+      new ScopeDimension { Attribute = "sprk_matter",         AccessibleIds = p =&gt; p.GetAccessibleMatterIds() },
+      new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p =&gt; p.GetAccessibleWorkAssignmentIds() },
+    `invoices` declares a two-dimension version. There is NO `todos` module. Decide deliberately whether the To Do read belongs on the generic scoped-fetch plane (`POST /api/v1/external/data/fetch` + Tier2ScopeFilterInjector) as a registered module, or on bespoke sibling routes -- and say why. A registered module is the reuse answer; bespoke routes are justified only if the SPA's To Do view genuinely cannot consume the generic plane. Note the attribute names in that list are LOOKUP names, not the `_value` forms, and sprk_todo's lookups are `sprk_regardingproject` / `sprk_regardingmatter` / `sprk_regardingworkassignment` -- verify against live metadata, do not pattern-match.
+
+(2) CREATE. `ExternalDataService.ApplyResolverFieldsAsync` (private, ~line 528) is ALREADY generic in the entity name: it takes `regardingEntityName`, stamps sprk_regardingrecordid / name / url, and resolves `sprk_RegardingRecordType@odata.bind` dynamically through `ResolveRecordTypeRefAsync` against `sprk_recordtype_ref`. So the resolver-field half of the owner's ask needs NO new code. Exactly two things in `CreateTodoAsync` are hard-coded to project: the specific lookup bind `body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})"`, and the `GetProjectByIdAsync` call that supplies the display name. Those two are the whole write-side change.
+
+Also read `Services/Workspace/TodoRegardingBuilder.cs` -- its `RegardingLookupByEntity` map already enumerates every supported sprk_todo regarding parent on the SDK path, and it enforces the ADR-024 one-parent-at-a-time rule. It is the authority for which ATTRIBUTE belongs to which entity. It is NOT the authority for the `@odata.bind` navigation-property casing, which is a different name and must come from $metadata.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs</file>
+      <file role="modify">projects/unified-access-control-r2/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in this exact file pair: once because two guards denied the same case so a status-code assertion could not tell them apart (fixed by asserting WHICH guard denied, via the response detail), and once because a new membership check had a positive test and no negative one (fixed by adding the negative). Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="project">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe / $metadata) before writing any $select, $filter, $orderby or @odata.bind. SIX stale-column instances have been found in this project; the sixth (H5, task 022) was an $orderby on `sprk_name` sitting one line BELOW a correct $select -- so check every clause that names a column, not just the select. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name: `sprk_regardingproject` binds as `sprk_RegardingProject`, and matter / work assignment may not follow the same capitalization. Get all three from metadata.</constraint>
+    <constraint source="project">DIFFERENT FAILURE MODE FROM TASK 021 -- do not carry 021's fear across without checking. CreateTodoAsync THROWS on any non-success response, so a wrong @odata.bind name fails loudly with a 400 rather than being silently swallowed (021's provisioning PATCH swallowed its 400, which is why wrong names there were invisible). Get the names from metadata anyway; but if a name is wrong here you will see it, so do not add a defensive swallow "to be safe" -- that would manufacture 021's bug in a file that does not have it.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse before you build. The `documents` module entry is a working three-dimension scope declaration and `ApplyResolverFieldsAsync` is already entity-generic. If you end up adding a new service, a new interface, or a second copy of the entity-to-lookup mapping, stop and justify it against those two -- a second mapping table is exactly how an attribute-name transposition gets introduced (this project already has the AppendAccess/AppendToAccess precedent).</constraint>
+    <constraint source="ADR-024">At most ONE specific regarding lookup may be set on a to-do. The four resolver fields (sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_RegardingRecordType) are written ATOMICALLY with the lookup in the same request -- never in a follow-up PATCH. TodoRegardingBuilder enforces the one-parent rule on the SDK path; the Web API path must not be able to create a two-parent row that GetTodoRootAsync would then classify as Ambiguous and deny forever.</constraint>
+    <constraint source="ADR-003">Fail closed on BOTH new paths. A create naming a parent outside the caller's accessible set must deny before any Dataverse write. A list for a root outside the accessible set must deny, not return an empty collection -- an empty list is indistinguishable from "no to-dos" and hides the denial.</constraint>
+    <constraint source="project">THE LEVEL ASYMMETRY IS LOAD-BEARING HERE -- decide it explicitly and write the decision down. `CreateTodo` today requires `AccessRights.Create` from `GetEffectiveRights(projectId)`. Project access carries a level (ExternalAccessLevel -> AccessRights); the matter and work-assignment accessible sets are bare IReadOnlySet&lt;Guid&gt; with NO level anywhere in the pipeline, so membership would imply create. That is the same asymmetry task 009 accepted for PATCH, and it is owner-approved for update -- but CREATE is a different act. Either follow 009's precedent (membership implies create; say so in a comment) or block create on the levelless roots. Do not leave it implicit either way, and record the reasoning in the notes file.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Extend the EXISTING tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs and its ExternalTodoScopeTestFixture -- they already substitute ICallerPrincipalResolver and a StubExternalDataService subclass, and the fixture's load-bearing assertion is a call-count, not a status code. Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="review-2026-08-24">Mocking at a seam proves the CALLER, never the CALLEE. If you widen GetTodosAsync's $filter, a test that substitutes GetTodosAsync cannot see the filter -- assert the emitted OData at the level that actually builds it, or the widening ships untested. Task 017 shipped an untested fix in this exact shape.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1 (shipped) and SPA-r3 (draft).</constraint>
+    <constraint source="project">CLIENT CONTRACT. Adding routes or a module changes what the external SPA can call. Do NOT change or remove the existing project-scoped routes' shapes -- SPA-r1/r2 are shipped against them. New capability is additive. If the read half lands as a registered module rather than routes, note in the PR that the SPA needs a corresponding client change and that this task does not deliver it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-024-multi-entity-regarding.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>projects/unified-access-control-r2/notes/task-009-external-todo-scope.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/api/endpoint-definition.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Verify against live metadata: sprk_todo's regarding lookups for project, matter and work assignment, and the PascalCase @odata.bind navigation property for each. Record all three names and their source in the notes file.</step>
+    <step order="1">Read the documents and invoices module registrations plus Tier2ScopeFilterInjector, and decide where the READ half belongs: a registered `todos` external module on the generic scoped-fetch plane, or sibling routes. Write the decision and its reason down BEFORE implementing.</step>
+    <step order="2">Implement the read half. Whichever shape, prove a matter-parented to-do is listed for a caller holding that matter and is NOT listed for one who is not -- and that an out-of-scope root denies rather than returning an empty collection.</step>
+    <step order="3">Implement the create half: parameterize the specific-lookup bind and the display-name lookup by parent type, reusing ApplyResolverFieldsAsync unchanged. Enforce the one-parent ADR-024 rule so no two-parent row can be created.</step>
+    <step order="4">Decide and implement the create-side level question per the constraint (membership-implies-create vs blocked on the levelless roots). Comment the choice at the decision site, not only in notes.</step>
+    <step order="5">Extend ExternalTodoScopeTests: for EACH of the three roots, a positive and a negative on both list and create; an ambiguous-parent create is rejected; the resolver fields are stamped with the right entity for a matter parent. Keep the call-count assertions -- a create must not reach Dataverse on a deny.</step>
+    <step order="6">Perturb, and record counts for each: (a) revert GetTodosAsync's filter to project-only; (b) bypass the create-side scope check; (c) cross-wire the matter dimension to the work-assignment set; (d) stamp the project entity name into a matter-parented create's resolver fields; (e) allow two parent lookups in one create. A zero-failure perturbation means the test is at the wrong level -- fix the test.</step>
+    <step order="7">Amend spec.md: FR-08's acceptance criteria name only the update path. State read/create/update parity across the three roots explicitly, so the asymmetry cannot silently reopen. This is the same lesson as FR-09's missing expiry criterion (task 023).</step>
+    <step order="8">Full suite (all SEVEN test projects); publish size; notes file; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the matter or work-assignment @odata.bind navigation property cannot be read from $metadata in this environment, STOP and escalate rather than guessing. Guessing a nav prop is the exact hazard task 021 exists to avoid.</trigger>
+    <trigger>If the read half turns out to require a change to the shipped external SPA client contract (i.e. the generic scoped-fetch plane cannot serve the To Do view without a client change), STOP and surface it -- coordinating a client change across SPA-r1/r2/r3 is a scope decision, not an implementation detail.</trigger>
+    <trigger>If honouring the owner's "any regarding entity" intent turns out to require accessible sets that do not exist (service request -> task 028; the nine other regarding types -> no set at all), do NOT invent them here. Deliver the three roots, and state plainly in the notes which of the owner's stated intent remains unimplemented and what each missing piece needs.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The read scoping mechanism exists twice (documents module: project + matter + work assignment OR'd; invoices module: two dimensions), and the create-side resolver stamping is already entity-generic in ApplyResolverFieldsAsync. TodoRegardingBuilder already owns the entity-to-lookup mapping on the SDK path.</existing>
+    <extension>Extends three existing files by adding a third instance of an established pattern. No new service, no new interface, no second mapping table.</extension>
+    <cost-of-doing-nothing>The plane's write surface is wider than its read surface: a caller may PATCH a matter- or work-assignment-parented to-do that the same plane refuses to list and cannot create. That is an incoherent contract the SPA cannot express, it leaves the owner's stated product intent (parent flows from creation context) unimplemented for two of the three supported roots, and an asymmetry between what a surface can read and what it can write is precisely the shape that hides authorization defects -- FR-08's acceptance criteria never mentioned read or create, which is how this gap was created in the first place.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs</output>
+    <output type="spec">projects/unified-access-control-r2/spec.md</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-029-external-todo-parity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All three @odata.bind navigation properties and all three lookup attribute names are recorded in the notes file with live metadata as their cited source.</criterion>
+    <criterion>The read-half placement decision (registered module vs sibling routes) is written down with its reason before the implementation, and the chosen shape reuses the existing mechanism rather than duplicating it.</criterion>
+    <criterion>A caller holding a matter can list to-dos parented to that matter; a caller who does not hold it cannot, and the denial is a denial -- not an empty collection.</criterion>
+    <criterion>The same holds for work assignment, and the existing project behaviour is unchanged.</criterion>
+    <criterion>A create naming a matter or work-assignment parent stamps the specific lookup plus all four ADR-024 resolver fields atomically, with the resolver fields carrying the PARENT's entity (not sprk_project).</criterion>
+    <criterion>A create naming a parent outside the caller's accessible set denies with no Dataverse write -- proven by call count, not by status code alone.</criterion>
+    <criterion>A create that would set more than one regarding lookup is rejected.</criterion>
+    <criterion>The create-side level decision is implemented, commented at the decision site, and its reasoning recorded in the notes file.</criterion>
+    <criterion>Every one of the five perturbations in step 6 fails at least one test; counts recorded in the notes file.</criterion>
+    <criterion>FR-08's acceptance criteria in spec.md name read, create AND update parity across the three roots.</criterion>
+    <criterion>The notes file states explicitly which parts of the owner's "any regarding entity" intent remain unimplemented (service request; the nine levelless regarding types) and what each needs.</criterion>
+    <criterion>All 7 test projects pass; publish size reported and &lt;=60 MB compressed incl. PDBs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Filed 2026-08-24 by owner decision from the task-009 asymmetry. Read notes/task-009-external-todo-scope.md first -- it records the level asymmetry, the two zero-failure perturbations this file pair produced, and the GetTodoRootAsync fail-closed contract. Task 028 (service request accessible set) is the natural follow-on for the fourth root; do not fold it in here.</notes>
+</task>
