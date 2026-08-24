@@ -297,6 +297,97 @@ export function describeProductionQuota(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Replication + consuming-tenant overrides (task 026 / spec FR-C08)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * "Updating settings on a container type may take up to **24 hours** for the new values to be
+ * replicated on all consuming tenants." — learn-containertypes.md:101.
+ */
+export const REPLICATION_MAX_HOURS = 24;
+
+/**
+ * What the UI may honestly say after a settings save.
+ *
+ * **There is no third "replicated" state, deliberately.** Graph exposes no replication signal of any
+ * kind — `replicat*` does not appear anywhere in either the v1.0 or the beta CSDL (see
+ * `notes/task-026-findings.md` §1). So nothing ever reports the pending → replicated transition, and
+ * there is no honest moment at which the UI could flip.
+ *
+ * Flipping on a timer would be worse than the bare "Saved" this replaces: it would look authoritative
+ * while being invented. NFR-06 forbids exactly that.
+ */
+export const SAVE_ACCEPTED_TITLE = "Saved — replication is pending";
+
+/** Body of the post-save notice. Both sentences are sourced from learn-containertypes.md:101. */
+export const SAVE_ACCEPTED_DETAIL =
+  `The change was accepted. It may take up to ${REPLICATION_MAX_HOURS} hours to reach consuming ` +
+  "tenants, and this API does not report when replication finishes — so this message will not " +
+  "change to \"replicated\". Any setting a consuming tenant has already overridden keeps its " +
+  "override and will not pick up the new value.";
+
+/**
+ * Parse `consumingTenantOverridables` — a comma-delimited flag string, NOT an array or a typed enum.
+ *
+ * **Unrecognised flags are preserved, never dropped.** Graph's own published enum is narrower than its
+ * own responses: all four live Spaarke Dev container types return `sharingCapability` in this string,
+ * and `sharingCapability` is not a member of `fileStorageContainerTypeSettingsOverride` in **either**
+ * API version. Filtering to "known" members would silently discard a real, live flag — the failure
+ * task 025 avoided in the SDK and this avoids again in the client.
+ */
+export function parseConsumingTenantOverridables(
+  raw?: string | null
+): readonly string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0 && f !== "unknownFutureValue");
+}
+
+/**
+ * Whether a consuming tenant is PERMITTED to override this setting.
+ *
+ * Note carefully what this does and does not say. It reports a **permission**, not a **state** — the
+ * setting may or may not actually be overridden anywhere. `consumingTenantOverridables` carries no
+ * effective value and no indication that an override exists; the effective value lives on a
+ * `fileStorageContainerTypeRegistration` in the CONSUMING tenant, which the owning tenant cannot read
+ * (`notes/task-026-findings.md` §2).
+ *
+ * Presenting this as "overridden" would assert something the response never said.
+ */
+export function isOverridableByConsumingTenant(
+  settingName: string,
+  overridables?: string | null
+): boolean {
+  const flags = parseConsumingTenantOverridables(overridables);
+  return flags.some((f) => f.toLowerCase() === settingName.toLowerCase());
+}
+
+/** Human label for a settings property name, for the overridable list. */
+const SETTING_LABELS: Readonly<Record<string, string>> = {
+  sharingCapability: "External sharing",
+  isItemVersioningEnabled: "Item versioning",
+  itemMajorVersionLimit: "Major version limit",
+  maxStoragePerContainerInBytes: "Storage ceiling per container",
+  isSearchEnabled: "Search indexing",
+  isDiscoverabilityEnabled: "Discoverability",
+  isSharingRestricted: "Sharing restriction",
+  urlTemplate: "URL template",
+  isOfficeRestricted: "Office restriction",
+};
+
+/**
+ * Label an overridable flag for display, falling back to the raw flag name.
+ *
+ * The fallback matters: a flag Graph adds later, or one already live but absent from the published
+ * enum, still renders as itself rather than vanishing.
+ */
+export function labelForSetting(settingName: string): string {
+  return SETTING_LABELS[settingName] ?? settingName;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Billing standing (task 029 / spec FR-C12)
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
     <title>Show replication-pending state and consuming-tenant override state</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>025 complete</gate>
-    <status>not-started</status>
+    <status>completed-partial</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs and .tsx; tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -113,7 +113,23 @@
     <criterion testable="true">dotnet build 0 errors; code page builds; publish size within ceiling.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-C08. Parallel-safe: owns the settings endpoint, DTO, and client screens — does NOT modify SpeAdminGraphService.cs.</notes>
+  <notes>Spec FR-C08.
+
+COMPLETED-PARTIAL 2026-08-24. Client-only in the end — no .cs changed, because task 025 had already delivered the one field this needed (settings.consumingTenantOverridables). The parallel-safe claim happens to hold for 026, unlike 029's; but W10's "no god-file contention" premise was still false, because 029 does modify it.
+
+Step 1 answered definitively: `replicat*` appears NOWHERE in the v1.0 or beta CSDL, so Graph exposes NO replication signal and the honesty constraint resolves to "state the expectation, never imply tracking". The 24-hour figure is sourced to learn-containertypes.md:101.
+
+🔴 PREMISE ERROR at the centre of the task: `consumingTenantOverridables` is a PERMISSION (which settings MAY be overridden), not a STATE (which ARE). It carries no effective value. The POML's "task 025 exposed it; this task renders what it means" reads it as state. Rendering it as "overridden" would assert what the response never said — the defect class this project exists to remove, reintroduced by the task meant to remove an instance of it. Shipped worded as a permission.
+
+🔴 The effective value lives on fileStorageContainerTypeRegistration.settings — but that collection hangs off `fileStorage`, NOT off a container type, and is scoped to the CALLING tenant. So the owning tenant structurally cannot read a remote consuming tenant's overrides. Not a permissions gap.
+
+🔴 Graph's own published enum is narrower than its own responses: all four live container types return `sharingCapability` in the overridables string, and it is not a member of fileStorageContainerTypeSettingsOverride in EITHER version. Unrecognised flags are preserved, never filtered.
+
+🔔 AC-2 ESCALATED — its broad form (show a remote consuming tenant's effective override) is not achievable from an owning-tenant console; its narrow form (what is effective in THIS tenant's registration) is a different feature needing its own task. Three paths in notes/task-026-findings.md §6; recommendation is path 2 + an FR-C08 amendment. The POML's literal trigger did not fire — raised on CLAUDE.md §6 scope-expansion grounds instead.
+
+⚠️ Also unmet as written: the constraint's three-state requirement. "replicated" vs "pending" are NOT distinguishable, because nothing reports the transition. Shipped two honest states rather than inventing a third on a timer.
+
+AC-1/3/4/5/6/7 met. AC-2 escalated. See notes/task-026-findings.md.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

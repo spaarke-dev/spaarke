@@ -72,7 +72,13 @@ import {
   type SharingCapabilityValue,
 } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
-import { assessBilling } from "./containerTypeLifecycle";
+import {
+  assessBilling,
+  labelForSetting,
+  parseConsumingTenantOverridables,
+  SAVE_ACCEPTED_DETAIL,
+  SAVE_ACCEPTED_TITLE,
+} from "./containerTypeLifecycle";
 import type { ContainerType, ContainerTypePermission } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +401,21 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
    */
   const billingAssessment = React.useMemo(
     () => assessBilling(containerType ?? {}),
+    [containerType]
+  );
+
+  /**
+   * Settings a consuming tenant is PERMITTED to override (task 026 / spec FR-C08).
+   *
+   * A permission, not a state — see `containerTypeLifecycle.parseConsumingTenantOverridables`. The
+   * UI must say "may be overridden", never "is overridden", because the effective value lives on a
+   * registration in the consuming tenant that this tenant cannot read.
+   */
+  const overridableSettings = React.useMemo(
+    () =>
+      parseConsumingTenantOverridables(
+        containerType?.settings?.consumingTenantOverridables
+      ),
     [containerType]
   );
 
@@ -721,10 +742,49 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                 </MessageBar>
               )}
 
-              {/* Save success / error banners */}
+              {/*
+                Which settings a consuming tenant MAY override (task 026 / spec FR-C08).
+
+                Deliberately worded as a permission. `consumingTenantOverridables` says what a
+                consuming tenant is ALLOWED to override; it carries no effective value and no
+                indication that any override actually exists. The effective value lives on a
+                fileStorageContainerTypeRegistration in the CONSUMING tenant, which the owning tenant
+                has no way to read (notes/task-026-findings.md §2) — so "is overridden" is a claim this
+                screen cannot make, and the last line says so rather than leaving a false impression
+                of completeness.
+              */}
+              {overridableSettings.length > 0 && (
+                <MessageBar intent="info" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>
+                      Consuming tenants may override these settings
+                    </MessageBarTitle>
+                    {overridableSettings.map(labelForSetting).join(", ")}. Where a
+                    consuming tenant has applied its own value, that value stays in
+                    place and changes saved here will not reach it. Overrides applied
+                    in another tenant are not visible from this screen.
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
+              {/*
+                Post-save feedback (task 026 / spec FR-C08).
+
+                This said "Settings saved successfully." — a bare success that implies the change is
+                in effect. It is not: replication to consuming tenants takes up to 24 hours, and any
+                setting a consuming tenant has overridden never picks the new value up at all
+                (learn-containertypes.md:101). An admin who saved, saw "successfully", checked a
+                consuming tenant and found the old value would reasonably conclude the tool is broken.
+
+                Intent is `info`, not `success` — the write was accepted, which is not the same as the
+                setting being live, and green reads as the latter.
+              */}
               {saveSuccess && (
-                <MessageBar intent="success" className={styles.successBanner}>
-                  <MessageBarBody>Settings saved successfully.</MessageBarBody>
+                <MessageBar intent="info" className={styles.successBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>{SAVE_ACCEPTED_TITLE}</MessageBarTitle>
+                    {SAVE_ACCEPTED_DETAIL}
+                  </MessageBarBody>
                 </MessageBar>
               )}
               {saveError && (
