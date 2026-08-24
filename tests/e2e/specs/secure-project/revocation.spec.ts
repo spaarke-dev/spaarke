@@ -94,9 +94,22 @@ interface RevokeAccessRequest {
   containerId?: string;
 }
 
+/**
+ * Updated by unified-access-control-r2 task 017 (FR-16 / finding A-13 / register H-8b).
+ *
+ * - `webRoleRemoved` was REMOVED from the contract: a Power Pages relic, hard-coded to `false` at every
+ *   call site because Spaarke does not manage web roles.
+ * - `speContainerOutcome` was ADDED because a boolean cannot distinguish the four states an operator
+ *   needs to tell apart — and the old boolean's answer to "no permission matched" was `true`, which is
+ *   precisely how A-13 stayed hidden.
+ */
+type SpeContainerOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermissionFound' | 'Failed';
+
 interface RevokeAccessResponse {
+  /** True ONLY when a container permission was actually deleted. */
   speContainerMembershipRevoked: boolean;
-  webRoleRemoved: boolean;
+  speContainerOutcome: SpeContainerOutcome;
+  deactivatedCount: number;
 }
 
 interface GrantAccessRequest {
@@ -157,11 +170,7 @@ async function grantAccess(
 /**
  * Query sprk_externalrecordaccess records for a given contact + project
  */
-async function queryAccessRecords(
-  dataverseApi: DataverseAPI,
-  contactId: string,
-  projectId: string
-): Promise<any[]> {
+async function queryAccessRecords(dataverseApi: DataverseAPI, contactId: string, projectId: string): Promise<any[]> {
   const fetchXml = `
     <fetch>
       <entity name="sprk_externalrecordaccess">
@@ -211,7 +220,6 @@ async function contactHasSecureProjectWebRole(
 // ============================================
 
 test.describe('Access Revocation — UAC Planes @e2e @secure-project @security', () => {
-
   // Test-level resources to clean up
   let dataverseApi: DataverseAPI;
   let bearerToken: string;
@@ -248,10 +256,13 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
    * Setup: Create a Contact + Project + grant access, return IDs.
    * Used as the precondition "arrange" step for revocation tests.
    */
-  async function setupGrantedAccess(request: APIRequestContext, options?: {
-    accessLevel?: number;
-    containerId?: string;
-  }): Promise<{
+  async function setupGrantedAccess(
+    request: APIRequestContext,
+    options?: {
+      accessLevel?: number;
+      containerId?: string;
+    }
+  ): Promise<{
     contactId: string;
     projectId: string;
     accessRecordId: string;
@@ -276,7 +287,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     if (grantResult.status !== 200) {
       throw new Error(
         `Setup failed: grant returned HTTP ${grantResult.status}. ` +
-        `Expected 200. Check BFF API is deployed and accessible at ${BFF_API_URL}.`
+          `Expected 200. Check BFF API is deployed and accessible at ${BFF_API_URL}.`
       );
     }
 
@@ -303,7 +314,10 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     // Assert: HTTP 200
     expect(result.status).toBe(200);
     expect(result.body).toHaveProperty('speContainerMembershipRevoked');
-    expect(result.body).toHaveProperty('webRoleRemoved');
+    // `webRoleRemoved` was removed by task 017 (Power Pages relic); `speContainerOutcome` replaces the
+    // boolean as the field that actually carries information.
+    expect(result.body).toHaveProperty('speContainerOutcome');
+    expect(result.body).not.toHaveProperty('webRoleRemoved');
   });
 
   // ============================================
@@ -314,20 +328,14 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     const { contactId, projectId, accessRecordId } = await setupGrantedAccess(request);
 
     // Verify record is active before revocation
-    const recordBefore = await dataverseApi.getRecord(
-      ENTITY_SETS.externalRecordAccess,
-      accessRecordId
-    );
+    const recordBefore = await dataverseApi.getRecord(ENTITY_SETS.externalRecordAccess, accessRecordId);
     expect(recordBefore.statecode).toBe(STATE.Active);
 
     // Revoke
     await revokeAccess(request, bearerToken, { accessRecordId, contactId, projectId });
 
     // Verify record is now inactive (statecode=1, statuscode=2)
-    const recordAfter = await dataverseApi.getRecord(
-      ENTITY_SETS.externalRecordAccess,
-      accessRecordId
-    );
+    const recordAfter = await dataverseApi.getRecord(ENTITY_SETS.externalRecordAccess, accessRecordId);
     expect(recordAfter.statecode).toBe(STATE.Inactive);
     expect(recordAfter.statuscode).toBe(2);
   });
@@ -336,9 +344,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
   // Test: Step 4 — Plane 1: Dataverse Web API returns no project data
   // ============================================
 
-  test('Plane 1 — Dataverse: Web API returns no active project data for revoked contact', async ({
-    request,
-  }) => {
+  test('Plane 1 — Dataverse: Web API returns no active project data for revoked contact', async ({ request }) => {
     const { contactId, projectId, accessRecordId } = await setupGrantedAccess(request);
 
     // Revoke
@@ -346,7 +352,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
 
     // Query for active access records for this contact + project
     const activeRecords = await queryAccessRecords(dataverseApi, contactId, projectId);
-    const activeOnes = activeRecords.filter((r) => r.statecode === STATE.Active);
+    const activeOnes = activeRecords.filter(r => r.statecode === STATE.Active);
 
     // No active access records should remain
     expect(activeOnes).toHaveLength(0);
@@ -356,9 +362,22 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
   // Test: Step 5 — Plane 2: SPE container membership removed
   // ============================================
 
-  test('Plane 2 — SPE: speContainerMembershipRevoked is true when containerId is provided', async ({
-    request,
-  }) => {
+  /**
+   * ✅ FLIPPED BY TASK 017 (FR-16 / finding A-13) — was
+   * `speContainerMembershipRevoked is true when containerId is provided`, asserting `.toBe(true)`.
+   *
+   * That assertion passed for the wrong reason and was pinning the bug. The old matcher searched for the
+   * contact's GUID inside `userPrincipalName`, but membership is written with the contact's EMAIL, so it
+   * never matched — and the endpoint then returned `true` anyway ("may have already been removed"). The
+   * test therefore went green on a revoke that removed nothing.
+   *
+   * Under broker-only, Spaarke ADDS no container permissions (`GrantMembershipAsync` has no callers), so
+   * against a freshly provisioned container the correct outcome is `NoPermissionFound` — there is
+   * genuinely nothing to remove. `PermissionRemoved` is correct only where a legacy or admin-created ACL
+   * actually exists. Both are success; what must NEVER appear here is `Failed`, and
+   * `speContainerMembershipRevoked` must be true only in the `PermissionRemoved` case.
+   */
+  test('Plane 2 — SPE: revoke reports an honest container outcome, never a false success', async ({ request }) => {
     // NOTE: In a live environment, this test requires a real SPE container ID.
     // The containerId below is a placeholder for the test flow; substitute with a
     // real container ID provisioned by task 061 (BU and Container Provisioning).
@@ -382,12 +401,13 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     });
 
     expect(result.status).toBe(200);
-    expect(result.body.speContainerMembershipRevoked).toBe(true);
+    expect(['PermissionRemoved', 'NoPermissionFound']).toContain(result.body.speContainerOutcome);
+    expect(result.body.speContainerOutcome).not.toBe('Failed');
+    // The boolean is now derived from the outcome, so the two can never disagree.
+    expect(result.body.speContainerMembershipRevoked).toBe(result.body.speContainerOutcome === 'PermissionRemoved');
   });
 
-  test('Plane 2 — SPE: speContainerMembershipRevoked is false when no containerId is provided', async ({
-    request,
-  }) => {
+  test('Plane 2 — SPE: speContainerMembershipRevoked is false when no containerId is provided', async ({ request }) => {
     const { contactId, projectId, accessRecordId } = await setupGrantedAccess(request);
 
     // Revoke WITHOUT container ID
@@ -399,8 +419,10 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     });
 
     expect(result.status).toBe(200);
-    // When no containerId is provided, the endpoint skips SPE removal
-    // and returns false for the flag
+    // When no containerId is provided there is no permission in scope. Task 017 made this state nameable:
+    // `NotAttempted` is distinct from `NoPermissionFound` ("we looked and there was none"), which the
+    // single boolean could not express.
+    expect(result.body.speContainerOutcome).toBe('NotAttempted');
     expect(result.body.speContainerMembershipRevoked).toBe(false);
   });
 
@@ -408,9 +430,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
   // Test: Step 6 — Plane 3: AI Search filter
   // ============================================
 
-  test('Plane 3 — AI Search: GET /api/v1/external/me excludes revoked project', async ({
-    request,
-  }) => {
+  test('Plane 3 — AI Search: GET /api/v1/external/me excludes revoked project', async ({ request }) => {
     // NOTE: This test verifies Plane 3 indirectly by checking that the contact's
     // GET /api/v1/external/me response no longer includes the project after revocation.
     // In the ExternalUserContextEndpoint, the BFF constructs the AI Search filter from
@@ -428,7 +448,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
 
     // Query participation records — these drive the AI Search filter
     const records = await queryAccessRecords(dataverseApi, contactId, projectId);
-    const activeParticipations = records.filter((r) => r.statecode === STATE.Active);
+    const activeParticipations = records.filter(r => r.statecode === STATE.Active);
 
     // No active participations → BFF will not include this project in AI Search filter
     // → AI Search will return 0 documents for this project for this contact
@@ -439,9 +459,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
   // Test: Step 7 — Web role removed when last access is revoked
   // ============================================
 
-  test('Web role removed when contact has no remaining active participations', async ({
-    request,
-  }) => {
+  test('Web role removed when contact has no remaining active participations', async ({ request }) => {
     const { contactId, projectId, accessRecordId } = await setupGrantedAccess(request);
 
     // Revoke the ONLY participation
@@ -458,9 +476,7 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
     expect(result.body.webRoleRemoved).toBe(true);
   });
 
-  test('Web role retained when contact still has other active participations', async ({
-    request,
-  }) => {
+  test('Web role retained when contact still has other active participations', async ({ request }) => {
     // Create one contact and two projects — grant access to both
     const contactId = await dataverseApi.createRecord(ENTITY_SETS.contact, makeTestContact());
     cleanup.push({ entitySet: ENTITY_SETS.contact, id: contactId });
@@ -552,14 +568,11 @@ test.describe('Access Revocation — UAC Planes @e2e @secure-project @security',
  * Tag: @mock (safe to run in any CI/CD environment)
  */
 test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () => {
-
   // ── Revoke success ─────────────────────────────────────────────────────────
 
-  test('mocked: revoke cascade — Dataverse deactivated, SPE removed, web role removed', async ({
-    page,
-  }) => {
+  test('mocked: revoke cascade — Dataverse deactivated, SPE removed, web role removed', async ({ page }) => {
     // Mock the BFF revoke endpoint
-    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async (route) => {
+    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -571,7 +584,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
     });
 
     // Simulate a page that calls the revoke endpoint (Power Pages SPA or internal UI)
-    await page.evaluate(async (bffUrl) => {
+    await page.evaluate(async bffUrl => {
       const res = await fetch(`${bffUrl}/api/v1/external-access/revoke`, {
         method: 'POST',
         headers: {
@@ -597,10 +610,8 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
     expect(body.webRoleRemoved).toBe(true);
   });
 
-  test('mocked: revoke with no containerId — SPE not removed, web role removed', async ({
-    page,
-  }) => {
-    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async (route) => {
+  test('mocked: revoke with no containerId — SPE not removed, web role removed', async ({ page }) => {
+    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       const body = JSON.parse((await route.request().postData()) || '{}');
 
       await route.fulfill({
@@ -614,7 +625,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
       });
     });
 
-    await page.evaluate(async (bffUrl) => {
+    await page.evaluate(async bffUrl => {
       const res = await fetch(`${bffUrl}/api/v1/external-access/revoke`, {
         method: 'POST',
         headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
@@ -637,7 +648,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
   // ── Error cases ────────────────────────────────────────────────────────────
 
   test('mocked: revoke returns 404 for non-existent access record', async ({ page }) => {
-    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async (route) => {
+    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/problem+json',
@@ -650,7 +661,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
       });
     });
 
-    await page.evaluate(async (bffUrl) => {
+    await page.evaluate(async bffUrl => {
       const res = await fetch(`${bffUrl}/api/v1/external-access/revoke`, {
         method: 'POST',
         headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
@@ -673,7 +684,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
   });
 
   test('mocked: revoke returns 401 without Authorization header', async ({ page }) => {
-    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async (route) => {
+    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       const authHeader = route.request().headers()['authorization'];
       if (!authHeader) {
         await route.fulfill({
@@ -690,7 +701,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
       }
     });
 
-    await page.evaluate(async (bffUrl) => {
+    await page.evaluate(async bffUrl => {
       const res = await fetch(`${bffUrl}/api/v1/external-access/revoke`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }, // No Authorization header
@@ -714,7 +725,7 @@ test.describe('Access Revocation — Mocked BFF API @mock @secure-project', () =
     // Second call: record already deactivated → Dataverse returns 404 on PATCH
     let callCount = 0;
 
-    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async (route) => {
+    await page.route(`${BFF_API_URL}/api/v1/external-access/revoke`, async route => {
       callCount++;
       if (callCount === 1) {
         await route.fulfill({

@@ -205,10 +205,19 @@ public class GrantLifecycleCharacterizationTests
             callerOid: null, client.Object, Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
 
+    /// <summary>
+    /// ContainerId is null throughout this class, so the SPE step is never attempted and the membership
+    /// service is only a constructor argument. Task 017 swapped the handler's <c>IGraphClientFactory</c>
+    /// for <see cref="SpeContainerMembershipService"/> when the endpoint's forked (and broken) SPE matcher
+    /// was deleted in favour of the service's own — see <c>SpeRevokeMatcherTests</c>.
+    /// </summary>
     private static Task<IResult> Revoke(Mock<DataverseWebApiClient> client, Guid accessRecordId, Guid contactId) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(accessRecordId, contactId, ProjectId, ContainerId: null),
-            client.Object, Mock.Of<IGraphClientFactory>(), Mock.Of<ITenantCache>(),
+            client.Object,
+            new SpeContainerMembershipService(
+                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+            Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse RevokeBody(IResult result) =>

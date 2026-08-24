@@ -4,7 +4,7 @@
     <title>FR-16 (A-13): SPE membership revoke matches the key membership is written with (+ H-8b relic cleanup)</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-010</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the revocation path (SPE ACL removal) — a real logic defect leaving container permissions in place while reporting success — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,6 +88,28 @@
     <criterion testable="true">The WebRoleRemoved relic is removed and the SPE path is coherent with the broker-only grant model.</criterion>
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-08-24">
+    Escalation checked FIRST and did not fire: nothing in this codebase adds an SPE container permission
+    (GrantMembershipAsync has zero callers; /grant reports SpeContainerMembershipGranted:false; neither
+    invite endpoint touches SPE), so the SPE path is a cleanup path for legacy/admin-created ACLs and is
+    worth keeping. The fix was DELETION not repair: SpeContainerMembershipService.RevokeMembershipAsync
+    already matched on email correctly and had ZERO callers -- the endpoint had forked it and replaced the
+    email match with a Contains(contact GUID) that could never match, then reported success on no-match.
+    Fork deleted, endpoint calls the service (CLAUDE.md 11). Response gained SpeContainerOutcome (4 states)
+    because a bool cannot distinguish "confirmed absent" from "match failed" (ADR-003). WebRoleRemoved
+    deleted (H-8b). GrantMembershipAsync NOT deleted -- flagged for the owner with a no-callers-by-design
+    header, since it defines the key the matcher must match. task-016 constraint DISCHARGED:
+    ListExternalMembersAsync propagates and RemoveAllExternalMembersAsync returns
+    SpeBulkRemovalResult(Removed,Failed), making ProjectClosureEndpoint's container_not_cleared guard
+    reachable and tested (incl. the partial-clear case). task-010 "assess and file": org-grant SPE cleanup
+    filed as a known gap (no single grantee, so no email; needs org-to-members expansion). Deviation:
+    tests at tests/integration/auth/** per the task-001 constraint, not the unit path in outputs.
+    NOTE: the perturbation run exposed a hole in my own tests -- re-swallowing listing failures passed
+    everything because the closure tests mock RemoveAllExternalMembersAsync at its seam; four service-level
+    tests were added. 17 new tests + 3 on the cascade suite; five perturbations all caught; 11,372 green
+    across seven .NET projects + 26 frontend; publish 43.69 MB compressed, unchanged.
+  </completion>
 
   <notes>Spec FR-16; finding A-13; register H-8b. Depends on task 010 (same file). Impact is bounded by the broker-only model but the matcher must satisfy its purpose.</notes>
 

@@ -41,7 +41,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 014 | Cache key includes auth mode | FR-13 / A-19 | 001 | **P0-B** | ✅ | sonnet | high |
 | 🔲 015 | Deterministic + complete membership paging | FR-14 / A-10 | 001 | — | ❌ | sonnet | high |
 | ✅ 016 | Close-project cascade (contact + org) | FR-15 / A-12 | 001 | — | ❌ | sonnet | high |
-| 🔲 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
+| ✅ 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
 | 🔲 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | — | ❌ | sonnet | high |
 | ✅ 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
 
@@ -328,6 +328,55 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > Verified: **11,357 passed / 0 failed** across all seven projects; publish **43.69 MB** compressed
 > (unchanged — no packages added). Rationale:
 > [`notes/task-016-close-project-cascade.md`](../notes/task-016-close-project-cascade.md).
+
+> **Task 017 outcome (2026-08-24)**: A-13 closed, H-8b cleaned up, and the task-016 constraint discharged.
+> **Escalation checked first and did NOT fire**: nothing in this codebase adds an SPE container permission
+> — `GrantMembershipAsync` has **zero callers**, `/grant` reports `SpeContainerMembershipGranted: false`
+> ("broker-only"), and neither invite endpoint touches SPE. The SPE removal path is therefore a **cleanup
+> path for ACLs this product did not create** (legacy / admin-added), which is why `NoPermissionFound` is
+> the ordinary healthy answer and why the path is worth keeping rather than deleting.
+> **The fix was DELETION, not repair.** The endpoint carried its own private copy of the SPE revoke which
+> set `contactIdStr = contactId.ToString()` and searched for that GUID *inside* `userPrincipalName` — but
+> membership is written with the contact's **email**, so it matched nothing, ever. It then returned `true`
+> on no-match ("may have already been removed"), claiming SPE success on every revoke while the ACL entry
+> sat untouched. Meanwhile `SpeContainerMembershipService.RevokeMembershipAsync` already matched on email
+> correctly (`FindPermissionByEmail`) and had **zero callers** — the endpoint had forked a working
+> implementation and broken it. Fork deleted; the endpoint calls the service (CLAUDE.md §11).
+> `IGraphClientFactory` left the handler signature with it — this endpoint no longer talks to Graph at all.
+> **A bool could not carry the answer** (ADR-003: distinguish "confirmed absent" from "match failed"), so
+> the response gained `SpeContainerOutcome` in {`NotAttempted`, `PermissionRemoved`, `NoPermissionFound`,
+> `Failed`}. Note that "contact has no email" maps to **`Failed`**, not `NoPermissionFound`: without the
+> key an existing permission is unfindable, which is unknown, not absent.
+> **task-016 constraint DISCHARGED**: `ListExternalMembersAsync` now propagates (an empty list means one
+> thing only) and `RemoveAllExternalMembersAsync` returns `SpeBulkRemovalResult(Removed, Failed)` instead
+> of a bare `int`. `ProjectClosureEndpoint`'s `container_not_cleared` guard is now **reachable and tested**
+> — including the subtler *partial*-clear case, which under the old `int` contract looked like success.
+> **H-8b**: `WebRoleRemoved` deleted (hard-coded `false` at every call site; Spaarke manages no Power Pages
+> web roles). `GrantMembershipAsync` was **NOT** deleted — flagged for the owner instead, carrying an
+> explicit "no callers by design / broker-only" header, because it defines the identity key the revoke
+> matcher must match.
+> **task-010 "assess and file"**: org-grant SPE cleanup is a KNOWN GAP, filed not fixed. An org revoke has
+> no single grantee, hence no email; cleanup needs an organization to members expansion this path lacks
+> (the same one declined in task 016 for cache invalidation). It reports `NotAttempted`. Bounded because
+> broker-only creates no member ACLs in the first place.
+> **⚠️ The perturbation run caught a hole in my own tests**: re-swallowing listing failures initially passed
+> EVERYTHING, because the closure tests substitute `RemoveAllExternalMembersAsync` at its seam and so never
+> exercise `ListExternalMembersAsync` at all — the very fix the constraint asked for was untested. Four
+> service-level tests were added. **Lesson worth keeping: mocking at a seam proves the CALLER handles a
+> failure, never that the CALLEE reports one.** Perturbations after the fix: GUID matcher **2**,
+> false-success-on-no-match **3**, Graph-error-as-absent **2**, re-swallow listing **2**, ignore per-member
+> failures **1**.
+> **The e2e spec was pinning the bug** — `revocation.spec.ts` asserted
+> `speContainerMembershipRevoked === true`, which passed *because* the broken matcher always returned true.
+> Flipped to assert an honest outcome.
+> 🔔 **Client-visible**: `/revoke` — `webRoleRemoved` **removed**; `speContainerOutcome` **added**;
+> `speContainerMembershipRevoked` is now true ONLY when a permission was actually deleted (it was
+> effectively a constant `true`). Shipped-client impact nil — `AccessGrantModal` awaits the call and ignores
+> the body; its stub used field names that never matched the DTO.
+> Verified: **11,372 passed / 0 failed** across all seven .NET projects, plus **26** frontend tests (needed
+> `npm install --legacy-peer-deps` first — `node_modules` is absent in a fresh worktree). Publish
+> **43.69 MB** compressed, unchanged. Rationale:
+> [`notes/task-017-spe-revoke-matcher.md`](../notes/task-017-spe-revoke-matcher.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

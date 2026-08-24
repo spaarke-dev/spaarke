@@ -346,31 +346,22 @@ public class ExternalAccessEndpointTests
 
     #region RevokeAccessResponse — DTO
 
-    [Fact]
-    public void RevokeAccessResponse_BothFlagsTrue_IsValid()
-    {
-        var response = new RevokeAccessResponse(SpeContainerMembershipRevoked: true, WebRoleRemoved: true);
-        response.SpeContainerMembershipRevoked.Should().BeTrue();
-        response.WebRoleRemoved.Should().BeTrue();
-    }
-
-    [Fact]
-    public void RevokeAccessResponse_BothFlagsFalse_IsValidWhenNoCleanupOccurred()
-    {
-        // Both flags are false when ContainerId was not provided and Contact still has other participations.
-        var response = new RevokeAccessResponse(false, false);
-        response.SpeContainerMembershipRevoked.Should().BeFalse();
-        response.WebRoleRemoved.Should().BeFalse();
-    }
-
-    [Fact]
-    public void RevokeAccessResponse_SpeRevokedFalseWebRoleRemovedTrue_IsValid()
-    {
-        // Web role is removed (no remaining participations) but SPE step was skipped (no ContainerId).
-        var response = new RevokeAccessResponse(SpeContainerMembershipRevoked: false, WebRoleRemoved: true);
-        response.SpeContainerMembershipRevoked.Should().BeFalse();
-        response.WebRoleRemoved.Should().BeTrue();
-    }
+    // ✅ REMOVED BY TASK 017 (FR-16 / finding A-13 / register H-8b).
+    //
+    // Three tests lived here — RevokeAccessResponse_BothFlagsTrue_IsValid,
+    // _BothFlagsFalse_IsValidWhenNoCleanupOccurred and _SpeRevokedFalseWebRoleRemovedTrue_IsValid. Each
+    // constructed the record and read its own arguments back, which the C# compiler guarantees
+    // (ADR-038 §7 ban B16 — positional-record property round-trip). They asserted nothing about behaviour.
+    //
+    // They also both centred on `WebRoleRemoved`, a Power Pages relic this task deleted: it was
+    // hard-coded to `false` at every call site because Spaarke does not manage web roles, so the tests
+    // were pinning a field that described a subsystem that isn't there.
+    //
+    // Real coverage of the revoke outcome — including that
+    // `SpeContainerMembershipRevoked` is now true ONLY when a permission was actually deleted — is at the
+    // ADR-038 KEEP path:
+    //
+    //   tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs
 
     #endregion
 

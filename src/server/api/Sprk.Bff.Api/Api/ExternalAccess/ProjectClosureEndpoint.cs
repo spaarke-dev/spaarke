@@ -164,24 +164,36 @@ public static class ProjectClosureEndpoint
         // useful thing to tell the operator. The failure is recorded and reported after Step 4, so cache
         // invalidation still happens.
         //
-        // ⚠️ This guard cannot fire today, and that is a SEPARATE defect (filed onto task 017):
-        // SpeContainerMembershipService.ListExternalMembersAsync catches every exception and returns [],
-        // so RemoveAllExternalMembersAsync answers "0 removed" whether the container was genuinely empty
-        // or Graph was unreachable — and closure reports 200 while external users may still hold file
-        // permission. Fixing that belongs with the SPE revoke work; the guard is kept so that fix lands
-        // as a typed response here rather than a raw 500.
+        // ✅ REACHABLE AS OF TASK 017. When task 016 wrote this guard it could not fire:
+        // ListExternalMembersAsync caught every exception and returned [], so "0 removed" was
+        // indistinguishable from "Graph unreachable". Task 017 made both failure modes observable — a
+        // listing failure now propagates, and per-member failures come back in SpeBulkRemovalResult.Failed
+        // — so a container that was not cleared reports as such instead of hiding behind a 200.
         int speRemovedCount = 0;
         bool containerCleared = true;
         if (!string.IsNullOrWhiteSpace(request.ContainerId))
         {
             try
             {
-                speRemovedCount = await speContainerMembership.RemoveAllExternalMembersAsync(
+                var removal = await speContainerMembership.RemoveAllExternalMembersAsync(
                     request.ContainerId, ct);
 
-                logger.LogInformation(
-                    "[CLOSE-PROJECT] Removed {Count} external SPE members from container {ContainerId}",
-                    speRemovedCount, request.ContainerId);
+                speRemovedCount = removal.Removed;
+                containerCleared = removal.IsComplete;
+
+                if (removal.IsComplete)
+                {
+                    logger.LogInformation(
+                        "[CLOSE-PROJECT] Removed {Count} external SPE members from container {ContainerId}",
+                        speRemovedCount, request.ContainerId);
+                }
+                else
+                {
+                    logger.LogError(
+                        "[CLOSE-PROJECT] Container {ContainerId} NOT fully cleared: {Removed} removed, " +
+                        "{Failed} external members retain FILE access.",
+                        request.ContainerId, removal.Removed, removal.Failed);
+                }
             }
             catch (Exception ex)
             {

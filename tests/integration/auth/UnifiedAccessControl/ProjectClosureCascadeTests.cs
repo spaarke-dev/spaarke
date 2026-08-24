@@ -233,11 +233,12 @@ public class ProjectClosureCascadeTests
         Mock<DataverseWebApiClient> client,
         ITenantCache? cache = null,
         Guid? projectId = null,
-        string? containerId = null) =>
+        string? containerId = null,
+        Mock<SpeContainerMembershipService>? spe = null) =>
         ProjectClosureEndpoint.Handle(
             new CloseProjectRequest(projectId ?? ProjectId, containerId),
             client.Object,
-            new SpeContainerMembershipService(
+            spe?.Object ?? new SpeContainerMembershipService(
                 Mock.Of<IGraphClientFactory>(),
                 NullLogger<SpeContainerMembershipService>.Instance),
             cache ?? Mock.Of<ITenantCache>(),
@@ -466,20 +467,91 @@ public class ProjectClosureCascadeTests
             "only the row that genuinely failed may survive");
     }
 
-    // ⚠️ NOT TESTED HERE, AND THE REASON IS ITSELF A FINDING — filed onto task 017.
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ✅ ENABLED BY TASK 017 — the test task 016 could not write.
     //
-    // ProjectClosureEndpoint guards the SPE step and answers
-    // `reasonCode: sdap.closure.incomplete.container_not_cleared` if clearing the container fails. That
-    // guard cannot be exercised today because `RemoveAllExternalMembersAsync` CANNOT fail:
-    // `SpeContainerMembershipService.ListExternalMembersAsync` catches ServiceException AND Exception and
-    // returns `[]` in both, so an unreachable Graph is indistinguishable from an empty container. Closure
-    // then reports `SpeContainerMembersRemoved: 0` with a 200 while every external user may still hold
-    // file permission on the container.
-    //
-    // That is FR-15's own failure shape ("no participant retains access post-closure") on the SPE half,
-    // and it is NOT fixed by task 016 — the defect is in SpeContainerMembershipService, task 017's file.
-    // The guard is kept because it is correct the moment that service reports failure honestly, and
-    // because leaving the call bare would turn that fix into an unhandled 500 here.
+    // Task 016 built the `container_not_cleared` guard but could not exercise it:
+    // `SpeContainerMembershipService.ListExternalMembersAsync` caught ServiceException AND Exception and
+    // returned `[]`, so `RemoveAllExternalMembersAsync` could not fail and an unreachable Graph was
+    // indistinguishable from an empty container. Task 017 made both failure modes observable (listing
+    // propagates; per-member failures return in `SpeBulkRemovalResult.Failed`), so the guard is reachable
+    // and these two tests now pin it.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// SPE container membership IS access: an external user still on the container can still reach the
+    /// project's files even with every Dataverse grant deactivated. So a failure to clear the container
+    /// must not be reported as a closed project — and must not throw away the fact that the grants
+    /// themselves WERE revoked, which is the most useful thing to tell the operator.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WhenTheContainerCannotBeCleared_ReportsIncompleteWithTheRevokedCount()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        var client = table.BuildMock();
+
+        // Listing the container's members fails, so nothing could be removed.
+        var spe = new Mock<SpeContainerMembershipService>(
+            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Graph unreachable"));
+
+        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Extensions["accessRecordsRevoked"].Should().Be(2,
+            "the grants were revoked and the operator needs to know that, even though closure failed");
+        table.ActiveRows.Should().BeEmpty("the grant sweep completed before the container step");
+    }
+
+    /// <summary>
+    /// A PARTIAL container clear is the subtler case, and the one that used to be invisible: the call
+    /// completes and returns a number, so the old <c>int</c> contract looked like success. Anyone left on
+    /// the container still has file access, so closure is incomplete.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WhenSomeContainerMembersRemain_ReportsIncomplete()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+
+        var spe = new Mock<SpeContainerMembershipService>(
+            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeBulkRemovalResult(Removed: 3, Failed: 2));
+
+        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+
+        Problem(result).ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason,
+                "two external members retain file access — the project is not closed");
+    }
+
+    /// <summary>
+    /// The complementary positive: a fully cleared container closes cleanly and reports the count.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WhenTheContainerIsFullyCleared_Returns200WithTheRemovedCount()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+
+        var spe = new Mock<SpeContainerMembershipService>(
+            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeBulkRemovalResult(Removed: 4, Failed: 0));
+
+        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+
+        OkBody(result).SpeContainerMembersRemoved.Should().Be(4);
+    }
 
     /// <summary>
     /// Cache invalidation runs even when a container id is supplied and the SPE step does nothing —

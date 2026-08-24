@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 016)
+> **Last Updated**: 2026-08-24 (by `context-handoff`, after task 017)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 016 complete, committed and pushed |
+| **Task** | **none active** — task 017 complete, committed and pushed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **12 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 019 ✅) |
+| **Phase** | Phase 0 — enforcement remediation · **13 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | Run **task 017** (`017-spe-revoke-matcher-and-relic.poml` — **verify the filename**) via the `task-execute` skill. See "Why 017 next" below |
+| **Next Action** | Run **task 013** (`013-workforce-email-oid-nohijack.poml` — **verify the filename**) via the `task-execute` skill. See "Why 013 next" below |
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
@@ -29,28 +29,28 @@ Low practical impact — `AccessGrantModal` and the external SPA send well-forme
 real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
 flipped to match, with the rationale in their doc comments.
 
-### Why 017 next
+### Why 013 next
 
-**017** (SPE revoke matcher, A-13) is now the clear one — task 016 just filed a finding straight into it,
-and until 017 lands, HALF of FR-15 is still open. `SpeContainerMembershipService.ListExternalMembersAsync`
-catches both `ServiceException` and `Exception` and returns `[]`, so `RemoveAllExternalMembersAsync`
-answers "0 removed" whether the container was empty **or Graph was unreachable** — and close-project
-reports 200 while external users may still hold file permission on the container. Task 016 already built
-the receiving end (`reasonCode: sdap.closure.incomplete.container_not_cleared`); 017 makes it reachable.
-017 also carries binding constraints from **010** (do not reduce the revoke sweep) and **016**, and it is
-the last of the three revocation-family defects.
+Six Phase 0 fixes remain (009, 011, 012, 013, 015, 018), all independent — no ordering constraint left.
+**013** (workforce email `oid` hijack, A-18) is the strongest candidate: it is the last unaddressed
+**identity-confusion** finding, and identity confusion is the highest-severity class in this project —
+the others remaining are enforcement-completeness or cleanup. It also pairs conceptually with what 017
+just did (matching a principal on the right key), so the reasoning is warm.
 
-Reasonable alternatives: **013** (workforce email `oid` hijack — the last unaddressed
-identity-confusion finding), **012** (anonymous share links, unblocked by 002), **009** / **011** /
-**015** / **018**. All independent; no hard ordering remains.
+Reasonable alternatives: **012** (anonymous share links, unblocked by 002), **009** (external To Do PATCH
+scope check), **015** (membership paging), **011** (same-entity self-join), **018** (dead filter + unbounded
+`in`-clause — the smallest).
 
 ### Last verified state
 
-**ALL SEVEN test projects — 11,357 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,745 ·
+**ALL SEVEN test projects — 11,372 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,760 ·
 `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
 `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
-Publish **43.69 MB** compressed incl. PDBs (unchanged by task 016 — no packages added; baseline 44.96,
-ceiling 60) · `--vulnerable` clean · `dotnet build --warnaserror` succeeds.
+Publish **43.69 MB** compressed incl. PDBs (unchanged by tasks 016 + 017 — no packages added; baseline
+44.96, ceiling 60) · `--vulnerable` clean · `dotnet build --warnaserror` succeeds.
+Frontend: **26** `AccessGrantModal` tests pass — but `node_modules` is **absent in a fresh worktree**, so
+`npm install --legacy-peer-deps --no-audit --no-fund` under
+`src/client/shared/Spaarke.UI.Components` is required before any frontend test edit can be verified.
 
 ⚠️ **Measure the publish COMPRESSED.** Raw bytes on disk are ~137 MB; the §10 ceiling is on the
 compressed artifact (43.69 MB). Zip `deploy/api-publish/` before reporting a number.
@@ -129,6 +129,11 @@ caught real gaps every time.
 | **Rethrow instead of the typed enumeration response (016)** | **2 of 20** |
 | **Ignore `failedCount`, always 200 (016)** | **2 of 20** |
 | **Drop the unaddressable-row guard (016)** | **1 of 20** |
+| **Match the SPE permission on the contact GUID again (017)** | **2** |
+| **Restore false success on SPE no-match (017)** | **3** |
+| **Report a Graph error as genuinely-absent (017)** | **2** |
+| **Re-swallow SPE listing failures (017)** | **2** — *initially 0; see the lesson below* |
+| **Ignore per-member SPE removal failures (017)** | **1** |
 
 **Capture failing-test identity with TRX**, not `-v q`:
 `dotnet test … --logger "trx;LogFileName=t.trx"`, then parse `outcome="Failed"`.
@@ -137,7 +142,21 @@ caught real gaps every time.
 
 ## Full State (Detailed)
 
-### Decisions made in task 016 (most recent)
+### Decisions made in task 017 (most recent)
+
+| Decision | Rationale |
+|---|---|
+| **Delete the endpoint's forked matcher rather than fix it** | `SpeContainerMembershipService.RevokeMembershipAsync` already matched on email correctly and had **zero callers**. The endpoint had forked a working implementation and broken it — CLAUDE.md §11 says reuse, so the fork goes |
+| **Keep the SPE removal path** (escalation did not fire) | Nothing in the codebase ADDS a container permission, so this is a cleanup path for legacy/admin ACLs — exactly the ones nothing else will clean. `NoPermissionFound` is therefore the healthy answer, not a problem |
+| **4-state `SpeContainerOutcome`, not a bool** | ADR-003 requires distinguishing "confirmed absent" from "match failed". The old bool answered `true` for both, which is how A-13 hid |
+| **"No email" → `Failed`, not `NoPermissionFound`** | Without the key an existing permission is unfindable. That is unknown, not absent — calling it absent would repeat A-13 in a new place |
+| **Keep `SpeContainerMembershipRevoked`, made honest** | Existing readers get a correct value instead of a constant. Only the relic (`WebRoleRemoved`) was removed |
+| **`GrantMembershipAsync` NOT deleted** | It is dead (zero callers) and H-8b says remove dead branches — but it defines the identity key the matcher must match. Documented with a "no callers by design / broker-only" header and **flagged for the owner** rather than silently deleting a public method |
+| **`ListExternalMembersAsync` propagates** | An empty list must mean one thing. Catching everything and returning `[]` is what made "Graph unreachable" indistinguishable from "empty container" |
+| **Per-member removal failures counted, loop not aborted** | Aborting leaves strictly MORE access in place. Same reasoning as task 016's deactivation sweep |
+| **Org-grant SPE cleanup filed, not fixed** | No single grantee → no email. Needs org→members expansion (declined in 016 for cache too). Bounded: broker-only creates no member ACLs |
+
+### Decisions made in task 016
 
 | Decision | Rationale |
 |---|---|
@@ -182,6 +201,10 @@ caught real gaps every time.
 | **SEVEN test projects, not one** | See the process-failure box above. `dotnet test` at root covers 4; ArchTests / Core.Tests / RecordSyncJob.IsolatedTests need explicit invocation |
 | **POML paths are unreliable** | Tasks 002/005/006/008/007/**016** all named test paths that do not exist or that a later constraint overrides — six of twelve. **Verify every path before acting on it** |
 | **Publish size is COMPRESSED** | Raw bytes are ~137 MB, the ceiling is 60. Zip `deploy/api-publish/` before reporting. Measuring raw once produced a false "3× over ceiling" scare |
+| **Mocking at a seam proves the CALLER, never the CALLEE** | Task 017: re-swallowing listing failures passed EVERY endpoint test, because the closure tests substitute `RemoveAllExternalMembersAsync` at its seam and never reach `ListExternalMembersAsync`. The fix a binding constraint asked for was untested until a perturbation exposed it. **When a task's deliverable is "make X report failures", test X directly** |
+| **Look for an existing correct implementation before fixing a broken one** | Task 017's bug was a FORK of working code that had zero callers. Grepping for the method name first turned a "patch the matcher" task into a deletion |
+| **Frontend tests need `npm install` first** | `node_modules` is absent in a fresh worktree; `npm test` fails with "jest is not recognized". Use `npm install --legacy-peer-deps --no-audit --no-fund` (never `npm ci`, per root CLAUDE.md §12) |
+| **Don't put backticked markdown in a bash-quoted Python heredoc** | Bash treats backticks as command substitution and silently mangles the text. Write the script to the scratchpad and run it as a file |
 | **Schema docs lose to live metadata** | `views-schema.md` says `sprk_contactid`; the table has no such attribute. Two Phase 0 tasks (007 type, 016 name) turned on checking live metadata rather than trusting a doc |
 | **Some POMLs are not valid XML** | `007` (and `017`) carry a raw `<` inside a constraint (`Mock<HttpMessageHandler>`), so `ET.parse` fails on them. Pre-existing; `scripts/Validate-TaskPoml.ps1` reports PASS because it is not a strict parse. Do not "fix" a POML on the strength of a parse error alone — check whether it predates you |
 | **KEEP paths** | Access-control → `tests/integration/auth/**`; pure domain logic → `tests/unit/domain/**`. Both globbed into `Sprk.Bff.Api.Tests.csproj` |
@@ -206,7 +229,8 @@ caught real gaps every time.
 | 4 | **D3 above** — download enforcement (Read) vs `CanDownload` (Write) |
 | ~~5~~ | ✅ **CONFIRMED AND FIXED 2026-08-23** — `EntityAccessFilter` WAS inert: `POST /api/office/save` with a `targetEntity` returned 403 for every caller. Now resolves the target's own collection via `CallerRecordAccessProbe`. **Should fold back into `AuthorizationService` when task 032 generalizes the seam** (constraint filed) |
 | 6 | **Needs its own task (002)**: `preview-url`, `view-url`, `office`, `preview` on `/api/documents` still have no per-document filter. They mint **URLs**, which outlive the request |
-| 7b | **FR-15 is only HALF closed** (016). The Dataverse cascade now revokes contact + org grants, but `SpeContainerMembershipService.ListExternalMembersAsync` catches every exception and returns `[]`, so `RemoveAllExternalMembersAsync` reports "0 removed" whether the container was empty **or Graph was unreachable** — close-project answers 200 while external users may still hold FILE access. Filed as a binding constraint on **task 017**; the closure endpoint's `container_not_cleared` guard is already built and waiting |
+| ~~7b~~ ✅ | **FR-15's SPE half — CLOSED by task 017.** `ListExternalMembersAsync` now propagates and `RemoveAllExternalMembersAsync` returns `SpeBulkRemovalResult(Removed, Failed)`, so close-project's `container_not_cleared` guard is reachable and tested (listing failure AND partial clear). FR-15 and FR-16 are both fully closed |
+| 7c | **Owner call wanted: delete `SpeContainerMembershipService.GrantMembershipAsync`?** (017) It has **zero callers** — Spaarke is broker-only and adds no container ACLs — so H-8b's "no dead branches implying grants add members" argues for deletion. It was KEPT because it defines the identity key the revoke matcher must match, and deleting a public service method exceeds this task's scope. It now carries an explicit no-callers-by-design header. Low risk either way |
 | 7a | **Expiry enforcement is query-level only** (007) — the tests assert the emitted `$filter`, not Dataverse's evaluation of it (transport mocking is ban B1). Live confirmation of all three cases — past expiry gone, today's expiry still works, null expiry unaffected — filed on **task 034** |
 | 7 | **RPA is now load-bearing for six mutation endpoints AND the Office save gate** (008 + follow-up), as well as the document read path (005) — still unverified against a live tenant → **task 034** (constraint filed). Also verify the new not-found retry actually absorbs the wizard's replication lag |
 | 8 | **Duplicates remain invisible (010)** to the participation surface until Phase 1 replaces the read-side `GroupBy` collapse |
@@ -222,12 +246,12 @@ caught real gaps every time.
 | Task | Constraint from |
 |---|---|
 | **005** ✅ done | 003 (`AppendToAccess`), 006 (verify capabilities light up) |
-| **017** | **010** — MUST NOT reduce the revoke sweep to a single row or weaken org/person isolation; also assess whether SPE removal should follow the logical key rather than `request.ContactId` |
+| **017** ✅ discharged | **010** — sweep preserved (pinned by `Revoke_WhenSpeFails_StillReportsTheDataverseRowsDeactivated` + the existing isolation tests); the "assess SPE-vs-logical-key" ask was **assessed and FILED** — an org revoke has no single grantee, so no email, so cleanup needs an org→members expansion this path lacks. Reports `NotAttempted`. Bounded: broker-only creates no member ACLs. · **016** — SPE reporting made honest, `container_not_cleared` now reachable + tested |
 | **032** | 006 (one-access-path invariant), 005 (per-principal derivation + `AppendTo`), **008** (collapse `CallerRecordAccessProbe` into the generalized rights map; **and the `IAccessDataSource` must stay SCOPED** — a singleton would turn `DataverseAccessDataSource`'s `DefaultRequestHeaders` mutation into a cross-user OBO-token bleed) |
 | **034** | 005 (verify RPA live; grep `RPA-FALLBACK`), **007** (verify the Date Only expiry predicate live — check the null-expiry case FIRST, because if it is broken external access is down for nearly everyone), **008** (RPA now gates six MUTATIONS against `sprk_projects`/`sprk_matters`/`sprk_workassignments` — a different target from 005's `sprk_documents`, so 005 passing does not imply 008 passes; also grep `DELEGATION-RPA-UNAVAILABLE`) |
 | **065** | **008** — unblocked; MUST surface `sdap.access.deny.delegation_write_required` as a real message, MUST send `recordType`+`recordId` (not legacy `projectId`), MUST NOT add a client-side pre-check that skips the server call |
-| **017** | 010 (do not reduce the revoke sweep), **016** (`SpeContainerMembershipService` cannot report a clearing failure — swallows every exception and returns `[]`; makes task 016's `container_not_cleared` guard reachable) |
-| **012/013/015/017/018** | 001 (own-coverage obligation) — 007 ✅ and 016 ✅ discharged their own |
+| **012/013/015/018** | 001 (own-coverage obligation) — 007 ✅, 016 ✅ and 017 ✅ discharged their own |
+| **Phase 1 evaluator (032/043)** | **017** — if you build the organization→members expansion that FR-24/FR-25 need for org terms, the org-grant **SPE cleanup gap** becomes cheap to close at the same time (`RemoveSpeContainerPermissionAsync` currently reports `NotAttempted` for org revokes). See `notes/task-017-spe-revoke-matcher.md` §6 |
 
 ### Decisions carried in from design (unchanged)
 
