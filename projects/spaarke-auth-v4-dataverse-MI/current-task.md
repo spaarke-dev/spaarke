@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (task 032 CLOSED) — **🟢 MI-FIC IS LIVE ON `spaarke-bff-dev` AND THE STAGING SLOT IS GONE. Next: 033 removes the secret.**
+> **Last Updated**: 2026-08-24 (task 033 step 1) — **033 STARTED. NOTHING DELETED. Step 1 found a false premise + a file conflict; both need a decision before step 2.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,9 +11,9 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **032 ✅ COMPLETE.** Swapped 14:50:59Z · MI-FIC proven on the default slot at credential level (14:59:14Z) · staging slot **DELETED** 15:37:45Z · post-deletion OBO 10/10, `/healthz` Healthy. Record: [`notes/decisions/032-promotion.md`](notes/decisions/032-promotion.md) |
-| **Status** | Default slot: `/healthz` Healthy · OBO 10/10 200 · unauth 401 · **only slot remaining** · tree clean. Deferred to the testing phase: Office add-in save flows + the MI proof method (032 record §8) |
-| **Next Action** | **033 — remove the secret + reconcile the estate.** Prep is DONE: app-setting name baseline for both slots at [`notes/appsettings-baseline-pre-033.md`](notes/appsettings-baseline-pre-033.md); survey corrected the stale numbers (**15** scripts not 11, 13 docs) and the **Key Vault name — it is `spaarke-spekvcert`, NOT `spaarke-spekv-dev`**. ⚠️ `spe-owning-app-secret` is in the same vault and is **ADR-028 E-1, out of scope**. 🔻 **Rollback is now credential-reorder ONLY (proven 031 §5.6); 033 retires that too — after 033 the only rollback is a redeploy.** |
+| **Task** | **033 🔄 — step 1 of 7 done. NOTHING DELETED YET.** Step 1 overturned a false premise the project has carried since the spec (see Next Action). Record: [`notes/decisions/033-secret-removal.md`](notes/decisions/033-secret-removal.md) |
+| **Status** | Live state UNCHANGED: 4 secret keys present on the only slot · both KV aliases present in `spaarke-spekvcert` · order overrides absent → canonical `[MI-FIC, ClientSecret]` · rollback rung 2 still available · tree clean |
+| **Next Action** | **Two decisions needed before step 2 (the first irreversible one).** (1) 🔴 **The lowercase KV alias is NOT used by the Office add-in deploy** — that claim is false in 4 places. Its real consumer is `Sync-LocalConfig.ps1` → **local `dotnet run`** (criterion 9, not 7). Step 3's re-verification target changes accordingly. (2) 🛑 **`/conflict-check` HARD WARN: PR #812 (`unified-access-control-r2`) edits `.claude/constraints/auth.md`**, which step 6 must also edit — coordinate before step 6. **Step 2 retires rollback rung 2 (credential reorder); after it, only a redeploy remains.** |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
