@@ -315,7 +315,75 @@ auth-plumbing one, and does not bear on this criterion.
 Incidentally confirmed in the same capture: outbound Dataverse traffic targets
 `https://spaarkedev1.crm.dynamics.com/api/data/v9.2/` — the expected dev environment.
 
-### 5.5 Not yet exercised
+### 5.5 ✅ SPE over OBO
+
+| Route | ralph | Reading |
+|---|---|---|
+| `GET /api/obo/containers/{id}/children` | **200** `{"items":[],"nextLink":null}` | **the OBO→Graph→SPE call completed.** A permission failure would surface as an error, not an empty success |
+| `GET /api/containers/{containerId}/drive` | 403 | consistent with §5.4 — this route DOES carry a resource id, so `ResourceAccessHandler` ran the real check and got `AccessRights=None`. Correct denial, same data reason as the document permissions result |
+
+Container used: `b!21yLRdWEOAdkaWXskuRfByIRiz1S9kb_...` (the one `sprk_container` row in dev).
+
+### 5.6 ✅ ROLLBACK RE-VERIFIED AT CREDENTIAL LEVEL — the evidence 032 depends on
+
+032 may only delete the `staging` slot if config-only rollback is proven, because deleting the slot
+retires "swap back" and leaves "reorder credentials" as the sole rollback. Proven here.
+
+**Method.** Set `Graph__Credentials__Order__0=ClientSecret`,
+`Graph__Credentials__Order__1=ManagedIdentityFederated` on the **slot only**, then restart to force the
+confidential-client cache to rebuild, then exercise OBO.
+
+**The app flagged its own deviation** — logged at `fail` level, unprompted:
+
+```
+fail: OrderedCredentialClientProvider[0]
+  ADR-028 A4 DEVIATION: credential order ClientSecret > ManagedIdentityFederated places the client
+  secret ABOVE a secret-free credential. This is valid only as a deliberate, temporary rollback.
+  Restore the secret-free credential to the top once the incident is resolved.
+info: Ordered credential selection active: ClientSecret > ManagedIdentityFederated.
+```
+
+That is the task-021/062 safety mechanism working: a rollback is possible, and it is impossible to
+perform quietly.
+
+**The proof, at credential level:**
+
+```
+13:30:16  Confidential client for 1e40baad-... built with credential ClientSecret.
+13:30:16  OBO token exchange successful
+```
+
+against the MI-FIC run for comparison:
+
+```
+12:53:30  Confidential client for 1e40baad-... built with credential ManagedIdentityFederated.
+12:53:30  OBO token exchange successful
+```
+
+**Why the HTTP 200s were not sufficient, and why this took an extra restart.** The abbreviated pass
+returned 200 on `/api/me`, `/api/obo/containers/{id}/children` and `/api/workspace/layouts` under
+secret-first ordering — but **a 200 does not prove the secret was used.** The whole point of an ordered
+provider is that a failing first credential falls through to the next; had `ClientSecret` failed, the
+provider would have silently used `ManagedIdentityFederated` and returned exactly the same 200. Only
+the `built with credential ...` line distinguishes them, and it is emitted on cache miss only — hence
+the deliberate restart. Accepting the 200s would have produced a confident and possibly false claim
+about the one property 032 rests on.
+
+**Restored, and verified restored:**
+
+```
+13:31:54  Ordered credential selection active: ManagedIdentityFederated > ClientSecret.
+```
+
+The `A4 DEVIATION` warning is **absent** after the revert — the positive signal, not merely the
+absence of an error. `Graph__Credentials__Order__*` deleted; slot back to **213 app settings**;
+`/healthz` 200.
+
+**Conclusion for 032:** rollback is a config-only reorder requiring no redeploy, demonstrated on this
+build, on this slot, at credential level. The 032 escalation trigger *"031's secret-first
+re-verification did not pass — STOP before the slot deletion step"* does **not** fire.
+
+### 5.7 Not yet exercised
 
 SPE upload/download/preview · `dataverse.*` chat tool calls over SSE · Office add-in save flows ·
 `/api/agent` · row-level authorization on `PermissionsEndpoints` · send-as-user email (authorized by the
