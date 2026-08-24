@@ -4,7 +4,9 @@
     <title>Graph Endpoint setting — wire it or delete it (no third option)</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- 2026-08-23: DELETE. See notes/graph-endpoint-decision.md. AC-4 partial - the Dataverse
+         column sprk_graphendpoint and its stored rows remain; schema deletion is an operator action. -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs (config model + client construction) and .tsx (settings screen); tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>

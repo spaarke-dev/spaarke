@@ -9,10 +9,35 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **021 in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)**; 011 🔄 partial |
-| **Step** | Starting 021 (Graph Endpoint setting — wire or delete). W5, GraphService + config + client. |
-| **Status** | 012, 013, 020, 030 committed + **pushed** (`c5790afa3`). Quota → **option A**, operator-confirmed. |
-| **Next Action** | Invoke `task-execute` on `tasks/021-graph-endpoint-setting.poml`. **Verify the POML's premise first** — 12 of 12 have now been wrong, incomplete, or mis-scoped. Note 021 interacts with 020's decision: the base address is now derived per-client (`ResolveGraphBaseUrl`), so a "Graph Endpoint" config field must not reintroduce a hardcoded one. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)** · **W5 ✅ (021)**; 011 🔄 partial |
+| **Step** | Between tasks. **Next: 022** (W6, recycle-bin `$select` — 🔴 task 040 already found a defect for it). |
+| **Status** | 012, 013, 020, 030, 021 committed. Quota → **option A**, operator-confirmed. |
+| **Next Action** | Invoke `task-execute` on `tasks/022-recycle-bin-select-fix.poml`. **Verify the POML's premise first** — 13 of 13 have now been wrong, incomplete, or mis-scoped. 022 is flagged 🔴 in TASK-INDEX because task 040's WireMock fixture already surfaced a concrete defect for it — start from that, not from the POML's narrative. |
+
+### 🔑 Task 021 — DELETED the Graph Endpoint field, and why not to restore it
+
+**The POML aimed at the wrong entity.** It named `ContainerTypeConfig`; the field is actually on
+**`sprk_speenvironment`**, surfaced by `EnvironmentConfig.tsx`. And it understated the defect: the
+field was not merely inert — it was **HTTPS-validated on create AND update, written to Dataverse,
+re-`$select`ed, and mapped into both response DTOs.** A complete round-trip for a value that **zero**
+code paths consume. An admin could change it, save, reload, see it persisted — and change nothing.
+**No test ever referenced it.**
+
+🔒 **The decisive argument**: `IsValidHttpsUrl` accepts *any* HTTPS host. Wiring this field would let
+anyone who can write an environment record point the BFF's **app-only Graph tokens** at an arbitrary
+server. The field was safe only because it was dead — one well-meaning "finish wiring this up" commit
+from being a credential leak.
+
+Escalation trigger evaluated and did **NOT** fire: no sovereign-cloud reference exists anywhere in
+`src/`, `docs/`, or `.claude/` (only `node_modules`).
+
+⚠️ **AC-4 is partial and needs an operator.** The `sprk_graphendpoint` column and its stored rows
+survive — deleting a Dataverse column is a schema change, not a code change. Steps are in
+[`notes/graph-endpoint-decision.md`](notes/graph-endpoint-decision.md) §5.
+
+**Deliberate deviation**: no WireMock test was added. For a DELETE outcome the only possible test is a
+reflection assertion that the DTO lacks a property — a DTO-shape test, exactly the scaffolding ADR-038
+bans and task 042 exists to delete. Compilation + grep prove absence more strongly.
 
 ### 🔑 Task 030 — what it changed, and the one thing NOT to undo
 

@@ -63,8 +63,6 @@ export interface SpeEnvironment {
   tenantName: string;
   /** SharePoint root site URL (sprk_rootsiteurl) */
   rootSiteUrl: string;
-  /** Microsoft Graph API endpoint (sprk_graphendpoint) */
-  graphEndpoint: string;
   /** Whether this is the default environment (sprk_isdefault) */
   isDefault: boolean;
   /** Active / inactive status (sprk_status) */
@@ -77,7 +75,6 @@ export interface SpeEnvironmentUpsert {
   tenantId: string;
   tenantName: string;
   rootSiteUrl: string;
-  graphEndpoint: string;
   isDefault: boolean;
   status: ActiveStatus;
 }
