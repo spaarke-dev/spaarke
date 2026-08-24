@@ -95,10 +95,48 @@ That is the first observed duration this job has ever produced, and it invalidat
 
 ---
 
+## D4 — a fourth defect the green Router then exposed
+
+With the Router fixed, `SDAP CI` at the same SHA went **red** — and it was a real, separate problem that the broken gate had been masking.
+
+`Build & Test (Debug)` failed, but **not in the tests**: `Test with coverage (pass 1)` **succeeded**; the step that failed was `Classify pass-1 failures (decide on retry)`:
+
+```
+PASS 1 had 1 failure(s):
+  - Sprk.Bff.Api.IntegrationTests.Admin.JobsEndpointsTests.Trigger_RunsJobOutOfBand_RecordsRun
+DETERMINISTIC FAILURES (not in reliability registry — real bugs):
+  - Sprk.Bff.Api.IntegrationTests.Admin.JobsEndpointsTests.Trigger_RunsJobOutOfBand_RecordsRun
+##[error]Deterministic test failure(s) detected — failing the build (no retry).
+```
+
+The assertion:
+
+```
+Expected trigger.StartedAt to be within 5s from <15:58:56.401>,
+but <15:59:02.815> was off by 6s, 413ms and 630.7µs.
+```
+
+`Trigger_RunsJobOutOfBand_RecordsRun` POSTs `/api/admin/jobs/{id}/trigger` and asserts the returned `StartedAt` is within **5 seconds** of a `DateTimeOffset.UtcNow` captured before the call — i.e. it measures HTTP round-trip + out-of-band job scheduling latency against a wall clock. On a contended runner that took 6.4s.
+
+**Verified as a flake, not a regression** — four independent checks, none assumed:
+
+| Check | Result |
+|---|---|
+| Does this branch touch the jobs/scheduling path? | **No** — `git diff --name-only origin/master...HEAD` matches nothing under `job`/`schedul`/`admin` |
+| Did it fail on the last completed `SDAP CI`? | **No** — 0 occurrences at `26ccac2d4` |
+| Does it reproduce locally? | **No** — all 18 `JobsEndpointsTests` pass in **4s** |
+| Is it the same class as registered entries? | **Yes** — a sibling *scheduling* wall-clock test (`ScheduledJobHostTests.StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07`) is already registered, as are five other latency assertions |
+
+**Fix**: registered under `TimingSensitive` in [`tests/.reliability-registry.json`](../../../tests/.reliability-registry.json) (10 → 11 entries). This is the repo's designed mechanism for exactly this case and is **a retry, not a swallow** — per the registry's own docs, "if pass 2 also fails, the build still fails (treated as real regression)." The gate is preserved; only the single-sample verdict is relaxed. Registry was uncontended (no open PR touches it).
+
+**Worth noting for the owning project**: this test had been failing-eligible all along; it simply never had the chance to surface, because on most recent commits `SDAP CI` was *cancelled* by the next push before it got that far. A gate that rarely finishes hides its own findings.
+
+---
+
 ## For `ci-cd-unit-test-remediation-r1` to decide
 
 1. **Router latency vs. advisory completeness — the real trade-off in this change.** `tier2` remains in the Router's `needs:`, so the gate verdict now waits for a tier2 allowed to run up to 30 min instead of dying at 6. **That is a genuine latency regression**: the Router previously rendered at ~9 min (because tier2 always died at 6), and will now render whenever the suite actually finishes. If gate latency matters more than having tier2 in the summary table, drop `tier2` from `needs:` entirely — the Router would then render on `classify` + `tier1` (~4 min, *faster than before*) and tier2 would run on as pure advisory. Not done here: it changes the signal model, which is yours.
-2. **Calibrate the 30 from real data once you have some.** No tier2 unit-test job had completed in recent repo history, so there was no observed duration to size against. Chosen from: plain suite ~4m03s on a fast local box (10,762 tests, measured 2026-08-24) × 2-4× for a 2-core `windows-latest` runner + 4m23s overhead ≈ 13-21 min, then headroom because a value at the edge of the estimate is how the original 6 became unreachable. Set from observed p95 once green runs accumulate.
+2. **Calibrate the 30 from real data once you have some.** No tier2 unit-test job had completed in recent repo history, so there was no observed duration to size against. Originally estimated from a local `dotnet test` wall-clock of 4m03s across the four solution test projects (run in parallel; 2026-08-24) × 2-4× for a 2-core `windows-latest` runner + 4m23s overhead ≈ 13-21 min, plus headroom. **That estimate was low** — the first real observation came in at 24 min (see Verified section). Size from CI's own p95, not from a dev box. Set from observed p95 once green runs accumulate.
 3. **`sdap-ci-docs-only.yml` check-name collision (not fixed — reported).** It emits check runs named exactly `Build & Test (Debug)` / `(Release)` as ~3-second no-ops. Its header asserts "Branch protection treats the REAL check from `sdap-ci.yml` as authoritative" — GitHub makes no such guarantee for same-named check runs. Benign while branch protection is off *and* while the real job finishes later and overwrites. The hole: when `sdap-ci.yml` is **cancelled** (5 of the last 8 commits on this branch), the stale no-op success is the only bearer of that name. If protection is ever re-enabled with `Build & Test (Debug)` required, that is a green gate over an unrun build. Suggest distinct check names plus an explicit aggregator.
 4. **`action_required` on bot commits.** Workflows on `github-actions[bot]`-authored commits (the `style: auto-format dotnet whitespace (CI)` commits) require manual approval and produce dead runs — `7ca8669d5`, `7f36a5ffe`, `e12cc48d3` here. Each was superseded within minutes, so nothing was lost, but the repo setting generates permanent noise. Owner decision.
 
