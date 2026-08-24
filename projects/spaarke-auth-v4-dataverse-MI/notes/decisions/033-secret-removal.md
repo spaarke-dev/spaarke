@@ -1,7 +1,8 @@
 # Task 033 — remove the secret and reconcile the estate
 
-> **Status**: 🔄 IN PROGRESS — steps 1–3 done. **The secret is GONE from the app AND from Key Vault**
-> 2026-11-22); 15 scripts swept. Remaining: the doc sweep (5), ADR-028 E-3 (6), Graph-API-ClientSecret (7).
+> **Status**: 🔄 IN PROGRESS — steps 1–4 done. **The secret is GONE from the app AND from Key Vault**
+> (soft-deleted, recoverable until 2026-11-22); 15 scripts swept.
+> Remaining: the doc sweep (5), ADR-028 E-3 (6), `Graph-API-ClientSecret` (7).
 > **Date**: 2026-08-24
 
 ---
