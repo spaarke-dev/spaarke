@@ -92,7 +92,8 @@ export interface RedlineSpan {
 
 /** Outcome of resolving a `target_text` against the current document. */
 export type ResolveResult =
-  { ok: true; spans: RedlineSpan[] } | { ok: false; kind: 'not_found' | 'ambiguous'; matchCount: number };
+  | { ok: true; spans: RedlineSpan[] }
+  | { ok: false; kind: 'not_found' | 'ambiguous'; matchCount: number };
 
 /**
  * Status returned by {@link UsePendingRedlineResult.materialize}.
