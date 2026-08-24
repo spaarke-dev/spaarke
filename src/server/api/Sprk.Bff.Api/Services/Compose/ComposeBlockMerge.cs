@@ -605,9 +605,14 @@ internal static class ComposeBlockMerge
             }
             else
             {
-                // The shell could not be reconstructed — degrade to the bare paragraph WITH a warning
-                // rather than emitting a malformed control. Never a refusal (ADR-049 invariant 1).
-                warn?.Invoke("hard-tier-sdt-flattened");
+                // The shell could not be reconstructed — degrade to the bare paragraph rather than emit a
+                // malformed control. Never a refusal (ADR-049 invariant 1).
+                //
+                // Task 045: the warning is NOT raised here any more. `sdt` joined ReportableConstructs, and
+                // WarnForConstructsLostOnThisBlock runs AFTER this carry and counts the final state — so a
+                // shell that was not reconstructed is already reported by the count (1 → 0), and a shell
+                // that WAS reconstructed correctly reports nothing (1 → 1). Warning here too would double-
+                // report the same loss, and a taxonomy that says a thing twice is one users stop reading.
             }
         }
 
@@ -645,6 +650,17 @@ internal static class ComposeBlockMerge
         ("br", "edited-paragraph-line-break-dropped"),
         ("sym", "symbol-flattened"),
         ("tab", "tab-flattened"),
+        // Task 045: the INLINE `w:sdt` — a content control sitting inside a paragraph (a party name, an
+        // effective date, a defined-term placeholder: the common shape in a legal template). The
+        // block-level SdtBlock case was handled below since 041, but an inline control was dropped in
+        // SILENCE, because it was not on this list and the shell carry only ever looks at SdtBlock. The
+        // residual-loss parity check found it: `edited: 0/1 kept · codes: (none)`.
+        //
+        // Reuses the EXISTING `hard-tier-sdt-flattened` code rather than minting a second one (root §11):
+        // the client copy already shipped for it — "A content control (form field, dropdown, or date
+        // picker) was saved as plain text" — describes the inline case exactly, and one code for one
+        // user-visible outcome is what keeps the taxonomy legible.
+        ("sdt", "hard-tier-sdt-flattened"),
     };
 
     private static void WarnForConstructsLostOnThisBlock(
