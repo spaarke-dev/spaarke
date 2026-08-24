@@ -104,8 +104,20 @@ copy would be the scaffolding `/test-diet` deletes at project close.
 **Placement justification (root CLAUDE.md §10):** no new endpoint, service, DI registration, or
 package — one corrected read inside an existing `Infrastructure/Graph` method, plus one private helper.
 
-⚠️ **Not verified against Spaarke Dev** (step 7 / AC-1). The `az` session has expired and this session
-cannot run an interactive login. The behaviour is pinned by WireMock against the real Kiota
-deserializer, which is where the defect lived — but a live confirmation that deleted containers list
-without error is still outstanding, along with the standing UI-verification gap from tasks 001 / 003 /
-012 / 030 / 021.
+### ✅ LIVE-VERIFIED 2026-08-24 — AC-1 met
+
+App-only token as the owning app, against Spaarke Dev:
+
+```
+GET /beta/storage/fileStorage/deletedContainers?$filter=containerTypeId eq 8a6ce34c-…
+→ HTTP 200      0 deleted containers
+```
+
+**200, no OData error.** The POML's claimed
+`Could not find a property named 'deletedDateTime'` does not occur — confirming §1: the surface works,
+and the defect was never a parsing failure. Removing the `$select` did not break the call.
+
+⚠️ **The timestamp mapping itself is still only pinned by WireMock**, because the recycle bin is
+currently empty — there is nothing live to map. Proving it end-to-end needs a throwaway container
+created, soft-deleted, observed, then permanently deleted (the pattern the project's live-tenant rules
+sanction). That is **task 041**'s remit; it would confirm here in about a minute if run sooner.

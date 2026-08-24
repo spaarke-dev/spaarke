@@ -14,6 +14,24 @@
 | **Status** | 012, 013, 020, 030, 021, 022, 023, 024 committed. Quota → **option A**, operator-confirmed. |
 | **Next Action** | Invoke `task-execute` on `tasks/025-full-settings-surface.poml`. ⚡ **025 starts from a strong position** — task 023 moved the settings write onto the SDK's **typed** `FileStorageContainerTypeSettings`, so the remaining properties are compiler-checked additions, not string keys. The nine: `SharingCapability`, `IsItemVersioningEnabled`, `ItemMajorVersionLimit`, `MaxStoragePerContainerInBytes` (**done in 023**) + `IsDiscoverabilityEnabled`, `IsSearchEnabled`, `IsSharingRestricted`, `UrlTemplate`, `ConsumingTenantOverridables` (**025's work**). **Inherits**: (a) the client **already sends `isSearchEnabled`** and the BFF silently discards it — no DTO property; (b) `azureTenantId` declared in `types/spe.ts` with no Graph source; (c) `ConsumingTenantOverridables` is task **026**'s override state — coordinate, don't duplicate. |
 
+### 🔴 READ FIRST — live verification is now UNBLOCKED (2026-08-24)
+
+Earlier notes claiming "no interactive Azure login available" were **wrong** — one failed `az` check
+was cached as a standing fact. `az` works. The real blocker was that **`spe-owning-app-secret` did not
+exist in `sprk-prod-kv`**, which meant `GetClientForConfigAsync` — and therefore containers, recycle
+bin, search, security, and audit — could not build a Graph client at all in production.
+
+**Resolved**: a new credential was minted on `170c98e1` with `--append` (expires **2028-08-24**) and
+stored in the vault. Full record + the Stage-2 setup the operator needs:
+[`notes/live-verification-credential.md`](notes/live-verification-credential.md).
+
+**Confirmed live**: 🔴 5 of 5 containers report storage totalling **861 MB** while the Dashboard showed
+**`0 B`** · GET omits `storageUsedInBytes` (LIST-only confirmed) · `deletedContainers` → **200, no
+OData error** · container types still **403 app-only** (delegated-only re-confirmed).
+
+⚠️ **Still needs delegated access**: task **023**'s write→read-back and task **030**'s container-type
+fields. See the Stage-2 recipe in that note.
+
 ### 🔑 Task 024 — IMPLEMENT. Spike deliberately not re-run.
 
 Task 020 had already measured it live, and the finding is **sharper than the POML's three options**:

@@ -145,7 +145,52 @@ package. Four call-site corrections, one private reader, one added metrics field
 block's extension test is satisfied — this extends the existing container read path rather than adding
 a service.
 
-⚠️ **Step 6 not live-verified.** "No screen shows a silent 0 B or em-dash" requires a deployed app and
-an interactive Azure login this session cannot perform. The mapping is pinned by WireMock against the
-real Kiota deserializer — where the defect lived — and the UI states are deterministic on the null/0
-distinction, but a live pass remains outstanding (001 / 003 / 012 / 021 / 022 / 023 / 030).
+---
+
+## 6. ✅ LIVE-VERIFIED 2026-08-24 — and the numbers are worse than "0 B" implied
+
+App-only token as the owning app (`170c98e1`), against Spaarke Dev, container type `8a6ce34c-…`:
+
+```
+GET /beta/storage/fileStorage/containers?$filter=containerTypeId eq 8a6ce34c-…
+    &$select=id,displayName,createdDateTime,storageUsedInBytes
+→ 200, 5 containers, ALL reporting a real figure
+
+  API Test 2025-09-30 14:43:59            47,294
+  Full Flow Test 2025-09-30 14:51:26      49,081
+  Spaarke Inc                        869,320,675
+  Spaarke Dev Container 2             33,112,969
+  Test New Container 8-20-2026            86,624
+                                     ───────────
+                                     902,616,643 bytes = 860.8 MB
+```
+
+**The Dashboard was rendering `0 B` while the tenant held 861 MB across five containers.** Not an
+edge case, not a partial gap — every container reports, and the app discarded all of it.
+
+Coverage here is **5 of 5**, so the new coverage subtext will read *"Across all 5 container(s)"* rather
+than the partial form.
+
+### 🔑 The defensive reader was necessary, not paranoid
+
+Every observed value **fits in int32** — the largest is 869,320,675 against an int32 ceiling of
+2,147,483,647. A `long`-only type match would therefore have dropped **all five**, silently, exactly as
+the `is string` guard dropped every deleted-container timestamp (task 022). `ReadStorageUsedInBytes`
+accepting `int` is what makes this work today; accepting `long` is what keeps it working once a
+container passes 2 GB — which "Spaarke Inc" is 40% of the way toward.
+
+### GET confirmed to omit it
+
+```
+GET /beta/…/containers/{id}?$select=id,displayName,storageUsedInBytes
+→ 200  keys returned: ["id", "displayName"]      storageUsedInBytes: ABSENT
+```
+
+Even with an explicit `$select`, Graph returns nothing. Task 020's LIST-only finding is confirmed, and
+the implementation is right to leave GET null → "Not reported".
+
+### Still outstanding
+
+The **UI** pass (does the grid render "Not reported"? does the tile show the coverage subtext?) still
+needs a running app — the local harness at
+`c:/code_files/spaarke-prototype/projects/spe-admin-r2-uat/` can answer it without a deployment.
