@@ -66,6 +66,23 @@ inference from Bicep. `ServiceBus__FullyQualifiedNamespace` is **absent on both*
 is just my own outage fix. The open question is not "who owns it" — it is **should it be Running at
 all**, which matters most for **032**, where a slot swap would promote whatever is in it.
 
+### 2b. Scope check — this project deploys to ONE app, and it is dev
+
+Verified 2026-08-23. Do not re-litigate:
+
+| | |
+|---|---|
+| `spaarke-bff-dev` (`rg-spaarke-dev`) | **Running** — the only deploy target in this project |
+| `spaarke-bff-prod` (`rg-spaarke-platform-prod`) | **Stopped** — explicitly out of scope |
+
+Exactly one task POML mentions the prod app: `001-create-dev-deployment-slot.poml:35`, and it is a
+**prohibition** (*"Do not touch spaarke-bff-prod (Stopped) or any other environment"*). No task
+deploys anything to production.
+
+The `*Production*.ps1` scripts that task 033 lists as `role="modify"`
+(`Configure-ProductionAppSettings.ps1`, `Seed-ProductionKeyVault.ps1`) are **edited as text** to stop
+referencing the retired secret. They are not executed by this project.
+
 ### 3. ⚠️ Always pass `--subscription` to `az`
 
 The CLI default drifted to **"Spaarke Model 1 Production"** during 051, which made correctly-granted
