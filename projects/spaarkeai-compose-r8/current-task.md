@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-24 (task 051 IN PROGRESS — discovery complete) · **Pushed**: through `7069717bd`
+> **Last Updated**: 2026-08-24 (by `context-handoff`) · **Pushed**: `d6cccc87c` + a formatting commit
 > **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
@@ -9,51 +9,76 @@
 
 | Field | Value |
 |-------|-------|
-| **Active task** | **051** — Track C anchor supply. Status: **in-progress**, Step 1 (trace) COMPLETE. |
-| **Next action** | Implement the wiring named in "Task 051 findings" below: pass `aiGenerateBookmark` + `aiApplyValidation` to BOTH `<ComposeAiToolbar>` mounts in `ComposeEditor.tsx` (lines ~3486, ~3744), then cover the note-tool sources. |
-| **Phases 1–3** | ✅ COMPLETE. Architecture gate **PASSED**. ADR-049 third amendment **APPLIED**. |
-| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · 044 ✅ · 043 ⊘ · 045 🔲 · **046 ✅ · 047 ✅ · 048 ✅** (zero-loss follow-ons) |
-| **Gate status** | Server **11,060 / 0** · Client (Jest) **1,140 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs** (+0.03 vs the 44.96 net10 baseline; ceiling 60) |
+| **Task** | **051** — FR-C01/C02/C03 anchor supply (`tasks/051-anchor-supply.poml`), Phase 5 Track C |
+| **Step** | **4 of 7 done** (0 rigor · 1 trace · 2–3 envelope+thread · 4 rebasing). Remaining: 5 (FR-C02 `CitationResolver`) · 6 (FR-C03 closed set) · 7 (tests) |
+| **Status** | **in-progress** — FR-C01 COMPLETE and committed; FR-C02 + FR-C03 not started |
+| **Rigor / tier** | FULL · opus @ max (session model must be Opus — do not run this on a lower tier) |
+| **Next Action** | Start **FR-C02**: give `src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs` a real BFF consumer so a reference-driven target ("clause 4.2") resolves through the numbering engine with no text search. Verify with `grep -rn "CitationResolver" src --include=*.cs` — today every hit is inside its own file. |
+
+### Files Modified This Session (all COMMITTED + PUSHED — clean tree)
+
+| File | Purpose |
+|---|---|
+| `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx` | Instantiate `useAiGenerateBookmark` + `useAiApplyValidation`; pass both to BOTH `<ComposeAiToolbar>` mounts; anchor + return-handling for the review-note dispatch |
+| `src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts` | `beginGenerate` accepts an optional explicit `range` (note-clause anchoring) |
+| `projects/spaarkeai-compose-r8/current-task.md` | This checkpoint |
+
+### Critical Context
+
+**FR-C01's machinery already existed and was dark.** R4 tasks 040/041 built the bookmark + validate-before-apply
+path — tested, exported, and never given a production consumer, so `useBookmark` was permanently false and every
+AI edit text-searched. Task 051 part 1 is the wiring, not new machinery. **Nothing has been deleted or retired**
+(`target_text` / `match_mode` / `ComposeEditValidator` all still present) — task 052 owns retirement.
 
 ---
 
-## Task 051 findings (Step 1 trace — READ BEFORE IMPLEMENTING)
+## Task 051 — decisions made (carry these forward)
 
-**F-1 — the FR-C01 machinery EXISTS and is UNWIRED.** `useAiGenerateBookmark` (R4 task 040) +
-`useAiApplyValidation` (R4 task 041) already implement exactly what FR-C01 specifies: a request-scoped
-bookmark at the live selection, **rebased through concurrent edits with the SAME ProseMirror `Mapping`
-primitive the op-log uses** (`RebasedOperationLog.recordTransaction`) — which is project invariant (6)
-satisfied by construction — resolving a durable `w14:paraId` via `resolveRunAnchor`, with the model
-returning JSON operations referencing paraId rather than free text (I-7).
+1. **Wire, don't rebuild.** The two R4 controllers are the FR-C01 implementation; only the mount was missing.
+   Invariant (6) holds by construction — the bookmark rebases on the editor's own ProseMirror `Mapping` (the
+   op-log's primitive) and applied ops go through a normal `chain()`, so the step interceptor captures them into
+   the same log as user keystrokes. **No parallel rebaser was written**, which acceptance criterion 5 requires.
+2. **`beginGenerate({ range })` instead of a second mechanism.** The review-note tools anchor on a note's clause
+   span, not the caret. One additive parameter reuses all downstream behaviour. The batch path calls
+   `dispatchNoteToolRequest`, so both note sources were covered by the single change.
+3. **Reanchor options deliberately omitted** from `useAiApplyValidation`. Without them `canReanchor` is false and
+   an unvalidatable op surfaces with NO fuzzy hint — the more conservative branch. The hint is presentation only
+   and never a placement (the hook's own SCOPE DECISION), so nothing is lost and no service dependency is added.
 
-Both are built, tested (3 test files), and exported from the barrel. **Neither has a production
-consumer.** Both `<ComposeAiToolbar>` mounts in `ComposeEditor.tsx` (~3486 BubbleMenu-less, ~3744
-BubbleMenu) omit `aiGenerateBookmark` AND `aiApplyValidation`. Therefore:
+## Task 051 — findings that bind the REST of Track C
 
-```ts
-const useBookmark = !!aiGenerateBookmark && action.materializesInEditor === true;  // ALWAYS false in prod
-...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),  // never sent
-```
+**F-1 / F-2 — the task-050 assessment's C-1 is half right.** It says the client already sends
+`selectionAnchorStart` / `selectionAnchorEnd` / `targetParaId`. The first two are unconditional; **`targetParaId`
+was behind `useBookmark` and never shipped**. Now fixed. Cite the corrected version, not C-1 as written.
 
-**F-2 — the task-050 assessment's C-1 is half right.** It states the client "already sends
-`selectionAnchorStart`/`selectionAnchorEnd`/`targetParaId` in `args.slots`, so FR-C01's request half is
-already on the wire". The first two ARE unconditional; **`targetParaId` is behind `useBookmark` and is
-therefore never sent in production.** The durable anchor is NOT on the wire — only raw ProseMirror
-positions, which are session-local and drift, which is precisely why 040 built the bookmark.
+**F-3 — ESCALATION TRIGGER 1 FIRED AND IS NOW CLOSED.** Four dispatch sites build edit slots, not one:
 
-**F-3 — ESCALATION TRIGGER FIRED (POML trigger 1: "a fourth anchor source exists").** There are FOUR
-dispatch sites building edit slots, not one:
-
-| # | Site | Durable identity available | Sent? |
+| # | Site | Durable identity | Status |
 |---|---|---|---|
-| 1 | `ComposeAiToolbar.handleActionClick` (selection) | bookmark paraId | ❌ unwired |
-| 2 | `ComposeEditor.dispatchNoteToolRequest` (review-note, single) | **the comment `threadId`** via `findCommentAnchorRange` | ❌ flattened to raw PM offsets |
-| 3 | `ComposeEditor.runBatchNoteToolAsync` (review-note, batch) | same | ❌ same |
-| 4 | Context-pane bridge → `enqueueComposeAction` | inherits from 1–3 | — |
+| 1 | `ComposeAiToolbar.handleActionClick` (selection) | bookmark paraId | ✅ wired (part 1) |
+| 2 | `ComposeEditor.dispatchNoteToolRequest` (review-note, single) | comment `threadId` → `findCommentAnchorRange` | ✅ wired (part 1) |
+| 3 | `ComposeEditor.runBatchNoteToolAsync` (batch) | same — reuses site 2 | ✅ covered |
+| 4 | Context-pane bridge → `enqueueComposeAction` | inherits from 1–3 | ✅ inherits |
 
-Sites 2/3 already RESOLVE a durable anchor (`findCommentAnchorRange(doc, threadId)`) and then throw it
-away, keeping only `selectionAnchorStart/End`. **Task 052 MUST NOT retire the text-search path until
-sites 2 and 3 carry an anchor too** — they are the uncovered source the trigger names.
+**Task 052 may now retire the search path only after FR-C02/C03 also land** — a citation-driven or
+review-pass edit with no anchor would still depend on it.
+
+## Task 051 — remaining work, with its binding constraints
+
+- **FR-C02** — wire `CitationResolver`; acceptance requires it to have a real BFF consumer outside its own file
+  (verified by grep).
+- **FR-C03** — enumerate a **closed** paraId set for review passes server-side, supply it to the model, validate
+  the returned id against it, **reject loudly**; MUST NOT fall back to searching.
+- **Tests** — **C-2 makes a `tests/integration/seam/Compose/**` vertical-slice test the definition of done**
+  ("a green contract-shape test is NOT sufficient"). Nearest neighbours: `ComposeParaOffsetAnchorSeamTests.cs`,
+  `ComposeReferenceMapSessionLedgerSeamTests.cs`. Plus the acceptance test that a selection-driven edit places
+  with **zero text matching invoked**.
+- **C-4 unchecked** — ADR-040 caps inline payloads at 128 KB and `ChatEndpoints.ProjectComposeOutputs` SKIPS
+  truncated entries entirely. Anchors now ride every edit entry; **measure the whole-document-revise worst case
+  and confirm headroom, or state the degradation.** Not yet done.
+- **C-1** — anchors MUST ride as `args.slots.*`; adding a fourth `OperandVocabulary` entry converts Path C into
+  Path B (a spine change). **C-3** — never add `body_html` to an edit payload. **C-6** — do not touch the
+  supersession leg. **C-7** — closed-set validation belongs in the Compose-owned path, not `SessionDispatchOrchestrator`.
 
 ### The one thing to understand
 
