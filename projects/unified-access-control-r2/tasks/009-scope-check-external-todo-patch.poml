@@ -28,10 +28,10 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
-      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning the unscoped PATCH behavior, flipped here.</dependency>
+      <dependency task="001" status="completed">⚠️ CORRECTED 2026-08-24 (review finding). Task 001 did NOT author a characterization for A-7 — notes/task-001-untestable-findings.md §2(b) records the PATCH handler as unreachable offline, so there is NOTHING TO FLIP. Do not go looking for one. The only related test is the fail-closed negative PatchExternalTodo_WhenCallerCannotBeResolvedToExternalPrincipal_IsRejected in EndpointAuthorizationCharacterizationTests.cs — that is a gate that must STAY, not a characterization to invert. This task owns its own coverage.</dependency>
     </dependencies>
   </context>
 
@@ -41,6 +41,9 @@
     <constraint source="ADR-008">Prefer expressing the check as an endpoint filter consistent with the route group's pattern; inline service-call acceptable only if the sibling scoped routes do the same — match the file's live convention. Scope: the PATCH route.</constraint>
     <constraint source="project">Respond 404 (not 403) when hiding record existence is the established convention on the external plane — match what the scoped read path returns for out-of-scope records. Scope: the deny response shape.</constraint>
     <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION — omitted when the other seven were filed, corrected 2026-08-24 by the review. A-7 was NOT pinned by task 001 (the PATCH handler is unreachable offline behind CallerPrincipalAuthorizationFilter), so this task owns its coverage entirely. Tests go at tests/integration/auth/** (the ADR-038 KEEP path). Extract a seam if needed rather than mocking transport.</constraint>
+    <constraint source="review-2026-08-24">LESSON THAT APPLIES DIRECTLY HERE. Mocking at a seam proves the CALLER handles a failure, never that the CALLEE reports one. The review found four load-bearing methods in this project executed by NO test, each with a one-line perturbation that fails zero tests -- including the central delegation probe. When you add the scope check, perturb it (invert the in-scope test, make the accessible-set resolver return everything) and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level: fix the test, do not drop the perturbation. Rationale: notes/review-2026-08-24-findings.md section 3.</constraint>
+    <constraint source="review-2026-08-24">DO NOT TOUCH tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalScopeCharacterizationTests.cs -- the path this POML originally named. It does not exist at that location, and the file of that name at tests/integration/auth/UnifiedAccessControl/ belongs to A-17 / pending task 011. Editing it would collide with 011 on a parallel-unsafe surface.</constraint>
   </constraints>
 
   <knowledge>
@@ -62,7 +65,7 @@
     <step order="2">Before the update: read the target To Do's root lookup, resolve the caller's accessible set for that root entity, and deny (matching the read path's out-of-scope response) when the root is not in the set.</step>
     <step order="3">Restrict the PATCH surface to the fields the endpoint intends to update (no open property bag pass-through) — verify current behavior and pin it.</step>
     <step order="4">Delete the stale H-8a comments at :13, :24, :339.</step>
-    <step order="5">Flip the task-001 characterization test; add negative tests (zero-root caller, out-of-scope To Do, nonexistent To Do).</step>
+    <step order="5">Author the coverage yourself at tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs — there is NO task-001 characterization to flip (see the corrected dependency note). Cover: an in-scope To Do PATCHes successfully; an out-of-scope To Do is denied; a zero-root caller is denied; a nonexistent To Do does not disclose existence. Do NOT weaken PatchExternalTodo_WhenCallerCannotBeResolvedToExternalPrincipal_IsRejected — it is the fail-closed gate this task strengthens. Mock at the virtual seam; Mock&lt;HttpMessageHandler&gt; stays banned (ADR-038 B1).</step>
     <step order="6">Run full test suite; build green.</step>
     <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
     <step order="8">Document response-shape choice (403 vs 404) in projects/unified-access-control-r2/notes/.</step>
@@ -71,6 +74,19 @@
   <escalation>
     <trigger>If the To Do's root cannot be resolved through an existing accessible-set entity (A-9: only 3 root sets exist — project/matter/WA), STOP and escalate: scoping to "todo regarding project only" vs denying todos with other parents is a product decision, not an implementation detail.</trigger>
   </escalation>
+
+  <justification>
+    <existing>tests/integration/auth/UnifiedAccessControl/ — the ADR-038 security-auth KEEP path this
+    project has used for every task's coverage. No existing file covers the external To Do PATCH scope
+    check; task 001 could not reach the handler offline, which is why A-7 was never pinned.</existing>
+    <extension>A new test file inside the existing KEEP path, not a new production component. It cannot
+    extend ExternalScopeCharacterizationTests: that file is A-17's FetchXml suite and belongs to pending
+    task 011, and editing it would collide on a parallel-unsafe surface.</extension>
+    <cost-of-doing-nothing>Without it the PATCH scope check ships unverified, and the review of 2026-08-24
+    established that this project has four load-bearing methods executed by no test — each with a one-line
+    perturbation that fails zero tests. An unverified authorization check on a mutation is exactly that
+    shape: it can be silently inverted with no signal.</cost-of-doing-nothing>
+  </justification>
 
   <tools><tool name="dotnet">Build + test</tool></tools>
 
