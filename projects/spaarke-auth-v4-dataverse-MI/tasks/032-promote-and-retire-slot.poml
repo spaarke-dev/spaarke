@@ -4,7 +4,7 @@
     <title>Promote MI-FIC to the default slot, then retire the staging slot (FR-C2)</title>
     <phase>3 Rollout</phase>
     <gate>031 fully green</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>auth tag, live environment change with total-lockout blast radius on the dev app.</rigor-reason>
     <model-tier>sonnet</model-tier>

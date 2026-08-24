@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (task 031 continued) — **EVERY 031 CHECKLIST SURFACE IS NOW VERIFIED EXCEPT THE OFFICE ADD-INS.** MI-FIC OBO proven at credential level on chat/SPE/email. 032 unblocked.
+> **Last Updated**: 2026-08-24 (task 032) — **🟢 THE SWAP IS DONE. THE DEFAULT SLOT NOW RUNS MI-FIC, PROVEN AT CREDENTIAL LEVEL.** Stopped before slot deletion — needs the Office add-in check (human).
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,9 +11,9 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **031 🔄 IN PROGRESS.** ✅ MI-FIC OBO · ✅ inbound validation (all 3 schemes) · ✅ row-level auth · ✅ **SPE upload/download/preview (byte-exact round-trip)** · ✅ **chat SSE `dataverse.*`** · ✅ **send-as-user email** · ✅ `/api/agent` · ✅ **secret-first rollback (unblocks 032)**. Group F closed; 051 🔄 + 053 🔄 await cutover |
-| **Status** | Suite **10,614 / 0** · seam **891/891** · ArchTests **56/56** · publish **44.99 MB** · CVE clean · **working tree clean, 0 unpushed** · slot `/healthz` 200 |
-| **Next Action** | **031 is DONE except for one item that must run inside 032.** The Office add-in is deployed but hard-baked at build time to `spaarke-bff-dev.azurewebsites.net` — **the default slot, i.e. the pre-migration build on the secret** — so testing it before the swap proves nothing. It verifies for free at **032 step 5** ("immediately re-run the §6.1 checklist against the default slot"), before step 7 deletes the slot. **Task-030 carry-forward: CLOSED 2026-08-24 as Option B** (owner) — structural proof stands, live confirmation handed to `customer-provisioning-orchestration-r1` task 130; see §6.1 + `notes/PROVISIONING-CHANGE-REQUEST.md` §11. **Do NOT re-run: rollback (§5.6), SPE (§5.5), chat SSE (§5.7), email (§5.8 — delivery owner-confirmed), inbound schemes (§5.2/§5.10).** |
+| **Task** | **032 🔄 — SWAP COMPLETE AND VERIFIED at 14:50:59Z.** Default slot runs the migrated build; `built with credential ManagedIdentityFederated.` captured on it at 14:59:14Z. Full checklist green, 25/25 + 25/25 clean. **STOPPED at step 7 (slot deletion)** pending the Office add-in check. Record: [`notes/decisions/032-promotion.md`](notes/decisions/032-promotion.md) |
+| **Status** | Default slot: `/healthz` 200 · OBO 25/25 200 · unauth 25/25 401 · SPE byte-exact round-trip · chat SSE 200 with live citations · no `A4 DEVIATION` · **zero auth-namespace warn/fail post-swap** · staging slot still Running (rollback target) · tree clean |
+| **Next Action** | 🛑 **HUMAN REQUIRED — test the Outlook and Word add-in save flows against the default slot.** They are live at `icy-desert-0bfdbb61e.6.azurestaticapps.net` and now point at the migrated build (BFF URL is baked at build time to `spaarke-bff-dev.azurewebsites.net`). **If green** → resume 032 step 7: delete the staging slot, then 033. **If it fails** → SWAP BACK first (`az webapp deployment slot swap … --slot staging --target-slot production`), diagnose after; do NOT fix forward on a fail-closed path. **Do NOT delete the staging slot until the add-in check passes** — it is the only remaining swap-back rollback. |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
