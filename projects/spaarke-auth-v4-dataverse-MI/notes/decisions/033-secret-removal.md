@@ -1,6 +1,7 @@
 # Task 033 — remove the secret and reconcile the estate
 
-> **Status**: 🔄 IN PROGRESS — steps 1–2 done. **The secret is GONE from the app; still present in Key Vault.**
+> **Status**: 🔄 IN PROGRESS — steps 1–3 done. **The secret is GONE from the app AND from Key Vault**
+> (soft-deleted, recoverable until 2026-11-22). Remaining: the script/doc sweep, ADR-028 E-3, step 7.
 > **Date**: 2026-08-24
 
 ---
@@ -257,20 +258,96 @@ own verification.**
 
 ---
 
-## 3. Steps 3–7 — NOT STARTED
+---
+
+## 3. Step 3 — COMPLETE. The secret is out of Key Vault
+
+### 3.1 The consumer was fixed BEFORE the deletion, not after
+
+The POML's step 3 reads *"Remove the Key Vault secret and the lowercase alias; re-verify the add-in
+deploy."* Two changes, both following from §0.1:
+
+- The surface to re-verify is **`Sync-LocalConfig.ps1` → local dev**, not the add-in deploy.
+- **Order reversed.** A "delete, then check what broke" sequence is only defensible when you don't know
+  the consumer. Here it was known, so the manifest it reads was corrected *first* and the deletion made
+  second — which turns the verification into a precondition rather than a post-mortem.
+
+`config/spaarke-resources.yaml` edits (it is the file `Sync-LocalConfig.ps1` walks for `kv:` refs):
+
+| Line | Was | Now |
+|---|---|---|
+| `:123` | *"KV alias … (+ duplicate lowercase … **used by the Office add-in deploy**)"* | retirement note + an explicit **CORRECTION** paragraph naming the false claim and its real consumer |
+| `:288-290` | `api_client_secret: kv:bff-api-client-secret`, `graph_api_client_secret: kv:Graph-API-ClientSecret` | removed, with a do-NOT-re-add note citing `RequireSecretFreeIdentity` |
+| `:311-313` | `app_user_client_secret: kv:bff-api-client-secret` | `secrets: {}` + note that the Dataverse app user shares the BFF app registration and therefore inherits the MI migration |
+| `:476-477` | both names in `referenced:` | removed |
+| `:494` | `- [bff-api-client-secret, BFF-API-ClientSecret]` in `duplicates:` | removed, with the §2.2 correction that `Graph-API-ClientSecret` was never a duplicate |
+
+**Verified statically rather than by running the script.** Parsed the manifest and walked every `kv:`
+reference: **14 total, 0 pointing at any of the three doomed secrets.** Since `Sync-LocalConfig.ps1`
+fetches exactly the refs it finds, it cannot fail on a secret nothing references. Running it would have
+dumped 14 live secret values to disk to prove the same thing — strictly worse.
+
+### 3.2 Execution
+
+```
+17:14:33Z  precondition: 26 secrets in spaarke-spekvcert
+17:14:37Z  az keyvault secret delete BFF-API-ClientSecret     (no --purge)
+17:14:39Z  az keyvault secret delete bff-api-client-secret    (no --purge)
+17:14:40Z  post-state: 24 secrets — exactly -2
+17:15:16Z  VERIFY  all green, 66 bytes byte-identical, 15/15 + 15/15
+```
+
+| Soft-deleted, recoverable until | |
+|---|---|
+| `BFF-API-ClientSecret` | **2026-11-22T17:14:37Z** |
+| `bff-api-client-secret` | **2026-11-22T17:14:39Z** |
+
+Negative cases held: **`spe-owning-app-secret` untouched** (ADR-028 E-1, per-customer owning apps) and
+`PowerBi__ClientSecret` untouched (task 042, deferred). `Graph-API-ClientSecret` deliberately left for
+step 7 rather than folded in here — the POML is `mode="prescriptive"`, so its step order is binding, and
+bundling it would have been convenience, not necessity.
+
+### 3.3 🔔 Consequence the owner should see: local-dev OBO has no credential path left
+
+This is the one genuine cost of the migration, and it is a **design consequence, not a defect**.
+`IdentityConfigurationValidator` states it in its own words:
+
+> *"Development is exempt from rule 6: a developer workstation has no route to IMDS, so MI-FIC cannot be
+> minted there and **the user-secret fallback is the legitimate — and only — way to run OBO locally**."*
+
+So local `dotnet run` OBO needs a client secret, and the KV copy was the only **readable** copy — Entra
+will not disclose a secret value after creation. Measured impact, narrower than it first appears:
 
 | | |
 |---|---|
-| App settings | ✅ **4 BFF-identity secret keys DELETED.** `PowerBi__ClientSecret` remains (task 042, deferred — correct) |
-| Key Vault `spaarke-spekvcert` | `BFF-API-ClientSecret` + `bff-api-client-secret` **both still present** |
+| Runtime source for local dev | `dotnet user-secrets` — **not** `config/secrets.local.json`, which `Program.cs` never reads. It is a reference dump |
+| Developer who already has the user-secret set | **unaffected** — the app-registration secret itself is alive in Entra until 2027-12-19 |
+| Developer setting up fresh, or after a machine rebuild | **cannot obtain the value** → no local OBO |
+| Recovery if this bites | `az keyvault secret recover --name bff-api-client-secret` (until 2026-11-22), or mint a dev-only secret |
+
+**Not escalated as a blocker** because it is recoverable in one command, affects no deployed environment,
+and criterion 3 ("gone from Key Vault") is the task's stated deliverable. **Surfaced** because it is a
+real change to the developer inner loop that no criterion states plainly, and the owner may want a
+deliberate replacement (a dev-only app registration, or `AzureCliCredential` for local OBO) rather than
+inheriting this by default. Booked to 090.
+
+⚠️ `src/server/api/Sprk.Bff.Api/docs/SPE.BFF.API-SECRETS-SETUP.md` is **doubly stale**: it instructs
+developers to set `Graph:ClientSecret` and `Dataverse:ClientSecret`, and per §2.1 **both keys have zero
+consumers** — the provider resolves `AzureAd:ClientSecret` → `API_CLIENT_SECRET` → `AZURE_CLIENT_SECRET`.
+Following that doc today produces a local dev environment that silently cannot authenticate. Step 5.
+
+---
+
+## 4. Steps 4–7 — REMAINING
+
+| | |
+|---|---|
+| App settings | ✅ 4 BFF-identity secret keys deleted; `PowerBi__ClientSecret` correctly remains |
+| Key Vault | ✅ both BFF-identity copies deleted (recoverable to 2026-11-22) |
 | Credential order | `[ManagedIdentityFederated]` — explicit, no fallback |
 | `RequireSecretFreeIdentity` | **true** |
-| Rollback | rung 2′ (restore from KV) |
+| Rollback | `secret recover` → restore app settings → remove the order override |
 
-Remaining, with the corrections from §0.1 and §2.2 folded in:
-
-3. Delete the KV secret + lowercase alias **without `--purge`**; re-verify **`Sync-LocalConfig.ps1` /
-   local `dotnet run`** (criterion 9 — *not* the add-in deploy).
 4. Sweep the **15** scripts (not 11). Includes the two stale `DataverseServiceClientImpl` comments (§2.1).
 5. Sweep the 13 docs/config/workflow files — including correcting the false add-in claim in 4 places.
 6. Close ADR-028 E-3; update `.claude/constraints/auth.md` + `Sprk.Bff.Api/CLAUDE.md:110,221`.

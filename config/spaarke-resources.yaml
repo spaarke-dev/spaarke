@@ -120,7 +120,17 @@ app_registrations:
       # Sole client secret on this app registration. Target of spaarke-auth-v4 (ADR-028 A4 / exception E-3).
       - name: Dataverse-Checkout-20251218
         expires: 2027-12-19T03:56:35Z
-        note: KV alias `BFF-API-ClientSecret` (+ duplicate lowercase `bff-api-client-secret` used by the Office add-in deploy)
+        note: |
+          RETIRED from the BFF identity 2026-08-24 (spaarke-auth-v4 task 033). The BFF authenticates as a
+          confidential client via the MI-FIC above; `Graph:Credentials:Order` is [ManagedIdentityFederated]
+          with no fallback, and `RequireSecretFreeIdentity=true` refuses to start if a secret is re-added.
+          Both KV copies (`BFF-API-ClientSecret` + lowercase `bff-api-client-secret`) were deleted.
+          CORRECTION: earlier revisions of this line said the lowercase alias was "used by the Office add-in
+          deploy". That was FALSE and it survived unchecked into the spec and task 033's own plan.
+          `deploy-office-addins.yml` uses BFF_API_CLIENT_ID (a client *id*) and no client secret at all; the
+          alias's only consumer was `scripts/Sync-LocalConfig.ps1` -> local dev.
+          This app-registration secret itself still exists in Entra until it expires 2027-12-19; it is simply
+          no longer reachable through Key Vault or app settings.
 
   msal_client:
     client_id: 5175798e-f23e-41c3-b09b-7a90b9218189
@@ -285,9 +295,12 @@ environments:
       deployment_workflow: .github/workflows/deploy-bff-api.yml
       app_registration_ref: app_registrations.bff_api
       secrets:
-        # KV duplicate exists: also stored as `BFF-API-ClientSecret` (PascalCase) — both point at same value historically; lowercase-kebab is canonical
-        api_client_secret: kv:bff-api-client-secret
-        graph_api_client_secret: kv:Graph-API-ClientSecret
+        # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
+        # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated
+        # credential (ADR-028 A4; exception E-3 closed by this task). `bff-api-client-secret`,
+        # `BFF-API-ClientSecret` and the orphaned `Graph-API-ClientSecret` were deleted from Key Vault.
+        # Do NOT re-add a kv: reference here — `Graph:Credentials:RequireSecretFreeIdentity=true` makes
+        # the BFF refuse to start outside Development if ClientSecret returns to the credential order.
         application_insights_key: kv:application-insights-key
         servicebus_connection_string: kv:ServiceBus-ConnectionString
         redis_connection_string: kv:Redis-ConnectionString
@@ -307,10 +320,11 @@ environments:
       api_url: https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2/
       region: unitedstates
       app_user_client_id_ref: app_registrations.bff_api.client_id
-      secrets:
-        # Dataverse application user shares the BFF API app registration, so it reuses bff-api-client-secret.
-        # No dedicated DV-* secret exists in dev KV (confirmed via `az keyvault secret list` 2026-06-26).
-        app_user_client_secret: kv:bff-api-client-secret
+      # secrets.app_user_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033). The Dataverse
+      # application user shares the BFF API app registration, so it inherits that identity's migration:
+      # Dataverse is reached under the user-assigned managed identity `mi-bff-api-dev` (app-only) or under
+      # the calling user via OBO on the MI-FIC assertion. No client secret is involved on either path.
+      secrets: {}
 
     ai:
       openai:
@@ -473,8 +487,6 @@ environments:
         - AiSearch--AdminKey # canonical per spec FR-21; added 2026-06-26 task 001
         - AzureAISearchApiKey # legacy app-settings alias (mirrors AiSearch--AdminKey); added 2026-06-26 task 001
         - application-insights-key
-        - bff-api-client-secret
-        - Graph-API-ClientSecret
         - Redis-ConnectionString
         - ServiceBus-ConnectionString
         - spe-app-cert
@@ -491,7 +503,10 @@ environments:
         - SPRK-MANAGED-IDENTITY-CLIENT-ID # duplicate of MANAGED-IDENTITY-CLIENT-ID
         - UAMI-ClientId
       duplicates: # Multiple KV entries for the same value
-        - [bff-api-client-secret, BFF-API-ClientSecret] # PascalCase legacy entry
+        # [bff-api-client-secret, BFF-API-ClientSecret] — BOTH DELETED 2026-08-24 (spaarke-auth-v4 task 033).
+        # `Graph-API-ClientSecret` was never a duplicate of these despite being described as an "alias" in
+        # several places: measured 2026-08-24, it held a DIFFERENT value. It was orphaned (zero code/config
+        # consumers, per code-quality-and-assurance-r3 HYGIENE-2) and was deleted separately.
         - [ai-openai-key, AzureOpenAI-ApiKey] # PascalCase legacy entry
         # AI Search admin key has 3 KV entries that all hold the same value — by intentional Option C design
         # (task 001 user remediation 2026-06-26) to support concurrent canonical + legacy callers during transition.
