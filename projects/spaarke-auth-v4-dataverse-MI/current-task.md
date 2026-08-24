@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (task 033 step 1) — **033 STARTED. NOTHING DELETED. Step 1 found a false premise + a file conflict; both need a decision before step 2.**
+> **Last Updated**: 2026-08-24 (task 033 step 2) — **🟢 THE SECRET IS GONE FROM THE RUNNING APP.** Order narrowed to MI-FIC-only FIRST (the proof), then the 4 secret app settings deleted, then `RequireSecretFreeIdentity=true`. Key Vault still holds it — that is step 3.
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -11,9 +11,10 @@
 |---|---|
 | **Project** | `spaarke-auth-v4-dataverse-MI` — eliminate `BFF-API-ClientSecret`; migrate every BFF-identity confidential client (incl. **OBO**) to a Managed-Identity federated credential |
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
-| **Task** | **033 🔄 — step 1 of 7 done. NOTHING DELETED YET.** Step 1 overturned a false premise the project has carried since the spec (see Next Action). Record: [`notes/decisions/033-secret-removal.md`](notes/decisions/033-secret-removal.md) |
-| **Status** | Live state UNCHANGED: 4 secret keys present on the only slot · both KV aliases present in `spaarke-spekvcert` · order overrides absent → canonical `[MI-FIC, ClientSecret]` · rollback rung 2 still available · tree clean |
-| **Next Action** | **Two decisions needed before step 2 (the first irreversible one).** (1) 🔴 **The lowercase KV alias is NOT used by the Office add-in deploy** — that claim is false in 4 places. Its real consumer is `Sync-LocalConfig.ps1` → **local `dotnet run`** (criterion 9, not 7). Step 3's re-verification target changes accordingly. (2) 🛑 **`/conflict-check` HARD WARN: PR #812 (`unified-access-control-r2`) edits `.claude/constraints/auth.md`**, which step 6 must also edit — coordinate before step 6. **Step 2 retires rollback rung 2 (credential reorder); after it, only a redeploy remains.** |
+| **Task** | **033 🔄 — steps 1–2 of 7 done.** The BFF no longer has a secret to resolve. Record: [`notes/decisions/033-secret-removal.md`](notes/decisions/033-secret-removal.md) |
+| **Status** | `Graph__Credentials__Order__0=ManagedIdentityFederated` (explicit, **no fallback beneath it**) · `RequireSecretFreeIdentity=true` · **4 secret app settings DELETED** 16:50:25Z (210 settings, every delta attributable) · `PowerBi__ClientSecret` correctly untouched · **KV still holds `BFF-API-ClientSecret` + `bff-api-client-secret`** · OBO verified green at every rung incl. byte-exact SPE round-trip, 15/15 + 15/15 |
+| **Next Action** | **Step 3 — delete the two KV secrets, WITHOUT `--purge`** (vault has soft-delete, 90-day retention, purge protection off → `az keyvault secret recover` is the undo; the POML's "irreversible" framing is wrong and is corrected in the record §2.0). Then re-verify **`Sync-LocalConfig.ps1` → local `dotnet run`** — **NOT** the add-in deploy (§0.1: that premise is false in 4 places). ⚠️ **`Graph-API-ClientSecret` is NOT an alias** — different fingerprint (`34f4d5234fb7` vs `b09a140a603e`); identify its owner before step 7 touches it. 🛑 Step 6 still contends with **PR #812** on `.claude/constraints/auth.md`. |
+| **Rollback** | Rungs 1 and 2 are both retired. Live rung is **2′ — restore the app settings from Key Vault** (fingerprint `b09a140a603e`, verified identical across all four keys + both KV aliases) + remove the order override. ~2 min. **Step 3 does not remove rung 2′** — it adds a 90-day `secret recover` in front of it |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
