@@ -484,6 +484,14 @@ HTTP 200 in 4.23 s
 `from` is the **authenticated user**, not the shared mailbox — the OBO branch ran. A `sprk_communication`
 row was created in Dataverse as a side effect (authorised). One email, one recipient: the owner.
 
+**✅ DELIVERY CONFIRMED OUT-OF-BAND (2026-08-24).** The owner reported receiving the message in their
+mailbox and quoted its body back verbatim. This matters more than usual on this task: every other §5
+result is inferred from a response the BFF itself produced, and §5.5 showed how badly that can mislead.
+Here the evidence is **outside the system under test** — a message that arrived in a mailbox the BFF does
+not control, sent as the user, over an OBO exchange performed with the MI-FIC credential. Of all the
+evidence in this record, this and the §5.5 byte-exact round-trip are the two that no fail-closed,
+fall-through or error-open path can fabricate.
+
 First attempt returned **400 `CHANNEL_NOT_SUPPORTED`** because the enums are Dataverse option-set integers
 (`CommunicationType.Email = 100000000`, `BodyFormat.HTML = 100000001`), not 0/1. Recorded because the 400
 is itself evidence: inbound auth and `CommunicationAuthorizationFilter` had both already passed to reach

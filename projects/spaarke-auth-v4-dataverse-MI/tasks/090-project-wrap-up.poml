@@ -180,11 +180,19 @@
       with real data, but it does so through the chat pipeline's DataverseUserClient - that 200 is NOT
       evidence about AgentTokenService.
 
-      Why this belongs in wrap-up rather than being ignored: a migrated confidential-client construction
-      site with no caller is precisely what the Phase 6 credential census (task 061) exists to keep
-      honest. Either it is a real site (wire it up, then it is verifiable end-to-end) or it is not
-      (delete it, and the census count drops by one). Leaving it registered-but-unreachable makes the
-      census number true but meaningless.
+      SCOPE NOTE - corrected 2026-08-24 after checking the census rather than assuming.
+      An earlier draft of this obligation claimed that leaving AgentTokenService registered-but-unreachable
+      "makes the census number true but meaningless". That is WRONG and is retracted. CredentialCensusTests
+      counts confidential-client CONSTRUCTION sites per file, and after task 022 AgentTokenService no longer
+      constructs one - it delegates to OrderedCredentialClientProvider.GetClientAsync. It is correctly ABSENT
+      from the census, and the census is honest by its own definition. Success criteria 4 and 12 are
+      unaffected by this item.
+
+      So this is ordinary code hygiene on the agent surface, NOT an unfinished auth-v4 deliverable, and it is
+      booked here for visibility rather than because this project owes it. The only auth-v4-relevant
+      consequence is already recorded in the 031 record section 5.9: FR-B3 site 4 is verified at seam-test
+      level rather than over HTTP, because no HTTP path reaches it. That is a stated limitation of the
+      verification, not an outstanding task.
     </obligation>
   </booked-obligations>
 </task>
