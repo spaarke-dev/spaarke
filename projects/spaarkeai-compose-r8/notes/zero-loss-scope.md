@@ -89,6 +89,49 @@ no OOXML representation in either direction. They are editor features that quiet
 selectable, deletable, and undo-able — and because a node the user can corrupt is worse than one they
 cannot see.
 
+## 2b. THE OPAQUE-ATOM PIPELINE ALREADY EXISTS — and this collapses the plan
+
+Following the owner's "look at what the editor already provides" instinct one step further found the
+thing that reorders everything. **There is already a complete opaque-atom pipeline, built in R4 task
+012/021, wired into the editor today, and it is only missing its save half.**
+
+| Half | State |
+|---|---|
+| Server → HTML | ✅ `ComposeDocxProjectionBuilder` emits `<span class="compose-atom" data-atom-kind="field" contenteditable="false">…</span>` for **fields, inline SDTs and complex objects** (`AppendAtom`), and a block form for block-level SDTs (`EmitBlockAtom`) |
+| Editor node | ✅ `opaqueAtomNode.ts` — inline + block ProseMirror leaf nodes, `atom: true`, non-editable, registered as `COMPOSE_R4_OPAQUE_ATOMS` in `ComposeEditor.tsx` |
+| **Editor → model** | ❌ **`docxBridge.ts` does not mention the atom node at all.** `collectSegments` / `buildRunsFromNode` never see it, so on an edited paragraph it is simply gone |
+| Model | ❌ no `ComposeInlineRun` field for it |
+| Model → OOXML | ❌ nothing to emit |
+
+So the piece I sized as the expensive one — **D, the editor node** — is **already built for fields, SDTs
+and complex objects**. The user already sees these as non-editable chips in the editor. They vanish only
+because nobody wired the return path.
+
+### What that does to the sizing
+
+This is the same shape as task 046, at larger scale: the editor and the read path were done; only the
+model round trip was missing. And crucially it is **ONE mechanism, not five** — an atom kind is a
+discriminator on a single run field, so wiring the round trip once covers every kind that uses it, and
+each new construct becomes a new *kind* rather than a new node.
+
+`ComposeAtomKind` is today `'sdt' | 'field' | 'object' | 'unknown'`. **Tab and symbol should become atom
+kinds too** (root §11 — extend the existing mechanism rather than author two more nodes). They fit the
+contract exactly: discrete, deletable, with no interior cursor position. Styling is per-kind — a tab
+renders as whitespace of the right width, a symbol as its glyph — which is a CSS concern, not an
+architectural one.
+
+### Revised plan
+
+1. **Wire the atom round trip once** — `ComposeInlineRun.Atom { Kind, DisplayText, Payload }`, mapper
+   emission, renderer re-emission. This alone fixes **fields, inline SDTs and complex objects**.
+2. **Add `tab` and `symbol` as atom kinds** — read side emits them as atoms instead of a styled span /
+   resolved glyph; everything downstream already works.
+3. Images, and the editor-native nodes from §1b, stay separate — they are real content with their own
+   editor nodes, not opaque placeholders.
+
+**That is roughly two pieces of work where §3 lists six.** The sizing table below is kept as written
+because it records what was believed at each step, but rows 1, 2, 3, 5 and 6b are all subsumed by this.
+
 ## 3. Sizing
 
 | # | Construct | Needs | Size | Why this order |
@@ -138,7 +181,26 @@ riskiest editor nodes. Keep real editor nodes for #1, #2 and #5, where position 
 5. **#4 footnote / endnote references** — last, because its cost is in a part the merge does not otherwise
    touch, and it is the rarest of the six in contracts (common in briefs).
 
-## 6. One product decision needed before #5
+## 6. Cross-references: answered — stay live
+
+**Answer (2026-08-24): NOT difficult — recommend STAY LIVE.**
+
+The owner's rule was "determine how difficult to support — if not difficult then stay live, otherwise ok
+to freeze". It is not difficult, for two reasons that only became clear after §2b:
+
+1. **The editor node already exists and already treats a field as an atom** — the user sees the field's
+   cached result (e.g. "Section 4") as a non-editable chip. They cannot corrupt the interior, because an
+   atom has no interior cursor position.
+2. **"A range, not a point" dissolves when the field is one atom.** I sized fields as **L** on the
+   assumption we would have to model `begin / instrText / separate / result / end` as separate runs and
+   keep them aligned through an edit. We do not: capture the **instruction** plus the **cached result
+   text** on one atom, and re-emit the canonical five-run form on save. The displayed text is *generated*,
+   so the user should never be editing it anyway — which is exactly what an atom enforces.
+
+So a cross-reference survives an edit to its paragraph and keeps updating in Word. Nested fields (a field
+inside a field) are rare and can degrade to a flattened atom with the existing warning.
+
+Original framing kept below for the record.
 
 **When a user edits a paragraph containing a cross-reference field, should the field stay live?**
 
