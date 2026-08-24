@@ -166,12 +166,27 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > block's residual formatting loss and is still not optional.
 > [`notes/merge-mechanism-results.md`](../notes/merge-mechanism-results.md)
 
+> **⊘ 043 — SUPERSEDED, 2026-08-23** (owner-directed: close the corpus gap, then decide). The first pass
+> found FR-A07's premise unsupported — the gate measured **zero hard-fails**, and the two families the POML's
+> own example names ("3 embedded charts, 1 legacy form field") were already in the corpus and already carried.
+> But six families had **ZERO coverage**, so "zero hard-fails" said nothing about them. Owner directed closing
+> that gap first. Four fixtures now cover five of the six (macros excluded with reasons — a `vbaProject.bin` in
+> a `.docx` is invalid by construction). Result: **100% strict preservation** on all four when the construct
+> sits in an untouched block (it is cloned byte-verbatim — the merge never parses it), and when the
+> construct's OWN block is edited, a **named** warning every time (`complex-object-dropped`,
+> `unrepresented-endnote-reference`) with the saved document schema-valid and the package part surviving.
+> No hard fail, no silent loss → no gate. **"Edit a copy" also has no trigger to attach to**: every existing
+> read-only trigger is "we cannot read this at all", and a copy of that is not editable; the one genuine
+> read-but-never-write case (the PDF) already ships. Suite 10,920 → **11,044 / 0**. Residual carried to 045:
+> warn at EDIT rather than at save, and `.docm`.
+> [`notes/capability-gate-triggers.md`](../notes/capability-gate-triggers.md)
+
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 040 | **The merge mechanism** — server-side re-projection oracle · LCS alignment · block copy-through · property inheritance *(FR-A01 stamper promotion DROPPED — proved unnecessary)* | FR-A02/03/04 | FULL | opus/max | ❌ | 031 | ✅ |
 | 041 | **Opaque-atom payload carry** + table/atom identity (write model + `opaqueAtomNode.ts`) | FR-A05/06 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 042 | **Comment anchors + revision-id seeding under cloning** (dup-paraId consume-in-order, cross-boundary ranges) | FR-A11 | FULL | opus/xhigh | ❌ | 040 | ✅ |
-| 043 | **Capability gate** → read-only + **"Edit a copy"** (`ConfirmModal`/ADR-050; fork stamped `Authored`; original never written) | FR-A07 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 043 | **Capability gate** → read-only + "Edit a copy" — **SUPERSEDED** (owner 2026-08-23): no construct family needs a gate; corpus gap closed, 4 fixtures, all 100% strict + named warnings | FR-A07 | FULL | opus/xhigh | ❌ | 040 | ⊘ |
 | 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044 | 🔲 |
 

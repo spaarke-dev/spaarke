@@ -4,7 +4,7 @@
     <title>FR-A07 — Capability gate: open read-only with a reason, plus a working "Edit a copy" fork (original never written)</title>
     <phase>4 Track A — Faithful Save</phase>
     <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <status>superseded</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a gate that can BLOCK a user from editing a document. False positives are the main risk this feature carries. PROVISIONAL — amendable by task 031.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -17,6 +17,17 @@
     <tags>bff-api, frontend, compose, testing</tags>
     <estimated-effort>10 hours</estimated-effort>
   </metadata>
+
+  <resolution date="2026-08-23" decided-by="owner">
+    SUPERSEDED — no construct family requires a capability gate. The corpus gap the first pass found (six
+    families with ZERO coverage) was closed at the owner's direction; four new fixtures cover five of the
+    six, and all measure 100% strict preservation in an untouched block and a NAMED warning when the
+    construct's own block is edited. No hard fail; no silent loss; the saved document is schema-valid in
+    every case. "Edit a copy" also has no trigger to attach to: every existing read-only trigger is "we
+    cannot read this at all", and the one genuine read-but-never-write case (the PDF) already ships.
+    Evidence: notes/capability-gate-triggers.md. Residual (warn at EDIT rather than at save; .docm) carried
+    to task 045.
+  </resolution>
 
   <prompt>
     ⚠️ **PROVISIONAL** — re-read `notes/gate-decision.md` and `notes/merge-prototype-results.md` first. The
