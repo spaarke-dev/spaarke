@@ -352,6 +352,152 @@ NOTE: setting name is lowercase `maxuploadfilesize` (not PascalCase); `pac org u
 
 **Combined F13 + F14 automation footprint**: TWO pre-import checks + TWO auto-remediations. Both idempotent (safe to re-run). Both fast (single API call each). Together they eliminate the two silent-fail traps between "F12-clean managed export" and "fresh env accepts import."
 
+### F15: Fresh per-tenant Key Vault denies data-plane access to subscription Owner (RBAC gap)
+
+**Symptom**: After Model 1 Prod Bicep deploy, attempted to list secrets in per-tenant KV `sprk-trial01-prod-kv`:
+```
+ERROR: (Forbidden) Caller is not authorized to perform action on resource.
+Action: 'Microsoft.KeyVault/vaults/secrets/readMetadata/action'
+Assignment: (not found)
+DecisionReason: null
+Inner error: { "code": "ForbiddenByRbac" }
+```
+Ralph is subscription **Owner** and can read every other resource in the sub — but not KV data-plane on the newly created per-tenant KV.
+
+**Root cause**: The Bicep template creates KVs with `enableRbacAuthorization=true` (RBAC-based access model, not legacy access policies). Azure RBAC treats KV data-plane and control-plane separately: subscription Owner grants only **control-plane** access (write settings, delete vault, etc.). To read/write secrets you need a **data-plane** role: `Key Vault Secrets Officer` (read/write) or `Key Vault Secrets User` (read-only). NO built-in role automatically covers both planes; even `Owner` grants zero secret data-plane access by default. Confirmed by the RBAC assignment query returning `(not found)`.
+
+**Fix applied (this session)**:
+```bash
+# 'az role assignment create' hit a MissingSubscription bug (see F15b) — used az rest fallback
+az rest --method put \
+  --url "https://management.azure.com/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/sprk-trial01-prod-kv/providers/Microsoft.Authorization/roleAssignments/{newGuid}?api-version=2022-04-01" \
+  --body '{"properties":{"roleDefinitionId":"/subscriptions/{sub}/providers/Microsoft.Authorization/roleDefinitions/b86a8fe4-44ce-4948-aee5-eccb2c155cd7","principalId":"{ralph-oid}","principalType":"User"}}'
+# b86a8fe4-... is the built-in Key Vault Secrets Officer role ID
+```
+Wait ~15s for RBAC propagation, then verify with `az keyvault secret list --vault-name ...` (should return empty [], not 403).
+
+**F15b sub-finding**: `az role assignment create` has an apparent CLI routing bug for KV data-plane role assignments — returns `MissingSubscription` even with sub context set. `az rest --method put` to the Authorization role-assignment endpoint works reliably. Documented as a fallback in the skill.
+
+**Automation gap**: Bicep can idempotently assign RBAC roles at deploy time (`Microsoft.Authorization/roleAssignments`), but the Bicep-time principalId is the deploy identity, not the operator. Post-deploy Owner does not get automatic secret data-plane access.
+
+**Automation TODO (r1 Step 2.5 or H4 pre-seeding handler)**:
+- Detect operator's OID from `az ad signed-in-user show`
+- Detect KV RBAC mode via `az keyvault show --query properties.enableRbacAuthorization` (only run this step if TRUE)
+- Grant `Key Vault Secrets Officer` scoped to the specific KV via `az rest` PUT (bypass F15b bug)
+- Idempotent — Azure returns 201 on first PUT, 200 on subsequent (no error). Safe to re-run.
+- Poll `az keyvault secret list` in `until` loop with ~10s intervals until it returns non-403 (RBAC prop can take 10-60s)
+
+**Broader class**: Applies to EVERY RBAC-enabled KV created via Bicep — shared vaults + per-tenant vaults + registry vaults. The pattern: operators authorized at control-plane MUST be granted data-plane before they can seed secrets. Consider a project-wide "operator RBAC bootstrap" idempotent step run once per operator + KV pair.
+
+### F16: Shared BFF App Service `keyVaultReferenceIdentity` set to `SystemAssigned` but only UserAssigned identity attached — KV references silently unresolvable
+
+**Symptom**: Inventory of the shared BFF App Service `sprksharedprod-api`:
+```
+identity.type = "UserAssigned"    (only)
+identity.userAssignedIdentities = { sprk-prod-shared-bff-uami }
+keyVaultReferenceIdentity = "SystemAssigned"    (❌ mismatch)
+```
+Also: shared UAMI (`sprk-prod-shared-bff-uami`) has **0 role assignments** on shared KV `sprk-prod-kv`. Data-plane RBAC is empty.
+
+App Service has 6 `@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=...)` references in its settings (AI Search API key, Service Bus conn str, Storage conn str, Doc Intelligence key, OpenAI key, Redis conn str). All 6 are silently unresolvable.
+
+**Root cause**: TWO independent misconfigurations, both from the Bicep template:
+1. The Bicep sets `keyVaultReferenceIdentity = 'SystemAssigned'` by default (`sites@2022-03-01` schema). But the App Service was configured with `identity.type = 'UserAssigned'` only — SystemAssigned was never enabled. So `keyVaultReferenceIdentity` points to an identity that doesn't exist.
+2. The shared UAMI (attached to the App Service) has no data-plane RBAC on the shared KV. Even if kvRefIdentity were correctly set to the UAMI, KV reference resolution would still fail with 403.
+
+Both must be fixed together for KV references to resolve. Neither is detectable via `az webapp show` — you have to specifically enumerate identities AND role assignments AND compare.
+
+**Fix (planned — NOT yet applied)**:
+```bash
+# Step 1: Grant shared UAMI Key Vault Secrets User (READ-ONLY) on shared KV
+# Use az rest fallback per F15b (Key Vault Secrets User role ID: 4633458b-17de-408a-b874-0445c86b69e6)
+az rest --method put \
+  --url "https://management.azure.com/subscriptions/{sub}/resourceGroups/rg-spaarke-shared-prod/providers/Microsoft.KeyVault/vaults/sprk-prod-kv/providers/Microsoft.Authorization/roleAssignments/{newGuid}?api-version=2022-04-01" \
+  --body '{"properties":{"roleDefinitionId":".../providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6","principalId":"{shared-uami-principal-id}","principalType":"ServicePrincipal"}}'
+
+# Step 2: PATCH kvRefIdentity to the shared UAMI resource ID (not "SystemAssigned")
+az webapp update -g rg-spaarke-shared-prod -n sprksharedprod-api \
+  --set keyVaultReferenceIdentity="/subscriptions/{sub}/resourcegroups/rg-spaarke-shared-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-prod-shared-bff-uami"
+
+# Step 3: Restart App Service for KV reference resolution to re-run
+az webapp restart -g rg-spaarke-shared-prod -n sprksharedprod-api
+```
+
+Also applies to the staging deployment slot per T1 rule (spec.md § MUST rules): both slots must be PATCHed.
+
+**Automation gap**: Bicep should either enable SystemAssigned + wire it up, OR set `keyVaultReferenceIdentity` to the UAMI resource ID at deploy time. Currently does neither correctly for Model 1 Prod. The RBAC grant also needs to happen in Bicep (or at deploy-time PowerShell step) — currently doesn't.
+
+**Automation TODO (r1 T1 handler + Bicep hardening)**:
+- **Bicep**: When `identity.type = 'UserAssigned'`, `keyVaultReferenceIdentity` MUST be set to a specific UAMI resource ID (never `'SystemAssigned'`). Add validation in the Bicep template to reject the invalid combination.
+- **Bicep**: Add `Microsoft.Authorization/roleAssignments` sub-resource on shared KV granting the shared UAMI `Key Vault Secrets User` role.
+- **T1 handler**: After Bicep deploy, VERIFY the App Service `keyVaultReferenceIdentity` resolves to an attached identity + that identity has `Key Vault Secrets User` or better on all referenced KVs. Emit HARD WARN if not.
+- **T1 handler**: On drift, auto-remediate (both PATCH kvRefIdentity + PUT role assignment). Idempotent.
+
+**F16b sub-finding**: The `az webapp show --query "identity.userAssignedIdentities"` output shows only the resource ID + clientId + principalId, NOT which identity is used for `keyVaultReferenceIdentity` binding. You must cross-reference `keyVaultReferenceIdentity` (a resource ID string OR the literal `"SystemAssigned"`) against `identity.userAssignedIdentities` keys. A mismatch is a silent failure mode.
+
+### F17: Shared BFF App Service has NEVER been deployed — root URL returns default "empty App Service" page
+
+**Symptom**: `curl https://sprksharedprod-api.azurewebsites.net/` returns Microsoft's default "Your web app is running and waiting for your content" HTML page. `/healthz` and `/ping` both return 404.
+
+**Root cause**: The Bicep deploy provisions the App Service resource but does NOT deploy the BFF application code. This is by design (Bicep is IaC, not CI/CD) — but the E2E "customer stand-up" workflow needs to include an explicit code-deploy step. Without it, all subsequent config work (KV references, App User bindings, /healthz verification) is testing an empty shell.
+
+**Fix (planned — this is H9 in r1 handler catalog, not yet run this session)**:
+```bash
+# Prereqs: dotnet 10 SDK, git clean, on main branch
+cd src/server/api/Sprk.Bff.Api
+dotnet publish -c Release -o ../../../../deploy/api-publish/ --self-contained false
+cd ../../../../deploy/api-publish
+zip -r ../api-publish.zip .
+cd ..
+az webapp deploy \
+  --subscription {model1-prod-sub} \
+  --resource-group rg-spaarke-shared-prod \
+  --name sprksharedprod-api \
+  --src-path api-publish.zip \
+  --type zip \
+  --async false
+
+# Verify
+curl -sS https://sprksharedprod-api.azurewebsites.net/healthz
+# Expected: 200 with health-check payload; degraded if KV refs unresolved (F16 must be fixed first)
+```
+
+Also constrained by NFR-01 (BFF publish size ≤60 MB compressed; current baseline 44.96 MB per r1 CLAUDE.md).
+
+**Automation gap**: r1 handler catalog lists H9 as "BFF deploy" but no code exists yet for automation. The `deploy-new-release` skill is the reference model but was designed for shared-env deploys (spaarkedev1 → prod slot swap), not fresh Model 1 Prod App Service where there's no existing deploy to swap from.
+
+**Automation TODO (r1 H9 handler)**:
+- Fresh-env case: Detect empty App Service via `curl / | grep "default"` OR check for absence of a specific health-endpoint tag file
+- Build BFF locally OR trigger CI pipeline to build + publish
+- Zip-deploy to App Service with `az webapp deploy --type zip`
+- Post-deploy: poll `/healthz` with backoff (App Service warm-up can take 30-90s)
+- Cross-reference against F16: kvRefIdentity + RBAC must be correct BEFORE the app starts, else the app boots in a degraded state and `/healthz` may misreport
+
+**Sequencing implication for r1 handler ordering**: Currently the handler catalog has H4 (KV seed) → H5-H7 (Dataverse solutions, roles) → H9 (BFF deploy) → H10 (App User). This session's discovery: H9 needs to happen BEFORE any /healthz-dependent testing, AND F16 remediation (T1 kvRefIdentity + shared UAMI KV RBAC) needs to happen BEFORE H9 (or BFF starts in degraded state). Proposed re-ordering:
+```
+[Existing] H0/H0.5/H1/H2a/H2b (infra)
+[New pre-H4]  F15 (op RBAC on per-tenant KV)
+[New]      F16-1 (shared UAMI Key Vault Secrets User on shared KV)
+[Existing] H3 (per-tenant KV creation - already in Bicep)
+[New]      F16-2 (T1: kvRefIdentity PATCH to shared UAMI, both slots)
+[Existing] H4 (per-tenant KV seed - if any secrets are per-tenant; currently NONE for Model 1)
+[Existing] H5/H6/H7 (Dataverse solutions - SpaarkeMaster import)
+[Existing] H10 (App User - shared UAMI as sysadmin in Dataverse)
+[New/re-cast] H9 (BFF deploy - fresh env: zip-deploy code, verify /healthz)
+[Existing] H11+ (customer user provisioning, license assignment)
+```
+
+**Combined F15 + F16 + F17 automation footprint**: FIVE new handlers/checks needed for E2E-no-human-interaction:
+- F15 (op RBAC on per-tenant KVs)
+- F16-1 (shared UAMI KV RBAC on shared KV)
+- F16-2 (T1 kvRefIdentity PATCH — MUST replace SystemAssigned with actual UAMI resource ID)
+- F17-1 (fresh-env BFF deploy detection)
+- F17-2 (BFF zip-deploy + /healthz post-deploy verification with warm-up backoff)
+
+Plus TWO Bicep hardenings:
+- Never emit `keyVaultReferenceIdentity='SystemAssigned'` when `identity.type='UserAssigned'` only
+- Emit role assignments for attached UAMIs on referenced KVs
+
 ---
 
 ## Non-Blocking Observations

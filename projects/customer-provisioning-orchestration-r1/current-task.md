@@ -1,65 +1,98 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-23 T21:20Z (in-session) — **🎉 MAJOR MILESTONE: SpaarkeMaster (485 components) SUCCESSFULLY INSTALLED to fresh Model 1 Prod Dataverse env after F12/F13/F14 fixes. First-ever install of Spaarke on a fresh Production-tier env. E2E chain proven from Bicep-deploy → env-create → F12-clean managed-export → F13/F14 preflight → import. Next phase: BFF wire-up (Application User + KV seeding + healthz).**
+> **Last Updated**: 2026-08-24 T02:00Z (in-session) — **🎉 IMPORT SUCCESS + H10 DONE + PIVOT: SpaarkeMaster (485 components) INSTALLED to fresh Model 1 Prod (F12/F13/F14 fixes proven). Shared BFF UAMI now App User with SysAdmin (H10 done). BUT wire-up plan pivoted after F15/F16/F17 discovered: F15 fixed (op RBAC on per-tenant KV); F16 discovered (kvRefIdentity=SystemAssigned mismatch + UAMI has 0 KV RBAC on shared KV); F17 discovered (BFF App Service is EMPTY, needs H9 deploy). Next session: H9 (fresh-env BFF deploy) + F16 remediation + T1 (correct: kvRefIdentity → SHARED UAMI, not per-tenant) + registry + /healthz.**
 
-## 🎯 QUICK RECOVERY — 2026-08-23 SESSION (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 SESSION (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD** | `344f29485` (F12/F13/F14 docs + skill absorb — pushed to origin) |
-| **Working tree** | ✅ Clean (all F12+F13+F14 work committed + pushed) |
-| **Azure sub (LIVE)** | `Spaarke Model 1 Production` (`cd95fcec-6b89-49ea-8339-c2b579b12587`) — 20 resources deployed via WestUS2 (platform) + WestUS3 (OpenAI). Ralph is Owner. |
-| **Dataverse env (LIVE)** | `spaarke-model1-prod.crm.dynamics.com` — **✅ SpaarkeMaster 1.0.0.0 INSTALLED (Managed=True), 485 components, import took 23 min (8:53 PM → 9:16 PM on 2026-08-23)** |
-| **Session commits (chained after last handoff)** | 2 more landed: `b4ba9ec2b` (F12 fix + research + prior handoff) → `344f29485` (F12/F13/F14 docs + skill absorb). Combined with prior 5, branch is 7 commits ahead of last-fetched origin — all pushed. |
-| **Findings this project** | **F1-F14** documented in `notes/lessons-learned-model1-prod-standup-2026-08-22.md` + skill Step 2.5 + Automation Gaps table (now covers F1-F14) + 4 Claude memory files |
-| **Research report** | ✅ COMMITTED `notes/research-dataverse-env-provisioning-2026-08-22.md` (723 lines, R1-R14 recommendations, 8-API-surface framework) |
+| **HEAD** | (updated on this session's next commit) |
+| **Working tree** | ⚠️ 3 files dirty (this current-task.md + lessons-learned F15/F16/F17 additions + provision-environment SKILL.md F15/F16/F17 additions) — will be committed as part of handoff |
+| **Azure sub (LIVE)** | `Spaarke Model 1 Production` (`cd95fcec-6b89-49ea-8339-c2b579b12587`) |
+| **Dataverse env (LIVE)** | `spaarke-model1-prod.crm.dynamics.com` — **✅ SpaarkeMaster 1.0.0.0 INSTALLED (Managed=True), 485 components** |
+| **Dataverse App User (LIVE)** | ✅ Shared BFF UAMI `sprk-prod-shared-bff-uami` (clientId `64b920f1-a063-42b0-94dd-4222fa46aa19`) registered as Application User in Model 1 Prod. systemuserid `59fca642-5c9f-f111-b8dc-70a8a5b1501b`. Role: `System Administrator` |
+| **Findings this project** | **F1-F17** documented in `notes/lessons-learned-model1-prod-standup-2026-08-22.md` + skill Step 2.5 + Automation Gaps table (F1-F17). 5 Claude memory files. |
+| **Research report** | ✅ COMMITTED `notes/research-dataverse-env-provisioning-2026-08-22.md` |
 
 ### 🎯 E2E CHAIN PROVEN THIS SESSION
 
 ```
 Bicep deploy (F1-F11 fixed)
   → pac admin create env (Production, restrictGuestUserAccess=false)
-  → Build-SpaarkeMaster.ps1 rebuild (F12 fix, AddRequiredComponents=$true, 485 components)
-  → pac solution export --managed (24.5 MB zip, F12-clean: 240→77 MissingDep, Cat B refs 0)
+  → Build-SpaarkeMaster.ps1 rebuild (F12 fix, 485 components)
+  → pac solution export --managed (F12-clean: 240→77 MissingDep, Cat B refs 0)
   → pac application install msft_PowerBI_Anchor (F13 preflight, ~6 min)
-  → pac org update-settings maxuploadfilesize 25600000 (F14 preflight, single API call)
+  → pac org update-settings maxuploadfilesize 25600000 (F14 preflight)
   → pac solution import --async (23 min, SUCCEEDED, 485 components installed clean)
+  → az rest PUT roleAssignment (F15 op RBAC via fallback since az CLI has MissingSubscription bug)
+  → pac admin assign-user --application-user (H10: shared UAMI → Application User + SysAdmin)
 ```
 
-This is the automation contract for the E2E "customer setup" workflow (owner directive: "run E2E with no human interaction"). Steps F12 + F13 + F14 need to become automated pre-import handlers in H6.
+Automation contract for E2E "customer setup" workflow: 8 stages proven this session. Steps F12 + F13 + F14 + F15 + H10 need to become automated handlers.
+
+### 🚨 F15 / F16 / F17 DISCOVERED THIS SESSION (new; documented in lessons-learned)
+
+- **F15 ✅ FIXED**: Fresh RBAC-enabled KVs deny data-plane access even to subscription Owner. Bicep-time RBAC needs to include operator's OID or a post-Bicep bootstrap step. Also: `az role assignment create` has a `MissingSubscription` CLI bug on KV endpoints — use `az rest --method put` fallback.
+- **F16 ❌ NOT FIXED**: Shared BFF App Service `keyVaultReferenceIdentity="SystemAssigned"` but only UserAssigned identity attached. Also shared UAMI has 0 RBAC on shared KV `sprk-prod-kv`. ALL 6 `@Microsoft.KeyVault(...)` refs silently unresolvable. TWO fixes required together (RBAC grant + kvRefIdentity PATCH to UAMI resource ID + restart), both slots per T1 rule.
+- **F17 ❌ NOT FIXED**: BFF App Service `sprksharedprod-api` returns the default "empty App Service" page — the BFF code has NEVER been deployed. All prior BFF-wire-up work assumed deployed BFF; that was wrong. H9 (BFF build + zip-deploy) is the actual blocking prerequisite.
 
 ### 📍 EXPLICIT NEXT ACTION (on fresh session)
 
-**Import succeeded — move to BFF wire-up phase.** The 6 next tasks map to r1 handlers H4 (KV secrets), H10 (App User + Role), and post-install verification:
+**Pivoted plan** — order MATTERS because F16 and F17 have sequencing implications:
 
-1. **H10 (Application User create)**: Create BFF Application User for the shared BFF UAMI in spaarke-model1-prod Dataverse, assign System Administrator (or scoped Spaarke role).
+1. **F16 Remediation Part A**: Grant shared UAMI `Key Vault Secrets User` on shared KV `sprk-prod-kv` via `az rest` fallback (Key Vault Secrets User role ID: `4633458b-17de-408a-b874-0445c86b69e6`, principalId `6baf84ae-32a3-470b-a48d-9d27bb40ee4f`, principalType `ServicePrincipal`).
    ```bash
-   # Shared BFF UAMI to link: sprk-prod-shared-bff-uami (rg-spaarke-shared-prod)
-   # Get its clientId + principalId first:
-   az identity show -g rg-spaarke-shared-prod -n sprk-prod-shared-bff-uami --query "{clientId:clientId, principalId:principalId}" -o json
-   # Then create Application User in Dataverse via Web API (see scripts/... for pattern)
+   az rest --method put \
+     --url "https://management.azure.com/subscriptions/cd95fcec-.../resourceGroups/rg-spaarke-shared-prod/providers/Microsoft.KeyVault/vaults/sprk-prod-kv/providers/Microsoft.Authorization/roleAssignments/{newGuid}?api-version=2022-04-01" \
+     --body '{"properties":{"roleDefinitionId":".../providers/Microsoft.Authorization/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6","principalId":"6baf84ae-32a3-470b-a48d-9d27bb40ee4f","principalType":"ServicePrincipal"}}'
    ```
 
-2. **H4 (KV secret seed)**: Seed per-tenant KV `sprk-trial01-prod-kv` with required secrets (`Dataverse-ClientSecret`, `BFF-API-ClientSecret`, others). BINDING: NEVER DELETE these two. Follow ADR-028 21 MUSTs.
-
-3. **T1 (kvRefIdentity)**: PATCH `sprksharedprod-api` App Service `keyVaultReferenceIdentity` to per-tenant UAMI `sprk-prod-trial01-uami` on BOTH slots (production + staging).
+2. **F16 Remediation Part B (T1)**: PATCH kvRefIdentity SystemAssigned → shared UAMI resource ID. NOT per-tenant UAMI (per-tenant KV is unreferenced by current config).
    ```bash
    az webapp update -g rg-spaarke-shared-prod -n sprksharedprod-api \
-     --set keyVaultReferenceIdentity=<sprk-prod-trial01-uami-resource-id>
-   # And for staging slot if it exists
+     --set keyVaultReferenceIdentity="/subscriptions/cd95fcec-.../resourcegroups/rg-spaarke-shared-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-prod-shared-bff-uami"
+   # Repeat for staging slot if exists
    ```
 
-4. **Registry entry**: Register spaarke-model1-prod as a new `sprk_dataverseenvironment` record on the registry env (probably spaarkedev1 — verify which env holds the registry).
+3. **H9 (F17 Remediation)**: Build + zip-deploy BFF to Model 1 Prod App Service.
+   ```bash
+   cd src/server/api/Sprk.Bff.Api
+   dotnet publish -c Release -o ../../../../deploy/api-publish/ --self-contained false
+   cd ../../../../deploy && zip -r api-publish.zip api-publish/
+   az webapp deploy \
+     --subscription cd95fcec-6b89-49ea-8339-c2b579b12587 \
+     --resource-group rg-spaarke-shared-prod \
+     --name sprksharedprod-api \
+     --src-path api-publish.zip --type zip --async false
+   ```
+   Report publish size to check against NFR-01 60 MB ceiling.
 
-5. **BFF /healthz verification**: Curl `sprksharedprod-api/healthz` and expect 200. Ideally with `X-Spaarke-Tenant: trial01` header to verify per-tenant routing works.
+4. **Restart App Service** to force KV reference re-resolution after F16 fixes.
 
-6. **Sample sign-in flow**: Manual test — sign in to Model 1 Prod MDA app (`sprk_MatterManagement`) as Ralph → verify BFF token flow works E2E.
+5. **Registry entry**: Add spaarke-model1-prod as new `sprk_dataverseenvironment` record on registry env. FIRST need to identify which env holds the registry (probably spaarkedev1; verify by querying `sprk_dataverseenvironment` in both envs). Schema: FR-35 canonical naming, `sprk_tenantid`, etc. per r1 CLAUDE.md registry key patterns.
 
-### ⚠️ HOLD OFF UNTIL BFF WIRE-UP COMPLETE
+6. **BFF /healthz verification**:
+   ```bash
+   curl -sS -w "\nHTTP: %{http_code}\n" https://sprksharedprod-api.azurewebsites.net/healthz
+   # Expected 200 + JSON payload; degraded state if F16 not fully applied
+   ```
 
-- Absorbing F1-F14 + R5-R14 into r1 design.md/spec.md — deferred; may surface F15 during BFF wire-up
-- Extending `sprk_dataverseenvironment` schema per owner Q7 — deferred to after Model 1 Prod is E2E-validated (schema extension is r1 delivery scope, not immediate blocker)
+7. **Sample sign-in flow**: Sign in to Model 1 Prod MDA app `sprk_MatterManagement` as Ralph → verify BFF token flow works E2E.
+
+### ⚠️ HOLD OFF UNTIL E2E VALIDATED
+
+- Absorbing F1-F17 + R5-R14 into r1 design.md/spec.md/handlers
+- Extending `sprk_dataverseenvironment` schema per owner Q7 (managed-env-enabled, env-group-id, payg-billing-plan-id)
+- H4 KV seeding — current BFF config references ZERO secrets in per-tenant KV; H4 is a future-tenant-scoped-config problem, not a current-BFF-boot problem
+
+### 🧹 SESSION-ERROR NOTES (for retrospective / rigor updates)
+
+Two execution errors made this session (both cleaned up):
+- **E1**: `az account clear` — accidentally wiped az credential cache while diagnosing MissingSubscription bug. User re-ran `az login`. Lesson: never run destructive az commands as "clean slate" — the auth cache is state I should preserve.
+- **E2**: `pac admin create-service-principal` — ran expecting help output; pac doesn't have `--help` flag and instead EXECUTED with defaults. Created a stray Entra app + SP + Dataverse user with a client secret exposed in transcript. Cleanup: deleted Entra app (invalidates SP + secret), disabled Dataverse user. Lesson: for pac subcommands, use official docs OR `pac cmd_name` with NO args (which shows usage without executing) — never with random flags.
+
+Both errors were caught + remediated in the same session. Neither reached production state persistently. Documented as retro material for skill hardening.
 
 ### 🧠 CRITICAL CONTEXT — Owner Directives (Q1-Q7, 2026-08-23)
 
