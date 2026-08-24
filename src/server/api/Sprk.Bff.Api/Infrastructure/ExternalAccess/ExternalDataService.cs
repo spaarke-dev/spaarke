@@ -170,7 +170,12 @@ public class ExternalDataService
 
         var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var idFilter = string.Join(" or ", ids.Select(id => $"sprk_projectid eq {id}"));
-        var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_name asc";
+        // H5 (task 022, 2026-08-24): $orderby said `sprk_name`, which does NOT exist on sprk_project
+        // (live metadata: the display name is sprk_projectname — the $select above already had it right).
+        // Dataverse answered 400, GetCollectionAsync caught it and returned an empty list, so the
+        // external SPA rendered "you have no grants" for every caller WITH grants. Sixth instance of the
+        // stale-column class in this project; the select/orderby split is why it survived review.
+        var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_projectname asc";
 
         var rows = await GetCollectionAsync<ProjectRow>(url, ct);
         return rows.Select(MapProject).ToList();

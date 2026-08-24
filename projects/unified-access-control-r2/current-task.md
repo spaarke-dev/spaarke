@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — 017 complete; **full multi-agent review of all 13 completed tasks DONE**; one Critical regression found and fixed |
+| **Task** | **022 IN PROGRESS** — document-surface authorization sweep (Critical). Inventory complete (22 routes, not the ~15 estimated); H5 fixed; gates not yet implemented |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
 | **Phase** | Phase 0 — enforcement remediation · **13 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | 🔔 **OWNER DECISION PENDING** — approve the 7-task breakdown in [`notes/review-2026-08-24-findings.md`](notes/review-2026-08-24-findings.md) §6, then run **task 022** (document-surface authorization sweep) first. Do NOT resume 013 until that is settled — 022 is a live disclosure + destroy surface |
+| **Next Action** | **Task 022 step 1**: add the missing `OperationAccessPolicy` keys (there is NO bare `write`/`delete` key, and an unmapped operation is an unconditional 403 — see [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md) "The mechanism"). THEN gate C2/C3, then C1. Do not attach a filter with a new operation string before its key exists. |
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
