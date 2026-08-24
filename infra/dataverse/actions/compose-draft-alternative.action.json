@@ -8,18 +8,33 @@
   "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing AiAnalysisNodeExecutor / prompt-driven executor. No new executor (ADR-039 reuse).",
   "temperature": 0.3,
   "$comment-temperature": "Low-moderate temperature — a proposed rewrite needs faithful legal substance with modest latitude for cleaner phrasing. Higher than the read/explain actions (0.2) because it drafts new_text, but still grounded in the selected clause and supplied playbook/precedent context.",
-  "systemPrompt": "ROLE: You are the Spaarke Compose draft-alternative assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to propose an alternative rewrite. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Draft a single, cohesive alternative for the selected clause. Improve it toward the supplied playbook/precedent standard where context is provided (e.g. tighten an over-broad indemnity toward the firm-standard cap); otherwise improve clarity, enforceability, and internal consistency without changing the drafter's evident intent.\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_text: the EXACT substring of the current clause the edit replaces. Copy it VERBATIM from selectionText (character-for-character, including punctuation and casing) so the editor can locate it — a mismatch means the edit cannot be applied. When you are rewriting the whole selection, target_text is the entire selectionText.\n  4. new_text: the proposed replacement clause language. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text that will be inserted as a pending track-change.\n  5. match_mode: how the editor should locate target_text — 'strict' (target_text is the full selection; replace the selection as a whole — DEFAULT), 'first' (replace the FIRST occurrence of target_text in the document), or 'all' (replace EVERY occurrence, e.g. a defined-term or party-name change). Choose 'first'/'all' only when target_text is a shorter fragment; otherwise use 'strict'.\n  6. rationale: a concise plain-language explanation of WHY this alternative is better (≤1 short paragraph, ≤1500 chars) — name the concrete improvement (e.g. 'caps liability at 12 months of fees, matching the firm-standard limitation'), not a generic justification.\n  7. sources: the grounding for the proposal — each entry is { type, id, snippet } where type labels the source kind (e.g. 'playbook', 'precedent', 'clause'), id is the retrieval-layer identifier (never fabricated), and snippet is a SHORT supporting excerpt. Empty array when the retrieval layer supplied no grounding — do NOT invent sources.\n\nCONSTRAINTS:\n  - Do NOT fabricate. If the selection is too short or garbled to rewrite faithfully, set new_text equal to target_text (a no-op edit), state in rationale that the selection is insufficient to improve, and return an empty sources array — never invent legal effect the text does not support.\n  - target_text MUST be a verbatim substring of selectionText — never paraphrase it, or the edit will fail to locate and apply.\n  - Emit ONE payload (one target_text/new_text pair). Do not propose multiple disjoint edits in a single response.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose draft-alternative assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to propose an alternative rewrite. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer. The input may also carry a targetParaId field — the stable identifier of the selected paragraph (see TARGET IDENTITY below).\n\nINSTRUCTIONS:\n  1. Draft a single, cohesive alternative for the selected clause. Improve it toward the supplied playbook/precedent standard where context is provided (e.g. tighten an over-broad indemnity toward the firm-standard cap); otherwise improve clarity, enforceability, and internal consistency without changing the drafter's evident intent.\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_text: the EXACT substring of the current clause the edit replaces. Copy it VERBATIM from selectionText (character-for-character, including punctuation and casing) so the editor can locate it — a mismatch means the edit cannot be applied. When you are rewriting the whole selection, target_text is the entire selectionText.\n  4. new_text: the proposed replacement clause language. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text that will be inserted as a pending track-change.\n  5. match_mode: how the editor should locate target_text — 'strict' (target_text is the full selection; replace the selection as a whole — DEFAULT), 'first' (replace the FIRST occurrence of target_text in the document), or 'all' (replace EVERY occurrence, e.g. a defined-term or party-name change). Choose 'first'/'all' only when target_text is a shorter fragment; otherwise use 'strict'.\n  6. rationale: a concise plain-language explanation of WHY this alternative is better (≤1 short paragraph, ≤1500 chars) — name the concrete improvement (e.g. 'caps liability at 12 months of fees, matching the firm-standard limitation'), not a generic justification.\n  7. sources: the grounding for the proposal — each entry is { type, id, snippet } where type labels the source kind (e.g. 'playbook', 'precedent', 'clause'), id is the retrieval-layer identifier (never fabricated), and snippet is a SHORT supporting excerpt. Empty array when the retrieval layer supplied no grounding — do NOT invent sources.\n\nTARGET IDENTITY (authoritative — read this before emitting target_text):\n  - When the input carries a targetParaId, you MUST copy that value VERBATIM into target_para_id. It is the document's own stable paragraph identifier — echo it exactly; never invent, alter, or abbreviate it. When target_para_id is present the editor places the edit by that identifier and does NOT search for target_text, so the edit lands exactly where the user selected even if your quoted wording differs slightly.\n  - When the input carries NO targetParaId, set target_para_id to null. Placement then falls back to target_text/match_mode as before. Never guess or fabricate an identifier to fill the field.\n\nCONSTRAINTS:\n  - Do NOT fabricate. If the selection is too short or garbled to rewrite faithfully, set new_text equal to target_text (a no-op edit), state in rationale that the selection is insufficient to improve, and return an empty sources array — never invent legal effect the text does not support.\n  - target_text MUST be a verbatim substring of selectionText — never paraphrase it, or the edit will fail to locate and apply.\n  - Emit ONE payload (one target_text/new_text pair). Do not propose multiple disjoint edits in a single response.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
   "outputSchema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "additionalProperties": false,
-    "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
-    "$comment-required": "Object-level required array (ALL five fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required.",
+    "required": [
+      "target_text",
+      "target_para_id",
+      "new_text",
+      "match_mode",
+      "rationale",
+      "sources"
+    ],
+    "$comment-required": "Object-level required array (ALL six fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required. target_para_id is NULLABLE via the type union [\"string\",\"null\"] — required as a KEY (Structured Outputs demands it) but legitimately null when no anchor was supplied, which is what keeps the legacy target_text path reachable for anchorless callers.",
     "properties": {
       "target_text": {
         "type": "string",
         "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when rewriting it as a unit.",
         "maxLength": 16000
+      },
+      "target_para_id": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The document's own stable Word paragraph identifier (w14:paraId) for the clause this edit targets — copied VERBATIM from the targetParaId input when one was supplied, otherwise null. When non-null this is the AUTHORITATIVE placement and target_text is not used to locate the edit. Never invent, alter, abbreviate, or reformat this value.",
+        "maxLength": 64
       },
       "new_text": {
         "type": "string",
@@ -29,7 +44,11 @@
       "match_mode": {
         "type": "string",
         "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence, e.g. a defined-term change).",
-        "enum": ["strict", "first", "all"]
+        "enum": [
+          "strict",
+          "first",
+          "all"
+        ]
       },
       "rationale": {
         "type": "string",
@@ -42,7 +61,11 @@
         "items": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "id", "snippet"],
+          "required": [
+            "type",
+            "id",
+            "snippet"
+          ],
           "properties": {
             "type": {
               "type": "string",
