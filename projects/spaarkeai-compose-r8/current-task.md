@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-23 (tasks 044 complete / 043 superseded) · **Pushed**: see Quick Recovery
+> **Last Updated**: 2026-08-24 (task 051 IN PROGRESS — discovery complete) · **Pushed**: through `7069717bd`
 > **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
@@ -9,11 +9,51 @@
 
 | Field | Value |
 |-------|-------|
-| **Active task** | **none** — 044 closed, 043 SUPERSEDED. Next is **051** (Track C). |
+| **Active task** | **051** — Track C anchor supply. Status: **in-progress**, Step 1 (trace) COMPLETE. |
+| **Next action** | Implement the wiring named in "Task 051 findings" below: pass `aiGenerateBookmark` + `aiApplyValidation` to BOTH `<ComposeAiToolbar>` mounts in `ComposeEditor.tsx` (lines ~3486, ~3744), then cover the note-tool sources. |
 | **Phases 1–3** | ✅ COMPLETE. Architecture gate **PASSED**. ADR-049 third amendment **APPLIED**. |
-| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · **044 ✅** · **043 ⊘ superseded** · 045 🔲 |
-| **Next** | **051** — Track C anchor supply (the *"wording differs slightly"* banner). Track A is done through 044; only 045 (sign-off) remains. |
-| **Gate status** | Server **11,044 / 0** · Client (Jest) **1,129 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs / 44.09 excl** (+0.03 vs the 44.96 documented net10 baseline; ceiling 60) · no vulnerable packages |
+| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · 044 ✅ · 043 ⊘ · 045 🔲 · **046 ✅ · 047 ✅ · 048 ✅** (zero-loss follow-ons) |
+| **Gate status** | Server **11,060 / 0** · Client (Jest) **1,140 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs** (+0.03 vs the 44.96 net10 baseline; ceiling 60) |
+
+---
+
+## Task 051 findings (Step 1 trace — READ BEFORE IMPLEMENTING)
+
+**F-1 — the FR-C01 machinery EXISTS and is UNWIRED.** `useAiGenerateBookmark` (R4 task 040) +
+`useAiApplyValidation` (R4 task 041) already implement exactly what FR-C01 specifies: a request-scoped
+bookmark at the live selection, **rebased through concurrent edits with the SAME ProseMirror `Mapping`
+primitive the op-log uses** (`RebasedOperationLog.recordTransaction`) — which is project invariant (6)
+satisfied by construction — resolving a durable `w14:paraId` via `resolveRunAnchor`, with the model
+returning JSON operations referencing paraId rather than free text (I-7).
+
+Both are built, tested (3 test files), and exported from the barrel. **Neither has a production
+consumer.** Both `<ComposeAiToolbar>` mounts in `ComposeEditor.tsx` (~3486 BubbleMenu-less, ~3744
+BubbleMenu) omit `aiGenerateBookmark` AND `aiApplyValidation`. Therefore:
+
+```ts
+const useBookmark = !!aiGenerateBookmark && action.materializesInEditor === true;  // ALWAYS false in prod
+...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),  // never sent
+```
+
+**F-2 — the task-050 assessment's C-1 is half right.** It states the client "already sends
+`selectionAnchorStart`/`selectionAnchorEnd`/`targetParaId` in `args.slots`, so FR-C01's request half is
+already on the wire". The first two ARE unconditional; **`targetParaId` is behind `useBookmark` and is
+therefore never sent in production.** The durable anchor is NOT on the wire — only raw ProseMirror
+positions, which are session-local and drift, which is precisely why 040 built the bookmark.
+
+**F-3 — ESCALATION TRIGGER FIRED (POML trigger 1: "a fourth anchor source exists").** There are FOUR
+dispatch sites building edit slots, not one:
+
+| # | Site | Durable identity available | Sent? |
+|---|---|---|---|
+| 1 | `ComposeAiToolbar.handleActionClick` (selection) | bookmark paraId | ❌ unwired |
+| 2 | `ComposeEditor.dispatchNoteToolRequest` (review-note, single) | **the comment `threadId`** via `findCommentAnchorRange` | ❌ flattened to raw PM offsets |
+| 3 | `ComposeEditor.runBatchNoteToolAsync` (review-note, batch) | same | ❌ same |
+| 4 | Context-pane bridge → `enqueueComposeAction` | inherits from 1–3 | — |
+
+Sites 2/3 already RESOLVE a durable anchor (`findCommentAnchorRange(doc, threadId)`) and then throw it
+away, keeping only `selectionAnchorStart/End`. **Task 052 MUST NOT retire the text-search path until
+sites 2 and 3 carry an anchor too** — they are the uncovered source the trigger names.
 
 ### The one thing to understand
 

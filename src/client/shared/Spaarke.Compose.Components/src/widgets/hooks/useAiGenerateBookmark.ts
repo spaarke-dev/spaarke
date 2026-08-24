@@ -46,7 +46,7 @@
  */
 import * as React from 'react';
 import type { Editor } from '@tiptap/core';
-import type { SelectionBookmark } from '@tiptap/pm/state';
+import { TextSelection, type SelectionBookmark } from '@tiptap/pm/state';
 import { resolveRunAnchor, STEP_INTERCEPTOR_IGNORE_META } from '../stepOperationInterceptor';
 import { isComposeOperation, type ComposeOperation, type ComposeRunPoint } from '../../types/compose-operations';
 
@@ -136,8 +136,17 @@ export interface AiGenerateBookmarkController {
    * On Generate: drop a bookmark at the current selection, tie it to `requestId` (minted if
    * omitted), and return the target paraId to send the model as context. Idempotent per id —
    * a second call with the same id replaces the prior bookmark.
+   *
+   * `range` (r8 task 051) anchors the bookmark at an EXPLICIT document range instead of the live
+   * selection. The review-note tools dispatch a compose edit against a note's clause span
+   * (`findCommentAnchorRange(doc, threadId)`), which is generally NOT where the caret is sitting —
+   * so without this they had no way to use this controller and fell back to text search, which is
+   * the uncovered anchor source task 051's escalation trigger named. Everything downstream is
+   * identical: the same `Mapping` rebasing, the same `resolveRunAnchor` paraId, the same
+   * `resolveOnReturn`. Supplying an explicit range is the ONLY difference, which is what keeps this
+   * one mechanism rather than two (invariant 6).
    */
-  beginGenerate: (opts?: { requestId?: string }) => AiGenerateBookmarkContext;
+  beginGenerate: (opts?: { requestId?: string; range?: { from: number; to: number } }) => AiGenerateBookmarkContext;
   /**
    * Peek the current resolution of a live bookmark WITHOUT consuming it (UI / tests). Returns
    * `null` for an unknown id or a bookmark whose anchor no longer resolves.
@@ -271,7 +280,7 @@ export function useAiGenerateBookmark(
   }, [editor]);
 
   const beginGenerate = React.useCallback(
-    (opts?: { requestId?: string }): AiGenerateBookmarkContext => {
+    (opts?: { requestId?: string; range?: { from: number; to: number } }): AiGenerateBookmarkContext => {
       const requestId = opts?.requestId ?? `ai-generate#${(seqRef.current += 1)}`;
       if (!editor) {
         // No editor mounted — a degenerate bookmark with no context. resolveOnReturn will still
@@ -279,11 +288,18 @@ export function useAiGenerateBookmark(
         return { requestId, paraId: null, anchor: null };
       }
       const { selection, doc } = editor.state;
-      const from = selection.from;
-      const to = selection.to;
+      // Task 051: an EXPLICIT range wins over the live selection (the review-note tools anchor on a
+      // note's clause span, not on wherever the caret happens to be). The bookmark is taken from a
+      // TextSelection over that range so `.map()`/`.resolve()` behave exactly as they do for a real
+      // selection — same primitive, no parallel path.
+      const from = opts?.range ? opts.range.from : selection.from;
+      const to = opts?.range ? opts.range.to : selection.to;
+      const bookmark = opts?.range
+        ? TextSelection.create(doc, from, to).getBookmark()
+        : selection.getBookmark();
       const startAnchor = resolveRunAnchor(doc, from);
       const entry: BookmarkEntry = {
-        bookmark: selection.getBookmark(),
+        bookmark,
         start: { pos: from, assoc: -1 },
         end: { pos: to, assoc: 1 },
         paraId: startAnchor ? startAnchor.paraId : null,

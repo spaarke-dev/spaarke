@@ -158,6 +158,12 @@ import {
   type ConfidenceBand,
   type PendingRedlineError,
 } from './hooks/usePendingRedline';
+// FR-C01 (r8 task 051) — the anchor supply for AI edits. Both hooks shipped in R4 (tasks 040/041) and
+// were never given a production consumer: every `<ComposeAiToolbar>` mount below omitted them, so
+// `useBookmark` was permanently false, `targetParaId` was never sent, and EVERY AI edit fell through to
+// `resolveTargetSpans`' text search. Wiring them here is what makes the durable anchor real.
+import { useAiGenerateBookmark } from './hooks/useAiGenerateBookmark';
+import { useAiApplyValidation } from './hooks/useAiApplyValidation';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
@@ -2556,6 +2562,34 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       for (const p of lowBandPending) redline.accept(p.ledgerRef);
     }, [lowBandPending, redline]);
 
+    // ----- FR-C01 anchor supply (r8 task 051) — the two R4 controllers, finally given a consumer ------
+    //
+    // `useAiGenerateBookmark` (R4 task 040) drops a request-scoped bookmark at the live selection and
+    // REBASES it through every concurrent user edit with the same ProseMirror `Mapping` primitive the
+    // op-log uses (`RebasedOperationLog.recordTransaction`), then resolves the durable `w14:paraId` via
+    // `resolveRunAnchor`. `useAiApplyValidation` (task 041) validates each returned operation's anchor
+    // against the LIVE document before applying it, and surfaces anything unvalidatable for review
+    // rather than placing it.
+    //
+    // Both were built, tested and exported in R4 — and never mounted. The consequence was not a
+    // degraded anchor but NO anchor: `useBookmark` in ComposeAiToolbar is `!!aiGenerateBookmark && …`,
+    // so with the prop absent it was permanently false, `targetParaId` never reached the model, and the
+    // apply path text-searched for the model's echoed wording every single time. That search is what
+    // produces the "wording differs slightly" dead-end.
+    //
+    // Invariant (6) — ONE edit-capture mechanism — is satisfied by construction here, not by a parallel
+    // rebaser: the bookmark rebases on the editor's own Mapping, and `applyValidatedComposeOperation`
+    // applies through a normal TipTap `chain()` on this SAME editor, so the step interceptor captures
+    // it into the SAME operation log the user's own keystrokes flow through.
+    //
+    // The reanchor options (`reanchor`/`documentSpeId`/`driveId`/`tenantId`) are deliberately NOT
+    // supplied: without them `canReanchor` is false and an unvalidatable op surfaces with no fuzzy
+    // confidence hint. That is the MORE conservative branch — the hint is presentation only and never a
+    // placement (the hook's own SCOPE DECISION), so omitting it loses no placement capability and keeps
+    // this wiring free of a second service dependency.
+    const aiGenerateBookmark = useAiGenerateBookmark(editor);
+    const aiApplyValidation = useAiApplyValidation(editor);
+
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
@@ -2817,14 +2851,27 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         }
         const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
         const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+        const requestId = `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`;
+        // FR-C01 (task 051) — the review-note anchor source. This path ALREADY resolved a durable
+        // identity (`findCommentAnchorRange`) and then threw it away, keeping only raw ProseMirror
+        // offsets, so a note tool's edit was placed by text search like everything else. It is the
+        // uncovered source this task's escalation trigger names: task 052 must not retire the search
+        // path while it depends on one.
+        //
+        // Same controller, same rebasing, same return handling as the selection path — the only
+        // difference is that the bookmark is anchored at the NOTE's span rather than the caret.
+        const bookmarkContext = aiGenerateBookmark.beginGenerate({ requestId, range: span });
         return enqueueComposeAction({
-          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
+          id: requestId,
           bindingId: action.bindingId,
           args: {
             slots: {
               selectionText,
               selectionAnchorStart: span.from,
               selectionAnchorEnd: span.to,
+              // The durable anchor the model anchors its returned operations to (I-7: operations
+              // referencing paraId, never free text to search).
+              ...(bookmarkContext.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
               documentSpeId: documentRef?.speDriveItemId,
               documentRecordId: documentRef?.sprkDocumentId,
               sessionId,
@@ -2845,9 +2892,31 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // so the result materializes as an inline redline — independent of the registry's
           // `materializesInEditor` flag (which the catalog seed may not preserve).
           documentSessionId: sessionId,
-        }).then(() => undefined);
+        })
+          .then(result => {
+            // Task 051: resolve the bookmark to its CURRENT (rebased) position and hand the returned
+            // operations to the validate-before-apply gate — identical to the toolbar's `resolveReturn`.
+            // A free-text return is REFUSED here rather than text-searched (I-7); an unvalidatable
+            // anchor surfaces for review rather than being placed.
+            const outcome = aiGenerateBookmark.resolveOnReturn(requestId, result?.result);
+            if (outcome?.status === 'operations') void aiApplyValidation.validateAndApply(outcome);
+          })
+          .catch((err: unknown) => {
+            // A rejected dispatch must not leak a live bookmark (mirrors the toolbar's onDispatchError).
+            aiGenerateBookmark.clearBookmark(requestId);
+            throw err;
+          })
+          .then(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef, advisoryComments.threads]
+      [
+        editor,
+        enqueueComposeAction,
+        sessionId,
+        documentRef,
+        advisoryComments.threads,
+        aiGenerateBookmark,
+        aiApplyValidation,
+      ]
     );
 
     // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
@@ -3493,6 +3562,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
+              // FR-C01 (task 051): the durable anchor. Without these two the toolbar's `useBookmark`
+              // is permanently false and every edit falls to text search — see the hook wiring above.
+              aiGenerateBookmark={aiGenerateBookmark}
+              aiApplyValidation={aiApplyValidation}
               forceVisible
             />
           </div>
@@ -3751,6 +3824,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
+              // FR-C01 (task 051): same anchor supply as the popup mount above. BOTH mounts need it —
+              // this is the BubbleMenu (selection) path, which is the one users hit most.
+              aiGenerateBookmark={aiGenerateBookmark}
+              aiApplyValidation={aiApplyValidation}
             />
           </BubbleMenu>
         ) : null}
