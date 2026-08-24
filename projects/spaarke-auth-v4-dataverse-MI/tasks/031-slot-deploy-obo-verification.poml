@@ -92,7 +92,28 @@
       workstation cannot mint an assertion at all. There is no Pester harness in the repo to catch a
       regression, and PR #779 is actively rewriting the same script, so closing the loop here (where it is
       nearly free) is the only repeatable protection these two invariants get. Use
-      `Register-EntraAppRegistrations.ps1 -FicOnly -AssertionToken &lt;token&gt;`.</criterion>
+      `Register-EntraAppRegistrations.ps1 -FicOnly -AssertionToken &lt;token&gt;`.
+
+      RESOLVED 2026-08-24 (owner decision, Option B). The premise "where a real managed-identity assertion
+      IS mintable" turned out to be FALSE, measured not assumed: Kudu /api/command executes shell fine on
+      the slot, but IDENTITY_ENDPOINT / IDENTITY_HEADER are ABSENT from the Kudu sidecar and no visible
+      /proc/*/environ exposes them. Only the app container can mint, and the only code there is the BFF,
+      which has no endpoint that emits its assertion and must never have one. Extracting an assertion to a
+      workstation was refused - it is a live credential capable of authenticating as the BFF app.
+
+      Criteria 3 and 4 are therefore recorded as VERIFIED STRUCTURALLY AT TASK 030, live platform
+      confirmation not performed. This is a stated limitation with its reason, NOT a deferral to 090.
+      The split that makes it acceptable: the half Spaarke can regress (does the script DETECT a
+      wrong-subject FIC / DOES it retry on 70021) is proven; the half not confirmed live (Entra rejecting
+      a sub/subject mismatch) is Microsoft-documented and not regressable by this codebase.
+
+      MITIGATION, and the reason this is not left to "UAT will catch it": auth-v4 has NO remaining task
+      that creates or changes a FIC (032, 033, 090 all checked), so this project's UAT would never
+      exercise the path. It was handed instead to the first real consumer - customer-provisioning-
+      orchestration-r1 Wave G-3 task 130 - whose first -FicOnly run against a new environment IS the live
+      test, for free, in the environment that actually matters. Written up as section 11 of
+      notes/PROVISIONING-CHANGE-REQUEST.md. See notes/decisions/031-obo-verification-dev.md section 6.1.
+    </criterion>
   </acceptance-criteria>
 
   <booked-obligations>

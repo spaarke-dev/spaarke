@@ -84,6 +84,25 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion>OFFICE ADD-INS - handed forward from task 031, and this is the ONLY point at which it can be
+      tested. Verify the Outlook and Word save flows against the default slot AFTER the swap and BEFORE the
+      slot-deletion step (step 7).
+
+      Why it could not be done in 031: the add-ins are deployed and live at
+      https://icy-desert-0bfdbb61e.6.azurestaticapps.net, but the BFF URL is baked in at BUILD time -
+      .github/workflows/deploy-office-addins.yml sets BFF_API_BASE_URL=https://spaarke-bff-dev.azurewebsites.net,
+      the DEFAULT slot. Before the swap that is the pre-migration build on the client secret, so a green
+      add-in test would have proven nothing about MI-FIC. After the swap the same deployed artifact points
+      at the migrated build with no rebuild, no redeploy and no repointing.
+
+      Rebuilding the add-in against the staging host and back was considered and rejected: churn on a
+      shared live artifact for zero extra signal, minutes before this step tests it properly anyway.
+
+      This requires a HUMAN in Outlook and Word - it cannot be driven over HTTP, because the add-in mints
+      its own token inside the Office host. If it fails: rollback is still available in both forms at this
+      point (swap back, per step 3; or reorder credentials to secret-first, proven in 031 section 5.6).
+      DO NOT proceed to step 7 until it is green.
+    </criterion>
     <criterion>Task 030 carry-forward (MEASURED 2026-08-21): if any FIC is created or modified as part
       of this swap, expect ~2 minutes of INTERMITTENT AADSTS70025 failures while Entra replicas
       converge — successes and failures interleaved, not a clean transition. Do not read an early

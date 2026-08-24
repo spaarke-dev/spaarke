@@ -437,3 +437,55 @@ Whoever merges second resolves that one hunk.
 
 Full rationale + verification evidence:
 [`notes/decisions/030-fic-automation.md`](decisions/030-fic-automation.md).
+
+---
+
+## 11. 🔔 ONE THING WE ARE HANDING YOU — your first FIC creation is the live test for two invariants
+
+**Added 2026-08-24 by auth-v4 task 031.** Short version: two safety invariants in the script we gave you
+are proven *structurally* but never *live*, and **Wave G-3 task 130 is the first thing that will exercise
+them for real**. Nothing is broken and nothing is asked of you up front — but if task 130's FIC step
+behaves oddly, read this before debugging.
+
+### The two invariants
+
+| # | Invariant | Proven | Not proven |
+|---|---|---|---|
+| 1 | A FIC whose `subject` is the UAMI's **clientId** instead of its **principalId** must be **DETECTED by the exchange verification**, not reported as success | The script's detection logic, at task 030 | The end-to-end run, against a real assertion |
+| 2 | **AADSTS70021** immediately after FIC creation must be **retried**, not surfaced as a failure | The retry logic, at task 030. The flap itself is measured: ~8 failures over ~130 s as replicas converge | The retry firing against a genuinely fresh FIC |
+
+### Why auth-v4 could not close them
+
+Both need a **real managed-identity assertion**, and that can only be minted by code running inside the
+App Service **app container**. Measured 2026-08-24: Kudu `/api/command` executes shell fine, but
+`IDENTITY_ENDPOINT` / `IDENTITY_HEADER` are **absent** from the Kudu sidecar, and no visible
+`/proc/*/environ` exposes them. The BFF itself has no endpoint that emits its assertion and must never
+have one, and extracting an assertion to a workstation was refused — it is a live credential capable of
+authenticating as the BFF app.
+
+auth-v4 also has **no remaining task that creates or changes a FIC** (032, 033 and 090 were checked). The
+dev FIC already exists and is proven working. So auth-v4's own UAT will never touch this path — which is
+exactly why it is being handed to you rather than left to be "caught in testing".
+
+### What this means for task 130 — practical, not procedural
+
+1. **Your first `-FicOnly` run against a new environment IS the live test.** It costs you nothing extra.
+2. **If the FIC appears to create successfully but token exchange later fails**, suspect invariant 1
+   first: check that the FIC `subject` is the UAMI's **principalId** (the managed identity's
+   service-principal objectId), **not** its clientId. This is the single commonest silent error in
+   MI-FIC setup, and the two ids look interchangeable.
+3. **If you see AADSTS70021 right after creating a FIC, do not treat it as a failure** — it is the
+   convergence flap. The script retries; give it the ~2 minutes. Note it is **70025**, not 70021, that
+   auth-v4 measured on *changes* to an existing FIC.
+4. **Please tell auth-v4 (or whoever owns the script by then) what you observed** — a one-line "FIC
+   created, exchange verified first try" closes both invariants live, permanently, for free.
+
+### Not an ask, and not a defect
+
+There is no Pester harness in the repo, so neither invariant is re-executed by anything today; a one-shot
+live run by auth-v4 would not have protected you either. Handing it to the first real consumer is
+strictly better than a synthetic run against throwaway infrastructure, because it tests the path that
+actually matters, in the environment that actually matters.
+
+Full reasoning: [`notes/decisions/031-obo-verification-dev.md`](decisions/031-obo-verification-dev.md) §6.1.
+
