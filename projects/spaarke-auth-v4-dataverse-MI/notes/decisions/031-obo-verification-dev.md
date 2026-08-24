@@ -602,7 +602,40 @@ mintable".
    ~2-minute token-acquisition flap (8 failures over ~130 s, AADSTS70025) after any FIC change, and both
    slots share that registration. On a fail-closed OBO path, that is a dev outage for every user.
 
-**Recommended path (cheap, zero blast radius) — needs owner sign-off before execution:**
+#### ⛔ ATTEMPTED 2026-08-24 AND BLOCKED — the criterion's cost premise is false
+
+The criterion says to close this "here, where a real managed-identity assertion IS mintable". **It is not
+mintable from any surface available to a verification session.** Measured, not assumed:
+
+| Probe | Result |
+|---|---|
+| Kudu `/api/command` on the slot, shell execution | **works** — `sh -c` runs, `curl` and `python3` both present |
+| `IDENTITY_ENDPOINT` / `IDENTITY_HEADER` in the Kudu execution context | **absent** — Kudu runs in a sidecar, not the app container |
+| Any visible `/proc/*/environ` exposing the identity endpoint | **none.** The one `dotnet` process visible from Kudu is Kudu's own; the BFF process is not in that namespace |
+
+So the managed-identity endpoint is reachable only from inside the app container, and the only code running
+there is the BFF — which has **no endpoint that emits its assertion, and must never have one.** Extracting
+the assertion to a workstation was rejected on sight: it is a live credential capable of authenticating as
+the BFF app, and moving it through a console is precisely the practice this project exists to end.
+
+**Consequence: closing criteria 3 and 4 live is not "nearly free". It requires new provisioning** — a
+throwaway UAMI, throwaway compute to run as it, and a throwaway app registration — roughly 30–45 minutes
+plus teardown.
+
+#### What is actually at stake, on the merits
+
+Criterion 3 has two halves, and they are not equally valuable:
+
+| Half | Status |
+|---|---|
+| **Script behaviour** — does `Register-EntraAppRegistrations.ps1` *detect* a wrong-subject FIC and report failure rather than success? | **Proven at task 030**, structurally. This is the half Spaarke can regress, and the half the criterion exists to protect. |
+| **Platform behaviour** — does Entra reject an assertion whose `sub` does not match the FIC `subject`? | Microsoft-documented; **not something this codebase can regress.** Live-testing it confirms Azure works, not that Spaarke is correct. |
+
+The same split applies to criterion 4: the retry-on-AADSTS70021 logic is Spaarke's (proven at 030); the
+flap itself is the platform's (measured at 030 — 8 failures over ~130 s).
+
+**Recommended path if the live proof is still wanted (needs owner sign-off — it is provisioning, not
+verification):**
 
 - Create a **throwaway app registration** (e.g. `sdap-fic-conflation-probe`), add a FIC whose subject is
   the UAMI **clientId** `5967251e-…` instead of its principalId `9fd47efb-…`, and attempt the exchange.
@@ -613,8 +646,14 @@ mintable".
 - Criterion (4) — the AADSTS70021 retry — is exercised by the same run: create the FIC and attempt
   immediately, inside the convergence window.
 
-This is a genuine scope decision (a new Entra object, however small), so it is surfaced rather than
-improvised. **It does not block 032**: 032's gate is §5.6, which passed.
+This is a genuine scope decision (new Entra objects and new compute, however small), so it is surfaced
+rather than improvised. **It does not block 032**: 032's gate is §5.6, which passed.
+
+**The alternative, and the honest default:** record criteria 3 and 4 as *verified structurally at task 030;
+live platform confirmation not performed, because the environment cannot mint a managed-identity assertion
+outside the app container.* That is a stated limitation with its reason — **not a deferral to 090** and not
+an unfinished deliverable. Note also that there is no Pester harness in the repo, so a live run here would
+not be re-executed by anything; its protective value is one-shot.
 
 ### 6.2 Booked for the documents / SPE surface — three pre-existing defects (see §5.5)
 
