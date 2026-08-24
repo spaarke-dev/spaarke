@@ -2,6 +2,20 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!--
+      runtimeconfig.template.json — READ BEFORE EDITING IT.
+      The SDK merges that file's TOP-LEVEL keys INTO the generated runtimeOptions object. It must NOT
+      contain a "runtimeOptions" wrapper and must NOT contain a "tfm" key (the SDK generates tfm from
+      <TargetFramework> above).
+      Until 2026-08-24 it had both. The published Sprk.Bff.Api.runtimeconfig.json therefore carried a
+      NESTED runtimeOptions with a stale "tfm": "net8.0" inside an otherwise-correct net10 publish —
+      in every BFF publish since the net10 retarget — and, less visibly,
+      Microsoft.PowerPlatform.Dataverse.Client.TelemetryOptOut never reached the effective config
+      because it sat inside that nested block. Found by spaarkeai-compose-r8 during the
+      2026-08-24 dev outage investigation; fixed by spaarke-auth-v4-dataverse-MI.
+      Regression check: the published artifact must contain no "net8" string and exactly one
+      "runtimeOptions" key.
+    -->
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Sprk.Bff.Api</AssemblyName>
