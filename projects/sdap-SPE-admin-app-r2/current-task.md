@@ -1,6 +1,6 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`)
+> **Last Updated**: 2026-08-24 (by `context-handoff`)
 > **Recovery**: read "Quick Recovery" first. History lives in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,28 +9,69 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W8 ✅ (**020, 030, 021, 022, 023, 024**); 011 🔄 partial |
-| **Step** | Between tasks. **Next: 025** (W9, full 9-property settings surface). |
-| **Status** | 012, 013, 020, 030, 021, 022, 023, 024 committed. Quota → **option A**, operator-confirmed. |
-| **Next Action** | Invoke `task-execute` on `tasks/025-full-settings-surface.poml`. ⚡ **025 starts from a strong position** — task 023 moved the settings write onto the SDK's **typed** `FileStorageContainerTypeSettings`, so the remaining properties are compiler-checked additions, not string keys. The nine: `SharingCapability`, `IsItemVersioningEnabled`, `ItemMajorVersionLimit`, `MaxStoragePerContainerInBytes` (**done in 023**) + `IsDiscoverabilityEnabled`, `IsSearchEnabled`, `IsSharingRestricted`, `UrlTemplate`, `ConsumingTenantOverridables` (**025's work**). **Inherits**: (a) the client **already sends `isSearchEnabled`** and the BFF silently discards it — no DTO property; (b) `azureTenantId` declared in `types/spe.ts` with no Graph source; (c) `ConsumingTenantOverridables` is task **026**'s override state — coordinate, don't duplicate. |
+| **Task** | **none in progress** — W1–W9 done (**020, 030, 021, 022, 023, 024, 025**); 011 🔄 · 023 🔄 · 025 🔄 |
+| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 10 commits this session. |
+| **Status** | All work committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). |
+| **Next Action** | **W10: tasks 026 + 029 run together** (both client+DTO only, no god-file contention). Invoke `task-execute` on `tasks/026-replication-and-override-state.poml` and `tasks/029-billing-status-surface.poml`. **Verify each POML's premise first** — 16 of 16 have now been wrong, incomplete, or mis-scoped. |
 
-### 🔴 READ FIRST — live verification is now UNBLOCKED (2026-08-24)
+### 🔑 Live verification is UNBLOCKED — use it
 
-Earlier notes claiming "no interactive Azure login available" were **wrong** — one failed `az` check
-was cached as a standing fact. `az` works. The real blocker was that **`spe-owning-app-secret` did not
-exist in `sprk-prod-kv`**, which meant `GetClientForConfigAsync` — and therefore containers, recycle
-bin, search, security, and audit — could not build a Graph client at all in production.
+`az` works. App-only tokens work (owning app `170c98e1`, secret restored — see
+[`notes/live-verification-credential.md`](notes/live-verification-credential.md)).
+**Delegated** tokens work via device-code through **`SPAARKE-SPE-Admin-CLI`**
+(`68cf5a14-1efb-4254-80bf-2761ffc89373`) — public-client flows on, both SPE scopes admin-consented.
+Delegated needs ~20s of operator time at <https://microsoft.com/devicelogin>.
 
-**Resolved**: a new credential was minted on `170c98e1` with `--append` (expires **2028-08-24**) and
-stored in the vault. Full record + the Stage-2 setup the operator needs:
-[`notes/live-verification-credential.md`](notes/live-verification-credential.md).
+**Graph's OData `$metadata` needs no token at all** and settled task 025 outright. Reach for it first:
+`curl -s https://graph.microsoft.com/{v1.0,beta}/$metadata`.
 
-**Confirmed live**: 🔴 5 of 5 containers report storage totalling **861 MB** while the Dashboard showed
-**`0 B`** · GET omits `storageUsedInBytes` (LIST-only confirmed) · `deletedContainers` → **200, no
-OData error** · container types still **403 app-only** (delegated-only re-confirmed).
+⏰ The restored credential **expires 2028-08-24**. When it lapses, every app-only SPE path fails silently.
 
-⚠️ **Still needs delegated access**: task **023**'s write→read-back and task **030**'s container-type
-fields. See the Stage-2 recipe in that note.
+### 🔴 Open escalation — container-type writes are impossible
+
+**Every PATCH to a container type returns `400 invalidRequest`** — nested, top-level, full blob, a
+no-op writing the current value back, v1.0, beta, `PUT`, `@odata.type`, `If-Match`, and even a bare
+`{"name":…}`. App-only is 403 on GET *and* PATCH.
+
+Leading hypothesis, **not proven**: only the **owning application** may modify its container type. If
+so the write needs delegated-as-owning-app — the exchange task 010 proved unworkable — and the ADR-028
+§6.5 gate must be re-run. **Blocks AC-2 for BOTH 023 and 025** (one shared escalation, not two).
+
+Two decisive tests, both with side effects, awaiting an operator decision — see
+[`notes/live-verification-2026-08-24.md`](notes/live-verification-2026-08-24.md) §2.
+
+### 🔴 Findings that change the tasks ahead
+
+| For | Finding |
+|---|---|
+| **026** | `consumingTenantOverridables` is a **comma-delimited flag string**, and the SDK's generated enum is **narrower than the live tenant** — 2 of the 3 live flags aren't members. Read it as a raw string; do NOT route through the typed enum. |
+| **025 (reopen)** | The settings **form** is still unrebound — it reads the Dataverse config record, not the new Graph settings DTO. |
+| **051** | Real ceilings exist: **25 TiB** on standard types, **200 MiB** on the trial. |
+| **041** | Recycle bin is **empty**, so task 022's timestamp mapping is still WireMock-only. A throwaway container would confirm it in a minute. |
+| **042** | `UpdateContainerTypeSettingsTests.cs` is flagged B16 scaffolding **with this session as evidence** — renaming four DTO properties broke every test in it without one having caught the defect. |
+
+### Session summary — 10 commits
+
+| Commit | Substance |
+|---|---|
+| `0a7220849` `e2c1b0cf6` | **030** — lifecycle constraints stated before submit; quota → **option A** (operator-confirmed: state limits, block trial on proof, **never publish a "remaining" figure**). Found: row selection had **never worked** (`id` vs `containerTypeId`, response cast not parsed). |
+| `c5790afa3` | 🔴 **`billingClassification` null since the Graph 6 upgrade (2026-08-13)** — a comment naming SDK 5.101.0 outlived its truth. Found by writing the first test over that mapping. |
+| `f87a2baa9` | **021** — deleted the Graph Endpoint setting. It was **fully persisted and validated**, read by nothing; `IsValidHttpsUrl` accepted **any** host, so wiring it would have been token exfiltration. |
+| `6d489b6a1` | **022** — all three POML claims false. Real defect: `is string` could never match Kiota's `DateTime`. |
+| `cb5840969` | **023** — writes were no-ops at **three** layers; 4th defect (`ValidSharingCapabilities`) was **defended by 10 tests**. |
+| `f65c7dfcf` | **024** — storage implemented. Dashboard showed **`0 B`** for **861 MB**. |
+| `16828fc9e` `2e3708761` | 🔴 **`spe-owning-app-secret` did not exist in Key Vault** — so *every* `…ForConfigAsync` path (containers, recycle bin, search, security, audit) could not build a Graph client. Restored; live-verified 022/024/030. |
+| `7b37063c9` | **025** — `agent.chatEmbedAllowedHosts` **does not exist**; `sharingCapability` was omitted. Settings had **never** reached the client. |
+
+### Uncommitted, deliberately
+
+**Different repo**: `c:/code_files/spaarke-prototype` holds harness changes (`spe-admin-r2-uat`
+scenarios seeded with the **real measured** 861 MB payload + Spaarke PAYGO 1 config id) **plus
+unrelated modifications from other projects**. Left uncommitted — pushing another repo, and one with
+other people's work in the tree, isn't this session's call.
+
+Harness: `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-sdap-SPE-admin-app-r2" npx vite` from that
+directory. Was serving on **:5177**.
 
 ### 🔑 Task 024 — IMPLEMENT. Spike deliberately not re-run.
 
