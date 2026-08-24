@@ -48,6 +48,31 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 
 **Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 → **020** · plus 002 → 012
 
+---
+
+## Phase 0b — Review remediation (8 tasks, filed 2026-08-24)
+
+Filed by owner decision from the multi-agent re-review of the 13 completed Phase 0 tasks.
+Findings: [`notes/review-2026-08-24-findings.md`](../notes/review-2026-08-24-findings.md).
+**021–027** are the review's §6 proposals; **028** was found while resolving task 009's escalation.
+
+| # | Task | Finding | Deps | Safe | Tier | Effort | Why |
+|---|---|---|---|---|---|---|---|
+| 🔲 **022** | Document-surface authorization sweep | **C1,C2,C3**,H2,H3,H5 | 002 | ❌ | **opus** | **xhigh** | **START HERE** — live disclosure AND destroy surface. Task 002 gated 4 of ~15 |
+| 🔲 **021** | Provisioning stamping PATCH: 3 wrong names + swallowed 400 | Critical (C4/C5) | 008 | ❌ | **opus** | **xhigh** | Creates real infra since 2026-03, leaves the project pointing at none. ⚠️ nav-prop names MUST come from `$metadata` — do not guess |
+| 🔲 **025** | Test-integrity: 4 untested seams + gate mechanism + false-claim tests | H6,M3,M7 | 003,007,017 | ❌ | **opus** | **xhigh** | This is WHY the rest could hide — the central gate can return blanket rights with the suite green |
+| 🔲 **023** | Grant upsert must write `sprk_expiresdate` (+ FR-09 acceptance) | H1 | 007,010 | ❌ | sonnet | high | A-5's shape resurrected on the write path by the two tasks that closed it on the read path |
+| 🔲 **028** | Service request: the missing 4th core accessible set | (task 009 escalation) | 009 | ❌ | sonnet | high | Model names 4 core types; `CallerPrincipal` carries 3. Completes the owner parity decision |
+| 🔲 **024** | SPE Graph paging + `/revoke` status parity | M1,M2 | 016,017 | ❌ | sonnet | high | `container_not_cleared` currently gives FALSE assurance on a multi-page container |
+| 🔲 **026** | Schema-truth doc repair | M4,M5 | — | ✅ | sonnet | medium | Cheapest, and the only one attacking the CAUSE of five stale-column recurrences |
+| 🔲 **027** | e2e tier reconciliation — or deliberate retirement | M6 | — | ✅ | sonnet | high | A suite that reads as coverage, pins 4 nonexistent contracts, and runs in no workflow |
+
+**Recommended order**: 022 → 021 → 025 → 023 → 028 → 024, with 026 and 027 runnable
+in parallel at any time (both `parallel-safe: true`, no deps, no contended code).
+
+**Not filed as tasks** (recorded as constraints on existing tasks): H4 `/share-link` missing
+authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.ok` → task 065.
+
 > **Task 001 outcome (2026-08-21)**: 62 tests green at `tests/integration/auth/UnifiedAccessControl/`
 > (the ADR-038 §2 security-auth KEEP path — **first backfill**; it had zero compiled files and was
 > globbed by no csproj). **9 of 20 Phase 0 findings pinned, 1 partial, 10 not reachable offline.**

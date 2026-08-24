@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="unified-access-control-r2">
+  <metadata>
+    <title>Repair the provision-project stamping PATCH: 3 wrong names + swallowed 400 (Critical)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on a provisioning write path that currently fails silently; ADR-003 fail-loud.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires reading live $metadata to recover case-sensitive navigation-property names and deciding the fail-loud contract; a wrong guess is silently accepted by Dataverse as an unknown property.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** -- contended path.</parallel-reason>
+    <deps>008</deps>
+    <tags>bff-api, dataverse, provisioning, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>Step 5 of /provision-project stamps the newly created business unit, container and external account back onto the sprk_project row. All three writes use navigation-property names that do not exist, the resulting Dataverse 400 is swallowed, and the endpoint returns 200. Since 2026-03 it has created real infrastructure and left the project pointing at none of it. Fix the names AND make the failure loud, in the same change.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse OData writes and @odata.bind navigation-property semantics.</role>
+  <goal>The stamping PATCH writes the three real navigation properties, verified against live $metadata; any failure surfaces as a non-2xx with a machine-readable reason and the ids that were already created, instead of a silent 200.</goal>
+
+  <context>
+    <background>Review finding (Critical, C4/C5 family). Task 009's sibling fix (4c364e47d) already corrected the provisioning READ -- its $select named _sprk_securitybuid_value and sprk_specontainerid, where live metadata has _sprk_securitybu_value and sprk_containerid. The WRITE half was deliberately left with a KNOWN BROKEN marker because @odata.bind requires the case-sensitive PascalCase navigation property, which is NOT derivable from the attribute name and could not be guessed safely. Verified repo examples of the correct form: sprk_BusinessUnit, sprk_Contact, sprk_Organization, sprk_GrantedBy. No secure project exists in dev to read the casing back from, so it must come from $metadata. Names alone leaves the next drift invisible; fail-loud alone hard-blocks provisioning on names already known to be wrong -- ship both together.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs</file>
+      <file role="new">tests/integration/data-mutation/ExternalAccess/ProvisionProjectStampingTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1.</constraint>
+    <constraint source="ADR-003">Fail loud on a failed stamp: the caller must not receive 200 when the project was left unstamped. Emit a machine-readable reason code consistent with the closure endpoint's sdap.closure.incomplete.* family.</constraint>
+    <constraint source="project">MANDATORY FIRST STEP: recover the three navigation-property names from live $metadata. DO NOT GUESS. A wrong @odata.bind name is accepted as an unknown property and the write silently does not happen -- the exact failure class this task exists to close. Record the metadata evidence in the notes.</constraint>
+    <constraint source="review-2026-08-24">The provisioning fixture had NO $select validation, which is why 5 of 5 tests stayed green while the endpoint 500'd. Extend the ported guard to reject unknown NAVIGATION PROPERTIES on write the way Dataverse does, or the same blindness recurs on the PATCH.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Recover the three navigation-property names from live $metadata; record the exact casing as evidence in the notes.</step>
+    <step order="1">Read ProvisionProjectEndpoint.cs step 5 plus the KNOWN BROKEN block task 009 left, and diff the current names against metadata.</step>
+    <step order="2">Correct the three @odata.bind writes.</step>
+    <step order="3">Replace the swallow with a fail-loud path: non-2xx, a reason code, and the ids that WERE created so an operator can reconcile.</step>
+    <step order="4">Extend ProvisionProjectTestFixture to reject unknown navigation properties on write, mirroring the $select guard.</step>
+    <step order="5">Author tests: happy path stamps all three; a rejected nav property surfaces non-2xx; created-but-unstamped reports the orphaned ids.</step>
+    <step order="6">Perturb: revert each name individually, then re-swallow the error. Record the failure counts.</step>
+    <step order="7">Full suite; publish size; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If $metadata is unreachable in this environment, STOP -- do not guess navigation-property names. Escalate for a metadata dump or a dev-environment secure project.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ProvisionProjectEndpoint.cs already performs this PATCH -- a repair of existing code, not a new component. The fixture guard extends the $select validator task 009's sibling fix already ported.</existing>
+    <extension>Modification only. No new service, interface, endpoint or package.</extension>
+    <cost-of-doing-nothing>Provisioning has silently produced unstamped projects since 2026-03: a real BU, container and account are created, the project points at none of them, and the caller gets 200. Every downstream secure-project behaviour reads those three fields.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/ProvisionProjectStampingTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The three navigation-property names match live $metadata and the notes record the evidence.</criterion>
+    <criterion testable="true">A successful provision leaves all three fields populated on the sprk_project row.</criterion>
+    <criterion testable="true">A failed stamp returns non-2xx with a machine-readable reason code -- never 200.</criterion>
+    <criterion testable="true">A failed stamp reports the ids already created, so an operator can reconcile or clean up.</criterion>
+    <criterion testable="true">The fixture rejects an unknown navigation property on write, proven by a test.</criterion>
+    <criterion testable="true">Perturbation: reverting any one name fails at least one test; re-swallowing the error fails at least one test.</criterion>
+    <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Pairs with the READ fix already shipped in 4c364e47d. Review priority: Critical.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
