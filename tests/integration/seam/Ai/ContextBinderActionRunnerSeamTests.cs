@@ -250,6 +250,89 @@ public sealed class ContextBinderActionRunnerSeamTests
             "an Action with no sprk_modeltier MUST default deterministically to the Standard tier");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // (v) DECLARED COMPANION INPUTS — spaarkeai-compose-r8 task 051, FR-C03 "link 3".
+    //
+    //     The operand channel is SINGLE-VALUED by construction: TryFindDeclaredOperandField
+    //     returns on the FIRST vocabulary match and ResolveOperand builds a one-key object. That
+    //     answers "what content do I run over?" — it was never able to answer "and WHERE did that
+    //     content come from?". So a deterministic anchor (a w14:paraId captured at selection time)
+    //     had nowhere to ride: the client sent it, the server accepted it, and it was silently
+    //     dropped before the prompt. The model was then asked to name its edit target and could
+    //     only do so by QUOTING PROSE BACK — which is a generation step, and generation is lossy.
+    //     That is the root of Compose's "wording differs slightly" dead end.
+    //
+    //     The fix is not to widen the operand vocabulary (adding a 4th name would make the anchor
+    //     COMPETE with selectionText, not accompany it — first match wins, so one would vanish).
+    //     It is to make the Action's declared input schema mean what it says: a property the Action
+    //     DECLARES and the caller SUPPLIES reaches the model, alongside the operand.
+    //
+    //     These three tests pin the whole contract: it arrives, undeclared args still do not, and
+    //     the operand itself is unchanged.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Input schema declaring the operand AND a companion identifier (the compose edit shape).</summary>
+    private const string ComposeAnchoredInputSchema =
+        """{"type":"object","required":["selectionText"],"properties":{"selectionText":{"type":"string"},"targetParaId":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_DeclaredCompanionInput_ReachesThePromptAlongsideTheOperand()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeAnchoredInputSchema);
+        h.GivenFlatTextAction("ROLE: Rewrite the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string clause = "The Provider total liability is capped at fees paid.";
+        const string paraId = "A1B2C3D4";
+
+        var chunks = await h.DispatchAsync(new { selectionText = clause, targetParaId = paraId });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().Contain("## Input").And.Contain(clause);
+        h.OpenAi.LastPrompt.Should().Contain(paraId,
+            "a DECLARED, SUPPLIED input MUST reach the model — otherwise the model cannot echo an "
+            + "identifier and is forced to quote prose back, which is the lossy step this removes");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_UndeclaredArg_DoesNotReachThePrompt()
+    {
+        // The bound on the rule above: DECLARATION is the contract, not "everything in args".
+        // Without this, any caller-supplied field would silently become prompt content.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeInputSchema); // declares selectionText ONLY
+        h.GivenFlatTextAction("ROLE: Explain the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        var chunks = await h.DispatchAsync(
+            new { selectionText = "Liability is capped.", targetParaId = "SHOULDNOTAPPEAR" });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().NotContain("SHOULDNOTAPPEAR",
+            "an arg the Action never declared is still accepted-and-ignored");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_CompanionInput_DoesNotDisplaceTheOperand()
+    {
+        // Non-regression for the single-valued operand: the companion rides ALONGSIDE, and the
+        // resolved operand kind is still SelectionText. A 4th vocabulary entry would have failed here.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeAnchoredInputSchema);
+        h.GivenFlatTextAction("ROLE: Rewrite the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string clause = "Liability is capped at fees paid.";
+        await h.DispatchAsync(new { selectionText = clause, targetParaId = "A1B2C3D4" });
+
+        h.OpenAi.LastPrompt.Should().Contain(clause,
+            "the operand is still the content the completion runs over — the companion does not replace it");
+    }
+
     // ─── Harness ─────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string? fileId = null)

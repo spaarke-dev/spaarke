@@ -115,6 +115,44 @@ public sealed class ComposeEditActionAnchorContractSeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // The INPUT side — the model must be TOLD the anchor before it can echo one back
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [MemberData(nameof(AnchoredEditActions))]
+    public void EditAction_DeclaresTargetParaIdAsAnInput_SoContextBinderRendersItIntoThePrompt(string actionCode)
+    {
+        // ContextBinder renders a companion input ONLY when the Action DECLARES it (declaration is the
+        // contract). Without this the arg is accepted and silently dropped before the prompt — the
+        // model is then asked to echo an identifier it was never given, and answers null every time.
+        var path = Path.Combine(RepoRoot(), "infra", "dataverse", "actions", $"{actionCode}.action.json");
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+
+        doc.RootElement.TryGetProperty("inputSchema", out var input)
+            .Should().BeTrue("a null sprk_inputschema means no companion input can ever reach the model");
+
+        var props = input.GetProperty("properties");
+        props.TryGetProperty("selectionText", out _)
+            .Should().BeTrue("declaring a schema also CONSTRAINS operand resolution — the operand must stay declared");
+        props.TryGetProperty("targetParaId", out _)
+            .Should().BeTrue("this is the field that carries the anchor to the model");
+    }
+
+    [Fact]
+    public void ActionDeployScript_WritesTheInputSchemaColumn()
+    {
+        // The seed file is only half the contract: if the deploy script does not map `inputSchema` onto
+        // `sprk_inputschema`, an authored declaration never leaves the repo and the runtime behaves as if
+        // it were absent. That is a silent, environment-only failure no C#-side test would otherwise catch.
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "Deploy-AnalysisAction.ps1"));
+
+        script.Should().Contain("sprk_inputschema",
+            "an authored inputSchema must actually be deployed, or the declaration is inert in every environment");
+        script.Should().Contain("$action.inputSchema",
+            "and it must be sourced from the seed file's own inputSchema member");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
     // The binding side — the model's answer must reach the consumer, and place
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 

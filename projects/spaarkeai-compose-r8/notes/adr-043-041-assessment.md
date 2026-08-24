@@ -317,7 +317,35 @@ Verification performed:
 
 Seven, all Path-C compliance (no exception, no amendment):
 
-- **C-1 (ADR-043) — Do NOT extend the operand vocabulary.**
+> ### ⚠️ C-1 AMENDED 2026-08-24 (task 051, CLAUDE.md §6.5 **Path B**) — read this before the original below
+>
+> **What C-1 got wrong.** It assumed the anchor could ride *inside* the declared operand value. It cannot,
+> and the alternative it named is worse than forbidden — it is broken. `TryFindDeclaredOperandField`
+> **returns on the first vocabulary match** and `ResolveOperand` builds a **one-key** object: the operand
+> channel is *pick-one*. A fourth vocabulary entry would therefore make `targetParaId` **COMPETE** with
+> `selectionText` rather than accompany it, silently dropping one of the two and breaking every selection
+> dispatch. And nesting the anchor in the operand value (`selectionText: {text, paraId}`) is a type pun —
+> `OperandKind.SelectionText` means the TEXT (Tier-3 content per ADR-015); an anchor is a Tier-1 opaque
+> identifier.
+>
+> **What C-1 now says.** The operand vocabulary stays **closed and single-valued**. An Action's other
+> **DECLARED** inputs render into the same `## Input` object **alongside** the operand; an **undeclared**
+> arg still does not. Declaration is the contract. Recorded as **ADR-043 Amendment 1** (concise + full).
+>
+> **Why the amendment was necessary rather than optional.** Under the original C-1 the anchor was
+> *accepted and silently dropped before the prompt* — so the model was asked to name its edit target with
+> no identifier in hand, and could only quote prose back. Quoting is a generation step and generation is
+> lossy: that is the mechanism behind "wording differs slightly". Complying with C-1 as written would have
+> preserved the exact defect Track C exists to remove — the §6.5 anti-pattern *"ADR says no, so I'll write
+> worse code to comply"*.
+>
+> **Verified, not assumed.** The seam test was written FIRST and observed to FAIL, then to pass:
+> `ContextBinderActionRunnerSeamTests` — declared-and-supplied reaches the prompt · undeclared does not ·
+> the operand is not displaced. Two further links were found the same way and closed: no compose Action
+> declared an `inputSchema` at all, and `Deploy-AnalysisAction.ps1` never wrote `sprk_inputschema`, so a
+> declaration would have been inert in every environment.
+
+- **C-1 (ADR-043) — Do NOT extend the operand vocabulary.** *(superseded in part — see the amendment above)*
   `Services/Ai/Context/ContextBinder.cs:59–64` holds a **closed, hardcoded** three-name operand
   vocabulary — `selectionText` / `changesText` / `documentText` — and
   `TryFindDeclaredOperandField` (356–385) matches **top-level** args properties from that list only,
