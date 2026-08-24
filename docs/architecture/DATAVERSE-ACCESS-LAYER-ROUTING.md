@@ -1,5 +1,23 @@
 # Dataverse Access-Layer Routing (which `IDataverseService` impl serves what — and the traps)
 
+> **Status**: canonical routing map · **Last Reviewed**: 2026-08-15 (r3 RED-4 hardening)
+> **Why this exists**: two impls back one composite interface; a mis-route already shipped a bug
+> (`GraphModule.cs:74-77`). Read this before injecting a Dataverse interface or editing either impl.
+> **Projects**: interim `dataverse-access-hardening` (fences the traps) · `dataverse-access-unification-r1`
+> (retires them) · `#3b` MI migration (task 011/NG1).
+
+## The two implementations
+
+| Impl | Mechanism | Auth (today) | Role |
+|---|---|---|---|
+| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | `ClientSecret` (`API_CLIENT_SECRET`) — **ADR-028 violation, #3b** | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
+| `DataverseWebApiService` | REST / `HttpClient` | `ClientSecret` (`Dataverse:ClientSecret`) — **ADR-028 violation, #3b** | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
+
+<!-- Placed here rather than at the top of the file deliberately (auth-v4 task 033): PR #812
+     (unified-access-control-r2) edits the header block and the '## Auth (#3b)' section, and a
+     banner adjacent to either produced a merge conflict for no benefit. Verified conflict-free
+     against origin/work/unified-access-control-r2 with `git merge-tree`. -->
+
 > ## 🔴 Secret-free BFF identity — read before following any credential step on this page
 >
 > **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
@@ -24,20 +42,6 @@
 > `PowerBi:ClientSecret` while task 042 is deferred.
 > Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
 > [`auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md)
-
-
-> **Status**: canonical routing map · **Last Reviewed**: 2026-08-15 (r3 RED-4 hardening)
-> **Why this exists**: two impls back one composite interface; a mis-route already shipped a bug
-> (`GraphModule.cs:74-77`). Read this before injecting a Dataverse interface or editing either impl.
-> **Projects**: interim `dataverse-access-hardening` (fences the traps) · `dataverse-access-unification-r1`
-> (retires them) · `#3b` MI migration (task 011/NG1).
-
-## The two implementations
-
-| Impl | Mechanism | Auth (today) | Role |
-|---|---|---|---|
-| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | `ClientSecret` (`API_CLIENT_SECRET`) — **ADR-028 violation, #3b** | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
-| `DataverseWebApiService` | REST / `HttpClient` | `ClientSecret` (`Dataverse:ClientSecret`) — **ADR-028 violation, #3b** | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
 
 ## Routing table (`Infrastructure/DI/GraphModule.cs:44-82`)
 
