@@ -294,9 +294,7 @@ export function useAiGenerateBookmark(
       // selection — same primitive, no parallel path.
       const from = opts?.range ? opts.range.from : selection.from;
       const to = opts?.range ? opts.range.to : selection.to;
-      const bookmark = opts?.range
-        ? TextSelection.create(doc, from, to).getBookmark()
-        : selection.getBookmark();
+      const bookmark = opts?.range ? TextSelection.create(doc, from, to).getBookmark() : selection.getBookmark();
       const startAnchor = resolveRunAnchor(doc, from);
       const entry: BookmarkEntry = {
         bookmark,
