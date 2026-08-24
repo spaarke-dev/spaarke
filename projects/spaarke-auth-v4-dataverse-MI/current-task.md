@@ -13,7 +13,7 @@
 | **Branch** | `work/spaarke-auth-v4-dataverse-MI` · worktree `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI` |
 | **Task** | **none active. Group F is CLOSED** — 055, 052, 050, 054, 056 done; **051 🔄 + 053 🔄 code-complete, cutover booked to 031/033** |
 | **Status** | Full suite **10,614 / 0** (97 skipped) · seam **891/891** · ArchTests **56/56** · publish **44.99 MB compressed** (delta 0.00) · CVE clean |
-| **Next Action** | **Owner-gated — no autonomous work remains in Group F.** Next is **031** (slot deploy + OBO verification), which now carries 4 booked obligations from 051 and 1 from 053. 031→032→033 need an owner decision, a second test principal that does not exist, and a soak that cannot be compressed. |
+| **Next Action** | 🛑 **031 needs the owner present — it cannot be run autonomously.** Its pre-flight IS done ([`notes/decisions/031-obo-verification-dev.md`](notes/decisions/031-obo-verification-dev.md)): SIGABRT trap not armed, both slots healthy, `AZURE_CLIENT_ID` obligation resolved as "record why not". **Blockers are a real delegated user token, a human in Outlook/Word/Copilot, and a SECOND TEST PRINCIPAL that does not exist** (create it, or descope the fail-closed criterion in writing). The soak blocker is gone — 032 was rescoped 2026-08-23. |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** Group F has no autonomous work left; the count does not move until then · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
 
@@ -252,11 +252,13 @@ is **not**, and the reason is by design rather than an oversight:
 | Task | What it does | Why it cannot just be run |
 |---|---|---|
 | **031** | Deploy to the `staging` slot, run the full §6.1 OBO checklist | Needs a **real delegated user token** (recipe below) AND, per its own booked obligation, **a second test principal** for the fails-closed case — which does not exist yet. Owner directive says create it in this project rather than defer |
-| **032** | **Slot swap** → dev runs on MI-FIC → **then soak** | The soak is a *time period*, not a step. It exists because **OBO fails closed for every user at once**. Running 031→032→033 back-to-back compresses it to zero and discards the entire staged-rollout safety design |
+| **032** | **Promote to the default slot, then DELETE the staging slot** (rescoped 2026-08-23) | No longer blocked by a soak — that gate was removed as ceremony for a dev app with a proven config-only rollback. Still gated on 031 being green, including its **secret-first re-verification**, which is the evidence that rollback survives the slot deletion |
 | **033** | Delete the secret from app settings **and Key Vault** | Irreversible, and gated on "032 soak complete". Also breaks the Office add-in if the lowercase `bff-api-client-secret` alias is missed |
 
-**Recommendation**: run Phase 6 (it is the project's distinguishing deliverable — success criterion 12),
-then do **031 as its own session** with the owner present, and let 032's soak actually elapse.
+**Recommendation** (updated 2026-08-23): Phase 6 is DONE. **031 as its own session with the owner present** —
+its pre-flight is already complete, so that session starts at the checklist. The soak clause is obsolete:
+032 was rescoped (no soak gate; it now promotes and then DELETES the slot) — see
+[`notes/decisions/032-slot-strategy.md`](notes/decisions/032-slot-strategy.md).
 
 ---
 
