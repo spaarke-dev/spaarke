@@ -44,10 +44,12 @@ violation with no canonical path to move to, and therefore recommend deleting th
 ADR-038, which names *"NetArchTest-style architecture tests at Tier 1"* as the sanctioned **replacement**
 for the discovery lost to bans B1–B5. The classifier would have deleted the mechanism the ADR prescribes.
 
-⚠️ **Ratification is still OPEN.** `tests/CLAUDE.md` and this skill name the category, but the **ADR-038
-amendment formalising it has not landed** (CLAUDE.md §6.5 path B — owner decision). Until it does, this
-protection lives in skill directives rather than in the ADR itself. **That is the weakest link in this
-project's forcing functions** and should be closed before the next project-close diet runs.
+✅ **RATIFIED 2026-08-24 — ADR-038 Amendment A1.** This was flagged here as the weakest link in the
+project's forcing functions, and it was fixed rather than re-booked: `tests/Spaarke.ArchTests/**` is now the
+**eighth KEEP path** in the ADR itself, not merely in skill/module text. All four surfaces (ADR-038,
+`.claude/constraints/testing.md`, `/test-diet`, `tests/CLAUDE.md`) were moved together so they cannot
+disagree. Heuristic 0 is retained deliberately — the path fix alone would still let heuristics 2–12
+mis-flag fitness functions on naming (B13) and setup-ratio (B15) grounds.
 
 ---
 
@@ -201,12 +203,11 @@ git mv tests/unit/Sprk.Bff.Api.Tests/OptionsValidation/DocumentIntelligenceOptio
 
 ## Open item this diet surfaced
 
-**The ADR-038 amendment for `tests/Spaarke.ArchTests/**` is still unratified** (task 063, CLAUDE.md §6.5
-path B). Every forcing function this project leaves behind — the credential ban, the census, the Service
-Bus guard, the fabricated-results guard — lives in that directory and is protected today only by skill
-directives. Until the ADR names the category, a future diet run under a reverted or reimplemented skill
-could recommend deleting exactly the mechanism this project exists to install. **Recommend closing it
-before project close.**
+✅ **CLOSED the same day (2026-08-24) — ADR-038 Amendment A1.** Every forcing function this project leaves
+behind — the credential ban, the census, the Service Bus guard, the fabricated-results guard — lives in
+`tests/Spaarke.ArchTests/**`, which is now a KEEP path in the **ADR**, with the same MUST force as the other
+seven: deleting a file there requires a same-PR replacement. A `/test-diet` run that recommends deleting one
+is now reporting a **classifier defect**, not a finding.
 
 ## Citation
 

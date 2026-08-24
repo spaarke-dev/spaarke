@@ -83,9 +83,9 @@ Per-method evaluation heuristics (apply in order):
 
    Heuristics 2–12 are also miscalibrated for this category by construction: a fitness function's name states the INVARIANT it enforces (`NoSecretBearingConfidentialClientOutsideTheAllowlist`) rather than a `{Method}_{Scenario}_{ExpectedResult}` triple, and its "arrange" section is a source scan whose setup-to-assertion ratio is meaninglessly high. Applying behavioral heuristics to structural tests produces confident nonsense.
 
-   Ratification status: `tests/CLAUDE.md` names this category; **an ADR-038 amendment formalising it is OPEN** (CLAUDE.md §6.5 path B). Until it lands, this rule keeps `/test-diet` from acting on the contradiction.
+   Ratification status: ✅ **RATIFIED 2026-08-24 — ADR-038 Amendment A1** (`spaarke-auth-v4-dataverse-MI` task 090) added `tests/Spaarke.ArchTests/**` as the **eighth KEEP path**, so heuristic 1 now recognises it too and this rule is no longer the only thing standing between the classifier and the contradiction. Heuristic 0 is retained deliberately: the path fix alone would still let heuristics 2–12 mis-flag fitness functions on naming and setup-ratio grounds.
 
-1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**` OR `tests/unit/domain/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
+1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**` OR `tests/unit/domain/**` OR `tests/Spaarke.ArchTests/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
 
    > **Drift correction (2026-08-21, task 063)**: `tests/integration/seam/**` was missing from this list. It has been a KEEP path since 2026-07-09 (ADR-038 §2, added by `spaarke-ai-architecture-redesign-r2` E-40) and is listed as one of the 7 in `tests/CLAUDE.md`, but this heuristic still enumerated six. Every vertical-slice-seam test in the repo was therefore a delete candidate whenever `/test-diet` ran — a far wider exposure than the ArchTests gap that prompted the look.
 2. **Naming check (B13)**: if test name doesn't match `{Method}_{Scenario}_{ExpectedResult}` shape (e.g., `Test1`, `Foo_Works`, `DoIt_Bug417`), classify SCAFFOLDING.

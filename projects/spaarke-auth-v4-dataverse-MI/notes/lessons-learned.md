@@ -107,14 +107,23 @@ Note the precise claim: **`dotnet build` succeeds; the ArchTests fail.** "The bu
 CI gate fails, via `Spaarke.ArchTests` in the `code-quality` job — not the compiler. Worth stating exactly,
 because someone will otherwise test it with `dotnet build` and conclude the guard is broken.
 
-### 🔴 The gap
+### ✅ The gap — found, and CLOSED (2026-08-24)
 
-Every one of these forcing functions lives in `tests/Spaarke.ArchTests/**`, which **ADR-038 does not list
-as a KEEP path**. Task 063 protected it via skill directives and pre-declared the category, but the
-**ADR-038 amendment is still unratified** (CLAUDE.md §6.5 path B, open owner decision).
+Every one of these forcing functions lives in `tests/Spaarke.ArchTests/**`, which ADR-038 **did not list as
+a KEEP path** — while §7's bans B1–B5 simultaneously delegated their lost discovery *to that very category*.
+The ADR prescribed the mechanism and declined to protect it, so `/test-diet` (a **mandatory** close gate)
+recommended deleting it.
 
-So the mechanism this project exists to leave behind is protected by a skill file, not by the ADR. That is
-the weakest link in the deliverable. **Close it before project close.**
+Task 063 fixed the **symptom** in 2026-06: heuristic 0 in the skill, plus a note in `tests/CLAUDE.md`. That
+worked — which is exactly why it persisted. **A workaround that removes the pain also removes the pressure
+to fix the cause.** The protection sat in a skill file and a module directive for two months, neither of
+which is the ADR, and both of which demonstrably drift (the same task found the skill had *also* been
+missing `tests/integration/seam/**` since 2026-07-09, silently making every seam test in the repo a delete
+candidate).
+
+**Ratified as ADR-038 Amendment A1** at task 090, moving all four surfaces together. This is the general
+lesson worth keeping: *when you patch a skill to route around an ADR, you have not fixed the ADR — and the
+next reader will trust the ADR.*
 
 ---
 

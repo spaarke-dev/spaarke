@@ -23,6 +23,41 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Fixed — ADR-038 Amendment A1: `tests/Spaarke.ArchTests/**` is now the EIGHTH KEEP path (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 090)
+
+**Closed a contradiction that lived inside ADR-038 itself**, and that had been mitigated at the skill layer
+rather than fixed since 2026-06-26:
+
+- ADR-038 §7 bans **B1–B5** (DI-registration tests, ctor null-check tests, `Mock<HttpMessageHandler>` wiring
+  tests), and its own "Some discovery loss" consequence names *"NetArchTest-style architecture tests at
+  Tier 1"* as the **sanctioned replacement** for what those bans give up.
+- But §2's KEEP-path list enumerated **7** categories and **did not include `tests/Spaarke.ArchTests/**`**.
+- `/test-diet` is a **mandatory gate at every project close** (root CLAUDE.md §7) and classifies anything
+  outside a KEEP path as a path violation → delete candidate. **The gate therefore recommended deleting the
+  exact mechanism the ADR prescribes.**
+
+**Why it persisted for two months**: task 063 fixed the *symptom* (heuristic 0 in `/test-diet`, plus naming
+the category in `tests/CLAUDE.md`). That made the pain stop, which also made the cause invisible — while
+leaving the protection in a skill file and a module directive, neither of which is the ADR. Those drift:
+the same task found `/test-diet`'s path list had *also* been missing `tests/integration/seam/**` since
+2026-07-09, silently making every vertical-slice-seam test in the repo a delete candidate.
+
+**Changed** — all four surfaces moved together so they cannot disagree:
+- `docs/adr/ADR-038-testing-strategy.md` — 7 → **8** KEEP paths; new `structural-fitness-function` row;
+  the "discovery loss" consequence now points at its protected home; full **Amendment A1** record appended
+- `.claude/constraints/testing.md` — "Seven" → "Eight" KEEP path categories + the new row
+- `.claude/skills/test-diet/SKILL.md` — heuristic 1's path list now includes `tests/Spaarke.ArchTests/**`;
+  heuristic 0's ratification note updated from OPEN to RATIFIED. **Heuristic 0 is deliberately retained** —
+  the path fix alone would still let heuristics 2–12 mis-flag fitness functions on naming (B13) and
+  setup-ratio (B15) grounds
+- `tests/CLAUDE.md` — "same terms as the seven paths" → the eighth KEEP path, citing A1
+
+**Evidence the category earns it**: graduation criterion 12 was exercised the same day — a deliberate ninth
+secret-bearing confidential client made `CredentialGuardTests` (FR-F1) and `CredentialCensusTests` (FR-F2)
+fail, naming the offending `file:line`. Note `dotnet build` **succeeds**; the ArchTests fail — the CI gate
+is what fails, not the compiler.
+
+
 ### Fixed / Added (2026-08-20 — ADR-010 example corrected + new anti-pattern **AP-7** · `spaarke-auth-v4-dataverse-MI` task 011)
 
 - **Fixed — [`.claude/adr/ADR-010-di-minimalism.md`](adr/ADR-010-di-minimalism.md), "Allowed Seams"**: the example read `services.AddSingleton<IAccessDataSource, DataverseAccessDataSource>()`. That is **not what the code does and must not be copied**. `DataverseAccessDataSource` is a **transient typed HttpClient** (`SpaarkeCore`) decorated by a scoped `CachedAccessDataSource`, and it holds **mutable per-instance auth state** (`_currentToken`, the `HttpClient`'s `Authorization` header) — so a singleton registration is a **data race that can bleed a token between users**, not merely an efficiency question. Corrected to the real registration, with the reason stated inline and a pointer to the pattern that *does* solve expensive shared state on a transient type (a static `(tenant|client|secret-fingerprint)` confidential-client cache). The example's actual point — that `IAccessDataSource` is one of only two sanctioned multi-implementation seams — is unchanged. Surfaced by `code-review` finding S-14 at task 011's Step 9.5 gate.
