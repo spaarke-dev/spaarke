@@ -9,10 +9,33 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)** · **W5 ✅ (021)**; 011 🔄 partial |
-| **Step** | Between tasks. **Next: 022** (W6, recycle-bin `$select` — 🔴 task 040 already found a defect for it). |
-| **Status** | 012, 013, 020, 030, 021 committed. Quota → **option A**, operator-confirmed. |
-| **Next Action** | Invoke `task-execute` on `tasks/022-recycle-bin-select-fix.poml`. **Verify the POML's premise first** — 13 of 13 have now been wrong, incomplete, or mis-scoped. 022 is flagged 🔴 in TASK-INDEX because task 040's WireMock fixture already surfaced a concrete defect for it — start from that, not from the POML's narrative. |
+| **Task** | **none in progress** — W1 ✅ · W2 ✅ · W3 ✅ · **W4 ✅ (020, 030)** · **W5 ✅ (021)** · **W6 ✅ (022)**; 011 🔄 partial |
+| **Step** | Between tasks. **Next: 023** (W7, property names + quota/consumption split — load-bearing semantic split). |
+| **Status** | 012, 013, 020, 030, 021, 022 committed. Quota → **option A**, operator-confirmed. |
+| **Next Action** | Invoke `task-execute` on `tasks/023-property-names-and-quota-split.poml`. **Verify the POML's premise first** — 14 of 14 have now been wrong, incomplete, or mis-scoped. **023 has inherited work**: (a) audit the remaining ~6 `AdditionalData` fallbacks in `SpeAdminGraphService.cs` — the `billingClassification` one was silently broken by the Graph 6 upgrade (task 030 §7); (b) `CreatedDateTime ?? DateTimeOffset.UtcNow` renders an unknown-age container type as *created today*; (c) `azureTenantId` is declared client-side but the Graph resource has no such field. |
+
+### 🔑 Task 022 — the POML described a bug that did not exist
+
+**All three of its claims were wrong.** There was no OData parsing error; the `$select` did not request
+an undeclared property; and the comment 11 lines below did **not** contradict the code — it correctly
+said the value arrives via `AdditionalData`, and the code read `AdditionalData`.
+
+The real defect (proven by task 040 against the real SDK): `rawDeletedAt is string` **can never match
+Kiota's `System.DateTime`**. Graph sent the value, Kiota parsed it, it sat in the dictionary — and
+production dropped it on a type check. `DeletedDateTime` was null for **every** row.
+
+🔑 **The DTO and UI needed no change.** `RecycleBinPage.tsx` already sorted nulls last and already
+rendered a muted **"Unknown"** rather than a blank or a fabricated date, and the empty state was
+already distinguishable from a failure — so AC-3 and AC-4 were **already met**. The presentation layer
+was honest the whole time and simply starved by the layer beneath it. That is what proves the fix
+belongs at exactly one layer.
+
+`$select` **removed** rather than corrected, matching the task-030 precedent. Task 040's two
+characterization tests were inverted, as 040 instructed.
+
+⚠️ **AC-1 not live-verified** — the `az` session expired and this session cannot run an interactive
+login. Behaviour is pinned by WireMock against the real Kiota deserializer, which is where the defect
+lived.
 
 ### 🔑 Task 021 — DELETED the Graph Endpoint field, and why not to restore it
 

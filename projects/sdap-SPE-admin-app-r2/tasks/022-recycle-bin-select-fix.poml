@@ -4,7 +4,10 @@
     <title>Fix the deleted-containers $select (deletedDateTime is not declared on fileStorageContainer)</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- 2026-08-24: the POML's premise did not hold - there was no OData error and no
+         contradicting comment. Real defect was a failed type check dropping a delivered value.
+         See notes/task-022-findings.md. AC-1 not live-verified (az session expired). -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>

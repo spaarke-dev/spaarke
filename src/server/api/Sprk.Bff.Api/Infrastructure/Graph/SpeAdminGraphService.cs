@@ -3553,6 +3553,49 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// Reads the deletion timestamp for a deleted container out of Kiota's untyped
+    /// <c>AdditionalData</c> bag, accepting every shape the deserializer can produce.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The property is not typed on <c>FileStorageContainer</c>, so its runtime type is whatever
+    /// Kiota decided — observed as <see cref="DateTime"/> against the real SDK (task 040), but
+    /// <see cref="DateTimeOffset"/> and <see cref="string"/> are both reachable depending on
+    /// serializer configuration and SDK version. The previous implementation matched on
+    /// <c>string</c> alone and therefore discarded a value that was present and correct.
+    /// </para>
+    /// <para>
+    /// Returns null only when the value is genuinely absent or genuinely unreadable. A deletion
+    /// timestamp we cannot read must stay null rather than becoming "now" — an aged-out container
+    /// that reports as freshly deleted is worse than one that admits it does not know.
+    /// </para>
+    /// </remarks>
+    internal static DateTimeOffset? ReadDeletionTimestamp(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("deletedDateTime", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        return raw switch
+        {
+            DateTimeOffset dto => dto,
+            // Kiota's observed shape. Unspecified kind is treated as UTC: Graph emits this value in
+            // UTC, and assuming local time would shift every timestamp by the server's offset.
+            DateTime dt => new DateTimeOffset(
+                dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt),
+            string s when DateTimeOffset.TryParse(
+                s,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var parsed) => parsed,
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Normalizes a billing classification to the value Graph puts on the wire.
     /// </summary>
     /// <remarks>
@@ -4580,10 +4623,14 @@ public sealed class SpeAdminGraphService
                 .GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
-                    config.QueryParameters.Select = new[]
-                    {
-                        "id", "displayName", "containerTypeId", "deletedDateTime"
-                    };
+
+                    // NO $select — deliberate (task 022), for the same reason as the container-type
+                    // list. A hand-maintained projection is a hand-maintained list of property names,
+                    // and a wrong or version-absent name is a hard 400 that breaks the entire view —
+                    // exactly what `storageUsedInBytes` does on v1.0. It also silently withholds any
+                    // property the list forgot to ask for, which is how `owningAppId` went missing on
+                    // the container-type surface. The default projection cannot drift out of sync
+                    // with itself, and the result set here is one page of deleted containers.
                 }, ct),
             ct);
 
@@ -4593,17 +4640,25 @@ public sealed class SpeAdminGraphService
             {
                 foreach (var container in response.Value)
                 {
-                    // deletedDateTime is not a first-class typed property on FileStorageContainer
-                    // in Graph SDK 5.x — it is returned via the AdditionalData dictionary when
-                    // querying the deletedContainers endpoint.
-                    DateTimeOffset? deletedAt = null;
-                    if (container.AdditionalData != null &&
-                        container.AdditionalData.TryGetValue("deletedDateTime", out var rawDeletedAt) &&
-                        rawDeletedAt is string deletedAtStr &&
-                        DateTimeOffset.TryParse(deletedAtStr, out var parsed))
-                    {
-                        deletedAt = parsed;
-                    }
+                    // 🔴 DEFECT FIXED HERE (task 022, 2026-08-24). deletedDateTime is not typed on
+                    // FileStorageContainer, so it arrives in AdditionalData — the old comment had
+                    // that right. What it got wrong was the RUNTIME TYPE. The guard read:
+                    //
+                    //     rawDeletedAt is string deletedAtStr && DateTimeOffset.TryParse(...)
+                    //
+                    // Kiota does not put a string there. Probed against the real SDK by task 040:
+                    //
+                    //     'deletedDateTime' => runtime type: System.DateTime  value: 8/1/2026 5:45 PM
+                    //     TryGetValue(...) = True ·  raw is string => False
+                    //
+                    // Graph sent the value, Kiota parsed it, it sat in the dictionary — and the type
+                    // check dropped it. DeletedDateTime was null for EVERY row, so the recycle bin
+                    // could not sort by deletion date or age anything out, and "deleted at an unknown
+                    // time" was indistinguishable from "deleted just now".
+                    //
+                    // ReadDeletionTimestamp handles every shape Kiota can produce rather than
+                    // guessing one, because the guess is what failed.
+                    var deletedAt = ReadDeletionTimestamp(container.AdditionalData);
 
                     results.Add(new DeletedContainerSummary(
                         Id: container.Id ?? string.Empty,

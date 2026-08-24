@@ -155,37 +155,50 @@ public class SpeAdminGraphMappingContractTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ListDeletedContainers_RequestsDeletedDateTimeInTheSelect()
+    public async Task ListDeletedContainers_SendsNoSelect_SoTheProjectionCannotDriftFromTheCode()
     {
-        // Arrange — SpeAdminGraphService.cs:4351 puts `deletedDateTime` in the $select, and a comment
-        // 11 lines below contradicts it. Task 022 resolves that; until then this pins what is sent.
+        // UPDATED by task 022 (2026-08-24). This previously pinned a hand-maintained $select of
+        // "id", "displayName", "containerTypeId", "deletedDateTime".
+        //
+        // The $select was removed rather than corrected, for the same reason as the container-type
+        // list: a hand-maintained list of property names is a standing liability. A wrong or
+        // version-absent name is a hard 400 that breaks the whole view (as `storageUsedInBytes` does
+        // on v1.0), and a name the list simply forgot silently withholds the property from every
+        // caller (as `owningAppId` was on the container-type surface). The default projection cannot
+        // drift out of sync with itself.
+        //
+        // The filter still has to survive — it is what scopes the view to one container type.
         using var graph = new GraphWireMockFixture();
         graph.StubGet(DeletedContainersPath, """{"value":[]}""");
 
-        // Act
         await CreateSut().ListDeletedContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
 
-        // Assert
-        graph.SelectFieldsFor(DeletedContainersPath).Should().BeEquivalentTo(
-            "id", "displayName", "containerTypeId", "deletedDateTime");
+        var query = Uri.UnescapeDataString(graph.RequestsFor(DeletedContainersPath).Single().RawQuery);
+
+        query.Should().NotContain("$select",
+            "the projection is the default one — see the comment in ListDeletedContainersAsync");
+        query.Should().Contain(ContainerTypeId,
+            "the view must stay scoped to the requested container type");
+        query.Should().NotContain($"'{ContainerTypeId}'",
+            "containerTypeId is Edm.Guid — quoting it makes Graph reject the filter (ADR-044)");
     }
 
     [Fact]
-    public async Task ListDeletedContainers_MapsIdAndDisplayNameButNeverTheDeletionTimestamp()
+    public async Task ListDeletedContainers_MapsTheDeletionTimestamp_NotJustIdAndDisplayName()
     {
-        // ⚠️ CHARACTERIZATION TEST — pins a DEFECT this fixture discovered on its first run.
+        // 🔴 REGRESSION GUARD — this was a characterization test pinning a live defect, inverted by
+        // task 022 (2026-08-24) when the defect was fixed. Task 040 wrote it saying "WHEN 022 FIXES
+        // THIS, THIS TEST MUST FAIL AND BE UPDATED", and it did.
         //
-        // deletedDateTime is not a typed property on FileStorageContainer, so production reads it out
-        // of AdditionalData at SpeAdminGraphService.cs:4366-4372, guarded by `rawDeletedAt is string`.
-        // Kiota does not put a string there. It parses the JSON value and stores a System.DateTime
-        // (proven below in ...StoresTheTimestampAsDateTimeNotString). The guard is therefore never
-        // true and DeletedDateTime is ALWAYS null — every recycle-bin row renders undated, and the
-        // screen cannot distinguish that from "deleted at an unknown time".
+        // The defect: deletedDateTime is not typed on FileStorageContainer, so production reads it
+        // from AdditionalData — correctly — but guarded the read with `rawDeletedAt is string`.
+        // Kiota stores a System.DateTime there (pinned separately below). The guard could never be
+        // true, so DeletedDateTime was null for EVERY row: the recycle bin could not sort by deletion
+        // date or age anything out, and "deleted at an unknown time" was indistinguishable from
+        // "deleted just now".
         //
-        // Not fixed here: task 040 is parallel-safe because it touches no production code, and the
-        // wave rules allow only one SpeAdminGraphService-modifying task per wave. Task 022 owns the
-        // recycle-bin path. WHEN 022 FIXES THIS, THIS TEST MUST FAIL AND BE UPDATED.
-        // Evidence: notes/task-040-completion.md.
+        // Asserting the exact value, not merely non-null: a fix that produced DateTime.UtcNow would
+        // also satisfy "not null" while being just as wrong.
         using var graph = new GraphWireMockFixture();
         graph.StubGet(DeletedContainersPath, $$"""
         {
@@ -200,16 +213,31 @@ public class SpeAdminGraphMappingContractTests
         }
         """);
 
-        // Act
         var result = await CreateSut().ListDeletedContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
 
-        // Assert
         var deleted = result.Should().ContainSingle().Subject;
         deleted.Id.Should().Be("b!deleted-one");
         deleted.DisplayName.Should().Be("Closed Matter");
         deleted.ContainerTypeId.Should().Be(ContainerTypeId);
-        deleted.DeletedDateTime.Should().BeNull(
-            "the `is string` guard at SpeAdminGraphService.cs:4368 can never match Kiota's DateTime");
+        deleted.DeletedDateTime.Should().Be(
+            new DateTimeOffset(2026, 8, 1, 17, 45, 0, TimeSpan.Zero),
+            "Graph sent this value and Kiota parsed it — dropping it on a type check is the defect");
+    }
+
+    [Fact]
+    public async Task ListDeletedContainers_WhenGraphOmitsTheTimestamp_LeavesItNull()
+    {
+        // The other half of the fix. Unknown must stay unknown: substituting "now" for a missing
+        // deletion date makes an aged-out container look freshly deleted, which is how a retention
+        // sweep skips the very rows it exists to catch.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(DeletedContainersPath, $$"""
+        {"value":[{"id":"b!no-date","displayName":"Undated","containerTypeId":"{{ContainerTypeId}}"}]}
+        """);
+
+        var result = await CreateSut().ListDeletedContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
+
+        result.Should().ContainSingle().Which.DeletedDateTime.Should().BeNull();
     }
 
     [Fact]
