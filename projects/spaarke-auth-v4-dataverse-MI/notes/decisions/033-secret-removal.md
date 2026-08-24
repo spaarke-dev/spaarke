@@ -46,7 +46,40 @@ to protect the wrong surface and leave the actually-affected one broken.
   nothing and the add-in deploy is worth confirming — but its stated *rationale* is wrong and must not be
   cited as the reason the alias is load-bearing.
 
-### 0.2 🛑 CONFLICT-CHECK HARD WARN — `.claude/constraints/auth.md` is contended
+### 0.2 ✅ RESOLVED 2026-08-24 — the predicted conflict was the wrong one
+
+**Outcome first**: `git merge-tree HEAD origin/work/unified-access-control-r2` → **clean merge, zero
+conflicts in any file**. Merge order between this branch and PR #812 no longer matters.
+
+Two things were wrong with the prediction below, and both are worth keeping:
+
+1. **`.claude/constraints/auth.md` never conflicted.** Their hunk is at ~line 196 (the access-control
+   note); mine are at ~5 and ~111-145. Disjoint. The `/conflict-check` skill compares **file paths**, which
+   is the right cheap first pass — but a path overlap is a *signal to look*, not a conflict. Asserting one
+   without testing would have been the same error as asserting an outcome from a status code.
+2. **The real conflict was in a file I never anticipated** — `docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md`,
+   and **I caused it**, by inserting a step-5 banner adjacent to a header line #812 also edits. Fixed by
+   relocating the banner into the lines-18-88 window their two hunks don't touch, with a comment at the
+   insertion point saying why it sits there so it is not "tidied" back to the top later.
+
+**A content problem the merge check surfaced, which merge mechanics would have hidden.** PR #812's new
+text asserts:
+
+> *"the client-secret path is the local-dev fallback and is retained (**do NOT remove
+> `Dataverse:ClientSecret` / `API_CLIENT_SECRET`**) per the migration's own guard comments."*
+
+That phrase is exactly right about its provenance — and **those guard comments were already stale when
+#812 read them** (§2.1 / §4.4). It is the false-premise propagation this project exists to stop, caught in
+flight: stale code comment → architecture doc → future readers. Raised on the PR
+([comment](https://github.com/spaarke-dev/spaarke/pull/812#issuecomment-5399340721)) with suggested
+replacement wording, rather than silently fixing it in this branch — it is their file and their call.
+
+**Reusable lesson**: a file-path overlap warning is a hypothesis. `git merge-tree --write-tree` tests it
+non-destructively in seconds and tells you the truth — including about conflicts you did not predict.
+
+<details><summary>Original hard-warn, kept for the record</summary>
+
+#### 🛑 CONFLICT-CHECK HARD WARN — `.claude/constraints/auth.md` is contended
 
 Step 6 must edit `.claude/constraints/auth.md` (to close ADR-028 exception **E-3**).
 **PR #812 (`work/unified-access-control-r2`) modifies the same file.**
@@ -58,6 +91,8 @@ silently merged into.
 Also on that PR: `.claude/agent-memory/researcher/**` (no collision — append-only memory).
 PRs #806 and #779 touch `.claude/` but **not** `constraints/auth.md`; #806 and #779 both touch root
 `CLAUDE.md`, which 033 does not.
+
+</details>
 
 ---
 
