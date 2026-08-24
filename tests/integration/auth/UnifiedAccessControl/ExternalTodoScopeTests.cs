@@ -46,6 +46,10 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     private static readonly Guid InScopeProject = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherProject = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid TodoId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid InScopeMatter = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid OtherMatter = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid InScopeWorkAssignment = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid OtherWorkAssignment = Guid.Parse("77777777-7777-7777-7777-777777777777");
 
     public ExternalTodoScopeTests(ExternalTodoScopeTestFixture fixture)
     {
@@ -66,6 +70,23 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
                 .ToList()
         };
 
+    /// <summary>Builds a principal across all three A-9 root sets.</summary>
+    private static CallerPrincipal PrincipalWithRoots(
+        (Guid ProjectId, ExternalAccessLevel Level)[]? projects = null,
+        Guid[]? matters = null,
+        Guid[]? workAssignments = null) =>
+        new()
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            Email = "external.user@example.test",
+            ProjectAccess = (projects ?? Array.Empty<(Guid, ExternalAccessLevel)>())
+                .Select(a => new CallerProjectAccess { ProjectId = a.ProjectId, AccessLevel = a.Level })
+                .ToList(),
+            AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
+            AccessibleWorkAssignmentIds = (workAssignments ?? Array.Empty<Guid>()).ToHashSet()
+        };
+
     // =====================================================================
     // Positive — no over-denial
     // =====================================================================
@@ -75,7 +96,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.Collaborate));
-        _fixture.Data.TodoLookupResult = (InScopeProject, "Existing to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -92,7 +113,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
-        _fixture.Data.TodoLookupResult = (InScopeProject, "Existing to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -111,7 +132,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         // Caller legitimately holds one project; the to-do belongs to a different one.
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
-        _fixture.Data.TodoLookupResult = (OtherProject, "Someone else's to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, OtherProject, "Someone else's to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -138,7 +159,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith(); // resolvable identity, no participations at all
-        _fixture.Data.TodoLookupResult = (InScopeProject, "Existing to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -153,15 +174,16 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
-        // Exists, but parented to something other than a project — one of the other 12 regarding
-        // lookups on sprk_todo (matter, work assignment, document, invoice, …). ADR-003 fail closed.
-        _fixture.Data.TodoLookupResult = (null, "To-do regarding a non-project parent");
+        // Exists, but parented to one of the TEN regarding types with no accessible set
+        // (document, invoice, communication, …). Matter and work assignment ARE scopeable
+        // as of the 2026-08-24 owner decision and are covered separately below.
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, "To-do regarding a non-scopeable parent");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "no resolvable root ⇒ deny; the write surface is never wider than the project-scoped read surface");
+            "a parent with no accessible set ⇒ deny (ADR-003 fail closed)");
         _fixture.Data.UpdateCallCount.Should().Be(0);
     }
 
@@ -170,7 +192,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
-        _fixture.Data.TodoLookupResult = (null, null); // absent OR unreadable — both deny
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null); // absent OR unreadable
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -198,6 +220,113 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     }
 
     // =====================================================================
+    // Matter / work-assignment roots — owner decision 2026-08-24: same
+    // functionality as project. Membership implies write for these two,
+    // because neither accessible set carries an access level.
+    // =====================================================================
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenTodoRootIsAnAccessibleMatter_AppliesTheUpdate()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRoots(matters: new[] { InScopeMatter });
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Matter, InScopeMatter, "Matter to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent,
+            "owner decision 2026-08-24: matter parents get the same functionality as project");
+        _fixture.Data.UpdateCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenTodoRootIsAnAccessibleWorkAssignment_AppliesTheUpdate()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRoots(workAssignments: new[] { InScopeWorkAssignment });
+        _fixture.Data.TodoLookupResult =
+            (ExternalDataService.TodoRootKind.WorkAssignment, InScopeWorkAssignment, "WA to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Data.UpdateCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenTodoRootIsAMatterOutsideTheAccessibleSet_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRoots(matters: new[] { InScopeMatter });
+        _fixture.Data.TodoLookupResult =
+            (ExternalDataService.TodoRootKind.Matter, OtherMatter, "Someone else's matter to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "widening to matter parents must not become 'any matter'");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenTodoRootIsAWorkAssignmentOutsideTheAccessibleSet_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRoots(workAssignments: new[] { InScopeWorkAssignment });
+        _fixture.Data.TodoLookupResult =
+            (ExternalDataService.TodoRootKind.WorkAssignment, OtherWorkAssignment, "Someone else's WA to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "widening to work-assignment parents must not become 'any work assignment' — without "
+            + "this test, deleting the membership check entirely is invisible (verified by perturbation)");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenCallerHoldsTheProjectButTodoIsOnAnUnheldMatter_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        // Holds a project, holds NO matters. A matter-parented to-do must not ride in on project access.
+        _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Matter, InScopeMatter, "Matter to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the three root sets are independent — holding one must not confer access to another");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenTodoHasMoreThanOneRootLookupPopulated_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        // Caller holds everything; the to-do is still denied purely for being ambiguous.
+        _fixture.Principal = PrincipalWithRoots(
+            projects: new[] { (InScopeProject, ExternalAccessLevel.FullAccess) },
+            matters: new[] { InScopeMatter },
+            workAssignments: new[] { InScopeWorkAssignment });
+        _fixture.Data.TodoLookupResult =
+            (ExternalDataService.TodoRootKind.Ambiguous, null, "To-do with two parents");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "ADR-024 says one parent, but the lookups are independent columns and nothing enforces "
+            + "it — honouring whichever root the caller happens to hold would let them write a record "
+            + "that is also parented somewhere they do not");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    // =====================================================================
     // Rights — a PATCH needs Write, mirroring CreateTodo's Create gate
     // =====================================================================
 
@@ -206,7 +335,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.ViewOnly));
-        _fixture.Data.TodoLookupResult = (InScopeProject, "Existing to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
@@ -225,7 +354,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.FullAccess));
-        _fixture.Data.TodoLookupResult = (InScopeProject, "Existing to-do");
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", new
@@ -330,7 +459,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         {
         }
 
-        public (Guid? ProjectId, string? TodoName) TodoLookupResult { get; set; } = (null, null);
+        public (ExternalDataService.TodoRootKind Kind, Guid? RootId, string? TodoName) TodoLookupResult { get; set; }
+            = (ExternalDataService.TodoRootKind.None, null, null);
         public bool ThrowOnLookup { get; set; }
 
         public int UpdateCallCount { get; private set; }
@@ -339,14 +469,14 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         public void Reset()
         {
-            TodoLookupResult = (null, null);
+            TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null);
             ThrowOnLookup = false;
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
         }
 
-        public override Task<(Guid? ProjectId, string? TodoName)> GetTodoProjectAsync(
+        public override Task<(ExternalDataService.TodoRootKind Kind, Guid? RootId, string? TodoName)> GetTodoRootAsync(
             Guid todoId, CancellationToken ct = default)
         {
             if (ThrowOnLookup)

@@ -25,16 +25,18 @@ The two sibling handlers on the same route group (`GetTodos`, `CreateTodo`) both
 
 **Resolve the child's root, then apply the existing gate.** Two additions:
 
-**1. `ExternalDataService.GetTodoProjectAsync(Guid todoId)` → `(Guid? ProjectId, string? TodoName)`.** Deliberately mirrors `GetDocumentProjectAndNameAsync` (task 027), which solves the identical child-record-to-root authorization problem for documents — same shape, same `public virtual` seam, same `(null, null)` = deny contract. Not a new pattern; the second instance of an existing one.
+**1. `ExternalDataService.GetTodoRootAsync(Guid todoId)` → `(TodoRootKind Kind, Guid? RootId, string? TodoName)`.** Deliberately mirrors `GetDocumentProjectAndNameAsync` (task 027), which solves the identical child-record-to-root authorization problem for documents — same `public virtual` seam, same absent-or-unreadable = deny contract. Not a new pattern; the second instance of an existing one. Projects all three A-9 root lookups (`sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment`) per the owner decision below.
 
 **2. The handler gate**, ordered so nothing writes before every check passes:
 
 | Condition | Response | Reason |
 |---|---|---|
 | To-do absent *or* unreadable | 404 | ADR-003 fail closed |
-| No resolvable project root | 403 | write surface never wider than read surface |
-| Root outside caller's accessible set | 403 | FR-08 — the A-7 fix proper |
-| Caller lacks `Write` on the root | 403 | mirrors `CreateTodo`'s `Create` gate |
+| Parent is one of the 10 non-scopeable regarding types | 403 | no accessible set exists to check against |
+| More than one root lookup populated (`Ambiguous`) | 403 | ADR-003 fail closed — see below |
+| Root outside the matching accessible set | 403 | FR-08 — the A-7 fix proper |
+| Project root, caller lacks `Write` | 403 | mirrors `CreateTodo`'s `Create` gate |
+| Matter / WA root, caller is a member | **allowed** | owner decision; no level exists to gate on |
 
 Plus H-8a: three stale comments naming the deleted `ExternalCallerAuthorizationFilter` / `ExternalCallerContext` corrected to `CallerPrincipalAuthorizationFilter` / `CallerPrincipal`.
 
@@ -45,21 +47,45 @@ Applying this project's carried-forward lesson — **verify every column you add
 1. **`sprk_todo` has 13 regarding-parent lookups, not 11.** The code comment said 11 twice. Actual: `analysis`, `budget`, `communication`, `contact`, `document`, `event`, `invoice`, `matter`, `organization`, `project`, `reportcard`, `servicerequest`, `workassignment`. Comment corrected in place.
 2. **`sprk_regardingrecordtype` is a LOOKUP to `sprk_recordtype_ref`, not a string or choice.** Anyone reaching for it as a type discriminator gets a GUID, not a type name. Worth knowing before the next task tries to branch on it.
 
-Columns used in the new `$select` (`sprk_todoid`, `sprk_name`, `_sprk_regardingproject_value`) all verified present. `sprk_name` is `NOT NULL`, which is what makes a non-null name a reliable existence signal.
+Columns used in the new `$select` (`sprk_todoid`, `sprk_name`, `_sprk_regardingproject_value`, `_sprk_regardingmatter_value`, `_sprk_regardingworkassignment_value`) all verified present. `sprk_name` is `NOT NULL`, which is what makes a non-null name a reliable existence signal.
 
-## 🔔 Escalation — owner decision (POML `<escalation><trigger>` fired)
+## Escalation — RESOLVED by owner 2026-08-24
 
 The POML anticipated this: *"If the To Do's root cannot be resolved through an existing accessible-set entity, STOP and escalate: scoping to 'todo regarding project only' vs denying todos with other parents is a product decision, not an implementation detail."*
 
-**It fired.** `CallerPrincipal` exposes **three** accessible sets — `ProjectAccess`, `AccessibleMatterIds`, `AccessibleWorkAssignmentIds`. So of the 13 regarding-parent types, 3 are scopeable and **10 are not**.
+**It fired, and the owner ruled: matter and work assignment get the same functionality as project.**
 
-**Shipped behaviour: project-only; everything else denied (fail closed).** Rationale — this keeps the WRITE surface *exactly* as wide as the READ surface and never wider:
+### The question, stated precisely
 
-- `GetTodosAsync` filters on `_sprk_regardingproject_value` — the plane can only ever *list* project to-dos
-- `CreateTodoAsync` writes only `sprk_regardingproject` — the plane can only ever *create* project to-dos
-- so a matter- or work-assignment-parented to-do is already invisible to this plane; letting it be *written* would grant write access to records the surface won't even show
+> For a to-do whose regarding-parent is a **matter** or **work assignment** rather than a project, should `PATCH /api/v1/external/todos/{id}` be allowed when the caller has that matter/WA in their accessible set?
 
-**The decision you own**: should a caller with matter or work-assignment access be able to PATCH to-dos parented to those? Widening is a small additive change (`GetTodoProjectAsync` would project the matter/WA lookups too, and the handler would test the corresponding set). It is **not** blocked by anything here — but note `GetEffectiveRights` is project-only, so a matter/WA rights model would have to be defined first. Deliberately not assumed either way.
+`CallerPrincipal` exposes exactly three accessible sets — `ProjectAccess`, `AccessibleMatterIds`, `AccessibleWorkAssignmentIds` (the A-9 root sets). Of `sprk_todo`'s 13 regarding-parent lookups, those 3 are scopeable and **10 are not**. The initial ship was project-only; the owner widened it to all three.
+
+### ⚠️ The asymmetry the answer runs into — and what was done about it
+
+"Same functionality" cannot be **literally** identical, because the data model does not carry the same information for the three roots:
+
+| Root | Shape on `CallerPrincipal` | Carries an access level? |
+|---|---|---|
+| Project | `IReadOnlyList<CallerProjectAccess>` — id **+ `ExternalAccessLevel`** | **Yes** (`ViewOnly` / `Collaborate` / `FullAccess`) |
+| Matter | `IReadOnlySet<Guid>` | No |
+| Work assignment | `IReadOnlySet<Guid>` | No |
+
+Traced to source: `grantSet.Projects` is a collection of `(ProjectId, AccessLevel)`; `grantSet.Matters` and `grantSet.WorkAssignments` are bare id sets. Matter/WA levels do not exist anywhere in the pipeline — they are populated purely for read-scoping via `ScopeDimension`.
+
+So the only implementable reading of "same as project" is **membership implies write** for matter and work assignment, while project-parented to-dos continue to honour the level and require `Write`.
+
+**Consequence, stated plainly**: a matter collaborator whose project-equivalent level would have been `ViewOnly` **can edit matter-parented to-dos**. Matter/WA are therefore slightly *more* permissive than project. Closing that gap requires a per-matter access level in the grant model, which does not exist — it is not a code change in this task's reach.
+
+### Ambiguity is denied (defensive, not requested)
+
+ADR-024 says a to-do has ONE parent, but the 13 lookups are physically independent columns and nothing in Dataverse enforces that. If more than one root lookup is populated, `GetTodoRootAsync` returns `Ambiguous` and the handler denies. Honouring whichever root the caller happens to hold would let them write a record that is also parented somewhere they do not. Covered by a test.
+
+### ⚠️ Read/write asymmetry this creates — recommend a follow-on task
+
+The read and create paths are still **project-only**: `GetTodosAsync` filters on `_sprk_regardingproject_value`, and `CreateTodoAsync` writes only `sprk_regardingproject`. After this widening, a caller can **PATCH** a matter-parented to-do that the same plane will not **list** for them.
+
+That inverts the property the original project-only ship was protecting (write surface never wider than read). The owner's decision is recorded and implemented as asked — but full parity wants `GetTodosAsync` / `CreateTodoAsync` extended to matter and work assignment, which is new endpoint behaviour and belongs in its own task. **Flagged, not silently absorbed.**
 
 ## Perturbation results (mandatory per the `review-2026-08-24` constraint)
 
@@ -69,6 +95,11 @@ The POML anticipated this: *"If the To Do's root cannot be resolved through an e
 | Remove the `Write`-rights check | **1** |
 | Apply the write BEFORE the checks | **8** |
 | Drop the 404 guard | **1** |
+| *(widening)* Allow any matter — membership check bypassed | **2** |
+| *(widening)* Check matter against the PROJECT set (cross-wire) | **1** |
+| *(widening)* Treat `Ambiguous` as in-scope | **2** |
+| *(widening)* Allow any work assignment — check bypassed | **1** *(was **0** — see below)* |
+| *(widening)* Check WA against the MATTER set (cross-wire) | **1** |
 
 **The first perturbation initially failed ZERO tests** — the constraint's exact warning, caught by running it rather than trusting the green suite.
 
@@ -77,6 +108,8 @@ Cause: for a project outside `ProjectAccess`, `GetEffectiveRights` returns `Acce
 Fix (per the constraint — *fix the test, do not drop the perturbation*): the out-of-scope test now asserts **which** guard denied, by matching the response detail. Record-scope denial says "You do not have access to this to-do"; rights denial says "Your access level does not permit…". Removing the scope check now flips the message and fails the test.
 
 **Generalisable**: when two guards deny the same case, a status-code assertion cannot tell them apart, and deleting either one is invisible. Assert the distinguishing observable — or accept that one guard is untested.
+
+**It happened a SECOND time on the widening.** Bypassing the work-assignment membership check entirely failed **zero** tests, because the new WA coverage was a *positive* test only (an accessible WA succeeds) with no negative counterpart. A check with only a happy-path test is not tested — deleting it is free. Fixed by adding `PatchExternalTodo_WhenTodoRootIsAWorkAssignmentOutsideTheAccessibleSet_IsDeniedAndDoesNotWrite`; P8 then fails 1. **Every membership check needs a negative test, and the positive one does not substitute.** Two independent instances of the same blind spot in one task is worth remembering.
 
 Note also that a *first* attempt at that perturbation didn't compile: removing the null guard broke nullable flow analysis. The compiler enforces part of the contract, which is worth knowing but is not test coverage — the perturbation was reshaped to compile before being counted.
 

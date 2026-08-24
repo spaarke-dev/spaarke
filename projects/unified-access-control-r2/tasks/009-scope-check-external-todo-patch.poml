@@ -111,15 +111,27 @@
     new ExternalDataService.GetTodoProjectAsync (mirroring task 027's GetDocumentProjectAndNameAsync)
     and denies unless the root is in the caller's accessible set AND the caller holds Write. ADR-003
     fail-closed on absent / unreadable / no-resolvable-root. H-8a stale comments corrected in this file.</summary>
-    <escalation-fired>YES — the regarding-scope trigger. sprk_todo has 13 regarding-parent lookups
-    (live metadata; the code said 11) and only 3 map to a CallerPrincipal accessible set. Shipped
-    project-only + deny-the-rest, which keeps the write surface exactly as wide as the project-scoped
-    read surface. Whether matter / work-assignment parents should be PATCHable is an OPEN OWNER
-    DECISION — see notes/task-009-external-todo-scope.md.</escalation-fired>
-    <coverage>tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs — 9 tests.
-    Perturbations: remove HasProjectAccess 1 fail · remove Write-rights 1 fail · write-before-check
-    8 fails · drop 404 guard 1 fail. The FIRST perturbation initially failed ZERO (the rights check
-    redundantly denies out-of-scope); fixed by asserting WHICH guard denied, per the review constraint.</coverage>
+    <escalation-fired>YES, and RESOLVED by the owner the same day. sprk_todo has 13 regarding-parent
+    lookups (live metadata; the code said 11) and only 3 map to a CallerPrincipal accessible set.
+    Question put to the owner: should a to-do parented to a MATTER or WORK ASSIGNMENT be PATCHable
+    when the caller holds that root? Owner ruling: YES — matter and work assignment get the same
+    functionality as project. Implemented: all three A-9 roots are projected and scoped against their
+    matching accessible set; Ambiguous (more than one root lookup populated) denies.
+    ⚠️ TWO consequences recorded, neither silently absorbed: (1) matter/WA accessible sets carry NO
+    access level anywhere in the pipeline, so membership implies WRITE for those two — slightly more
+    permissive than project, which still requires the Write right; closing that needs a per-matter
+    level in the grant model. (2) the READ and CREATE paths remain project-only, so the PATCH surface
+    is now WIDER than the list surface — full parity wants GetTodosAsync/CreateTodoAsync extended,
+    which is new endpoint behaviour and belongs in its own task. See
+    notes/task-009-external-todo-scope.md.</escalation-fired>
+    <coverage>tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs — 15 tests.
+    Perturbations (9): remove HasProjectAccess 1 · remove Write-rights 1 · write-before-check 8 ·
+    drop 404 guard 1 · any-matter-allowed 2 · matter-vs-project cross-wire 1 · Ambiguous-allowed 2 ·
+    any-WA-allowed 1 · WA-vs-matter cross-wire 1. TWO perturbations initially failed ZERO: (a) removing
+    HasProjectAccess, because the rights check redundantly denies out-of-scope and the test asserted
+    only the status code — fixed by asserting WHICH guard denied; (b) bypassing the work-assignment
+    check, because the new WA coverage was positive-only — fixed by adding the negative test. Lesson:
+    a check with only a happy-path test is not tested.</coverage>
     <gates>11,383 passed / 0 failed across all 7 projects · --warnaserror clean · publish 43.70 MB
     compressed incl PDBs (ceiling 60, baseline 43.69) · no vulnerable packages</gates>
     <notes-doc>projects/unified-access-control-r2/notes/task-009-external-todo-scope.md</notes-doc>

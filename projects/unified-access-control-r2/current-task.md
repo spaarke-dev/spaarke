@@ -277,6 +277,28 @@ caught real gaps every time.
 | **Own-coverage obligation** | Tasks **007, 012, 013, 015, 016, 017, 018** have no pinned baseline — each supplies its own tests |
 | ~~`data-mutation` KEEP path~~ | ✅ **BACKFILLED 2026-08-23** — it was the last of the seven with no csproj glob. **All seven ADR-038 KEEP paths now compile** |
 
+### CI posture — DECIDED 2026-08-24 (owner)
+
+**Rely on `CI / Router`. Do NOT chase `SDAP CI`.**
+
+`CI / Router` is the intended single composite gate (spec FR-A01) and is now **green** after the
+2026-08-24 repair ([`notes/ci-router-gate-repair-2026-08-24.md`](notes/ci-router-gate-repair-2026-08-24.md),
+[issue #813](https://github.com/spaarke-dev/spaarke/issues/813)) — two consecutive greens, tier2
+unit tests running 24m / 23m32s against a 30m timeout.
+
+`SDAP CI` remains **red on pre-existing latent flakes**, not on anything this project changed. The
+repaired gate exposed a cluster of them: the classifier fails the build on any pass-1 failure not in
+`tests/.reliability-registry.json`, and because `SDAP CI` was cancelled by the next push on most
+recent commits, these had never surfaced. Two seen so far — `JobsEndpointsTests.Trigger_RunsJobOutOfBand_RecordsRun`
+(registered) and `ReAnalysisFlowTests.ReAnalysis_HappyPath_...` (SSE stream, `TaskCanceledException`
+after 2m26s on a contended runner; passes locally).
+
+**Do not register flakes reactively one per CI cycle.** That is a ~30-minute loop per entry and it is
+the "silently widen the tolerance" pattern. If `SDAP CI` needs to go green, enumerate the flake set in
+one local sweep under load and propose a single reasoned batch. Otherwise treat it as known-red.
+
+---
+
 ### Open items requiring owner attention
 
 | # | Item |

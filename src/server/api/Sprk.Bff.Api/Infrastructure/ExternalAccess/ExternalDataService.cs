@@ -94,6 +94,8 @@ public class ExternalDataService
         [JsonPropertyName("statuscode")] public int? Statuscode { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
@@ -230,46 +232,88 @@ public class ExternalDataService
     // ---------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the to-do's regarding-project id and display name — used by the external PATCH
-    /// endpoint (task 009 / FR-08 / finding A-7) to scope a to-do write to the caller's accessible
-    /// root set BEFORE any mutation. App-only Dataverse read. Deliberately mirrors
-    /// <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which solves the same
-    /// child-record-to-root authorization problem for documents.
+    /// Which of the three A-9 accessible-root types a to-do is parented to, as resolved by
+    /// <see cref="ExternalDataService.GetTodoRootAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>None</c> covers three distinct situations that all deny identically: the to-do is absent,
+    /// the to-do could not be read, or it is parented to one of the ten regarding types that have no
+    /// accessible set. <c>Ambiguous</c> means more than one root lookup was populated — also a deny.
+    /// </remarks>
+    public enum TodoRootKind
+    {
+        None = 0,
+        Project = 1,
+        Matter = 2,
+        WorkAssignment = 3,
+        Ambiguous = 4,
+    }
+
+    /// <summary>
+    /// Returns the to-do's regarding-ROOT (project, matter, or work assignment), its id, and its
+    /// display name — used by the external PATCH endpoint (task 009 / FR-08 / finding A-7) to scope
+    /// a to-do write to the caller's accessible root set BEFORE any mutation. App-only Dataverse
+    /// read. Deliberately mirrors <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which
+    /// solves the same child-record-to-root authorization problem for documents.
     /// </summary>
     /// <remarks>
     /// <para><b>ADR-003 fail-closed contract.</b> <c>GetSingleAsync</c> collapses HTTP 404,
-    /// any non-success status, AND thrown exceptions all to <c>null</c>. A <c>(null, null)</c>
-    /// result therefore means "absent OR unreadable" — the two are not distinguishable here. The
-    /// caller MUST treat both as DENY, never as "no project restriction applies". That is the
-    /// required behaviour for an authorization pre-check; the cost is that a transient Dataverse
-    /// fault surfaces to the client as not-found rather than as a server error.</para>
+    /// any non-success status, AND thrown exceptions all to <c>null</c>. A <c>None</c> kind with a
+    /// null name therefore means "absent OR unreadable" — the two are not distinguishable here. The
+    /// caller MUST treat both as DENY, never as "no restriction applies". That is the required
+    /// behaviour for an authorization pre-check; the cost is that a transient Dataverse fault
+    /// surfaces to the client as not-found rather than as a server error.</para>
     ///
-    /// <para><b>Why only <c>sprk_regardingproject</c> is projected.</b> <c>sprk_todo</c> carries
-    /// 13 regarding-parent lookups (live metadata 2026-08-24: analysis, budget, communication,
-    /// contact, document, event, invoice, matter, organization, project, reportcard,
-    /// servicerequest, workassignment). Only project / matter / workassignment have a
-    /// corresponding accessible set on <see cref="CallerPrincipal"/>, and the external plane's
-    /// to-do surface is project-scoped by construction — <see cref="GetTodosAsync"/> filters on
-    /// <c>_sprk_regardingproject_value</c> and <see cref="CreateTodoAsync"/> writes only that
-    /// lookup. A to-do parented to any other type resolves to <c>null</c> here and is denied,
-    /// which keeps the WRITE surface exactly as wide as the READ surface — never wider.
-    /// Widening to matter / work-assignment parents is a product decision, not an implementation
-    /// detail; see notes/task-009-external-todo-scope.md.</para>
+    /// <para><b>Which of the 13 parents are scopeable.</b> <c>sprk_todo</c> carries 13
+    /// regarding-parent lookups (live metadata 2026-08-24: analysis, budget, communication, contact,
+    /// document, event, invoice, matter, organization, project, reportcard, servicerequest,
+    /// workassignment). Exactly THREE have a corresponding accessible set on
+    /// <see cref="CallerPrincipal"/> — project, matter, work assignment (the A-9 root sets) — and all
+    /// three are projected here per the 2026-08-24 owner decision that matter and work assignment get
+    /// the same functionality as project. The other ten resolve to <see cref="TodoRootKind.None"/>
+    /// and are denied.</para>
+    ///
+    /// <para><b>Ambiguity is denied.</b> ADR-024 says a to-do has ONE parent, but the lookups are
+    /// physically independent columns and nothing in Dataverse enforces that. If more than one root
+    /// lookup is populated the result is <see cref="TodoRootKind.Ambiguous"/> and the caller must
+    /// deny: honouring whichever root the caller happens to hold would let them write a record that
+    /// is also parented somewhere they do not.</para>
     /// </remarks>
-    public virtual async Task<(Guid? ProjectId, string? TodoName)> GetTodoProjectAsync(
+    public virtual async Task<(TodoRootKind Kind, Guid? RootId, string? TodoName)> GetTodoRootAsync(
         Guid todoId, CancellationToken ct = default)
     {
         // Columns verified against live Dataverse metadata 2026-08-24 (sprk_todo):
-        // sprk_todoid GUID · sprk_name NVARCHAR(200) NOT NULL · sprk_regardingproject LOOKUP.
-        var select = "sprk_todoid,sprk_name,_sprk_regardingproject_value";
+        // sprk_todoid GUID · sprk_name NVARCHAR(200) NOT NULL · sprk_regardingproject,
+        // sprk_regardingmatter, sprk_regardingworkassignment all LOOKUP.
+        var select = "sprk_todoid,sprk_name,_sprk_regardingproject_value," +
+                     "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value";
         var url = $"{GetApiUrl()}/sprk_todos({todoId})?$select={select}";
 
         var row = await GetSingleAsync<TodoRow>(url, ct);
-        if (row is null) return (null, null);
+        if (row is null) return (TodoRootKind.None, null, null);
+
+        static Guid? Parse(string? v) => Guid.TryParse(v, out var g) ? g : (Guid?)null;
+
+        var project = Parse(row.SprkRegardingprojectValue);
+        var matter = Parse(row.SprkRegardingmatterValue);
+        var workAssignment = Parse(row.SprkRegardingworkassignmentValue);
 
         // sprk_name is NOT NULL in Dataverse, so a non-null name is a reliable existence signal.
-        var projectId = Guid.TryParse(row.SprkRegardingprojectValue, out var pid) ? pid : (Guid?)null;
-        return (projectId, row.SprkName);
+        var name = row.SprkName;
+
+        var populated = new (TodoRootKind Kind, Guid? Id)[]
+        {
+            (TodoRootKind.Project, project),
+            (TodoRootKind.Matter, matter),
+            (TodoRootKind.WorkAssignment, workAssignment),
+        }.Where(x => x.Id is not null).ToArray();
+
+        return populated.Length switch
+        {
+            0 => (TodoRootKind.None, null, name),
+            1 => (populated[0].Kind, populated[0].Id, name),
+            _ => (TodoRootKind.Ambiguous, null, name),
+        };
     }
 
     /// <summary>

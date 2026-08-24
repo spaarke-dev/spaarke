@@ -347,29 +347,54 @@ public static class ExternalProjectDataEndpoints
         // justified it as "low blast radius (only the authenticated user's linked data)" — which
         // was wrong: the route takes an arbitrary to-do id, not one derived from the caller.
         //
-        // ADR-003 fail closed: an unreadable to-do, a to-do with no resolvable project root, and
-        // a project outside the caller's accessible set ALL deny. The PATCH is never applied on a
-        // failed or ambiguous read. GetTodoProjectAsync cannot distinguish "absent" from
+        // ADR-003 fail closed: an unreadable to-do, a to-do with no resolvable root, an ambiguous
+        // root, and a root outside the caller's accessible set ALL deny. The PATCH is never applied
+        // on a failed or ambiguous read. GetTodoRootAsync cannot distinguish "absent" from
         // "unreadable" (see its remarks) — both land in the deny paths below, which is the point.
-        var (projectId, todoName) = await dataService.GetTodoProjectAsync(id, ct);
+        var (rootKind, rootId, todoName) = await dataService.GetTodoRootAsync(id, ct);
 
         if (todoName is null)
             return Results.Problem(statusCode: 404, title: "Not Found",
                 detail: "To-do not found");
 
-        // No resolvable project root — includes to-dos parented to any of the other 12 regarding
-        // lookups (matter, work assignment, document, …). Denied so the WRITE surface is never
-        // wider than the project-scoped READ surface. Same response as out-of-scope: do not leak
-        // WHY the caller was denied.
-        if (projectId is null || !callerContext.HasProjectAccess(projectId.Value))
+        // Scope on whichever of the three A-9 root sets the to-do is parented to. Owner decision
+        // 2026-08-24: matter and work assignment get the same functionality as project.
+        //
+        // ⚠️ ASYMMETRY, deliberate and owner-approved. Project access carries a LEVEL
+        // (ViewOnly/Collaborate/FullAccess → AccessRights), so a project-parented to-do additionally
+        // requires Write below. Matter and work-assignment accessible sets are bare id sets with no
+        // level anywhere in the pipeline (grantSet.Matters / .WorkAssignments are IReadOnlySet<Guid>),
+        // so for those, MEMBERSHIP IMPLIES WRITE. A matter collaborator who would have been
+        // "ViewOnly" on a project can therefore edit matter-parented to-dos. Closing that gap needs
+        // a per-matter access level in the grant model, which does not exist yet.
+        var inScope = rootKind switch
+        {
+            ExternalDataService.TodoRootKind.Project =>
+                callerContext.HasProjectAccess(rootId!.Value),
+            ExternalDataService.TodoRootKind.Matter =>
+                callerContext.GetAccessibleMatterIds().Contains(rootId!.Value),
+            ExternalDataService.TodoRootKind.WorkAssignment =>
+                callerContext.GetAccessibleWorkAssignmentIds().Contains(rootId!.Value),
+            // None (absent parent, or one of the ten non-scopeable regarding types) and Ambiguous
+            // (more than one root lookup populated) both deny. Same response as out-of-scope so the
+            // caller cannot infer WHY.
+            _ => false,
+        };
+
+        if (!inScope)
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this to-do");
 
-        // Mirror CreateTodo's rights gate (which requires Create) — a PATCH requires Write.
-        var rights = callerContext.GetEffectiveRights(projectId.Value);
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit updating to-dos on this project");
+        // Project-parented to-dos additionally honour the access level — mirrors CreateTodo's gate
+        // (which requires Create) with Write for an update. Matter / work assignment have no level
+        // to honour; see the asymmetry note above.
+        if (rootKind == ExternalDataService.TodoRootKind.Project)
+        {
+            var rights = callerContext.GetEffectiveRights(rootId!.Value);
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
+                return Results.Problem(statusCode: 403, title: "Forbidden",
+                    detail: "Your access level does not permit updating to-dos on this project");
+        }
 
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
