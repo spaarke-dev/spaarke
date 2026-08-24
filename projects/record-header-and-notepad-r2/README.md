@@ -27,11 +27,11 @@ R1 shipped `MatterHeaderPcf` and — more importantly — shipped its primitives
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | 0 — design complete, pre-spec |
+| **Phase** | 0 — design code- and schema-verified; **ready for `/design-to-spec`** |
 | **Progress** | 0% |
 | **Owner** | Ralph Schroeder |
-| **Next Action** | Discovery pass (see [checklist](./notes/discovery-checklist.md)), then `/design-to-spec` |
-| **Estimate** | ~8–11 dev-days (design.md §14) |
+| **Next Action** | `/design-to-spec` → `/project-pipeline`. All owner decisions closed; [discovery closed](./notes/discovery-checklist.md) against `spaarkedev1` |
+| **Estimate** | ~8.5–12.5 dev-days (design.md §14) |
 
 ## Problem Statement
 
@@ -60,7 +60,9 @@ One control, configured per form:
 | Project + Work Assignment first; **Invoice explicitly required** | Wave 1 needs no new renderers; Invoice forces the currency + date work |
 | DEF-06 (`exports` migration) dropped | Rationale was amortizing across 4 PCFs; with 1 PCF the leverage is gone, the repo-wide cost isn't |
 | DEF-08 (`useSprkMemoRepository` promotion) dropped | A launcher doesn't render memo content inline — no second consumer, so CLAUDE.md §11 isn't satisfied |
-| New control name + one-time Matter form re-bind | `constructor=` rename creates a new control; better to pay one form edit than call it "MatterHeader" on Invoice forever |
+| New control name + one-time Matter form re-bind | `constructor=` rename creates a new control. **Re-decided 2026-08-22** after the code review showed a display-name-only rename would also fix the maker-visible name at zero cost — owner reaffirmed the clean identity |
+| **2026-08-22**: main forms are solution-transported | Confirmed by owner. Makes the JSON-on-manifest portability argument real (no per-environment paste) and the Matter re-bind genuinely once |
+| **2026-08-22**: metadata reuses `IDataverseClient` | Extends an existing shared contract with `targets` rather than adding a third raw-`fetch` metadata path; keeps the project inside its own "`Xrm.WebApi` only" rule and DataGrid inherits the improvement |
 
 ## Out of Scope
 

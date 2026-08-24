@@ -7,10 +7,13 @@
 
 ## Project Status
 
-- **Phase**: 0 — design complete, pre-spec
-- **Last Updated**: 2026-08-21
+- **Phase**: 0 — design code- **and** schema-verified; **ready for `/design-to-spec`**
+- **Last Updated**: 2026-08-24
 - **Current Task**: none
-- **Next Action**: Discovery pass ([`notes/discovery-checklist.md`](notes/discovery-checklist.md)) → `/design-to-spec` on `design.md`
+- **Next Action**: `/design-to-spec` → `/project-pipeline`. All six owner decisions closed (design.md §15.1); discovery closed (checklist). The `layoutJson` ergonomics spike runs as the first implementation task — it cannot change the design, only the manifest `of-type`.
+- **2026-08-22**: full line-by-line code verification of `design.md`. Several claims were wrong (line accounting, solution name, `TrackingFieldTrio` citation, throw line); the configuration mechanism turned out to have **no in-repo precedent**; metadata access was re-pointed at the existing `IDataverseClient` contract. Checklist §C closed as code-verified.
+- **2026-08-24 (owner)**: the **§9.1 schema-drift defects are OUT of R2 scope** — captured as three standalone issue docs grouped by area (Event · Daily Briefing · Work Assignment) in [`notes/issues/`](notes/issues/README.md), for evaluation as focused fix projects. Seven non-existent columns across 6 files; two confirmed HTTP 400 in shipped code. Do **not** fix them under R2; do **not** let them evaporate either — they are real, reproducible production defects.
+- **2026-08-24**: §9 entity schemas **live-verified against `spaarkedev1`**. Six seed fields do not exist; `sprk_project`'s primary name is `sprk_projectnumber`; Event's datetime pair is `sprk_plannedstart`/`sprk_plannedend`; `LOOKUP_META` confirmed deletable. Two live-code defects found (checklist §F).
 
 ---
 
@@ -84,7 +87,7 @@ Stale references to the withdrawn plan still exist in the repo and will mislead 
 - **MUST NOT** create a `sprk_headerconfiguration` Dataverse table — explicitly rejected (design.md §5.4)
 - **MUST NOT** do the DEF-06 `exports`/`moduleResolution` migration here (design.md §7.1) — and do not "clean up" the `dist/*` deep-path imports, they are load-bearing for bundle size
 - **MUST NOT** promote `useSprkMemoRepository` (DEF-08) — no second consumer
-- **MUST NOT** modify `src/client/pcf/VisualHost/**` or `src/solutions/EventDetailSidePane/**`
+- **MUST NOT** modify `src/client/pcf/VisualHost/**` or `src/solutions/EventDetailSidePane/**` — constraint **stands**. (A 2026-08-24 exception was briefly considered for the schema-drift fix, then withdrawn: those defects moved to standalone issue docs in [`notes/issues/`](notes/issues/README.md) for separate evaluation.)
 - **MUST NOT** fork any R1 shared primitive. Missing behavior lands in the shared lib so every entity gets it.
 
 ### ADR posture
@@ -109,14 +112,25 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md).
 - **2026-08-21**: Config = JSON on a `layoutJson` manifest property, **not** a Dataverse config table. Owner rationale: few instances ever, unlike VisualHost. Bonus: config travels in form XML, so nothing to seed per environment. Resolver is tier-shaped so a config-record tier can slot in later without touching renderers.
 - **2026-08-21**: Rollout = Project + Work Assignment → Invoice + Event → Matter last. Invoice is explicitly required, not optional; it forces the currency + date renderer work.
 - **2026-08-21**: DEF-06 and DEF-08 both dropped from R2 scope (design.md §7).
-- **2026-08-21**: New control identity `Spaarke.Records.RecordHeader` + one-time Matter form re-bind, rather than keeping `constructor="MatterHeader"` forever.
+- **2026-08-21**: New control identity `Spaarke.Records.RecordHeader` + one-time Matter form re-bind, rather than keeping `constructor="MatterHeader"` forever. — ⚠️ **REOPENED 2026-08-22 (design.md §8, D-1)**: this rested on a false premise. Changing `display-name-key` alone makes makers see "Spaarke Record Header" on every entity with **zero** migration; only the internal schema name stays Matter-flavoured. Owner must re-decide A vs B.
+- **2026-08-22 (owner)**: **§8 option B reaffirmed** after the corrected trade was presented — ship `Spaarke.Records.RecordHeader`, re-bind Matter, retire the old control. Clean identity is worth the one-time migration.
+- **2026-08-22 (owner)**: **Main forms ARE transported between environments inside a solution.** This is now a binding assumption: it makes §5.1's JSON-on-manifest portability argument real (no per-environment paste) and makes §8's Matter re-bind genuinely once. If form transport ever changes, §5.1 must be re-scored.
+- **2026-08-22**: Metadata access **reuses** [`IDataverseClient.retrieveEntityMetadata`](../../src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts) / `XrmDataverseClient`, extended with `targets?: string[]` — **not** a new raw-`fetch` `EntityDefinitions/ManyToOneRelationships` path. Keeps the project inside its own "`Xrm.WebApi` / `Xrm.Page` only" MUST, avoids a duplicate metadata code path, and DataGrid inherits the extension. Requires a new page-session metadata cache (none exists today).
 
 ---
 
 ## Implementation Notes
 
-- **Entity self-detection**: `context.mode.contextInfo.entityTypeName`. Proven in [`VisualHostRoot.tsx:253`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx#L253) and [`TrackingFieldTrio/index.ts:346`](../../src/client/pcf/TrackingFieldTrio/index.ts#L346). Not in the current `@types/powerapps-component-framework` — use the established type-cast idiom.
-- **`LOOKUP_META` removal hinges on the §5.4 discovery item.** If `sprk_mattertype_ref`'s primary id/name attributes aren't what we expect, add the optional `fields[].lookup` escape hatch. Nothing else in the design moves.
+- **Entity self-detection**: `context.mode.contextInfo.entityTypeName`. Proven in [`VisualHostRoot.tsx:246-253`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx#L246-L253) and documented in [`pcf-build-scaffold.md` gotcha #3](../../.claude/patterns/pcf/pcf-build-scaffold.md). Not in the current `@types/powerapps-component-framework` — use the established type-cast idiom. ⚠️ [`TrackingFieldTrio/index.ts:337-348`](../../src/client/pcf/TrackingFieldTrio/index.ts#L337-L348) uses a **different** surface, `context.page.entityTypeName` — it is the fallback, not evidence for `contextInfo`.
+- **`LOOKUP_META` is confirmed deletable** (live-verified 2026-08-24): `sprk_mattertype` → `sprk_mattertype_ref` / `sprk_mattertype_refid` / `sprk_mattertypename`, and `sprk_practicearea` → `sprk_practicearea_ref` / `sprk_practicearea_refid` / `sprk_practiceareaname` — both exactly as hard-coded. The `fields[].lookup` escape hatch is **not** needed in the v1.0 schema. But note `sprk_projecttype_ref` and `sprk_eventtype_ref` use `sprk_name`, so the convention is non-uniform and metadata resolution is mandatory.
+- **Schema gotchas that will bite** (live-verified 2026-08-24): `sprk_project`'s primary name is **`sprk_projectnumber`**, not `sprk_projectname` (both exist). `sprk_event`'s is `sprk_eventname`. Event's DateAndTime pair is `sprk_plannedstart`/`sprk_plannedend` — **`scheduledstart`/`scheduledend` and `sprk_location` do not exist** despite live client code referencing them. Invoice has **no due-date field**. Work Assignment's only date is `sprk_responseduedate`.
+- **Sparkle rule**: show it when `summaryField` names an attribute that **exists**, even if 0 records are populated (owner decision — a separate project will populate them); popover shows "No summary yet". Hide only when no such attribute exists. WA and Event have no summary column yet.
+- **Two `LookupField` components exist.** `components/RecordHeader/fields/LookupField.tsx` is display-only (barrel-aliased `RecordHeaderLookupField`); `components/LookupField/LookupField.tsx` is the editable search-as-you-type one MatterHeader actually renders — and it has **no `span` prop**, so the view hand-rolls a `<div style={{ gridColumn: 'span 1' }}>` cell. Don't confuse them.
+- **`FieldGrid` does not validate span.** Each cell applies its own `gridColumn`. `span: 3` in a `columns: 2` grid silently adds a third track. The resolver must clamp.
+- **Manifest strings must not contain apostrophes** — `pac solution import` fails with `noAposStringType` ([`pcf-deploy/SKILL.md:447`](../../.claude/skills/pcf-deploy/SKILL.md)).
+- **Stale comment to delete during migration**: [`MatterHeaderView.tsx:53-62`](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L53-L62) claims the shared lib has an `exports` map. It does not — the comment survived the task-063 revert.
+- **Version sync is 5 locations, not 4** (`src/client/pcf/CLAUDE.md` says 4; `pcf-deploy` adds `pack.ps1`).
+- **`ensure-dist-fresh` prebuild guard is mandatory** for any PCF on deep `dist/*` imports — carry it into the new PCF folder.
 - **Sequence matters**: shared-lib renderers + resolver land **before** any form binding. Matter migrates **last**.
 - **`Xrm.Navigation.navigateTo` gotchas** (R1 lost releases to each): call it **directly** on `xrm.Navigation` — aliasing strips `this` and makes it a silent no-op. Property is `webresourceName`, not `name`. `data` must be a URL-encoded **string**, not an object.
 - **`Xrm.WebApi` does not expose `@odata.count`** — `useRelatedCount` counts `entities.length` client-side. See [`.claude/patterns/pcf/xrm-webapi-related-count.md`](../../.claude/patterns/pcf/xrm-webapi-related-count.md).
