@@ -632,4 +632,239 @@ This is the natural evolution of the L3 `/provision-environment` skill. The web 
 
 ---
 
+## SESSION 3 — 2026-08-24 T02:00Z through T02:35Z (F16.5/F18/F19/F20 discovery)
+
+**Context**: Continued from 2026-08-24 T02:00Z SESSION 1 handoff (F16 discovered, not yet fixed; H9 pending). This session executed the pivoted plan (F16 Part A → Part B → H9) end-to-end. Discovered 5 new automation gaps along the way. Documenting each with the symptom/root-cause/fix/automation-gap structure established for F1-F17.
+
+### F16.5 — `az webapp update --set keyVaultReferenceIdentity=...` returns Bad Request
+
+**Symptom** (2026-08-24 T02:07Z, mid-F16-Part-B):
+```
+$ az webapp update -g rg-spaarke-shared-prod -n sprksharedprod-api \
+    --set keyVaultReferenceIdentity="/subscriptions/.../userAssignedIdentities/sprk-prod-shared-bff-uami"
+ERROR: Operation returned an invalid status 'Bad Request'
+```
+
+No further error detail (Bad Request body swallowed by az CLI wrapper). Blocks the F16 Part B remediation via the obvious CLI form.
+
+**Root cause**: `az webapp update --set <property>=<value>` uses the ARM `PATCH sites/{name}` endpoint with a synthesized body — but the CLI wrapper's property path resolution does NOT correctly project `keyVaultReferenceIdentity` (which lives under `properties.keyVaultReferenceIdentity` in the resource JSON). Result: server returns Bad Request because the PATCH body is malformed. Same shape of bug as F15b (a specific ARM operation the az CLI's convenience wrapper mangles) but for a different endpoint.
+
+**Fix** (workaround; use direct ARM PATCH):
+```bash
+az rest --method patch \
+  --url "https://management.azure.com/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}?api-version=2022-03-01" \
+  --body '{"properties":{"keyVaultReferenceIdentity":"<uami-resource-id>"}}'
+```
+
+Succeeds cleanly. Verified via re-query: `az webapp show ... --query keyVaultReferenceIdentity` returns the UAMI resource ID.
+
+**Automation gap**: T1 handler MUST skip `az webapp update --set keyVaultReferenceIdentity=...` and go straight to `az rest --method patch` on the site resource. Or file an azure-cli issue upstream (F15b's `az role assignment create` MissingSubscription bug is well-known; F16.5's `az webapp update --set` limitation on this specific property may also be known). Absorbed into Automation Gaps table as F16.5.
+
+**Session commit reference**: change applied via `az rest --method patch` at T02:07Z; verified at T02:08Z.
+
+---
+
+### F18 — Fresh RBAC-enabled SHARED KV grants NO data-plane access to subscription Owner
+
+**Symptom** (2026-08-24 T02:10Z, first attempt to `az keyvault secret list --vault-name sprk-prod-kv` after F16 fixes):
+```
+ERROR: (Forbidden) Caller is not authorized to perform action on resource.
+Caller: appid=04b07795-...;oid=c74ac1af-...;iss=https://sts.windows.net/a221a95e-.../
+Action: 'Microsoft.KeyVault/vaults/secrets/readMetadata/action'
+Resource: '.../providers/microsoft.keyvault/vaults/sprk-prod-kv'
+Assignment: (not found)
+Inner error: {"code": "ForbiddenByRbac"}
+```
+
+Same shape as F15 (fresh RBAC-enabled KV, subscription Owner has no data-plane role) — but for a DIFFERENT KV (the shared platform KV `sprk-prod-kv`, whereas F15 was for per-tenant `sprk-trial01-prod-kv`).
+
+**Root cause**: Bicep provisions both KVs with `enableRbacAuthorization=true` but does NOT emit role assignments for the deploying operator. Every RBAC-enabled KV in the resource group carries the same gap. F15 was the per-tenant instance; F18 is the shared instance. Both need the same fix.
+
+**Fix** (workaround; identical to F15b):
+```bash
+# Generate assignment name
+GUID=$(pwsh -c "[guid]::NewGuid().ToString()")
+
+# Body: KV Secrets Officer role on operator user OID
+cat > f18-ra-body.json <<EOF
+{
+  "properties": {
+    "roleDefinitionId": "/subscriptions/{sub}/providers/Microsoft.Authorization/roleDefinitions/b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+    "principalId": "c74ac1af-ff3b-46fb-83e7-3063616e959c",
+    "principalType": "User"
+  }
+}
+EOF
+
+az rest --method put \
+  --url "https://management.azure.com/subscriptions/{sub}/resourceGroups/rg-spaarke-shared-prod/providers/Microsoft.KeyVault/vaults/sprk-prod-kv/providers/Microsoft.Authorization/roleAssignments/$GUID?api-version=2022-04-01" \
+  --body @f18-ra-body.json
+```
+
+Succeeded T02:09Z. Assignment ID `4daec19b-b916-4346-bfdb-04b5d029fa52`. RBAC propagated in seconds.
+
+**Automation gap**: F15's operator-RBAC-bootstrap handler must widen scope to enumerate EVERY RBAC-enabled KV in the target RG (both per-tenant and shared) and grant `Key Vault Secrets Officer` to operator on each. Idempotent — silent success on re-run. Absorbed into Automation Gaps table as F18.
+
+---
+
+### F19 — Bicep-provisioned shared KV is EMPTY; BFF's 6 `@Microsoft.KeyVault(...)` refs unresolvable
+
+**Symptom** (2026-08-24 T02:11Z, first `az keyvault secret list --vault-name sprk-prod-kv` after F18 fix):
+```
+[]
+```
+
+All 6 App Service `@Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=...)` refs point to secrets that DO NOT EXIST. Even after F16 fully remediated (UAMI has RBAC + kvRefIdentity correct), the KV refs will resolve to "Secret not found" errors when BFF boots.
+
+The 6 refs BFF expects (from App Service settings inventory):
+1. `AiSearch--AdminKey` (BFF setting: `AI_SEARCH_API_KEY`)
+2. `DocumentIntelligence-ApiKey` (`DOC_INTELLIGENCE_KEY`)
+3. `AzureOpenAI-ApiKey` (`OPENAI_API_KEY`)
+4. `servicebus-connection-string` (`ConnectionStrings__ServiceBus`)
+5. `storage-connection-string` (`ConnectionStrings__Storage`)
+6. `redis-connection-string` (`Redis__ConnectionString`)
+
+**Root cause**: `stacks/model1-shared.bicep` provisions the KV as an empty vault. There is no Bicep-emitted secret-seeding step, and no auto-run companion script/handler. Prior H4 handler is scoped per-tenant KV only. Result: fresh Model 1 Prod stand-up leaves shared KV empty; all downstream BFF startup fails on config resolution.
+
+**Fix** (manually extracted from source services + `az keyvault secret set`):
+```bash
+# Extract source keys (all against rg-spaarke-shared-prod)
+AI_SEARCH_KEY=$(az search admin-key show -g rg-spaarke-shared-prod --service-name sprksharedprod-search --query primaryKey -o tsv)
+DOC_INTEL_KEY=$(az cognitiveservices account keys list -g rg-spaarke-shared-prod -n sprksharedprod-docintel --query key1 -o tsv)
+OPENAI_KEY=$(az cognitiveservices account keys list -g rg-spaarke-shared-prod -n sprksharedprod-openai --query key1 -o tsv)
+SB_CONN=$(az servicebus namespace authorization-rule keys list -g rg-spaarke-shared-prod --namespace-name sprksharedprod-servicebus --name RootManageSharedAccessKey --query primaryConnectionString -o tsv)
+STORAGE_CONN=$(az storage account show-connection-string -g rg-spaarke-shared-prod -n sprksharedprodsa --query connectionString -o tsv)
+REDIS_HOST=$(az redis show -g rg-spaarke-shared-prod -n sprksharedprod-redis --query hostName -o tsv)
+REDIS_PORT=$(az redis show -g rg-spaarke-shared-prod -n sprksharedprod-redis --query sslPort -o tsv)
+REDIS_KEY=$(az redis list-keys -g rg-spaarke-shared-prod -n sprksharedprod-redis --query primaryKey -o tsv)
+REDIS_CONN="${REDIS_HOST}:${REDIS_PORT},password=${REDIS_KEY},ssl=True,abortConnect=False"
+
+# Seed to KV (6 parallel sets)
+az keyvault secret set --vault-name sprk-prod-kv --name AiSearch--AdminKey --value "$AI_SEARCH_KEY"
+az keyvault secret set --vault-name sprk-prod-kv --name DocumentIntelligence-ApiKey --value "$DOC_INTEL_KEY"
+az keyvault secret set --vault-name sprk-prod-kv --name AzureOpenAI-ApiKey --value "$OPENAI_KEY"
+az keyvault secret set --vault-name sprk-prod-kv --name servicebus-connection-string --value "$SB_CONN"
+az keyvault secret set --vault-name sprk-prod-kv --name storage-connection-string --value "$STORAGE_CONN"
+az keyvault secret set --vault-name sprk-prod-kv --name redis-connection-string --value "$REDIS_CONN"
+```
+
+All 6 secrets seeded and verified via `az keyvault secret list`. Timestamps: T02:12:16 through T02:12:48Z.
+
+**Notes on naming conventions**: BFF App Service uses a mix of double-dash (`AiSearch--AdminKey` → .NET IConfiguration nested-section convention) and single-dash (`DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`) — must MATCH exactly what the App Service settings reference. Not fully consistent naming; the canonical name manifest MUST live in code (matched to BFF's KV-ref app-settings template).
+
+**Automation gap**: Introduce H4-shared handler (sibling to H4 which is per-tenant). Reads a canonical 6-secret manifest, extracts values from source Azure services via `az * keys list` / `az * show-connection-string`, seeds to shared KV. Fully idempotent — no-op if secret already exists at correct value; overwrite if drift detected. Absorbed into Automation Gaps table as F19.
+
+**Related**: Owner directive-adjacent (r1 must NEVER delete `Dataverse-ClientSecret` / `BFF-API-ClientSecret` per r3 BINDING never-delete rule). H4-shared handler must respect that same rule: check existence before write; NEVER blindly overwrite. Secret-seeder handler design MUST include the never-delete BINDING check as first-class.
+
+---
+
+### F20 / F20a — BFF fails-fast at boot on progressive missing-config chain (~40 IOptions modules)
+
+**Symptom sequence** (2026-08-24 T02:26Z through T02:33Z):
+
+**F20** (first fail-fast after H9 deploy):
+```
+2026-08-24T02:29:11.8499730Z Unhandled exception. System.InvalidOperationException:
+  SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.
+   at Sprk.Bff.Api.Infrastructure.DI.SpeAdminModule.AddSpeAdminModule(...) in
+      C:\code_files\...\SpeAdminModule.cs:line 45
+   at Program.<Main>$(String[] args) in
+      C:\code_files\...\Program.cs:line 123
+2026-08-24T02:29:15.5542654Z /opt/startup/startup.sh: line 20:  1843 Aborted (core dumped) dotnet "Sprk.Bff.Api.dll"
+```
+
+Container exit code 134 = SIGABRT (unhandled .NET exception during startup). BFF fail-fast.
+
+**F20a** (after setting `SpeAdmin__KeyVaultUri=https://sprk-prod-kv.vault.azure.net/`):
+```
+2026-08-24T02:33:56.9177183Z ⚠ Analysis services disabled (requires DocumentIntelligence:Enabled = true) — Null-Objects registered
+2026-08-24T02:33:58.6830110Z ⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)
+2026-08-24T02:33:58.8016433Z Unhandled exception. System.InvalidOperationException:
+  CosmosPersistence:Endpoint is not configured.
+  Add this setting to appsettings.json or Azure App Service configuration.
+   at Sprk.Bff.Api.Infrastructure.DI.AiPersistenceModule.AddAiPersistenceModule(...) in
+      C:\code_files\...\AiPersistenceModule.cs:line 56
+   at Program.<Main>$(String[] args) in
+      C:\code_files\...\Program.cs:line 184
+```
+
+Progressive discovery: each single-config fix reveals the next. BFF has ~40 `.ValidateOnStart()` modules per grep of Sprk.Bff.Api/. Continued serially: F20a → F20b → F20c → ... likely 30+ iterations before all IOptions satisfied.
+
+**Root cause**: Two related but distinct architectural facts:
+1. **Bicep does not seed App Service app settings for IOptions modules that hard-fail at boot.** The 14 app settings currently on `sprksharedprod-api` (per `az webapp config appsettings list`) are the endpoint URLs + 6 KV refs + telemetry setting — enough for TELEMETRY but NOT for BFF startup itself. The `.ValidateOnStart()` chain requires 40-80 more settings.
+2. **BFF's Tier-1 fail-fast assignment is broad**: even modules that ARE feature-gated at runtime (Analysis, RecordMatching — see the ⚠ Null-Object messages above) sit alongside modules that fail-fast unconditionally (SpeAdmin, AiPersistence). Result: ANY missing Tier-1 config kills BFF startup — cannot boot in degraded mode.
+
+**Fix** (attempted single-setting; NOT sufficient):
+```bash
+# Adds ONE setting; auto-restarts App Service
+az webapp config appsettings set -g rg-spaarke-shared-prod -n sprksharedprod-api \
+  --settings SpeAdmin__KeyVaultUri="https://sprk-prod-kv.vault.azure.net/"
+```
+→ Container starts, fails on CosmosPersistence:Endpoint (F20a). Not a solution.
+
+**Fix** (correct, deferred to next session):
+Batch-set ALL required app settings from a canonical template in ONE `az webapp config appsettings set` call. Template source: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKeys, EmailProcessing WebhookSigningKey). Some values are KV refs (need matching KV secrets seeded FIRST — chain with F19 handler). Some values are per-env constants (need per-customer intake to collect).
+
+**Automation gap** (CRITICAL): Introduce **H4b-BulkAppSettings handler** (companion to H4-KV-seed / F19 handler). Reads canonical BFF app-settings template + resolves KV refs + per-env inputs, `az webapp config appsettings set --settings k1=v1 k2=v2 ...` in single batch (single restart cycle). WITHOUT this handler, fresh-env BFF stand-up cannot progress past H9 (deploy) — the F20 chain is a hard block. Absorbed into Automation Gaps table as F20/F20a.
+
+**Design decision for next session**: H4 could be split into H4a (KV secret seed — F19) + H4b (App Service app settings set — F20). Both extract from a canonical manifest. Both must respect the never-delete BINDING (Dataverse-ClientSecret, BFF-API-ClientSecret). H4b should run AFTER H4a (KV refs need targets to exist for App Service to resolve them at boot).
+
+**Alternative: interim operator runbook**. `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §12 is the interim runbook until L3 skill lands. Its § App Service settings section IS the canonical template. Manual approach: read that section, formulate the full app-settings dict, single `az webapp config appsettings set --settings` call. This is what an operator would do TODAY; H4b just automates the read-and-set.
+
+---
+
+### F17 update (2026-08-24 T02:14Z): H9 verified
+
+Prior session flagged F17 (BFF App Service empty). This session verified the H9 zip-deploy path works when scoped to code-only:
+
+**Command**:
+```bash
+cd src/server/api/Sprk.Bff.Api
+dotnet publish -c Release -o ../../../../deploy/api-publish-model1prod/ --self-contained false
+cd ../../../../deploy
+pwsh -c "Compress-Archive -Path 'api-publish-model1prod/*' -DestinationPath 'api-publish-model1prod.zip' -CompressionLevel Optimal -Force"
+az webapp deploy \
+  --resource-group rg-spaarke-shared-prod \
+  --name sprksharedprod-api \
+  --src-path deploy/api-publish-model1prod.zip \
+  --type zip \
+  --async false
+```
+
+**Publish size**: **46 MB compressed** (47,152,950 bytes). Baseline per NFR-01: 44.96 MB (2026-08-13 .NET 10 upgrade). Delta: +1 MB. **PASSES** NFR-01 60 MB ceiling. No architecture review needed.
+
+**Deploy behavior**: Upload + extract succeeded. Site Startup Probe subsequently failed (F20 chain). `az webapp deploy` returns exit 0 even when startup probe fails — the exit-code semantics only cover the upload phase, not the startup phase. Operator MUST manually verify `/healthz` after deploy to catch startup failures.
+
+**Automation gap** (in addition to F17's existing entry): H9 handler MUST poll `/healthz` after `az webapp deploy` succeeds. Consider `/healthz` HTTP 200 within N minutes as the ACTUAL success criterion, not `az webapp deploy` exit code. Warm-up backoff strategy: 30s initial delay, then 15s poll for up to 5 min (BFF cold-start observed at 60-90s when config is complete).
+
+---
+
+### Session narrative (why we discovered F16.5/F18/F19/F20 today)
+
+Prior session (2026-08-24 T02:00Z SESSION 1) documented F16 discovery + pivoted the plan: F16 Part A → Part B → H9 → registry → /healthz. This session (SESSION 2) executed that plan and discovered 5 new gaps at each step:
+
+1. **F16 Part A** (grant shared UAMI KV Secrets User): straightforward `az rest` PUT; no new findings.
+2. **F16 Part B** (PATCH kvRefIdentity): discovered **F16.5** (az CLI `--set` bad-request bug); worked around via `az rest --method patch`.
+3. **Pre-H9 KV audit** (verify secrets before deploy): discovered **F18** (op RBAC gap on shared KV — F15 pattern repeated); fixed via same `az rest` fallback. Then discovered **F19** (KV entirely empty); fixed by extracting from 6 source services + seeding.
+4. **H9 zip-deploy**: succeeded (46 MB compressed); Site Startup Probe fail revealed **F20** (BFF hard-fails on missing SpeAdmin:KeyVaultUri). Attempted single-setting fix → revealed **F20a** (CosmosPersistence:Endpoint next). Chose NOT to serially chase 40-module chain; STOPPED and documented.
+
+**Meta-finding**: F17 + F19 + F20 all reveal the SAME root cause pattern:
+```
+Bicep provisions Model 1 Prod INFRASTRUCTURE (App Service, KV, source services, UAMIs, RBAC)
+but does NOT seed the BFF's RUNTIME state
+    (code deploy + KV secrets + App Service app settings for ~40 IOptions modules).
+```
+
+Recommended r1 handler design absorbs F17 (H9 fresh-env deploy) + F19 (H4-shared secret seeder) + F20 (H4b app-settings-template setter) as a coherent "BFF runtime activation cluster" that fires AFTER Bicep and BEFORE `/healthz` check.
+
+**Session errors**: none. All F16.5/F18/F19/F20 work was in-scope + reversible. Prior session's E1/E2 (accidental `az account clear` + `pac admin create-service-principal`) documented in current-task.md.
+
+**Session commits**: TBD (this section is being appended before commit).
+
+---
+
+*SESSION 3 addendum added 2026-08-24 T02:35Z. Author: Claude (Opus 4.7) continuing from SESSION 2 handoff. All discoveries in-place-remediated where scope allowed; F20 chain deferred to design of H4b handler.*
+
+---
+
 *Written 2026-08-22 during live deploy. Author: Claude (Opus 4.7) with Ralph Schroeder as owner.*

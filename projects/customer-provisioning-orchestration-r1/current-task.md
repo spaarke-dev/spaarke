@@ -1,8 +1,99 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T02:00Z (in-session) — **🎉 IMPORT SUCCESS + H10 DONE + PIVOT: SpaarkeMaster (485 components) INSTALLED to fresh Model 1 Prod (F12/F13/F14 fixes proven). Shared BFF UAMI now App User with SysAdmin (H10 done). BUT wire-up plan pivoted after F15/F16/F17 discovered: F15 fixed (op RBAC on per-tenant KV); F16 discovered (kvRefIdentity=SystemAssigned mismatch + UAMI has 0 KV RBAC on shared KV); F17 discovered (BFF App Service is EMPTY, needs H9 deploy). Next session: H9 (fresh-env BFF deploy) + F16 remediation + T1 (correct: kvRefIdentity → SHARED UAMI, not per-tenant) + registry + /healthz.**
+> **Last Updated**: 2026-08-24 T02:35Z (in-session, SESSION 2) — **🎯 CLUSTER FINDING: F17+F19+F20 all reveal the SAME root cause — Bicep provisions Model 1 Prod infra but does NOT seed BFF runtime config (App Service code + KV secrets + App Service app settings). F16 fully remediated. F18/F19 discovered + fixed. F20/F20a discovered, chose NOT to serially chase 40-module chain. Handoff: H9 code deployed, /healthz blocked on F20 chain resolution.**
 
-## 🎯 QUICK RECOVERY — 2026-08-24 SESSION (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 T02:35Z SESSION 2 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | (updated on this session's commit) |
+| **Working tree** | ⚠️ Multiple dirty (current-task.md + this session's F16-F20 additions to lessons-learned + skill Automation Gaps table, if written) |
+| **Azure sub** | `Spaarke Model 1 Production` (`cd95fcec-6b89-49ea-8339-c2b579b12587`) |
+| **Model 1 Prod state** | Dataverse ✅ SpaarkeMaster (485 comp) · MDA app ✅ · shared UAMI App User + SysAdmin ✅ · shared KV `sprk-prod-kv` RBAC ✅ + 6 secrets seeded ✅ · BFF App Service ⚠️ code deployed but crashes on config fail-fast chain |
+| **Findings this project** | F1-F20 (F20a pending remediation) — see lessons-learned + skill Automation Gaps |
+
+### 🎯 WHAT SESSION 2 ACCOMPLISHED (2026-08-24 T02:00Z → T02:35Z)
+
+Executed the pivoted plan from SESSION 1 handoff:
+1. ✅ **F16 Part A**: Granted shared UAMI (`6baf84ae-32a3-470b-a48d-9d27bb40ee4f`) `Key Vault Secrets User` on `sprk-prod-kv` via `az rest` PUT (assignment `30c4895d-8957-4aae-8a4d-9a672e2af351`). F15b bug applies to this endpoint too — `az rest` fallback works.
+2. ✅ **F16 Part B (T1)**: PATCHed `sprksharedprod-api` `keyVaultReferenceIdentity` from `SystemAssigned` → shared UAMI resource ID via `az rest --method patch` on `Microsoft.Web/sites?api-version=2022-03-01`. **NOTE**: `az webapp update --set keyVaultReferenceIdentity=...` returns `Bad Request` — must use `az rest` PATCH instead (see F16.5 note below).
+3. 🚨 **F18 DISCOVERED + FIXED**: Same F15 pattern applied to shared KV — Ralph had 0 RBAC on `sprk-prod-kv`. Granted self `Key Vault Secrets Officer` via same `az rest` PUT fallback (assignment `4daec19b-b916-4346-bfdb-04b5d029fa52`).
+4. 🚨 **F19 DISCOVERED + FIXED**: `sprk-prod-kv` was EMPTY — all 6 BFF `@Microsoft.KeyVault(...)` refs pointed to non-existent secrets. Extracted keys from 6 source services (`sprksharedprod-search/-docintel/-openai/-servicebus/sprksharedprodsa/sprksharedprod-redis`) and seeded 6 secrets: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string`.
+5. ✅ **H9 zip-deploy**: Built BFF via `dotnet publish -c Release --self-contained false` → 46 MB compressed (**PASSES** NFR-01 60 MB ceiling; +1 MB vs 44.96 MB baseline). Zip-deployed via `az webapp deploy --type zip`. Deploy uploaded successfully.
+6. 🚨 **F20 DISCOVERED (NOT FIXED)**: BFF container exits with code 134 (SIGABRT) on startup — fails-fast on missing `SpeAdmin:KeyVaultUri` (SpeAdminModule.cs:45). Added `SpeAdmin__KeyVaultUri=https://sprk-prod-kv.vault.azure.net/` → now fails-fast on next module.
+7. 🚨 **F20a DISCOVERED (NOT FIXED)**: After F20 setting, next fail-fast is `CosmosPersistence:Endpoint` (AiPersistenceModule.cs:56). BFF has ~40 `.ValidateOnStart()` modules — progressive discovery would burn session context; **chose NOT to serially chase**.
+
+### 🎯 CLUSTER FINDING (the r1 handler design insight)
+
+**F17 + F19 + F20 have one root cause**: `stacks/model1-shared.bicep` provisions the Model 1 Prod platform (App Service, KV, source services, UAMIs, RBAC) but does NOT seed the BFF's runtime state:
+- ❌ BFF code (fixed manually via H9)
+- ❌ KV secrets (fixed manually via F19)
+- ❌ App Service app settings for `.ValidateOnStart()` modules (F20 chain: SpeAdmin, AiPersistence, likely 30+ more)
+
+**Recommended r1 handler design (H4/H4-adjacent)**: A bulk-config-seeder handler that:
+- Extracts credentials from source Azure services (idempotent — `az * keys list`)
+- Seeds KV secrets from a canonical name manifest
+- Sets ALL required BFF app settings from a canonical template + KV refs
+- (Optional) Triggers BFF zip-deploy of latest artifact
+- Restarts App Service
+
+This is a natural extension of H4-KVSeeding but broader in scope (it seeds ENV VARS on the App Service too, not only secrets). Possibly should be H4a (secret-seeding) + H4b (app-settings-templating). Design decision for next session.
+
+### 📍 EXPLICIT NEXT ACTIONS (SESSION 3)
+
+**Option 1 — Complete the /healthz path manually (interim runbook)**:
+- Read `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings (canonical inventory)
+- Bulk-set all required app settings via `az webapp config appsettings set --settings k1=v1 k2=v2 ...` (single call to avoid restart-per-setting)
+- Include KV refs for: BFF-API-ClientSecret, Dataverse-ClientSecret, etc. (BINDING never-delete secrets — need to be seeded first)
+- Some app settings likely need values from Model 1 Prod IT context (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKey, WebhookClientState, EmailProcessing WebhookSigningKey) — these are per-env, not extractable
+- Restart, verify /healthz
+
+**Option 2 — Design H4-bulk-config-seeder handler first (r1 handler design)**:
+- Read `.claude/skills/provision-environment/SKILL.md` handler catalog to see H4 current scope
+- Draft H4a (secret-seed) + H4b (app-setting-template-set) POML tasks
+- Then execute against Model 1 Prod (validates the design end-to-end)
+
+**Recommend Option 2** — the whole point of this project is "customer provisioning platform." Option 1 hard-codes Model 1 Prod's runbook but doesn't produce a reusable handler. Option 2 designs the mechanism THEN uses Model 1 Prod as its first live-fire test.
+
+### 🚨 CRITICAL LEDGER (values needed for either option)
+
+Extracted from source services this session:
+- AI Search: `sprksharedprod-search` (admin key seeded to `AiSearch--AdminKey`)
+- Doc Intel: `sprksharedprod-docintel` (key1 seeded to `DocumentIntelligence-ApiKey`)
+- OpenAI: `sprksharedprod-openai` (key1 seeded to `AzureOpenAI-ApiKey`)
+- Service Bus: `sprksharedprod-servicebus` (RootManageSharedAccessKey seeded to `servicebus-connection-string`)
+- Storage: `sprksharedprodsa` (conn string seeded to `storage-connection-string`)
+- Redis: `sprksharedprod-redis` (StackExchange.Redis format seeded to `redis-connection-string`)
+
+Values NOT yet extracted/seeded (needed for next session):
+- `BFF-API-ClientSecret` (per r3 BINDING never-delete — must be seeded WITH REAL VALUE, not sentinel)
+- `Dataverse-ClientSecret` (per r3 BINDING never-delete — deprecated per ADR-028 auth v2 but still referenced somewhere?)
+- `Sidecar-Shared-Secret` (Exchange sidecar; MAY be needed for BFF startup — TBD)
+- Any per-env config: TenantId, BFF multitenant app ClientId, SharePointEmbedded ContainerTypeId
+
+### 🚨 F16.5 note (`az webapp update --set` doesn't work for `keyVaultReferenceIdentity`)
+
+Discovered mid-session: `az webapp update -g <rg> -n <name> --set keyVaultReferenceIdentity="<uami-resource-id>"` returns `ERROR: Operation returned an invalid status 'Bad Request'`. WORKAROUND: use `az rest --method patch` on the site resource directly with body `{"properties":{"keyVaultReferenceIdentity":"<uami-resource-id>"}}`. Documented as F16.5.
+
+### 🔁 To resume next session — say ONE of these
+
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context
+- **"resume with Option 1 (manual runbook)"** — hard-code Model 1 Prod app settings, get /healthz green
+- **"resume with Option 2 (design H4 first)"** — draft handler POMLs, then use Model 1 Prod as test bed (**recommended**)
+- **"just document + hand off"** — this session already did that; no further doc work needed
+
+### 🧠 SESSION 2 SUMMARY
+
+**Automation gaps discovered/expanded this session**: F16.5 (az CLI bad-request bug), F18 (op-RBAC-shared-KV — mirrors F15), F19 (shared-KV-empty), F20 (SpeAdmin config fail-fast), F20a (Cosmos config fail-fast). Full context in [`notes/lessons-learned-model1-prod-standup-2026-08-22.md`](./notes/lessons-learned-model1-prod-standup-2026-08-22.md) + Automation Gaps table in [`.claude/skills/provision-environment/SKILL.md`](../../.claude/skills/provision-environment/SKILL.md).
+
+**Ledger entries preserved**: shared UAMI `6baf84ae-32a3-470b-a48d-9d27bb40ee4f` (clientId `64b920f1-a063-42b0-94dd-4222fa46aa19`); Ralph OID `c74ac1af-ff3b-46fb-83e7-3063616e959c`; shared KV `sprk-prod-kv`; App Service `sprksharedprod-api` (`kvRefIdentity` now → shared UAMI resource ID).
+
+**Owner directives (unchanged from SESSION 1)**: Q1-Q7 answers per prior handoff. Do NOT `pac admin copy`. Do NOT enable Managed Environments yet. Do NOT set up Env Groups for Model 1. Do NOT set up PAYG for Model 1.
+
+---
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T02:00Z SESSION 1 (retained for reference)
 
 | Field | Value |
 |-------|-------|
