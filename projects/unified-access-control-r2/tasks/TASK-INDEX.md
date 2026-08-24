@@ -40,7 +40,7 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | 🔲 013 | Workforce email `oid` no-hijack | FR-12 / A-18 | 001 | — | ❌ | sonnet | high |
 | ✅ 014 | Cache key includes auth mode | FR-13 / A-19 | 001 | **P0-B** | ✅ | sonnet | high |
 | 🔲 015 | Deterministic + complete membership paging | FR-14 / A-10 | 001 | — | ❌ | sonnet | high |
-| 🔲 016 | Close-project cascade (contact + org) | FR-15 / A-12 | 001 | — | ❌ | sonnet | high |
+| ✅ 016 | Close-project cascade (contact + org) | FR-15 / A-12 | 001 | — | ❌ | sonnet | high |
 | 🔲 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
 | 🔲 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | — | ❌ | sonnet | high |
 | ✅ 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
@@ -288,6 +288,46 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 > Verified after repair: **11,338 passed / 0 failed** across all seven.
 > 🔔 **Client-visible**: `/grant`, `/revoke`, `/close-project` now answer **403**
 > (`sdap.access.deny.delegation_target_unresolved`) instead of 400 for a body with an empty identifier.
+
+> **Task 016 outcome (2026-08-23)**: A-12 closed — closing a Secure Project now actually revokes access.
+> **Two independent defects, either sufficient alone.** (1) The cascade `$select`ed
+> `_sprk_contactid_value`, an attribute that **does not exist** — live metadata declares the lookup
+> `sprk_contact` → `_sprk_contact_value`, and there is no `sprk_contactid` on the table at all. A
+> `$select` on a nonexistent column is a 400, the helper rethrew, `Handle` had no `try` → **every**
+> closure 500'd having revoked nothing and never reached SPE removal. Task 070 had already fixed the
+> *sibling* project lookup in this same file and left the contact one stale — same typo class, twice.
+> (2) The projection required a non-null contact, and **a null contact IS the organization-grant
+> discriminator** — so even with the column fixed, every org grant would have survived closure with the
+> whole firm's access intact. ⚠️ The solution's `views-schema.md` still says `sprk_contactid` and is
+> **wrong**; live metadata + `ExternalParticipationService` + `ExternalGrantKey` all agree on
+> `_sprk_contact_value`.
+> **Why no test caught it**: `ExternalAccessRow` was `private`, so no test could name
+> `QueryAsync<ExternalAccessRow>` — the pre-existing `CloseProject_DataverseQueryThrows_PropagatesException`
+> said exactly that in its own comments and then asserted `Guid.Empty == Guid.Empty`. Now `internal`
+> (ADR-038 §4 seam, ban B8 via `InternalsVisibleTo`), and **the fake table rejects unknown `$select`
+> columns the way Dataverse does** — a fake that ignored the projection would have gone green on the
+> shipped bug.
+> **In-scope extension**: `DeactivateAccessRecordsAsync` swallowed per-row failures and returned only the
+> success count, so a closure that revoked 2 of 5 answered `200 OK` — the same false-success shape the
+> ADR-003 constraint forbids for enumeration, and the precedent is one directory over in
+> `ExternalGrantLifecycle.DeactivateAsync` (task 010). Continue-on-error is kept (aborting leaves MORE
+> access standing); the failures are now counted and reported. Three reason codes, all carrying
+> `accessRecordsRevoked`. Perturbations: stale `$select` → **14/20** fail; restore the null-contact
+> exclusion → **6/20**; rethrow instead of typed response → **2/20**; ignore `failedCount` → **2/20**;
+> drop the unaddressable-row guard → **1/20**.
+> 🔔 **Client-visible**: `/close-project` can now answer **500 + RFC 7807** with `reasonCode ∈
+> {sdap.closure.incomplete.enumeration_failed, …partial_revocation, …container_not_cleared}` where it
+> previously answered 200 (partial revocation) or an untyped 500. Retry is safe and intended.
+> 🔔 **NEW FINDING → filed on task 017**: `SpeContainerMembershipService.ListExternalMembersAsync`
+> catches BOTH `ServiceException` and `Exception` and returns `[]`, so `RemoveAllExternalMembersAsync`
+> reports "0 removed" whether the container was empty **or Graph was unreachable**. Close-project then
+> reports 200 while external users may still hold file permission — FR-15's own acceptance failing on
+> the SPE half. Task 016 built the receiving end (`container_not_cleared`); the guard is **unreachable
+> until 017 makes that service report honestly**, and is documented as untestable-today rather than
+> covered by a fake exception the service cannot throw.
+> Verified: **11,357 passed / 0 failed** across all seven projects; publish **43.69 MB** compressed
+> (unchanged — no packages added). Rationale:
+> [`notes/task-016-close-project-cascade.md`](../notes/task-016-close-project-cascade.md).
 
 ## Phase 1 — One evaluator (10 tasks)
 

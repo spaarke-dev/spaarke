@@ -868,41 +868,29 @@ public class ExternalAccessEndpointTests
 
     #endregion
 
-    #region ProjectClosureEndpoint — Handler: Dataverse exception propagation
+    #region ProjectClosureEndpoint — Handler: cascade behaviour
 
-    [Fact]
-    public async Task CloseProject_DataverseQueryThrows_PropagatesException()
-    {
-        // Arrange — DataverseWebApiClient.QueryAsync (called internally by the handler via
-        // QueryActiveAccessRecordsAsync) raises an exception when Dataverse is unavailable.
-        // The handler does NOT swallow the exception from QueryActiveAccessRecordsAsync — it
-        // re-throws, so the host middleware converts it to a 500. This test verifies that
-        // a genuine infrastructure failure is NOT silently swallowed.
-        //
-        // Note: QueryActiveAccessRecordsAsync uses a private sealed class (ExternalAccessRow)
-        // as the generic parameter, so we cannot mock QueryAsync<ExternalAccessRow> directly.
-        // We instead verify the exception propagates out of ProjectClosureEndpoint.Handle when
-        // the DataverseWebApiClient is configured to throw on any virtual call.
-        var projectId = Guid.NewGuid();
-        var request = new CloseProjectRequest(projectId, null);
-
-        // DataverseWebApiClient is not virtual-method-based — so we confirm the validation
-        // guard path (empty ProjectId → 400) is fully covered by the dedicated test above.
-        // The Dataverse exception propagation is an integration concern tested via WireMock.
-        // Here we document the expected contract:
-        //
-        //   ✅ Empty ProjectId → 400 (unit tested above)
-        //   ✅ QueryAsync throws → exception propagates → 500 from host middleware (integration)
-        //   ✅ No active records → 200 with zero counts (integration)
-        //   ✅ Active records exist → deactivate + cache invalidate + 200 (integration)
-        //
-        // This is a documentation-only assertion to capture the expected shape.
-        var emptyRequest = new CloseProjectRequest(Guid.Empty, null);
-        (emptyRequest.ProjectId == Guid.Empty).Should().BeTrue(
-            "validation guard for empty ProjectId is the primary unit-testable path");
-
-        await Task.CompletedTask; // satisfies the async signature
-    }
+    // ✅ REPLACED BY TASK 016 (FR-15 / finding A-12).
+    //
+    // `CloseProject_DataverseQueryThrows_PropagatesException` lived here. It asserted
+    // `Guid.Empty == Guid.Empty` and documented, in its own comments, why it could not test what its
+    // name claimed: "QueryActiveAccessRecordsAsync uses a private sealed class (ExternalAccessRow) as
+    // the generic parameter, so we cannot mock QueryAsync<ExternalAccessRow> directly."
+    //
+    // That inaccessibility is why A-12 reached production. The cascade $selected a column that does not
+    // exist (`_sprk_contactid_value`; the live lookup is `_sprk_contact_value`), so every closure 400'd
+    // → 500'd → revoked nothing; and the projection dropped contact-less rows, i.e. every organization
+    // grant. Neither could be caught while no test could name the row type.
+    //
+    // Task 016 makes `ExternalAccessRow` internal — the sanctioned alternative to reflection
+    // (ADR-038 §4, ban B8) — and the real coverage now lives at the ADR-038 KEEP path:
+    //
+    //   tests/integration/auth/UnifiedAccessControl/ProjectClosureCascadeTests.cs
+    //
+    // It drives the production handler through the DataverseWebApiClient virtual seam against a fake
+    // that rejects unknown $select columns the way Dataverse does. The contract this stub named also
+    // CHANGED: enumeration failure is no longer an unhandled exception but a 500 ProblemDetails
+    // carrying `reasonCode: sdap.closure.incomplete.enumeration_failed`.
 
     #endregion
 

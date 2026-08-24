@@ -4,7 +4,7 @@
     <title>FR-15 (A-12): Close-project cascade deactivates contact AND organization grants</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (revocation cascade) where the current bug retains privilege after project close — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,6 +91,22 @@
     <criterion testable="true">Negative: a project with zero grants closes cleanly (no error).</criterion>
     <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-08-23">
+    Both halves of A-12 fixed. Step 1 verified against LIVE metadata: the lookup is sprk_contact ->
+    _sprk_contact_value; there is NO sprk_contactid attribute on the table, so the escalation trigger did
+    not fire. Deviations, both surfaced rather than silent: (a) tests landed at
+    tests/integration/auth/UnifiedAccessControl/ProjectClosureCascadeTests.cs, not the unit path named in
+    &lt;outputs&gt; -- the task-001 constraint is explicit that tests go to the ADR-038 KEEP path, and that
+    path is deletion-protected while the unit path is not; (b) step 5 had no task-001 characterization test
+    to flip because task 001 could not pin A-12 (its own constraint says so), so the vacuous
+    CloseProject_DataverseQueryThrows_PropagatesException -- which asserted Guid.Empty == Guid.Empty and
+    documented that the private row type blocked real coverage -- was replaced by a pointer to the new
+    suite. In-scope extension beyond A-12: partial deactivation failure was reported as 200; it now returns
+    a typed incomplete response. New finding filed onto task 017: SpeContainerMembershipService cannot
+    report a clearing failure at all. 20 tests; five perturbations all caught; 11,357 green across seven
+    projects; publish 43.69 MB compressed, unchanged.
+  </completion>
 
   <notes>Spec FR-15; finding A-12; register D-2 (broader closure semantics remain out of scope — this fixes only the broken cascade). Close-project is also gated by the delegation rule (task 008) — coordinate if both touch the endpoint's registration, but the cascade body is disjoint from the filter.</notes>
 

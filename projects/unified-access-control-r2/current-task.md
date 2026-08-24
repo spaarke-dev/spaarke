@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 007 + a CI repair)
+> **Last Updated**: 2026-08-23 (by `context-handoff`, after task 016)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 007 complete; CI red from task 008 found and repaired |
+| **Task** | **none active** — task 016 complete, committed and pushed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **11 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 019 ✅) |
+| **Phase** | Phase 0 — enforcement remediation · **12 of 19 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 019 ✅) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | Run **task 016** (`016-close-project-cascade-fix.poml` — **verify the filename**) via the `task-execute` skill. See "Why 016 next" below |
+| **Next Action** | Run **task 017** (`017-spe-revoke-matcher-and-relic.poml` — **verify the filename**) via the `task-execute` skill. See "Why 017 next" below |
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
@@ -29,24 +29,31 @@ Low practical impact — `AccessGrantModal` and the external SPA send well-forme
 real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
 flipped to match, with the rationale in their doc comments.
 
-### Why 016 next
+### Why 017 next
 
-Eight Phase 0 fixes remain, all independent — no hard ordering left. **016** (close-project cascade,
-A-12) is the strongest candidate because it is the *third* defect found in the same revocation family:
-010 fixed grant/revoke drift, 007 just established that the cascade sweep must deliberately NOT filter
-expiry, and 016 fixes the cascade missing organization grants entirely. Doing it while that reasoning is
-fresh is worth more than the ordering of the ids.
+**017** (SPE revoke matcher, A-13) is now the clear one — task 016 just filed a finding straight into it,
+and until 017 lands, HALF of FR-15 is still open. `SpeContainerMembershipService.ListExternalMembersAsync`
+catches both `ServiceException` and `Exception` and returns `[]`, so `RemoveAllExternalMembersAsync`
+answers "0 removed" whether the container was empty **or Graph was unreachable** — and close-project
+reports 200 while external users may still hold file permission on the container. Task 016 already built
+the receiving end (`reasonCode: sdap.closure.incomplete.container_not_cleared`); 017 makes it reachable.
+017 also carries binding constraints from **010** (do not reduce the revoke sweep) and **016**, and it is
+the last of the three revocation-family defects.
 
-Reasonable alternatives: **017** (SPE revoke matcher — same file family, carries binding constraints
-from 010), **013** (workforce email `oid` hijack — the last unaddressed identity-confusion finding),
-**012** (anonymous share links, unblocked by 002), **009** / **011** / **015** / **018**.
+Reasonable alternatives: **013** (workforce email `oid` hijack — the last unaddressed
+identity-confusion finding), **012** (anonymous share links, unblocked by 002), **009** / **011** /
+**015** / **018**. All independent; no hard ordering remains.
 
 ### Last verified state
 
-**ALL SEVEN test projects — 11,338 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,726 ·
+**ALL SEVEN test projects — 11,357 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,745 ·
 `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
 `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
-Publish **43.69 MB** compressed incl. PDBs (baseline 44.96, ceiling 60) · `--vulnerable` clean.
+Publish **43.69 MB** compressed incl. PDBs (unchanged by task 016 — no packages added; baseline 44.96,
+ceiling 60) · `--vulnerable` clean · `dotnet build --warnaserror` succeeds.
+
+⚠️ **Measure the publish COMPRESSED.** Raw bytes on disk are ~137 MB; the §10 ceiling is on the
+compressed artifact (43.69 MB). Zip `deploy/api-publish/` before reporting a number.
 
 ### 🚨 Process failure found 2026-08-23 — READ THIS BEFORE CLAIMING A GREEN SUITE
 
@@ -117,6 +124,11 @@ caught real gaps every time.
 | **Drop the `eq null` branch (007)** | **1 of 11** |
 | **`ge` → `gt` on a Date Only column (007)** | **1 of 11** — the boundary-day test |
 | **Ungroup the org disjunction (007)** | **1 of 11** |
+| **Revert the `$select` to `_sprk_contactid_value` (016)** | **14 of 20** |
+| **Restore the null-contact exclusion (016)** | **6 of 20** |
+| **Rethrow instead of the typed enumeration response (016)** | **2 of 20** |
+| **Ignore `failedCount`, always 200 (016)** | **2 of 20** |
+| **Drop the unaddressable-row guard (016)** | **1 of 20** |
 
 **Capture failing-test identity with TRX**, not `-v q`:
 `dotnet test … --logger "trx;LogFileName=t.trx"`, then parse `outcome="Failed"`.
@@ -125,7 +137,22 @@ caught real gaps every time.
 
 ## Full State (Detailed)
 
-### Decisions made in task 007 (most recent)
+### Decisions made in task 016 (most recent)
+
+| Decision | Rationale |
+|---|---|
+| **`_sprk_contact_value`, confirmed against live metadata** | Three sources agreed (live metadata, `ExternalParticipationService`, `ExternalGrantKey`); the solution's `views-schema.md` says `sprk_contactid` and is **stale**. There is no `sprk_contactid` attribute on the table at all, so the escalation trigger did not fire |
+| **Drop the null-contact filter entirely** | A null contact IS the organization-grant discriminator. Requiring a contact was not a safety check — it silently excluded every org grant from closure |
+| **An id-less row is a FAILURE, not a skip** | It cannot be PATCHed, so it cannot be deactivated. Skipping it quietly would leave an active grant behind a 200 — the same false-success shape, one layer down |
+| **Partial deactivation now returns non-success (in-scope extension)** | Not in A-12; found while fixing it. The loop swallowed per-row errors and returned only the success count, so 2-of-5 revoked answered `200 OK`. Precedent one directory over: `ExternalGrantLifecycle.DeactivateAsync` (task 010) |
+| **Continue-on-error is KEPT** | Aborting at the first failure leaves strictly MORE access standing. What changed is that failures are counted and reported, not that the sweep stops |
+| **Steps 3–4 run before the failure is returned** | Both only ever REMOVE access, so running them makes a partial state strictly less open. Closure is idempotent, so "retry" is sound |
+| **`ExternalAccessRow` `private` → `internal`** | The reason A-12 survived: no test could name `QueryAsync<ExternalAccessRow>`. ADR-038 §4 seam via `InternalsVisibleTo`; ban B8 (reflection) avoided |
+| **The fake table validates the `$select`** | Load-bearing. A fake that ignored the projection would have gone green on the exact code that shipped A-12 |
+| **SPE guard added but NOT tested** | `ListExternalMembersAsync` swallows everything and returns `[]`, so the guard cannot fire today. Documented as untestable-today rather than covered by a fake exception the service cannot throw — and filed on 017 |
+| **Tests at `tests/integration/auth/**`, not the POML `<outputs>` unit path** | The `task-001` constraint is explicit; that path is deletion-protected, the unit path is not; every Phase 0 task so far landed there |
+
+### Decisions made in task 007
 
 | Decision | Rationale |
 |---|---|
@@ -153,7 +180,9 @@ caught real gaps every time.
 | Item | Detail |
 |---|---|
 | **SEVEN test projects, not one** | See the process-failure box above. `dotnet test` at root covers 4; ArchTests / Core.Tests / RecordSyncJob.IsolatedTests need explicit invocation |
-| **POML paths are unreliable** | Tasks 002/005/006/008/**007** all named test paths that do not exist — five of eleven. **Verify every path before acting on it** |
+| **POML paths are unreliable** | Tasks 002/005/006/008/007/**016** all named test paths that do not exist or that a later constraint overrides — six of twelve. **Verify every path before acting on it** |
+| **Publish size is COMPRESSED** | Raw bytes are ~137 MB, the ceiling is 60. Zip `deploy/api-publish/` before reporting. Measuring raw once produced a false "3× over ceiling" scare |
+| **Schema docs lose to live metadata** | `views-schema.md` says `sprk_contactid`; the table has no such attribute. Two Phase 0 tasks (007 type, 016 name) turned on checking live metadata rather than trusting a doc |
 | **Some POMLs are not valid XML** | `007` (and `017`) carry a raw `<` inside a constraint (`Mock<HttpMessageHandler>`), so `ET.parse` fails on them. Pre-existing; `scripts/Validate-TaskPoml.ps1` reports PASS because it is not a strict parse. Do not "fix" a POML on the strength of a parse error alone — check whether it predates you |
 | **KEEP paths** | Access-control → `tests/integration/auth/**`; pure domain logic → `tests/unit/domain/**`. Both globbed into `Sprk.Bff.Api.Tests.csproj` |
 | **Vacuity trap** | Offline, real auth dependencies fail closed, so "all denied" is true before AND after a fix. Substitute a double that CAN answer yes, then break the fix to prove the tests bite |
@@ -177,6 +206,7 @@ caught real gaps every time.
 | 4 | **D3 above** — download enforcement (Read) vs `CanDownload` (Write) |
 | ~~5~~ | ✅ **CONFIRMED AND FIXED 2026-08-23** — `EntityAccessFilter` WAS inert: `POST /api/office/save` with a `targetEntity` returned 403 for every caller. Now resolves the target's own collection via `CallerRecordAccessProbe`. **Should fold back into `AuthorizationService` when task 032 generalizes the seam** (constraint filed) |
 | 6 | **Needs its own task (002)**: `preview-url`, `view-url`, `office`, `preview` on `/api/documents` still have no per-document filter. They mint **URLs**, which outlive the request |
+| 7b | **FR-15 is only HALF closed** (016). The Dataverse cascade now revokes contact + org grants, but `SpeContainerMembershipService.ListExternalMembersAsync` catches every exception and returns `[]`, so `RemoveAllExternalMembersAsync` reports "0 removed" whether the container was empty **or Graph was unreachable** — close-project answers 200 while external users may still hold FILE access. Filed as a binding constraint on **task 017**; the closure endpoint's `container_not_cleared` guard is already built and waiting |
 | 7a | **Expiry enforcement is query-level only** (007) — the tests assert the emitted `$filter`, not Dataverse's evaluation of it (transport mocking is ban B1). Live confirmation of all three cases — past expiry gone, today's expiry still works, null expiry unaffected — filed on **task 034** |
 | 7 | **RPA is now load-bearing for six mutation endpoints AND the Office save gate** (008 + follow-up), as well as the document read path (005) — still unverified against a live tenant → **task 034** (constraint filed). Also verify the new not-found retry actually absorbs the wizard's replication lag |
 | 8 | **Duplicates remain invisible (010)** to the participation surface until Phase 1 replaces the read-side `GroupBy` collapse |
@@ -196,7 +226,8 @@ caught real gaps every time.
 | **032** | 006 (one-access-path invariant), 005 (per-principal derivation + `AppendTo`), **008** (collapse `CallerRecordAccessProbe` into the generalized rights map; **and the `IAccessDataSource` must stay SCOPED** — a singleton would turn `DataverseAccessDataSource`'s `DefaultRequestHeaders` mutation into a cross-user OBO-token bleed) |
 | **034** | 005 (verify RPA live; grep `RPA-FALLBACK`), **007** (verify the Date Only expiry predicate live — check the null-expiry case FIRST, because if it is broken external access is down for nearly everyone), **008** (RPA now gates six MUTATIONS against `sprk_projects`/`sprk_matters`/`sprk_workassignments` — a different target from 005's `sprk_documents`, so 005 passing does not imply 008 passes; also grep `DELEGATION-RPA-UNAVAILABLE`) |
 | **065** | **008** — unblocked; MUST surface `sdap.access.deny.delegation_write_required` as a real message, MUST send `recordType`+`recordId` (not legacy `projectId`), MUST NOT add a client-side pre-check that skips the server call |
-| **012/013/015/016/017/018** | 001 (own-coverage obligation) — 007 ✅ discharged its own |
+| **017** | 010 (do not reduce the revoke sweep), **016** (`SpeContainerMembershipService` cannot report a clearing failure — swallows every exception and returns `[]`; makes task 016's `container_not_cleared` guard reachable) |
+| **012/013/015/017/018** | 001 (own-coverage obligation) — 007 ✅ and 016 ✅ discharged their own |
 
 ### Decisions carried in from design (unchanged)
 
