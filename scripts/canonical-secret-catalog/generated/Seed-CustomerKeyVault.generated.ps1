@@ -91,12 +91,8 @@ Write-Host ''
 
 # ---- AiSearch--AdminKey (ai) ----
 # Purpose: Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'AiSearch--AdminKey' -Value 'placeholder-from-bicep-output' -Description 'Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).' -Category 'ai'
-} else {
-    Write-Host '  SKIP: AiSearch--AdminKey (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: AiSearch--AdminKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source search:sprksharedprod-search)' -ForegroundColor Gray
 
 # ---- AiSearch-Endpoint (ai) ----
 # Purpose: Azure AI Search service endpoint.
@@ -118,12 +114,8 @@ if ($SeedPlaceholders) {
 
 # ---- AzureOpenAI-ApiKey (ai) ----
 # Purpose: Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'AzureOpenAI-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: AzureOpenAI-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: AzureOpenAI-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-openai)' -ForegroundColor Gray
 
 # ---- AzureOpenAI-Endpoint (ai) ----
 # Purpose: Azure OpenAI resource endpoint (https://{name}.openai.azure.com/).
@@ -255,12 +247,8 @@ if ($SeedPlaceholders) {
 
 # ---- DocumentIntelligence-ApiKey (ai) ----
 # Purpose: Azure Document Intelligence API key.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'DocumentIntelligence-ApiKey' -Value 'placeholder-from-bicep-output' -Description 'Azure Document Intelligence API key.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-docintel)' -ForegroundColor Gray
 
 # ---- DocumentIntelligence-Endpoint (ai) ----
 # Purpose: Azure Document Intelligence endpoint.
@@ -318,21 +306,13 @@ if ($SeedPlaceholders) {
 
 # ---- Redis-ConnectionString (data-services) ----
 # Purpose: Azure Cache for Redis connection string.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Redis-ConnectionString' -Value 'placeholder-from-bicep-output' -Description 'Azure Cache for Redis connection string.' -Category 'data-services'
-} else {
-    Write-Host '  SKIP: Redis-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: Redis-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source redis:sprksharedprod-redis)' -ForegroundColor Gray
 
 # ---- ServiceBus-ConnectionString (data-services) ----
 # Purpose: Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'ServiceBus-ConnectionString' -Value 'placeholder-from-bicep-output' -Description 'Azure Service Bus connection string (job queue: sdap-jobs / document-processing).' -Category 'data-services'
-} else {
-    Write-Host '  SKIP: ServiceBus-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: ServiceBus-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source servicebus:sprksharedprod-servicebus)' -ForegroundColor Gray
 
 # ---- SPE-CommunicationArchiveContainerId (spe) ----
 # Purpose: SPE communication-archive container ID (archived email / communication payloads).
@@ -363,12 +343,8 @@ if ($SeedPlaceholders) {
 
 # ---- Storage-ConnectionString (data-services) ----
 # Purpose: Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Storage-ConnectionString' -Value 'placeholder-from-bicep-output' -Description 'Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.' -Category 'data-services'
-} else {
-    Write-Host '  SKIP: Storage-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-shared-service
+Write-Host '  SKIP: Storage-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source storage:sprksharedprodsa)' -ForegroundColor Gray
 
 # ---- TenantId (identity) ----
 # Purpose: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.

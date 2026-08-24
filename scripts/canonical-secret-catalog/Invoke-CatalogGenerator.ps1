@@ -132,7 +132,7 @@ $script:RequiredSecretFields = @(
     'canonical_name', 'category', 'purpose', 'consumers', 'rotation_cadence',
     'never_delete', 'exception_note', 'aliases', 'value_source', 'app_settings', 'tags'
 )
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'generated')
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-shared-service', 'generated')
 
 # ---------------------------------------------------------------------------
 # Path defaults
@@ -241,6 +241,24 @@ function Test-ManifestShape {
 
         if ($secret.value_source -notin $script:AllowedValueSources) {
             throw "Secret '$canon' has invalid value_source '$($secret.value_source)'. Allowed: $($script:AllowedValueSources -join ', ')"
+        }
+
+        # Conditional field: `service_ref` is REQUIRED when value_source == 'from-shared-service'.
+        # Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search',
+        # 'cognitiveservices:sprksharedprod-openai'). Consumed at run time by H4-shared
+        # (SdkSourceServiceKeyExtractor) to dispatch to the right Azure.ResourceManager SDK
+        # extractor. Absent for all other value_source values (kept as optional field).
+        if ($secret.value_source -eq 'from-shared-service') {
+            if (-not $secret.ContainsKey('service_ref')) {
+                throw "Secret '$canon' has value_source='from-shared-service' but is missing required conditional field 'service_ref'. Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search')."
+            }
+            $svcRef = [string]$secret.service_ref
+            if ([string]::IsNullOrWhiteSpace($svcRef)) {
+                throw "Secret '$canon' has value_source='from-shared-service' but 'service_ref' is empty. Format: '<type>:<az-resource-name>'."
+            }
+            if ($svcRef -notmatch '^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]*$') {
+                throw "Secret '$canon' has malformed service_ref '$svcRef'. Expected '<type>:<az-resource-name>' where type is lowercase (e.g. 'search:sprksharedprod-search')."
+            }
         }
 
         # never_delete must be an actual bool — powershell-yaml maps `true`/`false` to [bool].
@@ -454,13 +472,24 @@ Write-Host ''
 
         # Emit either an unconditional seed (for from-existing-kv - never
         # overwrite live value; require -SeedPlaceholders explicitly for
-        # placeholder creation) or a conditional placeholder seed.
+        # placeholder creation), a from-shared-service handler-populated
+        # marker (NO placeholder — H4-shared owns the write), or a conditional
+        # placeholder seed for the other value_sources.
         if ($source -eq 'from-existing-kv') {
             [void]$sb.Append("if (`$SeedPlaceholders -and -not `$SkipExisting) {`n")
             [void]$sb.Append("    Write-Host '  REFUSED: $canon (from-existing-kv; refusing to overwrite; set SkipExisting=`$true or remove -SeedPlaceholders)' -ForegroundColor Yellow`n")
             [void]$sb.Append("} else {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-value-source-is-existing-kv' -Description '$($purpose -replace "'","''") [BINDING never-delete: skip in seed]' -Category '$category'`n")
             [void]$sb.Append("}`n")
+        } elseif ($source -eq 'from-shared-service') {
+            # Handler-populated (H4-shared): value extracted from source service at run time.
+            # The seeder deliberately does NOT write a placeholder — the value is owned by
+            # H4SharedKvSecretsPopulationHandler which extracts fresh from the source Azure
+            # service via Azure.ResourceManager SDK and writes idempotently to shared KV.
+            # A placeholder here would be overwritten anyway and would trigger BFF fail-fast
+            # if the handler run were delayed.
+            $serviceRef = if ($secret.ContainsKey('service_ref')) { [string]$secret.service_ref } else { '<unspecified>' }
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-shared-service; handler-populated by H4-shared at run time from source $serviceRef)' -ForegroundColor Gray`n")
         } else {
             [void]$sb.Append("if (`$SeedPlaceholders) {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-$($source)' -Description '$($purpose -replace "'","''")' -Category '$category'`n")

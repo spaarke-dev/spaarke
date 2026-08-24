@@ -21,10 +21,10 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 
 | Canonical Name | Category | Rotation | Never-Delete | Value Source |
 |---|---|---|:---:|---|
-| `AiSearch--AdminKey` | ai | 90-days | - | from-bicep-output |
+| `AiSearch--AdminKey` | ai | 90-days | - | from-shared-service |
 | `AiSearch-Endpoint` | ai | N/A | - | from-bicep-output |
 | `AppInsights-ConnectionString` | monitoring | on-instrumentation-key-rotation | - | from-bicep-output |
-| `AzureOpenAI-ApiKey` | ai | 90-days | - | from-run-parameter |
+| `AzureOpenAI-ApiKey` | ai | 90-days | - | from-shared-service |
 | `AzureOpenAI-Endpoint` | ai | N/A | - | from-bicep-output |
 | `BFF-API-Audience` | identity | N/A | - | from-run-parameter |
 | `BFF-API-ClientId` | identity | N/A | - | from-run-parameter |
@@ -39,19 +39,19 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
 | `Dataverse-ServiceUrl` | dataverse | N/A | - | from-run-parameter |
-| `DocumentIntelligence-ApiKey` | ai | 90-days | - | from-bicep-output |
+| `DocumentIntelligence-ApiKey` | ai | 90-days | - | from-shared-service |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
 | `LlamaParse-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `PromptFlow-Endpoint` | ai | N/A | - | from-run-parameter |
 | `PromptFlow-Key` | ai | 90-days | - | from-run-parameter |
-| `Redis-ConnectionString` | data-services | 90-days | - | from-bicep-output |
-| `ServiceBus-ConnectionString` | data-services | 90-days | - | from-bicep-output |
+| `Redis-ConnectionString` | data-services | 90-days | - | from-shared-service |
+| `ServiceBus-ConnectionString` | data-services | 90-days | - | from-shared-service |
 | `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
 | `SPE-ContainerTypeId` | spe | N/A | - | from-bicep-output |
 | `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
-| `Storage-ConnectionString` | data-services | 90-days | - | from-bicep-output |
+| `Storage-ConnectionString` | data-services | 90-days | - | from-shared-service |
 | `TenantId` | identity | N/A | - | from-run-parameter |
 
 ## Per-secret detail
@@ -62,7 +62,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-shared-service
 - **Tags**: ai, alias-collapse-target, key
 - **Exception note**: Alias-collapse target (task 085): three legacy aliases across three casings coexist in live dev today. BINDING pre-check per §7.9 R4: before deleting either alias, pre-check LIVE App Service settings + KV secrets list + Dataverse-persisted `sprk_aiknowledgedeployment` config for runtime references (see workstreams/config-deployment §4).
 - **Consumers**:
@@ -113,7 +113,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-shared-service
 - **Tags**: adr-028-exception, ai, key
 - **Exception note**: Per ADR-028 E-2: this KV ref MAY be absent in environments where MI auth on kind=AIServices is reliable. Restore to MI by clearing the AzureOpenAI__ApiKey app setting.
 - **Consumers**:
@@ -344,7 +344,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure Document Intelligence API key.
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-shared-service
 - **Tags**: ai, key
 - **Consumers**:
   - BFF: DocumentIntelligence:DocIntelKey
@@ -444,7 +444,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure Cache for Redis connection string.
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-shared-service
 - **Tags**: connection-string, data-services
 - **Exception note**: Grandfathered PascalCase per §7.9 R2.
 - **Consumers**:
@@ -461,7 +461,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-shared-service
 - **Tags**: connection-string, data-services
 - **Exception note**: Grandfathered PascalCase per §7.9 R2.
 - **Consumers**:
@@ -518,7 +518,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
+- **Value source**: from-shared-service
 - **Tags**: connection-string, data-services, model2-only
 - **Exception note**: Grandfathered PascalCase per §7.9 R2.
 - **Consumers**:

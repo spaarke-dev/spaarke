@@ -52,7 +52,7 @@ resource kv_aiSearch__AdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'AiSearch--AdminKey'
@@ -112,7 +112,7 @@ resource kv_azureOpenAI_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'AzureOpenAI-ApiKey'
@@ -384,7 +384,7 @@ resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'DocumentIntelligence-ApiKey'
@@ -524,7 +524,7 @@ resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'Redis-ConnectionString'
@@ -544,7 +544,7 @@ resource kv_serviceBus_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'ServiceBus-ConnectionString'
@@ -624,7 +624,7 @@ resource kv_storage_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-shared-service'
   }
   tags: {
     canonicalName: 'Storage-ConnectionString'

@@ -245,7 +245,8 @@ secrets:
       # Lowercase-hyphenated form used in infrastructure/bicep/stacks/*.bicep.
       # Alias-collapse target — Bicep should emit the canonical form.
       - "redis-connection-string"
-    value_source: "from-bicep-output"
+    value_source: "from-shared-service"
+    service_ref: "redis:sprksharedprod-redis"
     app_settings:
       - "ConnectionStrings__Redis"
       - "Redis__ConnectionString"
@@ -262,7 +263,8 @@ secrets:
     exception_note: "Grandfathered PascalCase per §7.9 R2."
     aliases:
       - "servicebus-connection-string"
-    value_source: "from-bicep-output"
+    value_source: "from-shared-service"
+    service_ref: "servicebus:sprksharedprod-servicebus"
     app_settings:
       - "ConnectionStrings__ServiceBus"
       - "ServiceBus__ConnectionString"
@@ -280,7 +282,8 @@ secrets:
     exception_note: "Grandfathered PascalCase per §7.9 R2."
     aliases:
       - "storage-connection-string"
-    value_source: "from-bicep-output"
+    value_source: "from-shared-service"
+    service_ref: "storage:sprksharedprodsa"
     app_settings:
       - "ConnectionStrings__Storage"
     tags: ["data-services", "connection-string", "model2-only"]
@@ -372,7 +375,8 @@ secrets:
     aliases:
       - "ai-openai-key"
       - "openai-api-key"
-    value_source: "from-run-parameter"
+    value_source: "from-shared-service"
+    service_ref: "cognitiveservices:sprksharedprod-openai"
     app_settings:
       - "AzureOpenAI__ApiKey"
       - "DocumentIntelligence__OpenAiKey"
@@ -404,7 +408,8 @@ secrets:
     aliases:
       - "ai-docintel-key"
       - "docintel-key"
-    value_source: "from-bicep-output"
+    value_source: "from-shared-service"
+    service_ref: "cognitiveservices:sprksharedprod-docintel"
     app_settings:
       - "DocumentIntelligence__DocIntelKey"
     tags: ["ai", "key"]
@@ -446,7 +451,8 @@ secrets:
       - "ai-search-key"
       - "aisearch-admin-key"
       - "AzureAISearchApiKey"
-    value_source: "from-bicep-output"
+    value_source: "from-shared-service"
+    service_ref: "search:sprksharedprod-search"
     app_settings:
       - "AiSearch__ApiKeySecretName"
       - "DocumentIntelligence__AiSearchKey"
