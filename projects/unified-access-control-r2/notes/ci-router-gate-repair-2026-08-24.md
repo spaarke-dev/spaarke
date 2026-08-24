@@ -69,6 +69,32 @@ D2 and D3 are fixed **independently on purpose**: the gate must survive a cancel
 
 ---
 
+## Verified — run 32747593600, SHA `f695ce38f`
+
+**`CI / Router` = SUCCESS. The first green Router in this branch's history** (previously 17 runs, 0 successes).
+
+| Evidence | Result |
+|---|---|
+| `CI / Router` | ✅ SUCCESS |
+| All 5 Tier 1 (blocking) jobs | ✅ SUCCESS |
+| All 7 Tier 2 (advisory) jobs | ✅ SUCCESS — including `Full Unit Tests`, **which had never completed once** |
+| Standalone `CI Tier 2 (Advisory)` run | ✅ **does not exist at this SHA** — D3 fixed; every prior SHA had one, always `cancelled` |
+| `CANCELLED` rows in the PR check rollup | ✅ **zero** (was 8+) |
+| Adjudication log | ✅ `classify=success tier1=success tier2=success (tier2 not adjudicated)` → `✓ All of the required dependency jobs succeeded` |
+
+### ⚠️ The number that matters for anyone re-tuning this
+
+**`Full Unit Tests` ran 15:53:46 → 16:17:46 — exactly 24 minutes — and passed.**
+
+That is the first observed duration this job has ever produced, and it invalidates two candidate values:
+
+- **6 (the original)** — killed at 6 min, 18 minutes short. Never completed, 20/20 runs across all branches.
+- **20 (this change's first draft)** — would have been killed at 20 min, **4 minutes short**. It would have shipped a "fix" that did not fix anything, and the failure would have looked identical to the original bug.
+
+20 was rejected before commit only because the estimate (~13-21 min, from a measured 4m03s local run × 2-4× runner slowdown + 4m23s overhead) put it *at the edge of the range* — which is exactly how the original 6 became unreachable. **The lesson generalizes: when a timeout is a runaway guard rather than a performance budget, sizing it at the edge of your estimate is the bug, not the fix.** 30 completed with ~6 min headroom; re-tune from p95 once several green runs exist, and keep meaningful headroom above it.
+
+---
+
 ## For `ci-cd-unit-test-remediation-r1` to decide
 
 1. **Router latency vs. advisory completeness — the real trade-off in this change.** `tier2` remains in the Router's `needs:`, so the gate verdict now waits for a tier2 allowed to run up to 30 min instead of dying at 6. **That is a genuine latency regression**: the Router previously rendered at ~9 min (because tier2 always died at 6), and will now render whenever the suite actually finishes. If gate latency matters more than having tier2 in the summary table, drop `tier2` from `needs:` entirely — the Router would then render on `classify` + `tier1` (~4 min, *faster than before*) and tier2 would run on as pure advisory. Not done here: it changes the signal model, which is yours.
