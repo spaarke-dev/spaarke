@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-24 (by `context-handoff`, after task 017)
+> **Last Updated**: 2026-08-24 (by `context-handoff`, after task 017 + the full Phase 0 review)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active** — task 017 complete, committed and pushed |
+| **Task** | **none active** — 017 complete; **full multi-agent review of all 13 completed tasks DONE**; one Critical regression found and fixed |
 | **Step** | n/a (between tasks) |
 | **Status** | clean — working tree has no uncommitted changes |
 | **Phase** | Phase 0 — enforcement remediation · **13 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | Run **task 013** (`013-workforce-email-oid-nohijack.poml` — **verify the filename**) via the `task-execute` skill. See "Why 013 next" below |
+| **Next Action** | 🔔 **OWNER DECISION PENDING** — approve the 7-task breakdown in [`notes/review-2026-08-24-findings.md`](notes/review-2026-08-24-findings.md) §6, then run **task 022** (document-surface authorization sweep) first. Do NOT resume 013 until that is settled — 022 is a live disclosure + destroy surface |
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
@@ -29,21 +29,62 @@ Low practical impact — `AccessGrantModal` and the external SPA send well-forme
 real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
 flipped to match, with the rationale in their doc comments.
 
-### Why 013 next
+### 🔴 THE REVIEW CHANGED THE PRIORITIES — read this before picking a task
 
-Six Phase 0 fixes remain (009, 011, 012, 013, 015, 018), all independent — no ordering constraint left.
-**013** (workforce email `oid` hijack, A-18) is the strongest candidate: it is the last unaddressed
-**identity-confusion** finding, and identity confusion is the highest-severity class in this project —
-the others remaining are enforcement-completeness or cleanup. It also pairs conceptually with what 017
-just did (matching a principal on the right key), so the reasoning is warm.
+A full multi-agent re-review of the 13 completed Phase 0 tasks ran on 2026-08-24 at owner request
+(8 Fable-tier agents: 4 task-family correctness re-reviews + 4 cross-cutting lenses; read-only,
+adversarially prompted, coverage-first). **Full ranked findings:
+[`notes/review-2026-08-24-findings.md`](notes/review-2026-08-24-findings.md).**
 
-Reasonable alternatives: **012** (anonymous share links, unblocked by 002), **009** (external To Do PATCH
-scope check), **015** (membership paging), **011** (same-entity self-join), **018** (dead filter + unbounded
-`in`-clause — the smallest).
+**It found three Critical authorization gaps the original 20-finding investigation never examined**, because
+that pass was scoped to read/disclosure paths and never asked whether DESTRUCTIVE operations were gated:
+
+1. `POST /api/documents/bulk-download` — its filter checks a `tid` claim, logs "authorization granted", and
+   calls `next()`. **No authorization decision at all.** 500 GUIDs/request, streamed app-only, failures
+   listed in a `_FAILED.txt` manifest while zipping continues (so one call exfiltrates AND enumerates). The
+   comment justifying the absent check cites `preview-url` as its model — which is itself unfiltered.
+2. `DELETE /api/documents/{id}` — `DeleteAsync` takes **no user identity**; destroys the Dataverse row and
+   the SPE file app-only, by GUID. Reachable from a shipped client hook.
+3. `DELETE /api/v1/documents/{id}` — a second app-only destroy path, while its `/download` sibling is gated.
+
+**Task 002 gated 4 of ~15 members of that class.** Also unfiltered: `PUT`/`GET /api/v1/documents/{id}`
+(the GET returns the SPE pointers that feed 1 and 2), the `/checkout` family, and the six OBO read routes.
+
+**Two defects THIS PROJECT created:**
+
+- ✅ **FIXED (`4c364e47d`)** — the provisioning `$select` named two nonexistent columns
+  (`_sprk_securitybuid_value`, `sprk_specontainerid`; live is `_sprk_securitybu_value`, `sprk_containerid`).
+  `/provision-project` 500'd on every call and its own 409 guard read null forever. Introduced by
+  `95d3f0f68`. **Fifth instance of the stale-column class, and the first one we caused.**
+- **OPEN (task 023)** — tasks 007 × 010 interact: the grant upsert never writes `sprk_expiresdate` on its
+  match path, so re-granting to ADD an expiry is a silent no-op returning 200. **A-5's shape resurrected on
+  the write path by the two tasks meant to close it.** `ExpiryDate` appears once in the whole grant-lifecycle
+  suite, as `null`.
+
+**FOUR load-bearing methods are executed by NO test** — each with a one-line perturbation that fails ZERO:
+`FindPermissionByEmail` (the A-13 matcher), `CallerRecordAccessProbe.GetCallerRightsAsync` (the project's
+central gate — return `Read|Write` and nothing fails), task 007's query call sites, and the Graph-call error
+path. See findings §3 for the exact perturbations.
+
+### 🔔 Owner decision pending — the 7 proposed tasks
+
+Findings §6 proposes **021–027**. Nothing is filed yet; the owner shapes it. Recommended order:
+
+| Task | Covers | Why this priority |
+|---|---|---|
+| **022** | The document-surface sweep (the 3 Criticals + the rest of the class) | **Start here.** Live disclosure AND destroy surface |
+| **021** | Provisioning stamping PATCH: 3 wrong names, 400 swallowed, 200 returned | Since 2026-03 it creates a real BU/container/account and leaves the project pointing at none. ⚠️ The two lookups need `@odata.bind` NAV-PROPERTY names — case-sensitive, NOT derivable from the attribute name, must come from `$metadata`. **Do not guess**; that is the exact failure class. Fix names + fail-loud TOGETHER |
+| **023** | Grant upsert expiry (H1) + amend FR-09's acceptance, which never mentioned expiry | Silent but contained |
+| **025** | The four untested seams + task 003's gate missing `HasRequiredRights` (16 invisible call sites) | This is WHY the rest hid |
+| **024** | SPE Graph paging (both reads use page 1 only, defeating `container_not_cleared`) + `/revoke` 200-on-SPE-failure | |
+| **026** | `views-schema.md` — still the poisoned well behind all five recurrences | Cheap, high leverage |
+| **027** | e2e reconciliation, or an explicit decision to retire a tier no workflow runs | |
+
+Remaining original Phase 0: 009 (POML now defused — see below), 011, 012, 013, 015, 018, 020.
 
 ### Last verified state
 
-**ALL SEVEN test projects — 11,372 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,760 ·
+**ALL SEVEN test projects — 11,374 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,762 ·
 `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
 `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
 Publish **43.69 MB** compressed incl. PDBs (unchanged by tasks 016 + 017 — no packages added; baseline
@@ -134,6 +175,7 @@ caught real gaps every time.
 | **Report a Graph error as genuinely-absent (017)** | **2** |
 | **Re-swallow SPE listing failures (017)** | **2** — *initially 0; see the lesson below* |
 | **Ignore per-member SPE removal failures (017)** | **1** |
+| **Restore the broken provisioning `$select` (review fix)** | **7 of 7** — and the same names passed **5 of 5** before the guard was ported |
 
 **Capture failing-test identity with TRX**, not `-v q`:
 `dotnet test … --logger "trx;LogFileName=t.trx"`, then parse `outcome="Failed"`.
@@ -142,7 +184,19 @@ caught real gaps every time.
 
 ## Full State (Detailed)
 
-### Decisions made in task 017 (most recent)
+### Decisions made during the review (most recent)
+
+| Decision | Rationale |
+|---|---|
+| **Fix the provisioning `$select` immediately, before synthesis** | It broke a shipped endpoint on the branch. Everything else in the findings is analysis; this was a live break |
+| **Do NOT guess the `@odata.bind` nav-property casing** | Deferred to task 021 with a mandatory `$metadata` step. Nav props are case-sensitive and not derivable from the attribute name; a wrong one is accepted as an unknown property and the write silently does not happen — the exact class under review. No secure project exists in dev to read the casing back from |
+| **Fix names AND the swallow together in 021** | Names alone leaves the next drift invisible; the swallow alone hard-blocks provisioning on names we know are wrong |
+| **Port task 016's `$select`-validating fake to the provisioning fixture** | The guard already existed one directory over and was not carried across — which is precisely why 5 of 5 tests stayed green while the endpoint 500'd |
+| **KEEP `GrantMembershipAsync`** (owner ruling) | Verified: one code occurrence repo-wide, no reflection path, unreachable from any endpoint, no other worktree or open PR references it |
+| **Defuse task 009's POML now, not as a task** | It is a pending security task whose POML told the executor to flip a nonexistent characterization and named task 011's contended file. Under literal execution it would have WEAKENED the fail-closed gate it exists to strengthen |
+| **File the review findings as a doc, propose tasks, do not create 7 POMLs unilaterally** | Seven tasks is a scope decision that belongs to the owner |
+
+### Decisions made in task 017
 
 | Decision | Rationale |
 |---|---|
@@ -201,6 +255,8 @@ caught real gaps every time.
 | **SEVEN test projects, not one** | See the process-failure box above. `dotnet test` at root covers 4; ArchTests / Core.Tests / RecordSyncJob.IsolatedTests need explicit invocation |
 | **POML paths are unreliable** | Tasks 002/005/006/008/007/**016** all named test paths that do not exist or that a later constraint overrides — six of twelve. **Verify every path before acting on it** |
 | **Publish size is COMPRESSED** | Raw bytes are ~137 MB, the ceiling is 60. Zip `deploy/api-publish/` before reporting. Measuring raw once produced a false "3× over ceiling" scare |
+| **A fake that ignores the `$select` will go green on a broken projection** | Task 016 built a fake that rejects unknown columns; the provisioning fixture had none, so 5 of 5 tests passed while `/provision-project` 500'd. **When an endpoint reads Dataverse, its fake must validate the projection.** Now ported to both |
+| **Verify EVERY column you add, not just the ones you came to fix** | The review found five stale-column instances; the fifth was introduced by the same session that fixed three. Fixing an instance of a class does not inoculate the next line you write |
 | **Mocking at a seam proves the CALLER, never the CALLEE** | Task 017: re-swallowing listing failures passed EVERY endpoint test, because the closure tests substitute `RemoveAllExternalMembersAsync` at its seam and never reach `ListExternalMembersAsync`. The fix a binding constraint asked for was untested until a perturbation exposed it. **When a task's deliverable is "make X report failures", test X directly** |
 | **Look for an existing correct implementation before fixing a broken one** | Task 017's bug was a FORK of working code that had zero callers. Grepping for the method name first turned a "patch the matcher" task into a deletion |
 | **Frontend tests need `npm install` first** | `node_modules` is absent in a fresh worktree; `npm test` fails with "jest is not recognized". Use `npm install --legacy-peer-deps --no-audit --no-fund` (never `npm ci`, per root CLAUDE.md §12) |
