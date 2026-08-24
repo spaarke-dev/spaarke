@@ -1803,7 +1803,8 @@ function distinctiveAnchorPrefix(text: string): string {
 /** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
  *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
 type AdvisoryAnchorResolution =
-  { span: { from: number; to: number }; kind?: undefined } | { span: null; kind: 'not_found' | 'ambiguous' };
+  | { span: { from: number; to: number }; kind?: undefined }
+  | { span: null; kind: 'not_found' | 'ambiguous' };
 
 /**
  * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an
