@@ -1,7 +1,7 @@
 # Task 032 — promotion of MI-FIC to the default slot
 
-> **Status**: swap DONE and verified. **Slot deletion NOT done** — blocked on the Office add-in
-> acceptance criterion, which requires a human in Outlook and Word.
+> **Status**: ✅ **COMPLETE.** Swap done and verified; staging slot deleted 15:37:45Z.
+> The Office add-in check was deferred to the testing phase by owner decision — see §6.
 > **Date**: 2026-08-24
 
 ---
@@ -14,7 +14,7 @@
 | Swap returned (exit 0) | **14:50:59Z** (~97 s) |
 | Verification window | 14:51 – 15:00Z |
 | Result | **green on every automated checklist item** |
-| Staging slot | **still exists, Running** — deliberately. It is the rollback target until the add-in check passes |
+| Staging slot | **DELETED 15:37:45Z** (§6). It was retained as the swap-back rollback target through the whole verification window, and released only after the add-in risk was measured rather than assumed |
 
 The swap was the plain `az webapp deployment slot swap --slot staging --target-slot production`.
 `Deploy-BffApi.ps1 -UseSlotDeploy` was NOT used, per the constraint — it re-deploys first, and this task
@@ -151,7 +151,7 @@ name list for both slots before the first change**, so a delta like this is attr
 speculative. 6-hourly config snapshots exist back to 2026-07-25 (`az webapp config snapshot list`) as a
 forensic fallback; restoring one was rejected here as riskier than the discrepancy.
 
-## 5. 🛑 STOPPED BEFORE STEP 7 — slot deletion requires the Office add-in check
+## 5. The Office add-in gate — why it existed, and why it was released
 
 Step 7 deletes the staging slot. The acceptance criterion added 2026-08-24 requires the **Outlook and Word
 save flows** to pass against the default slot *before* that, and it needs a human — the add-in mints its
@@ -173,3 +173,89 @@ build**, with no rebuild, no redeploy and no repointing.
 
 Deleting the slot retires the first form permanently. That is the whole reason ordering is load-bearing
 here, and the reason this stop is a real gate rather than a formality.
+
+---
+
+## 6. Step 7–8 — slot deleted, and the rollback ladder has moved down a rung
+
+**Owner decision 2026-08-24**: finish the project; pursue the UAT proof methods in the testing phase.
+The Office add-in check moves there with them.
+
+### The risk assessment that made releasing the gate defensible
+
+The gate existed to protect against a **code** regression on the add-in path, since only a swap-back
+fixes that. That premise was measured rather than assumed, and it is weak:
+
+| Question | Answer |
+|---|---|
+| Does this branch touch the add-in client code (`src/client/office-addins/**`)? | **No** |
+| Does it touch the add-in HTTP surface (`Api/Office/OfficeEndpoints.cs`)? | **No** |
+| Any Office-adjacent change at all? | One: `Workers/Office/OfficeWorkersModule.cs` — task 051 removing a **provably shadowed** `ServiceBusClient` registration (`JobProcessingModule` registered the same singleton later and last-registration-wins, so Office workers already received that one). Its `"ConnectionString is required for Office workers"` guard therefore never fired — and would have blocked the MI cutover if it had |
+| Is that change verified live? | Yes — `/healthz` is **Healthy** on the default slot, which exercises the 051 `servicebus-job-processing` check |
+
+So the add-in's dependency on this branch reduces to **inbound validation + OBO + Graph/Dataverse
+calls** — every one of which is proven at credential level in 031 §5 and re-proven post-swap in §3.
+
+### Execution
+
+```
+15:37:33Z  step 7 precondition re-confirmed:
+             4 secret keys present · order overrides absent -> canonical [MI-FIC, ClientSecret]
+15:37:33Z  az webapp deployment slot delete --slot staging
+15:37:45Z  returned exit 0  (12s)
+15:37:45Z  slot list -> EMPTY. Only the default slot remains.
+15:38:05Z  post-deletion: /healthz Healthy · OBO 10/10 = 200 · unauth 401
+```
+
+The staging slot's app-setting **names were captured before deletion**
+([`notes/appsettings-baseline-pre-033.md`](../appsettings-baseline-pre-033.md)), so the 16 plaintext
+secret app settings task 001 mirrored into it are gone with it — which was one of the two stated
+reasons for the rescope. The other, the shared `cloud_RoleName` diagnostic blind spot that cost ~40
+minutes on 2026-08-23, is also gone.
+
+### 🔻 Rollback has moved down a rung — state this plainly
+
+| Rung | Mechanism | Status |
+|---|---|---|
+| 1 | **Swap back** to the pre-migration build | ❌ **RETIRED 15:37:45Z** — the slot no longer exists |
+| 2 | **Reorder credentials** to secret-first (`Graph__Credentials__Order__0=ClientSecret`) | ✅ **available, and PROVEN** in 031 §5.6 at credential level |
+| 3 | Redeploy | available, slow |
+
+Rung 2 is the live rollback today. **Task 033 removes the secret and therefore retires rung 2 as
+well** — after 033 the only rollback is a redeploy. That is the intended end state (the whole point
+is that the secret cannot be reached), but it must be a conscious step, not a surprise: 033 should
+not be run casually, and its own escalation triggers are the last safety net before rung 3.
+
+## 7. Carried into 033
+
+1. **The 213→212 delta (§4)** — obligation discharged in advance: full app-setting **name** baseline
+   for both slots captured at [`notes/appsettings-baseline-pre-033.md`](../appsettings-baseline-pre-033.md)
+   before 033 touches anything. 033 diffs against it.
+2. **Estate numbers were stale** — the survey found **15** scripts referencing a client secret, not the
+   11 in the project notes, plus 13 docs/config/workflow files. 033 must re-derive, not trust a number.
+3. **Key Vault name was wrong in the notes** — it is **`spaarke-spekvcert`**, not `spaarke-spekv-dev`
+   (which does not resolve). Determined by parsing the BFF's own KV-reference app settings.
+4. **`spe-owning-app-secret` lives in the same vault and is OUT OF SCOPE** (ADR-028 **E-1**,
+   per-customer owning apps). 033 must not touch it. Nor `Graph-API-ClientSecret` without a check.
+5. **The Office add-in check** is now a testing-phase item, alongside the UAT proof method in §8.
+
+## 8. How to prove MI in the testing phase (for the record)
+
+The UI cannot show it, and a status code cannot prove it — while `ClientSecret` remains in the order, a
+completely broken MI-FIC would still serve every record and document successfully off the secret.
+
+The decisive method is to **make the secret unreachable and let success be the proof**:
+
+```
+Graph__Credentials__Order__0            = ManagedIdentityFederated     # single entry, no fallback
+Graph__Credentials__RequireSecretFreeIdentity = true                   # refuses to START if ClientSecret is in the order
+```
+
+Two independent guarantees: the canonical default is applied **only when the section is absent**
+(deliberately — see `AuthorizationModule` §"The canonical default is applied HERE", which names this exact
+edit), so narrowing the order does not silently merge `ClientSecret` back; and
+`RequireSecretFreeIdentity` turns startup itself into the assertion. Note the dev app runs with
+`ASPNETCORE_ENVIRONMENT=Production`, so the guard is **active** there.
+
+After 033 this becomes the permanent state rather than a test harness.
+
