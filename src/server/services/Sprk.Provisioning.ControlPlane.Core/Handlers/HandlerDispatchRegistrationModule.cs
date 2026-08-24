@@ -51,6 +51,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
+using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
@@ -78,8 +79,9 @@ public static class HandlerDispatchRegistrationModule
 {
     /// <summary>
     /// Adds one <c>AddKeyedScoped&lt;IProvisioningHandler&gt;</c> factory
-    /// per dispatchable <see cref="HandlerIds"/> constant (19 total; H14a/
-    /// H14b/H14c are deliberately absent -- see file header). Safe to call
+    /// per dispatchable <see cref="HandlerIds"/> constant (H14a/H14b/H14c
+    /// are deliberately absent -- see file header; total count is asserted
+    /// by <c>HandlerRegistrationCompletenessTests</c>). Safe to call
     /// regardless of registration order relative to the concrete handler
     /// types: the factory lambda only executes when the keyed service is
     /// actually resolved, by which point the full container is built.
@@ -109,6 +111,11 @@ public static class HandlerDispatchRegistrationModule
         // SHARED KV via source-service SDK extraction.
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4Shared, (sp, _) => sp.GetRequiredService<H4SharedKvSecretsPopulationHandler>());
+        // Task 201: H4b (F20/F20a automation) — BulkAppSettings handler.
+        // Thin wrapper around task 084's Configure-AppServiceSettings.generated.ps1
+        // (extended with per_env_settings). Runs AFTER H4 + H4-shared, BEFORE H9.
+        services.AddKeyedScoped<IProvisioningHandler>(
+            HandlerIds.H4b, (sp, _) => sp.GetRequiredService<H4bBulkAppSettingsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H5, (sp, _) => sp.GetRequiredService<H5DataverseEnvCreationHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

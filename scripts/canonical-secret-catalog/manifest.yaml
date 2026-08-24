@@ -705,3 +705,114 @@ secrets:
       - "ApplicationInsights__ConnectionString"
       - "APPLICATIONINSIGHTS_CONNECTION_STRING"
     tags: ["monitoring"]
+
+# ---------------------------------------------------------------------------
+# Per-environment LITERAL App Service settings (task 201 — H4b handler)
+# ---------------------------------------------------------------------------
+# App Service app-settings whose values are per-env LITERALS (URIs, public
+# GUIDs, generated signing keys) — NOT appropriate as KV secrets OR needed to
+# bootstrap KV access (SpeAdmin__KeyVaultUri creates a circular-boot if stored
+# in that same KV; AzureAd__TenantId is a public GUID; etc.).
+#
+# The generator (Invoke-CatalogGenerator.ps1) emits per-env-literal lines into
+# the SAME Configure-AppServiceSettings.generated.ps1 output alongside the
+# KV-ref lines (both in the single $settings array so ONE batched
+# `az webapp config appsettings set --settings @settings` call per slot is
+# preserved). Runtime consumer: H4bBulkAppSettingsHandler resolves each entry
+# from HandlerEnvelope.Parameters.NonSecret via `per_env_source`, then shells
+# to the generated script.
+#
+# Per-entry schema:
+#   - key                — App Service app-setting name (double underscore for
+#                          nested config, e.g. SpeAdmin__KeyVaultUri).
+#   - per_env_source     — one of:
+#                            literal                        (value in literal_value)
+#                            from-{handler}-output:{k}      (envelope.Parameters.NonSecret[k])
+#                            from-{handler}-parameter:{k}   (envelope.Parameters.NonSecret[k])
+#   - literal_value?     — REQUIRED when per_env_source == "literal"; else null/absent.
+#   - iOptionsModule     — Documentation: which BFF module consumes this
+#                          (per-env-literal drives the F20/F20a fail-fast chain).
+#   - required           — bool; defaults true if absent. Required-and-missing
+#                          in envelope → Resumable Failure BEFORE any script call.
+#   - notes?             — free-form.
+#
+# BINDING guard: entries whose `key` matches a never_delete secret name from
+# `secrets:` (Dataverse-ClientSecret / BFF-API-ClientSecret) are REFUSED by
+# the generator's Test-PerEnvSettingsShape — prevents accidentally writing a
+# cleartext BFF client secret as an app-setting literal (spec.md MUST rule).
+#
+# Ordering: sorted alphabetically by key at generator-emit time (determinism
+# contract mirrors secrets: sort).
+per_env_settings:
+
+  - key: "SpeAdmin__KeyVaultUri"
+    per_env_source: "from-h2a-output:kv_vault_uri"
+    iOptionsModule: "SpeAdminModule"
+    required: true
+    notes: >-
+      F20 SIGABRT trigger (2026-08-24 SESSION 2). BFF's SpeAdminModule fails
+      fast at boot when `SpeAdmin:KeyVaultUri` (or the fallback `KeyVaultUri`)
+      is absent. Value is the shared KV URI (e.g. https://sprk-prod-kv.vault.azure.net/).
+      MUST be a per-env literal — storing it in KV creates a circular boot
+      (BFF cannot resolve any KV ref without knowing the vault URI first).
+
+  - key: "CosmosPersistence__Endpoint"
+    per_env_source: "from-h2a-output:cosmos_endpoint"
+    iOptionsModule: "AiPersistenceModule"
+    required: true
+    notes: >-
+      F20a SIGABRT trigger (2026-08-24 SESSION 2). BFF's AiPersistenceModule
+      fails fast at boot when Cosmos endpoint is unset. Value is the per-env
+      Cosmos account URI (e.g. https://sprk-prod-cosmos.documents.azure.com/).
+
+  - key: "AzureAd__TenantId"
+    per_env_source: "from-h0-parameter:tenant_id"
+    iOptionsModule: "AzureAdOptions"
+    required: true
+    notes: >-
+      Public identifier; §4D I1 no-hardcoded-tenant compliance. H0 preflight
+      populates from the operator-supplied -TenantId parameter.
+
+  - key: "AzureAd__ClientId"
+    per_env_source: "from-h3-output:bff_app_client_id"
+    iOptionsModule: "AzureAdOptions"
+    required: true
+    notes: >-
+      Public identifier; H3 Entra-app-reg populates when it creates the BFF
+      client app-registration for this customer stamp.
+
+  - key: "SharePointEmbedded__ContainerTypeId"
+    per_env_source: "from-h8-output:container_type_id"
+    iOptionsModule: "SpeOptions"
+    required: true
+    notes: >-
+      Public GUID; H8 SPE creation populates after the 24-hour SPE
+      container-type replication gate clears.
+
+  - key: "Graph__ManagedIdentity__Enabled"
+    per_env_source: "literal"
+    literal_value: "true"
+    iOptionsModule: "GraphModule"
+    required: true
+    notes: >-
+      ADR-028 canonical: server outbound uses DefaultAzureCredential (MI)
+      when true. Global literal — every deployed env sets this to true (dev
+      + local fall back via appsettings.Development.json).
+
+  - key: "Graph__ManagedIdentity__ClientId"
+    per_env_source: "from-h2a-output:uami_client_id"
+    iOptionsModule: "GraphModule"
+    required: true
+    notes: >-
+      UAMI client-id H2a Bicep emits. Consumed by GraphClientFactory to pin
+      DefaultAzureCredential to the L2/BFF UAMI (rather than any other MI
+      the App Service may have).
+
+  - key: "ManagedIdentity__ClientId"
+    per_env_source: "from-h2a-output:uami_client_id"
+    iOptionsModule: "GraphModule"
+    required: true
+    notes: >-
+      Parity fallback alias for Graph__ManagedIdentity__ClientId. Kept for
+      compatibility with modules that read the flat key (documented in
+      SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7).

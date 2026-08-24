@@ -299,7 +299,7 @@ Post-Model-1-Prod-first-live-standup (2026-08-22 through 2026-08-24) revealed CL
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 200 | ✅ | H4-shared: seed shared KV from source Azure services (extract-from-source pattern; F19 automation; extends task 084 manifest schema with `value_source: from-shared-service` + `service_ref` field; 5-branch SdkSourceServiceKeyExtractor Search/CogSvc/ServiceBus/Storage/Redis) — Phase A `ad32b3a8c` + Phase B+C landing next commit; 1531 tests pass (19 new H4-shared + 32 existing H4 + all others); `-Verify` exit 0 | FULL | opus / xhigh | none (serial after 084; blocks 201) | 036, 044, 084 |
-| 201 | ⏸ | H4b-BulkAppSettings: apply canonical BFF app-settings template in ONE batch → ONE restart (F20/F20a automation; NEW canonical manifest at `scripts/canonical-app-settings/`; IHealthzProbe polls with 8-min backoff + parses docker-logs on failure for actionable diagnostic; sequences AFTER H4-shared + H4-per-tenant, BEFORE H9) | FULL | opus / xhigh | none (serial after 200) | 036, 044, 084, 200 |
+| 201 | ✅ | H4b-BulkAppSettings: apply canonical BFF app-settings in ONE batch → ONE restart (F20/F20a automation; Option A design: extends task 084 manifest with `per_env_settings:` top-level list; thin H4b handler shells to generated Configure-AppServiceSettings.generated.ps1; IHealthzProbe with 30/60/90/120/180s backoff + KuduContainerLogFetcher parses docker-logs on failure for actionable diagnostic; sequences AFTER H4-shared + H4-per-tenant, BEFORE H9) — 1555 tests pass (23 new H4b + all prior); `-Verify` exit 0 with 32 secrets + 8 per_env_settings; BINDING guard OK (BFF-API-ClientSecret + Dataverse-ClientSecret NOT in per_env_settings — remain KV-ref secrets) | FULL | opus / xhigh | none (serial after 200) | 036, 044, 084, 200 |
 
 ### Phase F — E2E Acceptance (1 task)
 
@@ -454,7 +454,7 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 138 (78 original + 58 Phase C'' Wave G-1..G-7, added 2026-08-18 + 2 Phase H-Prime, added 2026-08-24 SESSION 3 for F19/F20 automation) |
-| **not-started** 🔲 | 70 (11 original + 58 Phase C'' + 1 Phase H-Prime — task 200 landed 2026-08-24 SESSION 4) |
+| **not-started** 🔲 | 69 (11 original + 58 Phase C'' + 0 Phase H-Prime — tasks 200 + 201 both landed 2026-08-24 SESSION 4; Phase H-Prime CLOSED) |
 | **in-progress** 🟡 | 0 |
 | **completed** ✅ | 67 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085; Wave 4D: 059+060+061+086) |
 | **Phase C'' task decomposition (2026-08-18)** | 58 new POMLs (100-186) authored per DS-4/DS-1b/DS-2/DS-2b/DS-3/DS-5/DS-8 across Waves G-1..G-7 — the execution-engine build phase delivering FR-18/SC#5 E2E provisioning. See dedicated Phase C'' section above. All status not-started; NOT yet executed. |

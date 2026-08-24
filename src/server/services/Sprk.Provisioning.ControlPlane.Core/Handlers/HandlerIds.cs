@@ -67,6 +67,17 @@ public static class HandlerIds
     /// </summary>
     public const string H4Shared = "H4-shared";
 
+    /// <summary>
+    /// H4b (task 201) -- BulkAppSettings handler. Thin wrapper around task
+    /// 084's shipped Configure-AppServiceSettings.generated.ps1 (extended
+    /// by task 201 with per_env_settings). Applies ALL required BFF app
+    /// settings (KV refs + per-env literals) in ONE batched call → ONE App
+    /// Service restart cycle, then polls /healthz + parses container docker
+    /// logs on failure. Kills the F20/F20a progressive-fail-fast chain.
+    /// Runs AFTER H4 + H4-shared, BEFORE H9.
+    /// </summary>
+    public const string H4b = "H4b";
+
     /// <summary>H5 -- Dataverse environment creation.</summary>
     public const string H5 = "H5";
 
@@ -122,14 +133,16 @@ public static class HandlerIds
     public const string H14c = "H14c";
 
     /// <summary>
-    /// The 19 envelope-dispatchable ids (design.md §4.1 handler catalog).
+    /// The envelope-dispatchable ids (design.md §4.1 handler catalog).
     /// H14a/H14b/H14c are deliberately EXCLUDED -- orchestrated in-process
     /// by the H14 parent handler, never independently enqueued (DS-2 §3.2).
     /// This is the completeness surface task 102's dispatcher + this
-    /// project's HandlerRegistrationCompletenessTests both consume.
+    /// project's HandlerRegistrationCompletenessTests both consume. Count
+    /// is asserted by HandlerRegistrationCompletenessTests.Dispatchable_
+    /// ContainsExactly*Ids — bump the assertion whenever this list grows.
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H4Shared, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4Shared, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

@@ -45,6 +45,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
+using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
@@ -497,6 +498,44 @@ builder.Services.AddSingleton<ISharedKvSecretAccessor>(sp =>
     return new SecretClientKvSharedSecretAccessor(credential, logger);
 });
 builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
+
+// Task 201: H4b BulkAppSettings handler + three collaborator seams
+// (IPerEnvSettingsManifest — reads the same embedded manifest.yaml as
+// IKvSecretManifest but exposes only the per_env_settings top-level list;
+// IProcessRunner — narrow wrapper around System.Diagnostics.Process for
+// H4b's pwsh Configure-script invocation; IHealthzProbe — 8-min backoff
+// HTTP /healthz poll; IContainerLogFetcher — Kudu SCM docker-log fetch +
+// regex parse of the failing IOptions module name on healthz timeout).
+//
+// All registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// HttpClient injections use AddHttpClient (typed) so DefaultAzureCredential's
+// token cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
+// rule for KuduContainerLogFetcher). KuduContainerLogFetcher additionally
+// injects the shared UAMI-pinned TokenCredential singleton (registered by
+// AddCosmosModule) via constructor.
+//
+// Placement Justification (CLAUDE.md §10): H4b lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H4b
+// uses IProvisioningRunRepository (task 037) + the three dedicated seams;
+// no BFF-facade dependencies. Runs AFTER H4 (task 047) + H4-shared (task
+// 200) — KV must be seeded so the KV-ref settings resolve when the batched
+// Configure script writes them — and BEFORE H9 (BFF deploy).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-028 UAMI outbound: KuduContainerLogFetcher uses the shared UAMI-
+//     pinned TokenCredential for Kudu SCM bearer-token acquisition; no
+//     `az` shell-out. H4b's own Configure-script shell-out receives per-env
+//     cleartext values as argv (never Log*'d, never persisted to Cosmos).
+//   - §4C rollback: per-env-input-missing / write-failed / concurrent-conflict
+//     are Resumable; /healthz timeout with parsed fail-fast module is
+//     QuarantineRequired (half-configured App Service — new dispatch compounds).
+builder.Services.Configure<BulkAppSettingsOptions>(
+    builder.Configuration.GetSection(nameof(BulkAppSettingsOptions)));
+builder.Services.AddSingleton<IPerEnvSettingsManifest, FilePerEnvSettingsManifest>();
+builder.Services.AddSingleton<IProcessRunner, PwshProcessRunner>();
+builder.Services.AddHttpClient<IHealthzProbe, HttpHealthzProbe>();
+builder.Services.AddHttpClient<IContainerLogFetcher, KuduContainerLogFetcher>();
+builder.Services.AddScoped<H4bBulkAppSettingsHandler>();
 
 // Task 070 / 150: H12a AI seed chain handler + two collaborator seams
 // (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth

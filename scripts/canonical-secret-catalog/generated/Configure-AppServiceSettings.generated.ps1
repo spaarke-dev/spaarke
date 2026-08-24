@@ -5,14 +5,18 @@
 
 <#
 .SYNOPSIS
-    Configure App Service app settings to reference the canonical KV secret
-    catalog (Phase H) via the single-form KV reference syntax.
+    Configure App Service app settings from the canonical KV secret catalog
+    (Phase H) PLUS the sibling per_env_settings list (task 201 — H4b). ONE
+    batched call per slot preserves single-restart semantics.
 
 .DESCRIPTION
     Sets every canonical app-setting key from manifest.yaml as a Key Vault
-    reference (@Microsoft.KeyVault(VaultName=...;SecretName=...)) on the
-    target App Service. Both production slot and staging slot (when
-    -IncludeSlots is $true).
+    reference (@Microsoft.KeyVault(VaultName=...;SecretName=...)) AND every
+    per-env-literal app-setting key from manifest.per_env_settings as a cleartext
+    literal (URIs, public GUIDs, generated signing keys — things not
+    appropriate as KV secrets OR needed to bootstrap KV access). ONE
+    `az webapp config appsettings set --settings @settings` call per slot
+    triggers a SINGLE App Service restart cycle regardless of setting count.
 
 .PARAMETER ResourceGroupName
     Resource group.
@@ -40,6 +44,24 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$VaultName,
 
+    [Parameter(Mandatory = $true)]
+    [string]$BffAppClientId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ContainerTypeId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CosmosEndpoint,
+
+    [Parameter(Mandatory = $true)]
+    [string]$KvVaultUri,
+
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$UamiClientId,
+
     [bool]$IncludeSlots = $true
 )
 
@@ -53,57 +75,65 @@ function Format-KvRef {
 }
 
 $settings = @(
+    "AgentToken__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
+    "AgentToken__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
+    "AgentToken__TenantId=$(Format-KvRef 'TenantId')",
+    "AiSafety__ContentSafety__ApiKey=$(Format-KvRef 'ContentSafety-ApiKey')",
     "AiSearch__ApiKeySecretName=$(Format-KvRef 'AiSearch--AdminKey')",
-    "DocumentIntelligence__AiSearchKey=$(Format-KvRef 'AiSearch--AdminKey')",
     "AiSearch__Endpoint=$(Format-KvRef 'AiSearch-Endpoint')",
-    "DocumentIntelligence__AiSearchEndpoint=$(Format-KvRef 'AiSearch-Endpoint')",
+    "Analysis__PromptFlowEndpoint=$(Format-KvRef 'PromptFlow-Endpoint')",
+    "Analysis__PromptFlowKey=$(Format-KvRef 'PromptFlow-Key')",
+    "API_APP_ID=$(Format-KvRef 'BFF-API-ClientId')",
     "ApplicationInsights__ConnectionString=$(Format-KvRef 'AppInsights-ConnectionString')",
     "APPLICATIONINSIGHTS_CONNECTION_STRING=$(Format-KvRef 'AppInsights-ConnectionString')",
-    "AzureOpenAI__ApiKey=$(Format-KvRef 'AzureOpenAI-ApiKey')",
-    "DocumentIntelligence__OpenAiKey=$(Format-KvRef 'AzureOpenAI-ApiKey')",
-    "AzureOpenAI__Endpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
-    "DocumentIntelligence__OpenAiEndpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
     "AzureAd__Audience=$(Format-KvRef 'BFF-API-Audience')",
-    "AgentToken__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "API_APP_ID=$(Format-KvRef 'BFF-API-ClientId')",
+    "AzureAd__ClientId=$BffAppClientId",
     "AzureAd__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
+    "AzureAd__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
     "AzureAd__ClientSecret=$(Format-KvRef 'BFF-API-ClientSecret')",
-    "Graph__ClientSecret=$(Format-KvRef 'BFF-API-ClientSecret')",
+    "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
+    "AzureAd__TenantId=$TenantId",
+    "AzureOpenAI__ApiKey=$(Format-KvRef 'AzureOpenAI-ApiKey')",
+    "AzureOpenAI__Endpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
     "BingSearch__ApiKey=$(Format-KvRef 'BingSearch-ApiKey')",
+    "Communication__ArchiveContainerId=$(Format-KvRef 'SPE-CommunicationArchiveContainerId')",
     "Communication__DefaultMailbox=$(Format-KvRef 'Communication-DefaultMailbox')",
-    "Communication__WebhookSigningKey=$(Format-KvRef 'Communication-Webhook-SigningKey')",
     "Communication__WebhookClientState=$(Format-KvRef 'Communication-WebhookClientState')",
     "Communication__WebhookNotificationUrl=$(Format-KvRef 'Communication-WebhookUrl')",
+    "Communication__WebhookSigningKey=$(Format-KvRef 'Communication-Webhook-SigningKey')",
     "Compose__Webhook__ClientState=$(Format-KvRef 'Compose-Webhook-ClientState')",
     "Compose__Webhook__SigningKey=$(Format-KvRef 'Compose-Webhook-SigningKey')",
-    "AiSafety__ContentSafety__ApiKey=$(Format-KvRef 'ContentSafety-ApiKey')",
-    "AgentToken__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
-    "AzureAd__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
+    "ConnectionStrings__Redis=$(Format-KvRef 'Redis-ConnectionString')",
+    "ConnectionStrings__ServiceBus=$(Format-KvRef 'ServiceBus-ConnectionString')",
+    "ConnectionStrings__Storage=$(Format-KvRef 'Storage-ConnectionString')",
+    "CosmosPersistence__Endpoint=$CosmosEndpoint",
+    "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Dataverse__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
     "Dataverse__EnvironmentUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",
     "Dataverse__ServiceUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",
-    "DocumentIntelligence__DocIntelKey=$(Format-KvRef 'DocumentIntelligence-ApiKey')",
+    "Dataverse__TenantId=$(Format-KvRef 'TenantId')",
+    "DEFAULT_CT_ID=$(Format-KvRef 'SPE-ContainerTypeId')",
+    "DocumentIntelligence__AiSearchEndpoint=$(Format-KvRef 'AiSearch-Endpoint')",
+    "DocumentIntelligence__AiSearchKey=$(Format-KvRef 'AiSearch--AdminKey')",
     "DocumentIntelligence__DocIntelEndpoint=$(Format-KvRef 'DocumentIntelligence-Endpoint')",
+    "DocumentIntelligence__DocIntelKey=$(Format-KvRef 'DocumentIntelligence-ApiKey')",
+    "DocumentIntelligence__OpenAiEndpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
+    "DocumentIntelligence__OpenAiKey=$(Format-KvRef 'AzureOpenAI-ApiKey')",
+    "Email__DefaultContainerId=$(Format-KvRef 'SPE-DefaultContainerId')",
     "Email__WebhookSecret=$(Format-KvRef 'Email-WebhookSecret')",
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
-    "LlamaParse__ApiKeySecretName=$(Format-KvRef 'LlamaParse-ApiKey')",
-    "Analysis__PromptFlowEndpoint=$(Format-KvRef 'PromptFlow-Endpoint')",
-    "Analysis__PromptFlowKey=$(Format-KvRef 'PromptFlow-Key')",
-    "ConnectionStrings__Redis=$(Format-KvRef 'Redis-ConnectionString')",
-    "Redis__ConnectionString=$(Format-KvRef 'Redis-ConnectionString')",
-    "ConnectionStrings__ServiceBus=$(Format-KvRef 'ServiceBus-ConnectionString')",
-    "ServiceBus__ConnectionString=$(Format-KvRef 'ServiceBus-ConnectionString')",
-    "Communication__ArchiveContainerId=$(Format-KvRef 'SPE-CommunicationArchiveContainerId')",
-    "DEFAULT_CT_ID=$(Format-KvRef 'SPE-ContainerTypeId')",
-    "Email__DefaultContainerId=$(Format-KvRef 'SPE-DefaultContainerId')",
-    "ConnectionStrings__Storage=$(Format-KvRef 'Storage-ConnectionString')",
-    "AgentToken__TenantId=$(Format-KvRef 'TenantId')",
-    "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
-    "Dataverse__TenantId=$(Format-KvRef 'TenantId')",
+    "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
+    "Graph__ClientSecret=$(Format-KvRef 'BFF-API-ClientSecret')",
+    "Graph__ManagedIdentity__ClientId=$UamiClientId",
+    "Graph__ManagedIdentity__Enabled=true",
     "Graph__TenantId=$(Format-KvRef 'TenantId')",
+    "LlamaParse__ApiKeySecretName=$(Format-KvRef 'LlamaParse-ApiKey')",
+    "ManagedIdentity__ClientId=$UamiClientId",
+    "Redis__ConnectionString=$(Format-KvRef 'Redis-ConnectionString')",
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
+    "ServiceBus__ConnectionString=$(Format-KvRef 'ServiceBus-ConnectionString')",
+    "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
+    "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"
 )
 
