@@ -372,6 +372,11 @@ public static class ComposeEndpoints
     // FR-19 (task 020): deterministic match_mode edit validation. Pure — delegates to
     // IComposeEditValidator (ADR-013: no AI internals). 200 when the batch resolves cleanly,
     // 422 with the structured ambiguity/no-match/empty-target/overlap result otherwise.
+    //
+    // FR-C01/C02/C03 (task 051): resolution is now ANCHOR-FIRST via ComposeEditAnchorPass. An edit that
+    // names its target by paraId or by legal citation resolves through the reference map and never
+    // reaches the text search; only un-anchored edits still do. Task 052 (FR-C04) retires that leg — it
+    // is deliberately left intact here so no anchor source is broken before all three are live.
     private static IResult ValidateEditBatch(
         [FromBody] EditBatchValidateRequest? body,
         IComposeEditValidator validator,
@@ -383,9 +388,12 @@ public static class ComposeEndpoints
         if (body.DocumentText is null) return Results.BadRequest("documentText is required.");
         if (body.Edits is null || body.Edits.Count == 0) return Results.BadRequest("edits must contain at least one proposed edit.");
 
-        var result = validator.Validate(body.DocumentText, body.Edits);
-        logger.LogInformation("Compose edit-batch validate: edits={EditCount} isValid={IsValid} TraceId={TraceId}",
-            body.Edits.Count, result.IsValid, httpContext.TraceIdentifier);
+        var result = ComposeEditAnchorPass.Validate(body.DocumentText, body.Edits, body.ReferenceMap, validator);
+
+        var anchoredCount = result.Verdicts.Count(v => v.ResolvedParaId is not null);
+        logger.LogInformation(
+            "Compose edit-batch validate: edits={EditCount} anchored={AnchoredCount} referenceMap={MapSize} isValid={IsValid} TraceId={TraceId}",
+            body.Edits.Count, anchoredCount, body.ReferenceMap?.Count ?? 0, result.IsValid, httpContext.TraceIdentifier);
 
         return result.IsValid
             ? Results.Ok(result)

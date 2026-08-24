@@ -45,6 +45,12 @@ import * as React from 'react';
 import type { Editor } from '@tiptap/core';
 import type { Mapping } from '@tiptap/pm/transform';
 import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEditor';
+// Task 051 (FR-C01/C02/C03) — the deterministic anchor branch. `collectBlocks` is the SAME paraId→live-span
+// primitive `applyImportedCommentAnchors`/`applyImportedRevisions` already use (no second paraId walk);
+// `resolveCitation` is the client `CitationResolver` mirror the advisory-comment path already consumes.
+import { collectBlocks } from '../importedRevisions';
+import { resolveCitation } from '../composeCitationResolver';
+import type { ParaIdMapEntry } from '../../types/compose-contracts';
 
 /** How the client resolves `target_text` in the document (adeu `match_mode`, Spike 2). */
 export type RedlineMatchMode = 'strict' | 'first' | 'all';
@@ -86,8 +92,7 @@ export interface RedlineSpan {
 
 /** Outcome of resolving a `target_text` against the current document. */
 export type ResolveResult =
-  | { ok: true; spans: RedlineSpan[] }
-  | { ok: false; kind: 'not_found' | 'ambiguous'; matchCount: number };
+  { ok: true; spans: RedlineSpan[] } | { ok: false; kind: 'not_found' | 'ambiguous'; matchCount: number };
 
 /**
  * Status returned by {@link UsePendingRedlineResult.materialize}.
@@ -388,6 +393,93 @@ export function resolveTargetSpans(editor: Editor, targetText: string, matchMode
 }
 
 /**
+ * FR-C01/C02/C03 (spaarkeai-compose-r8 task 051) — the DETERMINISTIC anchor branch, and the client half
+ * of the same contract `ComposeAnchorResolver`/`ComposeEditAnchorPass` enforce on the server. An edit that
+ * names its target by `target_para_id` (captured at selection time, or returned by the model from the
+ * enumerated closed set) or by `target_ref` (a legal citation) resolves through the paraId reference map
+ * — the projection's coordinate system — and NEVER through `resolveTargetSpans`' text search.
+ *
+ * Returns `null` when the payload carries NO anchor at all, which is the caller's signal to use the
+ * legacy text path. That is the only route back to text: an anchor that is present and does not resolve
+ * is REFUSED, exactly like an unresolvable `target_text` (the UAT-21 "never silently mis-place" charter).
+ * Falling back to a search here would defeat the anchor's entire purpose — it would re-introduce the
+ * wrong-occurrence risk for precisely the edits that had already named their target exactly.
+ *
+ * Ordering matches the server: paraId first (it IS the address), then citation. Both present and
+ * disagreeing is `ambiguous` — neither is preferred.
+ *
+ * Exported for direct unit testing.
+ */
+export function resolveAnchoredSpans(
+  editor: Editor,
+  anchor: { target_para_id?: string; target_ref?: string } | undefined,
+  referenceMap: readonly ParaIdMapEntry[] | undefined
+): ResolveResult | null {
+  const paraId = anchor?.target_para_id?.trim();
+  const ref = anchor?.target_ref?.trim();
+  if (!paraId && !ref) return null;
+
+  const blocks = collectBlocks(editor);
+
+  /**
+   * paraId → its LIVE span, via the same primitive imported comments/revisions anchor through.
+   * `BlockInfo.from`/`to` are the block NODE's boundaries; the redline marks and the insertion point
+   * both need the block's CONTENT range, which is one position inside each boundary. Using the node
+   * boundaries directly would insert the replacement AFTER the paragraph instead of within it.
+   */
+  const spanOf = (id: string): RedlineSpan | null => {
+    const block = blocks.find(b => b.paraId?.toUpperCase() === id.toUpperCase());
+    return block ? { from: block.from + 1, to: block.to - 1 } : null;
+  };
+
+  let fromParaId: RedlineSpan | null = null;
+  if (paraId) {
+    fromParaId = spanOf(paraId);
+    // The named paragraph is not in the live document (deleted, or the edit was built against another
+    // document state). Refuse — repairing it would be a guess.
+    if (!fromParaId) return { ok: false, kind: 'not_found', matchCount: 0 };
+  }
+
+  let fromRef: RedlineSpan | null = null;
+  if (ref) {
+    if (!referenceMap || referenceMap.length === 0) {
+      // An anchor with nothing to validate it against. Refusing beats silently text-searching.
+      return { ok: false, kind: 'not_found', matchCount: 0 };
+    }
+    const resolution = resolveCitation(ref, referenceMap);
+    if (resolution.matches.length === 0) return { ok: false, kind: 'not_found', matchCount: 0 };
+    // A single edit addresses ONE paragraph; a range ("Sections 4-7") is refused, not narrowed to the
+    // first — picking one would be the silently-wrong-target failure this task removes.
+    if (resolution.matches.length > 1) {
+      return { ok: false, kind: 'ambiguous', matchCount: resolution.matches.length };
+    }
+    fromRef = spanOf(resolution.matches[0].paraId);
+    if (!fromRef) return { ok: false, kind: 'not_found', matchCount: 0 };
+  }
+
+  if (fromParaId && fromRef && (fromParaId.from !== fromRef.from || fromParaId.to !== fromRef.to)) {
+    return { ok: false, kind: 'ambiguous', matchCount: 2 };
+  }
+
+  return { ok: true, spans: [(fromParaId ?? fromRef)!] };
+}
+
+/**
+ * What to call the thing that couldn't be placed, in the user-facing banner. An anchored edit has no
+ * `target_text` to quote, so quoting an empty string would make the banner say nothing was targeted when
+ * something very specific was.
+ */
+function unplaceableLabel(
+  payload: { target_text?: string; target_ref?: string; target_para_id?: string } | undefined
+): string {
+  const text = payload?.target_text ?? '';
+  if (text.length > 0) return text;
+  if (payload?.target_ref) return payload.target_ref;
+  if (payload?.target_para_id) return `paragraph ${payload.target_para_id}`;
+  return '';
+}
+
+/**
  * Collect the document ranges carrying `markName` addressed by `ledgerRef`. Adjacent text nodes may
  * split a logical span into several ranges; callers apply deletions high→low to keep positions valid.
  * Exported for direct unit testing.
@@ -589,7 +681,15 @@ function stripRedlineMarks(editor: Editor, ledgerRef: string): Mapping {
  * document mutation goes through TipTap chains, so `onUpdate` fires and the editor's dirty state
  * tracks automatically.
  */
-export function usePendingRedline(editor: Editor | null): UsePendingRedlineResult {
+/**
+ * @param referenceMap Task 051 (FR-C02) — the document's `paraId` map from the Load response, the
+ * coordinate system a `target_ref` citation resolves through. Optional: without it, citation-anchored
+ * edits are refused (never text-searched) and everything else behaves exactly as before.
+ */
+export function usePendingRedline(
+  editor: Editor | null,
+  referenceMap?: readonly ParaIdMapEntry[]
+): UsePendingRedlineResult {
   const [pending, setPending] = React.useState<PendingRedline[]>([]);
   const [error, setError] = React.useState<PendingRedlineError | null>(null);
 
@@ -661,12 +761,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       }
 
       const targetText = payload?.target_text ?? '';
-      const hasTarget = targetText.length > 0;
+      // Task 051 — FIXED ordering, never the reverse: (1) DETERMINISTIC anchor, (2) legacy text search.
+      // `anchored === null` means the payload named no anchor at all, which is the only path back to text.
+      const anchored = resolveAnchoredSpans(editor, payload, referenceMap);
+      const hasTarget = anchored !== null || targetText.length > 0;
       let hasDeletion = false;
 
       if (hasTarget) {
         const matchMode = normalizeMatchMode(payload?.match_mode);
-        const resolved = resolveTargetSpans(editor, targetText, matchMode);
+        const resolved = anchored ?? resolveTargetSpans(editor, targetText, matchMode);
         let spans: RedlineSpan[];
         if (resolved.ok) {
           spans = resolved.spans;
@@ -683,7 +786,12 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
           // re-selects the exact passage and re-runs, or edits the clause manually. This is the
           // "propose, don't auto-place" resolution (UAT-24) applied at the placement boundary; it
           // deliberately reverses the Round-3 fallback (an honest dead-end beats a silent wrong edit).
-          setError({ ledgerRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
+          setError({
+            ledgerRef,
+            kind: resolved.kind,
+            targetText: unplaceableLabel(payload),
+            matchCount: resolved.matchCount,
+          });
           if (superseded.length > 0) {
             setPending(prev => prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef)));
           }
@@ -747,7 +855,7 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       });
       return 'applied';
     },
-    [editor, pending]
+    [editor, pending, referenceMap]
   );
 
   const materializeMany = React.useCallback(
@@ -783,7 +891,10 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         // is its own PendingRedline with its own confidence band).
         const editHasSources = Array.isArray(payload?.sources) && payload.sources.length > 0;
 
-        if (targetText.length === 0) {
+        // Task 051 — same fixed ordering as the single-edit path: deterministic anchor, then legacy text.
+        const anchored = resolveAnchoredSpans(editor, payload, referenceMap);
+
+        if (anchored === null && targetText.length === 0) {
           // Insertion-style edit (no target) — insert at the current caret as a pending insertion.
           if (newText.length === 0) {
             statuses.push('noop');
@@ -808,10 +919,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         // struck (still-present) originals + appended insertions — positions stay valid per edit.
         targetedCount += 1;
         const matchMode = normalizeMatchMode(payload?.match_mode);
-        const resolved = resolveTargetSpans(editor, targetText, matchMode);
+        const resolved = anchored ?? resolveTargetSpans(editor, targetText, matchMode);
         if (!resolved.ok) {
           // FR-19 "do not guess": skip this one, record the failure, keep going.
-          failures.push({ ledgerRef: subRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
+          failures.push({
+            ledgerRef: subRef,
+            kind: resolved.kind,
+            targetText: unplaceableLabel(payload),
+            matchCount: resolved.matchCount,
+          });
           statuses.push(resolved.kind);
           return;
         }
@@ -848,7 +964,7 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       });
       return statuses;
     },
-    [editor, pending]
+    [editor, pending, referenceMap]
   );
 
   const accept = React.useCallback(

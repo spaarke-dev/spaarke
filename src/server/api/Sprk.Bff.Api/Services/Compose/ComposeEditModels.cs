@@ -72,12 +72,28 @@ public sealed record EditSource(
 /// <c>POST /api/compose/edit-batch/validate</c> consumes the same JSON the catalog action
 /// emits, with no translation layer.
 /// </summary>
+/// <remarks>
+/// <b>FR-C01/C02/C03 (spaarkeai-compose-r8 task 051) — the two ANCHOR members.</b>
+/// <see cref="TargetParaId"/> and <see cref="TargetRef"/> are the deterministic way to name the target
+/// paragraph; <see cref="TargetText"/> + <see cref="Mode"/> are the legacy text-search way. Both shapes
+/// are accepted here DELIBERATELY and only for now: task 051 supplies the anchors without removing
+/// anything, and task 052 (FR-C04) retires the text pair once every anchor source is live. When an anchor
+/// is present, <see cref="ComposeEditAnchorPass"/> resolves it through the reference map and the text
+/// members are never read — see that type for the ordering guarantee.
+/// </remarks>
 public sealed record ProposedEdit(
     [property: JsonPropertyName("target_text")] string TargetText,
     [property: JsonPropertyName("new_text")] string NewText,
     [property: JsonPropertyName("match_mode")] MatchMode Mode,
     [property: JsonPropertyName("rationale")] string? Rationale = null,
-    [property: JsonPropertyName("sources")] IReadOnlyList<EditSource>? Sources = null);
+    [property: JsonPropertyName("sources")] IReadOnlyList<EditSource>? Sources = null,
+    /// <summary>FR-C01/FR-C03 — the exact <c>w14:paraId</c> this edit targets: captured from the user's
+    /// selection at dispatch time, or returned by the model from the enumerated closed set. Validated for
+    /// membership in that set; an id outside it is rejected loudly, never searched for.</summary>
+    [property: JsonPropertyName("target_para_id")] string? TargetParaId = null,
+    /// <summary>FR-C02 — the target named as a legal citation ("clause 4.2", "4.2(b)(iii)"), resolved by
+    /// <see cref="CitationResolver"/> through the numbering engine. Never a text search.</summary>
+    [property: JsonPropertyName("target_ref")] string? TargetRef = null);
 
 /// <summary>
 /// A resolved span in <c>documentText</c> — <c>[Offset, Offset+Length)</c>, addressable for
@@ -115,6 +131,24 @@ public enum EditErrorKind
 
     /// <summary>Two edits in the same batch resolved to overlapping spans.</summary>
     Overlap,
+
+    // ── FR-C02/FR-C03 anchor rejections (task 051). All are LOUD refusals: the edit named a target
+    // the document does not have, or named it two ways at once. None of them fall back to a search. ──
+
+    /// <summary>FR-C03 — <c>target_para_id</c> is not a member of the document's paraId reference map.</summary>
+    UnknownParaId,
+
+    /// <summary>FR-C02 — <c>target_ref</c> parsed but names no paragraph in this document's numbering.</summary>
+    UnresolvedReference,
+
+    /// <summary>FR-C02 — <c>target_ref</c> names more than one paragraph (a range); one edit addresses one paragraph.</summary>
+    AmbiguousReference,
+
+    /// <summary>Both anchors were supplied and they resolve to different paragraphs; neither is preferred.</summary>
+    ConflictingAnchors,
+
+    /// <summary>An anchor was supplied but no reference map accompanied the request, so nothing could validate it.</summary>
+    NoReferenceMap,
 }
 
 /// <summary>
@@ -139,7 +173,15 @@ public sealed record EditVerdict(
     [property: JsonPropertyName("editIndex")] int EditIndex,
     [property: JsonPropertyName("isValid")] bool IsValid,
     [property: JsonPropertyName("matches")] IReadOnlyList<ResolvedMatch> Matches,
-    [property: JsonPropertyName("error")] EditValidationError? Error);
+    [property: JsonPropertyName("error")] EditValidationError? Error,
+    /// <summary>
+    /// FR-C01/C02/C03 (task 051) — the paragraph this edit ANCHORED to, when it carried a
+    /// <c>target_para_id</c> or <c>target_ref</c>. Non-null exactly when the edit resolved through the
+    /// reference map instead of through text search, in which case <see cref="Matches"/> is empty: the
+    /// paraId IS the address, and mapping it to a live span is the editor's job (it already does this for
+    /// imported comments and revisions). Null for a legacy text-resolved edit.
+    /// </summary>
+    [property: JsonPropertyName("resolvedParaId")] string? ResolvedParaId = null);
 
 /// <summary>
 /// Batch outcome: one <see cref="EditVerdict"/> per proposed edit, plus any cross-edit overlap
@@ -160,7 +202,18 @@ public sealed record BatchValidationResult(
 /// <summary>Request body for <c>POST /api/compose/edit-batch/validate</c>.</summary>
 public sealed record EditBatchValidateRequest(
     [property: JsonPropertyName("documentText")] string DocumentText,
-    [property: JsonPropertyName("edits")] IReadOnlyList<ProposedEdit> Edits);
+    [property: JsonPropertyName("edits")] IReadOnlyList<ProposedEdit> Edits,
+    /// <summary>
+    /// FR-C02/FR-C03 (task 051) — the document's paraId reference map: BOTH the closed set an anchored
+    /// edit's <c>target_para_id</c> is validated against, and the numbering data
+    /// <see cref="CitationResolver"/> reads to resolve a <c>target_ref</c>. This is the SAME map the Load
+    /// response already returns (<c>ParaIdMap</c>) and the session already persists
+    /// (<c>ChatSession.ReferenceMap</c>) — passed in rather than fetched so this endpoint resolves only
+    /// against a map the caller is entitled to. Optional: omit it for a legacy text-only batch; supply it
+    /// for any batch carrying anchors, or every anchored edit is refused with
+    /// <see cref="EditErrorKind.NoReferenceMap"/> rather than silently text-searched.
+    /// </summary>
+    [property: JsonPropertyName("referenceMap")] IReadOnlyList<ParaIdMapEntry>? ReferenceMap = null);
 
 // ---------------------------------------------------------------------------
 // FR-20 (task 021) — result models for ComposeEditBatch.Apply. BFF-authored (not

@@ -488,6 +488,19 @@ export interface ComposeDraftPayload {
   new_text?: string;
   /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
   match_mode?: string;
+  /**
+   * FR-C01/FR-C03 (spaarkeai-compose-r8 task 051) — the DETERMINISTIC anchor: the exact `w14:paraId`
+   * this edit targets, captured from the user's selection at dispatch time or returned by the model
+   * from the enumerated closed set. When present it OUTRANKS `target_text`, which is never read.
+   * Mirrors the server envelope's `target_para_id` (`ProposedEdit`, `ComposeEditModels.cs`).
+   */
+  target_para_id?: string;
+  /**
+   * FR-C02 (task 051) — the target named as a legal citation ("clause 4.2", "4.2(b)(iii)"), resolved
+   * through the numbering engine's `paraIdMap` by the same `CitationResolver` mirror the advisory-comment
+   * path already uses. Also outranks `target_text`. Never a text search.
+   */
+  target_ref?: string;
   /** Optional model-supplied rationale (provenance/explanation). */
   rationale?: string;
   /** Citations / source ids the draft was grounded on (ids only). */
@@ -509,12 +522,20 @@ export interface ComposeDraftPayload {
 
 /** DEF-11: one targeted edit in a whole-document revision change list. Shape = the single-edit redline payload. */
 export interface ComposeDraftEdit {
-  /** Exact substring to replace — VERBATIM from the document so the editor can locate it. */
-  target_text: string;
+  /**
+   * Exact substring to replace — VERBATIM from the document so the editor can locate it. OPTIONAL since
+   * task 051: an edit that carries {@link target_para_id} or {@link target_ref} names its target
+   * deterministically and needs no prose to search for.
+   */
+  target_text?: string;
   /** The proposed replacement clause language, inserted as a pending track-change. */
   new_text: string;
   /** How to locate `target_text`: `strict` (default) | `first` | `all`. */
   match_mode?: string;
+  /** FR-C01/C03 (task 051) — the exact `w14:paraId` this change targets. Outranks `target_text`. */
+  target_para_id?: string;
+  /** FR-C02 (task 051) — this change's target named as a legal citation. Outranks `target_text`. */
+  target_ref?: string;
   /** Optional per-change rationale. */
   rationale?: string;
 }
@@ -2531,7 +2552,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- FR-16 pending-redline materialization (task 033) ---------------
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
-    const redline = usePendingRedline(editor);
+    // Task 051 (FR-C02): the paraId map is what a citation-anchored edit ("clause 4.2") resolves
+    // through — the SAME map `placeAdvisoryComments` already uses for `sectionRef`. One coordinate
+    // system for both anchor consumers (project invariant 3).
+    const redline = usePendingRedline(editor, paraIdMap);
 
     // Banner consolidation (2026-08-19): surface the redline anchor-failure notice up to the host so
     // it renders in the single ComposeBannerStack rail (one location, MessageBar styling) instead of a
