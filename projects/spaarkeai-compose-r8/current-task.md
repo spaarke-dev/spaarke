@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-23 (task 044 complete) · **Pushed**: see Quick Recovery
+> **Last Updated**: 2026-08-23 (tasks 044 complete / 043 superseded) · **Pushed**: see Quick Recovery
 > **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Active task** | **none** — 044 closed. Pick 043 or 051 below. |
+| **Active task** | **none** — 044 closed, 043 SUPERSEDED. Next is **051** (Track C). |
 | **Phases 1–3** | ✅ COMPLETE. Architecture gate **PASSED**. ADR-049 third amendment **APPLIED**. |
-| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · **044 ✅** · 043 🔲 not started · 045 🔲 |
-| **Next** | **043** (capability gate → read-only + "Edit a copy") or **051** (Track C — the *"wording differs slightly"* banner, independent of all Track A work) |
-| **Gate status** | Server **10,920 / 0** · Client (Jest) **1,129 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs / 44.09 excl** (+0.03 vs the 44.96 documented net10 baseline; ceiling 60) · no vulnerable packages |
+| **Phase 4** | 040 ✅ · 041 ✅ · 042 ✅ · **044 ✅** · **043 ⊘ superseded** · 045 🔲 |
+| **Next** | **051** — Track C anchor supply (the *"wording differs slightly"* banner). Track A is done through 044; only 045 (sign-off) remains. |
+| **Gate status** | Server **11,044 / 0** · Client (Jest) **1,129 / 0** · NetArchTest **36/36** · publish **44.99 MB incl PDBs / 44.09 excl** (+0.03 vs the 44.96 documented net10 baseline; ceiling 60) · no vulnerable packages |
 
 ### The one thing to understand
 
@@ -57,6 +57,24 @@ imported doc onto the clean branch — the SEV-1 shape), `originToPersist` is wh
 
 ---
 
+## What happened to 043 (2026-08-23) — SUPERSEDED
+
+FR-A07 assumes constructs exist the merge cannot safely carry. **There are none.** Owner directed closing
+the corpus gap first: four new fixtures now cover OLE objects, chart parts, endnotes and embedded fonts
+(five of the six families that had ZERO coverage; macros excluded with reasons). Results:
+
+| | Untouched block | The construct's OWN block edited |
+|---|---|---|
+| OLE object · chart · endnote · font | **100% strict**, cloned byte-verbatim | dropped, but **NAMED** every time; saved doc schema-valid; package part survives |
+
+Loss is **per-edited-block, never per-document** — so a gate keyed on construct presence would refuse
+editing on documents we handle at 100%, a false positive by construction. And **"Edit a copy" has no
+trigger to attach to**: every read-only trigger is "we cannot read this at all", and the one genuine
+read-but-never-write case (the PDF) already ships.
+[`notes/capability-gate-triggers.md`](notes/capability-gate-triggers.md)
+
+---
+
 ## Open items carried to task 045
 
 1. **The untested FR-A08 criterion** — *"an Authored document STILL receives save-outcome warnings"* has no
@@ -75,7 +93,12 @@ imported doc onto the clean branch — the SEV-1 shape), `originToPersist` is wh
 5. **`ComposeService.cs` is now 4,373 lines** (was 4,031). Track D's file. The PDF-provenance code is one
    self-contained region depending only on `_cache`/`_logger`/`_spe` — extraction is mechanical, same shape
    as `ComposeBlockMerge.cs`.
-6. **`w:br` soft breaks** (1 doc) and **run-level `rPr` variation** (2 docs) on the edited block — read-side
+6. **043 residual — the warning arrives at SAVE, after the edit.** Version history means nothing is
+   unrecoverable, but the consent is after the fact. The evidence-supported version of FR-A07 is a warning
+   **at the edit**, on the specific block, reusing 044's taxonomy — far smaller than the document gate the
+   POML described. Also open: whether Compose should accept `.docm` at all (a product question, not a merge
+   one; a `vbaProject.bin` cannot be fixtured as a `.docx`).
+7. **`w:br` soft breaks** (1 doc) and **run-level `rPr` variation** (2 docs) on the edited block — read-side
    projection gaps base-carry cannot reach. **`mc:AlternateContent` paraId re-mint** — 2 docs below 100%
    strict (the reverted experiment).
 
@@ -128,7 +151,7 @@ PDF work all ship with the next paired **BFF + `sprk_spaarkeai`** deploy (NFR-05
 ## Tasks complete
 
 **Phase 0** 001 · 002 — **Phase 1 (Track S)** 010–018 — **Phase 2** 020 · 021 · 022 · 023 —
-**Phase 3** 030 · 031 — **Phase 4** 040 · 041 · 042 · **044** — **Phase 5** 050
+**Phase 3** 030 · 031 — **Phase 4** 040 · 041 · 042 · **044** (043 superseded) — **Phase 5** 050
 
 **Blocked**: 074 ⛔ (`ComposeShadowPatchEngine` subsumption NOT-CONFIRMED — gate-decision §5).
 
