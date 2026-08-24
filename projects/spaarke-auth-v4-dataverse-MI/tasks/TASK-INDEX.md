@@ -20,7 +20,7 @@
 | 024 | Relax the three config validators | 2 Provider | FULL | sonnet/high | 020 | **C** | ✅ | FR-B5 | ✅ |
 | 030 | `Register-EntraAppRegistrations.ps1` FIC extension **⏩ PULLED FORWARD** | 3 Rollout | FULL | sonnet/high | 020 | **E** | ✅ | FR-C4 | ✅ |
 | 031 | Deploy to slot + full §6.1 OBO checklist | 3 Rollout | FULL | sonnet/high | 022 | — | ❌ | FR-C1 | 🔲 |
-| 032 | Slot swap + soak | 3 Rollout | FULL | sonnet/high | 031 | — | ❌ | FR-C2 | 🔲 |
+| 032 | Promote to default slot + **retire the staging slot** (rescoped 2026-08-23; no soak gate) | 3 Rollout | FULL | sonnet/high | 031 | — | ❌ | FR-C2 | 🔲 |
 | 033 | Remove the secret + reconcile 11 scripts / ~25 docs | 3 Rollout | FULL | sonnet/high | 032 | — | ❌ `.claude/` | FR-C3 | 🔲 |
 | 040 | ⚠️ Verify Power BI SP **profiles** under a managed identity | 4 PowerBI | FULL | **opus/xhigh** | 020 | — | ✅ | FR-D2 gate | ⏭️ |
 | 041 | Power BI tenant setting + rework both services | 4 PowerBI | FULL | sonnet/high | 040 | — | ✅ | FR-D1/D2 | ⏭️ |

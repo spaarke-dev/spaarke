@@ -61,6 +61,29 @@ blast radius**. Both slots carry **both** config keys (`ConnectionStrings__Servi
 `ServiceBus__ConnectionString`), confirming the two-key fan-out on the live app rather than by
 inference from Bicep. `ServiceBus__FullyQualifiedNamespace` is **absent on both** — that is 031's job.
 
+### ✅ Slot strategy decided 2026-08-23 (owner) — 032 rescoped, slot gets deleted
+
+Record: [`notes/decisions/032-slot-strategy.md`](notes/decisions/032-slot-strategy.md).
+
+Slots are **not part of the auth design** — nothing about Dataverse or managed identity needs one.
+They are a deployment-safety device, justified by exactly one thing: `#3b` attempt 1 died with a
+**SIGABRT at startup**, and *you cannot config-rollback an app that will not boot*.
+
+| Task | Change |
+|---|---|
+| **031** | unchanged — deploy to the slot, run the §6.1 OBO checklist there |
+| **032** | **rescoped**: keep the swap (atomic, instantly reversible), **drop the gated soak**, **add: DELETE the staging slot** once the swap is confirmed. Renamed `032-slot-swap-and-soak.poml` → `032-promote-and-retire-slot.poml` |
+| **033** | simpler as a result — one slot to purge, not two. Verify with `az webapp deployment slot list`, don't assume |
+
+**Why delete it**: the slot holds a mirrored copy of all 213 app settings, so **16 plaintext secrets
+exist twice**, and it reports the **same `cloud_RoleName`** as the default slot — the blind spot that
+made the 2026-08-23 outage take 40 minutes. Keeping it keeps that trap armed.
+
+**Load-bearing ordering** — rollback changes hands mid-task:
+`before swap: don't swap` → `after swap: swap back` → `after deletion: reorder credentials`.
+The slot may only be deleted if **031's secret-first re-verification passed**, since that is the
+evidence the third mode works. Written into 032 as a constraint *and* an escalation trigger.
+
 **Who created the `staging` slot is unknown and probably unknowable**: the Azure activity log retains
 90 days and shows nothing for it, so it predates 2026-05-26. Its `lastModified` (2026-08-23T20:35Z)
 is just my own outage fix. The open question is not "who owns it" — it is **should it be Running at
