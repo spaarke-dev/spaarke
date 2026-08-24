@@ -1,8 +1,82 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T05:30Z (in-session, SESSION 4) — **🎯 PHASE H-PRIME CLOSED. Tasks 200 (H4-shared) + 201 (H4b) BOTH SHIPPED end-to-end via delegated sub-agents. 1555 tests passing (42 new: 19 H4-shared + 23 H4b). All 4 commits pushed. F17+F19+F20 cluster now automatable. Live-fire smoke against Model 1 Prod is the next unblocked task pending Bicep RBAC hardening.**
+> **Last Updated**: 2026-08-24 T~19:00Z (in-session, SESSION 5) — **🎯 SESSION 5 CORRECTIVE PIVOT. Started by attempting manual F20-chain patching on Model 1 Prod BFF (5 App Service settings + 1 code fix `e3a15db91` for IActionSeam ADR-032 asymmetric-registration bug — deployed to `sprksharedprod-api`). Owner (Ralph) recognized this was symptom-fixing, NOT platform validation. Corrective sequence NOW IN EFFECT: task 202 (pre-live-fire lessons audit + formalize PROVISIONING-PREREQUISITES.md + design provisioning-run project structure) → task 203 (apply the punch list) → task 186 E2E live-fire. Owner directive: E2E target sub is `cd95fcec-6b89-49ea-8339-c2b579b12587` (Spaarke Model 1 Production) — do NOT create a fresh sub. Sweep legacy artifacts, re-provision via platform.**
 
-## 🎯 QUICK RECOVERY — 2026-08-24 T05:30Z SESSION 4 (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 T~19:00Z SESSION 5 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | `e3a15db91` (IActionSeam ADR-032 code fix — deployed live to Model 1 Prod BFF) + task 202 POML + TASK-INDEX update + this current-task.md update landing in next commit |
+| **Working tree** | Dirty until next commit (task 202 POML + TASK-INDEX + current-task.md) |
+| **Model 1 Prod BFF state** | Still SIGABRT in F20 chain — CosmosPersistence Endpoint + CORS + DocumentIntelligence + Dataverse ServiceUrl set + IActionSeam code fix deployed; next fail-fast blocks on `TENANT_ID/API_APP_ID/API_CLIENT_SECRET` (Entra app-reg creds). NOT progressing further this session — corrective pivot to task 202. |
+| **E2E target sub (per owner directive)** | `cd95fcec-6b89-49ea-8339-c2b579b12587` (Spaarke Model 1 Production) — DO NOT create fresh sub, use this one |
+| **Next action** | Invoke `task-execute 202` in fresh session (6-10h, STANDARD rigor, opus/high) |
+
+### 🎯 WHAT SESSION 5 ACCOMPLISHED
+
+**Part A — Manual BFF patching (5 gates cleared, then owner corrected direction):**
+1. **Gate 1** — `CosmosPersistence__Endpoint` not configured → set to `https://spaarke-trial01-prod-cosmos.documents.azure.com:443/`. Gate cleared.
+2. **Gate 2** — `Cors:AllowedOrigins` empty in Production → set `Cors__AllowedOrigins__0=https://sprksharedprod-api.azurewebsites.net` (wildcard rules at CorsModule.cs:93-111 cover real client origins). Gate cleared.
+3. **Gate 3 (CODE FIX `e3a15db91`)** — `IActionSeam` unresolved for `CommunicationRiActionService` at Host.StartAsync. Root cause: IActionSeam registered inside `if (DocIntel && Analysis)` compound gate in AnalysisServicesModule.cs:1425, but CommunicationRiActionService requires it UNCONDITIONALLY (CommunicationModule.cs:195). Hoisted registration to top-of-module unconditional block (~line 160) following IPinnedContextRepository / IContextEventEmitter / IFileSummarizeAi precedent. Rebuilt (0/0), published (47.15 MB — under 60 MB spec.md NFR-01 ceiling), deployed via `az webapp deploy` to `sprksharedprod-api`. Gate cleared. This is a REAL bug that H9's live BFF deploy would hit — code fix stays regardless of provisioning path.
+4. **Gate 4** — `IKnowledgeDeploymentService` unresolved for `EmbeddingMigrationService` → enabled DocumentIntelligence: `DocumentIntelligence__Enabled=true` + `DocumentIntelligence__OpenAiEndpoint` + `DocumentIntelligence__OpenAiKey` (KV-ref to AzureOpenAI-ApiKey) + `DocumentIntelligence__AiSearchEndpoint` + `DocumentIntelligence__AiSearchKey` (KV-ref to AiSearch--AdminKey). Gate cleared.
+5. **Gate 5** — `Dataverse:ServiceUrl configuration is required` → set `Dataverse__ServiceUrl=https://spaarke-model1-prod.crm.dynamics.com/` (Dataverse env `spaarke-model1-prod` verified in Power Platform inventory, NOT in Azure RG listings — my earlier confusion). Gate cleared.
+6. **Gate 6 (STOPPED HERE)** — `Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET`. Requires Entra app-reg creds. Legacy `spaarke-bff-api-prod` exists (created 2026-03-13) but reusing pre-project artifacts contradicts the whole-point-of-project premise. Owner corrected direction here.
+
+**Part B — Owner corrective pivot + task 202 authoring:**
+- Owner directive: "if the current process is using/testing/validating the E2E handlers... that is useful. BUT if what you're saying is that we are basically just doing a manual setup of a new environment then that's not useful to this project"
+- Owner directive: "for point 1 — AND these need to be actually documented somewhere that can then feed into the process; this needs to be formalized e.g., a file, an app, a table—something that is codified"
+- Owner directive: "shouldn't there be a project structure within which a new environment provisioning project runs?"
+- Owner directive: E2E target sub = `cd95fcec-6b89-49ea-8339-c2b579b12587` — "your subscription will be automatically upgraded to Tier 1. For this E2E let's use the subscription we created so we do not need to go through this process again"
+- Result: authored **task 202 POML** (`202-pre-live-fire-lessons-audit-and-prereqs-formalization.poml`) — STANDARD rigor, opus/high, 6-10h estimated effort. Task 203 placeholder added (FULL rigor, opus/xhigh, blocked by 202). Both added to TASK-INDEX.md under NEW Phase Pre-Live-Fire section.
+
+### 🎯 TASK 202 SCOPE (what the next task-execute run will do)
+
+Full POML at `projects/customer-provisioning-orchestration-r1/tasks/202-pre-live-fire-lessons-audit-and-prereqs-formalization.poml`. Summary:
+- **Audit** all captured-but-unapplied lessons across `notes/*.md` (90+ files: lessons-learned-model1-prod-standup-2026-08-22.md — 870 lines / F1-F20+, 40+ task-XXX-deviations.md, 4 wave-drift notes, SESSION 3+4+5 handoffs).
+- **Author** `docs/guides/PROVISIONING-PREREQUISITES.md` (formalized codified reference — markdown + sibling YAML `scripts/provisioning-prereqs/prereqs.yaml`) enumerating ≥7 manual prereqs: SPE container-types (owner: KEEP — outside provisioning automation), Office add-in Entra apps, Copilot bot Entra apps, Power BI service principals, Azure subscription (EA/MCA), OpenAI TPM bumps for frontier models, resource-provider registration on fresh subs. Each: scope + how-to + frequency + programmatic-check-recipe + consequence-of-absence.
+- **Author** `notes/provisioning-run-structure-design.md` — 7-file per-run folder `provisioning-runs/{customerId}-{runId}/{CLAUDE.md, intake.md, prerequisites-check.md, preflight-report.md, handler-log.md, manual-gates.md, handoff-report.md, lessons-learned.md}` + `provisioning-runs/INDEX.md` cross-run registry (mirrors `projects/INDEX.md`) + `.claude/patterns/provisioning/` scaffolding for cross-run shared patterns.
+- **Author** `notes/provisioning-run-agent-autonomy-design.md` — classify current interactive gates (must-stay-interactive / can-auto-advance-with-verification / can-batch-upfront) + propose `--batch` flag for `/provision-environment` + JSON intake schema.
+- **Produce** `notes/task-202-punch-list.md` — machine-readable table `{lesson-id, source-doc, title, landing-spot, effort-h, blocks-e2e, dependencies, task-203-subphase}` sortable by must-do-before-E2E. Task 203 executes against this.
+- **Update** task 186 escalation: add explicit pre-check "abort if task-202-punch-list.md has any blocks-e2e=YES + fix-applied=NO".
+
+### 🎯 TASK 203 SCOPE (blocked by 202)
+
+Apply the punch list. Likely includes: code fixes for any surfaced ADR-032-class asymmetric-registration bugs beyond IActionSeam; expand H4b `per_env_settings` manifest with full BFF IOptions inventory (~40 modules × ~2-4 settings); extend `/provision-environment` skill with Step 0.5 External Prerequisites Verification (reads `scripts/provisioning-prereqs/prereqs.yaml`) + per-run folder creation + Step 7 mandatory postmortem; create `provisioning-runs/` root + INDEX.md; fill `.claude/patterns/provisioning/`; resolve ADR Tensions surfaced during 202 (specifically SESSION 5 Lesson 3: multi-tenant Dataverse routing at `DataverseServiceClientImpl.cs:39` reading single `Dataverse:ServiceUrl` at DI setup vs Model 1's per-tenant Dataverse design in model1-shared.bicep); cross-refs into `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
+
+### 🎯 SESSION 5's 4 LESSONS (feed into task 202 punch list)
+
+1. **IActionSeam ADR-032 asymmetric-registration bug** — CODE FIXED as `e3a15db91`. Follow-on: NEW ArchTest to catch "unconditional consumer + conditionally-registered dependency" class at build time (existing ADR-032 forcing-function ArchTest only catches "kill-switch declared", not this specific class).
+2. **H4b per_env_settings manifest materially incomplete** — 8 entries today, need ~40 IOptions modules × ~2-4 settings ≈ 80-160 total. Fix: expand manifest + author "Nightly IOptions-inventory-drift ArchTest" from SESSION 4 deferred list.
+3. **Multi-tenant BFF Dataverse routing architectural gap** — `DataverseServiceClientImpl.cs:39` reads ONE `Dataverse:ServiceUrl` at DI setup, contradicts Model 1's per-tenant Dataverse design. Design question: does Model 1 shared BFF serve ONE Dataverse per shared tier (design walkback) OR does H5 create per-tenant Dataverse envs needing runtime routing (architectural refactor)? File as ADR Tension in design.md via §6.5 protocol.
+4. **Azure inventory ≠ Power Platform inventory** — operator lesson only, not code change. Add note to `/provision-environment` SKILL.md.
+
+### 🎯 SWEEP-SAFE LIST FOR MODEL 1 PROD (verified this session)
+
+If task 203's punch list requires sweeping Model 1 Prod back to a clean state for E2E, safe deletions:
+- RG `rg-spaarke-shared-prod` (BFF, KV, OpenAI, AI Search, Redis, SB, Storage, DocIntel, App Insights, App Service Plan, shared UAMI)
+- RG `rg-spaarke-trial01-prod-model1` (per-tenant UAMI + Cosmos)
+- Dataverse env `spaarke-model1-prod` (confirmed independent from `spaarkedev1`/`spaarke-demo` on same tenant)
+- Entra app `spaarke-bff-api-prod` (`92ecc702-d9ae-492d-957e-563244e93d8c`)
+- Entra app `spaarke-dataverse-s2s-prod` (`720bcc53-3399-488d-9a93-dafde5d9e290`) — r3 confirmed zero code consumers
+
+DO NOT sweep (tenant-shared or unknown-overlap):
+- Office add-in Entra apps (Word/Outlook/generic — tenant-shared)
+- `Spaarke External Workspace bot`, `Spaarke Copilot Bot Dev`, `spaarke-external-access-SPA`
+- `SPAARKE-SPE-Admin-CLI` (tenant-scoped, needed for SPE ops)
+- `Spaarke Reporting - Power BI SP (Prod)` — needs verification
+- `spaarke-provisioning-controlplane-dev` (spaarkedev1's L2 control plane — LOAD-BEARING)
+- SPE container-types — owner directive KEEP (outside provisioning automation) + I got 403 Forbidden enumerating them anyway
+
+### 🎯 To resume next session — say ONE of these
+
+- **"execute task 202"** — invokes task-execute for the pre-live-fire lessons audit + PREREQUISITES formalization + provisioning-run structure design (6-10h, STANDARD rigor, opus/high)
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, will point at task 202
+- Do NOT invoke task 186 yet — blocked by 202 + 203 per owner directive
+
+---
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T05:30Z SESSION 4 (retained for reference)
 
 | Field | Value |
 |-------|-------|
