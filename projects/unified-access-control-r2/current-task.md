@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-24 (by `context-handoff`, after task 017 + the full Phase 0 review)
+> **Last Updated**: 2026-08-24 (by `context-handoff`, mid-task-022)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -11,9 +11,9 @@
 | Field | Value |
 |---|---|
 | **Task** | **022 IN PROGRESS** — document-surface authorization sweep (Critical). Inventory complete (22 routes, not the ~15 estimated); H5 fixed; gates not yet implemented |
-| **Step** | n/a (between tasks) |
-| **Status** | clean — working tree has no uncommitted changes |
-| **Phase** | Phase 0 — enforcement remediation · **13 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6) |
+| **Step** | 022 step 1 of ~10 — inventory ✅, H5 ✅, gates NOT started |
+| **Status** | clean — all work committed and pushed (`081477bd3`) |
+| **Phase** | Phase 0 — enforcement remediation · **14 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ **009 ✅** 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) · **+ Phase 0b filed: 021–028** — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
 | **Next Action** | **Task 022 step 1**: add the missing `OperationAccessPolicy` keys (there is NO bare `write`/`delete` key, and an unmapped operation is an unconditional 403 — see [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md) "The mechanism"). THEN gate C2/C3, then C1. Do not attach a filter with a new operation string before its key exists. |
 
@@ -29,66 +29,75 @@ Low practical impact — `AccessGrantModal` and the external SPA send well-forme
 real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
 flipped to match, with the rationale in their doc comments.
 
-### 🔴 THE REVIEW CHANGED THE PRIORITIES — read this before picking a task
+### Where task 022 stands (READ BEFORE RESUMING)
 
-A full multi-agent re-review of the 13 completed Phase 0 tasks ran on 2026-08-24 at owner request
-(8 Fable-tier agents: 4 task-family correctness re-reviews + 4 cross-cutting lenses; read-only,
-adversarially prompted, coverage-first). **Full ranked findings:
-[`notes/review-2026-08-24-findings.md`](notes/review-2026-08-24-findings.md).**
+**Inventory complete** — [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md).
+The class is **22 routes across 4 files**, not the "~15" the review estimated:
+4 gated · 1 gated-in-form-only (C1) · 2 ungated destroy (C2, C3) · 8 ungated mutate/disclose
+(H2, H3, H4) · 5 ungated URL-minting reads · 3 collection-shaped with no caller-supplied id.
 
-**It found three Critical authorization gaps the original 20-finding investigation never examined**, because
-that pass was scoped to read/disclosure paths and never asked whether DESTRUCTIVE operations were gated:
+**H5 fixed** (`081477bd3`). `GetProjectsAsync` ordered by `sprk_name`, absent from `sprk_project`
+(the `$select` one line above already had `sprk_projectname` right) → Dataverse 400 → caught →
+empty list → **the external SPA showed "you have no grants" to every caller who had grants.**
+Sixth instance of the stale-column class; it survived review because `$select` and `$orderby` sit
+on adjacent lines and disagree, so checking the select gives a false all-clear.
 
-1. `POST /api/documents/bulk-download` — its filter checks a `tid` claim, logs "authorization granted", and
-   calls `next()`. **No authorization decision at all.** 500 GUIDs/request, streamed app-only, failures
-   listed in a `_FAILED.txt` manifest while zipping continues (so one call exfiltrates AND enumerates). The
-   comment justifying the absent check cites `preview-url` as its model — which is itself unfiltered.
-2. `DELETE /api/documents/{id}` — `DeleteAsync` takes **no user identity**; destroys the Dataverse row and
-   the SPE file app-only, by GUID. Reachable from a shipped client hook.
-3. `DELETE /api/v1/documents/{id}` — a second app-only destroy path, while its `/download` sibling is gated.
+### 🛑 THE BLOCKER TO CLEAR FIRST — do not attach a filter before this
 
-**Task 002 gated 4 of ~15 members of that class.** Also unfiltered: `PUT`/`GET /api/v1/documents/{id}`
-(the GET returns the SPE pointers that feed 1 and 2), the `/checkout` family, and the six OBO read routes.
+**There is NO bare `write` or `delete` operation key.** `OperationAccessPolicy` has only
+`read`, `finance.read`, `finance.confirm`, `entity.associate_document`.
 
-**Two defects THIS PROJECT created:**
+`GetRequiredRights` **throws** on an unknown operation and `DocumentAuthorizationFilter`'s
+`catch` returns 500 — so it fails closed, which is correct, but it also means **attaching a gate
+with a not-yet-existing operation string turns that route into an unconditional 403 for every
+caller.** `OperationAccessPolicy`'s own header records exactly that incident: it previously hit
+the finance surface, the Office save path, and three document read routes.
 
-- ✅ **FIXED (`4c364e47d`)** — the provisioning `$select` named two nonexistent columns
-  (`_sprk_securitybuid_value`, `sprk_specontainerid`; live is `_sprk_securitybu_value`, `sprk_containerid`).
-  `/provision-project` 500'd on every call and its own 409 guard read null forever. Introduced by
-  `95d3f0f68`. **Fifth instance of the stale-column class, and the first one we caused.**
-- **OPEN (task 023)** — tasks 007 × 010 interact: the grant upsert never writes `sprk_expiresdate` on its
-  match path, so re-granting to ADD an expiry is a silent no-op returning 200. **A-5's shape resurrected on
-  the write path by the two tasks meant to close it.** `ExpiryDate` appears once in the whole grant-lifecycle
-  suite, as `null`.
+**So: add the keys FIRST, each with the per-key rationale comment the table uses** (the
+`entity.associate_document` entry is the model — `AppendTo`, not `Write`, because attaching a
+document to a matter does not modify the matter).
 
-**FOUR load-bearing methods are executed by NO test** — each with a one-line perturbation that fails ZERO:
-`FindPermissionByEmail` (the A-13 matcher), `CallerRecordAccessProbe.GetCallerRightsAsync` (the project's
-central gate — return `Read|Write` and nothing fails), task 007's query call sites, and the Graph-call error
-path. See findings §3 for the exact perturbations.
+### Then, in order
 
-### 🔔 Owner decision pending — the 7 proposed tasks
+1. **C2 + C3** — the two destroy paths. ⚠️ C2 is NOT a filter attachment:
+   `DocumentCheckoutService.DeleteAsync(Guid, string, CancellationToken)` has **no user-identity
+   parameter at all**, so this is a signature change with call-site fallout.
+2. **C1** — bulk. Needs per-item authorization **plus** an explicit partial-failure contract: the
+   `_FAILED.txt` manifest distinguishes "denied" from "missing", which stays an enumeration oracle
+   even after per-item auth exists.
+3. **H2, H3** — mutate/disclose, per-route operations.
+4. **The 5 URL-minting reads** — they outlive the request; decide whether `read` is right or
+   whether minting deserves its own key.
+5. **The 6 OBO read routes** — decide whether OBO alone suffices; POML escalation trigger if a
+   record check is needed that does not exist.
+6. Tests per gated route + a perturbation for every gate.
 
-Findings §6 proposes **021–027**. Nothing is filed yet; the owner shapes it. Recommended order:
+### Phase 0b — the 8 review tasks are FILED (owner-approved 2026-08-24)
 
-| Task | Covers | Why this priority |
-|---|---|---|
-| **022** | The document-surface sweep (the 3 Criticals + the rest of the class) | **Start here.** Live disclosure AND destroy surface |
-| **021** | Provisioning stamping PATCH: 3 wrong names, 400 swallowed, 200 returned | Since 2026-03 it creates a real BU/container/account and leaves the project pointing at none. ⚠️ The two lookups need `@odata.bind` NAV-PROPERTY names — case-sensitive, NOT derivable from the attribute name, must come from `$metadata`. **Do not guess**; that is the exact failure class. Fix names + fail-loud TOGETHER |
-| **023** | Grant upsert expiry (H1) + amend FR-09's acceptance, which never mentioned expiry | Silent but contained |
-| **025** | The four untested seams + task 003's gate missing `HasRequiredRights` (16 invisible call sites) | This is WHY the rest hid |
-| **024** | SPE Graph paging (both reads use page 1 only, defeating `container_not_cleared`) + `/revoke` 200-on-SPE-failure | |
-| **026** | `views-schema.md` — still the poisoned well behind all five recurrences | Cheap, high leverage |
-| **027** | e2e reconciliation, or an explicit decision to retire a tier no workflow runs | |
+`021`–`028` exist as POMLs and are registered in [`TASK-INDEX.md`](tasks/TASK-INDEX.md).
+Recommended order **022 → 021 → 025 → 023 → 028 → 024**, with **026 and 027 parallel-safe**
+(no deps, no contended code — runnable any time, by anyone).
 
-Remaining original Phase 0: 009 (POML now defused — see below), 011, 012, 013, 015, 018, 020.
+- **021** ⚠️ the three `@odata.bind` names MUST come from `$metadata`. Escalate rather than guess —
+  a wrong nav-prop is silently accepted as an unknown property and the write does not happen.
+- **025** is why the rest could hide: the central gate (`CallerRecordAccessProbe.GetCallerRightsAsync`)
+  can be replaced with "return all rights" and the whole suite stays green.
+- **028** (new, from the task-009 To Do discussion): service request is one of the FOUR core types
+  in the project model but has no accessible set — only project/matter/WA exist.
+
+### Owner decisions recorded 2026-08-24
+
+| Decision | Effect |
+|---|---|
+| **To Do: matter + work assignment get the same functionality as project** | Implemented in `9294f0182`. ⚠️ TWO consequences: matter/WA sets carry NO access level, so membership implies WRITE there (more permissive than project, which requires the `Write` right); and the READ path is still project-only, so PATCH is now WIDER than list. Full parity needs `GetTodosAsync`/`CreateTodoAsync` extended — its own task. |
+| **CI: rely on `CI / Router`; do not chase `SDAP CI`** | Router is green (twice; tier2 ran 24m and 23m32s against the new 30m timeout). SDAP CI stays red on pre-existing latent flakes. **Do NOT register flakes reactively one per ~30-min cycle** — that is the widen-the-tolerance pattern. |
 
 ### Last verified state
 
-**ALL SEVEN test projects — 11,374 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,762 ·
+**ALL SEVEN test projects — 11,389 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,777 ·
 `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
 `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
-Publish **43.69 MB** compressed incl. PDBs (unchanged by tasks 016 + 017 — no packages added; baseline
-44.96, ceiling 60) · `--vulnerable` clean · `dotnet build --warnaserror` succeeds.
+Publish **43.70 MB** compressed incl. PDBs (unchanged by tasks 009 + 022-so-far — no packages added; ceiling 60) · `--vulnerable` clean · `dotnet build --warnaserror` succeeds.
 Frontend: **26** `AccessGrantModal` tests pass — but `node_modules` is **absent in a fresh worktree**, so
 `npm install --legacy-peer-deps --no-audit --no-fund` under
 `src/client/shared/Spaarke.UI.Components` is required before any frontend test edit can be verified.
@@ -259,6 +268,9 @@ caught real gaps every time.
 | **Verify EVERY column you add, not just the ones you came to fix** | The review found five stale-column instances; the fifth was introduced by the same session that fixed three. Fixing an instance of a class does not inoculate the next line you write |
 | **Mocking at a seam proves the CALLER, never the CALLEE** | Task 017: re-swallowing listing failures passed EVERY endpoint test, because the closure tests substitute `RemoveAllExternalMembersAsync` at its seam and never reach `ListExternalMembersAsync`. The fix a binding constraint asked for was untested until a perturbation exposed it. **When a task's deliverable is "make X report failures", test X directly** |
 | **A green local suite is NOT CI — read the gate, not the substitute** | This project reported "11,374 passed locally" as verification for six consecutive commits while `CI / Router` had never once rendered a verdict on the branch (17 runs, 0 successes). Local runs never execute Arch Tests, Changed-Surface Integration Smoke, Auth Smoke, Plugin Size or the Last-Reviewed stamp. **And when the gate is red for reasons that look unrelated to the diff, that is a finding to chase — not noise to route around.** It hid a repo-wide CI defect for weeks |
+| **A check with only a happy-path test is not tested** | Task 009 hit the zero-failure perturbation TWICE. (a) Two guards denied the same case, so a status-code assertion could not tell them apart — deleting the A-7 fix left every test green; fixed by asserting WHICH guard denied. (b) The new work-assignment membership check had a positive test but no negative one — bypassing it entirely failed zero; fixed by adding the negative. **Pair every positive with a negative, and assert the distinguishing observable.** |
+| **Check the `$orderby`, not just the `$select`** | H5's sixth stale-column instance sat one line below a CORRECT `$select`. Reading the select gave a false all-clear for months. Verify EVERY clause that names a column — select, filter, orderby, expand, and `@odata.bind`. |
+| **Do not attach an authorization filter before its operation key exists** | `OperationAccessPolicy.GetRequiredRights` throws on an unknown operation and the filter's catch returns 500 — fail-closed, but that means the route becomes an unconditional 403 for EVERY caller. Already happened once (finance surface + Office save + three document reads); the file's header records it. |
 | **Do not push again while a CI run is in flight** | The 13 cancelled Router runs are self-inflicted: push cadence (13:39 → 13:53 → 15:06 → 15:09 → 15:24) outran a ~9-min Router with `cancel-in-progress: true`, so each push killed the previous verdict. **After the last push of a work session, wait for the gate before pushing again** — otherwise the branch accumulates commits that were never adjudicated |
 | **Look for an existing correct implementation before fixing a broken one** | Task 017's bug was a FORK of working code that had zero callers. Grepping for the method name first turned a "patch the matcher" task into a deletion |
 | **Frontend tests need `npm install` first** | `node_modules` is absent in a fresh worktree; `npm test` fails with "jest is not recognized". Use `npm install --legacy-peer-deps --no-audit --no-fund` (never `npm ci`, per root CLAUDE.md §12) |
