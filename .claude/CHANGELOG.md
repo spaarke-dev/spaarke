@@ -23,6 +23,55 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Fixed — ADR-038 Amendment A1: `tests/Spaarke.ArchTests/**` is now the EIGHTH KEEP path (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 090)
+
+**Closed a contradiction that lived inside ADR-038 itself**, and that had been mitigated at the skill layer
+rather than fixed since 2026-06-26:
+
+- ADR-038 §7 bans **B1–B5** (DI-registration tests, ctor null-check tests, `Mock<HttpMessageHandler>` wiring
+  tests), and its own "Some discovery loss" consequence names *"NetArchTest-style architecture tests at
+  Tier 1"* as the **sanctioned replacement** for what those bans give up.
+- But §2's KEEP-path list enumerated **7** categories and **did not include `tests/Spaarke.ArchTests/**`**.
+- `/test-diet` is a **mandatory gate at every project close** (root CLAUDE.md §7) and classifies anything
+  outside a KEEP path as a path violation → delete candidate. **The gate therefore recommended deleting the
+  exact mechanism the ADR prescribes.**
+
+**Why it persisted for two months**: task 063 fixed the *symptom* (heuristic 0 in `/test-diet`, plus naming
+the category in `tests/CLAUDE.md`). That made the pain stop, which also made the cause invisible — while
+leaving the protection in a skill file and a module directive, neither of which is the ADR. Those drift:
+the same task found `/test-diet`'s path list had *also* been missing `tests/integration/seam/**` since
+2026-07-09, silently making every vertical-slice-seam test in the repo a delete candidate.
+
+**Changed** — all four surfaces moved together so they cannot disagree:
+- `docs/adr/ADR-038-testing-strategy.md` — 7 → **8** KEEP paths; new `structural-fitness-function` row;
+  the "discovery loss" consequence now points at its protected home; full **Amendment A1** record appended
+- `.claude/constraints/testing.md` — "Seven" → "Eight" KEEP path categories + the new row
+- `.claude/skills/test-diet/SKILL.md` — heuristic 1's path list now includes `tests/Spaarke.ArchTests/**`;
+  heuristic 0's ratification note updated from OPEN to RATIFIED. **Heuristic 0 is deliberately retained** —
+  the path fix alone would still let heuristics 2–12 mis-flag fitness functions on naming (B13) and
+  setup-ratio (B15) grounds
+- `tests/CLAUDE.md` — "same terms as the seven paths" → the eighth KEEP path, citing A1
+
+**Evidence the category earns it**: graduation criterion 12 was exercised the same day — a deliberate ninth
+secret-bearing confidential client made `CredentialGuardTests` (FR-F1) and `CredentialCensusTests` (FR-F2)
+fail, naming the offending `file:line`. Note `dotnet build` **succeeds**; the ArchTests fail — the CI gate
+is what fails, not the compiler.
+
+
+### Fixed / Added (2026-08-20 — ADR-010 example corrected + new anti-pattern **AP-7** · `spaarke-auth-v4-dataverse-MI` task 011)
+
+- **Fixed — [`.claude/adr/ADR-010-di-minimalism.md`](adr/ADR-010-di-minimalism.md), "Allowed Seams"**: the example read `services.AddSingleton<IAccessDataSource, DataverseAccessDataSource>()`. That is **not what the code does and must not be copied**. `DataverseAccessDataSource` is a **transient typed HttpClient** (`SpaarkeCore`) decorated by a scoped `CachedAccessDataSource`, and it holds **mutable per-instance auth state** (`_currentToken`, the `HttpClient`'s `Authorization` header) — so a singleton registration is a **data race that can bleed a token between users**, not merely an efficiency question. Corrected to the real registration, with the reason stated inline and a pointer to the pattern that *does* solve expensive shared state on a transient type (a static `(tenant|client|secret-fingerprint)` confidential-client cache). The example's actual point — that `IAccessDataSource` is one of only two sanctioned multi-implementation seams — is unchanged. Surfaced by `code-review` finding S-14 at task 011's Step 9.5 gate.
+
+- **Added — [`.claude/FAILURE-MODES.md`](FAILURE-MODES.md) **AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only**. Task 010 correctly replaced a silent `DefaultAzureCredential` fallback with fail-fast validation, verified with targeted seam tests + build + publish + CVE — all green — and shipped **13 failing contract tests**, found only when task 011 ran the full suite. Root cause generalises: **callers that depend on a silent fallback are by definition invisible at the change site** (they supplied nothing — there is no reference, call, or type dependency to grep for), and a targeted test run selects tests *near* the change, which is exactly the set that excludes them. Prevention: run the FULL suite for any change converting a fallback/default/permissive branch into a throw; and when failures surface in a later task, **stash and re-run before calling them pre-existing** — "fails on master too" and "fails without my current edits" are different claims.
+
+### Changed (2026-08-20 — ADR-028 **A4 adoption CONFIRMED** + E4′ wiring correction · `spaarke-auth-v4-dataverse-MI` task 003)
+
+- **Changed — [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](adr/ADR-028-spaarke-auth-architecture.md), Amendment A4**: added an **ADOPTION STATUS** block recording that A4 is no longer accepted-on-reasoning but **verified on the wire**. Task 002 proved, against a real delegated user token on `spaarke-bff-dev/staging`, that the OBO grant succeeds under a Managed-Identity-issued client assertion — Graph/SPE, Dataverse `user_impersonation` (with `upn` preserved, so row-level authorization still evaluates as the *user*), and long-running OBO — with a negative control that fails loudly when the assertion is minted for the wrong identity. **MI-FIC is the adopted credential; the KV-certificate alternative was NOT taken** (it remains sanctioned where the same-tenant rule cannot hold, e.g. an unresolved cross-tenant Model 2 shape). This closes the question that three prior audits closed *wrongly* on an unrecorded premise.
+
+- **Fixed — same file, A4 "Preferred wiring" section**: annotated that `Microsoft.Identity.Web`'s declarative ordered `ClientCredentials` JSON — presented by A4 as the preferred wiring — **is not usable in this codebase** (finding **E4′**). The repo has zero `EnableTokenAcquisition` / `ITokenAcquisition` / `IDownstreamApi` / `ClientCredentials` in any `.cs`; `AddMicrosoftIdentityWebApi` is inbound validation only; `Spaarke.Dataverse` has no Identity.Web reference. The JSON is retained as accurate *general* Microsoft guidance, but the direct-MSAL `.WithClientAssertion` + `ManagedIdentityClientAssertion` path is the mechanism here — **and the ordered fallback the rollback story depends on must therefore be built, not inherited**. Without this note a reader would configure the JSON, observe no effect, and reasonably conclude MI-FIC does not work.
+
+- **Fixed — [`src/server/api/Sprk.Bff.Api/CLAUDE.md`](../src/server/api/Sprk.Bff.Api/CLAUDE.md)** (task 002, listed here for the auth-surface trail; not a `.claude/` file): removed the assertion that OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"* — the exact false sentence that caused three audits to conclude the secret was permanent — and replaced it with the A4 shape plus the empirical evidence.
+
 ### Removed / Changed (2026-08-20 — God-class LOC ratchet RETIRED; replaced by complexity guidance)
 
 - **Removed — `tests/Spaarke.ArchTests/GodClassGuardTests.cs`** (the hard CI gate on `src/server` file LOC). It gated on line count — the wrong instrument for a gradual, judgment-laden signal — froze existing large files at arbitrary values, and blocked normal feature work on active files (Compose, Chat) with a build failure that had to be hand-waivered. Per ADR-038's own "coverage = observation, never a gate" precedent, **size is now observed and complexity is evaluated by humans where the work is authored.**

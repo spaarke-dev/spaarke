@@ -93,10 +93,18 @@ Set-VaultSecret -Name "BFF-API-ClientId" `
     -Description "BFF API Entra app client ID (update after Register-EntraAppRegistrations.ps1)" `
     -IsPlaceholder $true
 
-Set-VaultSecret -Name "BFF-API-ClientSecret" `
-    -Value "placeholder-update-after-entra-registration" `
-    -Description "BFF API Entra app client secret (update after Register-EntraAppRegistrations.ps1)" `
-    -IsPlaceholder $true
+# BFF-API-ClientSecret is NOT seeded — REMOVED 2026-08-24 (spaarke-auth-v4 task 033, ADR-028 A4).
+# The BFF identity is secret-free: it authenticates as a confidential client using a federated
+# credential issued to its user-assigned managed identity. Seeding a placeholder secret here would
+# re-create the exact hazard this migration removed — an app setting that LOOKS like the credential,
+# so an operator "fixes" auth by populating it and silently restores a secret path.
+#
+# What to provision instead (Register-EntraAppRegistrations.ps1 -CreateFederatedCredential):
+#   issuer    https://login.microsoftonline.com/{tenantId}/v2.0
+#   subject   the UAMI's principalId  — NOT its clientId (the commonest silent failure, FR-B4)
+#   audience  api://AzureADTokenExchange   (exactly)
+# Then set Graph__Credentials__Order__0=ManagedIdentityFederated and
+# Graph__Credentials__RequireSecretFreeIdentity=true on the app.
 
 Set-VaultSecret -Name "BFF-API-Audience" `
     -Value "api://spaarke-bff-api-prod" `
@@ -172,15 +180,11 @@ Set-VaultSecret -Name "ai-search-key" `
     -Description "Azure AI Search admin key (update with real key)" `
     -IsPlaceholder $true
 
-Set-VaultSecret -Name "PromptFlow-Endpoint" `
-    -Value "https://placeholder-promptflow.azurewebsites.net" `
-    -Description "AI Foundry Prompt Flow endpoint (update after AI Foundry setup)" `
-    -IsPlaceholder $true
-
-Set-VaultSecret -Name "PromptFlow-Key" `
-    -Value "placeholder-promptflow-key" `
-    -Description "AI Foundry Prompt Flow API key (update after AI Foundry setup)" `
-    -IsPlaceholder $true
+# PromptFlow-Endpoint / PromptFlow-Key seeding REMOVED 2026-08-21 (auth-v4 task 055, FR-E6).
+# Both were seeded as placeholders and never updated, because nothing ever read them: AnalysisOptions
+# bound the values and no code path consumed either. Seeding a placeholder credential is worse than
+# not seeding one -- it makes the vault look like Prompt Flow is provisioned.
+# See projects/spaarke-auth-v4-dataverse-MI/notes/decisions/055-promptflow-key-disposition.md
 
 # === Monitoring ===
 Write-Host ""

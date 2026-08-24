@@ -23,7 +23,29 @@ public class DataverseWebApiClient : IDisposable
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
-    public DataverseWebApiClient(IConfiguration configuration, ILogger<DataverseWebApiClient> logger)
+    /// <param name="credential">
+    /// Optional pre-built credential. When supplied, credential SELECTION is bypassed entirely —
+    /// neither the managed-identity nor the client-secret branch runs, and no credential
+    /// configuration is required.
+    ///
+    /// <para>Mirrors the <c>TokenCredential? credential = null</c> parameter its sibling
+    /// <see cref="DataverseAccessDataSource"/> already takes (nullable with a null default, so no
+    /// existing caller or test fixture changes). Added at task 011 per code-review finding W-6: test
+    /// doubles that override every virtual seam and issue no HTTP still had to satisfy credential
+    /// config purely to get through this constructor, which coupled them to whichever branch happened
+    /// to be cheapest to configure — and therefore re-broke them whenever that branch changed. Tasks
+    /// 020/022/033 are about to rewrite both branches.</para>
+    /// </param>
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY when neither
+    /// an explicit <paramref name="credential"/> nor managed identity applies — the branch that used to
+    /// build an inline <c>ClientSecretCredential</c>. Nullable with a null default (NFR-04).
+    /// </param>
+    public DataverseWebApiClient(
+        IConfiguration configuration,
+        ILogger<DataverseWebApiClient> logger,
+        TokenCredential? credential = null,
+        IConfidentialClientProvider? confidentialClients = null)
     {
         _logger = logger;
 
@@ -33,24 +55,54 @@ public class DataverseWebApiClient : IDisposable
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        // Use client credentials (same as DataverseServiceClientImpl) when available.
-        // Falls back to DefaultAzureCredential (managed identity) if client credentials not configured.
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
-        var tenantId = configuration["TENANT_ID"];
+        // FR-A1 (auth-v4 task 010): select the credential from the Graph:ManagedIdentity:Enabled
+        // FLAG, not from secret presence. Previously the mere presence of API_CLIENT_SECRET selected
+        // the secret path -- and on dev the secret IS present because OBO needs it, so this class ran
+        // on the client secret despite MI being enabled. Gating shape copied from
+        // DataverseWebApiService.cs (already corrected by #3b) so both read the same switch.
+        // This class has no OBO path, so the app-only credential is the only concern here.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId))
+        if (credential is not null)
         {
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-            _logger.LogInformation("DataverseWebApiClient using client credentials for {ApiUrl}", _apiUrl);
+            // Explicitly supplied — selection is bypassed. See the ctor's <param> doc.
+            _credential = credential;
+            _logger.LogInformation(
+                "DataverseWebApiClient using an injected TokenCredential (selection bypassed) for {ApiUrl}", _apiUrl);
         }
-        else
+        else if (useManagedIdentity)
         {
-            var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
+            var managedIdentityClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
             _credential = new DefaultAzureCredential(string.IsNullOrEmpty(managedIdentityClientId)
                 ? new DefaultAzureCredentialOptions()
                 : new DefaultAzureCredentialOptions { ManagedIdentityClientId = managedIdentityClientId });
-            _logger.LogInformation("DataverseWebApiClient using DefaultAzureCredential for {ApiUrl}", _apiUrl);
+            _logger.LogInformation(
+                "DataverseWebApiClient using Managed Identity (ADR-028; clientId {ClientId}) for {ApiUrl}",
+                managedIdentityClientId ?? "(system-assigned)", _apiUrl);
+        }
+        else
+        {
+            var clientId = configuration["API_APP_ID"];
+            var tenantId = configuration["TENANT_ID"];
+
+            if (string.IsNullOrEmpty(tenantId))
+                throw new InvalidOperationException("TENANT_ID configuration is required (Managed Identity disabled)");
+            if (string.IsNullOrEmpty(clientId))
+                throw new InvalidOperationException("API_APP_ID configuration is required (Managed Identity disabled)");
+
+            // auth-v4 task 022 (FR-B3): ordered credential selection replaces the inline
+            // ClientSecretCredential. Same app registration, same client-credentials grant.
+            if (confidentialClients is null)
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required when Managed Identity is disabled "
+                    + "(Graph:ManagedIdentity:Enabled is not true) and no TokenCredential was supplied. "
+                    + "Inside the BFF it is registered by AuthorizationModule.AddCredentialSelection.");
+
+            _credential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
+            _logger.LogInformation(
+                "DataverseWebApiClient using the ordered credential provider (ADR-028 A4) for {ApiUrl}", _apiUrl);
         }
 
         _httpClient = new HttpClient

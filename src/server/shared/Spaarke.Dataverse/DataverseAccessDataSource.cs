@@ -19,26 +19,72 @@ public class DataverseAccessDataSource : IAccessDataSource
     private readonly ILogger<DataverseAccessDataSource> _logger;
     private readonly HttpClient _httpClient;
     private readonly TokenCredential _credential;
-    private readonly IConfidentialClientApplication? _cca;
+
+    /// <summary>
+    /// Supplies the OBO confidential client, with the credential already selected from the configured
+    /// ordered list (MI-FIC → Key Vault certificate → transitional secret).
+    ///
+    /// <para><b>This class is the only reason the contract exists.</b> The three BFF-side consumers
+    /// (<c>GraphClientFactory</c>, <c>DataverseUserClient</c>, <c>AgentTokenService</c>) inject the
+    /// implementation concretely. This one is in <c>Spaarke.Dataverse</c> — the base layer, CI-enforced
+    /// to reference no other Spaarke project (FR-14) — so it can only receive a BFF-owned credential by
+    /// dependency inversion.</para>
+    ///
+    /// <para>Null outside the BFF DI container (tooling, direct construction in tests), in which case
+    /// delegated access <b>fails closed</b>, exactly as a missing confidential client did before
+    /// task 022.</para>
+    /// </summary>
+    private readonly IConfidentialClientProvider? _confidentialClients;
+
+    /// <summary>Directory (tenant) id the OBO exchange authenticates against. Null when unconfigured.</summary>
+    private readonly string? _tenantId;
+
+    /// <summary>App registration the OBO exchange authenticates AS — never the UAMI clientId (FR-B4).</summary>
+    private readonly string? _clientId;
+
     private readonly string _apiUrl;
     private readonly string _dataverseScope;
     private AccessToken? _currentToken;
 
+    /// <summary>
+    /// Whether delegated (OBO) access can be attempted at all. Task 022 changed what this depends on,
+    /// and the change is the point of the task: it used to require a client <b>secret</b>, and now
+    /// requires only an identity plus a credential provider. Which credential actually proves that
+    /// identity is the provider's decision, re-made per call and recoverable — not a fact frozen into
+    /// this object at construction.
+    /// </summary>
+    private bool OboAvailable =>
+        _confidentialClients is not null
+        && !string.IsNullOrEmpty(_tenantId)
+        && !string.IsNullOrEmpty(_clientId);
+
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021, FR-B2), supplied by the BFF. <b>Replaces the
+    /// <c>IClientAssertionProvider assertion</c> parameter</b> that task 020 threaded in here as a
+    /// placeholder: selection spans assertion / certificate / secret and only the first of those IS an
+    /// assertion, so the seam this class actually needs is the client-level one. The assertion contract
+    /// is still what mints the MI-FIC credential — one level down, inside the provider.
+    ///
+    /// <para>Nullable with a null default, deliberately: this mirrors <c>credential</c> above and is
+    /// what keeps the existing test fixtures compiling unchanged (NFR-04). A required parameter would
+    /// break every one of them.</para>
+    /// </param>
     public DataverseAccessDataSource(
         IDataverseService dataverseService,
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseAccessDataSource> logger,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        IConfidentialClientProvider? confidentialClients = null)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confidentialClients = confidentialClients;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
         var tenantId = configuration["TENANT_ID"];
         var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"]; // Same app registration as Graph
 
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
@@ -46,34 +92,102 @@ public class DataverseAccessDataSource : IAccessDataSource
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _dataverseScope = $"{dataverseUrl.TrimEnd('/')}/.default";
 
-        // Use ClientSecretCredential when configured (enables OBO token exchange), else use the
-        // DI-injected TokenCredential (UAMI-pinned via the BFF's ManagedIdentityCredentialFactory).
-        // Constructor TokenCredential is optional for backwards-compat with non-DI instantiation;
-        // production registrations from BFF will always provide it.
-        if (!string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
+        // ---------------------------------------------------------------------------------------
+        // FR-A1 (auth-v4 task 010) — DECOUPLED credential selection.
+        //
+        // These are TWO INDEPENDENT concerns and used to share a single `if`:
+        //   (1) _credential — the APP-ONLY token used by EnsureAuthenticatedAsync.
+        //   (2) _cca        — the OBO confidential client for DELEGATED (per-user) access.
+        //
+        // The old shape selected BOTH on "is a client secret present?", which had two bugs:
+        //   * The app-only path ignored Graph:ManagedIdentity:Enabled entirely, so on dev — where
+        //     API_CLIENT_SECRET is set BECAUSE OBO needs it — this class ran on the client secret
+        //     even though MI was enabled. That is the defect FR-A1 exists to fix.
+        //   * Fixing that naively (copying DataverseWebApiService's plain if/else) would have put
+        //     `_cca = null` in the MI branch, so enabling MI would DISABLE OBO and every delegated
+        //     access check would throw at GetDataverseTokenViaOBOAsync. DataverseWebApiService is a
+        //     safe template only because it has no OBO path; this class does.
+        //
+        // So: gate (1) on the flag, and make (2) available whenever an identity plus a credential
+        // provider exist — independent of the flag. DefaultAzureCredential cannot perform an OBO
+        // exchange (ADR-028 A4), and the MI flag says nothing about delegated access.
+        //
+        // TASK 022: neither concern constructs a credential inline any more. (2) asks the provider at
+        // the moment of the exchange; (1)'s secret branch is a provider-backed TokenCredential. The
+        // decoupling above is preserved exactly — it is still two independent selections, and the
+        // source-analysis guard task 060 adds exists to keep them from being "simplified" back into one
+        // if/else that would set the OBO client to null whenever MI is enabled.
+        // ---------------------------------------------------------------------------------------
+
+        _tenantId = tenantId;
+        _clientId = clientId;
+
+        // (1) APP-ONLY credential — gated by the flag.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
+
+        if (useManagedIdentity)
         {
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-            _logger.LogInformation("DataverseAccessDataSource using ClientSecretCredential for service principal auth");
-
-            // Initialize MSAL for OBO token exchange
-            _cca = ConfidentialClientApplicationBuilder
-                .Create(clientId)
-                .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
-                .WithClientSecret(clientSecret)
-                .Build();
-
-            _logger.LogInformation("DataverseAccessDataSource initialized with OBO support");
+            // BFF-FIX-2026-05-24: prefer the DI-injected TokenCredential (pinned to the UAMI clientId
+            // by the BFF's ManagedIdentityCredentialFactory). Fall back to DefaultAzureCredential for
+            // instantiation outside the BFF DI container (tooling, integration tests).
+            var miClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
+            _credential = credential ?? new DefaultAzureCredential(
+                string.IsNullOrEmpty(miClientId)
+                    ? new DefaultAzureCredentialOptions()
+                    : new DefaultAzureCredentialOptions { ManagedIdentityClientId = miClientId });
+            _logger.LogInformation(
+                "DataverseAccessDataSource app-only auth: Managed Identity (ADR-028; {CredentialKind}, clientId {ClientId})",
+                credential != null ? "DI-injected TokenCredential" : "DefaultAzureCredential (fallback)",
+                miClientId ?? "(system-assigned)");
         }
         else
         {
-            // BFF-FIX-2026-05-24: prefer the DI-injected TokenCredential (pinned to UAMI clientId).
-            // Falls back to DefaultAzureCredential() for cases where this type is instantiated
-            // outside the BFF DI container (e.g. tooling, integration tests).
-            _credential = credential ?? new DefaultAzureCredential();
-            _cca = null; // No OBO support with managed identity
+            // Fail fast with an actionable message rather than handing back a null/unusable credential.
+            // The IDENTITY is still required here — it is what the token is issued to, and no provider
+            // can supply it. What is NO LONGER required is the client SECRET: which credential proves
+            // this identity is the provider's ordered decision (FR-B2/FR-B5), and whether ANY credential
+            // is obtainable is checked once at startup by IdentityConfigurationValidator rule 4 rather
+            // than re-derived here. Task 022.
+            if (string.IsNullOrEmpty(tenantId))
+                throw new InvalidOperationException("TENANT_ID configuration is required (Graph:ManagedIdentity:Enabled is not true)");
+            if (string.IsNullOrEmpty(clientId))
+                throw new InvalidOperationException("API_APP_ID configuration is required (Graph:ManagedIdentity:Enabled is not true)");
+            if (confidentialClients is null)
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required for app-only authentication when "
+                    + "Graph:ManagedIdentity:Enabled is not true. Inside the BFF it is registered by "
+                    + "AuthorizationModule.AddCredentialSelection; constructing this type directly "
+                    + "requires supplying one (previously this branch built a ClientSecretCredential "
+                    + "from API_CLIENT_SECRET inline — removed by auth-v4 task 022, ADR-028 A4).");
+
+            // No per-instance token cache to worry about any more: the provider owns the ONE client
+            // cache, and MSAL caches the app token on that client. FR-A2's SecretCredentialCache
+            // existed only because ClientSecretCredential cached per instance and this type is
+            // transient; that reason is gone with the credential.
+            _credential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
             _logger.LogInformation(
-                "DataverseAccessDataSource using {CredentialKind} - OBO not available",
-                credential != null ? "DI-injected TokenCredential" : "DefaultAzureCredential (fallback)");
+                "DataverseAccessDataSource app-only auth: ordered credential provider (ADR-028 A4)");
+        }
+
+        // (2) OBO delegated access — INDEPENDENT of the MI flag, and no longer dependent on a secret.
+        //     The confidential client is fetched from the provider at the moment of the exchange
+        //     (GetDataverseTokenViaOBOAsync), not built here: the provider's contract is async because
+        //     selection PROVES a credential before binding it, and a constructor cannot await.
+        if (OboAvailable)
+        {
+            _logger.LogInformation(
+                "DataverseAccessDataSource delegated auth: OBO available via the ordered credential provider");
+        }
+        else
+        {
+            _logger.LogWarning(
+                "DataverseAccessDataSource delegated auth: OBO NOT available ({Reason}). "
+                + "Delegated access checks will fail closed.",
+                _confidentialClients is null
+                    ? "no IConfidentialClientProvider was supplied"
+                    : "TENANT_ID / API_APP_ID are not configured");
         }
     }
 
@@ -104,18 +218,26 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// <returns>Dataverse access token for the user</returns>
     private async Task<string> GetDataverseTokenViaOBOAsync(string userAccessToken, CancellationToken ct = default)
     {
-        if (_cca == null)
+        if (!OboAvailable)
         {
             throw new InvalidOperationException(
-                "OBO authentication requires client credentials to be configured. " +
-                "Ensure TENANT_ID, API_APP_ID, and API_CLIENT_SECRET are set.");
+                "OBO authentication requires an identity and a confidential-client provider. " +
+                "Ensure TENANT_ID and API_APP_ID are set and an IConfidentialClientProvider is supplied.");
         }
 
         _logger.LogDebug("Performing OBO token exchange for Dataverse access");
 
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            // Asked per exchange rather than held: the provider owns the ONE client cache (so this is
+            // a dictionary lookup on the hot path) AND re-evaluates the credential once a skipped
+            // higher-priority one stops being suppressed. Caching the client in a field here would
+            // defeat that recovery and pin the process to a fallback after a single transient blip.
+            var cca = await _confidentialClients!
+                .GetClientAsync(_tenantId!, _clientId!, ct)
+                .ConfigureAwait(false);
+
+            var result = await cca.AcquireTokenOnBehalfOf(
                 new[] { _dataverseScope },
                 new UserAssertion(userAccessToken))
                 .ExecuteAsync(ct);

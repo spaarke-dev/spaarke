@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Azure AI Search: migrate both key sites to Entra/MI (FR-E4)</title>
+    <phase>5 Group 2</phase>
+    <gate>code-complete-pending-deploy</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs on the RAG retrieval path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard Entra migration for a first-party Azure service.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,ai,search,api-key</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Azure AI Search supports Entra authentication. Migrate both key-based sites — AiSearch:ReferencesApiKey read directly in InternalIndexProvider, and AiSearchOptions.ApiKeySecretName — to the DI-injected TokenCredential.</prompt>
+  <role>SPAARKE platform developer with Azure AI Search experience.</role>
+  <goal>Both AI Search paths authenticate via managed identity; RAG retrieval and citation resolution are unchanged.</goal>
+
+  <context>
+    <background>InternalIndexProvider.cs:80-88 throws if AiSearch:ReferencesApiKey is unset; AiSearchOptions.cs:6 carries a KV secret name. Both are first-party Azure services where Entra auth is available — the Group 2 pattern.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/InternalIndexProvider.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: use the DI-injected TokenCredential singleton, not an inline DefaultAzureCredential.</constraint>
+    <constraint source="project">Scope: the UAMI needs Search Index Data Reader (and Contributor where indexing occurs) before keys are cleared. Verify first.</constraint>
+    <constraint source="project">Scope: RAG retrieval quality and citation resolution must be unchanged — this is an auth change, not a retrieval change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure AI Search, Entra auth, RBAC</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Verify UAMI RBAC on the Search service.</step>
+    <step>Migrate InternalIndexProvider to the DI TokenCredential.</step>
+    <step>Migrate the AiSearchOptions-based path.</step>
+    <step>Verify RAG retrieval and citations against a known query set.</step>
+    <step>Clear the keys from config and Key Vault.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Search RBAC cannot be granted, or Entra auth is disabled on the Search service — STOP; do not clear the keys.</trigger>
+    <trigger>Retrieval results change — STOP; that indicates the migration altered more than authentication.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/InternalIndexProvider.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Both AI Search paths authenticate via managed identity with no key configured.</criterion>
+    <criterion>RAG retrieval returns identical results for a known query set.</criterion>
+    <criterion>Negative case: with RBAC absent, the provider fails with an actionable message rather than returning empty results — a silent empty retrieval would look like a content problem.</criterion>
+    <criterion>Keys removed from config and Key Vault.</criterion>
+  </acceptance-criteria>
+</task>

@@ -69,7 +69,8 @@ All errors return RFC 7807 ProblemDetails. Domain-specific variants add extensio
 | Group | Route Prefix | Auth Filter |
 |-------|-------------|-------------|
 | OBO file operations | `/api/obo/` | `RequireRateLimiting` (graph-read/write) |
-| Container management | `/api/containers` | `RequireAuthorization("canmanagecontainers")` |
+| Container management | `/api/spe/containers` | SpeAdmin group auth |
+| ~~Container management~~ | ~~`/api/containers`~~ | `RequireAuthorization("canmanagecontainers")` — **BROKEN: 403 to every caller.** Collection route under a per-resource policy; `ResourceAccessHandler` fails before any SPE call. Verified live 2026-08-24 (auth-v4 task 031). Use `/api/spe/containers`. |
 | AI Chat | `/api/ai/chat/` | `AddAiAuthorizationFilter()` |
 | AI Analysis | `/api/ai/analysis/` | `AddAnalysisExecuteAuthorizationFilter()` |
 | AI RAG | `/api/ai/rag/` | `AddTenantAuthorizationFilter()` |

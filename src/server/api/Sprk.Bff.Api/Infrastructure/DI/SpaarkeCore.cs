@@ -36,6 +36,30 @@ public static class SpaarkeCore
 
         // Register HttpClient for DataverseAccessDataSource (handles its own authentication)
         // Step 1: Register the concrete DataverseAccessDataSource with its typed HttpClient
+        //
+        // FR-A2 (auth-v4 task 011) — this registration STAYS as AddHttpClient (transient), by
+        // decision. Task 011 was authored as "change this registration accordingly". Two reasons not
+        // to; the second is the one that actually forbids it.
+        //
+        //   1. Promoting a typed HttpClient to singleton pins one HttpMessageHandler for process
+        //      lifetime, defeating the handler rotation and DNS refresh IHttpClientFactory provides.
+        //      (On its own this is arguable — PooledConnectionLifetime can address it.)
+        //   2. DECISIVE: DataverseAccessDataSource holds MUTABLE, NON-THREAD-SAFE PER-INSTANCE AUTH
+        //      STATE — the _currentToken field and _httpClient.DefaultRequestHeaders.Authorization,
+        //      both written in EnsureAuthenticatedAsync. A singleton would share one Authorization
+        //      header across all concurrent requests, which is a data race that can BLEED A TOKEN
+        //      BETWEEN USERS. Not a performance tradeoff — a correctness and security defect.
+        //      Do not promote this registration without first removing that per-instance state.
+        //
+        // The DI-lifetime hazard the task targets is the credential objects rebuilt per resolution —
+        // fixed inside the class by static (tenant|client|secret-fingerprint) caches for both the OBO
+        // confidential client and the app-only ClientSecretCredential, the same shape
+        // DataverseUserClient (also a transient typed HttpClient) already uses.
+        //
+        // Note on the app-only path: in the MANAGED-IDENTITY branch the credential is the DI-injected
+        // singleton TokenCredential (Program.cs:46) and was never per-request. In the SECRET branch it
+        // was, and is now cached. An earlier version of this comment claimed the app-only path had no
+        // per-request rebuild at all — true of the MI branch only (code-review finding W-3).
         services.AddHttpClient<DataverseAccessDataSource>((sp, client) =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();

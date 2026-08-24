@@ -31,6 +31,8 @@ public class RecordMatchService : IRecordMatchService
 
     public RecordMatchService(
         IOptions<DocumentIntelligenceOptions> options,
+        IConfiguration configuration,
+        Azure.Core.TokenCredential credential,
         ILogger<RecordMatchService> logger)
     {
         _options = options.Value;
@@ -38,12 +40,12 @@ public class RecordMatchService : IRecordMatchService
 
         if (string.IsNullOrWhiteSpace(_options.AiSearchEndpoint))
             throw new InvalidOperationException("AiSearchEndpoint is not configured.");
-        if (string.IsNullOrWhiteSpace(_options.AiSearchKey))
-            throw new InvalidOperationException("AiSearchKey is not configured.");
 
+        // auth-v4 task 053 (FR-E4): AiSearchKey is no longer required - an absent key selects Entra
+        // (managed identity). The endpoint remains required because there is nothing to infer it from.
         var searchUri = new Uri(_options.AiSearchEndpoint);
-        var credential = new AzureKeyCredential(_options.AiSearchKey);
-        _searchClient = new SearchClient(searchUri, _options.AiSearchIndexName, credential);
+        _searchClient = Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateSearchClient(
+            searchUri, _options.AiSearchIndexName, _options.AiSearchKey, configuration, credential);
     }
 
     /// <inheritdoc />

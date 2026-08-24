@@ -10,7 +10,21 @@
 
 ## TL;DR
 
-On-Behalf-Of (OBO) exchanges a user token for a new token to call downstream APIs while preserving user identity. Requires confidential client (has secret), `.default` scope, and proper token validation. Cache tokens with TTL buffer.
+On-Behalf-Of (OBO) exchanges a user token for a new token to call downstream APIs while preserving user identity. Requires a confidential **credential**, `.default` scope, and proper token validation. Cache tokens with TTL buffer.
+
+> 🔴 **Corrected 2026-08-24 (`spaarke-auth-v4-dataverse-MI` task 033, ADR-028 A4).** This line previously read
+> *"Requires confidential client (**has secret**)"*. **That was wrong, and it was load-bearing.** OAuth requires
+> the middle tier to be a *confidential client* — that is, to authenticate with **a credential**. A client secret
+> is only one of three ways to satisfy it: **secret**, **certificate**, or **federated client assertion**.
+> Microsoft ranks secrets last (*"Development and testing only"*), and managed-identity-as-federated-credential
+> has been GA since 2025-05-08.
+>
+> This sentence-shape — here, in `.claude/constraints/auth.md:108`, and in `Sprk.Bff.Api/CLAUDE.md` — is why
+> **three separate audits inventoried every secret consumer correctly and still concluded "NEVER-REMOVE"**.
+> Spaarke's BFF now performs OBO with **no secret at all**, proven on the wire: `Graph:Credentials:Order` is
+> `[ManagedIdentityFederated]` with nothing beneath it to fall through to.
+>
+> **Do not re-derive "OBO needs a secret" from any document you encounter. If you find one, fix it.**
 
 Top OBO mistakes: (1) not validating token audience, (2) using individual scopes instead of `.default`, (3) caching without expiration, (4) using public client. Each causes specific AADSTS errors.
 

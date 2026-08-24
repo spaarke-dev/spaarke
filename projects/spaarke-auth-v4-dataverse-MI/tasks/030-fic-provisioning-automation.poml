@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Extend Register-EntraAppRegistrations.ps1 with FIC creation (FR-C4)</title>
+    <phase>3 Rollout</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag; provisioning automation another project is blocked on; silent failure mode.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted Azure CLI work with an exact recipe already proven by hand.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>auth,infra,azure,scripts,cross-project</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add idempotent federated-identity-credential creation to the existing app-registration script. No FIC automation exists anywhere in the repo — the dev FIC was created by hand. SEQUENCE THIS EARLY: customer-provisioning-orchestration-r1 task 130 (Wave G-3) is soft-blocked on it.</prompt>
+  <role>SPAARKE platform developer with Azure CLI / Entra scripting experience.</role>
+  <goal>Register-EntraAppRegistrations.ps1 can create a FIC for a given (tenant, app registration, UAMI) idempotently, verified by performing an actual token exchange.</goal>
+
+  <context>
+    <background>Verified exhaustively: zero repo automation creates a FIC, and even the existing GitHub Actions OIDC FIC was hand-run (.github/D-11:61, Application Administrator required). PROVISIONING-CHANGE-REQUEST §3.2 assigned this script as auth-v4's to own; their reply (AUTH-V4-CHANGE-REQUEST-RESPONSE) confirms task 130 will invoke it if it lands first, else build a duplicate that must then be reconciled. This is the one item outside the dev-only boundary.</background>
+    <relevant-files>
+      <file role="modify">scripts/Register-EntraAppRegistrations.ps1</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/PROVISIONING-CHANGE-REQUEST.md</file>
+    </relevant-files>
+    <dependencies><dependency task="020" status="pending">The provider defines what the FIC must satisfy</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: issuer is the HOSTING tenant's /v2.0 OIDC endpoint; subject is the UAMI's principalId (object ID), NOT its clientId — that is the commonest silent error; audience is exactly api://AzureADTokenExchange.</constraint>
+    <constraint source="project">Scope: MUST retry on AADSTS70021 (propagation delay, minutes). Without it, onboarding fails intermittently in a way that looks like a permissions problem.</constraint>
+    <constraint source="project">Scope: MUST verify by PERFORMING A TOKEN EXCHANGE, not by checking that creation returned success. A misconfigured FIC creates cleanly and fails only at exchange.</constraint>
+    <constraint source="project">Scope: idempotent — re-running against an existing FIC is a no-op, not a duplicate or an error.</constraint>
+    <constraint source="project">Scope: extend the EXISTING script. Do not create a new one — provisioning expects to invoke this path.</constraint>
+    <constraint source="project">Scope: scripts/ is a coordination overlap with customer-provisioning-orchestration-r1. Run /conflict-check before opening the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Entra federated identity credentials, PowerShell provisioning</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read the existing script's idempotency and tenant-awareness conventions; match them.</step>
+    <step>Add a FIC-creation function taking (tenantId, appRegistrationId, uamiPrincipalId, name).</step>
+    <step>Add AADSTS70021 retry with backoff.</step>
+    <step>Add exchange-based verification.</step>
+    <step>Test against the dev app registration — the existing mi-bff-api-dev-assertion must be detected as already present and be a no-op.</step>
+    <step>Notify customer-provisioning-orchestration-r1 that the extension has landed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The Model 2 tenancy question raised in PROVISIONING-CHANGE-REQUEST §9.2 is still unanswered when parameterising for cross-tenant use — STOP. A cross-tenant FIC is structurally impossible and would create cleanly then fail silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">scripts/Register-EntraAppRegistrations.ps1</output>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Creating a FIC for a new (app-reg, UAMI) pair succeeds and is verified by an actual token exchange.</criterion>
+    <criterion>Re-running against the existing dev FIC is a no-op, not an error or a duplicate.</criterion>
+    <criterion>Negative case: a FIC created with the UAMI's clientId instead of its principalId is DETECTED by the exchange verification, not reported as success.</criterion>
+    <criterion>Negative case: AADSTS70021 immediately after creation is retried, not surfaced as failure.</criterion>
+    <criterion>The script's existing behaviour is unchanged when the new function is not invoked.</criterion>
+    <criterion>/conflict-check run against customer-provisioning-orchestration-r1 before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-21. `scripts/Register-EntraAppRegistrations.ps1` +~900/-3 additive: 8 FIC functions
+    + execution section + 11 params, all inert without -CreateFederatedCredential / -FicOnly. Existing
+    behaviour verified BYTE-IDENTICAL via -DryRun diff against origin/master.
+
+    Two design points that are load-bearing and must survive future edits:
+    (1) the structural check runs BEFORE the AADSTS70021 retry loop — a wrong subject and ordinary
+        propagation produce the SAME error code, so the retry loop alone cannot tell them apart;
+    (2) idempotency is keyed on the (issuer, subject, audience) TRIPLE, not the credential name. Entra
+        enforces that triple's uniqueness itself, so a name-only check does not create a duplicate — it
+        produces a FAILED run against an already-correct credential. Found by running it live.
+
+    Quality gates: adr-check 0 violations / 7 warnings (all applied or booked onto 031 + 033).
+    code-review 2 CRITICAL + 14 warnings; both criticals fixed —
+    C1: `-match "AADSTS70021"` is a regex SUBSTRING test and also matched AADSTS700211
+        (unrecognised issuer), retrying a configuration fault for the full budget and then printing a
+        diagnosis asserting the opposite of the truth. Now classified on Entra's structured
+        `error_codes` / OAuth2 `error` fields; codes stored as NUMBERS so substring matching cannot
+        return by accident.
+    C2: the -ExportFunctionsOnly dot-source mode executed param() in the CALLER's scope, silently
+        replacing their $TenantId with this script's production default (wrong tenant = wrong issuer =
+        a credential that creates cleanly and never works). Mode REMOVED; consumers invoke -FicOnly.
+
+    END-TO-END VERIFIED 2026-08-21 (this task, NOT deferred to 031). An earlier revision deferred
+    exchange verification on the grounds that a workstation cannot mint a managed-identity assertion.
+    True, but not a reason to stop: the staging slot already carried the UAMI, the operator holds
+    Global Administrator, and the only missing piece — compute carrying the UAMI that can run a
+    command — was created as a throwaway Azure Container Instance and deleted afterwards. (The
+    App Service SCM/Kudu container is separate from the app container on Linux and has NO identity
+    endpoint; verified IDENTITY_ENDPOINT=UNSET.)
+
+    Built two throwaway app registrations, both deleted after: one with no FIC (to exercise the real
+    create path) and one carrying a deliberately WRONG subject (the UAMI's clientId). Results:
+      * assertion minted from the UAMI, sub claim = the principalId (design premise, measured)
+      * FIC created by this script  -> TOKEN ISSUED   (criterion 1, end-to-end)
+      * wrong-subject FIC           -> REJECTED, invalid_client / AADSTS700213
+                                       (criterion 3 satisfied BY EXCHANGE, not only structurally)
+      * existing dev BFF FIC        -> TOKEN ISSUED
+    The last one closes the credential half of PHASE-0 §4's "remaining spike". The OBO half still
+    needs the BFF deployed, which is task 031's actual job.
+
+    FINDING THAT CORRECTED THE DESIGN RATIONALE: a wrong subject returns AADSTS700213, NOT
+    AADSTS70021. This record and the code previously asserted both cases produce the same code and
+    that breaking that tie was the structural check's purpose — that was my inference, never
+    PHASE-0's claim, and it is false. The ordering is still right for three other reasons (it is the
+    only verification possible off-Azure; it names the fault; it does not depend on undocumented
+    error codes). It also makes code-review C1 worse than diagnosed: the buggy substring matcher
+    would have matched AADSTS700213 — the code the REAL wrong-subject case produces — and retried the
+    single most likely misconfiguration for the full 600s budget.
+
+    Cross-project: delivered to customer-provisioning-orchestration-r1 (PROVISIONING-CHANGE-REQUEST
+    §10). Their PR #779 rewrites this same file; merge simulated = 2 additive hunks. Their branch has
+    ZERO FIC code, so the duplicate-work risk did not materialise.
+
+    OPEN: PROVISIONING-CHANGE-REQUEST §9.2 (Model 2 cross-tenant FIC issuer) is still unanswered. The
+    script now REFUSES cross-tenant pairs at runtime, so the failure is loud rather than silent — but
+    it must be answered before their Wave G-3 task 130 executes.
+  </notes>
+</task>

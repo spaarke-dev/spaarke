@@ -47,7 +47,10 @@ public static class GraphModule
         {
             var config = sp.GetRequiredService<IConfiguration>();
             var logger = sp.GetRequiredService<ILogger<DataverseServiceClientImpl>>();
-            return new DataverseServiceClientImpl(config, logger);
+            // auth-v4 task 022: supplies the credential for the managed-identity-disabled branch.
+            // GetService (not GetRequiredService) — the provider is optional by contract, and that
+            // branch is the only consumer.
+            return new DataverseServiceClientImpl(config, logger, sp.GetService<IConfidentialClientProvider>());
         });
 
         // DataverseWebApiService - uses REST/HttpClient (no WCF). Handles event operations
@@ -59,7 +62,8 @@ public static class GraphModule
             var httpClient = factory.CreateClient("DataverseWebApi");
             var config = sp.GetRequiredService<IConfiguration>();
             var logger = sp.GetRequiredService<ILogger<DataverseWebApiService>>();
-            return new DataverseWebApiService(httpClient, config, logger);
+            // auth-v4 task 022 — as above, for the managed-identity-disabled branch.
+            return new DataverseWebApiService(httpClient, config, logger, sp.GetService<IConfidentialClientProvider>());
         });
 
         // Narrow interface forwarding registrations (ADR-010: forwarding delegates don't count as new types).
