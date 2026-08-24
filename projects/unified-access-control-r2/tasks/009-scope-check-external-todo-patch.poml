@@ -4,7 +4,7 @@
     <title>FR-08: Scope-check PATCH /api/v1/external/todos/{id} (+ H-8a comment cleanup)</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (external write endpoint) — FULL per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -105,6 +105,25 @@
   </acceptance-criteria>
 
   <notes>Spec FR-08; finding A-7; H-8a rider. Phase 3 will make sprk_todo a scoped child module — this fix is the Phase 0 stopgap on the write path; keep the mechanism aligned with the read path so Phase 3 can subsume it.</notes>
+
+  <completion date="2026-08-24">
+    <summary>FR-08 / A-7 closed. The PATCH handler now resolves the to-do's regarding-project via the
+    new ExternalDataService.GetTodoProjectAsync (mirroring task 027's GetDocumentProjectAndNameAsync)
+    and denies unless the root is in the caller's accessible set AND the caller holds Write. ADR-003
+    fail-closed on absent / unreadable / no-resolvable-root. H-8a stale comments corrected in this file.</summary>
+    <escalation-fired>YES — the regarding-scope trigger. sprk_todo has 13 regarding-parent lookups
+    (live metadata; the code said 11) and only 3 map to a CallerPrincipal accessible set. Shipped
+    project-only + deny-the-rest, which keeps the write surface exactly as wide as the project-scoped
+    read surface. Whether matter / work-assignment parents should be PATCHable is an OPEN OWNER
+    DECISION — see notes/task-009-external-todo-scope.md.</escalation-fired>
+    <coverage>tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs — 9 tests.
+    Perturbations: remove HasProjectAccess 1 fail · remove Write-rights 1 fail · write-before-check
+    8 fails · drop 404 guard 1 fail. The FIRST perturbation initially failed ZERO (the rights check
+    redundantly denies out-of-scope); fixed by asserting WHICH guard denied, per the review constraint.</coverage>
+    <gates>11,383 passed / 0 failed across all 7 projects · --warnaserror clean · publish 43.70 MB
+    compressed incl PDBs (ceiling 60, baseline 43.69) · no vulnerable packages</gates>
+    <notes-doc>projects/unified-access-control-r2/notes/task-009-external-todo-scope.md</notes-doc>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

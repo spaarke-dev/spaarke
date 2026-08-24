@@ -222,10 +222,55 @@ public class ExternalDataService
     // To Do queries and mutations (smart-todo-decoupling-r3 FR-29)
     //
     // Replaces the legacy event-based to-do surface. To-dos are scoped
-    // to a project via sprk_regardingproject (one of the 11 regarding lookups
-    // on sprk_todo). When a create writes a project association, the four
-    // resolver fields are applied atomically per ADR-024.
+    // to a project via sprk_regardingproject (one of the 13 regarding-parent
+    // lookups on sprk_todo — count corrected from "11" against live metadata
+    // 2026-08-24, unified-access-control-r2 task 009). When a create writes a
+    // project association, the four resolver fields are applied atomically per
+    // ADR-024.
     // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the to-do's regarding-project id and display name — used by the external PATCH
+    /// endpoint (task 009 / FR-08 / finding A-7) to scope a to-do write to the caller's accessible
+    /// root set BEFORE any mutation. App-only Dataverse read. Deliberately mirrors
+    /// <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which solves the same
+    /// child-record-to-root authorization problem for documents.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>ADR-003 fail-closed contract.</b> <c>GetSingleAsync</c> collapses HTTP 404,
+    /// any non-success status, AND thrown exceptions all to <c>null</c>. A <c>(null, null)</c>
+    /// result therefore means "absent OR unreadable" — the two are not distinguishable here. The
+    /// caller MUST treat both as DENY, never as "no project restriction applies". That is the
+    /// required behaviour for an authorization pre-check; the cost is that a transient Dataverse
+    /// fault surfaces to the client as not-found rather than as a server error.</para>
+    ///
+    /// <para><b>Why only <c>sprk_regardingproject</c> is projected.</b> <c>sprk_todo</c> carries
+    /// 13 regarding-parent lookups (live metadata 2026-08-24: analysis, budget, communication,
+    /// contact, document, event, invoice, matter, organization, project, reportcard,
+    /// servicerequest, workassignment). Only project / matter / workassignment have a
+    /// corresponding accessible set on <see cref="CallerPrincipal"/>, and the external plane's
+    /// to-do surface is project-scoped by construction — <see cref="GetTodosAsync"/> filters on
+    /// <c>_sprk_regardingproject_value</c> and <see cref="CreateTodoAsync"/> writes only that
+    /// lookup. A to-do parented to any other type resolves to <c>null</c> here and is denied,
+    /// which keeps the WRITE surface exactly as wide as the READ surface — never wider.
+    /// Widening to matter / work-assignment parents is a product decision, not an implementation
+    /// detail; see notes/task-009-external-todo-scope.md.</para>
+    /// </remarks>
+    public virtual async Task<(Guid? ProjectId, string? TodoName)> GetTodoProjectAsync(
+        Guid todoId, CancellationToken ct = default)
+    {
+        // Columns verified against live Dataverse metadata 2026-08-24 (sprk_todo):
+        // sprk_todoid GUID · sprk_name NVARCHAR(200) NOT NULL · sprk_regardingproject LOOKUP.
+        var select = "sprk_todoid,sprk_name,_sprk_regardingproject_value";
+        var url = $"{GetApiUrl()}/sprk_todos({todoId})?$select={select}";
+
+        var row = await GetSingleAsync<TodoRow>(url, ct);
+        if (row is null) return (null, null);
+
+        // sprk_name is NOT NULL in Dataverse, so a non-null name is a reliable existence signal.
+        var projectId = Guid.TryParse(row.SprkRegardingprojectValue, out var pid) ? pid : (Guid?)null;
+        return (projectId, row.SprkName);
+    }
 
     /// <summary>
     /// Retrieves all <c>sprk_todo</c> records whose regarding-project equals the supplied project id.
@@ -324,7 +369,10 @@ public class ExternalDataService
     /// Regarding context cannot be changed via this surface — to re-parent a to-do, use the
     /// internal model-driven-app form which applies the resolver fields atomically per ADR-024.
     /// </remarks>
-    public async Task UpdateTodoAsync(
+    // `virtual` per ADR-038 §4 (substitution seam), added by task 009: the FR-08 scope check is only
+    // meaningfully verifiable if a test can assert the write DID NOT HAPPEN on a deny. Asserting the
+    // 403/404 status alone would pass even if the PATCH were still issued before the check.
+    public virtual async Task UpdateTodoAsync(
         Guid todoId, UpdateExternalTodoRequest request, CancellationToken ct = default)
     {
         var token = await GetAppOnlyTokenAsync(ct);

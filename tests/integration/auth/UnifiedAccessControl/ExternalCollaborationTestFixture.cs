@@ -28,11 +28,18 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// way it does in production: no credential → 401, credential → authenticated.
 ///
 /// What this fixture deliberately does NOT do: stub <c>CallerPrincipalAuthorizationFilter</c>'s
-/// principal resolution. That needs real Dataverse participation data, so handler-level record-scope
-/// behavior on this group (finding A-7) stays out of reach offline — see
-/// notes/task-001-untestable-findings.md.
+/// principal resolution. Requests through THIS fixture therefore stop at the filter, which is the
+/// right default for characterizing "an unresolvable caller must not reach a write handler".
+///
+/// <para><b>UPDATE 2026-08-24 (task 009).</b> The original note here said handler-level record-scope
+/// behavior on this group (finding A-7) "stays out of reach offline" because principal resolution
+/// "needs real Dataverse participation data". That is no longer accurate: the filter resolves through
+/// <c>ICallerPrincipalResolver</c>, which is an interface registered <c>AddScoped</c>
+/// (ExternalAccessModule.cs:141) and can be substituted in <c>ConfigureTestServices</c> — no
+/// Dataverse required. <c>ExternalTodoScopeTestFixture</c> does exactly that. This class is now
+/// unsealed so that fixture can inherit the policy fix above instead of duplicating it.</para>
 /// </summary>
-public sealed class ExternalCollaborationTestFixture : WorkspaceTestFixture
+public class ExternalCollaborationTestFixture : WorkspaceTestFixture
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

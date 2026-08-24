@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// Maps all project data endpoints for authenticated external users.
 ///
-/// Routes (all under /api/v1/external — RequireAuthorization + ExternalCallerAuthorizationFilter):
+/// Routes (all under /api/v1/external — RequireAuthorization + CallerPrincipalAuthorizationFilter):
 ///   GET  /projects                       — list user's accessible projects
 ///   GET  /projects/{id}                  — single project by ID
 ///   GET  /projects/{id}/documents        — documents for a project
@@ -18,10 +18,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/contacts         — contacts with access to the project
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
-///   PATCH /todos/{id}                    — update a to-do (any project)
+///   PATCH /todos/{id}                    — update a to-do (scoped to the caller's projects)
 ///
 /// All project-specific endpoints verify the caller has a participation record for the requested
-/// project via ExternalCallerContext.HasProjectAccess(). Returns 403 if no access.
+/// project via CallerPrincipal.HasProjectAccess(). Returns 403 if no access.
+///
+/// PATCH /todos/{id} takes a to-do id rather than a project id, so it resolves the to-do's
+/// regarding-project first (ExternalDataService.GetTodoProjectAsync) and scopes on that — see
+/// FR-08 / finding A-7. Writes additionally require the Write right, mirroring the Create right
+/// that POST /projects/{id}/todos requires.
 ///
 /// smart-todo-decoupling-r3 (FR-29): Routes formerly exposed an event-based to-do model
 /// (GET/POST /events, PATCH /events/{id}). Replaced with sprk_todo routes here. See
@@ -29,7 +34,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// breaking-contract migration guide consumed by the external-spa (task 008).
 ///
 /// ADR-001: Minimal API — no controllers.
-/// ADR-008: Authorization applied via route group + ExternalCallerAuthorizationFilter.
+/// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.
 /// ADR-024: To-do regarding context applied via the four resolver fields + sprk_regardingproject lookup.
 /// </summary>
 public static class ExternalProjectDataEndpoints
@@ -335,11 +340,37 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        // Note: for update, we can't easily check project membership without looking up the to-do.
-        // The ExternalCallerAuthorizationFilter already validates the caller is authenticated.
-        // A stricter implementation would look up the to-do's project (via sprk_regardingproject)
-        // and verify access — acceptable for now given the app's low blast radius (only the
-        // authenticated user's linked data).
+        // FR-08 / finding A-7 (task 009, 2026-08-24) — scope the write BEFORE mutating.
+        //
+        // This handler previously applied the PATCH with no record-scope check at all: any caller
+        // who resolved to a CallerPrincipal could modify ANY to-do by GUID. The old comment
+        // justified it as "low blast radius (only the authenticated user's linked data)" — which
+        // was wrong: the route takes an arbitrary to-do id, not one derived from the caller.
+        //
+        // ADR-003 fail closed: an unreadable to-do, a to-do with no resolvable project root, and
+        // a project outside the caller's accessible set ALL deny. The PATCH is never applied on a
+        // failed or ambiguous read. GetTodoProjectAsync cannot distinguish "absent" from
+        // "unreadable" (see its remarks) — both land in the deny paths below, which is the point.
+        var (projectId, todoName) = await dataService.GetTodoProjectAsync(id, ct);
+
+        if (todoName is null)
+            return Results.Problem(statusCode: 404, title: "Not Found",
+                detail: "To-do not found");
+
+        // No resolvable project root — includes to-dos parented to any of the other 12 regarding
+        // lookups (matter, work assignment, document, …). Denied so the WRITE surface is never
+        // wider than the project-scoped READ surface. Same response as out-of-scope: do not leak
+        // WHY the caller was denied.
+        if (projectId is null || !callerContext.HasProjectAccess(projectId.Value))
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "You do not have access to this to-do");
+
+        // Mirror CreateTodo's rights gate (which requires Create) — a PATCH requires Write.
+        var rights = callerContext.GetEffectiveRights(projectId.Value);
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "Your access level does not permit updating to-dos on this project");
+
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }
