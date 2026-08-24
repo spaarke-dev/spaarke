@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="201" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H4b-BulkAppSettings handler: apply canonical BFF app-settings template in ONE batch (F20/F20a automation; kills progressive-fail-fast chain)</title>
+    <phase>H-Prime — Absorb F19/F20 first-live findings into handler catalog</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','azure-deployment','config'; introduces a NEW handler primitive (bulk-app-settings-from-manifest) that ships ~80-160 app settings per BFF instance in ONE batch. .cs implementation. Any bug produces silent BFF fail-fast at boot (F20 pattern observed live 2026-08-24 with SIGABRT exit code 134 on `SpeAdmin:KeyVaultUri` missing). FR-36 canonical-manifest sibling. Blast radius = every BFF customer stamp.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per project CLAUDE.md §Model tier defaults: Opus for Phase H canonical-manifest generator + high-blast-radius extensions. H4b introduces a second canonical manifest (app-settings, sibling to secret-catalog) — schema design must cover ~40 IOptions modules × ~2-4 settings with mixed sources (kv-ref / per-env-input / literal). Getting the schema right the first time avoids Model-2-dedicated churn + avoids the "add-one-setting-at-a-time" retrograde pattern that F20 demonstrated is untenable.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 200 (H4-shared) landing first — H4b resolves KV refs to secrets H4-shared seeds. Depends on task 084 canonical-manifest pattern (which H4b's sibling app-settings manifest follows). Blocks H9 (BFF deploy) — H9 assumes app settings are populated. Serial: 084 → 200 → 201 → H9.</parallel-reason>
+    <deps>036, 044, 084, 200</deps>
+    <tags>l2-controlplane, job-handler, auth, azure-deployment, config</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H4b-BulkAppSettings handler as an IProvisioningHandler in the L2 control-plane. H4b reads a NEW canonical app-settings manifest at `scripts/canonical-app-settings/manifest.yaml` (sibling to task 084's secret-catalog manifest), resolves each entry (KV-ref / per-env-input / literal), and applies ALL settings in ONE batch `az webapp config appsettings set --settings k1=v1 k2=v2 ...` call to trigger ONE App Service restart cycle. This kills the F20 progressive-fail-fast chain observed live 2026-08-24 where BFF SIGABRT'd at boot on `SpeAdmin:KeyVaultUri` missing, and after fix on `CosmosPersistence:Endpoint` missing, and would have continued for ~40 IOptions modules. Manifest source-of-truth: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IProvisioningHandler contract, App Service app-settings semantics (batch set → single restart; PATCH via `az webapp config appsettings set --settings k1=v1 k2=v2 ...`), the `@Microsoft.KeyVault(VaultName=X;SecretName=Y)` ref format, .NET IOptions `.ValidateOnStart()` fail-fast pattern (~40 modules in BFF), and Phase G canonical KV naming (§7.9). Follow ADRs strictly.</role>
+
+  <goal>Files exist: (a) `scripts/canonical-app-settings/manifest.yaml` enumerating every BFF app setting with source metadata; (b) `scripts/canonical-app-settings/Invoke-AppSettingsCatalogGenerator.ps1` generator (fans out to tokens.md + Bicep app-settings block + IOptions binding audit report); (c) `src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs` implementing IProvisioningHandler; registers in L2 DI; Handler: (i) reads manifest; (ii) resolves each entry (kv-ref → `@Microsoft.KeyVault(...)` string / per-env-input → interStepState lookup / literal → verbatim); (iii) computes DIFF against current App Service app settings (read via `az webapp config appsettings list`); (iv) if diff non-empty, PATCHes ALL differing settings in ONE batch call → ONE restart cycle; (v) polls `/healthz` with warm-up backoff (30s / 60s / 90s / 120s / 180s = 8min budget); (vi) if `/healthz` never green, quarantine with fail-fast diagnostic (which IOptions module raised); (vii) idempotency key `appsettings-{env}-{manifestVer}`.</goal>
+
+  <context>
+    <background>
+Per lessons-learned-model1-prod-standup-2026-08-22.md finding F20/F20a + Automation Gaps roadmap item 13 in `.claude/skills/provision-environment/SKILL.md`: BFF container exits with code 134 (SIGABRT) at startup with `Unhandled exception. System.InvalidOperationException: SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.` This is one of ~40 `.ValidateOnStart()` chains — each missing config surfaces as fail-fast in sequence. Session 2 observed the pattern after fixing F20 (added `SpeAdmin__KeyVaultUri`), next fail-fast was `CosmosPersistence:Endpoint` missing (F20a), and chose NOT to serially chase 40-module chain.
+
+The RIGHT fix is to set ALL required app settings in ONE batch call. That's what H4b does. It reads a manifest that enumerates every BFF app setting the ~40 IOptions modules require (source-of-truth: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings), resolves each entry against its source (KV ref / per-env input / literal), and applies them all at once.
+
+CLUSTER FINDING (from SESSION 2 handoff): F17 + F19 + F20 share ONE root cause — Bicep provisions Model 1 Prod infra but does NOT seed BFF runtime state. H4-shared (task 200) + H4b (this task) + H9 (BFF deploy) together close this gap. Sequencing: H4-shared → H4b → H9 → BFF starts with all config in place (kills F20 progressive fail-fast).
+
+**Per-env inputs** (settings that vary per customer — cannot be extracted from source services):
+- `TenantId` — the customer's Azure AD tenant GUID (from H0 preflight)
+- `AzureAd:ClientId` — the multitenant BFF app's client ID (from H3 Entra app-reg output)
+- `SharePointEmbedded:ContainerTypeId` — SPE container type (from H8 output)
+- `WebhookSigningKey` — SPE webhook signing key (from H8 output)
+- `WebhookClientState` — SPE webhook client state (from H8 output)
+- `EmailProcessing:WebhookSigningKey` — Email webhook signing key (from H14 output)
+- (others per full BFF IOptions inventory — task-execute Step 1 discovery)
+
+These come from prior-handler `interStepState` (Cosmos-persisted; ADR-004 shape). H4b resolves them by key lookup from run state.
+
+**KV-refs** (settings that resolve to KV secrets seeded by H4 per-tenant or H4-shared):
+- 6 shared-KV refs seeded by H4-shared (task 200): `AzureOpenAI:ApiKey`, `AiSearch:AdminKey`, `DocumentIntelligence:ApiKey`, `ServiceBus:ConnectionString`, `Storage:ConnectionString`, `Redis:ConnectionString`
+- Per-tenant refs seeded by H4 (task 047): `Dataverse:ClientSecret`, `BFF-API:ClientSecret`, others
+- Refs use format: `@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=AiSearch--AdminKey)`
+    </background>
+    <relevant-files>
+      <file role="new">scripts/canonical-app-settings/manifest.yaml</file>
+      <file role="new">scripts/canonical-app-settings/Invoke-AppSettingsCatalogGenerator.ps1</file>
+      <file role="new">scripts/canonical-app-settings/generated/ (output dir: tokens.md + Bicep app-settings snippet + IOptions binding audit report)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.Tests.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsManifestReader.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsResolver.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsWriter.cs (batch az CLI wrapper)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IHealthzProbe.cs (poll /healthz with backoff)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (register handler + services)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Program.cs (BFF IOptions module registrations — ~40 modules)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (per-module .ValidateOnStart() chains)</file>
+      <file role="canonical-reference">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md § App Service settings (manifest source-of-truth)</file>
+      <file role="canonical-reference">scripts/canonical-secret-catalog/manifest.yaml (task 084 — sibling manifest; H4b's schema mirrors its shape)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md (F20 evidence + progressive-fail-fast chain observation)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="completed">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="completed">H2a Bicep deploy — App Service must exist</dependency>
+      <dependency task="084" status="pending">Phase H canonical secret-catalog manifest — H4b app-settings manifest MIRRORS its shape</dependency>
+      <dependency task="200" status="pending">H4-shared handler — H4b's KV-ref settings resolve to secrets H4-shared seeds</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IProvisioningHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">Auth ceremony 21 MUSTs; App Service `keyVaultReferenceIdentity` MUST already be set to L2 UAMI resource ID BEFORE H4b writes KV-ref-shaped settings (F16 remediation gate). H4b's post-condition `/healthz` probe implicitly verifies this — if KV refs can't resolve, /healthz stays red.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="project">Idempotency key: appsettings-{env}-{manifestVer} — manifestVer is manifest hash from canonical-app-settings generator.</constraint>
+    <constraint source="project">Manifest schema per entry: `key` (App Service app-setting name with `__` for nested config), `source` (`kv-ref` | `per-env-input` | `literal`), `kv-secret-name?` (canonical), `per-env-key?` (interStepState lookup key), `literal-value?`, `iOptionsModule?` (documentation: which BFF module consumes this — for the IOptions binding audit report), `required` (bool, default true — required-and-missing = QuarantineRequired).</constraint>
+    <constraint source="project">SINGLE batch write per run: build the complete diff → call `az webapp config appsettings set --settings k1=v1 k2=v2 ...` ONCE. NO per-setting calls. Rationale: each `az webapp config appsettings set` triggers an App Service restart; N calls = N restarts = N cold-starts = long unstable window. Batch = ONE restart.</constraint>
+    <constraint source="project">Diff-first idempotency: read current app settings via `az webapp config appsettings list` → compute diff (missing + mismatched) → NO-OP if diff empty; otherwise batch-write ONLY diffing settings. Preserves manually-set operator overrides (e.g., diagnostic settings) — never clobbers keys not in the manifest.</constraint>
+    <constraint source="project">Post-condition `/healthz` probe: after batch write + restart-wait, poll `https://{appServiceName}.azurewebsites.net/healthz` with backoff (30s / 60s / 90s / 120s / 180s = 8-min budget). Success = HTTP 200. Failure = QuarantineRequired with fail-fast diagnostic (parse the container docker-logs for the `Unhandled exception. System.InvalidOperationException` line → the module name is in the error; report it back to operator so manifest can be extended).</constraint>
+    <constraint source="project">Per-env-input resolution: H4b reads `per-env-key` from Cosmos `interStepState` (prior-handler outputs). If a required per-env-input is MISSING (prior handler didn't emit it), fail startup validation BEFORE writing anything. This surfaces upstream handler gaps early rather than making them look like config drift.</constraint>
+    <constraint source="project">KV-ref resolution: for a manifest entry with `source: kv-ref` + `kv-secret-name: X`, H4b emits value `@Microsoft.KeyVault(VaultName={sharedVaultName};SecretName=X)` — vault name from Bicep parameter (env-scoped). H4b DOES NOT verify the secret exists on KV (that's H4-shared's job — H4b assumes H4-shared has landed per sequencing).</constraint>
+    <constraint source="project">BINDING guard: manifest MUST NOT list Dataverse-ClientSecret or BFF-API-ClientSecret as `source: literal` OR `source: per-env-input` — those MUST be `source: kv-ref` pointing to canonical secret names. Manifest validation enforces this. Prevents an operator from accidentally writing a cleartext BFF client secret as an app-setting literal.</constraint>
+    <constraint source="spec.md NFR-05">BFF /health must fail fast at boot on any Tier-1 IOptions misconfig — H4b's `/healthz` post-condition IS this check applied at H4b's timeframe rather than at boot. If /healthz fails, the manifest is incomplete + must be extended.</constraint>
+    <constraint source="root-CLAUDE-md-§10">L2 handlers register in L2 DI, NOT in BFF (§10 BFF Hygiene).</constraint>
+    <constraint source="root-CLAUDE-md-§11">NEW-surface justification field completed per §11 three-question gate (see &lt;justification&gt; below). H4b is a NEW handler primitive + NEW canonical manifest; both justified.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler that reads canonical BFF app-settings manifest, resolves entries (KV-ref / per-env-input / literal), batches to ONE `az webapp config appsettings set` call → ONE restart, then polls /healthz with backoff</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="sibling-canonical-manifest" location="scripts/canonical-secret-catalog/">Task 084 — H4b's canonical-app-settings manifest MIRRORS the same shape (manifest.yaml + generator + generated/ output dir).</pattern>
+      <pattern name="sibling-handler-shape" location="src/server/services/Sprk.Provisioning.ControlPlane/Handlers/KvSecretsPopulation/">Task 047 H4 — reuse IIdempotencyService pattern, Cosmos run store pattern.</pattern>
+      <pattern name="bff-ioptions-modules" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/">~40 IOptions modules that H4b's manifest must satisfy. Task-execute Step 1 discovery: enumerate each module + its `.ValidateOnStart()` chain + the config keys it reads.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load knowledge files. Load `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings.</step>
+    <step order="1" name="BFF IOptions inventory">Enumerate every `AddOptions&lt;T&gt;().Bind(...).ValidateOnStart()` chain in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/*Module.cs` files (~40 modules). For each: (a) module name, (b) IOptions type, (c) config section key (e.g., `SpeAdmin`, `CosmosPersistence`), (d) fields required by validator. Produce inventory table. This is the manifest source.</step>
+    <step order="2" name="Manifest schema">Design `scripts/canonical-app-settings/manifest.yaml` schema (mirror task 084 shape): entries have `key`, `source`, `kv-secret-name?`, `per-env-key?`, `literal-value?`, `iOptionsModule`, `required` (default true).</step>
+    <step order="3" name="Write manifest">Author `scripts/canonical-app-settings/manifest.yaml` with every entry from the BFF IOptions inventory. Categorize each: kv-ref (from H4-shared or H4-per-tenant seeded secrets) / per-env-input (from prior-handler interStepState) / literal (constant across all envs). Cross-check against `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.</step>
+    <step order="4" name="Generator">Author `scripts/canonical-app-settings/Invoke-AppSettingsCatalogGenerator.ps1` — fans out to: (a) `tokens.md` (documentation), (b) Bicep app-settings block snippet (paste-into `app-service.bicep`), (c) IOptions binding audit report (diff manifest keys vs BFF `.ValidateOnStart()` requirements → flag orphans + gaps). Deterministic ordering.</step>
+    <step order="5" name="IAppSettingsManifestReader">Author `IAppSettingsManifestReader.cs` + `YamlAppSettingsManifestReader.cs` — parses manifest.yaml into `IReadOnlyList&lt;AppSettingEntry&gt;`. BINDING guard enforced at read-time.</step>
+    <step order="6" name="IAppSettingsResolver">Author `IAppSettingsResolver.cs` + `AppSettingsResolver.cs` — resolves each entry: kv-ref → `@Microsoft.KeyVault(...)` string composition; per-env-input → Cosmos interStepState lookup; literal → verbatim value. Fails startup if a required per-env-input is missing from interStepState.</step>
+    <step order="7" name="IAppSettingsWriter">Author `IAppSettingsWriter.cs` + `AzCliAppSettingsWriter.cs` — wraps `az webapp config appsettings set --settings k1=v1 k2=v2 ...` batch call. Sanitizes values (shell-escapes; the `@Microsoft.KeyVault(...)` format is safe — no shell metacharacters).</step>
+    <step order="8" name="IHealthzProbe">Author `IHealthzProbe.cs` + `HttpHealthzProbe.cs` — polls `https://{appServiceName}.azurewebsites.net/healthz` with backoff (30s / 60s / 90s / 120s / 180s = 8-min budget). Success = HTTP 200. On failure: attempts to fetch container logs via Kudu API `/api/logs/docker` + parses for `Unhandled exception. System.InvalidOperationException:` line → extracts module name for diagnostic.</step>
+    <step order="9" name="H4bBulkAppSettingsHandler">Author main handler: inject IAppSettingsManifestReader, IAppSettingsResolver, IAppSettingsWriter, IHealthzProbe, IIdempotencyService, ICosmosRunStore. HandleAsync: (a) read manifest; (b) resolve all entries against interStepState (fail early on missing per-env-inputs); (c) fetch current app settings via `az webapp config appsettings list`; (d) compute diff (missing + mismatched); (e) NO-OP if diff empty; else batch-write via IAppSettingsWriter; (f) poll /healthz via IHealthzProbe; (g) on green, mark Succeeded + persist manifestVer to Cosmos; (h) on red, Quarantine with parsed fail-fast diagnostic.</step>
+    <step order="10" name="Program.cs registration">Register H4bBulkAppSettingsHandler + supporting services in L2 Program.cs DI. Wire into HandlerIds catalog (task 103).</step>
+    <step order="11" name="Unit tests">Author unit tests: (a) full-manifest happy path (mock resolver returns all values, writer succeeds, healthz returns 200); (b) diff-empty NO-OP (current == desired → 0 writes); (c) partial-diff batch-write (only diffing settings included in batch); (d) required-per-env-input-missing quarantine (interStepState doesn't have `TenantId` → QuarantineRequired BEFORE writes); (e) /healthz-never-green quarantine (mock probe returns 500 for full backoff window → QuarantineRequired with parsed diagnostic); (f) BINDING guard (manifest tampered with `Dataverse-ClientSecret` as literal → manifest read fails); (g) idempotency (two runs same manifestVer → second is short-circuit no-op); (h) diff preserves operator overrides (setting present on App Service but not in manifest → NOT touched); (i) IOptions binding audit report (verify generator output flags manifest-vs-BFF diffs).</step>
+    <step order="12" name="Live-fire test bed prep">Document how to run against Model 1 Prod as first live-fire test: L2 UAMI needs `Website Contributor` role on `sprksharedprod-api`; L2 must be reachable from operator machine via L2 API. Expected first-run outcome: H4b writes ~80-160 app settings in one batch, App Service restarts once, /healthz returns 200 within warm-up window. If /healthz stays red, manifest needs an entry — extend + re-run (idempotent).</step>
+    <step order="13" name="Build + test">Run `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` + `dotnet test`. Verify green + zero analyzer warnings.</step>
+    <step order="14" name="Handler-catalog update">Update handler catalog in `.claude/skills/provision-environment/SKILL.md` Step 3 handler enumeration to list H4b alongside H4 + H4-shared (main-session-only per root CLAUDE.md §3 sub-agent write boundary).</step>
+    <step order="15" name="Index update">Update TASK-INDEX.md: task 201 → ✅.</step>
+    <step order="16" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 200 (H4-shared) has NOT landed, STOP and escalate — H4b's KV-ref entries resolve to secrets H4-shared seeds. Running H4b without H4-shared produces `KeyVaultReferenceCouldNotResolve` at App Service runtime.</trigger>
+    <trigger>If BFF IOptions inventory (Step 1) reveals &gt;60 modules (significantly more than the ~40 expected), STOP and escalate — this signals ADR-010 DI-minimalism drift + should trigger a decomposition project BEFORE H4b lands. Manifest scope explodes proportionally.</trigger>
+    <trigger>If required per-env-input is not yet emitted by any upstream handler (e.g., `WebhookSigningKey` missing from H8's interStepState), STOP and escalate — H4b cannot fabricate the value; the upstream handler must be extended first.</trigger>
+    <trigger>If /healthz-never-green diagnostic parses a fail-fast module name NOT present in the manifest, STOP and add manifest entry → re-run. If the parse also names a module NOT present in the BFF IOptions inventory (Step 1), the inventory is stale — re-run Step 1 first.</trigger>
+    <trigger>If /healthz stays green but a downstream handler (H10, H11, H12a) fails on config the manifest missed, treat as manifest completeness gap and extend H4b's manifest. `.ValidateOnStart()` catches boot-time; runtime code paths that read `IConfiguration` lazily are H4b's blind spot (small — most BFF code binds IOptions).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbors: (a) H4 per-tenant handler (task 047) — writes to per-tenant KV, does NOT set App Service app settings. (b) `az webapp config appsettings set` ad-hoc invocation — session 2 used this manually to set ONE setting (`SpeAdmin__KeyVaultUri`), revealing F20a next fail-fast. (c) Bicep `app-service.bicep` `appSettings` array — sets initial app settings at deploy time, but stale across upgrades + can't resolve per-env inputs from run state. Grep for `AppSettingsManifest` returns none.</existing>
+    <extension>No — H4 per-tenant CANNOT be extended to also do app-settings because (a) different target (KV secrets vs App Service app settings), (b) different idempotency (H4 rotation-safe; H4b diff-and-restart-once), (c) different failure mode (H4 write failure = quarantine; H4b write failure = restart + /healthz probe → parse container logs). Bicep `app-service.bicep`'s `appSettings` array CANNOT be extended to resolve per-env inputs from Cosmos run state — Bicep is static; app settings depend on prior-handler outputs. Two sibling handlers (H4-shared + H4b) plus H4-per-tenant keep each contract tight.</extension>
+    <cost-of-doing-nothing>Without H4b as a handler: (1) Every new BFF customer stamp requires MANUAL enumeration of ~40 IOptions modules → ~80-160 app settings → serial `az webapp config appsettings set` calls, each triggering an App Service restart = ~40 restarts × ~3 min each = 2-hour manual runbook per customer (this session's F20 progressive discovery would have taken this long if pursued). (2) Every BFF module addition (new IOptions binding) silently breaks new customer stand-ups until an operator manually adds the app setting — no drift detection today. (3) F20's fail-fast pattern (SIGABRT exit 134) will recur on EVERY new Model 1 shared-tier deploy AND on EVERY Model 2 Dedicated deploy — this is not a Model-1-specific bug; it's the fresh-deploy-without-bulk-config bug. Concrete observed failure mode: `Unhandled exception. System.InvalidOperationException: SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.` at BFF container startup, followed by SIGABRT (exit 134), followed by App Service marking container Failed to start. Repeat for each of ~40 modules.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell + az CLI for batch app-settings write + /healthz poll + Kudu docker-logs fetch</tool>
+    <tool name="pwsh">Author Invoke-AppSettingsCatalogGenerator.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsManifestReader.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsResolver.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IAppSettingsWriter.cs (+ AzCli impl)</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/IHealthzProbe.cs (+ HTTP impl)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.Tests.cs</output>
+    <output type="config">scripts/canonical-app-settings/manifest.yaml</output>
+    <output type="code">scripts/canonical-app-settings/Invoke-AppSettingsCatalogGenerator.ps1</output>
+    <output type="docs">scripts/canonical-app-settings/generated/tokens.md + Bicep snippet + IOptions audit report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a full manifest + all per-env-inputs present in interStepState + all KV-refs resolvable, when HandleAsync runs against an App Service with no prior app settings, then ALL manifest entries are written in ONE batch `az webapp config appsettings set` call; App Service restarts ONCE; /healthz returns 200 within warm-up window.</criterion>
+    <criterion testable="true">Diff-empty NO-OP: given current app settings == desired manifest values, HandleAsync performs 0 writes + 0 restart + does poll /healthz once as sanity check.</criterion>
+    <criterion testable="true">Partial-diff batch: given some current app settings match manifest + others differ or are missing, HandleAsync writes ONLY the diffing set in ONE batch call (verified via mocked writer receiving exact diff set).</criterion>
+    <criterion testable="true">Operator-override preservation: given an App Service app setting present but NOT in the manifest (e.g., `APPLICATIONINSIGHTS_CONNECTION_STRING` set manually by operator), HandleAsync does NOT touch it; only manifest-listed keys are managed.</criterion>
+    <criterion testable="true">Required-per-env-input-missing Quarantine: given manifest requires `TenantId` per-env-input but interStepState doesn't have it, HandleAsync quarantines with "PerEnvInputMissing: TenantId (upstream handler H0 did not emit)" BEFORE any writes.</criterion>
+    <criterion testable="true">/healthz-never-green Quarantine: given /healthz returns 500 for full 8-min backoff window, HandleAsync quarantines with parsed fail-fast diagnostic (module name extracted from container docker-logs via Kudu API).</criterion>
+    <criterion testable="true">BINDING guard: given a tampered manifest that lists `Dataverse-ClientSecret` as `source: literal`, IAppSettingsManifestReader fails validation with "BindingViolation: Dataverse-ClientSecret MUST be source:kv-ref" BEFORE any resolver call.</criterion>
+    <criterion testable="true">Idempotency-key match: two invocations for the same (env, manifestVer) — second call short-circuits before manifest read (`appsettings-{env}-{manifestVer}` match).</criterion>
+    <criterion testable="true">KV-ref format correctness: for a manifest entry `source: kv-ref, kv-secret-name: AiSearch--AdminKey`, resolver emits value `@Microsoft.KeyVault(VaultName={sharedVaultName};SecretName=AiSearch--AdminKey)` — exact string match, no whitespace variance.</criterion>
+    <criterion testable="true">Generator determinism: two runs of Invoke-AppSettingsCatalogGenerator.ps1 against the same manifest produce byte-identical outputs.</criterion>
+    <criterion testable="true">Generator IOptions binding audit report flags: (a) manifest keys with no corresponding BFF `.ValidateOnStart()` binding (orphan settings), (b) BFF `.ValidateOnStart()` bindings with no corresponding manifest entry (uncovered required config).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` + `dotnet test` exit 0; zero analyzer warnings.</criterion>
+    <criterion testable="true">Handler catalog in `.claude/skills/provision-environment/SKILL.md` Step 3 enumeration includes H4b alongside H4 + H4-shared (main-session write).</criterion>
+    <criterion testable="true">Sequencing verified: H4b runs AFTER H4-shared (task 200) + AFTER H4 (task 047) AND BEFORE H9 (BFF deploy) in the L2 state machine's handler DAG. Reason: H4b resolves KV refs → H4-shared + H4 seed the secrets; H4b sets app settings → H9 deploys BFF code that boots with those settings resolved.</criterion>
+    <criterion testable="true">Live-fire on Model 1 Prod: H4b executed against `sprksharedprod-api` writes complete manifest in ONE batch; /healthz returns 200 within warm-up window; BFF boots WITHOUT the F20 SIGABRT observed 2026-08-24.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: lessons-learned-model1-prod-standup-2026-08-22.md finding F20/F20a + Automation Gaps roadmap item 13 + spec.md FR-36 canonical-manifest pattern + NFR-05 fail-fast + design.md §4.1 H4 (sibling handler shape). Companion task: 200 (H4-shared). This session (2026-08-24) manually validated the F20 fail-fast pattern against Model 1 Prod — set `SpeAdmin__KeyVaultUri`, revealed F20a on `CosmosPersistence:Endpoint`, chose NOT to serially chase ~40-module chain. That serial chase is precisely what this handler eliminates. Live-fire test bed: Model 1 Prod (`sprksharedprod-api` App Service).
+
+## Design notes (2026-08-24, SESSION 3 — H4b/H4-shared design)
+
+**Why a NEW canonical manifest (vs. extending task 084's secret-catalog manifest)**:
+- Task 084's manifest is scoped to KV secrets (canonical name, purpose, consumers, rotation cadence, never-delete). Adding app-settings would require overloading the schema OR adding a separate `app-settings:` top-level list. Cleaner: sibling manifest at `scripts/canonical-app-settings/manifest.yaml` mirroring the same shape.
+- The two manifests are RELATED: app-settings manifest entries with `source: kv-ref, kv-secret-name: X` implicitly cross-reference secret-catalog manifest entries with canonical name X. Generator's IOptions audit report should ALSO flag KV-ref app-settings that name a secret NOT in the secret-catalog manifest (cross-manifest drift detection).
+
+**Why /healthz probe with 8-min backoff (not shorter)**:
+- BFF cold-start observed 2026-08-24: ~2-4 min from restart to /healthz-green (assuming no fail-fast). Warm-up wants generous budget to distinguish "still starting" from "fail-fast permanent". 8-min budget covers 99th-percentile cold-start + gives fail-fast diagnostic clear signal (if not green by 8min, it's not going to be).
+- The backoff schedule (30s / 60s / 90s / 120s / 180s) is exponential-ish; each probe is a HEAD request (cheap). 5 probes across 8 min.
+
+**Why parse container docker-logs on failure**:
+- The `.ValidateOnStart()` fail-fast exception is UI-invisible unless operator fetches Kudu `/api/logs/docker`. Session 2 did this manually. H4b's IHealthzProbe automates it — extracts the `Unhandled exception. System.InvalidOperationException:` line, parses the message for the module name, reports it. This turns a "BFF broke" quarantine into a "H4b manifest missing SpeAdmin__KeyVaultUri" quarantine — actionable diagnostic.
+
+**Cross-manifest sequencing / DAG assertion**:
+- H4-per-tenant (task 047): seeds per-tenant KV
+- H4-shared (task 200): seeds shared KV from source Azure services
+- H4b (task 201): applies bulk app-settings referencing KV secrets from both
+- H9 (task 052): deploys BFF code
+- Correct order: H4 || H4-shared → H4b → H9 → BFF starts configured
+
+If any handler runs out of order, downstream fails deterministically (H4b Quarantine on missing KV secret; H9 boot fail-fast). Order-enforcement lives in the L2 state machine DAG (task 058 state reconciler).
+
+**Model 2 Dedicated extensibility**: manifest schema field `source: kv-ref | per-env-input | literal` naturally extends. For M2, per-env-inputs may become per-customer-inputs; the resolver's Cosmos interStepState lookup already scopes by run-id / customer-id.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

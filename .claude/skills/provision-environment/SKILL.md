@@ -405,25 +405,27 @@ RUN PLAN
   tenancyModel:  Model1Shared
   profile:       dev
 
-  Handlers to execute (11 for Model1Shared / 15 for Model2Dedicated):
-    H0.5  consent-callback (Model 2 only — skipping for Model 1)
-    H1    resource-group provisioning
-    H2a   Bicep infra apply (30-min timeout)
-    H2b   AI Search index deploy (7 canonical indexes)
-    H3    KV secret bootstrap
-    H4    canonical secret population
-    H5    Dataverse environment creation (20-min timeout for Model 2)
-    H6    Dataverse solutions import (8 solutions, dependency-ordered)
-    H7    env-var writes to customer env
-    H8    SPE container-type creation (24h replication, gate H8.a re-verifies)
-    H9    BFF deploy to customer stamp (blue-green via staging slot)
-    H10   Dataverse App User creation (UAMI-based)
-    H11   demo user provisioning (Model 1 only for trial users)
-    H12a  AI seed chain (playbooks + embeddings)
-    H12b  playbook consumers seed
-    H12c  agents seed
-    H13   acceptance gate (all traps clear + invariants pass + cost envelope)
-    H14   Exchange ApplicationAccessPolicy verification (T4)
+  Handlers to execute (13 for Model1Shared / 17 for Model2Dedicated):
+    H0.5      consent-callback (Model 2 only — skipping for Model 1)
+    H1        resource-group provisioning
+    H2a       Bicep infra apply (30-min timeout)
+    H2b       AI Search index deploy (7 canonical indexes)
+    H3        KV secret bootstrap
+    H4        canonical secret population (per-tenant KV; literal values)
+    H4-shared canonical secret population from source Azure services (shared KV; extract-from-source recipes — F19; task 200)
+    H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201)
+    H5        Dataverse environment creation (20-min timeout for Model 2)
+    H6        Dataverse solutions import (8 solutions, dependency-ordered)
+    H7        env-var writes to customer env
+    H8        SPE container-type creation (24h replication, gate H8.a re-verifies)
+    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4-shared + H4b so BFF boots with config in place)
+    H10       Dataverse App User creation (UAMI-based)
+    H11       demo user provisioning (Model 1 only for trial users)
+    H12a      AI seed chain (playbooks + embeddings)
+    H12b      playbook consumers seed
+    H12c      agents seed
+    H13       acceptance gate (all traps clear + invariants pass + cost envelope)
+    H14       Exchange ApplicationAccessPolicy verification (T4)
 
   Estimated wall-clock: 42 min (no lead-time gates surfaced by H0)
   Estimated cost impact: +$412/mo (Model 1 marginal, within envelope)
@@ -1070,8 +1072,8 @@ Before r1 can claim E2E-no-human-interaction:
 9. **Operator-RBAC-bootstrap step** (F15): idempotent pre-H4 grant of `Key Vault Secrets Officer` to operator on every RBAC-enabled KV, via `az rest` (F15b bypass). Uses `az ad signed-in-user show` for OID auto-detect. Silent success on re-run.
 10. **Bicep hardening for kvRefIdentity + UAMI-KV RBAC** (F16): (a) reject `keyVaultReferenceIdentity='SystemAssigned'` combined with UserAssigned-only identity in the Bicep template; (b) auto-emit role assignments for attached UAMIs on referenced KVs. Backstop: T1 handler verifies + auto-remediates any drift post-deploy.
 11. **Fresh-env BFF deploy handler** (F17): H9 currently exists as a catalog name only. Needs code that (a) detects empty-App-Service state, (b) builds + zip-deploys BFF, (c) polls `/healthz` with warm-up backoff, (d) sequences AFTER F16 remediation so BFF starts in configured state (not degraded). **This session verified: 46 MB compressed publish passes NFR-01 60 MB ceiling; `az webapp deploy --type zip` uploads cleanly but Site Startup Probe fails when config chain (F20) unresolved.**
-12. **H4-shared handler + canonical secret manifest** (F19): sibling to H4 (per-tenant); H4-shared extracts keys from source Azure services (AI Search admin key, Cog Svc key1s, SB RootManageSharedAccessKey, Storage conn string, Redis composed conn string) and seeds to shared KV under canonical secret names. Initial 6-secret manifest: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string` (must MATCH the App Service `@Microsoft.KeyVault(SecretName=...)` refs).
-13. **H4b-BulkAppSettings handler** (F20/F20a): CRITICAL NEW HANDLER. Reads canonical BFF app-settings template (~40 IOptions modules × ~2-4 settings each ≈ 80-160 app settings) + resolves KV refs + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKeys, EmailProcessing WebhookSigningKey), calls `az webapp config appsettings set --settings k1=v1 k2=v2 ...` in single batch to trigger ONE restart cycle. Manifest source: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings. **This handler is the difference between "BFF App Service exists" and "BFF actually boots" — without it, F20 chain progressively reveals ~40 missing configs.**
+12. **H4-shared handler + canonical secret manifest** (F19): sibling to H4 (per-tenant); H4-shared extracts keys from source Azure services (AI Search admin key, Cog Svc key1s, SB RootManageSharedAccessKey, Storage conn string, Redis composed conn string) and seeds to shared KV under canonical secret names. Initial 6-secret manifest: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string` (must MATCH the App Service `@Microsoft.KeyVault(SecretName=...)` refs). **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml). Extends task 084 manifest schema with `source: { type, service-ref }` field. Includes IArmKeyVaultRefProbe post-condition (uses F16-remediated kvRefIdentity). Bicep hardening implied: L2 UAMI needs 5 new RBAC assignments on source services (`Cognitive Services User`, `Search Service Contributor`, `Azure Service Bus Data Owner`, `Storage Account Contributor`, `Redis Cache Contributor`).**
+13. **H4b-BulkAppSettings handler** (F20/F20a): CRITICAL NEW HANDLER. Reads canonical BFF app-settings template (~40 IOptions modules × ~2-4 settings each ≈ 80-160 app settings) + resolves KV refs + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKeys, EmailProcessing WebhookSigningKey), calls `az webapp config appsettings set --settings k1=v1 k2=v2 ...` in single batch to trigger ONE restart cycle. Manifest source: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings. **This handler is the difference between "BFF App Service exists" and "BFF actually boots" — without it, F20 chain progressively reveals ~40 missing configs.** **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml). Introduces NEW canonical manifest at `scripts/canonical-app-settings/manifest.yaml` (sibling to task 084 secret-catalog). Diff-first idempotency preserves operator overrides. IHealthzProbe polls `/healthz` with 8-min backoff + parses container docker-logs on failure to extract fail-fast module name for actionable diagnostic. Sequencing: H4-shared || H4-per-tenant → H4b → H9 → BFF boots configured.**
 14. **F16 Bicep hardening (extend)**: (a) never emit `keyVaultReferenceIdentity='SystemAssigned'` when only UserAssigned attached, (b) auto-emit role assignments for attached UAMIs on referenced KVs — **AND** (c) via F16.5 discovery: T1 handler skips `az webapp update --set keyVaultReferenceIdentity=...` (returns Bad Request); goes straight to `az rest --method patch` on the site resource with `{"properties":{"keyVaultReferenceIdentity":"..."}}` body.
 
 ### The Customer Deployment Web App (natural evolution)

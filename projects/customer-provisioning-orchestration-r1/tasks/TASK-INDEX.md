@@ -24,7 +24,7 @@ Two additional corrections independently caught by task-gen subagents:
 
 ---
 
-## Task Registry (78 total)
+## Task Registry (80 total — 78 original + 2 Phase H-Prime added 2026-08-24 SESSION 3)
 
 ### Phase A — Doc Consolidation + Audits + `GraphAppRoles.cs` Completion (8 tasks)
 
@@ -292,6 +292,15 @@ _11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation
 
 **Note on task 089 vs task 186**: The original task 089 (below) is recorded SPLIT MODE — its scaffolding (harness + report skeleton + operator runbook) landed, but the actual E2E acceptance run against a genuinely-functional pipeline never happened, because the pipeline was not genuinely functional (per the r1-gap-analysis this Phase C'' build responds to: no dispatcher existed, 11 of 19 handlers shelled out to unavailable tools, several handlers were placeholder-backed). Task 186 is the REAL rerun once Waves G-1..G-7 land; it supersedes 089 as the project's actual acceptance evidence. Do not close out this project on 089 alone.
 
+### Phase H-Prime — Absorb F19/F20 first-live findings into handler catalog (2 tasks — designed 2026-08-24 SESSION 3)
+
+Post-Model-1-Prod-first-live-standup (2026-08-22 through 2026-08-24) revealed CLUSTER FINDING: F17 + F19 + F20 share ONE root cause — Bicep provisions Model 1 Prod infra but does NOT seed BFF runtime state (App Service code + KV secrets + App Service app settings). H9 (task 052) closes the code-deploy gap. These two new handlers close the KV-secret-seed gap (H4-shared) and the App Service app-settings gap (H4b). Together they eliminate the F20 progressive-fail-fast chain observed live (SIGABRT exit 134 on missing `SpeAdmin:KeyVaultUri` → next missing config → next → ~40 IOptions modules deep). Live-fire test bed: Model 1 Prod (`sprksharedprod-api` + `sprk-prod-kv`).
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 200 | ⏸ | H4-shared: seed shared KV from source Azure services (extract-from-source pattern; F19 automation; extends task 084 manifest schema with `source: { type, service-ref }` field; 6-source-type recipes AI Search / Cog Svc / Service Bus / Storage / Redis / literal) | FULL | opus / xhigh | none (serial after 084; blocks 201) | 036, 044, 084 |
+| 201 | ⏸ | H4b-BulkAppSettings: apply canonical BFF app-settings template in ONE batch → ONE restart (F20/F20a automation; NEW canonical manifest at `scripts/canonical-app-settings/`; IHealthzProbe polls with 8-min backoff + parses docker-logs on failure for actionable diagnostic; sequences AFTER H4-shared + H4-per-tenant, BEFORE H9) | FULL | opus / xhigh | none (serial after 200) | 036, 044, 084, 200 |
+
 ### Phase F — E2E Acceptance (1 task)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
@@ -444,8 +453,8 @@ Per `notes/resource-discovery-2026-08-16.md`:
 
 | Metric | Value |
 |---|---|
-| **Total tasks** | 136 (78 original + 58 Phase C'' Wave G-1..G-7, added 2026-08-18) |
-| **not-started** 🔲 | 69 (11 original + 58 Phase C'') |
+| **Total tasks** | 138 (78 original + 58 Phase C'' Wave G-1..G-7, added 2026-08-18 + 2 Phase H-Prime, added 2026-08-24 SESSION 3 for F19/F20 automation) |
+| **not-started** 🔲 | 71 (11 original + 58 Phase C'' + 2 Phase H-Prime) |
 | **in-progress** 🟡 | 0 |
 | **completed** ✅ | 67 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085; Wave 4D: 059+060+061+086) |
 | **Phase C'' task decomposition (2026-08-18)** | 58 new POMLs (100-186) authored per DS-4/DS-1b/DS-2/DS-2b/DS-3/DS-5/DS-8 across Waves G-1..G-7 — the execution-engine build phase delivering FR-18/SC#5 E2E provisioning. See dedicated Phase C'' section above. All status not-started; NOT yet executed. |

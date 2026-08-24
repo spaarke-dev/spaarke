@@ -1,8 +1,104 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T02:35Z (in-session, SESSION 2) — **🎯 CLUSTER FINDING: F17+F19+F20 all reveal the SAME root cause — Bicep provisions Model 1 Prod infra but does NOT seed BFF runtime config (App Service code + KV secrets + App Service app settings). F16 fully remediated. F18/F19 discovered + fixed. F20/F20a discovered, chose NOT to serially chase 40-module chain. Handoff: H9 code deployed, /healthz blocked on F20 chain resolution.**
+> **Last Updated**: 2026-08-24 T03:15Z (in-session, SESSION 3) — **🎯 H4-shared (task 200) + H4b-BulkAppSettings (task 201) POMLs DESIGNED. Both handlers close the F17+F19+F20 cluster (H9 code deploy + H4-shared KV secret extract-from-source + H4b bulk app-settings from canonical manifest). Handler catalog updated in provision-environment SKILL.md. TASK-INDEX.md updated (80 total tasks). Ready for next-session execution via task-execute.**
 
-## 🎯 QUICK RECOVERY — 2026-08-24 T02:35Z SESSION 2 (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 T03:15Z SESSION 3 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD** | (updated on this session's commit) |
+| **Working tree** | ⚠️ Dirty (2 new POMLs + SKILL.md handler catalog + TASK-INDEX.md + this current-task.md) |
+| **What SESSION 3 shipped** | Design work only — no code. Two POML task files + handler catalog updates + TASK-INDEX.md entries. Committed + pushed. |
+| **Model 1 Prod state** | Unchanged from SESSION 2. BFF still in F20-chain state (SIGABRT exit 134). No live changes this session. |
+
+### 🎯 WHAT SESSION 3 ACCOMPLISHED (2026-08-24 T02:45Z → T03:15Z)
+
+Designed both handlers per SESSION 2 handoff Option 2 (recommended):
+
+1. ✅ **Task 200 authored**: `projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml`
+   - H4-shared handler: sibling to H4 (per-tenant); extracts credentials from source Azure services via az CLI and seeds to shared KV under canonical secret names
+   - Extends task 084 canonical secret-catalog manifest schema (additive `source: { type, service-ref }` field on shared-tier entries)
+   - 6 per-source-type recipes validated live this session: ai-search-admin-key / cognitive-services-key1 (×2: openai + docintel) / service-bus-root-sas / storage-connection-string / redis-composed
+   - Idempotent with drift-detection: verify existing KV value against fresh source every run; rotate + audit-log on drift
+   - Bicep hardening implied: L2 UAMI needs 5 new RBAC assignments on source services (`Cognitive Services User`, `Search Service Contributor`, `Azure Service Bus Data Owner`, `Storage Account Contributor`, `Redis Cache Contributor`)
+   - Rigor: FULL · Model: opus @ xhigh · Deps: 036, 044, 084
+
+2. ✅ **Task 201 authored**: `projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml`
+   - H4b-BulkAppSettings handler: kills the F20 progressive-fail-fast chain by applying ALL required BFF app settings in ONE batch `az webapp config appsettings set --settings k1=v1 k2=v2 ...` call → ONE App Service restart cycle
+   - NEW canonical manifest at `scripts/canonical-app-settings/manifest.yaml` (sibling to task 084 secret-catalog) enumerating every BFF app setting (~40 IOptions modules × ~2-4 settings ≈ 80-160 total)
+   - Per-entry schema: `key`, `source` (`kv-ref` | `per-env-input` | `literal`), `kv-secret-name?`, `per-env-key?`, `literal-value?`, `iOptionsModule?`, `required` (default true)
+   - Diff-first idempotency: reads current app settings via `az webapp config appsettings list`, computes diff, writes only differing settings; preserves operator overrides (keys not in manifest untouched)
+   - Post-condition IHealthzProbe polls `/healthz` with 8-min backoff (30s / 60s / 90s / 120s / 180s); on failure parses container docker-logs via Kudu API for `Unhandled exception. System.InvalidOperationException:` line → extracts module name for actionable diagnostic
+   - Manifest source-of-truth: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings
+   - Rigor: FULL · Model: opus @ xhigh · Deps: 036, 044, 084, 200
+
+3. ✅ **Handler catalog updated**: `.claude/skills/provision-environment/SKILL.md` Step 3 handler enumeration now lists H4-shared alongside H4, and H4b as a new row (13 handlers for Model1Shared / 17 for Model2Dedicated, was 11 / 15). Roadmap items 12 + 13 in Automation Gaps section cross-reference the new POML files.
+
+4. ✅ **TASK-INDEX.md updated**: New "Phase H-Prime — Absorb F19/F20 first-live findings into handler catalog (2 tasks)" section added between Phase C'' G-7 and Phase F, with tasks 200 + 201 rows. Total tasks 136 → 138; not-started 🔲 69 → 71; Task Registry header 78 → 80.
+
+### 🎯 CLUSTER FINDING (unchanged from SESSION 2, now with handler POMLs)
+
+**F17 + F19 + F20 have one root cause**: `stacks/model1-shared.bicep` provisions the Model 1 Prod platform (App Service, KV, source services, UAMIs, RBAC) but does NOT seed the BFF's runtime state:
+- ❌ BFF code (fixed manually via H9 execution SESSION 2; H9 handler task 052 already exists)
+- ❌ KV secrets (fixed manually via F19 SESSION 2; **H4-shared task 200 designed this session**)
+- ❌ App Service app settings for `.ValidateOnStart()` modules (F20 chain; **H4b task 201 designed this session**)
+
+Correct handler sequence: `H4-per-tenant (task 047) || H4-shared (task 200) → H4b (task 201) → H9 (task 052) → BFF boots configured`. Kills F20 progressive fail-fast permanently.
+
+### 📍 EXPLICIT NEXT ACTIONS (SESSION 4)
+
+**Option 3 (recommended) — Execute the designed handlers via task-execute, then live-fire against Model 1 Prod**:
+
+1. **task-execute 084**: Author canonical secret-catalog manifest + generator (task 084 currently pending; must land BEFORE 200) — see `projects/customer-provisioning-orchestration-r1/tasks/084-canonical-secret-catalog-manifest.poml`
+2. **task-execute 200**: Implement H4-shared handler — extends 084 manifest schema with `source` field, implements 6 extractor recipes, unit tests
+3. **task-execute 201**: Implement H4b-BulkAppSettings handler — authors sibling canonical-app-settings manifest, implements bulk-write + /healthz probe, unit tests
+4. **Live-fire test bed**: run L2 dispatcher against Model 1 Prod for {H4-per-tenant, H4-shared, H4b, restart} → BFF /healthz returns 200 → verifies design end-to-end. First real evidence the customer-provisioning platform works.
+
+**Option 4 (alternate) — Interim runbook**: skip the handler build for now; manually seed ~80-160 app settings from `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` via a single ad-hoc `az webapp config appsettings set` batch call; verify /healthz. Faster to unblock Model 1 Prod but produces no reusable handler. Not recommended per owner directive ("customer provisioning + deployment PROCESS, not one-off standup").
+
+### 🚨 CRITICAL LEDGER (unchanged from SESSION 2)
+
+Extracted from source services SESSION 2, seeded to `sprk-prod-kv`:
+- `AiSearch--AdminKey` (sprksharedprod-search)
+- `DocumentIntelligence-ApiKey` (sprksharedprod-docintel)
+- `AzureOpenAI-ApiKey` (sprksharedprod-openai)
+- `servicebus-connection-string` (sprksharedprod-servicebus)
+- `storage-connection-string` (sprksharedprodsa)
+- `redis-connection-string` (sprksharedprod-redis)
+
+Values NOT yet extracted/seeded (needed for Option 3 step 4 or Option 4):
+- `BFF-API-ClientSecret` (per r3 BINDING never-delete — must be seeded WITH REAL VALUE, not sentinel)
+- `Dataverse-ClientSecret` (per r3 BINDING never-delete — deprecated per ADR-028 auth v2 but still referenced)
+- `Sidecar-Shared-Secret` (Exchange sidecar; MAY be needed)
+- Any per-env config: TenantId, BFF multitenant app ClientId, SharePointEmbedded ContainerTypeId, WebhookSigningKey, WebhookClientState, EmailProcessing:WebhookSigningKey
+
+### 🔁 To resume next session — say ONE of these
+
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context
+- **"execute task 084 then 200 then 201"** — sequenced task-execute chain (Option 3 recommended)
+- **"execute task 200"** — start with H4-shared (assumes 084 already lands or is deferred)
+- **"resume with Option 4 (interim runbook)"** — hand-crafted bulk app-settings write against Model 1 Prod
+- **"just document + hand off"** — this session already did that; no further doc work needed
+
+### 🧠 SESSION 3 SUMMARY
+
+**Design work only — no code changes to `src/` or Bicep.** Two POML task files + SKILL.md handler catalog update + TASK-INDEX.md entries. Committed + pushed.
+
+**Design decisions locked in**:
+- Two sibling handlers (H4-shared + H4b) NOT one combined — different idempotency semantics (drift-detection vs diff-first), different targets (KV secrets vs App Service app settings), different failure modes (source-unreachable vs /healthz-red)
+- H4-shared extends task 084 manifest schema additively — no v1 consumer break
+- H4b introduces sibling canonical-app-settings manifest at `scripts/canonical-app-settings/` — mirrors task 084 shape (manifest.yaml + generator + generated/ output dir)
+- Both handlers register in L2 control-plane, NOT BFF (§10)
+- Both pre-declared FULL rigor + opus @ xhigh model tier per project CLAUDE.md defaults for high-blast-radius manifest-driven work
+
+**§11 justification passed for both**: existing = nothing overlapping; extension = no (different semantics/scope); cost-of-doing-nothing = concrete BFF SIGABRT exit 134 pattern observed live this session
+
+**Owner directives (unchanged from SESSION 2)**: Q1-Q7 answers per prior handoff. Do NOT `pac admin copy`. Do NOT enable Managed Environments yet. Do NOT set up Env Groups for Model 1. Do NOT set up PAYG for Model 1.
+
+---
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T02:35Z SESSION 2 (retained for reference)
 
 | Field | Value |
 |-------|-------|
