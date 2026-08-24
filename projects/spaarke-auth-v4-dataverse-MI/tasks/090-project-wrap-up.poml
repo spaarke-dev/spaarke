@@ -4,7 +4,7 @@
     <title>Project wrap-up</title>
     <phase>9 Wrap-up</phase>
     <gate>all tasks complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation, reporting and gate execution; no production code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -195,4 +195,27 @@
       verification, not an outstanding task.
     </obligation>
   </booked-obligations>
+  <execution-log>
+    <!-- 090 EXECUTION LOG — 2026-08-24. PROJECT DELIBERATELY NOT CLOSED (owner direction):
+         build / deploy / UAT still remain. Steps executed up to, but excluding, close-out. -->
+    <step-status id="1" state="DONE">/test-diet run -> notes/test-diet-report.md. 73 methods added;
+      0 SCAFFOLDING; 8 PATH-VIOLATION-PROTECTED; 1 AMBIGUOUS. Zero deletions recommended — and the report
+      says why that reflects TIMING (tests authored after task 063 audited the classifier), not virtue.</step-status>
+    <step-status id="2" state="DONE">Graduation criterion 12 EXERCISED on scratch branch
+      scratch/criterion-12-negative-control: a deliberate 9th secret-bearing client made FR-F1 and FR-F2
+      FAIL, naming file:line. Branch deleted; 56/56 ArchTests green again. NOTE the precise claim:
+      dotnet build SUCCEEDS, the ArchTests fail — the CI gate is what fails, not the compiler.</step-status>
+    <step-status id="3" state="DONE">Publish 44.99 MB compressed incl. PDBs vs the 44.96 MB net10
+      baseline = +0.03 MB, despite Microsoft.Identity.Web.Certificateless being a NEW reference. Ceiling
+      60 MB: PASS. CVE scan (NFR-02): no vulnerable packages.</step-status>
+    <step-status id="5" state="DONE">notes/lessons-learned.md written — centres the false-premise root
+      cause, the 8 shapes of "a status code proves nothing", and an honest answer on whether the forcing
+      functions hold (yes, demonstrated; ONE gap — the ADR-038 amendment is unratified).</step-status>
+    <step-status id="4" state="DEFERRED">Graduation criteria walk — deferred to close-out; several
+      criteria are UAT-dependent by nature.</step-status>
+    <step-status id="6" state="DEFERRED-BY-DESIGN">README / projects/INDEX.md / portfolio #800 must NOT
+      be marked complete. Owner direction 2026-08-24: do not close the project.</step-status>
+    <step-status id="7" state="PARTIAL">Task 030 landed for provisioning; PR #812 coordination closed out
+      (clean merge verified + content issue raised on the PR). Model 2 tenancy question still open.</step-status>
+  </execution-log>
 </task>

@@ -36,7 +36,7 @@
 | 061 | Credential census (**source analysis, not DI**) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F2 | ✅ |
 | 062 | Startup assertion (non-Development) | 6 Forcing | FULL | sonnet/high | 022 | **G** | ✅ | FR-F3 | ✅ |
 | 063 | Pre-declare ArchTests MAINTAIN-class for `/test-diet` | 6 Forcing | STANDARD | sonnet/med | 060,061 | **G** | ❌ `.claude/` | FR-F0 | ✅ |
-| 090 | Project wrap-up | 9 Wrap | STANDARD | sonnet/high | all active | — | ❌ | — | 🔲 |
+| 090 | Project wrap-up (**PARTIAL 2026-08-24 — deliberately NOT closed per owner: build/deploy/UAT remain.** DONE: /test-diet (0 deletions), **criterion 12 EXERCISED — the guards fired on a seeded 9th secret client**, publish +0.03 MB vs baseline, 0 CVEs, lessons-learned. DEFERRED: criteria walk, registry/portfolio close-out) | 9 Wrap | STANDARD | sonnet/high | all active | — | ❌ | — | 🔄 |
 
 ¹ **001 ran at FULL, not the authored STANDARD** — `task-execute` Step 0.5 overrides *up* when tags include
 `auth`. Completed 2026-08-20. Slot `staging` is live and healthy, **not swapped**. It surfaced three findings that
