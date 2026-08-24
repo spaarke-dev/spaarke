@@ -296,6 +296,40 @@ public class SpeAdminContainerTypeSettingsPatchTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // The RESPONSE — every test above is about the request
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_ReturnsBillingFields_InTheSameCasingTheListDoes()
+    {
+        // 🔴 Regression guard for a defect task 029 found here. This path stringified the SDK's
+        // billing enum directly — `updated.BillingClassification?.ToString()` — while the LIST path
+        // ran the same value through the normalizer. So the identical container type came back as
+        // "Trial" from a settings save and "trial" from the list, and which spelling a client saw
+        // depended on which endpoint it had asked. Casing that varies by endpoint is not cosmetic:
+        // every client comparison against Graph's own lowercase value silently fails on one path.
+        using var graph = new GraphWireMockFixture();
+        graph.StubPatch(ContainerTypesPath, """
+            {
+              "id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+              "name":"Legal Documents",
+              "billingClassification":"trial",
+              "billingStatus":"invalid"
+            }
+            """);
+
+        var result = await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: true,
+            itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: null);
+
+        result.Should().NotBeNull();
+        result!.BillingClassification.Should().Be("trial", "the SDK enum stringifies as \"Trial\"");
+        result.BillingStatus.Should().Be("invalid", "the SDK enum stringifies as \"Invalid\"");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private static SpeAdminGraphService CreateSut()
     {

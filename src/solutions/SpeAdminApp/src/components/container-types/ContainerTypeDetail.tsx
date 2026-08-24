@@ -72,6 +72,7 @@ import {
   type SharingCapabilityValue,
 } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
+import { assessBilling } from "./containerTypeLifecycle";
 import type { ContainerType, ContainerTypePermission } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -386,6 +387,17 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
     [settings, savedSettings]
   );
 
+  /**
+   * Billing standing for the loaded container type (task 029 / spec FR-C12).
+   *
+   * Computed even when `containerType` is null so the value is always defined; in that state it
+   * assesses to "unknown", which is the truthful reading of "nothing loaded yet".
+   */
+  const billingAssessment = React.useMemo(
+    () => assessBilling(containerType ?? {}),
+    [containerType]
+  );
+
   // ── Tab State ──────────────────────────────────────────────────────────────
 
   const [activeTab, setActiveTab] = React.useState<TabId>("settings");
@@ -561,6 +573,28 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                   {capitalize(containerType.billingClassification)}
                 </Badge>
               )}
+              {/*
+                Billing standing (task 029 / spec FR-C12). Rendered whenever a container type is
+                loaded — including when Graph did not report it, which shows as an explicit "Unknown"
+                rather than being omitted. An omitted badge would be indistinguishable from a healthy
+                one to anyone who does not already know the field exists (NFR-06).
+              */}
+              {containerType && (
+                <Badge
+                  color={billingAssessment.tone}
+                  appearance={
+                    billingAssessment.standing === "unknown" ? "outline" : "filled"
+                  }
+                  size="small"
+                  title={
+                    [billingAssessment.consequence, billingAssessment.remediation]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                >
+                  Billing: {billingAssessment.label}
+                </Badge>
+              )}
               {containerType?.containerTypeId && (
                 <Text
                   className={styles.headerSubtext}
@@ -665,6 +699,28 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
           {/* ── Settings Tab ── */}
           {activeTab === "settings" && (
             <div className={styles.tabContent}>
+              {/*
+                Invalid-billing warning (task 029 / spec FR-C12). Placed above the settings form
+                because it is a condition of the container type itself, not a result of anything the
+                admin is about to do here — and it is not a save failure, so it must not sit among the
+                save banners. States the operational consequence and where it is remediated (which is
+                deliberately NOT this app); a bare red badge would leave an admin with nowhere to go.
+              */}
+              {billingAssessment.needsAttention && (
+                <MessageBar intent="warning" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>Billing is invalid</MessageBarTitle>
+                    {billingAssessment.consequence}
+                    {billingAssessment.remediation ? (
+                      <>
+                        {" "}
+                        {billingAssessment.remediation}
+                      </>
+                    ) : null}
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
               {/* Save success / error banners */}
               {saveSuccess && (
                 <MessageBar intent="success" className={styles.successBanner}>

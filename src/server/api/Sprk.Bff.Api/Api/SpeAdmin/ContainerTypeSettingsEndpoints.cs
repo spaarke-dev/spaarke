@@ -211,6 +211,7 @@ public static class ContainerTypeSettingsEndpoints
                 Id = result.Id,
                 DisplayName = result.DisplayName,
                 BillingClassification = result.BillingClassification,
+                BillingStatus = result.BillingStatus,
                 CreatedDateTime = result.CreatedDateTime,
                 // The read-back. A 200 is not proof a settings write applied (spec FR-C04).
                 Settings = ContainerTypeSettingsDto.FromDomain(result.Settings)

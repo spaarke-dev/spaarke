@@ -173,6 +173,17 @@ export interface SpeContainerTypeConfigUpsert {
 export type ContainerTypeStatus = "trial" | "standard" | "directToCustomer";
 
 /**
+ * Billing standing of a container type, from Graph's `fileStorageContainerBillingStatus` enum.
+ *
+ * Graph declares exactly `invalid | valid | unknownFutureValue` on both v1.0 and beta (verified
+ * against `https://graph.microsoft.com/v1.0/$metadata`). `unknownFutureValue` is Graph's forward-
+ * compatibility sentinel, never a real value, so it is deliberately not modelled here — an actual
+ * future member would arrive as an unrecognised string and must land in the UNKNOWN branch rather
+ * than being silently typed away.
+ */
+export type BillingStatus = "valid" | "invalid";
+
+/**
  * SPE Container Type — returned by the Graph API and proxied through
  * GET /api/spe/containertypes?configId={id}.
  */
@@ -189,8 +200,28 @@ export interface ContainerType {
    * isn't one", which is a different and wrong claim.
    */
   owningAppId?: string;
-  /** Billing classification (trial / standard / directToCustomer) */
-  billingClassification: ContainerTypeStatus;
+  /**
+   * Billing classification (trial / standard / directToCustomer).
+   *
+   * Optional since 2026-08-24 (task 029). The BFF has always sent this nullable (`string?`), but
+   * declaring it required here made the client type assert something the wire never guaranteed — and
+   * because responses are cast rather than parsed, TypeScript could not catch the difference. It
+   * mattered: the value was null for **every** container type between the Graph 6 upgrade
+   * (2026-08-13) and task 030's fix (2026-08-23), during which the grid rendered an empty badge
+   * rather than saying "unknown". `undefined` means UNKNOWN, never "standard".
+   */
+  billingClassification?: ContainerTypeStatus;
+  /**
+   * Whether billing for this container type is in good standing.
+   *
+   * `undefined` means NOT REPORTED and MUST NOT be rendered as valid (NFR-06). Read together with
+   * `billingClassification`: only a `standard` type requires a billing profile in the developer
+   * tenant, so an `invalid` status is actionable there and not necessarily elsewhere
+   * (`knowledge/sharepoint-embedded/docs/learn-containertypes.md` :61, :79-:80).
+   *
+   * READ-ONLY — attaching a billing profile belongs to provisioning (spec §4.2d).
+   */
+  billingStatus?: BillingStatus;
   /** Azure AD tenant ID of the owning tenant. Not currently returned by the BFF. */
   azureTenantId?: string;
   /**

@@ -167,6 +167,58 @@ public class SpeAdminContainerTypeMappingTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Billing status (task 029 / spec FR-C12)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task BillingStatus_ReachesTheSummary_InGraphsWireCasing()
+    {
+        // Until task 029 the string "billingStatus" did not appear anywhere in this repository, so a
+        // container type whose billing had lapsed looked identical to a healthy one on every screen.
+        //
+        // The casing half is not cosmetic. The SDK binds this to a typed enum whose ToString() is
+        // "Invalid", while Graph, this API's contract, and every client comparison use "invalid".
+        // Emitting the C# spelling would make the DTO's value depend on which SDK version happened to
+        // be installed — the exact coupling that left billingClassification null for ten days after
+        // the Graph 6 upgrade.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, """
+            {"value":[{
+              "id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+              "name":"Lapsed Billing",
+              "billingClassification":"standard",
+              "billingStatus":"invalid"
+            }]}
+            """);
+
+        var result = await CreateSut().ListContainerTypesAsync(graph.CreateGraphClient());
+
+        result.Should().ContainSingle().Which.BillingStatus.Should().Be("invalid");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task AbsentBillingStatus_IsNull_RatherThanValid()
+    {
+        // NFR-06, and the expensive direction of it. Defaulting an unreported billing status to
+        // "valid" would present an unbilled container type as healthy — a fabricated reassurance,
+        // which is worse here than an unhelpful blank. Null is what lets the UI say "unknown".
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, """
+            {"value":[{
+              "id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+              "name":"No Billing Status Returned",
+              "billingClassification":"standard"
+            }]}
+            """);
+
+        var result = await CreateSut().ListContainerTypesAsync(graph.CreateGraphClient());
+
+        result.Should().ContainSingle().Which.BillingStatus.Should().BeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private static SpeAdminGraphService CreateSut()
     {

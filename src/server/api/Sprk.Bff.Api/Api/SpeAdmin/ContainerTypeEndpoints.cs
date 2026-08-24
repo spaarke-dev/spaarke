@@ -173,6 +173,7 @@ public static class ContainerTypeEndpoints
                     DisplayName = ct2.DisplayName,
                     Description = ct2.Description,
                     BillingClassification = ct2.BillingClassification,
+                    BillingStatus = ct2.BillingStatus,
                     CreatedDateTime = ct2.CreatedDateTime,
                     // Both are nullable all the way to the client. An absent owning app must render
                     // as unknown, and an absent expiry must not read as "never expires" (task 030).
@@ -301,6 +302,7 @@ public static class ContainerTypeEndpoints
                 DisplayName = containerType.DisplayName,
                 Description = containerType.Description,
                 BillingClassification = containerType.BillingClassification,
+                BillingStatus = containerType.BillingStatus,
                 CreatedDateTime = containerType.CreatedDateTime,
                 OwningAppId = containerType.OwningAppId,
                 ExpiryDateTime = containerType.ExpirationDateTime,
@@ -460,6 +462,7 @@ public static class ContainerTypeEndpoints
                 DisplayName = created.DisplayName,
                 Description = created.Description,
                 BillingClassification = created.BillingClassification,
+                BillingStatus = created.BillingStatus,
                 CreatedDateTime = created.CreatedDateTime,
                 OwningAppId = created.OwningAppId,
                 ExpiryDateTime = created.ExpirationDateTime,

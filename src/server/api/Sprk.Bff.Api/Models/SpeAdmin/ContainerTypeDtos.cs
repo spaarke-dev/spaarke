@@ -107,11 +107,32 @@ public sealed record ContainerTypeDto
     public string? Description { get; init; }
 
     /// <summary>
-    /// Billing classification for the container type.
-    /// Typically "standard" for most container types.
+    /// Billing classification for the container type: "standard", "trial", or "directToCustomer".
+    /// Null when Graph does not report it — which means UNKNOWN, not "standard".
     /// </summary>
     [JsonPropertyName("billingClassification")]
     public string? BillingClassification { get; init; }
+
+    /// <summary>
+    /// Whether the container type's billing is in good standing: "valid" or "invalid".
+    /// Null when Graph does not report it.
+    /// </summary>
+    /// <remarks>
+    /// Added by task 029 (spec FR-C12). Graph declares this on <c>fileStorageContainerType</c> in both
+    /// the v1.0 and beta CSDL as enum <c>fileStorageContainerBillingStatus { invalid, valid,
+    /// unknownFutureValue }</c> — and until this task <b>the string "billingStatus" did not appear
+    /// anywhere in the repository</b>, so invalid billing had no way of reaching an administrator.
+    /// <para>
+    /// <b>Null means NOT REPORTED and MUST NOT render as "valid"</b> (NFR-06). Consumers must also
+    /// weigh this against <see cref="BillingClassification"/>: only a <c>standard</c> container type
+    /// requires a billing profile in the developer tenant, so an "invalid" status is actionable there
+    /// and not necessarily elsewhere (knowledge/sharepoint-embedded/docs/learn-containertypes.md:61,
+    /// :79-:80).
+    /// </para>
+    /// <para>READ-ONLY. Attaching a billing profile is provisioning's scope, not this app's.</para>
+    /// </remarks>
+    [JsonPropertyName("billingStatus")]
+    public string? BillingStatus { get; init; }
 
     /// <summary>When the container type was created (UTC), or null when Graph does not report it.</summary>
     /// <remarks>
@@ -179,6 +200,13 @@ public sealed record ContainerTypeSettingsResponseDto
     /// </summary>
     [JsonPropertyName("billingClassification")]
     public string? BillingClassification { get; init; }
+
+    /// <summary>
+    /// Billing standing ("valid" / "invalid"), or null when Graph does not report it. Echoed here so a
+    /// settings save returns the same billing view the list does, rather than a narrower one.
+    /// </summary>
+    [JsonPropertyName("billingStatus")]
+    public string? BillingStatus { get; init; }
 
     /// <summary>When the container type was created (UTC), or null when Graph does not report it.</summary>
     /// <remarks>

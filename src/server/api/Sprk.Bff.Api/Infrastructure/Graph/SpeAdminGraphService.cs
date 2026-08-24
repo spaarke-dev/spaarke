@@ -206,7 +206,8 @@ public sealed class SpeAdminGraphService
         DateTimeOffset? CreatedDateTime,
         string? OwningAppId = null,
         DateTimeOffset? ExpirationDateTime = null,
-        SpeContainerTypeSettings? Settings = null);
+        SpeContainerTypeSettings? Settings = null,
+        string? BillingStatus = null);
 
     /// <summary>
     /// An application permission entry on an SPE container type, returned from the Graph
@@ -3564,8 +3565,21 @@ public sealed class SpeAdminGraphService
         // deletable, which can be registered, which quota applies.
         //
         // Typed first, AdditionalData second, so this survives the SDK typing it OR untyping it.
-        var billingClassification = NormalizeBillingClassification(
+        var billingClassification = NormalizeEnumMemberName(
             ct.BillingClassification?.ToString() ?? ReadAdditionalString(ct, "billingClassification"));
+
+        // billingStatus (task 029 / spec FR-C12) — declared on fileStorageContainerType in BOTH the
+        // v1.0 and beta CSDL, as enum fileStorageContainerBillingStatus { invalid, valid,
+        // unknownFutureValue }. Verified against https://graph.microsoft.com/v1.0/$metadata, which
+        // needs no token and outranks documentation prose.
+        //
+        // Read with the same typed-first / AdditionalData-second shape as billingClassification, for
+        // the same reason: whether the installed SDK types a property is not a fact the mapping should
+        // depend on. Null means NOT REPORTED and must never be presented as "valid" (NFR-06) — an
+        // unbilled container type that reads as billed is precisely the silent-success defect this
+        // project exists to remove.
+        var billingStatus = NormalizeEnumMemberName(
+            ct.BillingStatus?.ToString() ?? ReadAdditionalString(ct, "billingStatus"));
 
         // owningAppId and expirationDateTime come through AdditionalData for the same reason
         // billingClassification does: the installed Graph SDK does not type them on
@@ -3587,7 +3601,8 @@ public sealed class SpeAdminGraphService
             CreatedDateTime: ct.CreatedDateTime,
             OwningAppId: owningAppId,
             ExpirationDateTime: expirationDateTime,
-            Settings: MapContainerTypeSettings(ct.Settings));
+            Settings: MapContainerTypeSettings(ct.Settings),
+            BillingStatus: billingStatus);
     }
 
     /// <summary>
@@ -3714,7 +3729,7 @@ public sealed class SpeAdminGraphService
         }
 
         return new SpeContainerTypeSettings(
-            SharingCapability: NormalizeBillingClassification(s.SharingCapability?.ToString()),
+            SharingCapability: NormalizeEnumMemberName(s.SharingCapability?.ToString()),
             IsItemVersioningEnabled: s.IsItemVersioningEnabled,
             ItemMajorVersionLimit: s.ItemMajorVersionLimit,
             MaxStoragePerContainerInBytes: s.MaxStoragePerContainerInBytes,
@@ -3727,16 +3742,22 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Normalizes a billing classification to the value Graph puts on the wire.
+    /// Normalizes a Graph enum member name to the value Graph puts on the wire.
     /// </summary>
     /// <remarks>
-    /// The SDK enum stringifies to its C# member name (<c>Trial</c>, <c>DirectToCustomer</c>), while
-    /// Graph, the API contract, and every client comparison use camelCase (<c>trial</c>,
-    /// <c>directToCustomer</c>). Emitting the C# spelling would make the DTO's value depend on which
-    /// SDK version happened to be installed — the exact coupling that hid the regression above.
-    /// Lowercasing only the first character preserves the rest of the identifier.
+    /// The SDK enum stringifies to its C# member name (<c>Trial</c>, <c>DirectToCustomer</c>,
+    /// <c>Invalid</c>), while Graph, the API contract, and every client comparison use camelCase
+    /// (<c>trial</c>, <c>directToCustomer</c>, <c>invalid</c>). Emitting the C# spelling would make the
+    /// DTO's value depend on which SDK version happened to be installed — the exact coupling that hid
+    /// the billing-classification regression above. Lowercasing only the first character preserves the
+    /// rest of the identifier.
+    /// <para>
+    /// Applies to every Graph enum this service surfaces as a string: billing classification, billing
+    /// status, and sharing capability. Renamed from <c>NormalizeBillingClassification</c> by task 029 —
+    /// it had already outgrown that name when task 025 pointed sharing capability at it.
+    /// </para>
     /// </remarks>
-    private static string? NormalizeBillingClassification(string? value)
+    private static string? NormalizeEnumMemberName(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         return char.ToLowerInvariant(value[0]) + value[1..];
@@ -4237,7 +4258,6 @@ public sealed class SpeAdminGraphService
     /// <param name="Id">Container type GUID.</param>
     /// <param name="DisplayName">Human-readable display name for the container type.</param>
     /// <param name="BillingClassification">Billing classification string (e.g., "standard"). Null when not returned.</param>
-    /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
     /// <param name="CreatedDateTime">
     /// When the container type was created, or null when Graph does not report it. Nullable since
     /// 2026-08-24 (task 023): the previous <c>?? DateTimeOffset.UtcNow</c> fallback rendered a
@@ -4247,12 +4267,17 @@ public sealed class SpeAdminGraphService
     /// Settings as Graph reports them after the update — the read-back that lets a caller confirm the
     /// write applied rather than trusting a 200. Added by task 025.
     /// </param>
+    /// <param name="BillingStatus">
+    /// Billing standing ("valid" / "invalid"), or null when Graph does not report it. Added by task
+    /// 029 so a settings save returns the same billing view the list does, rather than a narrower one.
+    /// </param>
     public sealed record ContainerTypeSettingsResult(
         string Id,
         string DisplayName,
         string? BillingClassification,
         DateTimeOffset? CreatedDateTime,
-        SpeContainerTypeSettings? Settings = null);
+        SpeContainerTypeSettings? Settings = null,
+        string? BillingStatus = null);
 
     /// <summary>
     /// Updates settings on an SPE container type via PATCH /storage/fileStorage/containerTypes/{typeId}.
@@ -4421,7 +4446,17 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            var billingClassification = updated.BillingClassification?.ToString();
+            // 🔴 Fixed by task 029: this read `updated.BillingClassification?.ToString()`, with no
+            // normalization — so the SAME field came back as "Trial" from a settings save and "trial"
+            // from the list, because only the list path passed it through the normalizer. Any client
+            // comparing the two, or comparing either against Graph's own value, would find a mismatch
+            // that depends on which endpoint it happened to ask. Both paths now agree.
+            var billingClassification = NormalizeEnumMemberName(
+                updated.BillingClassification?.ToString()
+                ?? ReadAdditionalString(updated, "billingClassification"));
+
+            var billingStatus = NormalizeEnumMemberName(
+                updated.BillingStatus?.ToString() ?? ReadAdditionalString(updated, "billingStatus"));
 
             _logger.LogInformation(
                 "Successfully updated container type settings for {ContainerTypeId}", containerTypeId);
@@ -4433,7 +4468,8 @@ public sealed class SpeAdminGraphService
                 // Was `?? DateTimeOffset.UtcNow` — a container type of unknown age rendered as
                 // "created today". Handed here by task 030; unknown now stays unknown.
                 CreatedDateTime: updated.CreatedDateTime,
-                Settings: MapContainerTypeSettings(updated.Settings));
+                Settings: MapContainerTypeSettings(updated.Settings),
+                BillingStatus: billingStatus);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {

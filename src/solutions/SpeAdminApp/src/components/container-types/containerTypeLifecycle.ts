@@ -295,3 +295,160 @@ export function describeProductionQuota(
       "the tenant total may be higher, because this list only covers what your account can see.",
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing standing (task 029 / spec FR-C12)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Billing standing as the UI must model it: Graph's two real values plus an explicit UNKNOWN.
+ *
+ * Three states, not two. Graph's enum is `invalid | valid | unknownFutureValue`, but the field can
+ * also be absent — and absent is not valid. Collapsing "not reported" into either real value is the
+ * defect NFR-06 names, and for billing it is the expensive direction: a container type whose billing
+ * has lapsed would read as healthy.
+ */
+export type BillingStanding = "valid" | "invalid" | "unknown";
+
+export interface BillingAssessment {
+  readonly standing: BillingStanding;
+  /** Badge label. Never blank — an empty badge reads as a state rather than as absence. */
+  readonly label: string;
+  /** Fluent Badge colour for this standing. */
+  readonly tone: "success" | "danger" | "informative";
+  /** True only for a reported `invalid`. Absence is not an alarm, and must not raise one. */
+  readonly needsAttention: boolean;
+  /** What this standing means operationally, or null when there is nothing to say. */
+  readonly consequence: string | null;
+  /**
+   * Where it is remediated, or null when this app cannot honestly route the admin anywhere.
+   * A null here is deliberate: inventing a remediation is worse than admitting the docs are silent.
+   */
+  readonly remediation: string | null;
+}
+
+/**
+ * Normalise a raw wire value to a {@link BillingStanding}.
+ *
+ * Anything unrecognised — including Graph's `unknownFutureValue` sentinel and any member added after
+ * this was written — becomes `unknown` rather than being coerced into `valid`.
+ */
+export function toBillingStanding(raw?: string | null): BillingStanding {
+  const v = (raw ?? "").trim().toLowerCase();
+  if (v === "valid") return "valid";
+  if (v === "invalid") return "invalid";
+  return "unknown";
+}
+
+/**
+ * Assess a container type's billing standing, and say what an `invalid` means *for this
+ * classification*.
+ *
+ * The classification split is load-bearing and is the part FR-C12 does not mention. Only a
+ * `standard` container type requires a billing profile in the developer tenant
+ * (learn-containertypes.md:79). A `directToCustomer` type bills the consuming tenant and the
+ * developer tenant "doesn't need to set up an Azure billing profile" (:80), and a `trial` type
+ * "isn't linked to any Azure billing profile" at all (:61). So a single generic "attach a billing
+ * profile" warning would instruct an admin to do something that is wrong for two of the three
+ * classifications.
+ */
+export function assessBilling(ct: {
+  billingStatus?: string | null;
+  billingClassification?: string | null;
+}): BillingAssessment {
+  const standing = toBillingStanding(ct.billingStatus);
+  const classification = (ct.billingClassification ?? "").trim().toLowerCase();
+
+  if (standing === "valid") {
+    return {
+      standing,
+      label: "Valid",
+      tone: "success",
+      needsAttention: false,
+      consequence: null,
+      remediation: null,
+    };
+  }
+
+  if (standing === "unknown") {
+    return {
+      standing,
+      label: "Unknown",
+      tone: "informative",
+      needsAttention: false,
+      consequence:
+        "Microsoft Graph did not report a billing status for this container type. This is not a " +
+        "statement that billing is valid — it means the value was not returned.",
+      remediation: null,
+    };
+  }
+
+  // standing === "invalid" — what that means depends entirely on the classification.
+  if (classification === "standard") {
+    return {
+      standing,
+      label: "Invalid",
+      tone: "danger",
+      needsAttention: true,
+      consequence:
+        "Consumption charges for a standard container type are billed to this tenant, and a standard " +
+        "type requires a valid Azure billing profile. While billing is invalid, the container type is " +
+        "not fully provisioned for billable production use.",
+      remediation:
+        "A Global Administrator in this (developer) tenant attaches a billing profile with " +
+        "Add-SPOContainerTypeBilling in the SharePoint Online Management Shell, using an Azure " +
+        "subscription and resource group in this tenant. SPE Admin does not perform this — it is a " +
+        "provisioning step and needs Azure subscription rights this app does not hold.",
+    };
+  }
+
+  if (classification === "directtocustomer") {
+    return {
+      standing,
+      label: "Invalid",
+      tone: "danger",
+      needsAttention: true,
+      consequence:
+        "This is a passthrough (directToCustomer) container type, so consumption is billed to the " +
+        "consuming tenant rather than to this one, and this tenant does not attach a billing profile " +
+        "for it.",
+      remediation:
+        "Attaching a billing profile here would be the wrong fix — that applies to standard types " +
+        "only. Microsoft's container-type documentation does not state how billing becomes invalid " +
+        "for a passthrough type, so check the consuming tenant's registration and its own Azure " +
+        "billing setup before changing anything.",
+    };
+  }
+
+  if (classification === "trial") {
+    return {
+      standing,
+      label: "Invalid",
+      tone: "danger",
+      needsAttention: true,
+      consequence:
+        "A trial container type is not linked to an Azure billing profile at all, so an invalid " +
+        "billing status is unexpected for one. Note that a trial type expires 30 days after creation " +
+        "regardless of billing.",
+      remediation:
+        "There is no billing profile to repair on a trial type. If this type is being used beyond " +
+        "development, it needs replacing with a standard or passthrough type — classification cannot " +
+        "be changed after creation.",
+    };
+  }
+
+  // Classification unknown: report the status truthfully and do not guess a remediation.
+  return {
+    standing,
+    label: "Invalid",
+    tone: "danger",
+    needsAttention: true,
+    consequence:
+      "Microsoft Graph reports this container type's billing as invalid. Its billing classification " +
+      "was not reported, and the remediation depends on that classification.",
+    remediation:
+      "Determine the billing classification first: a standard type needs a billing profile attached " +
+      "in this tenant, while a passthrough type is billed to the consuming tenant and is repaired " +
+      "there.",
+  };
+}

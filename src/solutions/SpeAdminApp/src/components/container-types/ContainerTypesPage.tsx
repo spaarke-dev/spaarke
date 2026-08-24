@@ -53,6 +53,7 @@ import {
 } from "../../services/speApiClient";
 import type { PermissionPrerequisite } from "../../services/speApiClient";
 import type { ContainerType } from "../../types/spe";
+import { assessBilling } from "./containerTypeLifecycle";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
 
@@ -76,7 +77,7 @@ function formatDate(iso: string | undefined): string {
 
 /** Map billing classification to a badge color. */
 function billingBadgeColor(
-  classification: string
+  classification: string | undefined
 ): "success" | "warning" | "informative" {
   switch (classification) {
     case "standard":
@@ -255,6 +256,18 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
+
+  /**
+   * Stacked lines inside the invalid-billing warning: affected types, then the operational
+   * consequence, then the remediation. Column layout so each stays a separate readable statement
+   * instead of running together into one paragraph.
+   */
+  billingWarningBody: {
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.gap(tokens.spacingVerticalXS),
+    marginTop: tokens.spacingVerticalXS,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,15 +289,67 @@ function buildColumns(): TableColumnDefinition<ContainerType>[] {
     createTableColumn<ContainerType>({
       columnId: "billingClassification",
       renderHeaderCell: () => "Billing Classification",
-      renderCell: (ct) => (
-        <Badge
-          color={billingBadgeColor(ct.billingClassification)}
-          appearance="filled"
-          size="small"
-        >
-          {capitalize(ct.billingClassification)}
-        </Badge>
-      ),
+      /*
+       * Three states, like Registered above. An absent classification used to reach `capitalize`,
+       * which returns its falsy input unchanged — so the cell rendered an EMPTY `informative` badge,
+       * visually a real neutral state rather than a gap. That is not hypothetical: the value was null
+       * for every container type between the Graph 6 upgrade (2026-08-13) and task 030's fix
+       * (2026-08-23), and nothing on this screen said so.
+       */
+      renderCell: (ct) => {
+        if (!ct.billingClassification) {
+          return (
+            <Tooltip
+              content="Microsoft Graph did not return a billing classification for this container type."
+              relationship="label"
+            >
+              <Badge color="informative" appearance="outline" size="small">
+                Unknown
+              </Badge>
+            </Tooltip>
+          );
+        }
+        return (
+          <Badge
+            color={billingBadgeColor(ct.billingClassification)}
+            appearance="filled"
+            size="small"
+          >
+            {capitalize(ct.billingClassification)}
+          </Badge>
+        );
+      },
+    }),
+    createTableColumn<ContainerType>({
+      columnId: "billingStatus",
+      renderHeaderCell: () => "Billing Status",
+      /*
+       * Task 029 / spec FR-C12. Until this column existed, invalid billing had no route to an
+       * administrator at all — "billingStatus" did not appear anywhere in the codebase, server or
+       * client. Unknown is rendered as Unknown, never as valid (NFR-06).
+       */
+      renderCell: (ct) => {
+        const billing = assessBilling(ct);
+        const badge = (
+          <Badge
+            color={billing.tone}
+            appearance={billing.standing === "unknown" ? "outline" : "filled"}
+            size="small"
+          >
+            {billing.label}
+          </Badge>
+        );
+        const tip = [billing.consequence, billing.remediation]
+          .filter(Boolean)
+          .join(" ");
+        return tip ? (
+          <Tooltip content={tip} relationship="label">
+            {badge}
+          </Tooltip>
+        ) : (
+          badge
+        );
+      },
     }),
     createTableColumn<ContainerType>({
       columnId: "owningAppId",
@@ -404,6 +469,32 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   const columns = React.useMemo(() => buildColumns(), []);
+
+  /*
+   * Container types whose billing Graph reports as INVALID (task 029 / spec FR-C12).
+   *
+   * Only a reported `invalid` qualifies — an unknown standing is surfaced per-row but must not raise
+   * a page-level alarm, because "we could not read it" is not "it is broken".
+   *
+   * The remediation differs by classification (a standard type is repaired here, a passthrough type
+   * is repaired in the consuming tenant), so distinct remediations are shown rather than merged into
+   * one instruction that would be wrong for some of the rows.
+   */
+  const invalidBilling = React.useMemo(() => {
+    const rows = containerTypes
+      .map((ct) => ({ ct, billing: assessBilling(ct) }))
+      .filter((r) => r.billing.needsAttention);
+
+    const remediations = [
+      ...new Set(
+        rows
+          .map((r) => r.billing.remediation)
+          .filter((r): r is string => Boolean(r))
+      ),
+    ];
+
+    return { rows, remediations };
+  }, [containerTypes]);
 
   // ── Data Loading ────────────────────────────────────────────────────────────
 
@@ -630,6 +721,44 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
               />
             </MessageBar>
           )}
+        </div>
+      )}
+
+      {/*
+        ── Invalid-billing warning (task 029 / spec FR-C12) ──
+        Not a bare red badge: it names the affected types, what invalid billing means operationally,
+        and where it is remediated — including that SPE Admin is deliberately not the place. Routing
+        beats stonewalling. Rendered only for a REPORTED invalid; an unknown standing shows in its
+        row's badge and raises nothing here.
+      */}
+      {invalidBilling.rows.length > 0 && (
+        <div className={styles.messageBarWrapper}>
+          <MessageBar intent="warning">
+            <MessageBarBody>
+              <MessageBarTitle>
+                {invalidBilling.rows.length === 1
+                  ? "Billing is invalid for 1 container type"
+                  : `Billing is invalid for ${invalidBilling.rows.length} container types`}
+              </MessageBarTitle>
+              <div className={styles.billingWarningBody}>
+                <Text size={200}>
+                  {invalidBilling.rows
+                    .map((r) => r.ct.displayName || r.ct.containerTypeId)
+                    .join(", ")}
+                </Text>
+                {invalidBilling.rows.map((r) => (
+                  <Text key={`c-${r.ct.containerTypeId}`} size={200}>
+                    {r.ct.displayName || r.ct.containerTypeId}: {r.billing.consequence}
+                  </Text>
+                ))}
+                {invalidBilling.remediations.map((text) => (
+                  <Text key={text} size={200} weight="semibold">
+                    {text}
+                  </Text>
+                ))}
+              </div>
+            </MessageBarBody>
+          </MessageBar>
         </div>
       )}
 
