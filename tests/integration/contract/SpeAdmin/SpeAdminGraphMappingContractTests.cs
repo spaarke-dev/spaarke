@@ -125,29 +125,81 @@ public class SpeAdminGraphMappingContractTests
     }
 
     [Fact]
-    public async Task ListContainers_AlwaysReportsStorageUsedAsNull_PinningTheKnownDefect()
+    public async Task ListContainers_ReportsTheStorageGraphActuallySent()
     {
-        // ⚠️ CHARACTERIZATION TEST — this pins a DEFECT, not desired behavior.
+        // 🔴 REGRESSION GUARD — was a characterization test pinning a live defect, inverted by task
+        // 024 (2026-08-24). Task 040 wrote it saying "WHEN THAT LANDS, THIS TEST MUST FAIL AND BE
+        // UPDATED", and it did.
         //
-        // SpeAdminGraphService.cs:645 hardcodes `StorageUsedInBytes: null` even though the $select
-        // asks for the field, so the Storage tile is silently blank for every container (spec §3.2).
-        // The field name is wrong too: `storageUsedInBytes` is a quota CEILING on the container type
-        // (`maxStoragePerContainerInBytes` in v1.0), not consumption.
+        // The defect: `StorageUsedInBytes: null` was hardcoded at four sites while the $select asked
+        // Graph for the field. The code requested the value and threw it away, so every Containers
+        // row read "—" and the Dashboard tile summed nothing into a confident "0 B".
         //
-        // Task 024 decides whether Graph exposes consumption at all and either implements it or
-        // removes the tile. WHEN THAT LANDS, THIS TEST MUST FAIL AND BE UPDATED — that failure is
-        // the point. Deleting it instead would restore the silence this project exists to end.
+        // Note the old comment's second claim was wrong, and task 023 settled it: storageUsedInBytes
+        // is genuinely CONSUMPTION on a container. The quota CEILING is maxStoragePerContainerInBytes
+        // on the container TYPE — a different concept on a different resource.
         using var graph = new GraphWireMockFixture();
         graph.StubGet(ContainersPath, """
-        {"value":[{"id":"b!c","displayName":"Has quota","storageUsedInBytes":1099511627776}]}
+        {"value":[{"id":"b!c","displayName":"Busy matter","storageUsedInBytes":1099511627776}]}
         """);
 
-        // Act
         var result = await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
 
-        // Assert
-        result.Should().ContainSingle().Which.StorageUsedInBytes.Should().BeNull(
-            "SpeAdminGraphService.cs:645 discards the value — task 024 owns the fix");
+        result.Should().ContainSingle().Which.StorageUsedInBytes.Should().Be(1_099_511_627_776L,
+            "Graph sent the figure and the $select asked for it — discarding it is the defect");
+    }
+
+    [Fact]
+    public async Task ListContainers_WhenGraphOmitsStorage_ReportsNull_NotZero()
+    {
+        // The half that makes the other half safe. Zero is a measurement — "this container holds
+        // nothing". Null is the absence of one. Collapsing them is exactly what made the Dashboard
+        // able to display "0 B" across a tenant full of documents (spec NFR-06).
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainersPath, """
+        {"value":[{"id":"b!c","displayName":"Silent"}]}
+        """);
+
+        var result = await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
+
+        result.Should().ContainSingle().Which.StorageUsedInBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListContainers_ReadsZeroAsZero_NotAsAbsent()
+    {
+        // The converse trap: a genuine zero must survive as 0, not be flattened into "not reported".
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainersPath, """
+        {"value":[{"id":"b!c","displayName":"Empty","storageUsedInBytes":0}]}
+        """);
+
+        var result = await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
+
+        result.Should().ContainSingle().Which.StorageUsedInBytes.Should().Be(0L,
+            "an empty container reporting 0 is a fact, and must not render as 'not reported'");
+    }
+
+    [Theory]
+    [InlineData("5368709120", 5_368_709_120L)]       // beyond int range — the realistic case
+    [InlineData("42", 42L)]
+    [InlineData("9007199254740991", 9007199254740991L)]
+    public async Task ListContainers_ReadsStorage_WhateverNumericShapeKiotaProduces(
+        string jsonNumber, long expected)
+    {
+        // Task 022's lesson, applied preventively. The deleted-container timestamp was discarded for
+        // the life of the product because the code tested `is string` and Kiota had stored a
+        // DateTime. storageUsedInBytes is untyped on FileStorageContainer (it is beta-only, and the
+        // SDK models v1.0), so its runtime type is whatever the deserializer chose — and a byte count
+        // straddles the int/long boundary, which is precisely where a narrow match would break.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainersPath, $$"""
+        {"value":[{"id":"b!c","displayName":"X","storageUsedInBytes":{{jsonNumber}}}]}
+        """);
+
+        var result = await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
+
+        result.Should().ContainSingle().Which.StorageUsedInBytes.Should().Be(expected);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

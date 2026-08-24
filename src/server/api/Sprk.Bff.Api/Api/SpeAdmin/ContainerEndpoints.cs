@@ -841,12 +841,29 @@ public static class ContainerEndpoints
         int Count);
 
     /// <summary>Single container details returned by both list and get endpoints.</summary>
+    /// <param name="CreatedDateTime">
+    /// When the container was created, or null when Graph does not report it. Nullable since
+    /// 2026-08-24 (task 024): the mapper previously substituted <c>DateTimeOffset.UtcNow</c>, so a
+    /// container of unknown age rendered as "created today".
+    /// </param>
+    /// <param name="StorageUsedInBytes">
+    /// Consumption in bytes, or null meaning <b>NOT REPORTED</b> — never zero. Graph returns this
+    /// only on the <b>beta LIST</b> surface (measured live, task 020): it is absent from the v1.0
+    /// schema entirely, and absent from GET even on beta. So a container fetched individually
+    /// legitimately has no value here while the same container in the grid does. Clients MUST render
+    /// that difference rather than collapsing null to 0 B (spec NFR-06).
+    /// <para>
+    /// This is <b>consumption</b>. The per-container quota <b>ceiling</b> is
+    /// <c>maxStoragePerContainerInBytes</c> on the container TYPE — a different concept on a
+    /// different resource, deliberately kept apart by task 023 (spec FR-C05).
+    /// </para>
+    /// </param>
     public sealed record ContainerDto(
         string Id,
         string DisplayName,
         string? Description,
         string ContainerTypeId,
-        DateTimeOffset CreatedDateTime,
+        DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
         string Status)
     {

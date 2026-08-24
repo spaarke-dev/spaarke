@@ -630,12 +630,39 @@ export const DashboardPage: React.FC = () => {
               value={metrics.totalContainerCount.toLocaleString()}
               subtext={`Across ${Object.keys(metrics.containerCountByConfig).length} config(s)`}
             />
-            <MetricCard
-              icon={<DataBarVertical20Regular />}
-              label="Storage Used"
-              value={formatBytes(metrics.totalStorageUsedInBytes)}
-              subtext="Across all containers"
-            />
+            {/*
+              A total is only a total when everything counted. Graph reports consumption on the LIST
+              surface only, so coverage can be partial — and a partial sum shown as a complete one is
+              the same defect as the "0 B" this tile used to display when NOTHING reported (every
+              container returned null because the BFF discarded the value). The subtext states the
+              coverage rather than asserting "across all containers" unconditionally.
+            */}
+            {(() => {
+              const total = metrics.totalContainerCount;
+              const reporting = metrics.storageReportingContainerCount ?? 0;
+              const complete = total > 0 && reporting === total;
+
+              return (
+                <MetricCard
+                  icon={<DataBarVertical20Regular />}
+                  label="Storage Used"
+                  value={
+                    reporting === 0 && total > 0
+                      ? "Not reported"
+                      : formatBytes(metrics.totalStorageUsedInBytes)
+                  }
+                  subtext={
+                    total === 0
+                      ? "No containers"
+                      : reporting === 0
+                        ? `Graph reported no storage figures for ${total} container(s)`
+                        : complete
+                          ? `Across all ${total} container(s)`
+                          : `At least — only ${reporting} of ${total} container(s) reported`
+                  }
+                />
+              );
+            })()}
             {(() => {
               const health = resolveSyncHealth(metrics);
               const presentation = SYNC_HEALTH_PRESENTATION[health];

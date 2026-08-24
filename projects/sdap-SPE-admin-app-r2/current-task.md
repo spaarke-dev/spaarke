@@ -9,11 +9,32 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W7 ✅ (**020, 030, 021, 022, 023**); 011 🔄 partial |
-| **Step** | Between tasks. **Next: 024** (W8, storage-consumption spike + branch). |
-| **Status** | 012, 013, 020, 030, 021, 022, 023 committed. Quota → **option A**, operator-confirmed. |
-| **Next Action** | Invoke `task-execute` on `tasks/024-storage-consumption-spike.poml`. ⚡ **024's spike is PRE-ANSWERED — do not re-run it.** Task 020 measured it live: `storageUsedInBytes` **exists on beta, LIST-only** (absent from GET even on beta; a `$select` for it on v1.0 returns 400). So FR-C06 resolves to **implement**, not remove. Start from `notes/beta-vs-v1-surface-verification.md` §2–3. **024 also inherits**: the 4 `CreatedDateTime ?? DateTimeOffset.UtcNow` fabrications at `:693`, `:1031`, `:1115`, `:1165` — the *same four methods* 024 edits for `StorageUsedInBytes`, so fix both in one pass. |
+| **Task** | **none in progress** — W1–W8 ✅ (**020, 030, 021, 022, 023, 024**); 011 🔄 partial |
+| **Step** | Between tasks. **Next: 025** (W9, full 9-property settings surface). |
+| **Status** | 012, 013, 020, 030, 021, 022, 023, 024 committed. Quota → **option A**, operator-confirmed. |
+| **Next Action** | Invoke `task-execute` on `tasks/025-full-settings-surface.poml`. ⚡ **025 starts from a strong position** — task 023 moved the settings write onto the SDK's **typed** `FileStorageContainerTypeSettings`, so the remaining properties are compiler-checked additions, not string keys. The nine: `SharingCapability`, `IsItemVersioningEnabled`, `ItemMajorVersionLimit`, `MaxStoragePerContainerInBytes` (**done in 023**) + `IsDiscoverabilityEnabled`, `IsSearchEnabled`, `IsSharingRestricted`, `UrlTemplate`, `ConsumingTenantOverridables` (**025's work**). **Inherits**: (a) the client **already sends `isSearchEnabled`** and the BFF silently discards it — no DTO property; (b) `azureTenantId` declared in `types/spe.ts` with no Graph source; (c) `ConsumingTenantOverridables` is task **026**'s override state — coordinate, don't duplicate. |
 
+### 🔑 Task 024 — IMPLEMENT. Spike deliberately not re-run.
+
+Task 020 had already measured it live, and the finding is **sharper than the POML's three options**:
+availability is partitioned **by operation**, not by container — beta **LIST yes**, beta **GET no**,
+v1.0 **not in the schema at all** (a `$select` returns 400). So the same container legitimately shows a
+figure in the grid and none in a detail fetch.
+
+The code had been **asking Graph for the field in its `$select` and discarding it** at four sites →
+every Containers row read "—", and the Dashboard summed nothing into a confident **"0 B"** across a
+tenant full of real documents.
+
+Three things worth not undoing:
+- **`ReadStorageUsedInBytes` accepts every numeric shape Kiota can produce.** Task 022's lesson applied
+  preventively — the property is beta-only so the SDK does not type it, and **5 GB does not fit in an
+  `int`**. A narrow match is exactly how the deleted-container timestamp was lost.
+- **Null ≠ 0, in both directions.** Tests guard each way: absent → "Not reported"; a genuine 0 stays 0.
+- **The Dashboard states its own coverage** (`storageReportingContainerCount`), so a partial sum is
+  never presented as a total — that would be the same defect in miniature.
+
+✅ **`SpeAdminGraphService.cs` now has ZERO `?? DateTimeOffset.UtcNow` fabrications on any read path**
+(the last four cleared here, handed over by 023).
 ### 🔑 Task 023 — first POML whose claim held, and it still wasn't the bug
 
 `itemMajorVersionLimit` / `maxStoragePerContainerInBytes` were **correct** — confirmed by reflecting

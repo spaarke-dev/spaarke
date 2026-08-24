@@ -68,7 +68,7 @@ public sealed class SpeAdminGraphService
         string DisplayName,
         string? Description,
         string ContainerTypeId,
-        DateTimeOffset CreatedDateTime,
+        DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
         string Status = "active");
 
@@ -690,8 +690,10 @@ public sealed class SpeAdminGraphService
                         container.DisplayName ?? string.Empty,
                         container.Description,
                         container.ContainerTypeId?.ToString() ?? containerTypeId,
-                        container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                        StorageUsedInBytes: null, // Not always returned by Graph
+                        container.CreatedDateTime,
+                        // LIST returns real consumption on beta (measured live, task 020). Null
+                        // means NOT REPORTED and must never render as 0 B.
+                        StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
                         Status: status));
                 }
             }
@@ -1028,8 +1030,8 @@ public sealed class SpeAdminGraphService
                     container.DisplayName ?? string.Empty,
                     container.Description,
                     container.ContainerTypeId?.ToString() ?? containerTypeId,
-                    container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                    StorageUsedInBytes: null, // Not always returned by Graph
+                    container.CreatedDateTime,
+                    StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
                     Status: status));
             }
         }
@@ -1112,8 +1114,11 @@ public sealed class SpeAdminGraphService
             DisplayName: created.DisplayName ?? displayName,
             Description: created.Description,
             ContainerTypeId: created.ContainerTypeId?.ToString() ?? containerTypeId,
-            CreatedDateTime: created.CreatedDateTime ?? DateTimeOffset.UtcNow,
-            StorageUsedInBytes: null, // New containers always start empty; Graph returns null here
+            CreatedDateTime: created.CreatedDateTime,
+            // Read rather than assumed. The old comment reasoned "new containers always start empty"
+            // and hardcoded null — but an inference is not a measurement, and if Graph ever does
+            // report a value here we would still have been discarding it.
+            StorageUsedInBytes: ReadStorageUsedInBytes(created.AdditionalData),
             Status: createdStatus);
     }
 
@@ -1162,8 +1167,11 @@ public sealed class SpeAdminGraphService
                 container.DisplayName ?? string.Empty,
                 container.Description,
                 container.ContainerTypeId?.ToString() ?? string.Empty,
-                container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                StorageUsedInBytes: null,
+                container.CreatedDateTime,
+                // GET does NOT return consumption, even on beta (measured live, task 020) — so this
+                // is normally null. Read anyway: if Graph starts returning it, we get it for free
+                // instead of discarding it for another year.
+                StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
                 Status: containerStatus);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
@@ -3548,6 +3556,55 @@ public sealed class SpeAdminGraphService
             CreatedDateTime: ct.CreatedDateTime,
             OwningAppId: owningAppId,
             ExpirationDateTime: expirationDateTime);
+    }
+
+    /// <summary>
+    /// Reads per-container storage consumption out of Kiota's untyped <c>AdditionalData</c> bag.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>storageUsedInBytes</c> is <b>beta-only</b> and <b>LIST-only</b>, measured live on
+    /// 2026-08-23 (task 020): a <c>$select</c> for it on v1.0 returns
+    /// <c>400 "Could not find a property named 'storageUsedInBytes'"</c>, while the identical call on
+    /// beta returns 200 with the value — and even on beta, <c>GET /containers/{id}</c> omits it.
+    /// Because it is not part of the v1.0 schema, the SDK does not type it on
+    /// <c>FileStorageContainer</c>, so it arrives untyped.
+    /// </para>
+    /// <para>
+    /// Every numeric shape Kiota can produce is accepted rather than one guess. Task 022 is why: the
+    /// deleted-container timestamp was discarded for the life of the product because the code tested
+    /// <c>is string</c> and Kiota had stored a <c>DateTime</c>. A byte count can plausibly arrive as
+    /// <c>long</c>, <c>int</c>, <c>double</c>, <c>decimal</c>, <c>JsonElement</c>, or a string, and
+    /// picking one would repeat that defect exactly.
+    /// </para>
+    /// <para>
+    /// Returns null when absent or unreadable. <b>Null means NOT REPORTED, never zero</b> — an
+    /// operator must be able to tell "this container holds nothing" from "we did not measure"
+    /// (spec NFR-06).
+    /// </para>
+    /// </remarks>
+    internal static long? ReadStorageUsedInBytes(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("storageUsedInBytes", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        return raw switch
+        {
+            long l => l,
+            int i => i,
+            double d when d >= 0 && d <= long.MaxValue => (long)d,
+            decimal m when m >= 0 && m <= long.MaxValue => (long)m,
+            string str when long.TryParse(
+                str, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+            System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number
+                && je.TryGetInt64(out var fromJson) => fromJson,
+            _ => null,
+        };
     }
 
     /// <summary>

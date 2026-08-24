@@ -47,8 +47,27 @@ public sealed class SpeDashboardSyncService : BackgroundService
         public int TotalContainerCount { get; init; }
 
         /// <summary>Total storage used in bytes across all containers that reported storage usage.</summary>
+        /// <remarks>
+        /// Read together with <see cref="StorageReportingContainerCount"/>. Before 2026-08-24 every
+        /// container reported null (the value was fetched from Graph and discarded), so this summed
+        /// to <b>0</b> and the dashboard rendered a confident "0 B" — the purest instance of the
+        /// systemic defect this project exists to remove. A partial sum presented as a total is the
+        /// same defect in miniature, which is why the contributing count travels with it.
+        /// </remarks>
         [JsonPropertyName("totalStorageUsedInBytes")]
         public long TotalStorageUsedInBytes { get; init; }
+
+        /// <summary>
+        /// How many containers actually reported a storage figure, out of
+        /// <see cref="TotalContainerCount"/>.
+        /// </summary>
+        /// <remarks>
+        /// Graph returns consumption only on the beta LIST surface (task 020), so coverage can be
+        /// partial. When this is below the total, the sum is a floor rather than a total and the UI
+        /// must say so instead of presenting it as complete.
+        /// </remarks>
+        [JsonPropertyName("storageReportingContainerCount")]
+        public int StorageReportingContainerCount { get; init; }
 
         /// <summary>Number of containers per container type config ID (Guid.ToString()).</summary>
         [JsonPropertyName("containerCountByConfig")]
@@ -381,7 +400,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
         // produced SyncSucceeded = true — a green dashboard over a broken app (spec §2.4).
         if (!load.Succeeded)
         {
-            return Summarize(0, 0, new Dictionary<string, int>(), concerns,
+            return Summarize(0, 0, 0, new Dictionary<string, int>(), concerns,
                 "Could not load container-type configs from Dataverse — container metrics are unavailable.");
         }
 
@@ -390,7 +409,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
             _logger.LogWarning(
                 "No container type configs found in Dataverse. Dashboard metrics will show zeros.");
 
-            return Summarize(0, 0, new Dictionary<string, int>(), concerns,
+            return Summarize(0, 0, 0, new Dictionary<string, int>(), concerns,
                 "No container type configs registered.");
         }
 
@@ -398,6 +417,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
         var containerCountByConfig = new Dictionary<string, int>();
         long totalStorageBytes = 0;
         int totalContainerCount = 0;
+        int storageReportingContainerCount = 0;
 
         foreach (var config in configs)
         {
@@ -415,7 +435,10 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 foreach (var container in containers)
                 {
                     if (container.StorageUsedInBytes.HasValue)
+                    {
                         totalStorageBytes += container.StorageUsedInBytes.Value;
+                        storageReportingContainerCount++;
+                    }
                 }
 
                 // Evict expired Graph clients as a housekeeping step
@@ -448,7 +471,8 @@ public sealed class SpeDashboardSyncService : BackgroundService
             }
         }
 
-        return Summarize(totalContainerCount, totalStorageBytes, containerCountByConfig, concerns, null);
+        return Summarize(totalContainerCount, totalStorageBytes, storageReportingContainerCount,
+            containerCountByConfig, concerns, null);
     }
 
     /// <summary>
@@ -485,6 +509,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
     private static DashboardMetrics Summarize(
         int totalContainerCount,
         long totalStorageBytes,
+        int storageReportingContainerCount,
         IReadOnlyDictionary<string, int> containerCountByConfig,
         IReadOnlyList<ConcernOutcome> concerns,
         string? statusOverride)
@@ -504,6 +529,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
         {
             TotalContainerCount = totalContainerCount,
             TotalStorageUsedInBytes = totalStorageBytes,
+            StorageReportingContainerCount = storageReportingContainerCount,
             ContainerCountByConfig = containerCountByConfig,
             LastSyncedAt = DateTimeOffset.UtcNow,
             SyncSucceeded = health == SyncHealth.Healthy,

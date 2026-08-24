@@ -80,6 +80,14 @@ import { ContainerDetail } from "./ContainerDetail";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Format bytes to a human-readable size string (e.g. "1.2 GB"). */
+/**
+ * Format a byte count. Callers MUST handle absence themselves — see the Storage Used column.
+ *
+ * This deliberately does NOT map absence to an em-dash any more. Until 2026-08-24 every container
+ * returned null here (the BFF fetched the value from Graph and discarded it), so this column showed
+ * "—" for every row, and an operator had no way to tell "we did not measure" from "nothing stored"
+ * (spec NFR-06).
+ */
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined || bytes === null) return "—";
   if (bytes === 0) return "0 B";
@@ -283,9 +291,25 @@ function buildColumns(
     createTableColumn<Container>({
       columnId: "storageUsedInBytes",
       renderHeaderCell: () => "Storage Used",
-      renderCell: (container) => (
-        <Text>{formatBytes(container.storageUsedInBytes)}</Text>
-      ),
+      /*
+       * Three states, not two. Graph reports consumption only on the LIST surface, so a container
+       * can legitimately have no figure — and "not reported" is a different fact from "0 B". An
+       * em-dash conveyed neither; it just looked like the column was broken (which it was).
+       */
+      renderCell: (container) =>
+        container.storageUsedInBytes === undefined ||
+        container.storageUsedInBytes === null ? (
+          <Tooltip
+            content="Microsoft Graph did not report a storage figure for this container. This is not the same as zero."
+            relationship="label"
+          >
+            <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+              Not reported
+            </Text>
+          </Tooltip>
+        ) : (
+          <Text>{formatBytes(container.storageUsedInBytes)}</Text>
+        ),
     }),
     createTableColumn<Container>({
       columnId: "browse",

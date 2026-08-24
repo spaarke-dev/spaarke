@@ -640,6 +640,14 @@ export interface DashboardMetrics {
   totalContainerCount: number;
   /** Total storage used in bytes across all containers */
   totalStorageUsedInBytes: number;
+  /**
+   * How many containers actually reported a storage figure, out of totalContainerCount.
+   *
+   * Graph returns consumption only on the beta LIST surface, so coverage can be partial. When this
+   * is below the total, totalStorageUsedInBytes is a FLOOR, not a total — present it as such.
+   * Optional so an older cached metrics payload still deserializes.
+   */
+  storageReportingContainerCount?: number;
   /** Container count keyed by container type config ID (Guid string) */
   containerCountByConfig: Record<string, number>;
   /** UTC timestamp when these metrics were last synced from Graph (ISO string) */

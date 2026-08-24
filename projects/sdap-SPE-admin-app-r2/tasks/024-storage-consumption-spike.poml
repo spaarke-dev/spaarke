@@ -4,7 +4,11 @@
     <title>SPIKE + BRANCH — real storage consumption reporting, or remove the tile</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>023 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- 2026-08-24: IMPLEMENT branch. Spike pre-answered by task 020's live measurement; not
+         re-run (and no interactive Azure login available this session). Availability is partitioned
+         by OPERATION: beta LIST yes, beta GET no, v1.0 not in schema. Step 6 (live UI pass) not
+         verified. See notes/storage-consumption-spike.md. -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path and .tsx; tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>
