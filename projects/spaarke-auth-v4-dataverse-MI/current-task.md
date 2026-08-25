@@ -1,6 +1,6 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (task 033 step 2) — **🟢 THE SECRET IS GONE FROM THE RUNNING APP.** Order narrowed to MI-FIC-only FIRST (the proof), then the 4 secret app settings deleted, then `RequireSecretFreeIdentity=true`. Key Vault still holds it — that is step 3.
+> **Last Updated**: 2026-08-24 21:55Z (context-handoff) — **ALL CREDENTIAL WORK IS DONE, PROVEN LIVE, AND MERGED TO MASTER (PR #814).** The project is deliberately OPEN. **The next action is UAT — see §UAT below; it is the only thing gating close.**
 > **Recovery**: Read "Quick Recovery" first. Everything needed to continue is in this file.
 
 ---
@@ -14,7 +14,7 @@
 | **Task** | **033 ✅ · 051 ✅ · 053 ✅ · 090 🔄 PARTIAL.** 🎉 **Every credential deliverable is DONE and PROVEN LIVE.** The BFF identity is secret-free (incl. OBO, ADR-028 **E-3 CLOSED**); Service Bus and AI Search run on managed identity with no key or SAS anywhere. **The project is deliberately NOT closed — build / deploy / UAT remain.** Records: [`033`](notes/decisions/033-secret-removal.md) · [`051+053`](notes/decisions/051-053-live-cutover.md) · [`test-diet`](notes/test-diet-report.md) · [`lessons-learned`](notes/lessons-learned.md) |
 | **🎓 Criterion 12 — EXERCISED, not asserted** | Seeded a deliberate **9th secret-bearing confidential client** on a scratch branch → **FR-F1 and FR-F2 both FAILED**, naming `DeliberateViolationProbe.cs:17`. Branch deleted; 56/56 ArchTests green again. ⚠️ Precise claim: **`dotnet build` SUCCEEDS; the ArchTests fail** — the CI gate is what fails, not the compiler. Anyone re-testing with `dotnet build` alone will wrongly conclude the guard is broken |
 | **Status** | Order `[ManagedIdentityFederated]` (**no fallback beneath it**) · `RequireSecretFreeIdentity=true` · 4 secret app settings deleted 16:50:25Z · 3 KV secrets deleted (26→23, soft-deleted to **2026-11-22**, **not purged**) · `PowerBi__ClientSecret` + `spe-owning-app-secret` untouched · 15 scripts (7 modified / 8 documented) · 33 docs swept · `-SkipClientSecret` added · **10,615 BFF tests + 56 ArchTests pass** · OBO green, byte-exact SPE round-trip, 15/15 + 15/15 |
-| **Next Action** | **BUILD / DEPLOY / UAT** — owner-led. Then close-out (090 steps 4, 6, 7). UAT proof method for "is this really running on MI?" is already in place and permanent: `Graph__Credentials__Order__0=ManagedIdentityFederated` with **no fallback** + `RequireSecretFreeIdentity=true`, so **startup itself is the assertion**. For Service Bus, `/healthz` reports *"authorized for queue 'sdap-jobs'"*; for AI Search, watch for `403`s from `*.search.windows.net`. Still untested by a human: the **Outlook + Word add-in save flows**. |
+| **Next Action** | ✅ **MERGED TO MASTER 2026-08-24 21:29Z (PR #814, commit `1920e5555`).** Branch fully contained in master; worktree retained because the project is NOT closed. **Next: UAT** — the only untested surface is the **Outlook + Word add-in save flows** (never human-tested). Everything else is verified live. **Do NOT run `/code-page-deploy` from this worktree** — auth-v4 changed **0** client files; deploying from here would ship 567 unrelated client commits from 8 other projects into spaarkedev1. A code-page deploy, if wanted, is a master-level action owned by those projects. |
 | **✅ PR #812 coordination CLOSED** | The predicted `auth.md` conflict **never existed** (disjoint hunks). The real conflict was in `DATAVERSE-ACCESS-LAYER-ROUTING.md` and **I caused it** — banner adjacent to their header edit; relocated. `git merge-tree` now reports **zero conflicts**, so merge order does not matter. Their new text asserts *"do NOT remove `Dataverse:ClientSecret` / `API_CLIENT_SECRET`"* — propagated from the stale guard comments 033 corrected. Raised on the PR with replacement wording rather than silently fixed in this branch |
 | **Before close-out (090 deferred steps)** | (a) delete KV `ServiceBus-ConnectionString` + `AiSearch--AdminKey` (retained as UAT rollback), **without `--purge`**; (b) obligation 051-E code half — remove the SAS branch + `PostConfigure` back-fill **and** update `ServiceBusClientGuardTests` in the same commit; (c) walk every graduation criterion; (d) README / `projects/INDEX.md` / portfolio #800 |
 | **Rollback** | `az keyvault secret recover --vault-name spaarke-spekvcert --name BFF-API-ClientSecret` (**until 2026-11-22**) → restore the 4 app settings (fingerprint `b09a140a603e`) → remove the order override |
@@ -22,6 +22,76 @@
 | **⚠️ Do not "fix"** | `ClientSecret` remains in the **code-side canonical default** in `AddCredentialSelection` **on purpose**. 033's own carried-forward obligation said to remove it; doing so **broke every unconfigured environment** (no `Graph:Credentials` section + no UAMI ⇒ validator fails fast) and was caught by `CredentialOrderingSeamTests`. Reverted; reasoning recorded at the code. The guarantee is delivered by **config** on deployed environments instead |
 | **Progress** | **20 of 26 active complete** · **6 remaining**: 031, 032, 033, 090 — plus **051🔄 and 053🔄, both code-complete but held at 🔄 until their cutover lands in 031/033.** **031 DOES have autonomous work left** (see Next Action) — that claim applied to Group F only and is superseded · 3 deferred |
 | **Portfolio** | [#800](https://github.com/spaarke-dev/spaarke/issues/800) · Epic [#426](https://github.com/spaarke-dev/spaarke/issues/426) · synced 2026-08-21: `Tasks Completed 4 → 17`. **`Task Count` deliberately left at 26, not 29**: 29 poml − 3 deferred (040/041/042, DEF-001) = 26 active. Setting 29 would make 100% unreachable and pull Power BI back into scope |
+
+## §UAT — the runbook for the next session (READ THIS BEFORE TESTING)
+
+**Everything else is verified.** The single untested surface is the **Outlook + Word add-in save flows**,
+which need a human in the actual add-ins. Nothing about them was changed by this project — they are listed
+because they are the one path never exercised end-to-end since the credential cutover.
+
+### What "prove it runs on managed identity" means — it is already structural
+
+You do **not** need to catch a log line. The proof is built into the configuration:
+
+```
+Graph__Credentials__Order__0                  = ManagedIdentityFederated   <- SINGLE entry, no fallback
+Graph__Credentials__RequireSecretFreeIdentity = true                       <- refuses to START otherwise
+```
+
+With nothing beneath MI-FIC in the order, and no secret in app settings **or** Key Vault, **a running BFF is
+the assertion**. If it serves a request at all, it did so on the managed identity. There is nothing else left
+for it to use.
+
+⚠️ The inverse trap, which cost real time in 031/032: **a 200 proves nothing while a fallback exists.** That
+is why the fallback was removed rather than merely deprioritised.
+
+### The checklist
+
+| # | Surface | How to test | Expected |
+|---|---|---|---|
+| 1 | **Outlook add-in save** | Save an email to a matter from Outlook | Document lands in SPE, visible on the record |
+| 2 | **Word add-in save** | Save/attach a document from Word | Same |
+| 3 | SPE upload/download | via UI | already proven byte-exact over OBO, re-confirm in-app |
+| 4 | Chat `dataverse.*` tool calls | ask the assistant a grid/matter question | real rows returned |
+| 5 | Send-as-user email | trigger a send | arrives `from:` the **user**, not a shared mailbox |
+| 6 | Row-level authorization | open a record the test user should NOT see | denied — and denial is a *computed* decision, not a failed lookup |
+| 7 | Service Bus jobs | any background job path | `/healthz` stays Healthy; see below |
+| 8 | AI Search / RAG | semantic search in the UI | results returned; **watch for 403 from `*.search.windows.net`** — that is the missing-role signal |
+
+### Fast health probes
+
+```bash
+curl https://spaarke-bff-dev.azurewebsites.net/healthz              # Healthy
+curl https://spaarke-bff-dev.azurewebsites.net/healthz/dataverse    # 200
+# Service Bus proof (051): look for this in the app logs —
+#   "Service Bus job processing is authorized for queue 'sdap-jobs'"
+```
+
+`/healthz/catalog` returns **Unhealthy** — that is **PRE-EXISTING AI catalog seed drift**, unrelated to
+credentials (proven: it was already failing at 20:10:08Z before any deploy). Fix is
+`scripts/Seed-TypedHandlers.ps1`. Do not chase it as a UAT failure.
+
+### 🔻 If UAT fails — rollback, in order
+
+1. **Identify the surface.** OBO fails CLOSED, so a credential fault locks out everything at once. If only
+   *one* surface fails, it is almost certainly NOT the credential.
+2. **Credential rollback** (~2 min, still available):
+   ```bash
+   az keyvault secret recover --vault-name spaarke-spekvcert --name BFF-API-ClientSecret   # until 2026-11-22
+   # restore the 4 app settings (all held the same value, fingerprint b09a140a603e)
+   # remove Graph__Credentials__Order__0 and set RequireSecretFreeIdentity=false
+   ```
+   Setting `RequireSecretFreeIdentity=false` is deliberate — it records the deviation instead of hiding it.
+3. **Service Bus rollback**: re-add `ServiceBus__ConnectionString` from KV `ServiceBus-ConnectionString`
+   (still present, retained for exactly this).
+4. **AI Search rollback**: `AiSearch__ManagedIdentity__Enabled=false`, or re-add keys from KV
+   `AiSearch--AdminKey` (still present).
+
+⚠️ **There is no slot to swap back to** — 032 deleted it. A code-level rollback is a redeploy, and a BFF
+deploy on this app has a real outage window (proven today: a partial deploy into a running host SIGABRTed
+and the recovery took ~16 min). Prefer config rollback.
+
+---
 
 ## §0.0 🟢 031 LIVE STATE (2026-08-24) — read before touching the slot
 

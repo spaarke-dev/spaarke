@@ -163,8 +163,8 @@ const mockLargeAttachment: EmailAttachment = {
 const mockSaveResponse: SaveJobResponse = {
   jobId: 'job-001',
   documentId: 'doc-001',
-  statusUrl: '/office/jobs/job-001',
-  streamUrl: '/office/jobs/job-001/stream',
+  statusUrl: '/api/office/jobs/job-001',
+  streamUrl: '/api/office/jobs/job-001/stream',
   status: 'Queued',
   duplicate: false,
   correlationId: 'corr-001',
@@ -173,8 +173,8 @@ const mockSaveResponse: SaveJobResponse = {
 const mockDuplicateResponse: SaveJobResponse = {
   jobId: 'job-existing',
   documentId: 'doc-existing',
-  statusUrl: '/office/jobs/job-existing',
-  streamUrl: '/office/jobs/job-existing/stream',
+  statusUrl: '/api/office/jobs/job-existing',
+  streamUrl: '/api/office/jobs/job-existing/stream',
   status: 'Completed',
   duplicate: true,
   correlationId: 'corr-002',
@@ -472,7 +472,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock job status polling endpoint
    */
   async mockJobStatusApi(response: JobStatusResponse = mockJobStatusCompleted): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*`, (route) => {
       if (!route.request().url().includes('/stream')) {
         route.fulfill({
           status: 200,
@@ -489,7 +489,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock SSE job status stream
    */
   async mockSSEStream(stages: JobStatusResponse['stages']): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/*/stream`, async (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*/stream`, async (route) => {
       // Create SSE response with staged updates
       let sseBody = '';
 
@@ -1114,13 +1114,13 @@ test.describe('Save Flow - Polling Fallback @e2e @outlook', () => {
 
   test('should fall back to polling when SSE fails', async ({ page }) => {
     // Mock SSE to fail
-    await page.route(`${testConfig.apiBaseUrl}/office/jobs/*/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, (route) => {
       route.abort('failed');
     });
 
     // Mock polling endpoint with progressive status
     let pollCount = 0;
-    await page.route(`${testConfig.apiBaseUrl}/office/jobs/*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, (route) => {
       if (!route.request().url().includes('/stream')) {
         pollCount++;
         const status =
@@ -1150,14 +1150,14 @@ test.describe('Save Flow - Polling Fallback @e2e @outlook', () => {
 
   test('should poll at 3-second intervals', async ({ page }) => {
     // Mock SSE to fail
-    await page.route(`${testConfig.apiBaseUrl}/office/jobs/*/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, (route) => {
       route.abort('failed');
     });
 
     const pollTimestamps: number[] = [];
 
     // Mock polling endpoint
-    await page.route(`${testConfig.apiBaseUrl}/office/jobs/*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, (route) => {
       if (!route.request().url().includes('/stream')) {
         pollTimestamps.push(Date.now());
         route.fulfill({

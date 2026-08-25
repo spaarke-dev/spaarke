@@ -498,7 +498,7 @@ export class WordTaskPanePage {
    * Mock job status API response
    */
   async mockJobStatusApi(jobId: string, response: JobStatusResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/${jobId}`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/${jobId}`, (route) => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -514,7 +514,7 @@ export class WordTaskPanePage {
     jobId: string,
     events: Array<{ event: string; data: any; delay?: number }>
   ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/${jobId}/stream`, async (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/${jobId}/stream`, async (route) => {
       const headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
