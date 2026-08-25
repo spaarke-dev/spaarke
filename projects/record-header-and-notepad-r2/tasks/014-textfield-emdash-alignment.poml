@@ -148,6 +148,31 @@
     verify: unit tests"), spec Owner Clarifications "Renderer conventions" (em-dash yes; required marker
     NOT adopted). This is a modify-only task — no justification element per CLAUDE.md §11. Keep the diff
     minimal: one condition, one JSDoc line, one new test file, one note.
+
+    COMPLETED 2026-08-25. Diff is exactly the two scoped lines: TextField.tsx:13 JSDoc + TextField.tsx:117
+    display-value condition (now mirrors OptionSetField.tsx:110's `=== null || === undefined || === ''`
+    shape exactly). New file __tests__/TextField.emdash.test.tsx: 13 tests, all passing — display cases
+    (empty string, null/undefined regression, 0 / '0' / non-empty-string / whitespace-only-string
+    regression) plus the edit round-trip (draft opens '', no-op commit, typed-value commit, same-session
+    type-then-clear no-op, cross-session real clear-to-empty save, rejected-save revert-and-stay-in-edit).
+    fields/index.ts, RecordHeader/index.ts, and __tests__/fields.test.tsx are untouched (git status
+    verified empty for all three). `npm run build` (tsc) exits 0. `npx eslint` on both touched files
+    exits 0. FR-11 parity note appended to notes/matter-parity-baseline.md naming task 080 as consumer.
+
+    Quality gates (task-execute Step 9.5): code-review — 0 Critical / 0 Warning / 0 Suggestion, 0 AI code
+    smells, ESLint clean. adr-check — 0 Violations / 0 Warnings across ADR-021/022/012. No CLAUDE.md §6.5
+    escalation needed.
+
+    Pre-existing test-suite finding (NOT caused by this task, reported for visibility): running the full
+    `npm test` in this shared worktree shows 8 failing tests in src/__tests__/recordHeader.integration.test.tsx
+    (checkmark/annotation badge-count assertions) plus unrelated failures in other suites
+    (surfaceLaunchRegistry, TimelineComposeBox, etc.). Empirically verified via `git stash` isolation: the
+    same 8 recordHeader.integration.test.tsx failures reproduce identically with TextField.tsx reverted to
+    its pre-task state, so they are NOT caused by the FR-11 '' change — they stem from other parallel
+    in-flight tasks' uncommitted changes in this shared worktree (untracked BooleanField.tsx/NumberField.tsx,
+    modified IDataverseClient.ts/XrmDataverseClient.ts). The POML's <escalation> trigger ("if any pre-existing
+    test... fails because of the '' change") did NOT fire — confirmed by the stash test. Left unfixed:
+    those files belong to other active tasks and are out of this task's scope/write boundary.
   </notes>
 
   <execution>

@@ -240,7 +240,6 @@ export const OptionSetField: React.FC<IOptionSetFieldProps> = ({
   const warnedRef = React.useRef(false);
   React.useEffect(() => {
     if (typeof onSave === 'function' && !hasOptions && !warnedRef.current) {
-      // eslint-disable-next-line no-console
       console.warn(
         '[OptionSetField] `onSave` was provided without a non-empty `options` array — field stays read-only.'
       );

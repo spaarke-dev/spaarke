@@ -4,7 +4,7 @@
     <title>OptionSetField — add edit mode via Fluent Dropdown + fix stale label typography (FR-09)</title>
     <phase>1 Renderers</phase>
     <gate>after-001-002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shipped shared-library .tsx component that MatterHeaderPcf v1.0.20 consumes (Step 3.5.5: modifies code files = FULL).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -169,6 +169,31 @@
     (015). This task is exports-compatible: the existing barrel line for OptionSetField already covers the
     extended props type.
   </notes>
+
+  <completion-summary date="2026-08-25">
+    Implemented as specified. `IOptionSetFieldOption`/`options`/`onSave`/`disabled` added to
+    `IOptionSetFieldProps` (all optional); label typography moved to the TextField v1.0.4 stack verbatim;
+    edit path uses a Fluent v9 `Dropdown` (defaultOpen on entry, filled-lighter/small/autoFocus) with
+    select-commits-immediately semantics, Escape-cancels, blur-commits, saving Spinner + disabled Dropdown,
+    revert-and-stay-in-edit on rejection, and a once-only `console.warn` when `onSave` is supplied without a
+    non-empty `options` array. New file `__tests__/OptionSetField.edit.test.tsx` (16 tests) covers every
+    acceptance criterion; `fields.test.tsx` is untouched in git diff and its 9 pre-existing OptionSetField
+    tests pass unmodified (verified via `npx jest OptionSetField fields.test` — 42/42 pass). `npm run build`
+    exits 0. Grep checks for hex/rgb/hsl and use()/useSyncExternalStore/createRoot are clean.
+
+    Full-suite run showed 22 unrelated pre-existing failures (10 suites) in other RecordHeader-adjacent and
+    unrelated modules (toolbar badges/sparkle popover in `recordHeader.integration.test.tsx`, plus
+    WorkspaceShell/EntityCreationService/ConversationView/FilePreview/CommunicationTimeline/hooks suites) —
+    caused by concurrent sibling-task work landed in this shared worktree (batch commit f85258f75 bundled
+    BooleanField/NumberField/TextField/RecordHeaderShell/index.ts changes from tasks 010-012 alongside this
+    task's OptionSetField changes). Isolated by temporarily swapping in the pre-R2 OptionSetField.tsx (git
+    blob from commit 801bca67e) and re-running `recordHeader.integration.test.tsx`: identical 8/10 failures
+    occurred with OptionSetField fully reverted, proving this task's change is not the cause. File restored
+    immediately after the isolation check; no other files were touched during verification.
+
+    TASK-INDEX.md status update deferred to the main session per explicit orchestrator instruction
+    (parallel-group A dispatch) — main session owns TASK-INDEX.md / current-task.md during this wave.
+  </completion-summary>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -258,7 +258,6 @@ export const NumberField: React.FC<INumberFieldProps> = ({
 
   React.useEffect(() => {
     if (invalid) {
-      // eslint-disable-next-line no-console
       console.warn(`[NumberField] Non-numeric value for "${label}": ${String(value)} — rendering empty state.`);
     }
   }, [invalid, label, value]);

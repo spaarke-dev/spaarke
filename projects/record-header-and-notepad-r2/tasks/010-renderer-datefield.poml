@@ -4,7 +4,7 @@
     <title>DateField renderer — one component, date + datetime modes (FR-06)</title>
     <phase>1 Renderers</phase>
     <gate>after-001-002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Creates a new shared-library .tsx component consumed by PCF surfaces (Step 3.5.5: modifies/creates code files = FULL).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -170,6 +170,25 @@
     DateField until task 015 lands, and that is intentional. onSave emits `Date | null` because the
     form-buffer setValue payload for datetime attributes is a Date — the contract suite (015) asserts
     behavior/semantics parity, not payload-type uniformity.
+
+    COMPLETION SUMMARY (2026-08-25): Implemented in full. Created
+    src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/DateField.tsx (418 lines,
+    exports IDateFieldProps + EMPTY_VALUE_PLACEHOLDER + DateField) and
+    __tests__/DateField.test.tsx (20 tests, all passing). Added @fluentui/react-datepicker-compat ^0.6.37
+    to package.json devDependencies after checking the escalation trigger with evidence (peer React range
+    16.14-19.x; 8 of 9 transitive deps already present via the existing @fluentui/react-components tree;
+    Griffel/token-based) — trigger did not fire, no escalation raised. Shared-lib `npm run build` exits 0.
+    fields/index.ts, components/RecordHeader/index.ts, and __tests__/fields.test.tsx were NOT touched
+    (verified via git status). code-review and adr-check quality gates both clean (0 critical, 0 violations).
+    Two deviations documented in projects/record-header-and-notepad-r2/notes/decisions/010-datefield-deviations.md:
+    (1) autoFocus replaced with ref+effect focus (native autoFocus collided with Fluent's useEventCallback
+    render-phase guard — empirically reproduced, not theorized); (2) Enter/Escape/blur commit-cancel
+    contract scoped to "calendar popup closed" to avoid fighting the vendor DatePicker's own keyboard
+    semantics for its calendar grid. Full shared-lib test suite has 8 pre-existing failing suites (21 tests)
+    in unrelated subsystems (surfaceLaunchRegistry, toolbarLaunchDefaults/Notepad-modal-sizing,
+    CommunicationTimeline, ConversationView, FilePreview, WorkspaceShell, EntityCreationService.cascade,
+    todoScoreMappings) — confirmed pre-existing/unrelated (none touch DateField, none are in this task's
+    file diff, none import DateField).
   </notes>
 
   <execution>
