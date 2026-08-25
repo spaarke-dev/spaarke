@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-21 (worktree scaffolded; design re-scoped)
+> **Last Updated**: 2026-08-25 (design verified against live schema; spec generated)
 > **Recovery**: Read "Quick Recovery" first, then [`CLAUDE.md`](CLAUDE.md) — especially its "Read this before anything else" section.
 
 ---
@@ -9,11 +9,25 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project not started |
-| **Phase** | 0 — design complete, pre-spec |
+| **Task** | none — implementation not started |
+| **Phase** | 1 — [`spec.md`](spec.md) generated; ready for `/project-pipeline` |
 | **Status** | not started |
-| **Next Action** | Run the discovery pass in [`notes/discovery-checklist.md`](notes/discovery-checklist.md), fold results into `design.md` §9, then `/design-to-spec` |
-| **Blocked by** | Nothing. Discovery can start immediately. |
+| **Next Action** | `/project-pipeline` |
+| **Blocked by** | Nothing. All 10 owner decisions closed; discovery closed against `spaarkedev1`. |
+
+### 🔴 Two live production breakages found during verification (spec FR-23)
+
+Not caused by this project, but discovered by it and now in R2's scope to fix:
+
+1. **The shipped `MatterHeaderPcf` v1.0.20 header does not load at all.** `MatterHeaderView.tsx:83` selects `sprk_mattersummary`, a column that was deleted during the 2026-08-25 summary-field standardization → HTTP 400 → the whole header fails, not just the sparkle. Consider a v1.0.21 hotfix if R2 will not ship soon.
+2. **`sprk_aitopicregistry` row "Matter Summary" targets the same deleted column** (`sprk_targetfield=sprk_mattersummary`, enabled). The BFF OutputRouter `work_product` leg writes to nothing. Dataverse **data** fix → `sprk_recordsummary`.
+
+### Scope changes since the 2026-08-21 re-scope
+
+- **6 entities**, not 5 — `sprk_agreement` added 2026-08-25
+- **Summary field standardized to `sprk_recordsummary`** everywhere (avoids collision with Microsoft OOB "AI summary"). Columns already created by the owner, so R2 does **no** schema work
+- **Lookups use the OOB `Xrm.Utility.lookupObjects` picker**, retiring the custom inline type-ahead — this deletes the custom OData search builder rather than hoisting it
+- **One toolbar-map change**: `sprk_agreement` added to both `SUPPORTED_TODO_PARENTS` and `SUPPORTED_MEMO_PARENTS`
 
 ### What just happened (2026-08-21)
 
@@ -44,6 +58,9 @@ The R2 design was **re-scoped** from "four cloned per-entity PCFs" to "ONE confi
 | 2026-08-21 | Rollout: Project + Work Assignment → Invoice + Event → Matter last |
 | 2026-08-21 | DEF-06 + DEF-08 dropped from R2 |
 | 2026-08-21 | New control identity `Spaarke.Records.RecordHeader`; Matter form re-bound once |
+| 2026-08-22 | Option B reaffirmed after the corrected trade; forms ship inside a transported solution; metadata reuses `IDataverseClient` (extended with `targets`) |
+| 2026-08-24 | JSON-only config confirmed; retire `MatterHeaderPcf` on delivery; §9 rewritten from live schema; per-entity layouts confirmed; `BooleanField` kept; skeleton takes a `columns` prop; em-dash `''` everywhere (required marker NOT adopted) |
+| 2026-08-25 | Summary field standardized to **`sprk_recordsummary`**; lookups use the **OOB `lookupObjects` picker**; **`sprk_agreement`** added as a sixth entity |
 
 ---
 

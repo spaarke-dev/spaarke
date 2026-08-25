@@ -19,7 +19,7 @@ R1 shipped `MatterHeaderPcf` and — more importantly — shipped its primitives
 | [Discovery Checklist](./notes/discovery-checklist.md) | Blocking Dataverse verification before `/design-to-spec` |
 | [Current Task](./current-task.md) | Active state (for context recovery) |
 | [CLAUDE.md](./CLAUDE.md) | AI context for Claude Code |
-| AI Spec | ⏳ Not generated — run `/design-to-spec` |
+| [AI Spec](./spec.md) | ✅ Generated 2026-08-24 — 25 FRs, 11 NFRs, 22 success criteria |
 | Project Plan | ⏳ Not generated — run `/project-pipeline` |
 | Task Index | ⏳ Not generated — run `task-create` |
 
@@ -27,11 +27,11 @@ R1 shipped `MatterHeaderPcf` and — more importantly — shipped its primitives
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | 0 — design code- and schema-verified; **ready for `/design-to-spec`** |
+| **Phase** | 1 — spec generated; **ready for `/project-pipeline`** |
 | **Progress** | 0% |
 | **Owner** | Ralph Schroeder |
-| **Next Action** | `/design-to-spec` → `/project-pipeline`. All owner decisions closed; [discovery closed](./notes/discovery-checklist.md) against `spaarkedev1` |
-| **Estimate** | ~8.5–12.5 dev-days (design.md §14) |
+| **Next Action** | `/project-pipeline`. All 10 owner decisions closed; [discovery closed](./notes/discovery-checklist.md) against `spaarkedev1`; [spec.md](./spec.md) generated |
+| **Estimate** | ~9.25–13.5 dev-days (design.md §14) |
 
 ## Problem Statement
 

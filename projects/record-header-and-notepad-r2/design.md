@@ -70,13 +70,16 @@ A maker adds **one** component — "Spaarke Record Header" — to any entity's m
 
 | Wave | Entity | Why this order |
 |---|---|---|
-| 1 | `sprk_project` | Text / lookup / option-set only — covered by existing renderers |
-| 1 | `sprk_workassignment` | Same shape; validates the config path on a second entity |
-| 2 | `sprk_invoice` | **Forces the currency + date renderer work** (§6). Explicitly required, not optional. |
-| 2 | `sprk_event` | Forces datetime rendering |
+| 1 | `sprk_project` | Exercises date + boolean + option-set (§9 layouts) — corrected 2026-08-24; the seed's "existing renderers only" claim was based on a wrong field list |
+| 1 | `sprk_workassignment` | Same renderer shape; validates the config path on a second entity |
+| 2 | `sprk_invoice` | **Forces the currency renderer** (§6). Explicitly required, not optional. |
+| 2 | `sprk_event` | Forces **datetime** (`sprk_plannedstart` / `sprk_plannedend`) plus a lookup-typed "type" field |
+| 3 | **`sprk_agreement`** *(added 2026-08-25)* | Needs **no new renderers**. Carries R2's only toolbar-map change (§9.2) and needs a seeded record — it has 0 today |
 | — | `sprk_matter` | Migrated from `MatterHeaderPcf` to the generic control (§8); must render pixel-identically |
 
 **Shared-library additions** (§6): date/datetime, number/currency, and boolean field renderers; editable option-set; metadata-driven lookup resolution; the config resolver.
+
+**Summary-field standardization** (owner 2026-08-25, §9): all entities use **`sprk_recordsummary`**. The columns already exist — the owner created them — so R2 has **no schema work**; it verifies them and remediates two residual references to the now-deleted `sprk_mattersummary` / `sprk_aisummary`, one of which has broken the shipped Matter header. R2 stays a pure client surface plus one Dataverse **data** fix (`sprk_aitopicregistry`).
 
 **Documentation**: rewrite [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) from "how to write a new per-entity PCF" to "how to configure the header for a new entity" — the old recipe becomes actively wrong the day this ships. Refresh [`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) accordingly (its withdrawal warning and the `patterns/ui/INDEX.md` row are already corrected on this branch; only the body sections need the post-ship update).
 
@@ -105,10 +108,10 @@ All R1 primitives are consumed verbatim. **No forking.** Missing behavior lands 
 | Primitive | R1 file | Change in R2 |
 |---|---|---|
 | `HeaderToolbar` | [`components/HeaderToolbar/`](../../src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/) | None. Note it **already** renders the sparkle only when `aiSummary` is passed ([`HeaderToolbar.tsx:154`](../../src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx#L154)) — half of §6.4 is pre-solved |
-| `RecordHeaderShell` | [`RecordHeaderShell.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx) | **Caveat**: the loading skeleton hard-codes `repeat(3, 1fr)` and 6 cells ([`:93-131`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx#L93-L131)), so a `columns: 2` header flashes a 3-column skeleton. Decide accept-vs-pass-`columns` at spec time |
+| `RecordHeaderShell` | [`RecordHeaderShell.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx) | **Small change (owner, 2026-08-24)** — add an optional `columns` prop and drive the loading skeleton from it. Today it hard-codes `repeat(3, 1fr)` and 6 cells ([`:93-131`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx#L93-L131)), so a `columns: 2` header flashes a mismatched skeleton. Pixel-parity on Matter is a binding acceptance criterion, so a load-time mismatch is worth closing. Default stays `3` — backward compatible |
 | `FieldGrid` | [`FieldGrid.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx) | None — **but it does not validate span**. `FieldGrid` never sets `gridColumn`; each cell applies its own. A `span: 3` cell in a `columns: 2` grid silently creates an implicit third track and breaks the layout. **`resolveHeaderConfig` MUST clamp `span = min(span, columns)`** (§6.3) |
 | `TextField` / `TextareaField` | [`RecordHeader/fields/`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields) | None — `TextField` is the canonical renderer contract new renderers copy (§6.1) |
-| **Lookup — two different components** | [`RecordHeader/fields/LookupField.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/LookupField.tsx) (display-only, barrel-aliased `RecordHeaderLookupField`) · [`components/LookupField/LookupField.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx) (editable, search-as-you-type) | **Clarified, not changed.** MatterHeader's editable lookups use the **top-level** component, which has **no `span` prop**, wrapped in a hand-rolled `<div style={{ gridColumn: 'span 1' }}>` cell ([`MatterHeaderView.tsx:290-309`](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L290-L309)). Renderer mapping: `lookup` → top-level editable; `lookup` + `readOnly: true` → `fields/` display-only. **The grid-cell wrapper joins the §6.2 hoist** |
+| **Lookup — REPLACED by the OOB picker** (owner, 2026-08-25) | [`RecordHeader/fields/LookupField.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/LookupField.tsx) (display-only) · [`components/LookupField/LookupField.tsx`](../../src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx) (custom search-as-you-type) | **Changed.** The `lookup` renderer now displays the current value and opens **`Xrm.Utility.lookupObjects`** on click — see §6.5. This **retires the custom type-ahead** from the header path and **removes the OData lookup-search builder from the §6.2 hoist entirely** |
 | `OptionSetField` | same | **Extended** — gains edit mode (§6.1). Also fix its **stale label typography** (`caption1` / `colorNeutralForeground2`, [`:86-89`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx#L86-L89)) — the siblings moved to `fontSizeBase300` / `colorNeutralForeground1` at v1.0.4 and it was left behind, so mixed grids look off today |
 | `useRecordFieldValues` | [`useRecordFieldValues.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts) | None |
 | `useRelatedCount` | [`useRelatedCount.ts`](../../src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts) | None |
@@ -248,7 +251,7 @@ Leave the property blank and the control still renders — tier 2 derives a defa
 | `_version` | yes | Discriminator. Non-`"1.0"` → treated as unconfigured, `console.warn`, fall through to derived defaults. |
 | `title` | no | Toolbar title. Default: entity display name from metadata. |
 | `columns` | no | `2` or `3`. Default `3`. |
-| `summaryField` | no | Field backing the sparkle popover. Omitted → sparkle icon hidden (**not** shown-and-empty; see §10). |
+| `summaryField` | no | Field backing the sparkle popover. Sparkle shows whenever the named attribute **exists in metadata**, even with zero populated records, and the popover renders "No summary yet" (§9, owner 2026-08-24). Omitted, or naming an attribute that does not exist → sparkle hidden. |
 | `fields[].name` | yes | Logical name. For lookups, the **lookup attribute** name (`sprk_mattertype`), not `_sprk_mattertype_value`. |
 | `fields[].span` | no | `1`–`3`. Default derived from renderer (textarea → `columns`, else `1`). **Clamped to `columns` by the resolver** — `FieldGrid` does not validate, and an over-wide span silently creates an implicit extra grid track (§4). |
 | `fields[].label` | no | Override. Default: the form control's label. |
@@ -355,10 +358,69 @@ These are required regardless of config mechanism — and note that **the withdr
 - Fluent surface: `appearance="filled-lighter" size="small"`, `autoFocus`, `disabled={saving}`, trailing `<Spinner size="tiny">`; module-scope `makeStyles`; semantic tokens only (ADR-021); React 16/17-safe hooks only (ADR-022)
 - Read-mode value cell: `colorNeutralBackground3` + `borderRadiusMedium` + `minHeight: 2em` (OOB input parity, v1.0.3); label `fontSizeBase300` / `colorNeutralForeground1` (v1.0.4) — copy **TextField's** label styles, not `OptionSetField`'s stale ones
 
-**Two conventions the spec must settle** (today's renderers disagree):
+**Two conventions — settled 2026-08-24:**
 
-1. **Empty-string handling.** `TextField` em-dashes only `null | undefined` and renders `''` as an empty box; `TextareaField` and `OptionSetField` em-dash `''` too. Pick one — recommend em-dashing `''` everywhere, and align `TextField`.
-2. **Required marker.** Only `TextField` renders the `*`. Every editable renderer needs it once `required` is config- and metadata-driven.
+1. **Empty-string handling — ✅ ADOPTED.** Em-dash `''` everywhere. `TextField` currently renders `''` as an empty box while `TextareaField` and `OptionSetField` em-dash it; align `TextField` to the majority. Touches a shipped component Matter consumes, so parity QA must cover it.
+2. **Required marker — ⬜ NOT adopted in R2.** Only `TextField` renders the `*` today, and it stays that way. **Known consequence**: once `required` is config- and metadata-driven, a required date / number / option-set / boolean / lookup cell shows **no** visual required indicator, so required-ness is invisible on every renderer except text. Dataverse still enforces it on save, so this is a discoverability gap, not a data-integrity one. Revisit if UAT flags it.
+
+### 6.5 Lookup editing — use the OOB picker (owner decision 2026-08-25)
+
+R1's header renders a **custom** inline type-ahead for lookups. Every other lookup in the app uses the native Dataverse picker. R2 adopts the OOB one.
+
+**Mechanism** — the proven in-repo pattern, already used by [`CommunicationActionsApp.tsx:405-413`](../../src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx#L405-L413) and `CommunicationConnectionsApp`:
+
+```ts
+const results = await xrm.Utility.lookupObjects({
+  entityTypes: [targetEntity],     // from metadata Targets[0] (§5.4)
+  allowMultiSelect: false,
+});
+// -> [{ id, name, entityType }] — exactly the form-buffer setValue payload shape
+```
+
+The returned shape is already what `saveLookup` stages into the form buffer, so the write path is unchanged.
+
+**What this buys**
+
+- Native fidelity for free: *Records / Recent records* tabs, entity icons, secondary text, **+ New**, **Advanced** — plus Dataverse security trimming and view configuration, none of which the custom control implements
+- Consistency with every other lookup surface in the product
+- **Deletes code.** The custom OData `$filter`/`$top=10` search builder leaves the header path entirely — so it drops out of the §6.2 hoist list rather than being generalized over metadata. Net simplification of the largest remaining piece of machinery.
+
+**What it costs**
+
+- The picker is a **modal**, not inline type-ahead. One extra click for a known value.
+- ⚠️ **This changes Matter's behaviour**, so the pixel-parity criterion must be qualified: *identical except that lookup cells now open the OOB picker instead of an inline dropdown.* Stated explicitly so the parity QA does not flag it as a regression.
+- `entityTypes` must come from metadata `Targets` (§5.4) — one more reason FR-21's `targets` projection is load-bearing.
+
+**Read-only lookups** still render via the display-only `fields/LookupField`; only the editable path changes.
+
+#### The picker's "+ New" — modal or navigate-away?
+
+**It can be a modal, but the PCF does not control it.** `lookupObjects` has no option for this. The behaviour is set by the **target** entity:
+
+| Target entity config | What "+ New" does |
+|---|---|
+| `IsQuickCreateEnabled = true` **and** a published Quick Create form | ✅ Opens the **quick-create flyout panel** — user stays on the record, no navigation |
+| Either missing | ❌ **Navigates away** to the full form, losing form context |
+
+**Live status of every lookup target in the §9 layouts (2026-08-25):**
+
+| Target | Used by | `IsQuickCreateEnabled` | Quick Create form | "+ New" today |
+|---|---|---|---|---|
+| `sprk_matter` | Agreement → Regarding Matter | ✅ **True** | ✅ "Matter quick create" | ✅ **Flyout** |
+| `contact` | WA → Assigned To | ❌ False | ✅ "Contact Quick Create" *(exists but inactive)* | ❌ Navigates |
+| `sprk_mattertype_ref` | Matter → Matter Type | ❌ False | ❌ none | ❌ Navigates |
+| `sprk_practicearea_ref` | Matter → Practice Area | ❌ False | ❌ none | ❌ Navigates |
+| `sprk_projecttype_ref` | Project → Type | ❌ False | ❌ none | ❌ Navigates |
+| `sprk_eventtype_ref` | Event → Type | ❌ False | ❌ none | ❌ Navigates |
+| `sprk_agreementtype` | Agreement → Type | ❌ False | ❌ none | ❌ Navigates |
+
+**Recommendation — split the targets by kind, rather than blanket-enabling:**
+
+- **`contact`** — enable quick create (flip `IsQuickCreateEnabled`; the form already exists). Users legitimately create contacts mid-task, and this is a one-setting change with an immediate payoff.
+- **`sprk_matter`** — already correct, nothing to do.
+- **The five `*_ref` / type tables** — these are **admin-managed taxonomies** (matter type, practice area, project type, event type, agreement type). Letting any user mint a new "Matter Type" from a header lookup pollutes the taxonomy and is arguably a governance problem, not a UX win. **Recommend leaving quick create off**, and accepting that "+ New" navigates away — it is rarely the right action on these fields anyway.
+
+**Not R2's work either way.** These are Dataverse configuration changes on tables R2 does not otherwise touch. Recorded here so the decision is explicit rather than discovered during UAT. If the owner wants the `contact` flag flipped, it is a one-line admin change that needs no code.
 
 ### 6.2 Hoist the generic machinery out of the view
 
@@ -367,9 +429,9 @@ Move from `MatterHeaderView.tsx` into the shared library so it exists once:
 - Form-buffer staging (`saveText` / `saveLookup` via `Xrm.Page.getAttribute().setValue()`) — the R1 v1.0.7 dirty-state pattern, which must be preserved exactly (it exists because writing straight to Dataverse re-rendered the whole PCF on every edit)
 - The pending-changes buffer and `pendingX[name] ?? values?.[name]` display resolution
 - `projectLookup()` (`_field_value` + `@OData.Community.Display.V1.FormattedValue` → `ILookupItem`)
-- The lookup OData search builder, generalized over metadata-resolved target/id/name
+- ~~The lookup OData search builder~~ — **removed from the hoist 2026-08-25**: §6.5 replaces the custom type-ahead with `Xrm.Utility.lookupObjects`, so there is no search builder left to generalize. The largest single piece of machinery on this list is deleted rather than moved.
 
-Plus the hand-rolled lookup grid-cell wrapper ([`MatterHeaderView.tsx:290-309`](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L290-L309)), which exists only because the editable `LookupField` has no `span` prop.
+Plus a lookup grid cell that owns its own `span` (the R1 view hand-rolled one at [`MatterHeaderView.tsx:290-309`](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L290-L309) because the editable `LookupField` had no `span` prop).
 
 Proposed home: `hooks/useRecordHeaderFields.ts` + `components/RecordHeader/RecordHeaderFields.tsx`. Neither name exists in `src/` today (grep-verified 2026-08-22). Exact split is a `/design-to-spec` decision.
 
@@ -452,7 +514,7 @@ The 2026-08-21 decision picked B on the premise that A meant living with "Matter
 
 **No data loss either way** — `boundField` is `usage="bound"` on `sprk_matternumber`; the control only replaces rendering.
 
-**Rollback**: recommend leaving the old control dormant for one release (re-adding it to the field's control list is the rollback) rather than retiring it in the same release.
+**Rollback**: none held open past delivery, per D-4. The rollback window exists only *between* step 3 (re-bind) and step 5 (retirement) — during it, re-adding the old control to the field's control list reverts instantly with no redeploy. Step 4's pixel-parity QA is what earns closing that window on delivery.
 
 **Version sync is 5 locations, not 4** (`src/client/pcf/CLAUDE.md` says 4; `pcf-deploy` adds `pack.ps1`): `ControlManifest.Input.xml`, `control/version.ts`, `Solution/solution.xml`, `Solution/Controls/.../ControlManifest.xml`, `pack.ps1`.
 
@@ -494,7 +556,37 @@ Matter is therefore both the last migration and the strongest regression test: R
 | `sprk_project` | `sprk_financialsummary` · `sprk_performancesummary` · `sprk_tasksummary` | **0 of 18** each |
 | `sprk_workassignment` · `sprk_event` | **no summary column exists at all** | n/a |
 
-**Owner decision: keep the sparkle and keep the summary fields.** These are to be populated by a separate project/component solution; R2 must not design them away because they are empty *today*. That changes §6.4's rule:
+**Owner decision (2026-08-25, superseding the 2026-08-24 "R2 creates the columns" decision): standardize on `sprk_recordsummary` everywhere, and the owner has ALREADY created the columns.**
+
+**Rationale for the name**: `sprk_aisummary` collides conceptually with Microsoft's OOB "AI summary" features. `sprk_recordsummary` is unambiguous and vendor-neutral.
+
+**Live verification 2026-08-25** — `sprk_recordsummary` (Memo) exists on **all six** rollout entities, 0 populated on each:
+
+| Entity | `sprk_recordsummary` | `sprk_aisummary` | `sprk_mattersummary` |
+|---|---|---|---|
+| `sprk_matter` · `sprk_project` · `sprk_workassignment` · `sprk_event` · `sprk_invoice` · `sprk_agreement` | ✅ EXISTS (0 populated) | ❌ absent (400) | ❌ absent (400) |
+
+**Consequences:**
+
+- **FR-22 changes from "create three columns" to "verify + remediate residual references".** No `dataverse-create-schema` work; R2 returns to a pure client surface plus one Dataverse **data** fix (below).
+- **The shared lib already has the right constant.** [`RECORDSUMMARY_FIELD = 'sprk_recordsummary'`](../../src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts#L90) has existed since R1. R2's `summaryField` default should be that constant; per-entity `layoutJson` need not set `summaryField` at all.
+
+#### 🔴 Two live breakages caused by the column deletions — must be fixed
+
+| # | What | Impact | Fix |
+|---|---|---|---|
+| **RS-1** | [`MatterHeaderView.tsx:83`](../../src/client/pcf/MatterHeader/control/MatterHeaderView.tsx#L83) includes `sprk_mattersummary` in the `useRecordFieldValues` `$select` | 🔴 **The shipped `MatterHeaderPcf` v1.0.20 is broken right now.** The `$select` names a column that no longer exists → HTTP 400 → **the entire header fails to load on every Matter record**, not just the sparkle | Point at `RECORDSUMMARY_FIELD`. R2 fixes this by construction, but Matter's header is broken *until R2 ships* — consider a v1.0.21 hotfix |
+| **RS-2** | `sprk_aitopicregistry` row **"Matter Summary"** (`sprk_topicname=matter-summary`, `sprk_playbookname=chat-summarize`) is **enabled** with `sprk_targetfield=sprk_mattersummary` | 🔴 The BFF OutputRouter `work_product` disposition leg writes to a column that no longer exists | **Dataverse data fix**: set `sprk_targetfield` = `sprk_recordsummary` on that row |
+
+**Verified NOT broken** (checked 2026-08-25, so nobody re-investigates):
+
+- The sibling registry row **"Matter Health Insight"** targets `sprk_performancesummary` — that column still exists on `sprk_matter` (HTTP 200), as do `sprk_financialsummary` and `sprk_tasksummary`.
+- `InvoiceExtractionJobHandler.cs:384` mentions `sprk_aisummary` **only in a comment**. The generated text goes to a context variable (`extraction.aiSummary`, [`:236`](../../src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs#L236)), not a direct column write — so there is no code break. Fix the stale comment; separately confirm whatever consumes that variable targets `sprk_recordsummary`.
+- All other `sprk_mattersummary` references are inside `MatterHeader` and its tests — i.e. entirely within the surface R2 rewrites.
+
+> **Handoff unchanged**: R2 reads `sprk_recordsummary` and renders "No summary yet"; it does **not** write. Whoever owns summary generation populates it — now against one uniform field name on every entity, which is exactly what the standardization buys.
+
+That changes §6.4's rule:
 
 | Condition | Behaviour |
 |---|---|
@@ -504,11 +596,45 @@ Matter is therefore both the last migration and the strongest regression test: R
 
 This is the honest version of the R1 fix. R1's bug was a sparkle pointing at a column that held nothing while a *different* column held the data — a silent lie. A sparkle over a real, currently-empty column that says "No summary yet" is not a lie, and it is forward-compatible with the populating project.
 
-> **Dependency to hand to that project**: `sprk_workassignment` and `sprk_event` have **no summary column of any kind**. Someone must create them before those two entities can show a sparkle. Project has three *specialised* summaries (financial / performance / task) rather than one narrative field — so §5.2's `summaryField` being a single field name may need revisiting for Project specifically. Flagging, not solving, in R2.
+### Proposed per-entity layouts (owner-confirmed 2026-08-24)
+
+Starting layouts for each form's `layoutJson`, built from the live-verified field lists. `columns: 3` throughout. Makers can tune these without a code change — that is the point of the design — so treat them as the shipped default, not a contract.
+
+`summaryField` is `sprk_recordsummary` on **every** entity (2026-08-25 standardization), so it can be omitted from `layoutJson` entirely and defaulted from `RECORDSUMMARY_FIELD`.
+
+| Entity | `fields[]` (name · span) |
+|---|---|
+| `sprk_project` | `sprk_projectnumber`·1 *(req)* · `sprk_projectname`·2 · `sprk_projecttype_ref`·1 · `sprk_openeddate`·1 · `sprk_highpriority`·1 · `sprk_projectdescription`·3 |
+| `sprk_workassignment` | `sprk_workassignmentnumber`·1 · `sprk_name`·2 *(req)* · `sprk_priority`·1 · `sprk_assignedto`·1 · `sprk_responseduedate`·1 · `sprk_highpriority`·1 · `sprk_description`·3 |
+| `sprk_invoice` | `sprk_invoicenumber`·1 · `sprk_name`·2 *(req)* · `sprk_totalamount`·1 · `sprk_invoicedate`·1 · `sprk_invoicestatus`·1 · `sprk_highpriority`·1 · `sprk_description`·3 |
+| `sprk_event` | `sprk_eventnumber`·1 · `sprk_eventname`·2 *(req)* · `sprk_eventtype_ref`·1 · `sprk_eventstatus`·1 · `sprk_plannedstart`·1 · `sprk_plannedend`·1 · `sprk_highpriority`·1 · `sprk_description`·3 |
+| **`sprk_agreement`** *(added 2026-08-25)* | `sprk_name`·2 *(req)* · `sprk_agreementtype`·1 · `sprk_effectivedate`·1 · `statuscode`·1 · `sprk_regardingmatter`·1 · `sprk_agreementdescription`·3 — **no Boolean cell; see §9.2** |
+| `sprk_matter` | as R1 v1.0.20 — unchanged |
+
+**`sprk_highpriority` is deliberate**: it is what gives `BooleanField` a real consumer (§6.1 / §11). Without it in at least one layout, the renderer would be built for a field type nothing displays — the exact scope-creep CLAUDE.md §11 exists to catch. It is also genuinely useful on a header: a flag users set and read constantly.
+
+Every layout exercises at least one new renderer, so the rollout doubles as the renderer test matrix: Project → date + boolean + optionset; WA → date + boolean + optionset; Invoice → **currency** + date + boolean + optionset; Event → **datetime** + date + boolean + optionset + lookup.
 
 > **Main form GUIDs — live-verified 2026-08-24** (dev `spaarkedev1`): Matter `4fa382f2-c273-f011-b4cb-6045bdd6a665` · Project `5aa00242-5212-f111-8342-7ced8d1dc988` · Work Assignment `7e578eef-761d-f111-88b3-7c1e520aa4df` · Invoice `93aa1c69-0406-f111-8406-7c1e525abd8b` · Event `eaf22dcb-9aff-f011-8406-7c1e525abd8b` (**the entity has 10 forms — 8 are side-pane/modal/assign-work variants; bind only the "Event main form"**). Each entity also has a legacy "Information" form — do not bind that one. Environment-specific GUIDs: fine for dev acceptance criteria, not portable.
 
 > **Finding that settles §5.4**: `sprk_mattertype` → `sprk_mattertype_ref` (Id `sprk_mattertype_refid`, Name `sprk_mattertypename`) and `sprk_practicearea` → `sprk_practicearea_ref` (Id `sprk_practicearea_refid`, Name `sprk_practiceareaname`) — **both match R1's hard-coded `LOOKUP_META` exactly, so it can be deleted.** And the convention is confirmed **non-uniform**: `sprk_projecttype_ref` and `sprk_eventtype_ref` both use **`sprk_name`** as their primary name. A hard-coded naming convention would break on two of the four rollout entities; reading `primaryNameAttribute` from metadata is required, not over-engineering.
+
+### 9.2 `sprk_agreement` — added 2026-08-25 (owner)
+
+Live-verified: PK `sprk_agreementid` · primary name **`sprk_name`** · entity set `sprk_agreements` · display name "Agreement" · **0 records** in `spaarkedev1`.
+
+**Available fields**: `sprk_agreementdescription` + `sprk_recordsummary` (Memo) · `sprk_effectivedate` (**DateOnly — the only DateTime on the entity**) · `sprk_agreementtype`, `sprk_regardingmatter`, `sprk_regardingproject`, `sprk_regardingdocument`, `sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `sprk_assignedlawfirm1/2` (Lookup) · `sprk_accesspermission` (Picklist) · `statuscode` / `statecode` · `sprk_activesignalcount` (Integer) · `ownerid`.
+
+**Owner resolved two of the three blockers on 2026-08-25 by changing Dataverse** — both verified live:
+
+1. ✅ **Main form created.** Bind **"Agreement main form"** `59d88274-a1a0-f111-aaac-000d3a99d1d7`. (The legacy `Information` form `e009a1da-…` is **not** the target, consistent with every other rollout entity.)
+2. ✅ **To Do + Notepad now supported.** `sprk_regardingagreement` (Lookup → `sprk_agreement`) now exists on **both** `sprk_todo` and `sprk_memo`. Agreement therefore gets the **full** toolbar — sparkle, To Do badge, Notepad badge — like the other five.
+   - **Code change this requires**: add `sprk_agreement → sprk_regardingagreement` to **both** [`SUPPORTED_TODO_PARENTS`](../../src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts#L150) (11 → 12) and [`SUPPORTED_MEMO_PARENTS`](../../src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts#L105) (6 → 7). This is the **first** map change in R2 — §1 finding 1's "zero new work" claim now has exactly one exception.
+3. ⚠️ **Still true — no Boolean fields at all.** No `sprk_highpriority`, `sprk_monitor`, or `sprk_issecure` on Agreement. Its layout carries no boolean cell; `BooleanField`'s justification rests on the other four entities, which is sufficient.
+
+**Consequence for FR-16**: Agreement is no longer the auto-hide acceptance test. FR-16 still has real consumers — `contact`, `sprk_document`, `sprk_organization`, `sprk_analysis`, `sprk_communication` are To Do parents but **not** Memo parents, so the Notepad slot must hide on those. Test FR-16 against one of them instead.
+
+**Also note**: Agreement has **0 records** in `spaarkedev1`, so acceptance testing needs a seeded record.
 
 ### 9.1 Schema-drift defects found during verification — **NOT in R2 scope; documented separately**
 
@@ -563,13 +689,14 @@ The table below is retained as R2's **discovery record**. Two entries were empir
 |---|---|---|---|
 | **Single control = shared blast radius.** A regression breaks every bound entity at once. | High | Med | Partly pre-existing — all header PCFs already share one library, so a shared-lib bug breaks all of them today regardless. Mitigate with staged form binding (wave 1 → soak → wave 2), version footer, and Matter migrated **last**. |
 | **Bundle growth from four new renderers** breaches the 250 KB ceiling. | Med | Low–Med | Measure per wave, not at the end. The optimization triad (§7.1) is mandatory and must not be disturbed. |
-| **Metadata-derived lookups fail on a non-conventional target** (§5.4 discovery). | Med | Med | Escape hatch already designed: optional `fields[].lookup: { entity, idField, nameField }`. Cheap to add if discovery says so. |
-| **Summary field absent or unpopulated** on Project / Work Assignment / Invoice / Event. | Med | **High** — this already happened on Matter | Sparkle hidden when `summaryField` is absent (§5.2), so the failure mode is a missing icon rather than a broken one. Confirm per entity in discovery. |
+| ~~Metadata-derived lookups fail on a non-conventional target~~ | — | — | ✅ **CLOSED 2026-08-24.** Live metadata matched `LOOKUP_META` exactly (§5.4); the `fields[].lookup` escape hatch is not needed and stays out of the v1.0 schema. |
+| **Summary columns are empty on every entity** — `sprk_aisummary` 0/10 on Invoice, `sprk_mattersummary` 1/55 on Matter, and R2 now *creates* three more that nothing writes yet (§9). | Med | **Certain** | Sparkle visibility keys on attribute **existence**, not population, and the popover renders an explicit "No summary yet" state. The failure mode is an honest empty state, not R1's silent lie. Depends on the separate populating project to become useful. |
 | **Layout change requires a form publish** (the accepted cost of JSON-on-manifest). | Low | Certain | Accepted 2026-08-21. Reversible via the resolver's tier design (§5.1). |
 | **`FieldGrid` caps at 2–3 columns, span 1–3.** If a form wants a 4-column header or explicit row breaks, config cannot express it. | Low | Low | Not in R2. Revisit only if a real form needs it. |
-| **`layoutJson` mechanism unproven in this repo** — no `of-type="Multiple"` + `usage="input"` property exists today; the form designer may render a single-line box for static values. | **High** — it is the whole configuration mechanism | Med | Blocking spike before `/design-to-spec` (§5.1). Fallback tiers if it fails: (a) a bound multiline column on the host entity, (b) fall back to the rejected config-record tier — the resolver's tier shape already accommodates it. |
+| **`layoutJson` editor ergonomics unproven** — no `of-type="Multiple"` + `usage="input"` property exists in this repo; the form designer may render a single-line box for static values. | **Low** (downgraded 2026-08-24) | Med | ✅ De-risked: `SingleLine.Text` + `usage="input"` is proven by `title`, form-XML storage has no 4000-char column limit, and a realistic layout minifies to ~330 chars. Spike is a 15-min ergonomics check that changes only the manifest `of-type` (§5.1.1). |
 | **Metadata calls regress TTI.** §5.4 adds ~3 cold network calls before first paint; `retrieveEntityMetadata` itself issues two per invocation and has no cache. | Med | Med | Page-session metadata cache (§5.4) + restored TTI acceptance criterion (§9). Measure per wave. |
-| **Layout portability depends on how forms move between environments** (§13). | Med | **Unknown until owner answers** | If forms are not solution-transported, `layoutJson` is per-environment maker work — re-score §5.1's comparison table honestly rather than after the fact. |
+| ~~Layout portability depends on form transport~~ | — | — | ✅ **CLOSED 2026-08-22** — owner confirmed forms ship inside a transported solution (§13). |
+| **New Dataverse columns (§9) widen the blast radius** beyond a pure client project — schema changes are harder to reverse than code. | Med | Low | Three additive, nullable Memo columns; no data migration, no existing consumer. Ship them in their own solution slice and verify import into a clean environment (§13). |
 | Four renderer tasks in parallel race on `fields/index.ts` (R1 hit this). | Low | Med | Serialize the barrel edit or split the file — encode in `/project-pipeline` task sequencing, not in review. |
 | Form binding needs maker access the dev session lacks. | Low | Low | Replicate R1's maker checklist ([`matter-form-binding-instructions.md`](../record-header-and-notepad-r1/notes/matter-form-binding-instructions.md)) per entity. |
 
@@ -579,7 +706,8 @@ The table below is retained as R2's **discovery record**. Two entries were empir
 
 | New surface | Existing overlap | Why not extend it | Cost of doing nothing |
 |---|---|---|---|
-| `RecordHeader` control | `MatterHeader` PCF | This **is** the extension — same control, generalized, old one retired (§8) | Four more PCF solutions to version, deploy, bind, and fix in parallel; ~180 lines of edit machinery duplicated four times |
+| `RecordHeader` control | `MatterHeader` PCF | This **is** the extension — same control, generalized, old one retired (§8) | Four more PCF solutions to version, deploy, bind, and fix in parallel; ~82 lines of reusable machinery duplicated four times (corrected count, §1.3) |
+| **`sprk_aisummary` column** on Project / WA / Event | Matter `sprk_mattersummary`; Invoice `sprk_aisummary`; Project's three specialised summaries | Cannot extend — the column simply does not exist on those three entities, and Project's three are structured insight-card fields, not narrative prose | Owner requires the sparkle on every rollout entity (§9). With no column, the sparkle can never render on Work Assignment or Event — the affordance is dead, not merely empty. Live-verified 2026-08-24. |
 | `DateField` / `NumberField` | `TextField` | `TextField` does `String(value)` ([`:117`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx#L117)) — it cannot format a Money value by currency/precision or a DateTime by user locale | Invoice `sprk_totalamount` renders `12500`; `sprk_invoicedate` renders `2026-08-21T00:00:00Z`. Invoice ships broken. |
 | `BooleanField` | `TextField` | `TextField` would render a Boolean as `true` / `false` | `sprk_highpriority` and `sprk_monitor` exist on all four rollout entities and would display as raw `true`/`false` instead of a Yes/No or toggle. Live-verified 2026-08-24. |
 | `OptionSetField` edit mode | `OptionSetField` | Direct extension of the existing component | Project / Work Assignment / Invoice status become read-only, unlike every other field in the header |
@@ -622,13 +750,14 @@ Portability check per deliverable: import the solution ZIP into a fresh environm
 | **`layoutJson` ergonomics spike** (§5.1.1) — `Multiple` vs the proven `SingleLine.Text` fallback | 0.25 d |
 | Generic view + entity self-detection + config resolver (§5, §6.3) | 1–2 d |
 | Hoist generic machinery to shared lib + unify `getXrmPage()` (§6.2) | 1–1.5 d |
-| Renderers + `OptionSetField` edit mode & typography fix (§6.1) — **2 new + 1 extended** if Boolean is cut and datetime is folded into `DateField` | 1.5–2.5 d |
+| Renderers (§6.1) — `DateField` (date + datetime modes), `NumberField`, `BooleanField`, plus `OptionSetField` edit mode & typography fix | 2–3 d |
+| **Three `sprk_aisummary` columns** (§9) — `dataverse-create-schema` + solution packaging + fresh-env import check | 0.25–0.5 d |
 | Metadata-driven lookup resolution — extend `EntityAttributeMetadata` with `targets` + page-session cache (§5.4) | 0.5–1 d |
 | **Rewrite the Matter-fixtured test suite** against the generic control (`__tests__/MatterHeaderView.test.tsx` asserts Matter labels, the 6-field payload, `entity === 'sprk_matter'`, `sprk_mattersummary` sparkle body) | 0.5–1 d |
 | Control migration to `RecordHeader` + parity QA (§8, option B — owner-confirmed) | 0.5–1 d |
 | Per-entity config + form binding + QA | 0.5 d × 4 |
 | Guide rewrite from shipped code + pattern refresh (§3.1) | 0.5–1 d |
-| **Total** | **~8.5–12.5 dev-days** |
+| **Total** | **~9.25–13.5 dev-days** |
 
 The §9.1 schema-drift defects are **excluded** — they are scoped separately in [`notes/issues/`](notes/issues/README.md) (~1–2 d combined if all three are approved).
 
@@ -651,7 +780,16 @@ The withdrawn four-PCF plan estimated 4–6 h × 4 ≈ 3 days — but that numbe
 | **D-5** | §5.4 metadata access path | ✅ **RESOLVED 2026-08-24 — reuse `IDataverseClient`**, extended with `targets`. §5.4.1. |
 | **D-6** | §9 field lists | ✅ **RESOLVED 2026-08-24 — live-verified against `spaarkedev1`; §9 rewritten.** Sparkle + summary fields **kept** per owner (populated by a separate project). `BooleanField` **stays in** — the 2026-08-22 "no consumer" call was wrong. |
 
-**All owner decisions are closed.** Remaining gate before `/design-to-spec` is the §5.1.1 ergonomics spike, which cannot change the design — only the manifest `of-type`.
+Four further decisions were taken during the `/design-to-spec` interview on 2026-08-24:
+
+| # | Decision | Status |
+|---|---|---|
+| **D-7** | Per-entity `layoutJson` layouts | ✅ **RESOLVED** — proposed layouts confirmed (§9). `sprk_highpriority` added to all four so `BooleanField` has a real consumer. |
+| **D-8** | Sparkle on entities with no summary column | ✅ **RESOLVED — R2 creates `sprk_aisummary` (Memo, 5000) on Project, Work Assignment and Event** (§9). This is the one place R2 leaves the pure client surface. |
+| **D-9** | `RecordHeaderShell` skeleton column mismatch | ✅ **RESOLVED** — add an optional `columns` prop, default `3` (§4). |
+| **D-10** | Renderer conventions | ✅ **Em-dash `''` everywhere — adopted.** ⬜ **Required marker on every editable renderer — NOT adopted**; consequence documented in §6.1. |
+
+**All owner decisions are closed.** Remaining gate is the §5.1.1 ergonomics spike, which cannot change the design — only the manifest `of-type`.
 
 ### 15.2 Sequence
 

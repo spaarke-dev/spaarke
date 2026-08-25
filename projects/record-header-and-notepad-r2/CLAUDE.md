@@ -7,10 +7,11 @@
 
 ## Project Status
 
-- **Phase**: 0 — design code- **and** schema-verified; **ready for `/design-to-spec`**
+- **Phase**: 1 — [`spec.md`](spec.md) generated; **ready for `/project-pipeline`**
 - **Last Updated**: 2026-08-24
 - **Current Task**: none
-- **Next Action**: `/design-to-spec` → `/project-pipeline`. All six owner decisions closed (design.md §15.1); discovery closed (checklist). The `layoutJson` ergonomics spike runs as the first implementation task — it cannot change the design, only the manifest `of-type`.
+- **Next Action**: `/project-pipeline`. All 10 owner decisions closed (design.md §15.1); discovery closed (checklist); spec has 25 FRs / 11 NFRs / 22 success criteria. The `layoutJson` ergonomics spike runs as the first implementation task — it cannot change the design, only the manifest `of-type`.
+- **⚠️ R2 now creates Dataverse columns** (D-8): `sprk_aisummary` (Memo, 5000) on `sprk_project`, `sprk_workassignment`, `sprk_event`. This is the one place R2 leaves the pure client surface — use `dataverse-create-schema`.
 - **2026-08-22**: full line-by-line code verification of `design.md`. Several claims were wrong (line accounting, solution name, `TrackingFieldTrio` citation, throw line); the configuration mechanism turned out to have **no in-repo precedent**; metadata access was re-pointed at the existing `IDataverseClient` contract. Checklist §C closed as code-verified.
 - **2026-08-24 (owner)**: the **§9.1 schema-drift defects are OUT of R2 scope** — captured as three standalone issue docs grouped by area (Event · Daily Briefing · Work Assignment) in [`notes/issues/`](notes/issues/README.md), for evaluation as focused fix projects. Seven non-existent columns across 6 files; two confirmed HTTP 400 in shipped code. Do **not** fix them under R2; do **not** let them evaporate either — they are real, reproducible production defects.
 - **2026-08-24**: §9 entity schemas **live-verified against `spaarkedev1`**. Six seed fields do not exist; `sprk_project`'s primary name is `sprk_projectnumber`; Event's datetime pair is `sprk_plannedstart`/`sprk_plannedend`; `LOOKUP_META` confirmed deletable. Two live-code defects found (checklist §F).
