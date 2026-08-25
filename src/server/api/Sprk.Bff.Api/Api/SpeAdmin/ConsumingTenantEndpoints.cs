@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
@@ -514,15 +515,11 @@ public static class ConsumingTenantEndpoints
             "Graph API error for container type {TypeId}, config {ConfigId}. Status: {Status}. ErrorCode: {ErrorCode}. TraceId: {TraceId}",
             typeId, configGuid, ex.StatusCode, errorCodePrefix, context.TraceIdentifier);
 
-        return Results.Problem(
-            detail: "Failed to complete the operation via the Graph API. Check the app registration credentials in the config.",
+        return ex.ToProblemDetails(
+            summary: $"Could not complete the operation on container type '{typeId}'.",
+            errorCode: $"spe.containertypes.{errorCodePrefix}.graph_error",
             statusCode: StatusCodes.Status500InternalServerError,
-            title: "Graph API Error",
-            extensions: new Dictionary<string, object?>
-            {
-                ["errorCode"] = $"spe.containertypes.{errorCodePrefix}.graph_error",
-                ["traceId"] = context.TraceIdentifier
-            });
+            traceId: context.TraceIdentifier);
     }
 
     /// <summary>Returns a 500 unexpected error ProblemDetails result and logs the exception.</summary>
@@ -540,7 +537,7 @@ public static class ConsumingTenantEndpoints
             typeId, configGuid, errorCodePrefix, context.TraceIdentifier);
 
         return Results.Problem(
-            detail: "An unexpected error occurred while processing the request.",
+            detail: ProblemDetailsHelper.Explain("An unexpected error occurred while processing the request.", ex),
             statusCode: StatusCodes.Status500InternalServerError,
             title: "Internal Server Error",
             extensions: new Dictionary<string, object?>

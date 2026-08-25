@@ -71,6 +71,12 @@ public static class SpeAdminModule
         // Scoped: captures HttpContext identity for the audit actor per request.
         services.AddScoped<SpeAuditService>();
 
+        // Cross-customer boundary for the shared-BFF deployment model. Registered unconditionally:
+        // SpeAdminTenantScopeFilter resolves it per request, and a missing registration would throw
+        // at request time on every SPE Admin call rather than failing safe. Scoped, because it reads
+        // the caller's identity and must never be shared across requests.
+        services.AddScoped<SpeAdminTenantScope>();
+
         // Background service: syncs dashboard metrics (container counts, storage usage)
         // from Graph API into IDistributedCache on a configurable interval (default 15 min).
         // ADR-001: BackgroundService, not Azure Functions.

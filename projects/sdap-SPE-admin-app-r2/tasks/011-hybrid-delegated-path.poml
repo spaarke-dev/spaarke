@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Wire the hybrid delegated path for container-type operations</title>
+    <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
+    <gate>010 complete with a WORKABLE verdict</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive auth implementation in a BFF hot path; tags include auth. Root CLAUDE.md §8 FULL trigger.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural auth change governed by an ADR gate; hybrid path-selection rule has high blast radius across the /api/spe route group.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminTokenProvider.cs AND SpeAdminGraphService.cs. Auth-critical — runs alone against those files.</parallel-reason>
+    <deps>010</deps>
+    <tags>auth, oauth, authorization, bff-api, api</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the token-acquisition shape proven by task 010 so container-type operations run on a delegated Graph token, while container CRUD and drive items stay app-only. This is a hybrid, not a wholesale migration — the two paths must be selected by ONE documented rule, not scattered conditionals.</prompt>
+
+  <role>SPAARKE platform developer. Expert in MSAL confidential clients, the OBO flow, token caching, and Microsoft Graph SPE permissions. Follow ADRs strictly.</role>
+
+  <goal>Container Types list and create succeed against Spaarke Dev on a delegated token. Container CRUD continues to work app-only with no regression. A single documented rule selects the path.</goal>
+
+  <context>
+    <background>Spec FR-B02 / §3.1. Graph does not support application permissions for containerTypes at all, so a delegated path is mandatory. Task 010 established the working shape and fixed the two defects (wrong token audience at SpeAdminTokenProvider.cs:142; OBO actor mismatch at :306). This task implements it. The §6.5 ADR gate is resolved as path C — comply under ADR-028 E-1 — provided the exchange stays on the per-customer owning app.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeEndpoints.cs</file>
+      <file role="canonical-reference">projects/sdap-SPE-admin-app-r2/notes/obo-spike-findings.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">The proven token-acquisition shape and its permission prerequisites.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the delegated exchange credential. MUST remain on the per-customer OWNING APP identity (exception E-1). MUST NOT route through the BFF app registration — that is Amendment A4 territory and contradicts auth-v4's scoping.</constraint>
+    <constraint source="ADR-028">Scope: new confidential clients. MUST NOT introduce a new .WithClientSecret site for a BFF-identity client. MUST cache the IConfidentialClientApplication at singleton/process scope keyed by (tenant|client) — per-request construction discards the MSAL token cache.</constraint>
+    <constraint source="ADR-028">Scope: token handling. MUST hash user tokens for cache keys (SHA256); MUST NOT store or log plaintext tokens. OBO cache TTL 55 minutes (5-minute buffer before expiry).</constraint>
+    <constraint source="ADR-008">Scope: the /api/spe route group. Inbound authorization stays on the existing SpeAdminAuthorizationFilter endpoint filter. MUST NOT add global auth middleware.</constraint>
+    <constraint source="project">Scope: path selection. ONE documented rule decides delegated vs app-only per operation. Scattered per-call-site conditionals are a defect — the rule must be readable in one place.</constraint>
+    <constraint source="project">Scope: app-only operations. Container CRUD and drive items MUST continue to work app-only. Regressing them to delegated is out of scope and breaks background/system callers.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size; no new NuGet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO implementation + hybrid auth path selection</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="obo-flow" location=".claude/patterns/auth/obo-flow.md">Canonical OBO exchange.</pattern>
+      <pattern name="token-caching" location=".claude/patterns/auth/token-caching.md">Cache keying and TTL rules.</pattern>
+      <pattern name="oauth-scopes" location=".claude/patterns/auth/oauth-scopes.md">Scope construction.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">ADR-008 filter pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-028 (A4 + E-1/E-3), ADR-008, and notes/obo-spike-findings.md.</step>
+    <step order="1">Verify task 010's verdict is WORKABLE. If it is UNWORKABLE, STOP — this task must not start.</step>
+    <step order="2">Fix the token audience: request the Graph-audienced scope proven in the spike, not api://{OwningAppId}/.default.</step>
+    <step order="3">Fix the OBO actor per the spike's finding so the confidential client matches the incoming assertion's audience.</step>
+    <step order="4">Define the ONE path-selection rule (a single method or table mapping operation → delegated|app-only) and document it inline with the reason each operation falls where it does.</step>
+    <step order="5">Route container-type operations through the delegated path; leave container CRUD and drive items app-only.</step>
+    <step order="6">Verify CCA instances are cached at singleton scope keyed (tenant|client), and OBO tokens keyed (configId + sha256(userToken)) with 55-minute TTL.</step>
+    <step order="7">Build: dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors.</step>
+    <step order="8">Verify against Spaarke Dev: Container Types LIST returns 200 with data; container CRUD still works app-only (regression check).</step>
+    <step order="9">Add WireMock coverage on the task-040 infrastructure for the path-selection rule and the token-audience shape.</step>
+    <step order="10">Measure publish size; record in task notes. Update TASK-INDEX.md: task 011 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If implementing the proven shape requires routing the exchange through the BFF app registration after all, STOP and re-run the CLAUDE.md §6.5 gate. This is the ADR-028 A4 boundary and needs a named human path A/B decision plus coordination with spaarke-auth-v4-dataverse-MI — never a silent implementation choice.</trigger>
+    <trigger>If the hybrid rule cannot be expressed in one place because some operation genuinely needs both paths depending on caller identity, STOP and escalate — that is an architectural shape change, not a task-level judgment.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (delegated-path coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an admin with the required permission, when Container Types loads against Spaarke Dev, then it returns 200 with data.</criterion>
+    <criterion testable="true">Given container CRUD operations, when they run after this change, then they still succeed app-only — no regression.</criterion>
+    <criterion testable="true">The delegated/app-only selection is expressed by ONE documented rule; grep confirms no scattered per-call-site auth conditionals were introduced.</criterion>
+    <criterion testable="true">CCA instances are cached at singleton scope keyed (tenant|client); OBO tokens keyed (configId + sha256(userToken)) with 55-minute TTL.</criterion>
+    <criterion testable="true">Negative: no plaintext user token appears in logs or cache keys.</criterion>
+    <criterion testable="true">Negative: a caller lacking the required Graph permission receives an actionable ProblemDetails naming the permission — not a generic 403.</criterion>
+    <criterion testable="true">Negative: no NEW .WithClientSecret site was added for a BFF-identity client (ADR-028 A4).</criterion>
+    <criterion testable="true">The exchange runs on the per-customer owning app identity, keeping the §6.5 path-C resolution intact.</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling; no new NuGet.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-B02. Cite the §6.5 path-C resolution in the PR description per spec success criterion 17. If task 010 returned UNWORKABLE, this task is blocked, not adaptable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

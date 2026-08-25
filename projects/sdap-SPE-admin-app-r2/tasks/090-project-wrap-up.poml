@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Project wrap-up — verification sweep, /test-diet gate, lessons learned</title>
+    <phase>7 Close</phase>
+    <gate>all prior tasks complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project closure with a mandatory quality gate. Documentation plus a verification sweep; no feature code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification and synthesis against a closed checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Terminal task — must run alone after every other task completes, since it verifies their collective outcome.</parallel-reason>
+    <deps>001, 002, 003, 004, 005, 010, 011, 012, 013, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030, 040, 041, 042, 050, 051, 052, 060, 061, 062</deps>
+    <tags>documentation, testing, deletion, wrap-up</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: verify every spec success criterion against the real system, run the mandatory /test-diet gate, record lessons learned, and hand the decomposition follow-on its entry evidence.</prompt>
+
+  <role>SPAARKE platform developer. Expert in project closure, ADR-038 test reconciliation, and honest completion reporting. Follow ADRs strictly.</role>
+
+  <goal>All 22 spec success criteria are verified or explicitly recorded as not met with reasons. The /test-diet report is clean. The follow-on project has what it needs to start.</goal>
+
+  <context>
+    <background>Spec §Success Criteria. This project exists because R1 closed 75 tasks in one day reporting "4176 passing, 0 failing" for an app that had never worked. The closure standard here is therefore higher than usual: a criterion is met when it is VERIFIED against the Spaarke Dev tenant, not when a task was marked done. Root CLAUDE.md §7 makes /test-diet a binding gate on 090-wrapup tasks.</background>
+    <relevant-files>
+      <file role="modify">projects/sdap-SPE-admin-app-r2/README.md</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/lessons-learned.md</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/test-diet-report.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="canonical-reference">projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="062" status="pending">The cross-project billing handoff — spec success criterion 13 depends on it.</dependency>
+      <dependency task="042" status="pending">Scaffolding retirement — /test-diet reconciles against it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Scope: this wrap-up task. /test-diet MUST run BEFORE the project is marked complete. Skipping it is a HARD WARNING and the PR must cite the report or document the skip rationale.</constraint>
+    <constraint source="project">Scope: criterion verification. A criterion is met only when VERIFIED against the real system. "The task was marked done" is not verification — that is precisely the R1 failure mode this project was raised to correct.</constraint>
+    <constraint source="project">Scope: honesty. Any unmet criterion MUST be recorded as unmet with its reason. Do NOT quietly narrow a criterion to make it pass.</constraint>
+    <constraint source="project">Scope: the follow-on. Record the entry evidence speeadmingraphservice-decomposition-r1 needs: A–E merged, harness green, and the seams learned from having worked inside the concerns.</constraint>
+    <constraint source="ADR-038">Scope: /test-diet output. It is read-only — it emits git rm / git mv commands for the reviewer. Do NOT auto-execute them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project closure + test reconciliation</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">Classification reference for /test-diet.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor STANDARD. Load spec Success Criteria and CLAUDE.md §7.</step>
+    <step order="1">Walk all nine screens against the Spaarke Dev tenant — the same method as the 2026-08-20 diagnosis that raised this project. Record the result per screen.</step>
+    <step order="2">Verify each of the 22 spec success criteria. Mark MET (with evidence) or NOT MET (with reason). Do not narrow any criterion.</step>
+    <step order="3">Run the full build and test suite: dotnet build -c Release (0 errors under the analyzer gate), ArchTests green, dotnet test green.</step>
+    <step order="4">Measure final publish size and compare against the ~44.96 MB baseline. Confirm ≤60 MB and record the delta.</step>
+    <step order="5">Run dotnet list package --vulnerable --include-transitive — confirm no new HIGH CVE.</step>
+    <step order="6">Run /test-diet. Record the report at notes/test-diet-report.md. Do NOT auto-execute its git commands.</step>
+    <step order="7">Confirm task 062's cross-project handoff was filed (spec success criterion 13).</step>
+    <step order="8">Write notes/lessons-learned.md — including, honestly, whether deferring the decomposition (D5) was the right call given the wave serialization it caused.</step>
+    <step order="9">Record the decomposition follow-on's entry evidence: A–E merged, harness green, seams learned.</step>
+    <step order="10">Update README.md status to Complete; update projects/INDEX.md; reset current-task.md to none.</step>
+    <step order="11">Update TASK-INDEX.md: task 090 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any spec success criterion is NOT met, STOP before marking the project complete and escalate per CLAUDE.md §6 with the criterion and reason. Closing a project over an unmet criterion is exactly what R1 did, and it is the failure this project exists to correct.</trigger>
+    <trigger>If /test-diet reports AMBIGUOUS tests requiring reviewer judgment, STOP and escalate for that judgment rather than classifying them unilaterally.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No closure artifact exists for this project — projects/sdap-SPE-admin-app-r2/notes/ holds research and per-task records but no lessons-learned or test-diet report. Other projects' notes/lessons-learned.md files are the established convention.</existing>
+    <extension>Yes — follows the existing per-project closure convention rather than inventing one. The NEW files are documentation artifacts (lessons-learned, test-diet report), not code surface.</extension>
+    <cost-of-doing-nothing>Without a verification sweep the project closes on task-completion counts, which is exactly how R1 reported "4176 passing, 0 failing" for an app that had never worked. Without the /test-diet report the root CLAUDE.md §7 gate is unmet and the wrap-up PR has nothing to cite.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size measurement, CVE scan</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/lessons-learned.md</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/test-diet-report.md</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/README.md (status Complete)</output>
+    <output type="doc">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All nine screens were walked against Spaarke Dev and the result per screen is recorded.</criterion>
+    <criterion testable="true">All 22 spec success criteria are marked MET with evidence or NOT MET with a reason — none narrowed to pass.</criterion>
+    <criterion testable="true">dotnet build -c Release: 0 errors under the analyzer gate; ArchTests green; test suite green.</criterion>
+    <criterion testable="true">Final publish size recorded, ≤60 MB, with the delta against the ~44.96 MB baseline.</criterion>
+    <criterion testable="true">No new HIGH CVE from dotnet list package --vulnerable --include-transitive.</criterion>
+    <criterion testable="true">/test-diet ran and its report exists at notes/test-diet-report.md; its git commands were NOT auto-executed.</criterion>
+    <criterion testable="true">Task 062's cross-project handoff is confirmed filed.</criterion>
+    <criterion testable="true">lessons-learned.md exists and honestly assesses the D5 decomposition-deferral decision.</criterion>
+    <criterion testable="true">Negative: the project is NOT marked complete if any success criterion is unmet.</criterion>
+    <criterion testable="true">README status is Complete; projects/INDEX.md updated; current-task.md reset to none.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §Success Criteria. /test-diet is a BINDING gate per root CLAUDE.md §7 — the wrap-up PR must cite the report. The closure bar is verification against the real tenant, not task-completion counts.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

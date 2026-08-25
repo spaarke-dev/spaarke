@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;

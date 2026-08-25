@@ -1009,16 +1009,16 @@ public class Phase2IntegrationTests
             var request = new Sprk.Bff.Api.Models.SpeAdmin.UpdateContainerTypeSettingsRequest
             {
                 SharingCapability = null,
-                IsVersioningEnabled = true,
-                MajorVersionLimit = null,
-                StorageUsedInBytes = null
+                IsItemVersioningEnabled = true,
+                ItemMajorVersionLimit = null,
+                MaxStoragePerContainerInBytes = null
             };
 
-            // Assert — only IsVersioningEnabled is non-null, so only it should be updated
+            // Assert — only IsItemVersioningEnabled is non-null, so only it should be updated
             request.SharingCapability.Should().BeNull("null means leave sharing capability unchanged");
-            request.IsVersioningEnabled.Should().BeTrue("versioning enabled is explicitly set to true");
-            request.MajorVersionLimit.Should().BeNull("null means leave version limit unchanged");
-            request.StorageUsedInBytes.Should().BeNull("null means leave storage limit unchanged");
+            request.IsItemVersioningEnabled.Should().BeTrue("versioning enabled is explicitly set to true");
+            request.ItemMajorVersionLimit.Should().BeNull("null means leave version limit unchanged");
+            request.MaxStoragePerContainerInBytes.Should().BeNull("null means leave storage limit unchanged");
         }
     }
 

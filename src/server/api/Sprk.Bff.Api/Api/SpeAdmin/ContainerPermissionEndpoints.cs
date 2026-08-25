@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
@@ -161,7 +162,7 @@ public static class ContainerPermissionEndpoints
             logger.LogError(
                 ex, "ListPermissions: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("listing permissions", context);
+            return UnexpectedProblem("listing permissions", ex, context);
         }
     }
 
@@ -238,7 +239,7 @@ public static class ContainerPermissionEndpoints
             logger.LogError(
                 ex, "GrantPermission: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("granting permission", context);
+            return UnexpectedProblem("granting permission", ex, context);
         }
     }
 
@@ -342,7 +343,7 @@ public static class ContainerPermissionEndpoints
             logger.LogError(
                 ex, "UpdatePermission: unexpected error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 permissionId, containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("updating permission", context);
+            return UnexpectedProblem("updating permission", ex, context);
         }
     }
 
@@ -442,7 +443,7 @@ public static class ContainerPermissionEndpoints
             logger.LogError(
                 ex, "RevokePermission: unexpected error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 permissionId, containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("revoking permission", context);
+            return UnexpectedProblem("revoking permission", ex, context);
         }
     }
 
@@ -557,20 +558,19 @@ public static class ContainerPermissionEndpoints
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 
     private static IResult GraphApiProblem(SpaarkeStorageException ex, HttpContext context) =>
-        Results.Problem(
-            title: "Graph API Error",
-            detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-            statusCode: ex.StatusCode is >= 400 and < 600
-                ? ex.StatusCode.Value
-                : StatusCodes.Status502BadGateway,
-            extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+        ex.ToProblemDetails(
+            summary: "The Graph API call did not succeed.",
+            errorCode: "spe.containers.permissions.graph_error",
+            statusCode: ex.ClientStatusFor(),
+            traceId: context.TraceIdentifier);
 
-    private static IResult UnexpectedProblem(string operation, HttpContext context) =>
+    private static IResult UnexpectedProblem(string operation, Exception ex, HttpContext context) =>
         Results.Problem(
             title: "Internal Server Error",
-            detail: $"An unexpected error occurred while {operation}.",
+            detail: ProblemDetailsHelper.Explain($"An unexpected error occurred while {operation}.", ex),
             statusCode: StatusCodes.Status500InternalServerError,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+
 
     // =========================================================================
     // Request DTOs

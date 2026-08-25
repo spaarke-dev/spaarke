@@ -33,7 +33,7 @@ public static class EnvironmentEndpoints
     private const string EntitySet = "sprk_speenvironments";
     private const string ConfigEntitySet = "sprk_specontainertypeconfigs";
     private const string SelectFields =
-        "sprk_speenvironmentid,sprk_name,sprk_tenantid,sprk_tenantname,sprk_rootsiteurl,sprk_graphendpoint,sprk_isdefault,statecode,createdon,modifiedon";
+        "sprk_speenvironmentid,sprk_name,sprk_tenantid,sprk_tenantname,sprk_rootsiteurl,sprk_isdefault,statecode,createdon,modifiedon";
 
     /// <summary>
     /// Registers the environment CRUD endpoints on the /api/spe route group.
@@ -145,7 +145,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while listing SPE environments.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while listing SPE environments.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -191,7 +191,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while retrieving the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -251,7 +251,6 @@ public static class EnvironmentEndpoints
                         TenantId = request.TenantId,
                         TenantName = request.TenantName,
                         RootSiteUrl = request.RootSiteUrl,
-                        GraphEndpoint = request.GraphEndpoint,
                         Description = request.Description,
                         IsDefault = request.IsDefault,
                         Status = request.Status
@@ -266,7 +265,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while creating the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while creating the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -342,7 +341,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while updating the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -424,7 +423,7 @@ public static class EnvironmentEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while deleting the SPE environment.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while deleting the SPE environment.", ex),
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
     }
@@ -451,11 +450,6 @@ public static class EnvironmentEndpoints
             errors["rootSiteUrl"] = ["rootSiteUrl must be a valid HTTPS URL."];
         }
 
-        if (request.GraphEndpoint is not null && !IsValidHttpsUrl(request.GraphEndpoint))
-        {
-            errors["graphEndpoint"] = ["graphEndpoint must be a valid HTTPS URL when provided."];
-        }
-
         return errors;
     }
 
@@ -466,11 +460,6 @@ public static class EnvironmentEndpoints
         if (request.RootSiteUrl is not null && !IsValidHttpsUrl(request.RootSiteUrl))
         {
             errors["rootSiteUrl"] = ["rootSiteUrl must be a valid HTTPS URL."];
-        }
-
-        if (request.GraphEndpoint is not null && !IsValidHttpsUrl(request.GraphEndpoint))
-        {
-            errors["graphEndpoint"] = ["graphEndpoint must be a valid HTTPS URL when provided."];
         }
 
         return errors;
@@ -533,7 +522,6 @@ public static class EnvironmentEndpoints
             sprk_tenantid = request.TenantId,
             sprk_tenantname = request.TenantName,
             sprk_rootsiteurl = request.RootSiteUrl,
-            sprk_graphendpoint = request.GraphEndpoint,
             sprk_isdefault = request.IsDefault
         };
 
@@ -554,9 +542,6 @@ public static class EnvironmentEndpoints
 
         if (request.RootSiteUrl is not null)
             dict["sprk_rootsiteurl"] = request.RootSiteUrl;
-
-        if (request.GraphEndpoint is not null)
-            dict["sprk_graphendpoint"] = request.GraphEndpoint;
 
         if (request.IsDefault.HasValue)
             dict["sprk_isdefault"] = request.IsDefault.Value;

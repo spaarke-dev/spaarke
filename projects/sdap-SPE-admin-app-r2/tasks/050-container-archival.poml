@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Container archival — archive/restore per container with grid state</title>
+    <phase>5 Workstream E — New capabilities</phase>
+    <gate>020 complete, 040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New capability adding .cs endpoints + Graph calls + .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New but well-documented Graph capability; endpoint pattern already established.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W15</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>020, 040</deps>
+    <tags>bff-api, api, endpoints, frontend, fluent-ui, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add container archival — the highest-ROI item in this project. Archiving delivers up to 75% storage cost reduction and improves Copilot relevance by de-prioritising inactive content. Spaarke provisions a container per matter, and matters close on a predictable lifecycle, so a growing fraction of container storage is inactive by definition.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph SPE container lifecycle APIs, Minimal API endpoints, and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>Archive and restore both succeed against a Spaarke Dev container, and archived state is visible in the Containers grid.</goal>
+
+  <context>
+    <background>Spec FR-E01 / §4.3. GA February 2026. Important boundary: the per-container-TYPE opt-in is PowerShell (Set-SPOContainerType -IsArchiveEnabled) and is NOT this app's job — the app manages archived CONTAINERS, not the opt-in. If the container type has not opted in, archival calls will fail, and the UI must explain that rather than presenting a generic error.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/containers</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypeEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">v1.0 endpoints.</dependency>
+      <dependency task="040" status="pending">WireMock fixture for request-shape coverage.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Scope: new endpoints. Minimal API pattern; no Azure Functions.</constraint>
+    <constraint source="ADR-008">Scope: the new endpoints. Authorization via the existing endpoint filter on the /api/spe group. No global middleware.</constraint>
+    <constraint source="ADR-007">Scope: the facade boundary. Graph SDK types MUST NOT leak above the service.</constraint>
+    <constraint source="project">Scope: the opt-in boundary. Do NOT implement the container-type archive opt-in (PowerShell, Set-SPOContainerType). If archival fails because the type has not opted in, the message MUST say so and name the remediation.</constraint>
+    <constraint source="project">Scope: archival semantics. Archiving affects content availability. The UI MUST state the consequence before archiving and require confirmation.</constraint>
+    <constraint source="NFR-07">Scope: live verification. Archive/restore against a throwaway container provisioned for the purpose — not a container holding real matter documents.</constraint>
+    <constraint source="ADR-021">Scope: the grid state and confirmation. Fluent v9 semantic tokens; ADR-050 canonical modal shell for the confirmation.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF addition. Placement Justification in the PR; verify publish size; no new NuGet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE container archival</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">ADR-008 authorization.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Graph request construction.</pattern>
+      <pattern name="modal-shell" location=".claude/patterns/ui/modal-shell.md">ConfirmModal usage.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.3 and bff-extensions.md.</step>
+    <step order="1">Verify the archival Graph API shape and permissions against current docs.</step>
+    <step order="2">Add archive and restore operations to the service, and endpoints under the existing /api/spe group with the existing authorization filter.</step>
+    <step order="3">Expose archived state on the container DTO and render it in the Containers grid.</step>
+    <step order="4">Add a confirmation stating the content-availability consequence before archiving (ConfirmModal per ADR-050).</step>
+    <step order="5">Handle the not-opted-in failure explicitly with a message naming the PowerShell remediation.</step>
+    <step order="6">Add WireMock coverage for archive/restore request shapes.</step>
+    <step order="7">Build BFF and code page; run tests.</step>
+    <step order="8">Verify against Spaarke Dev on a throwaway container: archive, confirm state in the grid, restore.</step>
+    <step order="9">Measure publish size; record. Update TASK-INDEX.md: task 050 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Spaarke Dev container type has not opted into archival and enabling it requires PowerShell the executing identity cannot run, STOP and escalate — the opt-in is an operator action, and verifying archival without it is impossible.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No archival capability exists in Spaarke — grep across src/ for archive/IsArchiveEnabled on the SPE surface returns nothing. ContainerEndpoints.cs provides the endpoint pattern to extend.</existing>
+    <extension>Extends the existing container endpoint group and service rather than adding a new service. No new abstraction is introduced.</extension>
+    <cost-of-doing-nothing>Cold matter containers accrue a standing, compounding storage bill with no lever to reduce it. Up to 75% of that cost is addressable, and Spaarke's container-per-matter model means the inactive fraction grows continuously.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Archive and restore round-trip">
+      <steps>
+        <step>On a throwaway container, choose Archive and confirm</step>
+        <step>Observe the grid state, then Restore</step>
+      </steps>
+      <expected>Archived state renders in the grid after archiving; restore returns the container to active state.</expected>
+    </test>
+    <test name="Consequence stated before archiving">
+      <steps><step>Begin archiving and inspect the confirmation</step></steps>
+      <expected>The confirmation states the content-availability consequence before proceeding, using the canonical ConfirmModal.</expected>
+    </test>
+    <test name="Not-opted-in explained">
+      <steps><step>Attempt archival on a container whose type has not opted in</step></steps>
+      <expected>The message states the container type has not enabled archival and names the remediation. It is not a generic error.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the grid state and modal</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; modal per ADR-050; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (archival coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a throwaway container, when Archive runs against Spaarke Dev, then it succeeds and archived state renders in the grid.</criterion>
+    <criterion testable="true">Given an archived container, when Restore runs, then the container returns to active state.</criterion>
+    <criterion testable="true">Archiving requires a confirmation that states the content-availability consequence first.</criterion>
+    <criterion testable="true">Negative: archival on a not-opted-in container type produces a message naming the PowerShell remediation, not a generic error.</criterion>
+    <criterion testable="true">Negative: an unauthorized caller receives 403 ProblemDetails from the endpoint filter.</criterion>
+    <criterion testable="true">Negative: no container-type archive OPT-IN capability was built (boundary preserved).</criterion>
+    <criterion testable="true">Negative: verification used a throwaway container, not one holding real documents (NFR-07).</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling; no new NuGet.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E01. Highest-ROI item in the project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
