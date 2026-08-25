@@ -22,9 +22,9 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 export const useHeaderStyles = makeStyles({
   /**
-   * Header column — wraps the title row + toolbar row (UAT 2026-06-19:
-   * title moved to its OWN row above the toolbar per user feedback;
-   * previously the title sat inline at the start of the toolbar).
+   * Header column — wraps the single header row (UAT 2026-08-17, item #4:
+   * title + actions consolidated back onto ONE row, reversing the 2026-06-19
+   * two-row split, per the original mockup). Retains the bottom border + bg.
    */
   headerColumn: {
     flexShrink: 0,
@@ -35,24 +35,8 @@ export const useHeaderStyles = makeStyles({
   },
 
   /**
-   * Title row — sits ABOVE the toolbar, full width, slightly larger text +
-   * brand icon. Mirrors the widget's title row for uniformity (UAT 2026-06-19).
-   */
-  titleRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    ...shorthands.padding(
-      tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
-      tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM
-    ),
-  },
-
-  /**
-   * Toolbar row — flex row below the title row. NO bottom border (the
+   * Header row — single flex row holding the brand title cluster (leading),
+   * a flex spacer, and the right action cluster. NO bottom border (the
    * headerColumn carries it instead).
    */
   toolbar: {

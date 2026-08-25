@@ -977,6 +977,10 @@ public class SessionPersistenceService : ISessionPersistenceService
         catch (Exception ex)
         {
             // Logged at Warning — not re-thrown. Cosmos failure must not surface to the user (ADR-015 D-06).
+            // ALSO emit an alertable metric (R-5, 2026-08-18): a swallowed Warning alone let the
+            // ttl:null → 400 write outage stay invisible for 11 days. cosmos.write_failures{container}
+            // makes a persistent write-stoppage detectable without any failing request.
+            Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.RecordWriteFailure("sessions");
             _logger.LogWarning(ex,
                 "SessionPersistenceService: Cosmos DB write failed for session {SessionId} (tenant={TenantId}, store=Cosmos) — streaming continues",
                 session.SessionId, session.TenantId);

@@ -48,6 +48,7 @@ public sealed class CreateTaskApplySeamTests
 
     private const int ActionProposed = 100000001;
     private const int ActionApplied = 100000005;
+    private const int ActionDismissed = 100000004;
     private const int ActorTypeHuman = 100000001;
     private const int EventStatusOpen = 1;
     private const int EventStatusCompleted = 2;
@@ -433,6 +434,93 @@ public sealed class CreateTaskApplySeamTests
         (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(422);
         _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once, "the create is audited even when the follow-on PATCH fails");
+    }
+
+    // B2.2 UNDO — soft-cancels a just-created task (sprk_eventstatus=Cancelled=5) UNDER THE CALLER'S impersonation
+    // (never app-only — impersonation gates the write to the caller, so there is no "cancel any event by id" hole),
+    // and writes ONE append-only compensating (Dismissed) audit row tying the cancel to the communication.
+    [Fact]
+    public async Task UndoCreateTaskAsync_WhenCalled_SoftCancelsEventUnderImpersonationAndWritesOneAuditRow()
+    {
+        var sut = BuildSut();
+        UpdateRecordRequest? cancelled = null;
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<UpdateRecordRequest, CancellationToken>((r, _) => cancelled = r)
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_eventstatus" }, null));
+
+        var result = await sut.UndoCreateTaskAsync(CommunicationId, CreatedTaskId, new ClaimsPrincipal(), CancellationToken.None);
+
+        cancelled.Should().NotBeNull();
+        cancelled!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
+        cancelled.EntityLogicalName.Should().Be("sprk_event");
+        cancelled.RecordId.Should().Be(CreatedTaskId);
+        cancelled.FieldMappings.Should().ContainSingle(m =>
+            m.Field == "sprk_eventstatus" && m.Type == ActionFieldType.String && m.Value == "5");
+
+        // Exactly one append-only compensating audit row (Dismissed, actor = the caller), tying the cancel to the
+        // communication + the cancelled task via a distinct sentinel field (never collides with a proposal open-walk).
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == "sprk_emailreviewlog"
+                && ((OptionSetValue)e["sprk_action"]).Value == ActionDismissed
+                && ((OptionSetValue)e["sprk_actortype"]).Value == ActorTypeHuman
+                && (string)e["sprk_actor"] == CallerSystemUserId.ToString()
+                && ((EntityReference)e["sprk_communication"]).Id == CommunicationId
+                && (string)e["sprk_targetentity"] == "sprk_event"
+                && (string)e["sprk_targetrecordid"] == CreatedTaskId.ToString()
+                && (string)e["sprk_targetfield"] == "__undo_task__"),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        result.TaskId.Should().Be(CreatedTaskId);
+        result.NewStatus.Should().Be(5);
+    }
+
+    // B2.2 UNDO NEGATIVE — auth: an unresolved caller fails closed (403); no cancel write + no audit row run.
+    [Fact]
+    public async Task UndoCreateTaskAsync_WhenCallerUnresolved_Returns403AndNeverWrites()
+    {
+        var sut = BuildSut();
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no oid"));
+
+        var act = () => sut.UndoCreateTaskAsync(CommunicationId, CreatedTaskId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // B2.2 UNDO NEGATIVE — a failed cancel write (caller lacks access to the event, or it no longer exists) surfaces
+    // 422, and NO audit row is written (nothing was mutated).
+    [Fact]
+    public async Task UndoCreateTaskAsync_WhenWriteFails_Returns422AndWritesNoAuditRow()
+    {
+        var sut = BuildSut();
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "no access"));
+
+        var act = () => sut.UndoCreateTaskAsync(CommunicationId, CreatedTaskId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(422);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // B2.2 UNDO NEGATIVE — audit integrity: if the compensating audit write fails AFTER the cancel, surface 500
+    // (never a silent mutate-without-audit). The cancel write DID run once before the failure.
+    [Fact]
+    public async Task UndoCreateTaskAsync_WhenAuditRowWriteFails_Returns500AfterCancel()
+    {
+        _auditThrows = true;
+        var sut = BuildSut();
+
+        var act = () => sut.UndoCreateTaskAsync(CommunicationId, CreatedTaskId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(500);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static Entity ProposedRow(string targetField)

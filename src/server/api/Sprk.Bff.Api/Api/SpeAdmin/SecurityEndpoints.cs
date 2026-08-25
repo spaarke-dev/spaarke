@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -156,16 +157,16 @@ public static class SecurityEndpoints
                 "App registration may lack SecurityEvents.Read.All. TraceId={TraceId}",
                 configId, context.TraceIdentifier);
 
-            return TypedResults.Problem(
-                detail: "Access denied to the Graph Security API. " +
-                        "Ensure the app registration has SecurityEvents.Read.All permission.",
+            // The catch is filtered to 403, so "access denied" IS established. WHICH grant is missing is
+            // not — a 403 can also be conditional access or a tenant policy — so the hint stays a hint and
+            // the helper appends what Graph actually reported (task 013 grants SecurityEvents.Read.All).
+            return ex.ToProblemDetails(
+                summary: "Access denied to the Graph Security API. "
+                         + "The most common cause is a missing SecurityEvents.Read.All grant.",
+                errorCode: "spe.security.alerts.graph_access_denied",
                 statusCode: StatusCodes.Status403Forbidden,
-                title: "Security API Access Denied",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.security.alerts.graph_access_denied",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier,
+                title: "Security API Access Denied");
         }
         catch (Exception ex)
         {
@@ -175,7 +176,7 @@ public static class SecurityEndpoints
                 configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "An unexpected error occurred while retrieving security alerts.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving security alerts.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Security Alerts Retrieval Failed",
                 extensions: new Dictionary<string, object?>
@@ -274,16 +275,14 @@ public static class SecurityEndpoints
                 "App registration may lack SecurityEvents.Read.All. TraceId={TraceId}",
                 configId, context.TraceIdentifier);
 
-            return TypedResults.Problem(
-                detail: "Access denied to the Graph Security API. " +
-                        "Ensure the app registration has SecurityEvents.Read.All permission.",
+            // See the note on the alerts path above — 403 is established, the specific missing grant is not.
+            return ex.ToProblemDetails(
+                summary: "Access denied to the Graph Security API. "
+                         + "The most common cause is a missing SecurityEvents.Read.All grant.",
+                errorCode: "spe.security.score.graph_access_denied",
                 statusCode: StatusCodes.Status403Forbidden,
-                title: "Security API Access Denied",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.security.score.graph_access_denied",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier,
+                title: "Security API Access Denied");
         }
         catch (Exception ex)
         {
@@ -293,7 +292,7 @@ public static class SecurityEndpoints
                 configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
-                detail: "An unexpected error occurred while retrieving the secure score.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the secure score.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Secure Score Retrieval Failed",
                 extensions: new Dictionary<string, object?>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Deploy + verify — BFF redeploy + sprk_spaarkeai rebuild + publish-size + UAT (owner-gated)</title>
+    <phase>Deploy</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + post-deploy verification orchestrating bff-deploy + code-page-deploy skills — no new code implementation</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy + verification; owner-gated confirmation before each deploy; publish-size + CVE + DoD checks are procedural</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared BFF + sprk_spaarkeai code page — must serialize (last-deploy-wins); coordinate with active worktrees (compose-r5/r6, assistant-r3) before deploying</parallel-reason>
+    <deps>013,024,033,040</deps>
+    <tags>deploy, bff-api, spaarkeai</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner-gated deploy + verify. Deploy the R4 code to dev with the BFF and the `sprk_spaarkeai` code page TOGETHER (advisory capability + per-Action opt-in + preference-producer on the BFF; SprkChatSuggestions gating + follow-on cards + D9 flex chain on the code page). Verify compressed publish size ≤60 MB with the delta vs the ~49.63 MB baseline reported, no new HIGH CVE, new Action/Binding/tool catalog rows seeded, and the 7 spec Success Criteria DoDs exercised and ready for owner UAT. Confirm with the owner BEFORE each deploy; capture everything in notes/deploy-verify.md.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF App Service + code-page deployment expertise; disciplined about the owner deploy gate, publish-size/CVE checks, catalog-row seeding, and post-deploy DoD verification.</role>
+  <goal>R4 code is deployed to dev (BFF + sprk_spaarkeai code page together), compressed publish size ≤60 MB verified with the delta reported, no new HIGH CVE, the new catalog rows seeded, and the 7 spec Success Criteria DoDs exercised and ready for owner UAT.</goal>
+  <context>
+    <background>Deploy + verify the whole R4 surface after all code tasks land (deps 013 advisory capability/BFF, 024 E2 follow-ons/suggestions, 033 E3 memory/preference, 040 D9 flex chain). BFF touches the ADR-039 projection + Action catalog + preference-producer; publish-size ceiling ≤60 MB (baseline ~49.63 MB incl. PDBs, 2026-07-08 — state the PDB convention when reporting). The BFF and the code page ship TOGETHER (the advisory capability's server side + the client suggestion-gating/cards/D9 fix are one release). Deploys are OWNER-GATED — confirm before each. New catalog rows (the advisory task-agenda Action + its Binding, the two Daily Briefing / Smart To Do surface-launch entries are code, but any Action/Binding/tool/`sprk_chiptransitions` rows must be seeded) go in via the seed scripts. Then exercise the 7 Success Criteria DoDs (P1 grounded-summary, advisory fidelity, P2 no-dead-end, follow-on cards, P3 preference loop, P4/D9 viewport, BFF hygiene) for owner UAT. Run /conflict-check before the BFF PR (Services/Ai + ConversationPane + SprkChat heavily contended with compose-r5/r6 + assistant-r3).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ (dotnet publish -c Release -o deploy/api-publish/ — measure compressed size + delta)</file>
+      <file>src/solutions/SpaarkeAi/ (build + deploy the code page — Deploy-SpaarkeAi.ps1 / code-page-deploy)</file>
+      <file>infra/dataverse/ + scripts/dataverse/Seed-PlaybookConsumers.ps1 (seed any new Action/Binding/tool/chipTransition catalog rows)</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="deploy gate">Deploys are OWNER-GATED — confirm with the owner BEFORE deploying the BFF and BEFORE deploying the code page.</constraint>
+    <constraint source="project" scope="ship-together">Deploy the BFF and the `sprk_spaarkeai` code page TOGETHER (the advisory capability's server + client halves are one release).</constraint>
+    <constraint source="BFF §10" scope="the BFF deploy">Compressed publish size ≤60 MB — measure + report absolute + delta vs ~49.63 MB baseline (incl. PDBs; state the PDB convention); ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP; ≥+5 MB single-task delta → justify.</constraint>
+    <constraint source="NFR-02" scope="the BFF deploy">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity finding.</constraint>
+    <constraint source="project" scope="catalog seeding">Seed any new Action/Binding/tool/`sprk_chiptransitions` catalog rows (byte-equal seed rows where D-4 parity tests guard) via the seed scripts — do NOT hand-edit prod rows.</constraint>
+    <constraint source="project" scope="deploy skills">Use the bff-deploy + code-page-deploy skills; do NOT hand-roll deployment. Retry the code-page publish on transient 0x80071151.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm owner go-ahead to deploy. Run /conflict-check (Services/Ai + ConversationPane + SprkChat contended); re-sync origin/master into the branch and resolve any conflicts.</step>
+    <step order="2">Build the BFF (dotnet build); dotnet publish -c Release -o deploy/api-publish/; measure compressed size; report absolute + delta vs ~49.63 MB baseline (state PDB convention). HARD STOP if ≥60 MB.</step>
+    <step order="3">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE.</step>
+    <step order="4">Deploy the BFF via the bff-deploy skill (owner-confirmed).</step>
+    <step order="5">Build the SpaarkeAi code page for production; deploy via Deploy-SpaarkeAi.ps1 / the code-page-deploy skill (owner-confirmed); retry on transient 0x80071151.</step>
+    <step order="6">Seed any new Action/Binding/tool/chipTransition catalog rows via the seed scripts.</step>
+    <step order="7">Exercise the 7 spec Success Criteria DoDs in the deployed env (P1 grounded cited summary + recommendation + Tasks opens; advisory fidelity/no second dispatch; P2 no dead-end + no id prompt; follow-on cards open/closed states; P3 preference loop; P4/D9 viewport; BFF hygiene).</step>
+    <step order="8">Capture results in projects/spaarkeai-assistant-enhancements-r4/notes/deploy-verify.md; note the owner UAT handoff; update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If compressed publish size reaches ≥60 MB, or a new HIGH CVE appears, or the owner has not confirmed the deploy, STOP and escalate rather than deploying. If a single-task delta is ≥+5 MB, document the justification before proceeding.</trigger>
+  </escalation>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r4/notes/deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">BFF and the sprk_spaarkeai code page deployed TOGETHER to dev (owner-confirmed before each).</criterion>
+    <criterion testable="true">Compressed publish size ≤60 MB reported — absolute + delta vs ~49.63 MB baseline (PDB convention stated).</criterion>
+    <criterion testable="true">No new HIGH CVE from `dotnet list package --vulnerable --include-transitive`.</criterion>
+    <criterion testable="true">New Action/Binding/tool/chipTransition catalog rows seeded via the seed scripts.</criterion>
+    <criterion testable="true">All 7 spec Success Criteria DoDs exercised in the deployed env.</criterion>
+    <criterion testable="true">notes/deploy-verify.md written with results + owner UAT handoff noted.</criterion>
+    <criterion testable="true">Negative: no deploy without owner confirmation; no deploy if ≥60 MB or a new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>DEPLOYS ARE OWNER-GATED — confirm before deploying. BFF + code page ship together. /conflict-check before the BFF PR (Services/Ai + ConversationPane + SprkChat heavily contended with compose-r5/r6 + assistant-r3; serialize — last-deploy-wins). Retry the code-page publish on transient 0x80071151.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

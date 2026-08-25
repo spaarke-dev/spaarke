@@ -42,6 +42,7 @@ import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { resolveTenantIdSync } from "@spaarke/auth";
 import { EntityCreationService, cleanGuid } from "@spaarke/ui-components";
 import type { ComposeWidgetData, ComposeWidgetSeed } from "./composeWidgetData";
+import { useReviewedDocumentAnalysis } from "./useReviewedDocumentAnalysis";
 
 // ---------------------------------------------------------------------------
 // FIX #6 (spaarkeai-compose-r2) — bounded height host for the DIRECT mount.
@@ -170,8 +171,11 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
   isActiveTab = true,
   initialSessionId,
 }) => {
-  const { bffBaseUrl } = useAiSession();
+  const { bffBaseUrl, authenticatedFetch } = useAiSession();
   const composeLaunch = useComposeLaunch();
+  // UAT (2026-08-18, owner): SAVE-driven Analysis create+bind for a reviewed document (see
+  // useReviewedDocumentAnalysis / ComposeWorkspace.onReviewedDocumentCreated).
+  const createReviewedDocumentAnalysis = useReviewedDocumentAnalysis({ bffBaseUrl, authenticatedFetch });
   // FR-13: forward the Assistant serial-dispatch queue ONLY when the bridge is
   // present AND a host dispatcher is registered — else omit so the inline AI
   // toolbar falls back to its own dispatcher.
@@ -181,37 +185,61 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
   // Activate the inline AI toolbar (reads GET /api/ai/capabilities?surface=compose).
   useComposeToolbarActivation({ bffBaseUrl });
 
-  // FR-05 create-on-save: resolve the user's BU SPE container once on mount.
+  // FR-05 create-on-save: resolve the user's BU SPE container. UAT-11 (2026-08-18): the resolution
+  // is now a REUSABLE function returning a discriminated outcome, so a transient-create Save can RETRY
+  // it (below, threaded to ComposeWorkspace `resolveContainer`) instead of the mount-only one-shot that
+  // left `containerId` undefined — and a dishonest "no container configured" save error — whenever Xrm
+  // wasn't ready yet, a transient 401, or a Dataverse query fault hit at mount time.
+  const resolveContainer = React.useCallback(async (): Promise<{
+    containerId?: string;
+    outcome: "resolved" | "no-container" | "unavailable";
+  }> => {
+    try {
+      // The SpaarkeAi code page runs in an iframe where Xrm lives on the PARENT/TOP window, not the
+      // iframe's own globalThis — use the SAME fallback every other SpaarkeAi Xrm consumer uses
+      // (WorkspacePane, ManageWorkspacesPane, usePlaybookOptions, main.tsx).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm;
+      const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
+      const webApi = xrm?.WebApi;
+      if (!rawUserId || !webApi) return { outcome: "unavailable" }; // no Dataverse host / not ready
+      const userId = cleanGuid(rawUserId);
+      const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
+      // A completed query with no container id = the BU genuinely has none; a container id = resolved.
+      return defaults.containerId
+        ? { containerId: defaults.containerId, outcome: "resolved" }
+        : { outcome: "no-container" };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[ComposeDirectWidget] BU container resolution failed:", err);
+      return { outcome: "unavailable" }; // transient — the save-path retry can recover it
+    }
+  }, []);
+
   const [containerId, setContainerId] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (globalThis as any).Xrm;
-        const rawUserId: string | undefined =
-          xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
-        const webApi = xrm?.WebApi;
-        if (!rawUserId || !webApi) return; // no Dataverse host — create-on-save container unavailable
-        const userId = cleanGuid(rawUserId);
-        const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
-        if (!cancelled) setContainerId(defaults.containerId);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("[ComposeDirectWidget] BU container resolution failed:", err);
-      }
+      const result = await resolveContainer();
+      if (!cancelled && result.containerId) setContainerId(result.containerId);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resolveContainer]);
 
   return React.createElement(ComposeWorkspace, {
     bffBaseUrl,
     driveId: composeLaunch?.driveId ?? "",
     tenantId,
     containerId,
+    resolveContainer,
     onCreateOnSaveComplete: composeLaunch?.onCreateOnSaveComplete,
+    // UAT (2026-08-18, owner): SAVE-driven Analysis. On the first save of a NEW document that had a
+    // review run on it, create + bind the sprk_analysis for the review session (create-on-save-only;
+    // reopened/subsequent saves are the replace/version path). See useReviewedDocumentAnalysis.
+    onReviewedDocumentCreated: createReviewedDocumentAnalysis,
     initialDocumentRef: composeLaunch?.document ?? null,
     initialUploadRef: composeLaunch?.upload ?? null,
     initialDraftRef: composeLaunch?.draft ?? null,

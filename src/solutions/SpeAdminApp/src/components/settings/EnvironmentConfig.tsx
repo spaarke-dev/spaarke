@@ -9,7 +9,6 @@
  *   tenantId     — Azure AD tenant GUID (required)
  *   tenantName   — Tenant display name
  *   rootSiteUrl  — SharePoint root site URL (required)
- *   graphEndpoint — Microsoft Graph API base URL
  *   isDefault    — toggle: one default per tenant
  *   status       — active | inactive dropdown
  *
@@ -69,7 +68,7 @@ import {
   CloudDatabase20Regular,
   StarFilled,
 } from "@fluentui/react-icons";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { SpeEnvironment, SpeEnvironmentUpsert, ActiveStatus } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,7 +222,6 @@ interface EnvironmentFormState {
   tenantId: string;
   tenantName: string;
   rootSiteUrl: string;
-  graphEndpoint: string;
   isDefault: boolean;
   status: ActiveStatus;
 }
@@ -233,7 +231,6 @@ const defaultFormState: EnvironmentFormState = {
   tenantId: "",
   tenantName: "",
   rootSiteUrl: "",
-  graphEndpoint: "https://graph.microsoft.com/v1.0",
   isDefault: false,
   status: "active",
 };
@@ -244,7 +241,6 @@ function formStateFromEnv(env: SpeEnvironment): EnvironmentFormState {
     tenantId: env.tenantId,
     tenantName: env.tenantName,
     rootSiteUrl: env.rootSiteUrl,
-    graphEndpoint: env.graphEndpoint,
     isDefault: env.isDefault,
     status: env.status,
   };
@@ -324,7 +320,6 @@ const EnvironmentFormDialog: React.FC<EnvironmentFormDialogProps> = ({
       tenantId: form.tenantId.trim(),
       tenantName: form.tenantName.trim(),
       rootSiteUrl: form.rootSiteUrl.trim(),
-      graphEndpoint: form.graphEndpoint.trim(),
     };
     const validationErrors = validate(trimmed);
     if (Object.keys(validationErrors).length > 0) {
@@ -415,19 +410,15 @@ const EnvironmentFormDialog: React.FC<EnvironmentFormDialogProps> = ({
                 />
               </Field>
 
-              {/* Graph Endpoint */}
-              <Field
-                className={styles.formField}
-                label="Graph Endpoint"
-                hint="Microsoft Graph API base URL (default: https://graph.microsoft.com/v1.0)"
-              >
-                <Input
-                  value={form.graphEndpoint}
-                  onChange={(_e, d) => setField("graphEndpoint", d.value)}
-                  placeholder="https://graph.microsoft.com/v1.0"
-                  disabled={isSaving}
-                />
-              </Field>
+              {/*
+                A "Graph Endpoint" field sat here until 2026-08-23, defaulted to
+                https://graph.microsoft.com/v1.0. It saved, validated, persisted to Dataverse, and
+                came back on reload — and changed nothing, because no Graph client was ever built
+                from it. Removed by task 021 (spec FR-C02) rather than wired: see
+                projects/sdap-SPE-admin-app-r2/notes/graph-endpoint-decision.md. Short version — a
+                per-environment Graph host that an admin can type is a token-exfiltration vector,
+                not a convenience.
+              */}
 
               {/* Status */}
               <Field className={styles.formField} label="Status">
@@ -695,9 +686,7 @@ export const EnvironmentConfig: React.FC = () => {
       setEnvironments(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load environments. Please try again.";
+        describeApiError(err, "Failed to load environments. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -732,7 +721,6 @@ export const EnvironmentConfig: React.FC = () => {
           tenantId: form.tenantId,
           tenantName: form.tenantName,
           rootSiteUrl: form.rootSiteUrl,
-          graphEndpoint: form.graphEndpoint,
           isDefault: form.isDefault,
           status: form.status,
         };
@@ -742,7 +730,7 @@ export const EnvironmentConfig: React.FC = () => {
         await loadEnvironments();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to add environment.";
+          describeApiError(err, "Failed to add environment.");
         setActionError(message);
       } finally {
         setIsSaving(false);
@@ -771,7 +759,6 @@ export const EnvironmentConfig: React.FC = () => {
           tenantId: form.tenantId,
           tenantName: form.tenantName,
           rootSiteUrl: form.rootSiteUrl,
-          graphEndpoint: form.graphEndpoint,
           isDefault: form.isDefault,
           status: form.status,
         };
@@ -782,7 +769,7 @@ export const EnvironmentConfig: React.FC = () => {
         await loadEnvironments();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to update environment.";
+          describeApiError(err, "Failed to update environment.");
         setActionError(message);
       } finally {
         setIsSaving(false);
@@ -813,7 +800,7 @@ export const EnvironmentConfig: React.FC = () => {
       await loadEnvironments();
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to delete environment.";
+        describeApiError(err, "Failed to delete environment.");
       setActionError(message);
       setDeleteOpen(false);
     } finally {

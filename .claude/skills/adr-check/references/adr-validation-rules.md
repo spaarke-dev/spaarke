@@ -550,10 +550,33 @@ Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx |
 # CHECK: GraphClientFactory uses DefaultAzureCredential (canonical) when MI enabled
 Select-String -Path src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs -Pattern 'DefaultAzureCredential|ManagedIdentityCredential'
 
-# VIOLATION: ClientSecretCredential for app-only Graph (use DefaultAzureCredential when MI available)
+# VIOLATION: secret-based credential for a BFF-identity client (ADR-028 A4).
+# App-only  -> DefaultAzureCredential (UAMI) from DI.
+# Confidential client / OBO -> MI-FIC client assertion, or KV certificate. NEVER a secret.
+#
+# NOTE (2026-08-17): the previous rule excluded `$_.Path -notmatch 'OBO|onBehalfOf'` — a PATH filter that
+# never matched, because OBO appears in file CONTENT, not in file names. Every OBO site therefore tripped
+# this check on every run, with no sanctioned alternative to move to. That false-positive churn is the
+# reason A4 exists. Filter on the E-3 allowlist instead.
+#
+# $E3 = the transitional sites enumerated in ADR-028 exception E-3. Cite E-3 for these; do NOT report as
+# violations. E-3 is time-boxed to `spaarke-auth-v4-dataverse-MI` — remove this allowlist when it closes.
+$E3 = 'GraphClientFactory|DataverseAccessDataSource|DataverseUserClient|AgentTokenService|ReportingEmbedService|ReportingProfileManager|DataverseServiceClientImpl|DataverseWebApiService|DataverseWebApiClient'
+# E-1 (per-customer owning apps) is architectural, not transitional — permanently exempt.
+$E1 = 'SpeAdminTokenProvider|SpeAdminGraphService'
+
 Get-ChildItem -Recurse -Path src/server -Include *.cs |
-  Select-String -Pattern 'new ClientSecretCredential' |
-  Where-Object { $_.Path -notmatch 'OBO|onBehalfOf' } | Select-Object -First 200
+  Select-String -Pattern 'new ClientSecretCredential|\.WithClientSecret\(' |
+  Where-Object { $_.Path -notmatch $E3 -and $_.Path -notmatch $E1 } | Select-Object -First 200
+
+# VIOLATION: NEW confidential client built with a secret. E-3 does NOT license expansion — any
+# .WithClientSecret( outside the allowlists above is a Critical finding, even during the migration.
+# Also flag per-request CCA construction: client assertions require singleton-cached clients
+# (reference impl: DataverseUserClient's static CCA cache keyed (tenant|client)).
+Get-ChildItem -Recurse -Path src/server -Include *.cs |
+  Select-String -Pattern 'ConfidentialClientApplicationBuilder' |
+  Where-Object { $_.Path -notmatch $E3 -and $_.Path -notmatch $E1 -and $_.Path -notmatch 'CiamGraphClientFactory' } |
+  Select-Object -First 200
 
 # VIOLATION: MSAL authority /common or /organizations (INV-3 / INV-6)
 Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx,*.js |

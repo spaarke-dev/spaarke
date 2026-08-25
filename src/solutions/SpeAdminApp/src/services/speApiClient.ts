@@ -23,6 +23,7 @@ import type {
   SpeContainerTypeConfigUpsert,
   ContainerType,
   ContainerTypePermission,
+  ContainerTypeOwner,
   Container,
   ContainerCustomProperty,
   ContainerPermission,
@@ -56,6 +57,120 @@ import type {
 
 // Re-export error types for consumer convenience
 export { ApiError, AuthError };
+
+// ---------------------------------------------------------------------------
+// Error description
+// ---------------------------------------------------------------------------
+
+/** Reads a ProblemDetails extension as a non-empty string, or undefined. */
+function extension(problem: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  const value = problem?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Describes a caught error for display, preserving everything the BFF sent.
+ *
+ * `ApiError.message` is already the RFC 7807 `detail` (authenticatedFetch puts it there), and since
+ * task 001 that detail carries the real Graph/Dataverse error rather than a hardcoded guess. What was
+ * still being dropped is the diagnostic set in `problemDetails` — the Graph error code and, most
+ * importantly, the **request id**, which is the value an admin quotes to Microsoft support. This appends
+ * them.
+ *
+ * @param err       The caught value. Anything — ApiError, Error, or a non-Error throw.
+ * @param fallback  Used ONLY when nothing descriptive can be recovered. Never overrides a real message.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 001 (spec FR-A01).
+ */
+export function describeApiError(err: unknown, fallback = ""): string {
+  if (err instanceof ApiError) {
+    const problem = err.problemDetails as Record<string, unknown> | null;
+    const base = err.message || extension(problem, "title") || fallback;
+
+    const graphCode = extension(problem, "graphErrorCode");
+    const requestId = extension(problem, "graphRequestId");
+    const traceId = extension(problem, "traceId");
+
+    const diagnostics = [
+      graphCode ? `Graph code ${graphCode}` : undefined,
+      requestId ? `request id ${requestId}` : undefined,
+      !requestId && traceId ? `trace id ${traceId}` : undefined,
+    ].filter(Boolean);
+
+    return diagnostics.length > 0 ? `${base} (${diagnostics.join(" · ")})` : base;
+  }
+
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+
+  const text = String(err ?? "");
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Authorization prerequisites
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable codes the BFF uses to report an authorization prerequisite. SPE Admin has **two independent
+ * authorization layers**, and telling them apart is the whole point — see
+ * `SpeAdminAuthorizationFilter` for the full description.
+ */
+export const PERMISSION_CODES = {
+  /** Not signed in / session expired. Nothing is known about this caller's permissions. */
+  unauthenticated: "sdap.access.deny.unauthenticated",
+  /** Layer 1 — signed in, but without the Spaarke admin app role. Granted by a Spaarke admin. */
+  spaarkeAdmin: "sdap.access.deny.role_insufficient",
+  /** Layer 2 — Microsoft Graph refused a container-type operation. Granted by an Entra admin. */
+  entraDirectoryRole: "spe.containertypes.entra_role_required",
+} as const;
+
+/** How a screen should present an authorization prerequisite. */
+export interface PermissionPrerequisite {
+  /** Banner heading — states the nature of the problem, not a guess at its cause. */
+  title: string;
+  /** Fluent `MessageBar` intent. `warning` where the user can obtain access; `error` otherwise. */
+  intent: "warning" | "error";
+}
+
+/**
+ * Classifies a caught error as one of the authorization prerequisites the BFF reports.
+ *
+ * Screens use this to title the banner accurately. Without it every prerequisite renders under
+ * "Failed to load container types", which reads as a malfunction and sends the admin looking for a
+ * bug instead of a permission.
+ *
+ * The **body text always comes from {@link describeApiError}** — the BFF is the only party that knows
+ * which layer denied the request and what grants it, so the client must not compose its own
+ * explanation here. This function chooses a heading and nothing more.
+ *
+ * @returns The presentation, or `null` when the error is not an authorization prerequisite.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 012 (spec FR-B03).
+ */
+export function describePermissionPrerequisite(err: unknown): PermissionPrerequisite | null {
+  if (!(err instanceof ApiError)) return null;
+
+  const problem = err.problemDetails as Record<string, unknown> | null;
+  const code = extension(problem, "errorCode") ?? extension(problem, "reasonCode");
+
+  switch (code) {
+    case PERMISSION_CODES.entraDirectoryRole:
+      // Graph refused. The role is the prerequisite — but the user may already hold it and be
+      // blocked by something else, so this is a "warning", not a verdict.
+      return { title: "Additional permission required", intent: "warning" };
+
+    case PERMISSION_CODES.spaarkeAdmin:
+      return { title: "Spaarke administrator permission required", intent: "warning" };
+
+    case PERMISSION_CODES.unauthenticated:
+      return { title: "Sign in to continue", intent: "warning" };
+
+    default:
+      return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Typed HTTP helpers
@@ -338,6 +453,47 @@ export const speApiClient = {
       return get<{ items: ContainerTypePermission[]; count: number }>(
         "/spe/containertypes/" + typeId + "/permissions" + qs({ configId }),
       ).then(r => r.items);
+    },
+
+    /*
+     * ── Container-type OWNERS (spec FR-C09, task 027) ──
+     *
+     * 🔑 `/owners`, NOT `/permissions`. `listPermissions` above returns which APPLICATIONS may access
+     * containers of this type; these return which PEOPLE administer the type. Orthogonal surfaces
+     * that happen to share a Graph word — task 027's own POML conflated them, and the separate route
+     * is what keeps that mistake from being easy to repeat.
+     *
+     * Server-side these run delegated against Graph BETA: container types reject app-only auth (403),
+     * and the `permissions` relationship does not exist on v1.0 (400 "Resource not found for the
+     * segment 'permissions'"). No `configId` — the delegated path derives the tenant from the caller.
+     */
+
+    /** GET /api/spe/containertypes/{typeId}/owners — the people who administer this container type. */
+    listOwners(typeId: string): Promise<ContainerTypeOwner[]> {
+      return get<{ items: ContainerTypeOwner[] }>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+      ).then(r => r.items ?? []);
+    },
+
+    /**
+     * POST /api/spe/containertypes/{typeId}/owners — grant ownership.
+     *
+     * `userIdentifier` is an email/UPN or a directory object id, passed to Graph as given. An unknown
+     * user surfaces Graph's own error rather than appearing to succeed.
+     */
+    addOwner(typeId: string, userIdentifier: string): Promise<ContainerTypeOwner> {
+      return post<{ userIdentifier: string }, ContainerTypeOwner>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+        { userIdentifier },
+      );
+    },
+
+    /** DELETE /api/spe/containertypes/{typeId}/owners/{permissionId} — revoke an ownership grant. */
+    removeOwner(typeId: string, permissionId: string): Promise<void> {
+      return del(
+        "/spe/containertypes/" + encodeURIComponent(typeId) +
+        "/owners/" + encodeURIComponent(permissionId),
+      );
     },
 
     /**

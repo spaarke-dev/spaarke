@@ -31,10 +31,10 @@
  * `FluentProvider`), ADR-022 (`React.FC` + standard hooks — dual-use across hosts).
  */
 import * as React from 'react';
-import { Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Badge, Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { CheckmarkCircle16Filled } from '@fluentui/react-icons';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import {
-  DataGridViewSelector,
   type DataGridProps,
   type IDataverseClient,
   type MembershipResolver,
@@ -60,6 +60,14 @@ import type { EmailCitation } from '../../logic/citations';
 
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
+
+/**
+ * Item 1 (owner UAT 2026-08-19) — page size for the Needs-Review grid. The reconciliation
+ * queue is a bounded working set (typically 10s–low 100s); loading it in ONE page shows the
+ * whole queue in the browse "N of M" navigator instead of capping at the framework default
+ * (25). Large enough to cover the queue without unbounded growth.
+ */
+const RECONCILIATION_PAGE_SIZE = 500;
 
 /** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
 const COMMUNICATION_ENTITY = 'sprk_communication';
@@ -189,6 +197,55 @@ async function resolveBrowseDetail(
 }
 
 type TabValue = 'related' | 'fields' | 'tasks';
+
+/** Per-tab progress count for the current record (B2.3 header badges). */
+interface TabCount {
+  total: number;
+  resolved: number;
+}
+
+/** Queue-feed item `kind` discriminators used to count field vs task proposals (mirrors the tabs' filters). */
+const PENDING_PROPOSAL_KIND = 'pending-proposal';
+const CREATE_TASK_KIND = 'create-task';
+
+/**
+ * B2.3 progress badges rendered in the browse-shell header (`SprkModal.headerActions`): a Related ✓/•
+ * indicator plus "Fields n/N" and "Tasks n/N" resolved-of-total counts for the CURRENT record — the
+ * prototype's at-a-glance progress. Totals are seeded eagerly on open + when a tab loads; resolved is
+ * tallied by the workspace as the reviewer accepts/rejects. Fluent v9 tokens only (ADR-021).
+ */
+function ProgressBadges({
+  related,
+  fields,
+  tasks,
+}: {
+  related: boolean;
+  fields?: TabCount;
+  tasks?: TabCount;
+}): React.ReactElement {
+  const frac = (c?: TabCount): string => `${c?.resolved ?? 0}/${c?.total ?? 0}`;
+  return (
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}
+      data-testid="reconciliation-progress-badges"
+    >
+      <Badge
+        appearance="tint"
+        color={related ? 'success' : 'informative'}
+        icon={related ? <CheckmarkCircle16Filled /> : undefined}
+        data-testid="progress-badge-related"
+      >
+        {related ? 'Related ✓' : 'Related •'}
+      </Badge>
+      <Badge appearance="tint" color="brand" data-testid="progress-badge-fields">
+        Fields {frac(fields)}
+      </Badge>
+      <Badge appearance="tint" color="brand" data-testid="progress-badge-tasks">
+        Tasks {frac(tasks)}
+      </Badge>
+    </div>
+  );
+}
 
 export interface ReconciliationWorkspaceProps {
   /** GUID of the "Needs-review" `sprk_gridconfiguration` record (forwarded to the grid). */
@@ -383,6 +440,33 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   // (host-refreshed) rows and re-scopes Fields/Tasks (NFR-10).
   const [, forceRescope] = React.useReducer((n: number) => n + 1, 0);
 
+  // B2.3 progress counts, keyed by communicationId. `total` is seeded eagerly on open (+ corrected when a tab
+  // loads, taking the max so it never shrinks on a tab remount); `resolved` is tallied here as the reviewer
+  // accepts/rejects (cumulative, never reset by a tab remount).
+  const [fieldCounts, setFieldCounts] = React.useState<Record<string, TabCount>>({});
+  const [taskCounts, setTaskCounts] = React.useState<Record<string, TabCount>>({});
+
+  const setTotal = React.useCallback(
+    (setter: React.Dispatch<React.SetStateAction<Record<string, TabCount>>>, id: string, total: number) => {
+      setter(prev => {
+        const cur = prev[id] ?? { total: 0, resolved: 0 };
+        const next = Math.max(cur.total, total);
+        return next === cur.total ? prev : { ...prev, [id]: { ...cur, total: next } };
+      });
+    },
+    []
+  );
+  const bumpResolved = React.useCallback(
+    (setter: React.Dispatch<React.SetStateAction<Record<string, TabCount>>>, id: string) => {
+      setter(prev => {
+        const cur = prev[id] ?? { total: 0, resolved: 0 };
+        const resolved = cur.resolved + 1;
+        return { ...prev, [id]: { total: Math.max(cur.total, resolved), resolved } };
+      });
+    },
+    []
+  );
+
   const handleRecordsLoaded = React.useCallback<NonNullable<DataGridProps['onRecordsLoaded']>>(next => {
     setRows(next);
   }, []);
@@ -471,7 +555,9 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   const handleConfirmed = React.useCallback(
     (record: Record<string, unknown>) => {
       onAssociationsChanged?.(record);
-      setSelectedTab('fields');
+      // Item 6 (owner UAT 2026-08-19): do NOT auto-switch to the Fields tab on confirm.
+      // The reviewer stays on Related-to (now showing the switchable confirmed state) and
+      // moves to Fields / Tasks themselves. Only the gate/scope is refreshed below.
       const id = str(record, PRIMARY_ID_FIELD);
       if (id) enrichRow(id);
       else forceRescope();
@@ -562,7 +648,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                 regarding={regarding}
                 authenticatedFetch={authenticatedFetch}
                 onCitationClick={handleCitationClick}
-                onProposalResolved={onProposalResolved}
+                onLoadedCount={total => setTotal(setFieldCounts, browseRecord.id, total)}
+                onProposalResolved={(id, outcome) => {
+                  if (outcome === 'applied' || outcome === 'rejected') bumpResolved(setFieldCounts, browseRecord.id);
+                  onProposalResolved?.(id, outcome);
+                }}
               />
             )}
 
@@ -572,7 +662,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                 regarding={regarding}
                 authenticatedFetch={authenticatedFetch}
                 onCitationClick={handleCitationClick}
-                onTaskResolved={onProposalResolved}
+                onLoadedCount={total => setTotal(setTaskCounts, browseRecord.id, total)}
+                onTaskResolved={(id, outcome) => {
+                  if (outcome === 'applied' || outcome === 'rejected') bumpResolved(setTaskCounts, browseRecord.id);
+                  onProposalResolved?.(id, outcome);
+                }}
               />
             )}
           </div>
@@ -589,17 +683,51 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       handleCitationClick,
       handleConfirmed,
       onProposalResolved,
+      setTotal,
+      bumpResolved,
       s,
     ]
   );
 
+  // The currently-open record + whether its Related-to is confirmed — drives the header progress badges.
+  const openRecordId = openIndex !== null ? queue[openIndex]?.id : undefined;
+  const openRegarding = React.useMemo(() => {
+    if (!openRecordId || !resolveRegarding) return null;
+    const liveRow = rows.find(r => str(r, PRIMARY_ID_FIELD) === openRecordId);
+    return liveRow ? resolveRegarding(liveRow) : null;
+  }, [openRecordId, rows, resolveRegarding]);
+
+  // B2.3: eagerly seed Fields/Tasks totals for the open record (once its Related-to is confirmed) so the header
+  // badges show a total BEFORE the reviewer visits each tab (prototype parity). Best-effort; the tabs' own
+  // onLoadedCount corrects/refreshes it. Uses the ONE queue-feed read the tabs already use.
+  React.useEffect(() => {
+    if (!openRecordId || !openRegarding?.entityType || !openRegarding?.recordId) return;
+    const scope = `${openRegarding.entityType}:${openRegarding.recordId}`;
+    const fetchFn = authenticatedFetch ?? defaultAuthenticatedFetch;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchFn(`/communications/queue-feed?regarding=${encodeURIComponent(scope)}`);
+        const data = (await res.json()) as { items?: Array<{ kind?: string; communicationId?: string }> };
+        const items = (data.items ?? []).filter(i => i.communicationId === openRecordId);
+        if (cancelled) return;
+        setTotal(setFieldCounts, openRecordId, items.filter(i => i.kind === PENDING_PROPOSAL_KIND).length);
+        setTotal(setTaskCounts, openRecordId, items.filter(i => i.kind === CREATE_TASK_KIND).length);
+      } catch {
+        /* best-effort — the tabs' onLoadedCount still seeds totals on visit */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openRecordId, openRegarding?.entityType, openRegarding?.recordId, authenticatedFetch, setTotal]);
+
+  const headerBadges = openRecordId ? (
+    <ProgressBadges related={!!openRegarding} fields={fieldCounts[openRecordId]} tasks={taskCounts[openRecordId]} />
+  ) : undefined;
+
   return (
     <div className={className ? `${s.root} ${className}` : s.root} data-testid="reconciliation-workspace">
-      {hasViews && views!.length > 1 && (
-        <div className={s.viewBar} data-testid="reconciliation-view-switcher">
-          <DataGridViewSelector views={views!} activeViewId={activeViewId} onViewChange={handleViewChange} />
-        </div>
-      )}
       <div className={s.grid}>
         <ReconciliationGrid
           configId={effectiveConfigId}
@@ -608,6 +736,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           relatedTo={relatedTo}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
+          // Item 2 (owner UAT 2026-08-19): the "Email Review views" selector renders
+          // INSIDE the grid's native toolbar (single picker, dataset-grid look) —
+          // selecting a view swaps the grid's configId. No separate bar above.
+          externalViews={
+            hasViews && views!.length > 1 ? { views: views!, activeViewId, onViewChange: handleViewChange } : undefined
+          }
+          // Item 1 (owner UAT 2026-08-19): load the whole Needs-Review queue rather
+          // than a single 25-row page (the framework's incremental infinite-scroll
+          // did not advance past page 1 in this host). Bounded working-queue set.
+          pageSize={RECONCILIATION_PAGE_SIZE}
         />
       </div>
 
@@ -618,6 +756,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         initialIndex={openIndex ?? 0}
         onIndexChange={(_i, record) => enrichRow(record.id)}
         renderTabs={renderTabs}
+        headerBadges={headerBadges}
         authenticatedFetch={authenticatedFetch}
         activeCitation={activeCitation}
         onOpenOriginalActivate={onOpenOriginalActivate}

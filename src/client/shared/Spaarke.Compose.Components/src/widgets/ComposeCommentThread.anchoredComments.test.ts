@@ -102,6 +102,45 @@ describe('composeSessionCommentThreadsToAnchoredComments — cross-paragraph cla
   });
 });
 
+// UAT-22 (2026-08-18, honest/safe): a comment the user sees in the gutter whose live anchor no longer
+// resolves is dropped from the save payload. It MUST be surfaced (counted), never silently lost — but a
+// thread legitimately skipped because it already rides the imported baseline is NOT a loss and must NOT
+// fire the sink.
+describe('composeSessionCommentThreadsToAnchoredComments — onDropped sink surfaces silent drops (UAT-22)', () => {
+  it('fires onDropped with anchor-mark-missing for a thread whose anchor is gone', () => {
+    const doc = crossParagraphDoc('c1');
+    const dropped: Array<{ id: string; reason: string }> = [];
+    const result = composeSessionCommentThreadsToAnchoredComments(
+      doc,
+      [thread('no-such-mark')],
+      new Set(),
+      (id, reason) => dropped.push({ id, reason })
+    );
+    expect(result).toHaveLength(0);
+    expect(dropped).toEqual([{ id: 'no-such-mark', reason: 'anchor-mark-missing' }]);
+  });
+
+  it('does NOT fire onDropped for an imported-thread skip (not a loss — already in the baseline)', () => {
+    const doc = crossParagraphDoc('c1');
+    const dropped: string[] = [];
+    const result = composeSessionCommentThreadsToAnchoredComments(doc, [thread('c1')], new Set(['c1']), id =>
+      dropped.push(id)
+    );
+    expect(result).toHaveLength(0);
+    expect(dropped).toHaveLength(0);
+  });
+
+  it('does NOT fire onDropped for a thread that anchors successfully', () => {
+    const doc = crossParagraphDoc('c1');
+    const dropped: string[] = [];
+    const result = composeSessionCommentThreadsToAnchoredComments(doc, [thread('c1')], new Set(), id =>
+      dropped.push(id)
+    );
+    expect(result).toHaveLength(1);
+    expect(dropped).toHaveLength(0);
+  });
+});
+
 /**
  * Agreements-r1 UAT round-1 #4 (agent-C, 2026-08-03) — the anchor-drift TRIGGER for the
  * "Save error: A change could not be anchored in the document" 422.

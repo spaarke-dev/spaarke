@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -167,13 +168,12 @@ public static class ContainerCustomPropertyEndpoints
                 "GetCustomProperties: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.customproperties.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -183,7 +183,7 @@ public static class ContainerCustomPropertyEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while retrieving custom properties.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving custom properties.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -318,13 +318,12 @@ public static class ContainerCustomPropertyEndpoints
                 "PutCustomProperties: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.containers.customproperties.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -334,7 +333,7 @@ public static class ContainerCustomPropertyEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while updating custom properties.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating custom properties.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }

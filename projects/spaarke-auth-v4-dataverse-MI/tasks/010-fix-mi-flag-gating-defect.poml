@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Fix the MI-flag gating defect (FR-A1)</title>
+    <phase>1 Prerequisites</phase>
+    <gate>003 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs in a shared lib consumed by BFF.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified defect with an exact fix and a closed test matrix.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CORRECTED 2026-08-20: NOT parallel-safe. Task 011 also modifies src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs. Dispatching both as concurrent sub-agents would collide on that file. Run 010 then 011 sequentially -- 011's CCA caching builds on the branch structure 010 corrects.</parallel-reason>
+    <deps>003</deps>
+    <tags>auth,bff-api,dataverse,bugfix</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>DataverseAccessDataSource.cs:53 and DataverseWebApiClient.cs:42 never read Graph:ManagedIdentity:Enabled — secret presence alone selects the secret path. On dev, where API_CLIENT_SECRET is set because OBO needs it, both run on the client secret today despite MI being enabled. Make both read the flag.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-028 and the Spaarke.Dataverse layering rules strictly.</role>
+  <goal>Both sites select their credential from the flag, not from secret presence, with a seam test covering the full matrix.</goal>
+
+  <context>
+    <background>This is a live defect, not a hypothetical: it means dev observation of these two files currently reflects the SECRET code path, not the MI path. That matters to this project and to dataverse-access-unification-r1, whose parity testing would otherwise characterise the wrong path (see COORDINATION-DATAVERSE-ACCESS-UNIFICATION §5.1). Independently correct regardless of the credential decision.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file role="new">tests/integration/seam/Auth/CredentialSelectionSeamTests.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="003" status="pending">Credential decision recorded</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: these two sites only. Do not change the credential TYPE here — that is Phase 2. This task only corrects which branch is selected.</constraint>
+    <constraint source="project">Scope: DataverseWebApiService.cs:65 is already correctly flag-gated by #3b — copy its gating shape, do not re-implement it differently.</constraint>
+    <constraint source="project">Scope: Spaarke.Dataverse must gain NO ProjectReference and NO new package. CI-enforced by tests/Spaarke.ArchTests/LayerDependencyTests.cs FR-14.</constraint>
+    <constraint source="ADR-038">Scope: coverage goes to tests/integration/seam/**. Do NOT write DI-registration tests or ctor null-check tests — both are banned (B3/B4).</constraint>
+    <constraint source="project">Scope: DataverseWebApiClient is scheduled for DELETION by dataverse-access-unification-r1. Keep the change minimal (~6 lines); do not refactor it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse credential selection, managed identity gating</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read DataverseWebApiService.cs:60-90 to capture the correct gating shape from #3b.</step>
+    <step>Apply the same gating to DataverseAccessDataSource.cs:49-77, preserving the OBO branch semantics.</step>
+    <step>Apply it to DataverseWebApiClient.cs:36-54.</step>
+    <step>Add a seam test asserting the selected credential type across the flag/secret matrix.</step>
+    <step>Verify publish size + CVE scan per CLAUDE.md §10.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Correcting the gating breaks OBO in DataverseAccessDataSource — the OBO branch and the app-only branch are entangled there. STOP and report; this is the highest-blast-radius file in the library.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</output>
+    <output type="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs</output>
+    <output type="new">tests/integration/seam/Auth/CredentialSelectionSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Flag true + secret present: both sites resolve the MI credential.</criterion>
+    <criterion>Flag false + secret present: both sites resolve the secret.</criterion>
+    <criterion>Flag true + no secret: both sites resolve MI.</criterion>
+    <criterion>Negative case: flag false + no secret fails fast with an actionable message, not a null credential.</criterion>
+    <criterion>Negative case: OBO in DataverseAccessDataSource still fails CLOSED (AccessRights.None) when the user lacks rights.</criterion>
+    <criterion>LayerDependencyTests FR-14 passes unmodified; Spaarke.Dataverse.csproj is unchanged.</criterion>
+    <criterion>Publish size reported vs the 44.96 MB baseline; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-08-20" rigor="FULL">
+      ESCALATION TRIGGER FIRED AND WAS RESOLVED BY OWNER DECISION (Option A -- decouple).
+
+      DataverseWebApiClient: clean gating fix (no OBO path). DataverseAccessDataSource: the prescribed
+      "copy DataverseWebApiService's shape" would have set _cca = null whenever MI is enabled, disabling OBO and
+      throwing on every delegated access check -- a total fail-closed outage on the intended dev end-state.
+      DataverseWebApiService is a safe template only because it has no OBO path.
+
+      FIX: decoupled. (1) _credential gated by Graph:ManagedIdentity:Enabled. (2) _cca built whenever OBO config
+      exists, INDEPENDENT of the flag -- DefaultAzureCredential cannot perform an OBO exchange (ADR-028 A4) and the
+      MI flag says nothing about delegated access. This is also exactly the seam task 020 needs, so task 022 does
+      not inherit the entanglement. Added fail-fast validation naming the missing setting.
+
+      SECOND ADR-038 FINDING, self-caught at the quality gate: the first seam test read private fields by
+      REFLECTION = ban B8. Rewritten behavioural-only (8 tests, 0 reflection). A behavioural assertion of the
+      credential TYPE is genuinely impossible here -- the class is fail-closed and swallows credential errors into
+      AccessRights.None -- so the structural decoupling guard was DEFERRED TO TASK 060 as source analysis, the
+      shape ADR-038 sanctions and which fails at the shape level rather than on one sampled config. Booked onto
+      060 as a constraint + acceptance criterion, not assumed.
+
+      PRE-EXISTING CI FAILURE RAISED, NOT ABSORBED: GodClassGuardTests FR-14 is red on DataverseServiceClientImpl.cs
+      (2975 vs 2864) and ComposeEndpoints.cs (2755 vs 2651). Neither is in this task's diff; ComposeEndpoints.cs is
+      byte-identical to origin/master, proving the gate is red independently of this branch. Both arrived via the
+      master merge from #3b and compose-r7. Remedy is decompose-or-re-baseline-with-reason, and it belongs to the
+      projects that caused the growth.
+
+      METADATA CORRECTION: group A was misclassified parallel-safe -- 010 and 011 BOTH modify
+      DataverseAccessDataSource.cs and would have collided as concurrent sub-agents. Now parallel-safe: false on
+      both, group re-marked 010 -> 011 sequential.
+
+      Publish 43.67 MB compressed incl. PDBs (unchanged); CVE clean; LayerDependencyTests FR-14 passes;
+      Spaarke.Dataverse.csproj zero diff.
+
+      Full record: notes/decisions/010-credential-gating.md
+    </completion>
+  </notes>
+</task>

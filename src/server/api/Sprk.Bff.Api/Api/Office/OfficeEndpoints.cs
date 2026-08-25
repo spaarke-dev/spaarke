@@ -211,7 +211,16 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // This value is stamped as the job's CreatedBy (OfficeService.SaveAsync) and is later
+        // compared against JobOwnershipFilter's userId, which comes from
+        // OfficeAuthFilter.ExtractUserId — and that resolves 'oid' FIRST.
+        // Reading NameIdentifier ('sub') first here stamped a DIFFERENT claim than the filter
+        // compares, so every subsequent job poll returned 403 OFFICE_009
+        // ("You do not have access to this job") for every user. Both sides must resolve
+        // identity identically; this now matches the sibling handlers at GetJobStatusAsync
+        // and StreamJobAsync, which already read UserIdKey first.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Get idempotency key from header if provided
@@ -817,7 +826,13 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Validate user identity
@@ -963,7 +978,13 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Validate user identity
@@ -1160,7 +1181,13 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         logger.LogInformation(
@@ -1394,7 +1421,13 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Validate user identity
@@ -1518,7 +1551,13 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Validate user identity
@@ -1670,7 +1709,13 @@ public static class OfficeEndpoints
         HttpContext context,
         CancellationToken cancellationToken)
     {
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Resolve identity the SAME way OfficeAuthFilter.ExtractUserId does ('oid' first). Reading
+        // NameIdentifier ('sub') first here diverges from every filter that compares against it —
+        // the defect that made `SaveAsync` stamp one claim and JobOwnershipFilter check another,
+        // 403-ing every job poll. No handler below currently persists this value for later comparison,
+        // so none was reachable by that bug; they are aligned anyway so the next one cannot be.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         if (string.IsNullOrEmpty(userId))

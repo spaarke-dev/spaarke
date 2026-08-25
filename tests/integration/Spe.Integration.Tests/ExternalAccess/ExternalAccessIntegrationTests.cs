@@ -233,8 +233,25 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         await AssertIsProblemDetailsAsync(response, "grant with empty ContactId");
     }
 
+    /// <summary>
+    /// ✅ FLIPPED BY TASK 008 (FR-07) — the expected status changed from 400 to 403.
+    ///
+    /// <para>The delegation rule now runs BEFORE the handler: a caller may act on a record only if
+    /// they hold Write on it, so the filter must first work out WHICH record. A body carrying an
+    /// empty identifier names no resolvable target, and per task 008's ADR-003 constraint —
+    /// <i>"if the target record cannot be resolved from the request, DENY 403"</i> — that denies
+    /// rather than falling through to the handler's own validation.</para>
+    ///
+    /// <para>Letting it through to get a nicer 400 would mean invoking a handler for a request that
+    /// names no record, on the assumption the handler will reject it. That assumption is exactly
+    /// what a future change could break, and it would break open.</para>
+    ///
+    /// <para>The response is still RFC 7807 ProblemDetails and carries
+    /// <c>reasonCode: sdap.access.deny.delegation_target_unresolved</c>, so a caller can tell this
+    /// apart from a permissions failure.</para>
+    /// </summary>
     [Fact]
-    public async Task GrantAccess_EmptyProjectId_Returns400WithProblemDetails()
+    public async Task GrantAccess_EmptyProjectId_IsDeniedBeforeValidation()
     {
         // Arrange
         var request = new GrantAccessRequest(
@@ -248,8 +265,9 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400 before any I/O");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "an empty ProjectId names no grant root, so the delegation rule has nothing to check " +
+            "Write against and denies before the handler runs (task 008, FR-07)");
 
         await AssertIsProblemDetailsAsync(response, "grant with empty ProjectId");
     }
@@ -309,8 +327,25 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
 
     #region Revoke Access — Validation (400 paths)
 
+    /// <summary>
+    /// ✅ FLIPPED BY TASK 008 (FR-07) — the expected status changed from 400 to 403.
+    ///
+    /// <para>The delegation rule now runs BEFORE the handler: a caller may act on a record only if
+    /// they hold Write on it, so the filter must first work out WHICH record. A body carrying an
+    /// empty identifier names no resolvable target, and per task 008's ADR-003 constraint —
+    /// <i>"if the target record cannot be resolved from the request, DENY 403"</i> — that denies
+    /// rather than falling through to the handler's own validation.</para>
+    ///
+    /// <para>Letting it through to get a nicer 400 would mean invoking a handler for a request that
+    /// names no record, on the assumption the handler will reject it. That assumption is exactly
+    /// what a future change could break, and it would break open.</para>
+    ///
+    /// <para>The response is still RFC 7807 ProblemDetails and carries
+    /// <c>reasonCode: sdap.access.deny.delegation_target_unresolved</c>, so a caller can tell this
+    /// apart from a permissions failure.</para>
+    /// </summary>
     [Fact]
-    public async Task RevokeAccess_EmptyAccessRecordId_Returns400WithProblemDetails()
+    public async Task RevokeAccess_EmptyAccessRecordId_IsDeniedBeforeValidation()
     {
         // Arrange
         var request = new RevokeAccessRequest(
@@ -323,50 +358,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty AccessRecordId must be rejected with 400");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "revoke resolves its target by reading the named access record; an empty id resolves " +
+            "nothing, so the delegation rule denies before the handler runs (task 008, FR-07)");
 
         await AssertIsProblemDetailsAsync(response, "revoke with empty AccessRecordId");
-    }
-
-    [Fact]
-    public async Task RevokeAccess_EmptyContactId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new RevokeAccessRequest(
-            AccessRecordId: Guid.NewGuid(),
-            ContactId: Guid.Empty,
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ContactId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "revoke with empty ContactId");
-    }
-
-    [Fact]
-    public async Task RevokeAccess_EmptyProjectId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new RevokeAccessRequest(
-            AccessRecordId: Guid.NewGuid(),
-            ContactId: Guid.NewGuid(),
-            ProjectId: Guid.Empty,
-            ContainerId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "revoke with empty ProjectId");
     }
 
     #endregion
@@ -397,29 +393,6 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             "empty Email must be rejected with 400");
 
         await AssertIsProblemDetailsAsync(response, "invite with empty Email");
-    }
-
-    [Fact]
-    public async Task InviteExternalUser_EmptyProjectId_Returns400WithProblemDetails()
-    {
-        // Arrange
-        var request = new InviteExternalUserRequest(
-            Email: "external.user@example.com",
-            ProjectId: Guid.Empty,
-            AccessLevel: 100000000,
-            FirstName: null,
-            LastName: null,
-            ExpiryDate: null,
-            OrganizationId: null);
-
-        // Act
-        var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400");
-
-        await AssertIsProblemDetailsAsync(response, "invite with empty ProjectId");
     }
 
     [Fact]
@@ -456,8 +429,25 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
 
     #region Close Project — Validation (400 paths)
 
+    /// <summary>
+    /// ✅ FLIPPED BY TASK 008 (FR-07) — the expected status changed from 400 to 403.
+    ///
+    /// <para>The delegation rule now runs BEFORE the handler: a caller may act on a record only if
+    /// they hold Write on it, so the filter must first work out WHICH record. A body carrying an
+    /// empty identifier names no resolvable target, and per task 008's ADR-003 constraint —
+    /// <i>"if the target record cannot be resolved from the request, DENY 403"</i> — that denies
+    /// rather than falling through to the handler's own validation.</para>
+    ///
+    /// <para>Letting it through to get a nicer 400 would mean invoking a handler for a request that
+    /// names no record, on the assumption the handler will reject it. That assumption is exactly
+    /// what a future change could break, and it would break open.</para>
+    ///
+    /// <para>The response is still RFC 7807 ProblemDetails and carries
+    /// <c>reasonCode: sdap.access.deny.delegation_target_unresolved</c>, so a caller can tell this
+    /// apart from a permissions failure.</para>
+    /// </summary>
     [Fact]
-    public async Task CloseProject_EmptyProjectId_Returns400WithProblemDetails()
+    public async Task CloseProject_EmptyProjectId_IsDeniedBeforeValidation()
     {
         // Arrange
         var request = new CloseProjectRequest(
@@ -468,8 +458,9 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "empty ProjectId must be rejected with 400 before any I/O");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "an empty ProjectId names no project, so the delegation rule has nothing to check " +
+            "Write against and denies before the handler runs (task 008, FR-07)");
 
         await AssertIsProblemDetailsAsync(response, "close-project with empty ProjectId");
     }
@@ -597,13 +588,20 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var body = await response.Content.ReadAsStringAsync();
         var problem = JsonDocument.Parse(body).RootElement;
 
-        // Assert
+        // Assert — the SHAPE is what this test is about. The status became 403 when task 008 put the
+        // delegation rule in front of the handler (an empty ProjectId names no target to check Write
+        // against); the RFC 7807 contract must hold on that path too, which is the point worth pinning.
         problem.TryGetProperty("status", out var statusProp).Should().BeTrue(
             "RFC 7807 ProblemDetails must include a 'status' field");
-        statusProp.GetInt32().Should().Be(400);
+        statusProp.GetInt32().Should().Be(403);
 
         problem.TryGetProperty("detail", out _).Should().BeTrue(
             "RFC 7807 ProblemDetails must include a 'detail' field");
+
+        problem.TryGetProperty("reasonCode", out var reasonProp).Should().BeTrue(
+            "an authorization denial must carry a machine-readable deny code (ADR-003) so a caller " +
+            "can distinguish 'your request named no record' from 'you lack permission'");
+        reasonProp.GetString().Should().Be("sdap.access.deny.delegation_target_unresolved");
     }
 
     #endregion

@@ -680,15 +680,17 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           }
         }
 
-        // 1d. Provision Secure Project infrastructure (BU, SPE container, Account)
-        //     when the Secure Project toggle is enabled.
+        // 1d. Provision Secure Project infrastructure when the Secure Project toggle is enabled:
+        //     assign the project to the canonical Secure Project business unit's owner team, then
+        //     provision its own SPE container and record it. No business unit or account is created
+        //     (BFF task 021, 2026-08-25).
         let provisioningWarning: string | undefined;
         if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
           const provisionResult = await provisionSecureProject(
             {
               projectId,
-              // Use project name as the ProjectRef when no dedicated ref field is available.
-              // The BU will be named "SP-{projectName}" on the backend.
+              // Only a fallback for the SPE container's display name; it no longer names anything
+              // in Dataverse.
               projectRef: projectName,
             },
             authFetch,

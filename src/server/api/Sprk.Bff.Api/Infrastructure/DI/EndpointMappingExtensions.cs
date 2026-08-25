@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
 using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)

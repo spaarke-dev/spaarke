@@ -2,9 +2,17 @@
 
 > **Domain**: OAuth, OBO, Token Management, Access Control, Server Hardening
 > **Source ADRs**: **ADR-028 (canonical — Spaarke Auth v2)**, ADR-003 (server seams), ADR-004 (OBO), ADR-008 (filters), ADR-009 (Redis caching)
-> **Last Updated**: 2026-05-19 (Spaarke Auth v2 + Hardening sign-off)
-> **Last Reviewed**: 2026-05-19
-> **Status**: Verified · v2-aligned
+> **Last Updated**: 2026-08-24 (ADR-028 **A4** applied; exception **E-3 CLOSED** — the BFF identity is secret-free)
+> **Last Reviewed**: 2026-08-24
+> **Status**: Verified · v2-aligned · A4-complete
+>
+> <!-- Why this metadata block is itself a control, not bookkeeping (task 033):
+>      Until 2026-08-24 this header read "Last Updated: 2026-05-19" even though lines 109-112 had been
+>      materially corrected on 2026-08-17. A reader checking whether this file was current would have been
+>      told it had not changed since May. Stale review metadata on THIS file is part of how one false
+>      sentence ("OAuth spec requires confidential client + secret") survived three separate audits.
+>      If you change a rule below, change the date above in the same commit. -->
+
 >
 > **Architecture**: [ADR-028 Spaarke Auth Architecture](../adr/ADR-028-spaarke-auth-architecture.md)
 > **Client-side MSAL invariants**: [`spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md) (INV-1..INV-8)
@@ -105,7 +113,41 @@ Load when:
 ### Server hardening (Spaarke Auth v2 Phase C — ADR-028)
 
 - ✅ **MUST** use `Microsoft.Identity.Web`'s `AddMicrosoftIdentityWebApi` for inbound JWT validation (BFF + any new .NET API service)
-- ✅ **MUST** use `DefaultAzureCredential` (managed identity) for ALL server outbound auth — Graph app-only, Dataverse service identity, Cosmos, Key Vault, AI Search, Service Bus. Exception: per-tenant SpeAdmin container-type ops (per-customer secrets from Key Vault) + OBO flow (OAuth spec requires confidential client + secret).
+- ✅ **MUST** use `DefaultAzureCredential` (managed identity) for all server **app-only** outbound auth — Graph app-only, Dataverse service identity, Cosmos, Key Vault, AI Search, Service Bus. Exceptions: per-tenant SpeAdmin container-type ops (per-customer secrets from Key Vault, ADR-028 **E-1**) + Azure OpenAI data plane (**E-2**).
+- ✅ **MUST** authenticate **confidential clients acting as the BFF identity** (OBO / delegated exchanges, and MSAL app-only clients) with a **secret-free confidential credential** — **MI-as-Federated-Identity-Credential (default)** or a **Key Vault certificate** where MI-FIC's same-tenant rule doesn't hold. Obtain it from the shared credential provider; **cache the CCA at singleton scope**. See **ADR-028 Amendment A4**.
+  > ⚠️ **Corrected 2026-08-17 (A4).** This line previously read *"OBO flow (OAuth spec requires confidential client + secret)."* **That was wrong** — OAuth requires a confidential **credential**; a secret is only one of three ways to satisfy it (secret / certificate / federated client assertion). That clause foreclosed the question in every prior auth audit. MI-as-FIC has been **GA since 2025-05-08**, and Microsoft ranks client secrets *"Development and testing only."*
+- ❌ **MUST NOT** call `.WithClientSecret(...)` for any client authenticating as the BFF identity.
+  > ✅ **Exception E-3 is CLOSED (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).** It was transitional
+  > and covered the pre-existing sites only. There are now **zero** secret-bearing BFF-identity sites: the
+  > four secret app settings and both Key Vault copies (`BFF-API-ClientSecret`, `bff-api-client-secret`) are
+  > deleted, and the live credential order is `[ManagedIdentityFederated]` with **nothing beneath it**.
+  > The only sanctioned secret-bearing credentials remaining are **E-1** (per-customer SPE owning apps) and
+  > `PowerBi:ClientSecret` (task 042, deferred). Enforced by `tests/Spaarke.ArchTests/CredentialGuardTests.cs`
+  > (build fails on a new site) + `CredentialCensusTests` (asserts the construction-site count).
+- ✅ **MUST** keep a secret out of the credential **order**, not merely out of the config file. A secret listed
+  *beneath* MI-FIC is worse than no migration: a broken federated credential falls through to it silently and
+  every health signal stays green. Set `Graph:Credentials:RequireSecretFreeIdentity=true` outside Development —
+  it refuses startup if `ClientSecret` is still in the order. **Asserting the order is strictly stronger than
+  observing one resolution**: observing says the secret was not used *this time*; the order says it *cannot* be.
+
+### FIC provisioning shape (get these four things right or it fails silently)
+
+The rules above say how the BFF *uses* the credential. This is how you *create* one — the repo's only
+automation is `scripts/Register-EntraAppRegistrations.ps1 -CreateFederatedCredential` (task 030).
+
+| Field | Value | Failure if wrong |
+|---|---|---|
+| **subject** | the managed identity's **`principalId`** (object id) | 🔴 **The FR-B4 silent failure.** Using its `clientId` — the intuitive choice, and both are GUIDs on the same resource — yields **`AADSTS700213`**. Nothing validates this at creation time |
+| **issuer** | `https://login.microsoftonline.com/{tenantId}/v2.0` | wrong/missing `/v2.0` → the assertion is rejected |
+| **audience** | exactly `api://AzureADTokenExchange` | any deviation → rejected |
+| **tenancy** | the managed identity and the app registration **must be in the same tenant** | MI-FIC cannot cross tenants. Where it must (some Model 2 topologies), use a **Key Vault certificate** instead — that is what the A4 "or certificate" clause is for |
+
+Two operational notes that have cost real time here:
+- **Propagation flaps.** A newly created FIC returns **`AADSTS70025`** and keeps flapping for **~2 minutes**.
+  A single green check inside that window proves nothing; re-test after it settles.
+- **Resolve managed identities by resource ID, never by name.** The dev subscription holds five UAMIs, and
+  `spaarke-bff-identity` is named like the BFF's but is **not** attached to it.
+- ❌ **MUST NOT** treat `DefaultAzureCredential` as a substitute on OBO paths — it yields app-only tokens and cannot perform an OBO exchange.
 - ✅ **MUST** validate inbound webhooks via HMAC-SHA256 — fail-closed if signing key is null/empty (Communication + Email Service Endpoint webhooks)
 - ✅ **MUST** route admin + bulk API key endpoints through named `AuthenticationHandler<>` schemes (`AuthSchemes.BuilderAdminApiKey`, `AuthSchemes.RagApiKey`); use `CryptographicOperations.FixedTimeEquals` for compare
 - ✅ **MUST** guard `PostConfigure<JwtBearerOptions>` with `Interlocked.CompareExchange<int>` (or equivalent) to prevent double-application + handler stacking
@@ -192,7 +234,19 @@ if (!result.IsAllowed)
 }
 ```
 
-**Note**: Single rule model (`OperationAccessRule`) - Dataverse handles all permission computation (teams, roles, sharing). Uses `RetrievePrincipalAccess` in app-only contexts; uses direct query pattern in OBO contexts because `RetrievePrincipalAccess` does NOT work with OBO tokens.
+**Note**: Single rule model (`OperationAccessRule`).
+
+> ⚠️ **Corrected 2026-08-20** (`unified-access-control-r2` investigation). The previous text claimed
+> `RetrievePrincipalAccess` is used in app-only contexts. **It is not — it has zero call sites in the
+> repository.** Both modes run the same direct query `GET sprk_documents({id})` and grant at most
+> `AccessRights.Read` (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323,368-372`).
+>
+> Further, `Spaarke.Core/Auth/AuthorizationService.cs:48-52` always passes `userAccessToken: null`, so on
+> that path the probe runs **as the application, not as the caller** — it answers "can the app see this
+> record", not "can this user see it". Do not rely on `AuthorizationService` for caller-scoped access
+> decisions until this is remediated (UAC-r2 Phase 0). The genuinely caller-scoped paths today are
+> `AiAuthorizationService` (real OBO) and the impersonated read seam
+> (`DataverseWebApiService.RetrieveMultipleImpersonatedAsync`, `MSCRMCallerID`).
 
 **See**: [UAC Access Control Pattern](../patterns/auth/uac-access-control.md)
 

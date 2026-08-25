@@ -294,15 +294,16 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
-**Purpose:** Create the production Entra ID app registration (BFF API) and store credentials in Key Vault
+**Purpose:** Create the production Entra ID app registration (BFF API), store credentials in Key Vault, and create/verify managed-identity federated credentials (MI-FIC)
 **Usage:** 🔴 One-time - Production environment setup
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Entra ID admin permissions, Key Vault access
 **Owner:** DevOps Team
-**Last Used:** March 2026
+**Last Used:** August 2026 (FIC extension, task 030)
 
 **When to Use:**
 - Setting up production Entra ID app registrations
+- Creating a managed-identity federated credential for a new (app-registration, UAMI) pair
 - Recreating registrations in a new tenant
 - After tenant migration
 
@@ -317,12 +318,66 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Creates:**
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
-- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience
+- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
+
+> 🔴 **Pass `-SkipClientSecret` for any new registration (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).**
+> The BFF identity is **secret-free** per ADR-028 **A4**: it authenticates as a confidential client using a
+> federated credential issued to its user-assigned managed identity. `BFF-API-ClientSecret` and its lowercase
+> duplicate were deleted from Key Vault on 2026-08-24.
+>
+> Without the switch, COMBINED mode (`-CreateFederatedCredential` **without** `-FicOnly`) still mints a client
+> secret unconditionally — which would re-introduce a per-customer secret on every onboarding. ADR-028 exception
+> **E-3** is transitional and explicitly *does not license expansion*. The switch is **opt-in, not the default**,
+> because flipping the default would silently change behaviour for every existing caller of an identity-provisioning
+> script (notably `customer-provisioning-orchestration-r1` Wave G-3).
+>
+> Provision the credential instead:
+> `-CreateFederatedCredential -UamiResourceId <resourceId>` — subject is the UAMI's **principalId**, *not* its
+> clientId (the commonest silent failure), audience exactly `api://AzureADTokenExchange`. Then set
+> `Graph__Credentials__Order__0=ManagedIdentityFederated` and `Graph__Credentials__RequireSecretFreeIdentity=true`.
 
 > **Note (2026-08-14, code-quality-and-assurance-r3 task 060):** the separate
 > `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault secrets
 > were removed. They had zero code consumers; Dataverse server-to-server access
 > consolidated onto the BFF app registration credential (`API_CLIENT_SECRET`) on 2026-01-07.
+
+**Also creates federated identity credentials (MI-FIC)** — added 2026-08-21 by
+`spaarke-auth-v4-dataverse-MI` task 030 (spec FR-C4). This is the repo's **only** FIC automation;
+before it, every federated credential in the tenant was created by hand.
+
+```powershell
+# Create/verify a FIC only (the entry point customer provisioning invokes)
+.\Register-EntraAppRegistrations.ps1 -FicOnly `
+  -FederatedCredentialAppId <app-reg-id> `
+  -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>"
+
+# Preview without changing anything
+.\Register-EntraAppRegistrations.ps1 -DryRun -CreateFederatedCredential `
+  -FederatedCredentialAppId <app-reg-id> -UamiResourceId <arm-id>
+```
+
+> **Integrate by INVOKING it, never by dot-sourcing it.** A dot-source runs the script's `param()`
+> block in *your* scope, silently replacing your `$TenantId` with this script's production default —
+> and a wrong tenant means a wrong FIC issuer, i.e. a credential that creates cleanly and never
+> works. `-FicOnly` runs in its own child scope and leaks nothing.
+
+- **Idempotent on the `(issuer, subject, audience)` triple, not the name** — a credential that already
+  carries the required triple under a different name is a no-op, not a duplicate or an error.
+- **Verified by a real token exchange**, never by "create returned success" — a misconfigured FIC
+  creates cleanly and fails only at exchange.
+- **Exit codes**: `0` verified · `1` fault · `2` structurally correct but not exchange-provable from
+  this host (a workstation cannot mint a managed-identity assertion — pass `-AssertionToken`, or
+  `-AllowUnverified` to accept it).
+- **Cross-tenant pairs are refused**, not attempted: Entra requires the app registration and the UAMI
+  in the same tenant, and a cross-tenant FIC creates successfully then fails silently.
+- Behaviour without the new flags is unchanged (verified byte-identical).
+
+> ⚠️ **The client-secret path above is transitional.** It exists under ADR-028 exception **E-3** and is
+> scheduled for removal by spec FR-C3 / task 033 of `spaarke-auth-v4-dataverse-MI`. ADR-028 **A4** ranks
+> secrets last ("development and testing only"). **New credentials should use MI-FIC**, not the secret.
+> The two capabilities above are not co-equal — one is the target state, the other is being retired.
+
+Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md`](../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md)
 
 ---
 
@@ -344,9 +399,16 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 # Test using Key Vault secrets
 .\Test-EntraAppRegistrations.ps1
 
-# Test with explicit credentials
+# Test with explicit credentials (only for a NON-migrated environment — see note)
 .\Test-EntraAppRegistrations.ps1 -BffApiClientId "abc123" -BffApiClientSecret "secret"
 ```
+
+> **Note (2026-08-24, task 033):** the client-credentials token test now reports **SKIPPED** against a migrated
+> environment, and that is the correct result — not a missing credential. The BFF identity is secret-free, and a
+> managed-identity federated credential cannot be exercised from a workstation (no route to IMDS). To verify the
+> live credential, look for `Ordered credential selection active: ManagedIdentityFederated.` in the app's startup
+> logs. The suite also now asserts the **inverse**: `BFF-API-ClientSecret` must stay **absent** from Key Vault —
+> a re-appearance means a provisioning run without `-SkipClientSecret`.
 
 ---
 

@@ -37,6 +37,7 @@ import {
   IDocumentInsertEvent,
   IDocumentStatusChatMessage,
   IDocumentStatusMessage,
+  ISprkChatFollowup,
 } from './types';
 import { thinScrollbarStyle } from '../../theme/scrollbar';
 import { SprkChatMessage, ISprkChatMessageExtendedProps } from './SprkChatMessage';
@@ -493,6 +494,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // next-step chip click forwarding to host. Optional; ADR-012 generic seam (same
   // pattern as onSelectPlaybook/onOpenLibraryModal above).
   onNextStep,
+  // spaarkeai-assistant-enhancements-r4 task 021b — capability suggestion chip →
+  // host Click-path dispatch (dispatchConsumer). ADR-012 generic seam (same
+  // pattern as onNextStep above).
+  onSuggestionCapabilitySelect,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
   // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
@@ -1411,10 +1416,27 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // the scroll must re-anchor when the slot's node changes for the chips to land
   // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+    // spaarkeai-assistant-enhancements-r4 040 UAT (2026-08-18): COLLAPSE the
+    // pin-to-top trailing spacer once real content fills the viewport. The spacer
+    // is sized to the viewport height on send (below) so a short just-sent turn
+    // can reach the top; but it never shrank back, leaving a large dead region
+    // after the transcript footer (Click-path chips + the "Refresh suggestions"
+    // affordance) that clipped the last footer row at the fold in a long
+    // conversation (the handoff's dead-whitespace hypothesis 2). Once the content
+    // EXCLUDING the spacer already exceeds the viewport, the pin-to-top scroll
+    // room is unnecessary — clear it so the footer sits directly beneath the
+    // transcript with no dead space. Short responses (content < viewport) keep
+    // the spacer, preserving the pin-to-top behavior.
+    const spacer = trailingSpacerRef.current;
+    if (spacer && spacer.offsetHeight > 0 && container.scrollHeight - spacer.offsetHeight >= container.clientHeight) {
+      spacer.style.minHeight = '0px';
+    }
     // P1-4: only re-anchor when the user is pinned to the bottom (Copilot-style).
     // If they've scrolled up to read history, don't fight them.
-    if (messageListRef.current && isPinnedToBottomRef.current) {
-      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    if (isPinnedToBottomRef.current) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [messages, streamedContent, transcriptFooterSlot]);
 
@@ -1572,36 +1594,50 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     [handleSend]
   );
 
-  // Handle follow-up suggestion selection.
-  //
-  // Action chips are prefixed with "[action:<id>]" (AIPU-058) and require
-  // special routing instead of being sent as plain text messages:
-  //   [action:upload]  → trigger the hidden file input to open the OS picker
-  //   [action:search]  → send a search-oriented follow-up message
-  //   [action:select]  → send a matter-selection follow-up message
-  //
-  // Regular suggestion strings (no "[action:" prefix) are sent verbatim as
-  // new user messages, identical to the previous behaviour.
+  // Handle follow-up suggestion selection (spaarkeai-assistant-enhancements-r4
+  // task 021b — typed two-kind suggestions; design delta §5/§9a). Route by the
+  // item's STRUCTURAL `kind` (never a keyword heuristic on the label):
+  //   - capability → dispatch the carried `targetBindingId` via the host's Click
+  //     path (`onSuggestionCapabilitySelect` → dispatchConsumer). SprkChat never
+  //     calls dispatchConsumer itself (ADR-012 context-agnostic).
+  //   - question   → send `label` as a new user message (re-enter the grounded
+  //     loop; safe by construction — ADR-039 grounded outcomes).
+  //   - action     → the deterministic missing-context shortcut keyed off
+  //     `actionId` ∈ {upload, search, select} (the legacy "[action:*]" chips,
+  //     now carried structurally instead of parsed from a string prefix).
   const handleSuggestionSelect = React.useCallback(
-    (suggestion: string) => {
-      if (suggestion.startsWith('[action:upload]')) {
-        // Programmatically open the OS file picker — the hidden <input type="file">
-        // onChange callback will receive the selected file and reuse the upload flow.
-        fileInputRef.current?.click();
+    (item: ISprkChatFollowup) => {
+      if (item.kind === 'capability') {
+        // Only dispatch a real Binding id — the parser guarantees a capability
+        // item carries a non-null targetBindingId, but guard defensively so a
+        // malformed item is inert rather than a dead-end.
+        if (item.targetBindingId) {
+          onSuggestionCapabilitySelect?.(item.targetBindingId);
+        }
         return;
       }
-      if (suggestion.startsWith('[action:search]')) {
-        handleSend('Browse and search my documents');
+      if (item.kind === 'action') {
+        if (item.actionId === 'upload') {
+          // Programmatically open the OS file picker — the hidden <input type="file">
+          // onChange callback will receive the selected file and reuse the upload flow.
+          fileInputRef.current?.click();
+          return;
+        }
+        if (item.actionId === 'search') {
+          handleSend('Browse and search my documents');
+          return;
+        }
+        if (item.actionId === 'select') {
+          handleSend('Help me select a matter to work with');
+          return;
+        }
+        // Unknown actionId — inert (no dead-end).
         return;
       }
-      if (suggestion.startsWith('[action:select]')) {
-        handleSend('Help me select a matter to work with');
-        return;
-      }
-      // Regular follow-up suggestion — send as a new user message.
-      handleSend(suggestion);
+      // question → send the label as a new user message.
+      handleSend(item.label);
     },
-    [handleSend]
+    [handleSend, onSuggestionCapabilitySelect]
   );
 
   // Handle file selected via the hidden file input triggered by "[action:upload]" chip.

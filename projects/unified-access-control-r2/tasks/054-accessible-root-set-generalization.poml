@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="unified-access-control-r2">
+  <metadata>
+    <title>Generalize the accessible-root-set model: sprk_servicerequest as a first-class core root (FR-27)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires Phase 1 (FR-19 evaluator, FR-20 impersonated root sets) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs in Infrastructure/ExternalAccess — changes what every external caller can reach.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical generalization following three existing root-set implementations as the literal pattern; boundaries fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/** (CallerPrincipalResolver, AccessibleRecordSetService, WorkforcePrincipalResolver) — the project's declared exclusive-file zone.</parallel-reason>
+    <deps>032, 035, 036</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The spec's core taxonomy has FOUR core entities (project, matter, work assignment, service request) but the caller principal carries only THREE accessible-root-id sets. Add sprk_servicerequest as a first-class root set on both principal strategies and in the accessible-record-set gate, so child-module scope dimensions (task 056) and the inheritance term (task 055) can express service-request-rooted children. This is the honest generalization the adversarial critique (06 §F1) demands BEFORE registering child modules.</prompt>
+  <role>SPAARKE platform developer. BFF authorization internals: CallerPrincipalResolver strategies, AccessibleRecordSetService, evaluator. Follow ADRs strictly.</role>
+  <goal>CallerPrincipal exposes an accessible-service-request set filled by BOTH the workforce and CIAM strategies (workforce: Phase-1 impersonated Dataverse answer union contact grants; CIAM: grants only, matching the shipped pattern for the other three roots); AccessibleRecordSetService composes it (grant allow-list extended to include sprk_servicerequest); all existing consumers unaffected; tests cover the fourth root for both principal kinds.</goal>
+
+  <context>
+    <background>spec.md FR-27 + Owner Clarifications ("Core: project, matter, work assignment, service request"). Investigation 01 §3: GrantSupportedRootEntities = { sprk_project, sprk_matter, sprk_workassignment } (AccessibleRecordSetService.cs:99-104); both strategies fill exactly 3 root sets (CallerPrincipalResolver.cs:91,97,102); the existing service-requests module scopes by sprk_requestedby only. 06 §F1: a ScopeDimension can only point at a set that exists on the principal — this task creates the missing fourth set. NOTE: Phase 1/2 will have reshaped these files (evaluator returns recordId->rights; FR-20 impersonated source) — extend the AS-MERGED shapes, using the three existing roots as the literal reference.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (grant reads for the fourth root, if entity-filtered)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (root-set composition tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">FR-19 evaluator returning (recordId -> rights) — the shape this root set feeds.</dependency>
+      <dependency task="035" status="pending">FR-20 ImpersonatedRootSetSource — the systemuser term for the new root uses it, same 3-round-trip budget rule.</dependency>
+      <dependency task="036" status="pending">FR-20 flag-gated swap live (impersonated derivation is the active policy).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: an error composing the service-request set denies (empty set), never throws into a permissive path. Scope: the new compose branch.</constraint>
+    <constraint source="NFR-02">No regression in request cost — adding the fourth root MUST NOT add unconditional per-request Dataverse round trips beyond the existing composition budget; compose lazily or batch alongside the existing three. State the measured round-trip count in the PR. Scope: strategy composition.</constraint>
+    <constraint source="CLAUDE.md-§10">BFF-touching: placement decision cited from .claude/constraints/bff-extensions.md in the PR; publish size measured and reported (ceiling 60 MB). Scope: PR description.</constraint>
+    <constraint source="ADR-034">Root sets remain roots-only — do NOT add child-entity accessible sets (AccessibleCommunicationIds etc.); FR-26 stamps make them unnecessary and 06 §F1 shows they would be 2-hop. Scope: whole task; adding a child-entity set is an escalation, not a decision.</constraint>
+    <constraint source="ADR-038">Tests at KEEP paths (tests/unit/Sprk.Bff.Api.Tests + seam tests where the suite already covers root composition); no Mock of HttpMessageHandler. Scope: new tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external-access principal composition</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/01-spa-plane.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Access-control seam map.</pattern>
+      <pattern name="membership-consumer" location=".claude/patterns/api/membership-consumer.md">How consumers use MembershipResolverService.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Read the AS-MERGED Phase 1/2 shapes of the five target files before editing.</step>
+    <step order="1">Extend the principal contract with the service-request root set, mirroring exactly how AccessibleMatterIds is declared, filled and consumed.</step>
+    <step order="2">Extend AccessibleRecordSetService: add sprk_servicerequest to the grant-supported root entities; compose the systemuser term via the Phase-1 impersonated source and the contact term via grants (+ standing membership if the shipped pattern includes it for the other roots — match, do not innovate).</step>
+    <step order="3">Fill the set in BOTH strategies (workforce + CIAM), matching each strategy's shipped pattern for the other three roots. Verify the existing service-requests module (sprk_requestedby dimension) still behaves identically — do not change its descriptor here.</step>
+    <step order="4">Tests: systemuser with an accessible service request resolves it in the set; contact with a service-request grant resolves it; contact without resolves empty; composition error yields empty set (fail-closed); existing three roots unchanged (regression pins).</step>
+    <step order="5">dotnet build + test green; publish size + round-trip count reported.</step>
+    <step order="6">Update TASK-INDEX.md; note decisions in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_servicerequest grants are not representable in sprk_externalrecordaccess (e.g. the grant table's entity-type field/choice lacks a service-request value), STOP and escalate — the fix is a Phase-2 registry/schema decision, not an improvised column.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (fourth-root composition tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce systemuser whom Dataverse says can read service request SR1, the principal's service-request set contains SR1.</criterion>
+    <criterion testable="true">Given a CIAM contact holding an active sprk_externalrecordaccess grant on SR2, the principal's service-request set contains SR2.</criterion>
+    <criterion testable="true">Negative: a contact with no service-request grant has an EMPTY service-request set (not null, not throwing), and a compose error also yields empty (fail-closed).</criterion>
+    <criterion testable="true">Negative: no AccessibleCommunicationIds / AccessibleEventIds / AccessibleInvoiceIds set exists anywhere after this task (grep clean) — child sets stay banned.</criterion>
+    <criterion testable="true">Regression: existing project/matter/workassignment composition tests pass unmodified.</criterion>
+    <criterion testable="true">Build green; publish size ≤ 60 MB reported; per-request Dataverse round-trip count stated and within NFR-02.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-27; 06 §F1. Tasks 055/056 consume the fourth root set.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

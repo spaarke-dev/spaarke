@@ -35,10 +35,17 @@
  * @see projects/smart-todo-r5/notes/task-033-saveclose-refresh.md
  */
 
-import { navigateToEntityRecordSurfaceAsync } from '@spaarke/ui-components';
+import { navigateToEntityRecordSurfaceAsync, getOobModalSize } from '@spaarke/ui-components';
 
 /** Entity logical name for the sprk_todo OOB main form (spec FR-11). */
 const TODO_ENTITY_NAME = 'sprk_todo';
+
+/**
+ * Uniform dialog chrome title for every To Do modal (smart-todo-r5 UAT
+ * 2026-08-18 item #1) — replaces the record's `sprk_name` so all To Do
+ * modals read the same. Also used by the CREATE path (newTaskLauncher).
+ */
+const TODO_DIALOG_TITLE = 'Smart To Do Item';
 
 /**
  * Open the sprk_todo OOB main form in OPEN-EXISTING mode as a modal (spec
@@ -57,6 +64,11 @@ export async function launchOpenTodoForm(
   const outcome = await navigateToEntityRecordSurfaceAsync({
     entityName: TODO_ENTITY_NAME,
     entityId: todoId,
+    // UAT 2026-08-18 #1 — uniform dialog title (not the record's sprk_name).
+    title: TODO_DIALOG_TITLE,
+    // UAT 2026-08-18 — down to createForm (70%×80%): fullCover(100%) → record(85%,
+    // "not smaller enough") → createForm. (Two steps down from the original.)
+    size: getOobModalSize('createForm'),
   });
   if (!outcome.launched) {
     // eslint-disable-next-line no-console

@@ -72,7 +72,7 @@ import {
 } from "@fluentui/react-icons";
 import { LookupField } from "@spaarke/ui-components";
 import type { ILookupItem } from "@spaarke/ui-components";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type {
   SpeContainerTypeConfig,
   SpeContainerTypeConfigUpsert,
@@ -544,12 +544,7 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
         : await speApiClient.configs.create(payload);
       onSaved(saved);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "An unexpected error occurred.";
+      const message = describeApiError(err, "An unexpected error occurred.");
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -1045,12 +1040,7 @@ export const ContainerTypeConfig: React.FC = () => {
       const data = await speApiClient.configs.list();
       setConfigs(data);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load container type configs.";
+      const message = describeApiError(err, "Failed to load container type configs.");
       setLoadError(message);
     } finally {
       setLoading(false);
@@ -1088,10 +1078,7 @@ export const ContainerTypeConfig: React.FC = () => {
       setEditingConfig(config);
       setDialogOpen(true);
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message :
-        err instanceof Error ? err.message :
-        "Failed to load config detail.";
+      const message = describeApiError(err, "Failed to load config detail.");
       setDeleteError(message);
     } finally {
       setEditLoading(false);

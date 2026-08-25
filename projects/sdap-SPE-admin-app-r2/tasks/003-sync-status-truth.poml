@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Make Dashboard Sync Status reflect actual per-concern outcomes</title>
+    <phase>1 Workstream A — Make failures visible</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (BFF service + endpoint) and .tsx (dashboard); tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified change to a single service's status aggregation; no architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, api, frontend, fluent-ui, error-handling</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The Dashboard reports Sync Status "OK" regardless of whether the underlying concerns returned data. Make the status a real aggregate of per-concern outcomes, so a failing concern is visible instead of masked.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and Fluent UI v9 React. Follow ADRs strictly.</role>
+
+  <goal>Sync Status is computed from actual per-concern results. When any concern fails, the Dashboard names which one — it never reads "OK" while a concern is failing.</goal>
+
+  <context>
+    <background>Spec §2.3 / FR-A03. Sync Status reads "OK" independent of whether the storage, container, or container-type concerns returned data. Combined with the silently-null storage tile, an operator sees a green dashboard over a broken app. This is the most direct instance of the spec §2.4 systemic defect.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeDashboardSyncService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/DashboardEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/dashboard</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The real error surface — per-concern failures must carry a real reason.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the Sync Status field. Status MUST be derived from per-concern outcomes captured at call time. A hardcoded or optimistic default is the defect being removed — do not reintroduce one.</constraint>
+    <constraint source="project">Scope: partial success. When some concerns succeed and others fail, the UI MUST show a degraded state naming the failed concern(s) — not a binary OK/FAIL that hides which part broke.</constraint>
+    <constraint source="ADR-021">Scope: the dashboard status indicator. Use Fluent v9 semantic tokens; the status colour MUST adapt correctly in dark mode. No hex literals.</constraint>
+    <constraint source="ADR-019">Scope: the status endpoint. Failures surface as ProblemDetails.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF status aggregation + Fluent v9 status display</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Error mapping for per-concern failures.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load ADR-019, ADR-021, spec §2.3.</step>
+    <step order="1">Read SpeDashboardSyncService.cs and identify where the status value originates. Record why it is currently always OK.</step>
+    <step order="2">Define a per-concern outcome model (concern name, succeeded, error reason when failed).</step>
+    <step order="3">Capture each concern's real outcome during the sync pass; aggregate into an overall status with a degraded state for partial success.</step>
+    <step order="4">Return the per-concern breakdown from the dashboard endpoint.</step>
+    <step order="5">Update the dashboard UI to render the aggregate plus the failing concern name(s), using Fluent v9 semantic tokens.</step>
+    <step order="6">Build BFF (dotnet build) and the code page (npm install --legacy-peer-deps then build).</step>
+    <step order="7">Verify against Spaarke Dev: with a concern deliberately failing, the dashboard does not read OK.</step>
+    <step order="8">Measure publish size; record in task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set task 003 status to ✅.</step>
+    <step order="10">Document deviations in projects/sdap-SPE-admin-app-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the set of "concerns" that Sync Status should cover is not derivable from the existing service (i.e. it is ambiguous which subsystems the status is meant to represent), STOP and escalate rather than inventing a set — a wrong aggregate is as misleading as the current hardcoded OK.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Sync Status reflects failure">
+      <steps>
+        <step>Force one concern to fail (e.g. revoke the Graph permission or point at an invalid config)</step>
+        <step>Load the SPE Admin Dashboard</step>
+        <step>Inspect the Sync Status indicator</step>
+      </steps>
+      <expected>Status shows a failed or degraded state and names the failing concern. It does NOT read "OK".</expected>
+    </test>
+    <test name="Sync Status healthy path">
+      <steps>
+        <step>With all concerns healthy, load the Dashboard</step>
+      </steps>
+      <expected>Status reads OK and the per-concern breakdown shows every concern succeeding.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Inspect the status indicator in both themes</step>
+      </steps>
+      <expected>Status colours adapt via Fluent v9 semantic tokens per ADR-021; no hardcoded hex; contrast remains legible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeDashboardSyncService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/DashboardEndpoints.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/dashboard</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given any concern fails, when the Dashboard renders, then Sync Status does not read "OK" and the failing concern is named.</criterion>
+    <criterion testable="true">Given all concerns succeed, when the Dashboard renders, then Sync Status reads OK with a per-concern breakdown showing each success.</criterion>
+    <criterion testable="true">Given some concerns succeed and others fail, when the Dashboard renders, then a degraded state is shown identifying exactly which failed.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to the dashboard status endpoint returns 401 ProblemDetails, not an unhandled error.</criterion>
+    <criterion testable="true">Status colours use Fluent v9 semantic tokens and adapt in dark mode (ADR-021); no hex literals.</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; code page builds; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-A03. Parallel-safe: owns SpeDashboardSyncService.cs and the dashboard UI — does NOT modify SpeAdminGraphService.cs, so it can run alongside task 002 in Wave 1.</notes>
+
+
+  <completion>
+    <date>2026-08-21</date>
+    <summary>The premise was partly wrong and partly right. The Graph-per-config path already reported "Partial". The REAL defect was one layer down: LoadContainerTypeConfigsAsync swallowed every exception and returned an empty list, which the caller could not distinguish from "no configs registered" - and mapped to SyncSucceeded = true. So a Dataverse outage rendered as Sync Status "OK": a green dashboard over an app that could not read its own configuration.</summary>
+    <changed>Added SyncHealth (Healthy/Degraded/Failed), ConcernOutcome (per-concern name + succeeded + redacted reason), ConfigLoadResult (separates load-failure from none-registered), a public pure DeriveHealth domain rule, and a single Summarize construction point so health can never drift from the concerns that produced it. UI renders health with Fluent semantic colours and NAMES each failing concern with its reason. SyncSucceeded retained as a derived mirror for existing clients.</changed>
+    <back-compat>DashboardMetrics is cached in Redis for 2x the sync interval, so post-deploy payloads lack syncHealth. resolveSyncHealth falls back to the legacy boolean and degrades an unrecognised value to "Degraded", never "OK" - treating undefined as Healthy would reintroduce the optimistic default this task removes.</back-compat>
+    <verified>dotnet build 0 errors; 10,573 unit tests pass (+9 new); ArchTests 36/36; code page builds; publish 43.68 MB compressed (unchanged, ceiling 60); no hex literals (ADR-021 semantic tokens only); no literal SyncSucceeded = true remains.</verified>
+    <not-verified>POML step 7 and the three ui-tests NOT run: they need a DEPLOYED SPE Admin app plus the ability to force a concern to fail against Spaarke Dev, and no --chrome session. Acceptance criteria 1-3 and 5 are verified at the logic/type layer (9 tests over the health rule) but not rendered in a browser. DeriveHealth was made a public pure function specifically so the load-bearing rule rests on executable tests rather than a manual browser check.</not-verified>
+    <notes>projects/sdap-SPE-admin-app-r2/notes/task-003-completion.md</notes>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

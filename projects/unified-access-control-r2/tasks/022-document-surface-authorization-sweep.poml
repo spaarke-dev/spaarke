@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="unified-access-control-r2">
+  <metadata>
+    <title>Document-surface authorization sweep: C1/C2/C3 + H2/H3/H5 + the OBO read routes (Critical)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds authorization to live disclosure AND destroy endpoints -- the highest blast radius in the project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A whole endpoint class must be enumerated then gated consistently; task 002 gated 4 of ~15 members. Requires judgment about which existing filter each route should reuse and an explicit partial-failure contract for bulk.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/Documents* and Api/Filters/** -- broad contended surface; serialize against other BFF PRs.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api, auth, endpoints, security, documents</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>Close the three Critical authorization gaps on the document surface, then sweep the rest of the class so the next member is not missed. Every route that reads, mutates, destroys, or mints a URL for a document by caller-supplied GUID must make an authorization decision.</prompt>
+  <role>SPAARKE platform developer. Expert in ADR-008 endpoint filters and the CallerRecordAccessProbe / AuthorizationService seam.</role>
+  <goal>No document route reaches Dataverse or Graph app-only on a caller-supplied GUID without an authorization decision, and the class is enumerated in the notes so completeness is checkable rather than assumed.</goal>
+
+  <context>
+    <background>Review findings C1, C2, C3 (Critical) and H2, H3, H5 (High). C1: POST /api/documents/bulk-download makes NO authorization decision -- its filter checks that a tid claim exists, logs 'Bulk download authorization granted', and calls next(). 500 GUIDs per request, streamed app-only, with failures listed in a _FAILED.txt manifest while zipping continues, so one call both exfiltrates AND enumerates. The comment justifying the absent check cites preview-url as its model; preview-url is itself unfiltered. C2: DELETE /api/documents/{id} -- DeleteAsync takes no user identity and destroys the Dataverse row AND the SPE file app-only; reachable from a shipped client hook. C3: DELETE /api/v1/documents/{id} -- a second app-only destroy path, while its /download sibling did get a filter. H2: PUT and GET /api/v1/documents/{id} -- app-only tamper and metadata disclosure by GUID; the GET returns GraphDriveId/GraphItemId, which are exactly what C1 and C2 consume. H3: the /checkout, /checkin, /discard, /analyze, /checkout-status family -- app-only state ops on any document, and /checkout returns an EDITABLE URL. H5: ExternalDataService orders the accessible-projects query by sprk_name, which does not exist on sprk_project -> 400 -> caught -> empty list, so the external SPA renders 'you have no grants'. Task 002 gated 4 of roughly 15 members of this class.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/BulkDownloadAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentOperationsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/DocumentSurfaceAuthorizationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1.</constraint>
+    <constraint source="ADR-003">Fail closed on every route touched: an unresolvable document, an errored access check, or a caller with no rights must DENY. Never fall through to an app-only read, write, delete or URL mint.</constraint>
+    <constraint source="ADR-008">Prefer an endpoint filter and reuse the existing DocumentAuthorizationFilter where the shape matches. Add a new filter only where the route's identity source genuinely differs. Do not fork the probe.</constraint>
+    <constraint source="project">ENUMERATE THE CLASS FIRST and record the full inventory in the notes -- every route that takes a document id (or a list of them) and reaches Dataverse or Graph. Task 002 gated 4 of ~15; an unenumerated sweep will miss members again. The inventory is a deliverable, not a means to one.</constraint>
+    <constraint source="project">BULK IS A DISTINCT SHAPE. A per-item check on a 500-GUID request must decide the partial-failure contract explicitly: which items proceed, what the manifest discloses, and whether a denied item is distinguishable from a missing one. The current _FAILED.txt manifest is an enumeration oracle -- close that too.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse the existing probe and filter. Do not introduce a parallel authorization path for documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Enumerate every document-surface route accepting a caller-supplied document id, note its current filter (or absence), and record the inventory in the notes.</step>
+    <step order="1">Fix H5 first -- a one-line $orderby on a nonexistent column that is currently making the external project list render empty.</step>
+    <step order="2">Gate C1 (bulk-download): per-item authorization, plus an explicit partial-failure and manifest contract so a denial is not an enumeration signal.</step>
+    <step order="3">Gate C2 and C3 (the two DELETE paths): thread caller identity into the delete path; ADR-003 deny on unresolvable.</step>
+    <step order="4">Gate H2 (PUT and GET /api/v1/documents/{id}) -- the GET leaks the Graph pointers that feed C1 and C2.</step>
+    <step order="5">Gate H3 (the /checkout family), noting that /checkout returns an editable URL.</step>
+    <step order="6">Review the six OBO read routes: decide whether OBO alone suffices or a record check is still required, and record the reasoning either way.</step>
+    <step order="7">Author tests per gated route: in-scope succeeds, out-of-scope denies, and the app-only operation provably does not happen.</step>
+    <step order="8">Perturb every gate added; record the counts.</step>
+    <step order="9">Full suite; publish size; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If gating a route would break a shipped client (the bulk-download client hook, the checkout UI), STOP and escalate with the specific client and the proposed contract change rather than silently breaking it or silently skipping the gate.</trigger>
+    <trigger>If the six OBO read routes turn out to need a record-scope check that does not exist yet, escalate rather than inventing one inline -- that is Phase 1 evaluator scope.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DocumentAuthorizationFilter and CallerRecordAccessProbe already exist and already gate four members of this class (task 002). This task extends that same mechanism to the rest.</existing>
+    <extension>Reuse first: the filter and probe are the extension points. A new filter is justified only where a route's identity source genuinely differs -- bulk, which is per-item rather than per-request.</extension>
+    <cost-of-doing-nothing>Three Critical findings stay open on a live surface: one endpoint that both exfiltrates and enumerates 500 documents per call, and two that destroy a Dataverse row plus its SPE file for any authenticated caller by GUID.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentsBulkEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentOperationsEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/DocumentSurfaceAuthorizationTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-022-document-surface-inventory.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes contain a complete inventory of document routes taking a caller-supplied id, each with its authorization mechanism named.</criterion>
+    <criterion testable="true">POST /api/documents/bulk-download authorizes per item; an unauthorized item is not streamed.</criterion>
+    <criterion testable="true">The bulk manifest does not let a caller distinguish denied from nonexistent (no enumeration oracle).</criterion>
+    <criterion testable="true">Both DELETE paths deny a caller without rights, and the Dataverse row plus SPE file provably survive.</criterion>
+    <criterion testable="true">PUT and GET /api/v1/documents/{id} deny an out-of-scope caller; the GET returns no Graph pointers to an unauthorized caller.</criterion>
+    <criterion testable="true">The /checkout family denies out-of-scope callers; no editable URL is minted for them.</criterion>
+    <criterion testable="true">H5: the accessible-projects query no longer orders by a nonexistent column, and a test proves the list is non-empty for a caller with grants.</criterion>
+    <criterion testable="true">Every gate added has a perturbation that fails at least one test.</criterion>
+    <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>The largest task from the review, and the recommended first of the seven -- live disclosure AND destroy surface.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

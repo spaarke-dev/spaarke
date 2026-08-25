@@ -1,10 +1,11 @@
 # sprk_externalrecordaccess Entity Schema
 
-> **Entity Purpose**: Junction table linking external Contacts to Projects (and optionally Matters) with a specific access level. This is the single source of truth for "who can access what" in the Secure Project module, driving both the Power Pages table permission parent chain (Plane 1) and BFF API external authorization filter (Planes 2 & 3).
+> **Entity Purpose**: Junction table linking external Contacts (or Organizations — org-wide grants omit the Contact) to polymorphic grant roots (Project / Matter / Work Assignment) with a specific access level. This is the single source of truth for "who can access what" in the external access module, read by the BFF's external authorization layer (`ExternalParticipationService` / `CallerPrincipalResolver`). The Power Pages access model originally described here is RETIRED — external callers are Static Web Apps + Entra External ID (CIAM), broker-only through the BFF (ADR-028 A1).
 >
-> **Schema Version**: 1.0
+> **Schema Version**: 1.1
 > **Created**: 2026-03-16
 > **Project**: sdap-secure-project-module
+> **Corrected**: 2026-08-20 by the `unified-access-control-r2` investigation — field logical names, expiry field name, organization lookup, and never-built features (expiry worker, Power Pages chain, three-plane revocation) verified against `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` + `Infrastructure/ExternalAccess/ExternalParticipationService.cs`; unbuilt behavior is marked NOT IMPLEMENTED below
 
 ## Entity Definition
 
@@ -15,7 +16,7 @@
 | **Plural Display Name** | External Record Accesses |
 | **Primary Name Field** | sprk_name |
 | **Ownership Type** | Organization |
-| **Description** | Tracks external user (Contact) access grants to Spaarke records (Projects/Matters). Drives Power Pages table permission chain and BFF API authorization. |
+| **Description** | Tracks external user (Contact) and Organization access grants to Spaarke records (Projects/Matters/Work Assignments). Drives BFF API external authorization. (Power Pages table permission chain: RETIRED.) |
 
 ---
 
@@ -30,21 +31,24 @@
 
 ### Core Lookup Fields
 
-| Logical Name | Display Name | Type | Required | Target Entity | Description |
-|--------------|--------------|------|----------|---------------|-------------|
-| sprk_contactid | Contact | Lookup | Yes | contact | External user granted access — the key subject of this record |
-| sprk_projectid | Project | Lookup | Yes* | sprk_project | Project to which access is granted (*required when sprk_matterid is null) |
-| sprk_matterid | Matter | Lookup | No | sprk_matter | Matter to which access is granted (nullable — future expansion) |
-| sprk_accountid | Account | Lookup | No | account | Organization/firm the Contact belongs to (for reporting) |
-| sprk_grantedby | Granted By | Lookup | Yes | systemuser | Core User who created the access grant |
+> **Corrected 2026-08-20** — the original `*id`-suffixed logical names were wrong and 400'd every grant. Live names verified via `$metadata` (task 070): schema (write) names are PascalCase `@odata.bind` navigation properties (`GrantExternalAccessEndpoint.cs:290-334`); read form is `_sprk_{name}_value` (`ExternalParticipationService.cs:399-407`).
+
+| Logical Name | Schema Name (write) | Display Name | Type | Required | Target Entity | Description |
+|--------------|--------------------|--------------|------|----------|---------------|-------------|
+| sprk_contact (read: `_sprk_contact_value`) | `sprk_Contact@odata.bind` | Contact | Lookup | No* | contact | External user granted access. *OMITTED for an Organization grant — a row with no Contact + a bound Organization grants every ACTIVE org member at check time (`GrantExternalAccessEndpoint.cs:303-311`) |
+| sprk_project (read: `_sprk_project_value`) | `sprk_Project@odata.bind` | Project | Lookup | One-of | sprk_project | Grant root — exactly ONE typed root lookup is bound per record (project / matter / workassignment; `GrantExternalAccessEndpoint.cs:286-298`) |
+| sprk_matter (read: `_sprk_matter_value`) | `sprk_Matter@odata.bind` | Matter | Lookup | One-of | sprk_matter | Grant root (see above) |
+| sprk_workassignment (read: `_sprk_workassignment_value`) | `sprk_WorkAssignment@odata.bind` | Work Assignment | Lookup | One-of | sprk_workassignment | Grant root (see above) |
+| sprk_organization (read: `_sprk_organization_value`) | `sprk_Organization@odata.bind` | Organization | Lookup | No | sprk_organization | Firm/org association — targets the custom `sprk_organization` table, NOT the OOB `account` (owner steer 2026-08-11; `GrantExternalAccessEndpoint.cs:330-334`). Supersedes the originally documented `sprk_organization` → account |
+| sprk_grantedby | `sprk_GrantedBy@odata.bind` | Granted By | Lookup | No | systemuser | Core User who created the grant (audit field — resolved from the caller's AAD oid and OMITTED when unresolvable rather than failing the grant; `GrantExternalAccessEndpoint.cs:199-231`) |
 
 ### Access Control Fields
 
 | Logical Name | Display Name | Type | Required | Description |
 |--------------|--------------|------|----------|-------------|
-| sprk_accesslevel | Access Level | Choice | Yes | Determines Plane 2/3 permissions: View Only / Collaborate / Full Access |
-| sprk_granteddate | Granted Date | DateTime (DateOnly) | Yes | Date access was granted (defaults to today on create) |
-| sprk_expirydate | Expiry Date | DateTime (DateOnly) | No | Optional expiration date for time-limited access grants |
+| sprk_accesslevel | Access Level | Choice | Yes | Determines the BFF's effective rights: View Only / Collaborate / Full Access |
+| sprk_granteddate | Granted Date | DateTime (DateOnly) | Yes | Date access was granted (set to UTC now on create; `GrantExternalAccessEndpoint.cs:300`) |
+| sprk_expiresdate | Expires Date | DateTime (DateOnly) | No | Optional expiration date. **Corrected 2026-08-20**: the live field is `sprk_expiresdate`, NOT the originally documented `sprk_expiresdate` (verified live, task 070 — the old name 400'd any grant carrying an expiry; `GrantExternalAccessEndpoint.cs:321-326`). ⚠️ **Expiry is NOT ENFORCED anywhere**: the field is write-only today — no worker deactivates expired rows and the participation query filters on `statecode` only (`ExternalParticipationService.cs:406`) |
 
 ### Approval Fields (Document/File Access)
 
@@ -57,7 +61,7 @@
 
 | Logical Name | Display Name | Type | Description |
 |--------------|--------------|------|-------------|
-| statecode | Status | State | Active (0) / Inactive (1) — **deactivating this record revokes all three planes** |
+| statecode | Status | State | Active (0) / Inactive (1) — deactivating this record revokes the grant (the BFF's participation query reads `statecode eq 0` only; `ExternalParticipationService.cs:406`) |
 | statuscode | Status Reason | Status | Active: Active (1) / Inactive: Inactive (2) |
 | createdon | Created On | DateTime | Record creation timestamp |
 | modifiedon | Modified On | DateTime | Last modification timestamp |
@@ -70,31 +74,35 @@
 
 ### sprk_accesslevel (Access Level)
 
-| Value | Label | Plane 2 (SPE) | Plane 3 (AI Search) | Dataverse Table Permissions |
-|-------|-------|---------------|---------------------|----------------------------|
-| 100000000 | View Only | Reader container role | Project in search filter | Read only |
-| 100000001 | Collaborate | Writer container role | Project in search filter | Read + Create (docs), Read/Create/Write (events/tasks) |
-| 100000002 | Full Access | Writer container role | Project in search filter | Read + Create + Write (all tables) |
+> **Corrected 2026-08-20** — the original Plane 2/Plane 3 columns described NOT-IMPLEMENTED behavior (no SPE container role is ever assigned — external SPE access is broker-only per ADR-028 A1 — and no external AI Search filter exists). The actual enforcement is the BFF effective-rights mapping (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:126-134`):
+
+| Value | Label | Effective `AccessRights` (BFF) | SPE / AI Search |
+|-------|-------|-------------------------------|-----------------|
+| 100000000 | View Only | Read | NOT IMPLEMENTED (broker-only; no search plane) |
+| 100000001 | Collaborate | Read + Create + Write | NOT IMPLEMENTED |
+| 100000002 | Full Access | Read + Create + Write + Delete | NOT IMPLEMENTED |
 
 ---
 
 ## Form Layout
 
+> **Note (2026-08-20)**: field references below corrected to the live logical names (`sprk_contact`, `sprk_project`, `sprk_organization`, `sprk_expiresdate`); the layout itself is the original design and has not been re-verified against the deployed form.
+
 ### Main Form: Information
 
 **Header Section**
 - sprk_name (External Record Access — computed)
-- sprk_contactid (Contact)
-- sprk_projectid (Project)
+- sprk_contact (Contact)
+- sprk_project (Project)
 - sprk_accesslevel (Access Level)
 - statecode (Status)
 
 **Access Details Section**
-- sprk_accountid (Account)
-- sprk_matterid (Matter)
+- sprk_organization (Organization)
+- sprk_matter (Matter)
 - sprk_grantedby (Granted By)
 - sprk_granteddate (Granted Date)
-- sprk_expirydate (Expiry Date)
+- sprk_expiresdate (Expires Date)
 
 **File Access Approval Section**
 - sprk_approvedby (Approved By)
@@ -112,11 +120,11 @@
 | Column | Width | Sort |
 |--------|-------|------|
 | sprk_name | 200 | 1 (ASC) |
-| sprk_contactid | 150 | — |
-| sprk_projectid | 150 | — |
+| sprk_contact | 150 | — |
+| sprk_project | 150 | — |
 | sprk_accesslevel | 120 | — |
 | sprk_granteddate | 110 | — |
-| sprk_expirydate | 110 | — |
+| sprk_expiresdate | 110 | — |
 | sprk_grantedby | 150 | — |
 
 **Filter**: statecode = Active
@@ -129,11 +137,11 @@ Same columns as above, no filter.
 
 | Column | Width | Sort |
 |--------|-------|------|
-| sprk_contactid | 180 | 1 (ASC) |
+| sprk_contact | 180 | 1 (ASC) |
 | sprk_accesslevel | 120 | — |
-| sprk_accountid | 150 | — |
+| sprk_organization | 150 | — |
 | sprk_granteddate | 110 | — |
-| sprk_expirydate | 110 | — |
+| sprk_expiresdate | 110 | — |
 | sprk_grantedby | 150 | — |
 
 **Filter**: statecode = Active
@@ -145,12 +153,12 @@ Same columns as above, no filter.
 | Column | Width | Sort |
 |--------|-------|------|
 | sprk_name | 200 | — |
-| sprk_contactid | 150 | — |
-| sprk_projectid | 150 | — |
+| sprk_contact | 150 | — |
+| sprk_project | 150 | — |
 | sprk_accesslevel | 120 | — |
-| sprk_expirydate | 110 | 1 (ASC) |
+| sprk_expiresdate | 110 | 1 (ASC) |
 
-**Filter**: statecode = Active AND sprk_expirydate ≤ [next 30 days]
+**Filter**: statecode = Active AND sprk_expiresdate ≤ [next 30 days]
 
 ---
 
@@ -158,12 +166,14 @@ Same columns as above, no filter.
 
 ### N:1 Relationships (Lookups — this table references)
 
-| Relationship | This Field | Parent Table | Behavior |
+> **Note (2026-08-20)**: relationship schema names below are the ORIGINAL design names and have NOT been re-verified against live metadata (the live field logical names differ from the design — see Core Lookup Fields). "This Field" column corrected; the organization lookup targets `sprk_organization`, not `account`. A `sprk_workassignment` root lookup also exists live (task 028) and is not in this original list.
+
+| Relationship (design name — unverified) | This Field | Parent Table | Behavior |
 |-------------|-----------|--------------|----------|
-| sprk_externalrecordaccess_contactid_contact | sprk_contactid | contact | Restrict (do not delete Contact if active access records exist) |
-| sprk_externalrecordaccess_projectid_sprk_project | sprk_projectid | sprk_project | Cascade — deactivate all access when project is deactivated |
-| sprk_externalrecordaccess_matterid_sprk_matter | sprk_matterid | sprk_matter | Cascade — deactivate all access when matter is deactivated |
-| sprk_externalrecordaccess_accountid_account | sprk_accountid | account | Referential (no cascade) |
+| sprk_externalrecordaccess_contactid_contact | sprk_contact | contact | Restrict (do not delete Contact if active access records exist) |
+| sprk_externalrecordaccess_projectid_sprk_project | sprk_project | sprk_project | Cascade — deactivate all access when project is deactivated |
+| sprk_externalrecordaccess_matterid_sprk_matter | sprk_matter | sprk_matter | Cascade — deactivate all access when matter is deactivated |
+| (organization lookup, added task 070) | sprk_organization | sprk_organization | Referential (no cascade) |
 | sprk_externalrecordaccess_grantedby_systemuser | sprk_grantedby | systemuser | Referential (no cascade) |
 | sprk_externalrecordaccess_approvedby_systemuser | sprk_approvedby | systemuser | Referential (no cascade) |
 
@@ -179,18 +189,19 @@ Same columns as above, no filter.
 | SDAP User (Core) | Yes | Yes | Yes | No |
 | Basic User | No | No | No | No |
 
-**Note**: External Contacts access this table exclusively through Power Pages table permissions (Contact scope), NOT Dataverse security roles.
+**Note**: External Contacts never read this table directly — the BFF reads it app-only on their behalf (broker-only, ADR-028 A1). The original "Power Pages table permissions (Contact scope)" model is RETIRED.
 
 ---
 
-## Power Pages Table Permission Configuration
+## Power Pages Table Permission Configuration — ⚠️ RETIRED / NOT IMPLEMENTED
 
-This table is **Level 0** in the Power Pages parent permission chain. See [power-pages-access-control.md](../../../../docs/architecture/power-pages-access-control.md) for full configuration steps.
+> **Corrected 2026-08-20**: Power Pages is retired. External access is served by Static Web Apps + Entra External ID (CIAM); the BFF resolves the caller's Contact and reads this table app-only (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs`, `ExternalParticipationService.cs`). No Power Pages table permission chain or web role exists. The original design is preserved below for lineage only.
 
 ```
+(retired design)
 Level 0: sprk_externalrecordaccess
          Scope: Contact
-         Relationship: sprk_contactid
+         Relationship: sprk_contact
          CRUD: Read only
          Web Role: "Secure Project Participant"
          → Unlocks parent chain to sprk_project and its children
@@ -204,9 +215,9 @@ Level 0: sprk_externalrecordaccess
 
 2. **Computed name**: Auto-generate `sprk_name` as `"{ContactFullName} → {ProjectName}"` via pre-create plugin (thin validation only, per ADR-002).
 
-3. **Deactivation = full revocation**: Setting statecode = Inactive triggers BFF API to orchestrate Plane 2 (SPE membership removal) and Plane 3 (search filter exclusion). This is NOT done by a plugin — the BFF API handles it via the grant/revoke endpoints.
+3. **Deactivation = revocation** *(corrected 2026-08-20 — the original "full three-plane revocation" was never built)*: Setting statecode = Inactive revokes the grant because the BFF's participation query only reads Active rows (`ExternalParticipationService.cs:406`). The revoke endpoint deactivates the row + invalidates the Redis participation cache, plus a defensive SPE permission cleanup only when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`). There is no web-role removal (Power Pages retired) and no search-filter exclusion (no external search plane exists).
 
-4. **Expiry enforcement**: A scheduled BFF API worker checks `sprk_expirydate` and deactivates expired records. Power Pages checks statecode — an expired but still-Active record remains accessible until the worker runs.
+4. **Expiry enforcement — ⚠️ NOT IMPLEMENTED**: The originally promised scheduled BFF worker that checks `sprk_expiresdate` and deactivates expired records was never built. As of 2026-08-20 the expiry date is stored on grant (`GrantExternalAccessEndpoint.cs:321-326`) but enforced NOWHERE — the participation query filters on `statecode` only, so an expired but still-Active grant remains fully effective until someone deactivates it manually.
 
 ---
 
@@ -216,13 +227,13 @@ This table is queried by:
 
 | BFF Component | Query | Purpose |
 |--------------|-------|---------|
-| `ExternalCallerAuthorizationFilter` | Active records where `sprk_contactid` = authenticated Contact | Determine accessible projects for this caller |
-| `GrantAccessEndpoint` | Create new record | Grant external access (orchestrates all 3 planes) |
-| `RevokeAccessEndpoint` | Deactivate record by ID | Revoke external access (orchestrates all 3 planes) |
+| `ExternalParticipationService` (via `CallerPrincipalAuthorizationFilter` / `CallerPrincipalResolver`) | Active records where `_sprk_contact_value` = resolved Contact (plus org-grant rows with no Contact for the caller's active orgs) | Determine the caller's grant set (projects/matters/work assignments) |
+| `GrantExternalAccessEndpoint` | Create new record + invalidate participation cache | Grant external access (ONE Dataverse row — no SPE/web-role/search orchestration; broker-only) |
+| `RevokeExternalAccessEndpoint` | Deactivate record by ID + invalidate cache (+ defensive SPE cleanup when `ContainerId` supplied) | Revoke external access |
 | `ProjectClosureEndpoint` | Deactivate all records for project | Cascade revocation on project close |
-| `ExternalUserContextEndpoint` | Active records for Contact | Return user's project membership to SPA |
+| `ExternalUserContextEndpoint` | Resolved principal's grant set | Return user's project membership to SPA |
 
-**Redis Cache Key**: `sdap:external:access:{contactId}` (60s TTL, per ADR-009)
+**Redis Cache Key** *(corrected 2026-08-20)*: tenant-scoped `ITenantCache` entry — resource `external-access-grant`, contact-id component, version 3, 60s TTL (`ExternalParticipationService.cs:28-34`; per ADR-009). The old flat `sdap:external:access:{contactId}` key is no longer accurate.
 
 ---
 
@@ -238,4 +249,4 @@ pac solution import --path SpaarkeCore.zip --force-overwrite
 
 ---
 
-*Schema version: 1.0 | Created: 2026-03-16 | Project: sdap-secure-project-module*
+*Schema version: 1.1 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-08-20 by `unified-access-control-r2` (field names, org lookup, expiry field + unenforced expiry, retired Power Pages model, actual grant/revoke behavior)*

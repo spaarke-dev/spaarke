@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021a" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Grounded follow-on suggestion proposer (BFF) — retire the ungrounded generator; generalize the grounded proposer to the conversational moment (FR-04)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <!-- Splits the original task 021 (per notes/021-grounded-suggestions-design-delta.md, owner-approved 2026-08-17).
+         021a = the BFF half (this file); 021b = the client render half. Close coordination on the typed SSE wire contract. -->
+    <!-- COMPLETED 2026-08-17 (opus/high FULL). Retired the ungrounded free-string generator
+         (ChatEndpoints.GenerateAndEmitSuggestionsAsync — no capability menu, untyped strings, the P2 dead-end) and
+         generalized the grounded proposer (AssistantSuggestionService) to the conversational moment. 4 files:
+         (1) ConsumerRoutingService.FilterByContextTypes — deterministic UNION context pre-filter (ADR-039 aid,
+         widened from one type to the open-tab union). (2) AssistantSuggestionService — typed
+         SuggestedFollowup{Capability,Question} + SuggestForConversationAsync (conversation tail + union candidate
+         scope + active-tab server-derived content) + typed ParseFollowups (closed-catalog guard preserved: an
+         off-catalog capability id is dropped; a question re-enters the loop, no id); proactive SuggestAsync
+         contract UNCHANGED (capability-only). (3) suggest-followups.action.json — two-kind output schema
+         (kind=capability|question, OpenAI-strict-safe all-fields-present) + optional conversationTail input +
+         rewritten split-instruction prompt (imperative=capability / interrogative=question; PROACTIVE moment =
+         capabilities-only, closes review W1); proactive operand byte-identical. (4) ChatEndpoints — ONE predictable
+         grounded pass per turn (removed the <150-char skip + the keyword-hijack mutual-exclusion + the separate
+         proactive trigger); typed "suggestions" SSE event (ChatSseFollowupItem: capability|question|action —
+         the [action:*] string encoding re-typed as an 'action' kind); merge order actions→capability→question;
+         emits nothing when empty (absence = meaningful). Best-effort 4s timeout (ADR-019 — never breaks the turn).
+         14 new unit tests (8 conversational/two-kind/cadence/union-scope + 6 union-filter); existing 7 proactive
+         tests still green (backward-compatible refactor). BFF build 0 err; 27/27 touched tests; publish 44.97 MB
+         compressed incl PDBs (Δ +0.01 vs 44.96 baseline, no new pkgs, ≤60); CVE clean. Step 9.5 CLEAN
+         (independent ADR-039 review: no Critical; W1 fixed via prompt; ADR-039/040/015/013 compliant).
+         COORDINATION: 021b renders the typed SSE shape — LOCKED in notes/021-grounded-suggestions-design-delta.md
+         §9a. MERGE-ORDER GATE (review W2): 021a must NOT deploy ahead of 021b (the wire shape changed string[]→
+         typed); deploy together at task 080. FR-04 golden-utterance eval case (review S3) is task 024's deliverable
+         (E2 eval, deps 021b+023 — the no-dead-end behavior is user-observable only after 021b renders). -->
+    <rigor>FULL</rigor>
+    <rigor-reason>Retires a live suggestion-generation path + changes the SSE `suggestions` wire contract on the shared chat surface (hot-path BFF + ADR-039 grounded-proposer boundary); requires code-review + adr-check.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural: retires the ungrounded generator, generalizes the grounded proposer to a new trigger moment, and reshapes the suggestion wire contract on ChatEndpoints (hot-path). ADR-039 closed-catalog-proposer fidelity is the load-bearing constraint.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ChatEndpoints.cs (hot-path BFF) + AssistantSuggestionService + the SSE suggestions contract; coordinate with 021b (client render) + compose-r5/r6; run /conflict-check before the PR.</parallel-reason>
+    <deps>012</deps>
+    <tags>bff-api, ai, spaarkeai</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+  <prompt>Make every rendered follow-on suggestion capability-backed OR a safe conversational question, by consolidating onto the GROUNDED PROPOSER pattern already shipped in `AssistantSuggestionService`. (1) RETIRE the ungrounded free-string generator (`ChatEndpoints.GenerateAndEmitSuggestionsAsync`) and stop emitting the untyped `suggestions: string[]` SSE event. (2) GENERALIZE the grounded proposer so it runs after a chat response — keyed off the conversation tail + the deterministically context-scoped candidate capability menu (union of open-tab context-types + session/host) + the active tab's server-derived content — and returns a TYPED list of ≤3 suggestions of two kinds: `capability` (carries a real `targetBindingId` the model SELECTED from the supplied menu — hallucinated ids dropped, exactly as `ParseSuggestions` already does) and `question` (free text that re-enters the grounded agent loop, safe by construction). (3) Make CADENCE predictable: one grounded pass per assistant turn; absence means "nothing relevant", never a timeout/short-ack/keyword-hijack artifact. The model authors labels + question text (full creativity); it NEVER authors a capability's routing target. Follow notes/021-grounded-suggestions-design-delta.md.</prompt>
+  <role>SPAARKE BFF developer. Deep familiarity with the ADR-039 closed-catalog grounded-proposer pattern (AssistantSuggestionService), the Linear AI Consumer primitives (IActionResolver/IActionRunner), the SUGGEST-FOLLOWUPS catalog Action, the SprkChat SSE contract, and the deterministic context pre-filter (open-tab context-types, active-tab visible state).</role>
+  <goal>Every follow-on suggestion the Assistant emits is either a capability chip carrying a real, selected `targetBindingId` or a safe conversational question; the ungrounded free-string generator is gone; suggestions are emitted as a typed two-kind SSE structure; cadence is one predictable grounded pass per turn (no dead-ends possible, no random silence).</goal>
+  <context>
+    <background>Per the FR-04 design delta (notes/021-grounded-suggestions-design-delta.md, owner-approved 2026-08-17): the dead-end problem is the ungrounded `GenerateAndEmitSuggestionsAsync` (ChatEndpoints.cs ~:3211) — a ~100-output-token LLM call fed only the last user message + 500 chars of the response, NEVER told what the system can do, emitting untyped free strings. The FIX already exists as `AssistantSuggestionService.SuggestAsync` (the grounded proposer for the proactive-tab moment): it hands the model the REAL context-scoped candidate menu WITH descriptions and DROPS any suggestion whose id is not a supplied candidate (ParseSuggestions closed-catalog guard). This task generalizes that proposer to the after-a-response moment and retires the ungrounded path. TWO honest kinds: capability (bindingId → dispatch via the existing Click path) and question (text → re-enters the loop, grounded-outcomes-safe). Cadence today is inconsistent because of THREE hidden skips in ChatEndpoints (`:977` keyword action-chip hijack; `:1002` <150-char dedup-ack skip; 2s timeout) plus a separate proactive trigger — replace with one predictable pass. The code's own R7 comment (ChatEndpoints.cs:990-998) already prescribes this direction. Input context must be GENEROUS (conversation tail + real menu + descriptions + active-tab state); output stays modest + structured (~400 tokens for the ≤3 typed items). Active-tab identity + open-tab awareness already flow (activeContextTabId + liveTabs → context pre-filter, task 030). The three deterministic `[action:upload/search/select]` chips stay as-is for now (deterministic + backed); folding them into the grounded menu is a deferred phase-2.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AssistantSuggestionService.cs (the grounded proposer to generalize — candidate menu + descriptions + closed-catalog ParseSuggestions guard)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (retire GenerateAndEmitSuggestionsAsync ~:3211; the after-response suggestion emit ~:963-1021; the SSE suggestions event ~:3268)</file>
+      <file>infra/dataverse/actions/suggest-followups.action.json (the SUGGEST-FOLLOWUPS Action prompt+schema — author the two-kind output + the capability-vs-question split instruction + label grammar; mirror the operand shape)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ConsumerRoutingService.cs (ListTextProjectableBindingsAsync + FilterByContextType — the deterministic candidate pre-filter to scope by open-tab context-types + session/host)</file>
+      <file>the SSE event models (ChatSseEvent / ChatSseSuggestionsData) — evolve suggestions: string[] → a typed two-kind array (version carefully)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/** (grounded-proposer selection + closed-catalog-guard + typed-output + cadence tests)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the proposer">The suggestion turn is a PROPOSER, not a decider: it selects ≤3 from the deterministically pre-filtered closed candidate set; a suggestion whose capability id is not a supplied candidate MUST be dropped (no uncataloged capability may be proposed). No classifier, no second dispatch surface. The one probabilistic decider stays the Text-path agent turn; suggestion chips ride the existing Click path on click.</constraint>
+    <constraint source="ADR-040" scope="the proposer">The suggestion turn consumes no tool reads and persists nothing (ephemeral UI) — store-before-render is vacuously satisfied; do NOT add a new store.</constraint>
+    <constraint source="ADR-015" scope="grounded input">Active-tab content passed to the model stays server-derived + bounded (the same compact visible-state shape the chat turn uses); never trust client bytes.</constraint>
+    <constraint source="project" scope="no dead-ends">A rendered capability suggestion MUST carry a real selected targetBindingId; a question suggestion re-enters the grounded loop (safe). MUST NOT emit an untyped free string with no backing. MUST NOT use a keyword heuristic to classify suggestions.</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline 44.96 MB incl. PDBs) — measure + report absolute + delta; no new HIGH CVE; add/update tests in tests/unit/Sprk.Bff.Api.Tests/ (NFR-08).</constraint>
+    <constraint source="wire-contract" scope="SSE suggestions">Evolve the suggestions SSE event to the typed two-kind shape deliberately; coordinate the exact shape with 021b BEFORE landing (a client that expects string[] must not break).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/021-grounded-suggestions-design-delta.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Study AssistantSuggestionService (candidate menu build + BuildInput operand + ParseSuggestions closed-catalog guard) and the after-response suggestion emit path in ChatEndpoints (the three skips + the SSE event).</step>
+    <step order="2">Generalize the grounded proposer to the conversational moment: add a conversation-tail input + scope the candidate menu by the union of open-tab context-types + session/host (reuse the deterministic pre-filter); ground labels in the active tab's server-derived content.</step>
+    <step order="3">Author the SUGGEST-FOLLOWUPS Action for the TWO-KIND typed output (capability {targetBindingId,label} + question {text}) with the split instruction + label grammar (imperative+capability vs interrogative+question); keep the closed-catalog id-drop guard.</step>
+    <step order="4">Retire GenerateAndEmitSuggestionsAsync; wire the after-response path to the grounded proposer; make cadence one predictable pass (remove the coupling to the <150-char skip so a post-capability short ack still gets grounded followups).</step>
+    <step order="5">Evolve the SSE suggestions event to the typed two-kind shape (coordinate with 021b); keep it best-effort (ADR-019 — silent skip on failure, never break the turn).</step>
+    <step order="6">Tests: the proposer selects only supplied candidate ids (hallucinated dropped); typed two-kind output parses; a question kind round-trips; cadence — a post-capability short-ack turn still yields grounded followups; no untyped free string is emitted. dotnet build + publish size (absolute + delta) + CVE scan.</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If generalizing the candidate scope to the conversational moment cannot be expressed as the existing deterministic context pre-filter (open-tab context-types + session/host) and appears to need intent detection or a ranker, STOP and escalate (ADR-039 forbids a second decider) rather than adding classification.</trigger>
+    <trigger>If retiring the ungrounded generator would leave a real consumer with no grounded equivalent for a needed follow-on, surface it (the grounded proposer + the sprk_chiptransitions ConsumerChips should cover it; a gap is an escalation, not a silent regression).</trigger>
+  </escalation>
+  <justification>
+    <existing>AssistantSuggestionService already IS the closed-catalog grounded proposer (candidate menu + descriptions + hallucinated-id drop); ConsumerChips (sprk_chiptransitions) are the deterministic action-declared followups.</existing>
+    <extension>Generalize the existing proposer to the after-response moment + add a typed question kind + retire the ungrounded generator — no new service, no new dispatch surface, no new store (§11); the net change REMOVES a fragile surface.</extension>
+    <cost-of-doing-nothing>The ungrounded generator keeps emitting untyped free strings the client cannot verify — the P2 dead-end persists, and cadence stays random (three hidden skips).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AssistantSuggestionService.cs (generalized to the conversational moment + typed two-kind output)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ungrounded generator retired; grounded proposer wired to the after-response path; predictable cadence)</output>
+    <output type="code">infra/dataverse/actions/suggest-followups.action.json (two-kind output schema + split instruction + label grammar)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/** (proposer selection, closed-catalog guard, typed output, cadence)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The ungrounded free-string generator (GenerateAndEmitSuggestionsAsync) is removed; no untyped suggestions: string[] SSE event is emitted.</criterion>
+    <criterion testable="true">Every capability suggestion carries a targetBindingId that is one of the supplied candidates (a hallucinated/off-catalog id is dropped) — negative case tested.</criterion>
+    <criterion testable="true">The proposer emits a typed two-kind structure (capability + question); a question kind is a safe conversational follow-on (no bindingId).</criterion>
+    <criterion testable="true">Cadence is one predictable grounded pass per turn: a post-capability short-ack turn still yields grounded followups (the pre-existing <150-char silence is gone).</criterion>
+    <criterion testable="true">No classifier / second dispatch surface is added (verified against ADR-039 MUST-NOTs); the candidate scope is the deterministic context pre-filter.</criterion>
+    <criterion testable="true">Publish ≤60 MB reported (absolute + delta); no new HIGH CVE; tests added/updated.</criterion>
+  </acceptance-criteria>
+  <notes>Coordinate the exact typed SSE shape with 021b (client). The three deterministic [action:*] chips stay for now; folding them into the grounded menu is a deferred phase-2. The after-capability-dispatch moment may lean on the existing sprk_chiptransitions ConsumerChips (deterministic action-declared followups — task 023 territory); reconcile whether those merge with the grounded proposer's output or stay the dispatch-turn source. /conflict-check with compose-r5/r6 before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files + the design delta. Follow task-execute skill.</protocol>
+  </execution>
+</task>

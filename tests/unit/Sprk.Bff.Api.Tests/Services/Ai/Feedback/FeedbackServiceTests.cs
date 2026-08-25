@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai.Feedback;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Feedback;
@@ -260,6 +261,116 @@ public class FeedbackServiceTests
 
         // Assert — null is preserved (no truncation applied to null)
         captured!.Comment.Should().BeNull();
+    }
+
+    // =========================================================================
+    // FR-08 — feedback → governed per-user Preference memory (trigger wiring)
+    // =========================================================================
+
+    [Fact]
+    public async Task SubmitAsync_ExplicitStandingDirective_CapturesUserConfirmedPreference()
+    {
+        // "always" is a standing-directive marker → explicit user directive, regardless of rating.
+        var (sut, capture) = CreateSutWithCapture();
+        var entry = BuildEntry(FeedbackRating.ThumbsUp, comment: "Always summarize my tasks first.");
+
+        await sut.SubmitAsync(TenantId, entry);
+
+        capture.Verify(c => c.CapturePreferenceAsync(
+            It.Is<PreferenceCaptureInput>(i =>
+                i.TenantId == TenantId
+                && i.UserAadObjectId == UserId
+                && i.Origin == MemoryOrigin.User
+                && i.ConfirmedByUser == true
+                && i.SessionId == SessionId
+                && i.Key.Contains("Always")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ThumbsDownWithComment_NoDirective_CapturesAiDerivedUnconfirmedPreference()
+    {
+        var (sut, capture) = CreateSutWithCapture();
+        var entry = BuildEntry(FeedbackRating.ThumbsDown, comment: "The answer was too long.");
+
+        await sut.SubmitAsync(TenantId, entry);
+
+        capture.Verify(c => c.CapturePreferenceAsync(
+            It.Is<PreferenceCaptureInput>(i =>
+                i.Origin == MemoryOrigin.AiDerived && i.ConfirmedByUser == false),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ThumbsUpWithComment_NoDirective_DoesNotCapture()
+    {
+        var (sut, capture) = CreateSutWithCapture();
+        var entry = BuildEntry(FeedbackRating.ThumbsUp, comment: "Nice, thanks.");
+
+        await sut.SubmitAsync(TenantId, entry);
+
+        capture.Verify(c => c.CapturePreferenceAsync(
+            It.IsAny<PreferenceCaptureInput>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_NoComment_DoesNotCapture()
+    {
+        var (sut, capture) = CreateSutWithCapture();
+        var entry = BuildEntry(FeedbackRating.ThumbsDown, comment: null);
+
+        await sut.SubmitAsync(TenantId, entry);
+
+        capture.Verify(c => c.CapturePreferenceAsync(
+            It.IsAny<PreferenceCaptureInput>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_PreferenceCaptureThrows_StillReturnsFeedbackId()
+    {
+        // The feedback write is the contract — a preference-capture failure must never surface.
+        var (sut, capture) = CreateSutWithCapture();
+        capture
+            .Setup(c => c.CapturePreferenceAsync(It.IsAny<PreferenceCaptureInput>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("memory store unavailable"));
+        var entry = BuildEntry(FeedbackRating.ThumbsDown, comment: "From now on, cite sources.");
+
+        var id = await sut.SubmitAsync(TenantId, entry);
+
+        id.Should().Be(entry.Id);
+    }
+
+    /// <summary>
+    /// Builds a FeedbackService wired with a mock <see cref="IPreferenceMemoryCapture"/> and a stubbed
+    /// container write, returning both so trigger behavior can be asserted on the mock.
+    /// </summary>
+    private (FeedbackService sut, Mock<IPreferenceMemoryCapture> capture) CreateSutWithCapture()
+    {
+        var capture = new Mock<IPreferenceMemoryCapture>();
+        capture
+            .Setup(c => c.CapturePreferenceAsync(It.IsAny<PreferenceCaptureInput>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PreferenceMemoryCaptureOutcome.Captured("item-1"));
+
+        _containerMock
+            .Setup(c => c.CreateItemAsync(
+                It.IsAny<FeedbackEntry>(),
+                It.IsAny<PartitionKey>(),
+                It.IsAny<ItemRequestOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FeedbackEntry item, PartitionKey? _, ItemRequestOptions? _, CancellationToken _) =>
+                CreateMockResponse(item));
+
+        var sut = new FeedbackService(
+            _cosmosClientMock.Object,
+            _configuration,
+            _loggerMock.Object,
+            capture.Object);
+
+        return (sut, capture);
     }
 
     // =========================================================================

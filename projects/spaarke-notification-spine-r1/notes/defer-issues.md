@@ -22,6 +22,44 @@
 
 ---
 
+### ISS-002 — Deploy spaarke-bff-dev to pick up the SignalR endpoint-host diagnostic + suggestion idempotency fix
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-08-19 |
+| **Source** | SignalR UAT-10 resolution (2026-08-19) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/802 |
+
+**Description**: Two fixes are on master but NOT deployed to `spaarke-bff-dev` (rg-spaarke-dev). (a) compose-r7's endpoint-host diagnostic log in `SignalRDeliveryService.NegotiateAsync` — until live, a future SignalR key/endpoint drift (like UAT-10) is only diagnosable from a client 401, with NO server-side signal. (b) the `DailyBriefingSuggestionProducer` idempotency fix — the running dev BFF still writes a duplicate `kind=suggestion` outbox row on EVERY Daily-Briefing re-render, so the pending stack keeps ballooning in dev. Concrete failure: dev duplicate-suggestion bloat persists + future SignalR drift stays blind server-side.
+
+**Entry-points**: `deploy-bff-api.yml` (target spaarke-bff-dev); `Services/Notifications/SignalRDeliveryService.cs:224-231` (diagnostic); `Services/Ai/Narrators/DailyBriefingSuggestionProducer.cs` (idempotency dedupe).
+
+**Suggested fix**: run the BFF deploy workflow against spaarke-bff-dev.
+**Estimated effort**: < 1 hr. **Blockers**: none. **Related**: ISS-003.
+
+---
+
+### ISS-003 — Move dev `Notifications__SignalR__ConnectionString` to a Key Vault reference (ADR-028)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-08-19 |
+| **Source** | SignalR UAT-10 resolution (2026-08-19) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/803 |
+
+**Description**: On `spaarke-bff-dev` the SignalR connection string is a **plaintext App Setting**, not a Key Vault reference. UAT-10 (real-time delivery 401 outage) happened because the Azure SignalR access key was rotated but the plaintext setting was never re-copied — the configured key matched neither current primary nor secondary. A `@Microsoft.KeyVault(...)` reference lets a rotated key re-sync in ONE place (the vault secret), preventing silent recurrence of the exact outage. ADR-028 already requires the KV-reference pattern for production; dev is the gap. Concrete failure: a SignalR key rotation silently breaks real-time delivery again.
+
+**Entry-points**: `az webapp config appsettings list -n spaarke-bff-dev -g rg-spaarke-dev` → `Notifications__SignalR__ConnectionString`; secret source `az signalr key list -n spaarke-signalr-dev -g rg-spaarke-dev --query primaryConnectionString -o tsv`; `SignalRDeliveryOptions.SectionName = "Notifications:SignalR"`; ADR-028.
+
+**Suggested fix**: store the connection string as a KV secret; set the app setting to `@Microsoft.KeyVault(SecretUri=...)`; grant the App Service MI `get`; restart.
+**Estimated effort**: 1-2 hrs. **Blockers**: none. **Related**: ISS-002; parent outage `notes/handoffs/signalr-uat10-realtime-delivery-assessment-2026-08-19.md`.
+
+---
+
 ## Deferrals (DEF)
 
 ### DEF-001 — Consolidate ad-hoc oid↔systemuserid resolution onto shared ISystemUserIdentityResolver

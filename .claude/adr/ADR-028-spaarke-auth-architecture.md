@@ -21,7 +21,8 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** use tenant-specific Azure AD authority (NOT `common` or `organizations`) — resolved via `sprk_TenantId` env var → Xrm frame-walk fallback
 - **MUST** preserve INV-1..INV-8 MSAL configuration invariants (see `.claude/patterns/auth/spaarke-sso-binding.md`)
 - **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library version changes (INV-8 "Bundling Reality")
-- **MUST** use `DefaultAzureCredential` (managed identity) for all server outbound — Graph app-only, Dataverse service identity, Cosmos, Key Vault. NOT `ClientSecretCredential`. Documented exceptions: (1) Per-tenant SpeAdmin container-type ops (per-customer secrets, BFF MI cannot impersonate); (2) **Azure OpenAI / AI Services data plane** — see "Documented MI exceptions" below.
+- **MUST** use `DefaultAzureCredential` (managed identity) for all server **app-only** outbound — Graph app-only, Dataverse service identity, Cosmos, Key Vault. NOT `ClientSecretCredential`. Documented exceptions: (1) Per-tenant SpeAdmin container-type ops (per-customer secrets, BFF MI cannot impersonate); (2) **Azure OpenAI / AI Services data plane** — see "Documented MI exceptions" below.
+- **MUST** authenticate every **confidential client** that acts as the BFF identity (OBO / delegated exchanges, and app-only MSAL clients) with a **secret-free confidential credential** — **Managed Identity as a Federated Identity Credential (MI-FIC, the default)** or a **Key Vault certificate** where MI-FIC's tenancy constraints do not hold. NOT `.WithClientSecret(...)`. `DefaultAzureCredential` **cannot** satisfy this rule — it produces app-only tokens and cannot perform an OBO exchange; the correct mechanism is a **client assertion**. See **Amendment A4**. Transitional exception **E-3** (retained `BFF-API-ClientSecret`) was **CLOSED 2026-08-24** — the secret is deleted from app settings and Key Vault, and the credential order carries no fallback. A `.WithClientSecret(...)` site on the BFF identity is now simply a violation.
 - **MUST** validate inbound webhooks via HMAC-SHA256 signature header — fail-closed if signing key missing
 - **MUST** route admin + bulk API key endpoints through named `AuthenticationHandler<>` schemes (`AuthSchemes.BuilderAdminApiKey`, `AuthSchemes.RagApiKey`) with `CryptographicOperations.FixedTimeEquals` compare
 - **MUST** enrich every authenticated server log with `oid`, `appid`, `obo`, `tenantId`, `correlationId` via `ILogger.BeginScope` (AuditEnrichmentMiddleware)
@@ -128,9 +129,132 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 
 > **Note (A3)**: Applied **concise-only** — a full `docs/adr/ADR-028-*.md` does not exist (confirmed 2026-08-06); this concise ADR remains the canonical ADR-028 and now carries Amendments **A1, A2, and A3**. A3 ratifies the teams-app-r1 shipped implementation; it introduces no new IdP, client, or downstream token exchange.
 
+## Amendment A4 (2026-08-17): Secret-Free Confidential Credential for OBO and BFF-Identity Clients
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**: [`spaarke-auth-v4-dataverse-MI`](../../projects/spaarke-auth-v4-dataverse-MI/). **Owner-directed** 2026-08-17.
+>
+> ### ✅ ADOPTION STATUS — **CONFIRMED EMPIRICALLY 2026-08-20**
+>
+> A4 was accepted on reasoning; it is now **verified on the wire**. `spaarke-auth-v4-dataverse-MI` task 002
+> proved, against a real delegated user token on `spaarke-bff-dev/staging`, that the OBO grant succeeds under a
+> Managed-Identity-issued client assertion:
+>
+> | Proven | Detail |
+> |---|---|
+> | OBO → **Graph / SPE** | full SPE delegated scope set, real IdP exchange |
+> | OBO → **Dataverse `user_impersonation`** | **`upn`/`oid` preserved** — row-level authorization still evaluates as the *user*, not app-only |
+> | **Long-running OBO** | `InitiateLongRunningProcessInWebApi` → retrieval from cache |
+> | **Negative control** | an assertion minted for the wrong identity **fails loudly** at minting time |
+>
+> **MI-FIC is the adopted credential. The KV-certificate alternative was NOT taken** — it remains sanctioned for
+> cases where the same-tenant rule cannot hold (e.g. a cross-tenant Model 2 shape, still unresolved).
+>
+> Evidence: [`notes/decisions/002-spike-results.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md) ·
+> decision: [`notes/decisions/003-credential-decision.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/003-credential-decision.md).
+> `.WithClientSecret` remains in place under transitional exception **E-3** until task 033 removes it. Evidence: [`notes/RESEARCH-FINDINGS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md) · inventory: [`notes/CREDENTIAL-INVENTORY.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md) · tenancy: [`notes/TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md).
+
+### Why this amendment exists
+
+The pre-A4 MUST said "use `DefaultAzureCredential` … NOT `ClientSecretCredential`" for **all** server outbound, with no OBO carve-out. That rule was **unsatisfiable for OBO** — `DefaultAzureCredential` produces app-only tokens and cannot perform an On-Behalf-Of exchange — so the OBO paths necessarily violated it, silently and permanently. The consequences were concrete:
+
+1. **Recurring false-positive churn.** `adr-check` (and `adr-aware`) flagged every OBO `ClientSecretCredential` / `.WithClientSecret` as a violation with no sanctioned alternative to move to, so each auth-touching task re-litigated the same finding.
+2. **A wrong belief encoded as a rule.** `.claude/constraints/auth.md` asserted *"OBO flow (OAuth spec requires confidential client + secret)."* **This is false.** OAuth requires a confidential **credential**; a secret is one of three ways to satisfy it. That single clause foreclosed the question in every prior auth audit.
+3. **An undocumented deviation.** The OBO secret was never entered in this ADR's exception registry, despite the registry's own rule that exceptions be enumerated by PR.
+
+A4 replaces an unsatisfiable rule with the **required shape**, so the question stops being re-opened.
+
+### The required shape
+
+**Two distinct outbound classes, two distinct rules:**
+
+| Class | Mechanism | Credential |
+|---|---|---|
+| **App-only** (BFF acts as itself): Graph app-only, Dataverse service identity, Cosmos, Key Vault, Service Bus, AI Search | `TokenCredential` → `DefaultAzureCredential` pinned to the UAMI | Managed identity. No app registration involved |
+| **Confidential client** (BFF identity as an OAuth client): **OBO / delegated exchanges**, and MSAL app-only clients bound to the app registration | `IConfidentialClientApplication` + **client assertion** | **MI-FIC** (default) or **KV certificate**. **Never a client secret** |
+
+**Default credential — MI-as-Federated-Identity-Credential (MI-FIC).** GA since 2025-05-08. The app registration carries a federated identity credential trusting the App Service's **user-assigned** managed identity; MSAL presents the MI token as a standard `client_assertion`. Microsoft ranks this "Highest" security with **no rotation** (Azure-managed lifecycle), above certificates, and designates client secrets "Development and testing only."
+
+**Sanctioned alternative — Key Vault certificate.** Use where MI-FIC's same-tenant rule cannot be satisfied (see A4 constraints below and [`TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md)). Precedent already in production: `CiamGraphClientFactory` (`.WithCertificate`, KV PFX, private key ephemeral in-process).
+
+> **⚠️ Correction (2026-08-20, finding E4′): the declarative list below is NOT usable in this codebase.**
+> It only takes effect through `Microsoft.Identity.Web`'s token-acquisition surface, and this repo has **zero**
+> `EnableTokenAcquisition` / `ITokenAcquisition` / `IDownstreamApi` / `ClientCredentials` in any `.cs`.
+> `AddMicrosoftIdentityWebApi` (`AuthorizationModule.cs:36`) is **inbound validation only**, and
+> `Spaarke.Dataverse` has no Identity.Web reference at all. Every confidential client here is built directly via
+> `ConfidentialClientApplicationBuilder`.
+>
+> **Use the direct-MSAL equivalent below, and note the consequence: the ordered fallback that the rollback story
+> depends on must be BUILT, not inherited.** A reader who configures the JSON will observe no effect and may
+> wrongly conclude MI-FIC does not work here. The JSON is retained as accurate *general* Microsoft guidance.
+
+**Preferred wiring — declarative, ordered.** `Microsoft.Identity.Web` `ClientCredentials` supports an ordered fallback list, which is also the local-development answer:
+
+```json
+"AzureAd": {
+  "ClientCredentials": [
+    { "SourceType": "SignedAssertionFromManagedIdentity",
+      "ManagedIdentityClientId": "<UAMI client id>",
+      "TokenExchangeUrl": "api://AzureADTokenExchange/.default" },
+    { "SourceType": "KeyVault", "KeyVaultUrl": "...", "KeyVaultCertificateName": "..." }
+  ]
+}
+```
+
+Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<string>>)`, or `ManagedIdentityClientAssertion` from `Microsoft.Identity.Web.Certificateless` (**reuse the instance** — it caches the signed assertion until expiry).
+
+### New MUST / MUST NOT rules
+
+- **MUST** authenticate BFF-identity confidential clients with MI-FIC or a KV certificate (see the Constraints MUST added by A4).
+- **MUST** obtain the confidential credential from the **single shared credential provider** (extending `Infrastructure/Auth/ManagedIdentityCredentialFactory`) rather than constructing credentials per call site. Rationale: seven call sites each rolling their own credential handling is what made the previous state unfixable in one place.
+- **MUST** cache `IConfidentialClientApplication` instances at **singleton/process scope**, keyed by `(tenant|client)`. Client assertions require shared clients; per-request construction discards the MSAL token cache. Reference implementation: `DataverseUserClient` static CCA cache.
+- **MUST** use a **user-assigned** managed identity for MI-FIC (Entra supports UAMI only as a FIC issuer).
+- **MUST NOT** call `.WithClientSecret(...)` for any client authenticating as the BFF identity. **E-3 is closed (2026-08-24) and its site list is empty** — the only remaining carve-out is **E-1** (per-customer owning apps, which are *other* applications' identities).
+- **MUST NOT** treat `DefaultAzureCredential` as a substitute for the confidential credential on OBO paths — it cannot perform the exchange.
+
+### Platform constraints this rule must respect
+
+- **Same-tenant rule** — the UAMI and the app registration **must be in the same tenant**. Cross-tenant *resource* access is supported via a multitenant app provisioned into the customer tenant. **Cross-cloud is not supported.**
+- **Audience** is exactly `api://AzureADTokenExchange` (sovereign clouds differ).
+- **Max 20 FICs** on the object that **holds** them. In MI-FIC the FIC lives on the **app registration**; the UAMI is only the issuer and holds nothing. So the cap counts *how many UAMIs one app registration must trust* — which in **every Spaarke deployment shape is exactly one**. **The cap does not bind in our architecture and should not feature in scoping.** Evidence: [`TENANCY-AND-CREDENTIALS.md` §5](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md).
+- **Propagation delay** — newly created FICs can return `AADSTS70021` for several minutes; retry logic required.
+- **Silent misconfiguration** — a wrong issuer/subject/audience creates successfully and fails only at token exchange.
+- **No downstream constraint** — Dataverse, Graph/SPE, Power BI and Azure OpenAI validate only the resulting token; none constrains how the client authenticated.
+
+### Multi-tenant / provisioning shapes (normative)
+
+`customer-provisioning-orchestration-r1` deploys in two models. A4 binds both. **Full analysis lives in [`TENANCY-AND-CREDENTIALS.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md)**; the normative summary — the only thing that varies is whether the app registration and the OBO-performing UAMI share a tenant:
+
+| Deployment | App registration | UAMI performing OBO | Credential |
+|---|---|---|---|
+| **Model 1** — shared Spaarke environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI `sprk-{env}-shared-bff-uami`) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 2 — Spaarke tenant** (dedicated stamp) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 2 — customer tenant** (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
+
+**Every Spaarke deployment shape is intra-tenant, so MI-FIC covers all of them** — one mechanism, no special cases. The app registration **MUST** be created in the tenant that hosts the deployment.
+
+**Ruled out (owner decision, 2026-08-18)**: a Spaarke-owned app registration paired with customer-tenant compute. It is the only shape that would break the same-tenant rule (credentials attach to the *application object*, not the consented service principal), and it was never part of the approach — in a full customer-tenant install every job the app registration performs is customer-tenant scoped, so nothing requires a Spaarke-side app object. Rationale + the provisioning doc-fix it implies: [`TENANCY-AND-CREDENTIALS.md` §3.1](../../projects/spaarke-auth-v4-dataverse-MI/notes/TENANCY-AND-CREDENTIALS.md).
+
+**MUST (standing guard)**: if any future shape cannot satisfy the same-tenant rule, fall back to a Key Vault certificate — **not** to a client secret. A client secret is the one credential a hardened customer tenant can refuse outright via Entra app-management policy. No such shape exists today, so **no certificate provisioning automation is required**.
+
+**Open (provisioning's call, does not affect feasibility)**: whether the shared Model 1 BFF authenticates as ONE shared multitenant app registration or one per customer — this decides whether onboarding creates a FIC per customer or none. See `TENANCY-AND-CREDENTIALS.md` §4.
+
+### Adoption status (as of 2026-08-17)
+
+A4 states the target shape; adoption is staged by `spaarke-auth-v4-dataverse-MI`. Until it completes, exception **E-3** governs the retained secret. Verified prerequisites already in place on dev: the BFF app registration (`SDAP-BFF-SPE-API`, `1e40baad-…`) already carries a working FIC (GitHub Actions OIDC, audience `api://AzureADTokenExchange`, 1 of 20 used), and `spaarke-bff-dev` runs a **user-assigned identity only** (`mi-bff-api-dev`). **No FIC automation exists in the repo** — per-environment FIC creation is currently a manual Azure AD admin step.
+
+### Alternatives considered and rejected
+
+- **Path A only (document the secret as an exception and stop)** — rejected as the primary path: it entrenches the credential type Microsoft designates dev/test-only, keeps per-customer secret rotation as a permanent operating cost, and leaves Spaarke exposed to customer-tenant app-management policies that can block or time-limit secrets on a service principal. Retained as the **transitional** mechanism only (E-3).
+- **Path C (comply with the pre-A4 rule as written)** — not viable: the rule was literally unsatisfiable for OBO.
+- **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite (Model 2b/2c), where it is not a fallback but the correct answer.
+
+> **Note (A4)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries Amendments **A1–A4**. A4 changes **server-side credential mechanism only** — it introduces no new IdP or client surface, and **does not weaken the A1/A2/A3 "no OBO on the external, collaboration, or module-host planes" invariants**, which remain in force.
+
 ## Documented MI exceptions
 
 When MI is genuinely unworkable for a specific outbound surface, the **only** sanctioned alternative is a **Key Vault–backed secret reference** (`@Microsoft.KeyVault(SecretUri=...)`) — never plain text in App Service config. Each exception is enumerated here with rationale, scope, and a remediation TODO. Adding an exception requires a PR that updates this list.
+
+> **Post-A4 note**: for **confidential clients** the sanctioned non-MI credential is a **Key Vault certificate**, not a secret (Amendment A4). E-3 below is the single, time-boxed exception permitting a retained secret during the auth-v4 migration.
 
 ### E-1: SpeAdmin per-tenant container-type ops
 
@@ -146,6 +270,66 @@ When MI is genuinely unworkable for a specific outbound surface, the **only** sa
 - **Rotation**: 90-day cadence (operator responsibility — track alongside other KV-backed secrets in [`docs/guides/auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md)).
 - **Restore-to-MI**: Single config change — clear `AzureOpenAI__ApiKey` app setting; code falls back to `TokenCredential` (MI) automatically. Do this when AIServices-kind MI auth is consistently reliable (track via Microsoft Foundry product updates).
 - **Remediation TODO**: Restore MI when reliable. No filed ticket yet (the failure mode is widely documented but Microsoft has not published a confirmed fix).
+
+#### E-2 RE-AFFIRMED with current evidence — 2026-08-21 (`spaarke-auth-v4-dataverse-MI` task 052, FR-E3)
+
+E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, and two candidate root causes are now **eliminated**:
+
+| Hypothesis | Checked 2026-08-21 | Verdict |
+|---|---|---|
+| **Missing custom subdomain** — Microsoft's documented cause of exactly this symptom, and the reason task 052 was scheduled | `spaarke-openai-dev` has `customSubDomainName: spaarke-openai-dev` | **ELIMINATED.** It is configured, and was never the cause. The hoped-for one-config fix does not exist |
+| **Missing / unpropagated RBAC** | UAMI `9fd47efb-…` holds **both** `Cognitive Services OpenAI User` and `Cognitive Services User` at account scope | **ELIMINATED** (re-confirms the original finding, still true) |
+| **Wrong endpoint host** — the app is configured with `…openai.azure.com` while this `kind=AIServices` account's canonical endpoint is `…cognitiveservices.azure.com` | User-token chat completion returned **HTTP 200 on BOTH hosts** | **Not the cause for user tokens.** Untested for `idtyp=app` tokens — see below |
+
+**What was NOT re-tested, and why it matters:** the decisive comparison in E-2 is *user token → 200* versus *managed-identity token → 401 with correct claims*. Only the first half is reachable from a workstation. The managed-identity half needs IMDS inside the app container: a developer workstation has no route to IMDS, and the **Kudu SCM container does not receive `IDENTITY_ENDPOINT`** (verified 2026-08-21 — `has_endpoint=no`), so it cannot stand in. The original 401 evidence — App Insights `LoggingTokenCredential` capture showing correct `oid`, `appid`, `aud`, `idtyp=app` — remains the only direct measurement and is **not contradicted** by anything found today.
+
+**Next test, and it is cheap**: on the dev slot, set `AzureOpenAI__Endpoint` to `https://spaarke-openai-dev.cognitiveservices.azure.com/` (the account's own endpoint for its `AIServices` kind) **and** clear `AzureOpenAI__ApiKey`, then exercise a chat completion. The host alias is the one variable E-2 never isolated, and it is specifically plausible for an `AIServices`-kind account where `…openai.azure.com` is an alias rather than the resource's endpoint. Two app settings, instantly reversible.
+
+**Do not remove E-2 without that measurement.** Re-testing only the half that was already known to pass would reproduce the prior result and mistake it for a refutation — the failure mode this project exists to eliminate.
+
+### E-3: OBO / BFF-identity confidential clients — transitional retained secret (2026-08-17, per A4) — ✅ **CLOSED 2026-08-24**
+
+> ## ✅ E-3 IS CLOSED. THE SECRET IS GONE. DO NOT CITE THIS EXCEPTION FOR NEW CODE.
+>
+> Closed **2026-08-24** by `spaarke-auth-v4-dataverse-MI` task 033. Every listed site now takes its
+> credential from `OrderedCredentialClientProvider`; the live order on `spaarke-bff-dev` is
+> `[ManagedIdentityFederated]` — a **single entry with nothing beneath it** — and
+> `Graph:Credentials:RequireSecretFreeIdentity=true` refuses startup outside Development if
+> `ClientSecret` returns to the order.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` (2026-08-24 16:50:25Z) |
+> | Key Vault | `BFF-API-ClientSecret` + `bff-api-client-secret` (2026-08-24 17:14:40Z; soft-deleted, recoverable to 2026-11-22 — **not purged**) |
+>
+> **`adr-check` guidance changed**: a `.WithClientSecret(...)` site on the BFF identity is now a plain
+> **violation**. There is no longer a set of sites for which citing E-3 is correct. `adr-check`'s ADR-028
+> A4 row still says *"cite exception E-3 for the transitional sites it enumerates"* — that clause is
+> **spent**; the enumeration is empty.
+>
+> Enforced mechanically, not by reading: `tests/Spaarke.ArchTests/CredentialGuardTests.cs` fails the build
+> on a new site, and `CredentialCensusTests` asserts the construction-site count with a per-site reason.
+>
+> **Two corrections to the record below**, both found while executing the removal and left visible rather
+> than edited away, because this ADR is the place future readers will check:
+> 1. *"five keys"* was **four** on the live app — `Graph__ClientSecret` was never set there.
+> 2. *"a lowercase Key Vault alias `bff-api-client-secret` **used by the Office add-in deploy**"* is
+> **FALSE**. `deploy-office-addins.yml` uses a client **id** and no secret of any kind. The alias's only
+> consumer was `scripts/Sync-LocalConfig.ps1` → local development. This false clause propagated from
+> here into the project spec and into task 033's own plan, and would have sent the removal to protect the
+> wrong surface. It is the same failure this amendment exists to correct, one layer down.
+>
+> Record: [`projects/spaarke-auth-v4-dataverse-MI/notes/decisions/033-secret-removal.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/033-secret-removal.md)
+
+**Historical record of the exception as it stood while open:**
+
+- **Scope**: the confidential clients authenticating as the BFF identity that still use `.WithClientSecret` — `GraphClientFactory` (Graph OBO), `DataverseAccessDataSource` (Dataverse OBO + app-only), `DataverseUserClient` (Dataverse OBO), `AgentTokenService` (Graph + Dataverse OBO for the M365 Copilot agent), `ReportingEmbedService` / `ReportingProfileManager` (Power BI app-only), and the residual `ClientSecretCredential` fallbacks in `DataverseServiceClientImpl` / `DataverseWebApiService`. Config: `BFF-API-ClientSecret` behind five keys (`API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Graph__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret`) plus a lowercase Key Vault alias `bff-api-client-secret` used by the Office add-in deploy.
+- **Why**: pre-A4 the ADR mandated `DefaultAzureCredential`, which **cannot perform an OBO exchange**, and no secret-free confidential credential was specified. The secret was the only mechanism available. A4 now specifies the target; migration is staged because OBO is the highest-blast-radius auth surface (breaking it disables SPE documents, chat, Office add-ins, the Copilot agent, and **all Dataverse row-level authorization** — fail-closed, so users are locked out immediately and totally).
+- **Storage**: `BFF-API-ClientSecret` in `spaarke-spekvcert`, referenced via `@Microsoft.KeyVault(SecretUri=...)`. Live secret expires **2027-12-19**.
+- **Rotation**: per `docs/guides/SECRET-ROTATION-PROCEDURES.md` while E-3 is open. Rotation must update **all six paths**, including the lowercase alias.
+- **Restore-to-compliance**: complete `spaarke-auth-v4-dataverse-MI` — migrate all listed clients to the A4 credential provider, verify OBO per environment, then remove the secret from app settings and Key Vault and relax `DataverseOptions.ClientSecret` `[Required]` (+ `GraphOptionsValidator`, `AgentTokenOptions`).
+- **Remediation TODO**: ~~OPEN~~ — ✅ **DONE 2026-08-24** (task 033). E-3 was time-boxed to `spaarke-auth-v4-dataverse-MI` and that project discharged it. It is **not** a standing exception and must not be cited for new code; see the closure banner above.
+- **Not covered by E-3**: E-1 per-customer SpeAdmin owning-app secrets (different applications' identities, architectural); non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search — inventoried, out of A4 scope); plaintext secrets in Dataverse columns used by `BaseProxyPlugin` (separate defect, filed).
 
 ## Key Patterns
 
@@ -180,17 +364,34 @@ await initAuth({
 });
 ```
 
-### Server: managed identity for outbound
+### Server: managed identity for APP-ONLY outbound
 
 ```csharp
-// Graph app-only
-TokenCredential credential = _managedIdentityEnabled
-    ? new DefaultAzureCredential()
-    : new ClientSecretCredential(...);  // local-dev fallback
+// Graph app-only, Dataverse service identity, Cosmos, Key Vault, Service Bus.
+// Resolve the UAMI-pinned TokenCredential from DI (ManagedIdentityCredentialFactory) —
+// do NOT construct credentials inline.
+TokenCredential credential = serviceProvider.GetRequiredService<TokenCredential>();
 
-// Dataverse — DefaultAzureCredential chains EnvironmentCredential → 
-// WorkloadIdentityCredential → ManagedIdentityCredential → AzureCliCredential
+// DefaultAzureCredential chains EnvironmentCredential → WorkloadIdentityCredential
+// → ManagedIdentityCredential → AzureCliCredential (the local-dev leg).
 ```
+
+### Server: secret-free confidential credential for OBO (Amendment A4)
+
+```csharp
+// OBO and any MSAL client acting as the BFF identity.
+// DefaultAzureCredential CANNOT do this — OBO needs a client assertion.
+var cca = ConfidentialClientApplicationBuilder
+    .Create(clientId)
+    .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+    .WithClientAssertion(opts => _credentialProvider.GetAssertionAsync(opts))  // MI-FIC
+    .Build();                                                                  // or .WithCertificate(kvCert)
+
+var result = await cca.AcquireTokenOnBehalfOf(scopes, new UserAssertion(userToken))
+                      .ExecuteAsync();
+```
+
+**Rules**: obtain the credential from the shared provider (never per call site); **cache the CCA at singleton scope** keyed `(tenant|client)` — assertions require shared clients and per-request construction discards the MSAL token cache; prefer the declarative `AzureAd:ClientCredentials` ordered list (MI-FIC → KV cert → dev credential) over hand-built clients. `.WithClientSecret(...)` is **prohibited** for BFF-identity clients outside transitional exception **E-3**.
 
 ### Server: PostConfigure idempotency
 

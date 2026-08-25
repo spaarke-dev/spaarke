@@ -83,12 +83,14 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
         // Initialize Azure AI Search clients
         var searchEndpoint = _options.AiSearchEndpoint
             ?? throw new InvalidOperationException("DocumentIntelligence:AiSearchEndpoint is required for record matching");
-        var searchKey = _options.AiSearchKey
-            ?? throw new InvalidOperationException("DocumentIntelligence:AiSearchKey is required for record matching");
+        // auth-v4 task 053 (FR-E4): the key is optional now - absent selects Entra (managed identity)
+        // via the shared SearchClientFactory. It previously threw, which made the admin key mandatory.
+        var searchKey = _options.AiSearchKey;
 
-        var searchCredential = new AzureKeyCredential(searchKey);
-        _searchClient = new SearchClient(new Uri(searchEndpoint), _options.AiSearchIndexName, searchCredential);
-        _indexClient = new SearchIndexClient(new Uri(searchEndpoint), searchCredential);
+        _searchClient = Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateSearchClient(
+            new Uri(searchEndpoint), _options.AiSearchIndexName, searchKey, configuration, credential);
+        _indexClient = Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateIndexClient(
+            new Uri(searchEndpoint), searchKey, configuration, credential);
 
         _logger.LogInformation("Initialized DataverseIndexSyncService for index {IndexName}", _options.AiSearchIndexName);
     }

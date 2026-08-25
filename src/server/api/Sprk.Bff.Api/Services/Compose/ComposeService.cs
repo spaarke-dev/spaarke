@@ -647,6 +647,10 @@ public class ComposeService : IComposeService
         // still edits the doc).
         IReadOnlyList<ImportedRevision> importedRevisions;
         IReadOnlyList<ImportedComment> importedComments;
+        // UAT-12 (2026-08-18, honest/safe): track whether the annotation read actually FAILED (threw) vs
+        // genuinely returned nothing. An empty result on the failure path must NOT be presented as a clean
+        // document — the client surfaces an honest banner when this is true.
+        bool annotationReadFailed = false;
         try
         {
             var recovered = _annotationReader.Read(content.ToArray());
@@ -685,6 +689,7 @@ public class ComposeService : IComposeService
                 request.DriveId, request.DocumentSpeId);
             importedRevisions = Array.Empty<ImportedRevision>();
             importedComments = Array.Empty<ImportedComment>();
+            annotationReadFailed = true; // UAT-12: signal the client so it never shows this as clean
         }
 
         // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
@@ -815,6 +820,7 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            AnnotationReadFailed = annotationReadFailed,
             ContentModel = contentModel,
             ContentModelWarnings = contentModelWarnings,
             Origin = origin,
@@ -1213,14 +1219,34 @@ public class ComposeService : IComposeService
                     unavailable: false);
             }
 
-            if (preWriteETag is not null && request.ContentModel is null && (hasOperations || hasComments))
-            {
-                var storedStamp = await GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
-                    .ConfigureAwait(false);
-                var isStale = storedStamp is not null
-                    && !string.Equals(storedStamp.ETag, preWriteETag, StringComparison.Ordinal);
+            // UAT-25/26 (2026-08-18, honest/safe concurrency): compute the stale-base signal ONCE for both
+            // save paths. The effective baseline is the Compose save-version STAMP if this session already
+            // saved (Compose's own last write), else the client's LOAD-TIME ETag (request.BaselineETag) — the
+            // latter closes the first-Compose-save no-stamp gap (UAT-26). A mismatch vs the live SPE ETag means
+            // an EXTERNAL writer (Word / another tab) landed a new version since the client loaded.
+            var saveStamp = await GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+            var effectiveBaselineETag = saveStamp?.ETag ?? request.BaselineETag;
+            var baseMoved = preWriteETag is not null
+                && !string.IsNullOrEmpty(effectiveBaselineETag)
+                && !string.Equals(effectiveBaselineETag, preWriteETag, StringComparison.Ordinal);
 
-                if (isStale)
+            // UAT-25: the whole-body ContentModel re-author CANNOT re-anchor another writer's changes (unlike
+            // the op-log path below) — so a stale base there would SILENTLY OVERWRITE whatever Word / another
+            // tab wrote. Refuse honestly (412 reload-and-reapply, nothing overwritten) instead of clobbering.
+            if (request.ContentModel is not null && baseMoved)
+            {
+                _logger.LogWarning(
+                    "Compose save: STALE base on the ContentModel (whole-body) path for driveItem={DocumentSpeId} " +
+                    "(baseline eTag={BaselineETag} [{BaselineSource}], live eTag={CurrentETag}) — refusing (412) to " +
+                    "avoid silently overwriting an external writer; the client reloads + reapplies.",
+                    request.DocumentSpeId, effectiveBaselineETag, saveStamp is not null ? "stamp" : "load-time", preWriteETag);
+                throw new EtagPreconditionFailedException(request.DocumentSpeId!, ifMatch: effectiveBaselineETag);
+            }
+
+            if (request.ContentModel is null && (hasOperations || hasComments) && baseMoved)
+            {
+                var storedStamp = saveStamp;
                 {
                     var (patchedBytes, summary) = await ReanchorStaleSaveAsync(
                             request, contentToPersist, httpContext, observedAt, trackChanges: !cleanApply, cancellationToken)

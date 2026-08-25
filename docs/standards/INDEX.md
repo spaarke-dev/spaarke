@@ -16,6 +16,7 @@ This directory contains cross-cutting coding standards, anti-pattern catalog, in
 |----------|-------------|--------------|---------------|--------|
 | **[CODING-STANDARDS.md](CODING-STANDARDS.md)** | Naming conventions, file organization, formatting, error handling, and language-specific rules (.NET/C#, TypeScript, PCF, Code Pages) | 2026-04-05 | 2026-04-05 | New |
 | **[ANTI-PATTERNS.md](ANTI-PATTERNS.md)** | Catalog of patterns to avoid across BFF API, PCF controls, plugins, auth, and AI integration with corrective examples | 2026-04-05 | 2026-04-05 | New |
+| **[COMPONENT-COMPLEXITY.md](COMPONENT-COMPLEXITY.md)** | Evaluate **complexity, not line count** — the real god-class signals (responsibilities/cohesion/coupling), when a large file is legitimate, decompose-when-responsibilities-diverge. Enforced at `task-create` §3.5.6 + `code-review` + CLAUDE.md §11.5; size only observed (`scripts/report-large-server-files.ps1`). Supersedes the retired God-class LOC ratchet. | 2026-08-20 | 2026-08-20 | New |
 | **[INTEGRATION-CONTRACTS.md](INTEGRATION-CONTRACTS.md)** | Cross-module integration contracts: API → PCF, PCF → BFF, plugin → API, job contracts, event shapes, and versioning rules | 2026-04-05 | 2026-04-05 | New |
 | **[ODATA-NAMING-CONVENTION.md](ODATA-NAMING-CONVENTION.md)** | Dataverse OData attribute naming: PascalCase SchemaName for `@odata.bind` lookup binding vs lowercase LogicalName for filtering/selecting | 2026-07-08 | 2026-07-08 | New |
 

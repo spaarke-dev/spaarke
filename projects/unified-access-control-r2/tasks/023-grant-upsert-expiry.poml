@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="unified-access-control-r2">
+  <metadata>
+    <title>Grant upsert must write sprk_expiresdate on the match path (H1) + amend FR-09 acceptance</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the grant write path; interacts with task 007's read filter.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: add a column to a select + write it on the match path. The interaction with 007 is documented.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** -- contended path.</parallel-reason>
+    <deps>007,010</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>The grant upsert never writes sprk_expiresdate when it matches an existing row. Combined with task 007's read filter this produces three silent wrong outcomes. Write the expiry on the match path, and amend FR-09's acceptance criteria, which never mentioned expiry at all.</prompt>
+  <role>SPAARKE platform developer. Expert in the external grant lifecycle (grant / revoke / upsert) and the task-007 expiry read filter.</role>
+  <goal>Re-granting to add, extend, or clear an expiry takes effect. FR-09's acceptance criteria name expiry explicitly so the gap cannot reopen unnoticed.</goal>
+
+  <context>
+    <background>Review finding H1 (High). GrantExternalAccessEndpoint.cs:168-179 and ExternalGrantLifecycle.cs:132-135: the match path updates the row but never sets sprk_expiresdate, and RowSelect does not even select the column. With task 007's read filter now enforcing expiry, three outcomes are silently wrong: (1) re-granting to ADD an expiry is a no-op and access stays unbounded -- this is A-5's shape resurrected on the WRITE path by the two tasks meant to close it; (2) re-granting over an EXPIRED row returns 200 with a record id while the grantee still has nothing; (3) extending an expiry is ignored. ExpiryDate appears exactly ONCE in the entire grant-lifecycle suite, as null -- which is why none of this was caught. Note the related LOW finding: sprk_granteddate is written with a full timestamp against a DATE ONLY column; sprk_expiresdate is also DATE ONLY (live metadata), so match the column type.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs</file>
+      <file role="modify">projects/unified-access-control-r2/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1.</constraint>
+    <constraint source="ADR-003">A grant that cannot be applied as requested must not return 200 with a record id. If the expiry cannot be written, say so.</constraint>
+    <constraint source="project">sprk_expiresdate and sprk_granteddate are both DATE ONLY in live metadata. Write date-shaped values, not full timestamps -- the existing sprk_granteddate timestamp write is a recorded LOW finding; fix it here while in the file.</constraint>
+    <constraint source="project">Amend FR-09's acceptance criteria in spec.md to name expiry on the upsert path. The gap existed because the acceptance criteria never mentioned it -- fixing only the code leaves the same hole open for the next change.</constraint>
+    <constraint source="review-2026-08-24">ExpiryDate appears once in the whole grant-lifecycle suite, as null. Cover all three transitions: null -> date, date -> later date, and date -> null (clearing). A single happy-path test is what let this hide.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>projects/unified-access-control-r2/notes/task-007-grant-expiry.md</file>
+      <file>projects/unified-access-control-r2/notes/task-010-grant-lifecycle.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read the match path in both files and confirm against live metadata that sprk_expiresdate is DATE ONLY.</step>
+    <step order="1">Add sprk_expiresdate to RowSelect so the current value is readable.</step>
+    <step order="2">Write the expiry on the match path, covering add, extend, and clear.</step>
+    <step order="3">Fix the sprk_granteddate full-timestamp write against the DATE ONLY column while in the file.</step>
+    <step order="4">Amend FR-09's acceptance criteria in spec.md to name expiry on the upsert path.</step>
+    <step order="5">Author tests for all three transitions plus the expired-row re-grant case (which must not return a bare 200).</step>
+    <step order="6">Perturb: drop the expiry write; drop it only on the extend path. Record the counts.</step>
+    <step order="7">Full suite; publish size; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If clearing an expiry (date -> null) turns out to be ambiguous in the API contract -- omitted field versus explicit null -- STOP and escalate; that is a contract decision, not an implementation detail.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The upsert already exists and already writes other fields on the match path. This adds one column to an existing write.</existing>
+    <extension>Modification only. No new component.</extension>
+    <cost-of-doing-nothing>Re-granting to add an expiry silently leaves access unbounded, and the caller gets 200. This is the same class of defect as A-5, reintroduced on the write path by the two tasks that closed it on the read path.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</output>
+    <output type="spec">projects/unified-access-control-r2/spec.md</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-023-grant-upsert-expiry.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Re-granting an existing row with a new expiry persists that expiry.</criterion>
+    <criterion testable="true">Extending an existing expiry persists the later date.</criterion>
+    <criterion testable="true">Clearing an expiry behaves per the documented contract and is tested.</criterion>
+    <criterion testable="true">Re-granting over an expired row does not return a bare 200 implying access was restored when it was not.</criterion>
+    <criterion testable="true">sprk_expiresdate and sprk_granteddate are written as DATE ONLY values matching the column type.</criterion>
+    <criterion testable="true">FR-09's acceptance criteria in spec.md name expiry on the upsert path.</criterion>
+    <criterion testable="true">Perturbation: removing the expiry write fails at least one test.</criterion>
+    <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Review finding H1. Interacts with tasks 007 and 010 -- read their notes first.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

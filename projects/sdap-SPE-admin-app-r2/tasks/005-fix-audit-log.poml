@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Diagnose and fix the Audit Log screen (Dataverse-side)</title>
+    <phase>1 Workstream A — Make failures visible</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF; brownfield root-cause work; tags include bff-api and dataverse.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-cause diagnosis against Dataverse in a contained service; no architectural decision expected.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api, api, dataverse, error-handling</tags>
+    <estimated-effort>4-8 hours (open-ended — root cause not isolated)</estimated-effort>
+  </metadata>
+
+  <prompt>The Audit Log screen fails with "Failed to retrieve audit log entries from Dataverse." This is Dataverse-side, not Graph. Using the real error surface from task 001, isolate the actual cause and fix it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API queries, OData filters, and Dataverse security/privilege models. Follow ADRs strictly.</role>
+
+  <goal>The Audit Log screen renders entries against the Spaarke Dev tenant. The confirmed root cause is recorded in task notes.</goal>
+
+  <context>
+    <background>Spec §2.2 / FR-A05. Uncapped commitment to fix (owner decision OC-02). The cause is not isolated. Candidates include a missing Dataverse privilege on the app user, a query against a table or column that does not exist, a malformed OData filter, or auditing simply not being enabled on the target tables. Note SpeAdminGraphService is one of 16 files injecting DataverseWebApiClient — an independent REST stack, not the IDataverseService family.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/AuditLogEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAuditService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The real error surface — required to see the Dataverse error behind the generic message.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: root-cause determination. The cause MUST be established empirically from a real Dataverse response. Record the actual error before writing a fix.</constraint>
+    <constraint source="project">Scope: Dataverse writes. This task is READ-ONLY against Dataverse. If the fix requires a schema change or a privilege grant, that is configuration/escalation — do NOT create tables or columns from this task.</constraint>
+    <constraint source="ADR-044">Scope: any Dataverse GUID used in a query key predicate or filter. Canonicalize to bare-lowercase; MUST NOT interpolate a raw registry-format GUID into a key predicate.</constraint>
+    <constraint source="ADR-019">Scope: the audit endpoints. Failures surface as ProblemDetails carrying the real Dataverse error.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse Web API queries + audit data</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Error mapping for Dataverse failures.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §2.2, ADR-044.</step>
+    <step order="1">Reproduce the failure against Spaarke Dev with the task-001 error surface in place. Capture the real Dataverse error.</step>
+    <step order="2">Record it in projects/sdap-SPE-admin-app-r2/notes/audit-log-root-cause.md BEFORE writing any fix.</step>
+    <step order="3">Classify: (a) missing privilege on the app user, (b) query targets a nonexistent table/column, (c) malformed OData filter or GUID format, (d) auditing not enabled on the target tables, (e) other.</step>
+    <step order="4">If (b), (c): fix the query here. If (c) involves GUID format, apply ADR-044 canonicalization.</step>
+    <step order="5">If (a) or (d): this is Dataverse configuration, not code. Record the exact privilege or audit setting required, and fire the escalation trigger.</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors.</step>
+    <step order="7">Verify: Audit Log renders entries against Spaarke Dev, or is documented as blocked on a named configuration change.</step>
+    <step order="8">Measure publish size; record in task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set task 005 status to ✅ (or 🔄 if blocked on configuration).</step>
+    <step order="10">Document deviations in projects/sdap-SPE-admin-app-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the root cause is a missing Dataverse privilege or a disabled audit setting, STOP and escalate per CLAUDE.md §6 with the exact privilege/setting named. Do NOT grant privileges or change org settings from a task — that is an operator action.</trigger>
+    <trigger>If the audit data the screen wants does not exist in Dataverse at all (i.e. the screen was built against an imagined table, mirroring the spec §3.2 defect class), STOP and escalate — the correct answer may be to remove the screen, which is a scope decision.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/AuditLogEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAuditService.cs</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/audit-log-root-cause.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The real Dataverse error is captured and recorded in notes/audit-log-root-cause.md before any fix is written.</criterion>
+    <criterion testable="true">Given audit entries exist, when the Audit Log screen loads against Spaarke Dev, then entries render — OR the task is documented as blocked on a specifically-named configuration change.</criterion>
+    <criterion testable="true">Negative: a period with no audit entries renders an empty state distinguishable from a failure.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to the audit endpoint returns 401 ProblemDetails.</criterion>
+    <criterion testable="true">Any GUID used in a Dataverse key predicate or filter is bare-lowercase per ADR-044.</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors; publish size recorded and within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-A05. Owner decision OC-02 makes this an uncapped commitment to fix. Parallel-safe: owns AuditLogEndpoints.cs + SpeAuditService.cs, does NOT touch SpeAdminGraphService.cs — runs alongside task 002 in Wave 1.</notes>
+
+
+  <completion>
+    <date>2026-08-21</date>
+    <summary>Classification (b) - the code queried columns that do not exist. Established EMPIRICALLY against the live Spaarke Dev org via Dataverse MCP: `SELECT sprk_targetresource FROM sprk_speauditlog` returns "'sprk_SPEAuditLog' entity doesn't contain attribute with Name = 'sprk_targetresource'". That is the error behind the screen's message. Root cause recorded BEFORE any fix, per the binding constraint.</summary>
+    <bigger-finding>The WRITE path is broken the same way and swallows its own failures, so there is nothing to read even once the read is fixed. `SELECT COUNT(*) FROM sprk_speauditlog` = 0 rows despite the app having been exercised. Five independent write defects, each fatal to the create: sprk_name (NOT NULL) never written; sprk_targetresource does not exist; two @odata.bind nav properties wrong; sprk_category written as a string when it is a CHOICE (and only one of the nine caller categories even matches an option name). This is the THIRD instance in this project of the same shape - a lower layer collapsing a failure into an absent/empty result an upper layer reads as success.</bigger-finding>
+    <read-fixes>$select targetresource -> targetresourceid + targetresourcename; lookup _sprk_containertypeconfigid_value -> _sprk_containertypeconfig_value; GUID unquoted (Edm.Guid, bare-lowercase per ADR-044); category filtered as option-set int; DTO Category -> int? plus derived categoryLabel. The false comment asserting that lookup GUIDs "require single quotes" is replaced - it was the only place in the codebase saying so; 29 of the other 30 lookup filters in src/ already used a bare literal.</read-fixes>
+    <escalation-triggers>Both evaluated, NEITHER fires. Not a privilege or audit-setting problem (so no operator action needed). Not an imagined TABLE - the table is real and well-shaped; the code was built against imagined COLUMN NAMES on it, which is fixable in code, so removing the screen is not warranted.</escalation-triggers>
+    <verified>Corrected column set executes cleanly against live Dataverse; dotnet build 0 errors; 10,592 unit tests pass (+19 new); ArchTests 36/36; publish 43.68 MB compressed (unchanged); read-only - no schema change, no privilege grant.</verified>
+    <not-verified>End-to-end "the screen renders entries" NOT verified: no deployed app/BFF, AND the table has 0 rows so even a perfect read renders empty until the fixed write path runs in a real environment. Confirmation once deployed: perform any audited operation, then re-run the COUNT - it should be non-zero for the first time.</not-verified>
+    <notes>projects/sdap-SPE-admin-app-r2/notes/audit-log-root-cause.md</notes>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

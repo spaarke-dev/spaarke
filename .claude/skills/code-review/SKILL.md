@@ -297,6 +297,17 @@ CHECK code quality:
   - Class responsibility (single purpose)
   - Circular dependencies
 
+  Component complexity (per docs/standards/COMPONENT-COMPLEXITY.md — evaluate COMPLEXITY, not LOC)
+  - Is this change adding a SECOND (or Nth) responsibility to a component? (SRP / cohesion — the real smell,
+    not the line count.) Direction matters: a component doing MORE jobs is declining; the same file getting
+    simpler is improving.
+  - Signals to weigh: multiple reasons-to-change, low-cohesion method clusters, many ctor deps (>~8-12),
+    high cyclomatic complexity, mixed abstraction levels, merge-conflict-magnet churn.
+  - Do NOT flag a large file on size alone: a large, single-responsibility/cohesive file (state machine,
+    exhaustive mapping, generated code) is legitimate — accept it, and expect the PR to say why.
+  - When responsibilities have genuinely diverged, flag a DECOMPOSITION opportunity (extract the cluster with
+    its own reason-to-change) — as a suggestion toward deliberate refactoring, not a blocker.
+
   Documentation
   - Public API has XML docs (.cs)
   - Complex logic has comments

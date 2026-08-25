@@ -1291,8 +1291,24 @@ export interface ComposeLoggedOperation {
    * deleted (`MapResult.deleted`) — surfaced for review, per the never-silently-drop discipline.
    * The op remains in `orderedOps`; the save/apply path (Phase 5+) MUST NOT apply a flagged op
    * without review.
+   *
+   * NOTE this is set for TWO distinct reasons (see {@link anchorLostFlag} for the split): (1) a
+   * genuine later-deletion of the op's target content, and (2) a re-derivation FAILURE at serialize
+   * time. Both keep the op out of what the save path applies; only (2) represents a still-valid edit
+   * that would otherwise be lost silently.
    */
   deletedContentFlag: boolean;
+  /**
+   * UAT-23 (2026-08-18) — `true` only for the SILENT-LOSS subcase of {@link deletedContentFlag}: the
+   * op's anchor could NOT be re-derived against the current document at serialize time (its range
+   * drifted across a paragraph boundary, or its position no longer resolves to a paraId-bearing
+   * block) WITHOUT the target having been genuinely deleted by a later edit. That is a still-valid
+   * edit which the save filter drops — the save path counts these and surfaces an honest
+   * "N edit(s) couldn't be saved" degradation warning (never a silent drop). A genuine later-deletion
+   * (target content removed on purpose) is NOT flagged here — dropping it is expected and surfacing
+   * it would be false-alarm noise. Absent/false on every applied op.
+   */
+  anchorLostFlag?: boolean;
 }
 
 /** The `{orderedOps, baseVersion}` shape the save path (Phase 5, task 050) will transmit. */
@@ -1643,9 +1659,15 @@ export class RebasedOperationLog {
       })
       .map(entry => {
         const derived = deriveOperation(entry.op, entry.anchor, doc);
+        // UAT-23 (2026-08-18): a re-derivation failure (derived === null) that is NOT a genuine
+        // later-deletion is the SILENT-LOSS subcase — a still-valid edit whose anchor drifted so it
+        // can't be represented. Split it out from the genuine-deletion flag so the save path can
+        // surface ONLY the real losses and stay quiet on expected deletions.
+        const deriveFailed = derived === null;
         const loggedOp: ComposeLoggedOperation = {
           operation: derived ?? entry.op,
-          deletedContentFlag: entry.deletedContentFlag || derived === null,
+          deletedContentFlag: entry.deletedContentFlag || deriveFailed,
+          anchorLostFlag: deriveFailed && !entry.deletedContentFlag,
         };
         return { seq: entry.seq, primaryPos: primaryPositionOf(entry.anchor), loggedOp };
       });

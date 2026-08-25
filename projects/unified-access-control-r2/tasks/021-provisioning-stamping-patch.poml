@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="unified-access-control-r2">
+  <metadata>
+    <title>Re-scoped: make provision-project match design 5.1 -- drop BU + account creation, resolve the Secure Projects BU by name, own via its default team, stamp only the container, fail loudly</title>
+    <phase>0b Review remediation</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the secure-project provisioning path; deletes two creation steps with rollback fallout; changes record OWNERSHIP; and fixes a live regression that currently 409s every secure project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-path work with deletion fallout and Dataverse ownership-assignment semantics. All design decisions are already made and documented, but the blast radius is high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/ProvisionProjectEndpoint.cs -- a contended external-access path.</parallel-reason>
+    <deps>008</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <origin>Filed 2026-08-24 as "3 wrong names + swallowed 400" (review C4/C5). RE-SCOPED 2026-08-25 after an owner-requested review of the secure-project workflow found the mechanism itself contradicts design 5.1 -- see notes/secure-project-workflow-review-2026-08-24.md and notes/task-021-provisioning-stamping.md. The original nav-property blocker DISSOLVES under this scope: the only field still stamped is plain text.</origin>
+  </metadata>
+
+  <prompt>provision-project creates a business unit per secure project and an account per secure project, neither of which design 5.1 wants, then stamps three references using column names that do not exist and swallows the resulting 400. Do not repair the names. Delete the two steps that should not exist, resolve the single canonical Secure Projects BU by NAME, assign ownership to that BU's default owner team, stamp only the container id, and make the stamp fail loudly.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse ownership assignment (user-or-team owned entities, Assign privilege), business-unit resolution, and the external-access provisioning path.</role>
+
+  <goal>Provisioning does exactly what design 5.1 specifies and nothing else: one canonical Secure Projects BU resolved by name, ownership assigned to its default owner team, one SPE container created and recorded on the project, and any failure to record it surfaced loudly with the ids that were created. No BU is created, no account is created, and sprk_externalaccount is never touched.</goal>
+
+  <context>
+    <background>Read BOTH notes files before starting; they contain the evidence and the owner decisions:
+- notes/secure-project-workflow-review-2026-08-24.md -- the end-to-end review, including the live regression in section 4 and the container-resolution finding in the addendum
+- notes/task-021-provisioning-stamping.md -- why the original scope was wrong
+
+FOUR THINGS THIS TASK MUST FIX.
+
+(1) BU-PER-PROJECT CONTRADICTS THE DESIGN. design.md 5.1 says verbatim "no BU-per-project proliferation" and specifies ONE `Secure Projects` business unit. Step 2 of the endpoint creates a new BU per project and parents it to the ROOT BU -- so it also sits OUTSIDE the BU that NFR-05's assertion guards. Delete the creation. Resolve the canonical BU instead.
+
+(2) RESOLVE THE BU BY NAME, NOT GUID (owner decision 2026-08-25). The GUID differs per environment; the canonical BU now exists in dev and will be part of new-environment setup. Business unit names are unique per organisation in Dataverse, so a name lookup is deterministic. Read the name from configuration (default "Secure Projects") -- do not hard-code it, so a customer rename needs no deploy. `ResolveRootBusinessUnitIdAsync` (filter `parentbusinessunitid eq null`) is the wrong resolver and goes away.
+
+(3) OWNERSHIP GOES TO THE BU's DEFAULT OWNER TEAM -- not a service account (design 5.1a). Every Dataverse BU is created with a default owner team named after it, so the team already exists and needs no provisioning. `sprk_project` is user-or-team owned (`ownerid` is an OWNER field, live-metadata verified), so a team is a valid owner. The BFF application user needs Assign + Write on `sprk_project`.
+
+(4) THE ACCOUNT STEP MUST GO, AND `sprk_externalaccount` MUST NEVER BE WRITTEN. Firms are `sprk_organization` in this codebase (`sprk_assignedlawfirm1/2`, and `_sprk_organization_value` on the grant row); the external-access model reads no accounts at all. Critically, `sprk_externalaccount` is the CLIENT field -- `ProjectLiveFactResolver.cs:33` and `MatterLiveFactResolver.cs:35` both map predicate `client` to it. Repairing the old names as originally specified would have OVERWRITTEN each project's client with a synthetic "External Access - {project}" account. The five-month failure is the only reason no client data was corrupted.
+
+THE LIVE REGRESSION (review section 4) -- this is the most urgent part. The Step 1b idempotency guard added 2026-08-23 treats a project as already-provisioned when `sprk_containerid` is non-empty. But the wizard writes `sprk_containerid` at CREATE time, cascaded from the creating user's BU, for every project including secure ones (`EntityCreationService.applyUserBuDefaults`). So any user whose BU carries a container id creates a secure project that immediately 409s and is never provisioned. Fix the marker so it keys on state only provisioning writes -- never on shared state.
+
+WHAT STAYS: the SPE container creation (Step 3) is legitimate and is the one thing worth stamping. `sprk_containerid` is NVARCHAR(100) (live metadata) -- a PLAIN STRING write, no `@odata.bind`, no navigation property. That is why the original blocker dissolves.
+
+OUT OF SCOPE, deliberately -- do NOT drift into these:
+- The explicit share / access teams for licensed users -- FR-28, its own task
+- Making anything READ the project's container -- a separate project (`spaarke-secure-project-r1`); the container stamped here is written but not yet consumed, which is expected and stated in design 5.1c
+- The `Secure Project Owner` security role -- environment setup, per the spec's UAT section
+- The wizard's Secure Project step and the BU cascade suppression -- the new project</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectResponse.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectRequest.cs</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/ProvisionSecureProjectTests.cs</file>
+      <file role="modify">projects/unified-access-control-r2/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. Break the fix one line at a time and record how many tests fail. A zero-failure perturbation has TWO possible causes -- the test is at the wrong level, OR the perturbed code is unreachable. Distinguish them BEFORE rewriting tests (task 022 proved a zero was unreachable defence-in-depth, and "fixing the test" would have covered a path that cannot execute).</constraint>
+    <constraint source="project">VERIFY EVERY COLUMN against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter or write payload. SEVEN stale-column instances have now been found in this project, and the seventh -- `secure-project-fields-schema.md` -- is the ROOT CAUSE of this very task. Do not trust any schema doc.</constraint>
+    <constraint source="project">FAIL CLOSED on BU resolution. If the configured Secure Projects BU is not found, or more than one matches, return a non-2xx with a reason code. NEVER fall back to the root BU or the caller's BU -- a silent fallback would put secure records in a reachable BU, which is the disclosure this whole design exists to prevent. Select $top=2 so ambiguity is detectable rather than silently taking the first row.</constraint>
+    <constraint source="project">THE IDEMPOTENCY MARKER MUST NOT KEY ON SHARED STATE. `sprk_containerid` is written by the wizard's BU cascade before provisioning ever runs -- that is the live regression. Pick state that ONLY provisioning writes, and say in a comment why the obvious field is wrong. My own 2026-08-23 error was choosing a marker without checking who else writes the field.</constraint>
+    <constraint source="ADR-003">A provisioning run that cannot record what it created must NOT return success. Surface a non-2xx with a reason code AND the ids that were created, so an operator can reconcile an orphaned container. The swallow is why this survived five months.</constraint>
+    <constraint source="project">ORDER MATTERS: reduce the payload to fields that should actually be written BEFORE making the failure loud. Fail-loud on the current payload would hard-block provisioning on names known to be wrong.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10). Port task 016's $select-validating fake -- the provisioning fixture had none, which is why 5 of 5 tests passed while the endpoint 500'd.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md §11">This task DELETES surface. No new service, no new interface. If ownership assignment appears to need a new client, check `DataverseWebApiClient` first -- and note that `PlaybookSharingService` + `IDataverseAccessGrantService` already exist for POA work and are slated for consolidation, not forking.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read both notes files and design 5.1/5.1a/5.1c. Verify against live metadata: `sprk_containerid` type, `ownerid` is an OWNER field, and that a business unit named per the configured value exists in dev.</step>
+    <step order="1">Add configuration for the BU name (default "Secure Projects") and a resolver that looks it up by name, selecting $top=2 so ambiguity is detectable. Fail closed with a reason code on absent or ambiguous.</step>
+    <step order="2">Delete Step 2 (BU creation), Step 4 (account creation), their rollback paths, `ResolveRootBusinessUnitIdAsync`, `ResolveAccountForBuAsync`, and the now-dead response/request fields. Keep the response honest about what it actually did.</step>
+    <step order="3">Assign the project's owner to the resolved BU's default owner team. Confirm from live metadata how that team is identified, and verify a team assignment actually succeeds rather than assuming.</step>
+    <step order="4">Reduce the Step 5 stamp to `sprk_containerid` only -- a plain string write. Comment that no navigation property is involved and why.</step>
+    <step order="5">Fix the idempotency marker so it keys only on state provisioning writes. Comment why `sprk_containerid` is unsuitable.</step>
+    <step order="6">Replace the swallow with a fail-loud path: non-2xx, a reason code, and the created container id for reconciliation.</step>
+    <step order="7">Author tests: BU resolved by name; absent BU fails closed; ambiguous BU fails closed; owner set to the team; container stamped; a failed stamp returns non-2xx carrying the container id; provisioning NEVER writes sprk_externalaccount; a wizard-cascaded container id does NOT trigger the already-provisioned 409.</step>
+    <step order="8">Perturb: fall back to the root BU on absent; revert the marker to `sprk_containerid`; re-swallow the stamp failure; write `sprk_externalaccount`; skip the owner assignment. Record counts.</step>
+    <step order="9">Amend spec.md FR-18/FR-28 acceptance criteria if they still describe the old mechanism. Full suite (all SEVEN test projects); publish size; notes; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If assigning a record to the BU's default owner team fails because the team lacks entity privileges, STOP and escalate -- that is the `Secure Project Owner` role dependency (design 5.1a), which is environment setup and not this task's to create. Report exactly what Dataverse refused.</trigger>
+    <trigger>If no business unit matching the configured name exists in the target environment, STOP -- do not create one. That is environment setup, and creating it here would reintroduce exactly the behaviour this task removes.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ProvisionProjectEndpoint already resolves BUs, creates containers and PATCHes the project. This task removes two of its steps and corrects the other two.</existing>
+    <extension>Net deletion. One configuration key and one name-based resolver replace a creation path plus two resolvers.</extension>
+    <cost-of-doing-nothing>Secure-project provisioning currently 409s for any user whose BU carries a container id, so no secure project is provisioned at all. When it did run it created a per-project BU outside the BU that NFR-05 guards, plus an account nothing reads -- and repairing the stamp as originally specified would overwrite each project's CLIENT with a synthetic account.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ProvisionSecureProjectTests.cs</output>
+    <output type="spec">projects/unified-access-control-r2/spec.md</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No business unit is created by provisioning under any code path.</criterion>
+    <criterion>No account is created, and `sprk_externalaccount` is never present in any write payload -- pinned by a test that fails if it appears.</criterion>
+    <criterion>The Secure Projects BU is resolved by NAME from configuration; an absent or ambiguous match fails closed with a reason code and never falls back to the root or caller BU.</criterion>
+    <criterion>The project's owner is the resolved BU's default owner team, verified by reading the owner back.</criterion>
+    <criterion>The stamp writes `sprk_containerid` only, as a plain string with no `@odata.bind`.</criterion>
+    <criterion>A stamp failure returns non-2xx carrying a reason code and the created container id.</criterion>
+    <criterion>A project carrying a wizard-cascaded `sprk_containerid` is still provisionable -- the live 409 regression is closed, proven by a test.</criterion>
+    <criterion>Every perturbation in step 8 fails at least one test; counts recorded in the notes file.</criterion>
+    <criterion>All 7 test projects pass; publish size reported and &lt;=60 MB compressed incl. PDBs.</criterion>
+  </acceptance-criteria>
+
+  <notes>RE-SCOPED 2026-08-25. The original "fix 3 wrong names" scope would have activated a data-corruption bug. The nav-property blocker that stopped the first attempt dissolves here because the only remaining stamped field is plain text. Document isolation is NOT achieved by this task -- nothing reads the project's container yet; that is `spaarke-secure-project-r1`.
+
+COMPLETED 2026-08-25. Full record: notes/task-021-provisioning-stamping.md "What shipped".
+
+Delivered: BU resolved by name from SecureProject:BusinessUnitName ($top=2, fails closed on absent AND ambiguous, never falls back); ownership assigned to the BU's default owner team and VERIFIED BY READ-BACK; container-only stamp as a plain string; fail-loud on an unrecorded container carrying its id (ADR-003). Deleted: BU creation, account creation, both rollbacks, ResolveRootBusinessUnitIdAsync, ResolveAccountForBuAsync, AttemptRollbackBuAsync, the umbrella branch, UmbrellaBuId, and three response members.
+
+Idempotency marker = OWNERSHIP, not sprk_containerid (which the wizard writes at create time -- that was the live 409 regression). _sprk_securitybu_value still read as a legacy marker so retired-mechanism projects are refused, not silently migrated.
+
+Perturbations: 9 run, 9 bit (1/1/2/1/1/3/1/12/1). P2 and P8 initially returned ZERO -- neither cause task 022 named, but a third: the fixture's Dataverse double ignored $top and ignored the discriminating $filter predicates. Fixed the FAKE (honour $top, apply only the predicates asked for, seed decoy teams). Third instance of task 016's class.
+
+DEVIATIONS from the POML, all deliberate:
+1. Tests went to tests/integration/data-mutation/ExternalAccess/ (the EXISTING provisioning fixture, already a KEEP path with the $select guard) rather than the POML's tests/integration/auth/UnifiedAccessControl/ProvisionSecureProjectTests.cs, which did not exist. Forking a second provisioning fixture is what CLAUDE.md 11 forbids. Seventh unreliable POML path in this project.
+2. The POML's default BU name "Secure Projects" is WRONG. Live metadata: "Secure Project", SINGULAR. Shipping the plural would have failed closed on every call. Corrected in design.md + spec.md; pinned by a test.
+3. SpeFileStore.CreateContainerAsync made virtual -- the ADR-007 facade seam, without which the success path cannot be asserted at all. Precedent: DocumentCheckoutService.DeleteAsync, task 022.
+
+ESCALATION TRIGGER 1 DID NOT FIRE, and note WHY: the owner team holds System Administrator, so assignment succeeds by omnipotence, not by correct scoping. A green run in dev is NOT evidence the Secure Project Owner role exists -- it does not exist in the environment. Surfaced in design 5.1a and spec FR-28 as an open owner item.
+
+Verified: all 7 test projects 11,443 passed / 0 failed; publish 43.70 MB compressed incl. PDBs (ZERO delta, ceiling 60); --vulnerable clean.</notes>
+</task>

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// Maps all project data endpoints for authenticated external users.
 ///
-/// Routes (all under /api/v1/external — RequireAuthorization + ExternalCallerAuthorizationFilter):
+/// Routes (all under /api/v1/external — RequireAuthorization + CallerPrincipalAuthorizationFilter):
 ///   GET  /projects                       — list user's accessible projects
 ///   GET  /projects/{id}                  — single project by ID
 ///   GET  /projects/{id}/documents        — documents for a project
@@ -18,10 +18,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/contacts         — contacts with access to the project
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
-///   PATCH /todos/{id}                    — update a to-do (any project)
+///   PATCH /todos/{id}                    — update a to-do (scoped to the caller's projects)
 ///
 /// All project-specific endpoints verify the caller has a participation record for the requested
-/// project via ExternalCallerContext.HasProjectAccess(). Returns 403 if no access.
+/// project via CallerPrincipal.HasProjectAccess(). Returns 403 if no access.
+///
+/// PATCH /todos/{id} takes a to-do id rather than a project id, so it resolves the to-do's
+/// regarding-project first (ExternalDataService.GetTodoProjectAsync) and scopes on that — see
+/// FR-08 / finding A-7. Writes additionally require the Write right, mirroring the Create right
+/// that POST /projects/{id}/todos requires.
 ///
 /// smart-todo-decoupling-r3 (FR-29): Routes formerly exposed an event-based to-do model
 /// (GET/POST /events, PATCH /events/{id}). Replaced with sprk_todo routes here. See
@@ -29,7 +34,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// breaking-contract migration guide consumed by the external-spa (task 008).
 ///
 /// ADR-001: Minimal API — no controllers.
-/// ADR-008: Authorization applied via route group + ExternalCallerAuthorizationFilter.
+/// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.
 /// ADR-024: To-do regarding context applied via the four resolver fields + sprk_regardingproject lookup.
 /// </summary>
 public static class ExternalProjectDataEndpoints
@@ -335,11 +340,62 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        // Note: for update, we can't easily check project membership without looking up the to-do.
-        // The ExternalCallerAuthorizationFilter already validates the caller is authenticated.
-        // A stricter implementation would look up the to-do's project (via sprk_regardingproject)
-        // and verify access — acceptable for now given the app's low blast radius (only the
-        // authenticated user's linked data).
+        // FR-08 / finding A-7 (task 009, 2026-08-24) — scope the write BEFORE mutating.
+        //
+        // This handler previously applied the PATCH with no record-scope check at all: any caller
+        // who resolved to a CallerPrincipal could modify ANY to-do by GUID. The old comment
+        // justified it as "low blast radius (only the authenticated user's linked data)" — which
+        // was wrong: the route takes an arbitrary to-do id, not one derived from the caller.
+        //
+        // ADR-003 fail closed: an unreadable to-do, a to-do with no resolvable root, an ambiguous
+        // root, and a root outside the caller's accessible set ALL deny. The PATCH is never applied
+        // on a failed or ambiguous read. GetTodoRootAsync cannot distinguish "absent" from
+        // "unreadable" (see its remarks) — both land in the deny paths below, which is the point.
+        var (rootKind, rootId, todoName) = await dataService.GetTodoRootAsync(id, ct);
+
+        if (todoName is null)
+            return Results.Problem(statusCode: 404, title: "Not Found",
+                detail: "To-do not found");
+
+        // Scope on whichever of the three A-9 root sets the to-do is parented to. Owner decision
+        // 2026-08-24: matter and work assignment get the same functionality as project.
+        //
+        // ⚠️ ASYMMETRY, deliberate and owner-approved. Project access carries a LEVEL
+        // (ViewOnly/Collaborate/FullAccess → AccessRights), so a project-parented to-do additionally
+        // requires Write below. Matter and work-assignment accessible sets are bare id sets with no
+        // level anywhere in the pipeline (grantSet.Matters / .WorkAssignments are IReadOnlySet<Guid>),
+        // so for those, MEMBERSHIP IMPLIES WRITE. A matter collaborator who would have been
+        // "ViewOnly" on a project can therefore edit matter-parented to-dos. Closing that gap needs
+        // a per-matter access level in the grant model, which does not exist yet.
+        var inScope = rootKind switch
+        {
+            ExternalDataService.TodoRootKind.Project =>
+                callerContext.HasProjectAccess(rootId!.Value),
+            ExternalDataService.TodoRootKind.Matter =>
+                callerContext.GetAccessibleMatterIds().Contains(rootId!.Value),
+            ExternalDataService.TodoRootKind.WorkAssignment =>
+                callerContext.GetAccessibleWorkAssignmentIds().Contains(rootId!.Value),
+            // None (absent parent, or one of the ten non-scopeable regarding types) and Ambiguous
+            // (more than one root lookup populated) both deny. Same response as out-of-scope so the
+            // caller cannot infer WHY.
+            _ => false,
+        };
+
+        if (!inScope)
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "You do not have access to this to-do");
+
+        // Project-parented to-dos additionally honour the access level — mirrors CreateTodo's gate
+        // (which requires Create) with Write for an update. Matter / work assignment have no level
+        // to honour; see the asymmetry note above.
+        if (rootKind == ExternalDataService.TodoRootKind.Project)
+        {
+            var rights = callerContext.GetEffectiveRights(rootId!.Value);
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
+                return Results.Problem(statusCode: 403, title: "Forbidden",
+                    detail: "Your access level does not permit updating to-dos on this project");
+        }
+
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }

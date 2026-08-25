@@ -512,6 +512,112 @@ public class AgentTurnLoopContractTests
                 "null OpenTabContextTypes ⇒ tab-economy predicate inert (no tab awareness supplied)");
     }
 
+    // ── FR-02 advisory nested-turn narrowing (R4 task 011) ───────────────────────────────────
+    // When AdvisoryToolAllowList is non-null the projection is for an ADVISORY capability's NESTED
+    // bounded turn (design note Option A): keep ONLY the allow-listed grounded READ handler tools and
+    // DROP every capability-selecting tool so the nested turn structurally cannot dispatch a second
+    // capability. The allow-list is the resolved Action's own catalog data applied AFTER the Action was
+    // selected by binding id — deterministic context scoping, never a classifier / second decider (ADR-039).
+    // The allow-list carries sprk_toolid values (e.g. "spaarke.grid_overview") matched against the
+    // sanitised LLM-facing tool name. Null = inert (byte-identical to every pre-task-011 turn).
+
+    // The two grounded READ tools the R4 advisory task-agenda capability (task 012) allow-lists.
+    private static AgentToolFilterContext AdvisoryContext(params string[] allowList) =>
+        new(AgentToolFilterContext.AssistantSurface,
+            HasSessionFiles: false, HasActiveDocument: false, HasAnalysisBinding: false,
+            HasAttachedRecord: false,
+            OpenTabContextTypes: null,
+            AdvisoryToolAllowList: allowList);
+
+    [Fact]
+    public void PreFilter_AdvisoryAllowList_MountsOnlyAllowListedGroundedTools()
+    {
+        var gridOverview = AIFunctionFactory.Create(() => "x", "spaarke.grid_overview");
+        var dailyBriefing = AIFunctionFactory.Create(() => "x", "spaarke.daily_briefing_overview");
+        var offListHandler = AIFunctionFactory.Create(() => "x", "web_search");
+        var context = AdvisoryContext("spaarke.grid_overview", "spaarke.daily_briefing_overview");
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { gridOverview, dailyBriefing, offListHandler }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().BeEquivalentTo(
+            new[] { "spaarke.grid_overview", "spaarke.daily_briefing_overview" },
+            "an advisory turn mounts EXACTLY its declared grounded-tool allow-list — no other handler survives");
+        survivors.Should().NotContain("web_search",
+            "a grounded tool NOT in the Action's allow-list is scoped out of the advisory turn");
+    }
+
+    [Fact]
+    public void PreFilter_AdvisoryAllowList_DropsAllCapabilityAndRefusalTools_NoSecondDecider()
+    {
+        // The load-bearing ADR-039 negative case: the nested advisory turn must be a grounded reasoning
+        // EXECUTOR, not a dispatch decider — so NO capability-selecting tool may survive it.
+        var gridOverview = AIFunctionFactory.Create(() => "x", "spaarke.grid_overview");
+        var capability = CreateBindingTool("create-matter", surfaces: new[] { "assistant" });
+        var refusal = CreateRefusalTool();
+        var context = AdvisoryContext("spaarke.grid_overview");
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { capability, gridOverview, refusal }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().ContainSingle().Which.Should().Be("spaarke.grid_overview",
+            "only the allow-listed grounded read tool survives the advisory turn");
+        survivors.Should().NotContain(n => n.StartsWith("capability_", StringComparison.Ordinal),
+            "NO BindingCapabilityTool or RefusalCapabilityTool survives an advisory turn — the nested turn " +
+            "cannot dispatch a second capability (ADR-039: one probabilistic dispatch decider, the top-level turn)");
+    }
+
+    [Fact]
+    public void PreFilter_AdvisoryAllowList_MatchesToolIdCaseAndSanitisationRobustly()
+    {
+        // sprk_toolid entries are already regex-safe; the match sanitises BOTH sides so a display-shaped
+        // or differently-cased maker entry still resolves to the projected function name deterministically.
+        var gridOverview = AIFunctionFactory.Create(() => "x", "spaarke.grid_overview");
+        var context = AdvisoryContext("SPAARKE.GRID_OVERVIEW");
+
+        AgentToolProjection.PreFilter(new AIFunction[] { gridOverview }, context)
+            .Select(t => t.Name)
+            .Should().ContainSingle().Which.Should().Be("spaarke.grid_overview",
+                "allow-list membership is case-insensitive + sanitisation-normalized on both sides");
+    }
+
+    [Fact]
+    public void PreFilter_NullAdvisoryAllowList_IsInert_BackwardCompatible()
+    {
+        // The 6-arg construction (no AdvisoryToolAllowList) defaults it to null — a NON-advisory turn.
+        // The projection is byte-identical to today: capability + handler tools both pass unchanged.
+        var capability = CreateBindingTool("chat-summarize", surfaces: new[] { "assistant" });
+        var handler = AIFunctionFactory.Create(() => "x", "web_search");
+        var context = new AgentToolFilterContext(
+            AgentToolFilterContext.AssistantSurface, false, false, false);
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { capability, handler }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().Contain(capability.Name,
+            "null AdvisoryToolAllowList ⇒ advisory narrowing inert (this is a normal top-level turn)");
+        survivors.Should().Contain("web_search", "handler tools pass through unchanged on a non-advisory turn");
+    }
+
+    [Fact]
+    public void PreFilter_EmptyAdvisoryAllowList_MountsNoGroundedTools_FailClosed()
+    {
+        // A non-null EMPTY allow-list is fail-closed: an advisory turn with no grounded tools mounts none
+        // (only ever constructed by the task-012 runner, which requires a non-empty list before routing).
+        var gridOverview = AIFunctionFactory.Create(() => "x", "spaarke.grid_overview");
+        var capability = CreateBindingTool("create-matter", surfaces: new[] { "assistant" });
+        var context = AdvisoryContext(Array.Empty<string>());
+
+        AgentToolProjection.PreFilter(new AIFunction[] { gridOverview, capability }, context)
+            .Should().BeEmpty("empty (non-null) allow-list ⇒ zero grounded tools + all capability tools dropped");
+    }
+
     [Fact]
     public void Finalize_AnyInputOrder_ProducesOrdinalNameOrderAndBudgetWrap()
     {
@@ -793,6 +899,15 @@ public class AgentTurnLoopContractTests
             "tenant-1",
             "session-1",
             TestLogger);
+
+    // FR-02 (task 011): the tenant's no_match_handler Binding projects as the refusal tool. Used by the
+    // advisory-narrowing tests to prove NO capability-selecting tool (incl. the refusal tool) survives.
+    private static RefusalCapabilityTool CreateRefusalTool() => new(
+        CreateBinding(ConsumerTypes.NoMatchHandler, surfaces: null),
+        new ServiceCollection().BuildServiceProvider(),
+        "tenant-1",
+        "session-1",
+        TestLogger);
 
     private static async IAsyncEnumerable<T> ToAsyncEnumerable<T>(IEnumerable<T> items)
     {

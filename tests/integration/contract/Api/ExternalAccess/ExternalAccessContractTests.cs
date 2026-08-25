@@ -431,6 +431,20 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
 
+            // Delegation rule (unified-access-control-r2 task 008, FR-07): every /api/v1/external-access
+            // route now requires Write on the target record, evaluated as the caller via an OBO probe.
+            // These are CONTRACT tests — they assert what /invite-and-grant does for an ENTITLED caller,
+            // not who is entitled — so the fixture's caller is given Write. Without this the real probe
+            // has no Dataverse offline, correctly answers "no rights", and every case 403s before the
+            // contract under test is ever exercised.
+            //
+            // Deliberately NOT an "allow everything" stub: it reports Write on the record it is asked
+            // about, so if a future change aimed the check at the wrong record these tests would still
+            // pass — that discrimination is owned by DelegationRuleCharacterizationTests, which asserts
+            // the probed target. Here the point is only that an entitled caller gets through.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new EntitledCallerRecordAccessProbe());
+
             // Replace the Dataverse-backed external services with header-driven stubs (virtual seams).
             services.RemoveAll<ExternalParticipationService>();
             services.AddScoped<ExternalParticipationService>(sp =>
@@ -587,6 +601,27 @@ internal sealed class StubExternalDataService : ExternalDataService
 }
 
 /// <summary>
+/// A caller who holds Write on whatever record the delegation rule asks about — i.e. someone entitled
+/// to manage external access, which is the caller these contract tests are written from the
+/// perspective of (task 008, FR-07).
+/// </summary>
+/// <remarks>
+/// Substituted at the <c>virtual</c> seam on <see cref="CallerRecordAccessProbe"/>, so no OBO exchange
+/// or Dataverse call is attempted. Whether an UNENTITLED caller is refused — the actual subject of
+/// FR-07 — is asserted in <c>tests/integration/auth/UnifiedAccessControl/</c>, not here.
+/// </remarks>
+public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
+{
+    public EntitledCallerRecordAccessProbe()
+        : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+    { }
+
+    public override Task<AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(AccessRights.Read | AccessRights.Write);
+}
+
+/// <summary>
 /// <see cref="DataverseWebApiClient"/> double driven off the (additive, backward-compatible) <c>virtual</c>
 /// seams. Returns a configured JSON query result, records creates/updates by entity set. No HTTP.
 /// </summary>
@@ -596,11 +631,35 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         : base(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
-            ["Dataverse:ClientId"] = "x",
-            ["Dataverse:ClientSecret"] = "x",
-            ["Dataverse:TenantId"] = "x",
-        }).Build(), NullLogger<DataverseWebApiClient>.Instance)
+        }).Build(), NullLogger<DataverseWebApiClient>.Instance, NoOpCredential.Instance)
     { }
+
+    /// <summary>
+    /// Never used — this double overrides every virtual seam and issues no HTTP. It exists so the
+    /// base constructor needs no credential CONFIGURATION at all.
+    ///
+    /// <para>History, because this stub has now broken twice for unrelated reasons. It originally
+    /// passed <c>Dataverse:ClientId</c> / <c>:ClientSecret</c> / <c>:TenantId</c> — keys
+    /// <see cref="DataverseWebApiClient"/> never reads (it reads <c>API_APP_ID</c> /
+    /// <c>API_CLIENT_SECRET</c> / <c>TENANT_ID</c>) — and worked only because the constructor
+    /// silently fell through to <c>DefaultAzureCredential</c>. Task 010 replaced that silent fallback
+    /// with fail-fast validation, deliberately, since credential-selection-by-accident is the exact
+    /// defect FR-A1 exists to fix; 13 tests failed. Setting the managed-identity flag fixed it, but
+    /// bound the stub to the branch tasks 020/022/033 are about to rewrite. Injecting a credential
+    /// decouples it from both branches permanently. Code-review finding W-6.</para>
+    /// </summary>
+    private sealed class NoOpCredential : TokenCredential
+    {
+        public static readonly NoOpCredential Instance = new();
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "StubDataverseWebApiClient issues no HTTP; if this is reached, a virtual seam was left unoverridden.");
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "StubDataverseWebApiClient issues no HTTP; if this is reached, a virtual seam was left unoverridden.");
+    }
 
     /// <summary>JSON array returned from the next <see cref="QueryAsync{T}"/> (deserialized to List&lt;T&gt;).</summary>
     public string ContactQueryResult { get; set; } = "[]";

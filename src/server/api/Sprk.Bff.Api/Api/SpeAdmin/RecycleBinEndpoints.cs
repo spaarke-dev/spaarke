@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -152,13 +153,12 @@ public static class RecycleBinEndpoints
                 "ListDeletedContainers: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.recyclebin.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -169,7 +169,7 @@ public static class RecycleBinEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while listing deleted containers.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while listing deleted containers.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -283,13 +283,12 @@ public static class RecycleBinEndpoints
                 "RestoreContainer: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.recyclebin.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -300,7 +299,7 @@ public static class RecycleBinEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while restoring the container.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while restoring the container.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -416,13 +415,12 @@ public static class RecycleBinEndpoints
                 "PermanentDeleteContainer: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
                 containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Graph API Error",
-                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: ex.StatusCode is >= 400 and < 600
-                    ? ex.StatusCode.Value
-                    : StatusCodes.Status502BadGateway,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return ex.ToProblemDetails(
+                summary: "An error occurred communicating with the Graph API.",
+                errorCode: "spe.recyclebin.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -433,7 +431,7 @@ public static class RecycleBinEndpoints
 
             return Results.Problem(
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while permanently deleting the container.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while permanently deleting the container.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }

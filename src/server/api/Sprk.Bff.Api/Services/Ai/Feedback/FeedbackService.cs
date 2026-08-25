@@ -1,6 +1,7 @@
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Feedback;
 
@@ -28,9 +29,29 @@ public sealed class FeedbackService : IFeedbackService
     private const int MaxCommentLength = 500;
     private const int TopNegativeCommentsCount = 10;
 
+    /// <summary>
+    /// Conservative closed set of standing-directive markers (FR-08). A comment containing any of these
+    /// (case-insensitive) is treated as an EXPLICIT user directive — persisted as a <c>user</c>-origin,
+    /// user-confirmed preference. Kept narrow to avoid mis-firing on incidental usage; the FR-B-03
+    /// review/delete surface + upsert-by-key supersession bound any false positive's blast radius.
+    /// </summary>
+    private static readonly string[] StandingDirectiveMarkers =
+    {
+        "every time",
+        "everytime",
+        "each time",
+        "always",
+        "from now on",
+        "going forward",
+        "in future",
+        "in the future",
+        "whenever",
+    };
+
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<FeedbackService> _logger;
+    private readonly IPreferenceMemoryCapture? _preferenceCapture;
 
     /// <summary>
     /// Initialises the <see cref="FeedbackService"/>.
@@ -38,15 +59,23 @@ public sealed class FeedbackService : IFeedbackService
     /// <param name="cosmosClient">Singleton Cosmos DB client authenticated via DefaultAzureCredential.</param>
     /// <param name="configuration">Application configuration (CosmosPersistence:DatabaseName).</param>
     /// <param name="logger">Logger for write/query failures.</param>
+    /// <param name="preferenceCapture">
+    /// FR-08 feedback→memory seam (ADR-013 CRUD-safe facade). OPTIONAL so predated construction/tests stay
+    /// green (mirrors the optional <c>IAuditLogService</c> on <c>MemoryItemStore</c>): when supplied, an
+    /// explicit standing directive — or, inferred, a thumbs-down+comment — persists a governed per-user
+    /// <c>Preference</c> memory item via this facade. When null the pipeline is inert (no capture).
+    /// </param>
     public FeedbackService(
         CosmosClient cosmosClient,
         IConfiguration configuration,
-        ILogger<FeedbackService> logger)
+        ILogger<FeedbackService> logger,
+        IPreferenceMemoryCapture? preferenceCapture = null)
     {
         _cosmosClient = cosmosClient ?? throw new ArgumentNullException(nameof(cosmosClient));
         _databaseName = configuration["CosmosPersistence:DatabaseName"]
             ?? throw new InvalidOperationException("CosmosPersistence:DatabaseName is not configured.");
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _preferenceCapture = preferenceCapture;
     }
 
     // =========================================================================
@@ -93,7 +122,110 @@ public sealed class FeedbackService : IFeedbackService
             storedEntry.Id, storedEntry.SessionId, storedEntry.TurnIndex,
             storedEntry.Rating, tenantId);
 
+        // FR-08 — feedback→memory pipeline (best-effort, NON-BLOCKING). The feedback write above has already
+        // succeeded and is the operation's contract; capturing a governed preference is a downstream side
+        // effect that must NEVER fail or delay it. Runs only when the seam is wired (facade injected).
+        await TryCapturePreferenceAsync(tenantId, storedEntry, ct).ConfigureAwait(false);
+
         return storedEntry.Id;
+    }
+
+    // =========================================================================
+    // FR-08 — feedback → governed per-user Preference memory
+    // =========================================================================
+
+    /// <summary>
+    /// Fires the governed preference-capture pipeline when the feedback carries a standing directive
+    /// (explicit) or a thumbs-down+comment (inferred). Best-effort: swallows every failure so a preference
+    /// capture never blocks or fails the feedback submission the caller depends on.
+    /// <list type="bullet">
+    ///   <item><b>Explicit directive</b> — the comment matches <see cref="StandingDirectiveMarkers"/>
+    ///   (regardless of rating) → <c>user</c> origin, <c>ConfirmedByUser = true</c>.</item>
+    ///   <item><b>Inferred</b> — a thumbs-down WITH a non-empty comment but NO directive marker →
+    ///   <c>ai-derived</c> origin, <c>ConfirmedByUser = false</c> (a candidate pending the FR-B-03 review
+    ///   surface).</item>
+    ///   <item>Otherwise (thumbs-up without a directive, or no comment) → no capture.</item>
+    /// </list>
+    /// The capture is strictly per-user (User scope) and NEVER mutates any global/shared state
+    /// (ADR-039 catalog stays HITL); <c>trustLevel</c> is carried inert (ADR-042 #616).
+    /// </summary>
+    private async Task TryCapturePreferenceAsync(string tenantId, FeedbackEntry entry, CancellationToken ct)
+    {
+        if (_preferenceCapture is null || string.IsNullOrWhiteSpace(entry.UserId))
+        {
+            return;
+        }
+
+        var comment = entry.Comment?.Trim();
+        if (string.IsNullOrEmpty(comment))
+        {
+            return;
+        }
+
+        string origin;
+        bool confirmedByUser;
+
+        if (ContainsStandingDirective(comment))
+        {
+            // Explicit standing directive authored by the user ("do this every time").
+            origin = MemoryOrigin.User;
+            confirmedByUser = true;
+        }
+        else if (entry.Rating == FeedbackRating.ThumbsDown)
+        {
+            // Inferred preference from negative feedback — unconfirmed, pending user review (FR-B-03).
+            origin = MemoryOrigin.AiDerived;
+            confirmedByUser = false;
+        }
+        else
+        {
+            // A thumbs-up comment with no directive is not a preference — do not persist.
+            return;
+        }
+
+        try
+        {
+            var input = new PreferenceCaptureInput(
+                TenantId: tenantId,
+                UserAadObjectId: entry.UserId,
+                Key: comment,
+                Value: comment,
+                Origin: origin,
+                ConfirmedByUser: confirmedByUser,
+                SessionId: entry.SessionId);
+
+            var outcome = await _preferenceCapture.CapturePreferenceAsync(input, ct).ConfigureAwait(false);
+
+            _logger.LogDebug(
+                "FeedbackService.SubmitAsync: preference-capture for feedback {Id} → {Status} (origin={Origin}, confirmed={Confirmed}).",
+                entry.Id, outcome.Status, origin, confirmedByUser);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense in depth — the facade is already best-effort, but a preference capture must never
+            // surface as a feedback-submission failure.
+            _logger.LogWarning(ex,
+                "FeedbackService.SubmitAsync: preference-capture threw for feedback {Id} — feedback already stored, ignored.",
+                entry.Id);
+        }
+    }
+
+    /// <summary>True when the comment contains any conservative standing-directive marker (case-insensitive).</summary>
+    private static bool ContainsStandingDirective(string comment)
+    {
+        foreach (var marker in StandingDirectiveMarkers)
+        {
+            if (comment.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // =========================================================================

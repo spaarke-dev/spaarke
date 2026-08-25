@@ -1,0 +1,13 @@
+Archived: 2026-08-18
+Final status: Completed
+Closing PR: none (merged to master via fast-forward @ fe704e359)
+Worktree: c:/code_files/spaarke-wt-side-pane-navigation-history-r1 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/side-pane-navigation-history-r1 (still on origin)
+Issue: #764 (closed)
+
+Summary: 21/21 tasks complete. Navigator side pane deployed + owner-UAT-passed
+(light+dark) on spaarkedev1. Auto-load live on Matter/Document/Project/Event/
+Communication/Todo entity ribbons + SpaarkeAi/Email/Reconciliation code pages.
+11/12 spec success criteria met (criterion 2 Edited-toggle owner-descoped in UAT).
+Wrap-up artifacts: notes/lessons-learned.md, notes/test-diet-report.md,
+notes/success-criteria-verification.md.

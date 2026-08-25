@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="unified-access-control-r2">
+  <metadata>
+    <title>Register sprk_todo / sprk_event / sprk_communication as scoped child modules (FR-27)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires 055 (inheritance term) + 009 (FR-08 scoped todo PATCH) + 018 (FR-17 in-clause bound) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs: module descriptors define what external callers can query; the periphery (Tier-1 codes, grid-config allow-list) is security-adjacent.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Descriptor registration mirrors the shipped documents/invoices descriptors exactly; the real work is the enumerated periphery, which investigation 01 §7 fully specifies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/DI/ExternalAccessModule.cs + Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs — inside the exclusive ExternalAccess zone.</parallel-reason>
+    <deps>055, 009, 018</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Register the three child modules (todos, events, communications) on the external fetch seam with scope dimensions over the FOUR core-ancestor stamp columns — and close every peripheral cost investigation 01 §7 enumerated: metadata-verify the regarding logical names, extend Tier-1 entitlement module codes, extend the grid-configuration allow-list, and document the client fetch-column projection requirement. This is NOT "just descriptors" — treat the periphery as first-class scope.</prompt>
+  <role>SPAARKE platform developer. External-access module registry, FetchXML scope injection, Tier-1 entitlements. Follow ADRs strictly.</role>
+  <goal>Three new ExternalModuleDescriptor registrations (dims: sprk_regardingproject / sprk_regardingmatter / sprk_regardingworkassignment / sprk_regardingservicerequest as they exist per entity, verified against live metadata); Tier-1 module codes wired for workforce and CIAM per the shipped policy; grid-config ids added where widget configs exist; seam tests proving scoped fetch, record 403 behaviour, and fail-closed empty-set handling.</goal>
+
+  <context>
+    <background>spec.md FR-27. Investigation 01 §7: descriptor mirroring ExternalAccessModule.cs:166-176 is the small part; the six real costs are (1) client FetchXML must project every dim column or ScopeRows drops rows fail-closed; (2) Tier-1 CIAM blanket set is exactly { assigned-work } — new module codes need OutsideCounselModules and/or sprk_approlemodulemap rows; (3) grid-configuration static allow-list needs each new widget config id; (4) only the composed root sets can be dims (054 added the fourth); (5) IN-list fan-out (bounded by Phase 0 FR-17); (6) the seam is read-only — the unscoped PATCH /todos/{id} was fixed by Phase 0 FR-08 and MUST NOT be reused as a write pattern. Only sprk_todo.sprk_regardingproject is code-verified — every other regarding logical name must be checked against live metadata before wiring.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs (the seam being extended — read, do not modify)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs (ScopeRows fail-closed re-filter)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ (module scope tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="055" status="pending">Inheritance term so scoped rows carry correct rights.</dependency>
+      <dependency task="009" status="pending">FR-08 scoped todo PATCH — todos must not become a child module while an unscoped write exists.</dependency>
+      <dependency task="018" status="pending">FR-17 bounded in-clause in Tier2ScopeFilterInjector (06 §F3) — without it the new modules break for high-membership users.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: unregistered entities stay 403; all-empty dims stay 200-with-0-rows-no-query; scope: descriptor wiring must not alter the seam's deny paths.</constraint>
+    <constraint source="project">Scope dimensions may reference ONLY the four composed core root sets; adding a child-entity accessible set is forbidden (06 §F1 2-hop trap) — a todo regarding only a communication is reachable because FR-26 stamped its core ancestor, not because a communication set exists. Scope: descriptor definitions.</constraint>
+    <constraint source="project">Every dim's logical name MUST be verified against live Dataverse metadata (mcp or Web API $metadata) before registration; record the verification table in notes. Scope: all three descriptors.</constraint>
+    <constraint source="NFR-03">Result caps must be visible: confirm the module pageSize + the FR-17 bound surface the "Only 5,000 records displayed" style message contract for these modules; scope: descriptor pageSize decisions, documented.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification in PR citing .claude/constraints/bff-extensions.md; publish size ≤ 60 MB reported. Scope: PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external module registry + scope injection</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/01-spa-plane.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Seam map.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Metadata verification: for sprk_todo, sprk_event, sprk_communication, list which of the four core-ancestor lookup columns exist (logical names, exact); write the table to notes. Any missing column shrinks that module's dims — never guess.</step>
+    <step order="2">Register the three descriptors mirroring the invoices descriptor (ExternalAccessModule.cs:181-190 as-merged), dims per the verification table, including the service-request dim where the column exists (054's root set).</step>
+    <step order="3">Tier-1: add module codes per the shipped policy — decide workforce (sprk_approlemodulemap data + code constant) and CIAM (OutsideCounselModules) exposure explicitly; default to NOT adding CIAM exposure unless the spec's Type-3 story requires it, and record the decision.</step>
+    <step order="4">Grid-config allow-list: add config ids ONLY for widgets that exist today; if none exist yet for these modules, record that the id must be added when the widget ships (do not pre-add placeholder ids).</step>
+    <step order="5">Tests: per module — scoped fetch returns only rows whose stamp is in the caller's root sets; record GET on a child id 403s (by design); caller with zero roots gets 0 rows with no Dataverse query; fetch not projecting the dim column drops rows (fail-closed over-hide pinned as EXPECTED behaviour with the projection requirement documented).</step>
+    <step order="6">Build + tests green; publish size reported. Update TASK-INDEX.md; write the metadata table + Tier-1 decisions to projects/unified-access-control-r2/notes/phase3-child-modules.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_event or sprk_communication lacks ALL four core-ancestor columns in live metadata (no stamp target exists), STOP and escalate — that entity cannot be a scoped child module until schema adds the stamp columns, which is an owner decision, not a task improvisation.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ExternalModuleDescriptor registry (Infrastructure/DI/ExternalAccessModule.cs:146-246) — the documents/invoices descriptors are the exact pattern; no todo/event/communication module is registered (Register throws on duplicates; grep confirms absence).</existing>
+    <extension>Yes — this IS the extension path: new descriptors on the existing registry, no new mechanism (054/055 supplied the model generalization the critique demanded).</extension>
+    <cost-of-doing-nothing>FR-27 acceptance fails: a contact with Project 1 access cannot see its events, communications or To Dos on the SPA at all (no external read path exists for those entities today — investigation 01 §7).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ (module scope tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase3-child-modules.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller with Project P in their root set, a todos-module fetch returns todos stamped sprk_regardingproject = P (including todos whose direct regarding is a communication under P, via the FR-26 stamp).</criterion>
+    <criterion testable="true">Given a caller with zero accessible roots, each new module's fetch returns 0 rows with NO Dataverse query issued.</criterion>
+    <criterion testable="true">Negative: a fetch referencing another entity in link-entity is rejected (guard regression pin); a record GET for a child row 403s.</criterion>
+    <criterion testable="true">Negative: a caller not entitled to the module's Tier-1 code does not see the module in entitlements (and CIAM exposure matches the recorded decision).</criterion>
+    <criterion testable="true">The metadata-verification table in notes lists every dim column with its live logical name; no descriptor contains an unverified name.</criterion>
+    <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-27; investigation 01 §7 costs 1-6 are the checklist. Client widgets consuming these modules are downstream (SPA-r3 project) — this task's deliverable is the server seam + documented projection contract.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

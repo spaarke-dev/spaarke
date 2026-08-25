@@ -995,6 +995,18 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");
 
+        // IAdvisoryCapabilityRunner — the E1 advisory grounded-recommend tier runner (task 012,
+        // FR-01/FR-02). Consumed ONLY by the concrete SessionDispatchOrchestrator (an OPTIONAL ctor dep)
+        // in THIS compound-ON block; the compound-OFF path resolves NullSessionDispatchOrchestrator
+        // (logger-only ctor) which never touches it → transitively conditional, no ADR-032 Null peer
+        // needed (same rationale as IOutputRouter below). Depends on the REAL SprkChatAgentFactory
+        // (registered in this block, overriding the B2 NullSprkChatAgentFactory default) to build the
+        // nested bounded advisory turn. Singleton: no per-request state (the factory owns per-turn
+        // scoping); resolved fine by the Scoped orchestrator.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Chat.IAdvisoryCapabilityRunner,
+                              Sprk.Bff.Api.Services.Ai.Chat.AdvisoryCapabilityRunner>();
+        Console.WriteLine("✓ AdvisoryCapabilityRunner registered (task 012 FR-01/FR-02; advisory nested-turn grounded-recommend tier)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
         Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
 
@@ -1624,14 +1636,28 @@ public static class AnalysisServicesModule
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
     {
         var docIntelOptions = configuration.GetSection(DocumentIntelligenceOptions.SectionName).Get<DocumentIntelligenceOptions>();
-        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint) && !string.IsNullOrEmpty(docIntelOptions?.AiSearchKey))
+        // auth-v4 task 053 (FR-E4): the gate is the ENDPOINT, not the key.
+        //
+        // It previously read `endpoint != null && key != null`, which made the ADMIN KEY'S PRESENCE
+        // the feature flag for this entire block - SearchIndexClient plus IRagService,
+        // IFileIndexingService, IKnowledgeDeploymentService, IEmbeddingCache and IVisualizationService.
+        // Clearing the key to finish the Entra migration would therefore not have degraded retrieval;
+        // it would have SILENTLY UN-REGISTERED six services at startup, and every consumer would have
+        // failed with an unrelated "service not registered" error. That is the asymmetric-registration
+        // anti-pattern (CLAUDE.md 10 F.1 / ADR-032) and the same shape as this project's own FR-A1
+        // finding, where secret *presence* selected the Dataverse auth path.
+        //
+        // Gating on the endpoint keeps registration symmetric across both credential modes: with Entra
+        // selected and no key configured, RAG still registers and an auth problem surfaces as an auth
+        // error at call time instead of a missing dependency at startup.
+        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint))
         {
             services.AddSingleton(sp =>
-            {
-                return new Azure.Search.Documents.Indexes.SearchIndexClient(
+                Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateIndexClient(
                     new Uri(docIntelOptions.AiSearchEndpoint),
-                    new Azure.AzureKeyCredential(docIntelOptions.AiSearchKey));
-            });
+                    docIntelOptions.AiSearchKey,
+                    sp.GetRequiredService<IConfiguration>(),
+                    sp.GetRequiredService<Azure.Core.TokenCredential>()));
 
             services.AddSingleton<IKnowledgeDeploymentService, KnowledgeDeploymentService>();
             services.AddSingleton<IEmbeddingCache, EmbeddingCache>();

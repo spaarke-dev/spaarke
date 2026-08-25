@@ -50,20 +50,38 @@ Ask them top-down; the first "yes" wins.
 ## 5. Rules (do / don't)
 
 - **DO** keep chips ephemeral and grounded — they are next-steps for the *last turn*, capped at a few. If a set of chips would persist across turns or arrives without a turn, it's a **card**, not chips.
-- **DON'T** render internal codes in a chip/card label. Chips carrying routing markup (`[action:<id>] <label>`, AIPU-058) MUST display **only the label**; the raw string is for routing (`SprkChatSuggestions` strips the prefix — regression fixed UAT 2026-07-22).
+- **DON'T** render internal codes in a chip/card label. The routing datum is carried **structurally** — a typed `{ kind, label, targetBindingId?, actionId? }` item (spaarkeai-assistant-enhancements-r4 021a/021b), never encoded in the label text. (This supersedes the retired `[action:<id>] <label>` string-prefix encoding, AIPU-058: `actionId` is now a typed field, so there is no prefix to strip.)
 - **DON'T** fire a chip set from a keyword heuristic that can match unrelated replies. The document/matter "missing-context" chips (`EmitMissingContextChipsIfNeededAsync`) must only fire for genuine document-missing flows — not e.g. a task-creation clarification (tightened UAT 2026-07-22). *Long-term:* this pre-ADR-039 keyword heuristic should be retired in favor of grounded routing.
 - **DON'T** put a set of actions or a unit of work in a **bubble** — bubbles are speech only.
 - **DO** give **cards** their own affordances: a clickable region (open) and, where the item is transient, a **dismiss 'x'** (like a tab close). Hover highlight belongs on the clickable region, not on non-clickable headers.
 - **DO** collapse a *stack* of proactive cards behind a single disclosure header ("You have N new notifications") so they don't dominate the conversation space (UAT 2026-07-22) — the header is a toggle (no hover), the cards drop down.
 - **DO** open rich output/tools as **tabs** via the workspace event bus, never as a wall of bubbles or a giant card.
 
+## 5a. Chip sub-distinction — capability chip vs question chip (structural kind)
+
+`SprkChatSuggestions` renders **one chip family with two learnable variants**, driven by the item's **structural `kind`** (never a keyword heuristic on the label — that heuristic is banned by rule §5). This exists because before 021b the two styles looked like unrelated UI and the difference was an *accident of which pipeline drew the chip*, not what it does — so a genuine action ("Send the email to Jon James Wiley") could render as a conversational pill (the visible mislabel bug).
+
+| | **Capability / action chip** | **Question chip** |
+|---|---|---|
+| **Promise** | "does / opens / sends something" | "asks the assistant, answered right here" |
+| **Affordance** | stronger (filled/`brand`) chip + trailing **→** ("arrow = acts") | lighter (outline) pill, **no arrow** ("no arrow = asks") |
+| **Label grammar** (authored server-side) | imperative, verb-first — "Prioritize my tasks", "Upload File" | interrogative — "What are the risks?", "How does this compare to a standard NDA?" |
+| **Click** | dispatches the carried `targetBindingId` via the Click path (`dispatchConsumer`); `action` kind routes the deterministic `actionId` ∈ {upload, search, select} shortcut | re-enters the grounded agent loop (send the label as a message) |
+| **Guarantee** | the id is real (model selected it from the closed candidate menu; hallucinated ids are dropped server-side — ADR-039) | safe by construction (ADR-039 grounded outcomes: dispatch, cited answer, clarifying question, or honest refusal — never a hard dead-end) |
+
+Rules:
+- **One chip family, two variants** — not two components. The **trailing arrow is the decisive, learnable signal** ("arrow = acts, no arrow = asks"), reinforced by weight: capability/action use the stronger (filled/`brand`) chip, question the lighter (outline) pill. The two cues always agree and point the same way, so the distinction reads as intentional and the user learns it in ~two turns (no legend needed). Do not let the variants diverge on anything else.
+- **Kind is structural** (`kind: 'capability' \| 'action' \| 'question'`; a `capability` carries a non-null `targetBindingId`, an `action` a non-null `actionId`). Grammar and affordance always agree because the server authors both. A bare/untyped item (no `kind`) is **never rendered** — a dead-end promise is structurally impossible.
+- **Order:** server-authoritative — actions first, then capabilities (what you can *do*), then questions (what you can *ask*). Render in received order. Keep it light — throwaway followups per §2/§5; don't over-chrome.
+- The affordance encodes the promise; do not style a question chip like an action (or vice-versa) — the whole point is that the look tells the truth about what happens on click.
+
 ## 6. Where each lives (code map)
 
 | Element | Where |
 |---|---|
 | Bubble | `@spaarke/ui-components` `SprkChat` transcript |
-| Chip (next-step) | `SprkChatSuggestions.tsx` (SSE `suggestions`) · `ConsumerChips` (chiptransitions) |
-| Card (proactive) | `SuggestionCard.tsx` + `useSuggestionCards.tsx` (notification spine) |
+| Chip (next-step) | `SprkChatSuggestions.tsx` (typed SSE `suggestions`: capability / question / action — §5a) · `ConsumerChips` (chiptransitions) |
+| Card (proactive) | ⚠️ **renderer removed** — `useSuggestionCards.tsx` was deleted (`spaarkeai-assistant-enhancements-r2`); `SuggestionCard.tsx` survives only as a shared visual primitive for `useRerunFullAnalysisCard.tsx`. The proactive spine's suggestions are being rebuilt as OOB Dataverse bell notifications (`spaarke-notification-spine-r2`), not an in-Assistant card. |
 | Card (launcher) | `GetStartedCardsWidget` |
 | Tab | Workspace `widget_load` (see [SURFACE-LAUNCH-MECHANISM](../architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md)) |
 

@@ -351,20 +351,46 @@ Two app registrations have active client secrets used by the BFF API:
 
 | App Registration | Client ID | Secret Prefix | Expires | Purpose |
 |------------------|-----------|---------------|---------|---------|
-| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `l8b8Q~J` | 2027-12-18 | OBO token exchange (Graph, Dataverse), Playbook retrieval |
-| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `~Ac8Q~JGnsrv` | 2027-09-22 | Dataverse ServiceClient S2S auth (`AuthType=ClientSecret`) |
+| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `[redacted]` | 2027-12-18 | ~~OBO token exchange (Graph, Dataverse), Playbook retrieval~~ — **nothing reads this since 2026-08-24** (task 033); the BFF uses a managed-identity federated credential |
+| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `[redacted]` | 2027-09-22 | Dataverse ServiceClient S2S auth (`AuthType=ClientSecret`) |
 
 ### BFF API App Secrets (`1e40baad`)
 
-| Created | Expires | Description | First 5 chars | Used By | Status |
+> ### 🔴 Security note added 2026-08-24 (`spaarke-auth-v4-dataverse-MI` task 033)
+>
+> **Partial client-secret values were committed to this file and are in git history.** The column was
+> captioned *"First 5 chars"*, but the entries held **7 and 12** characters of live 40-character Entra
+> client secrets — committed 2026-03-09 in `c1803e99a`. They have been
+> **redacted here**, which fixes the working tree but **not the history**.
+>
+> Assessment, stated plainly rather than reassuringly:
+> - A 12-character prefix is **not** directly usable, but it is a real partial-credential disclosure and it
+>   narrows an offline search. It should never have been written down.
+> - `BFF-API-ClientSecret` (the 12-char entry) is **retired** — deleted from Key Vault and app settings on
+>   2026-08-24 — so its exposure is now moot.
+> - `Dataverse-Checkout-20251218` (the 7-char entry) is **still a valid credential on the app registration
+>   until 2027-12-18**, even though nothing reads it any more. Its prefix remains in history.
+>
+> **Owner decision required — not taken here.** Rewriting git history is destructive, affects every clone,
+> and is out of this task's scope. The proportionate options are (a) rotate/delete
+> `Dataverse-Checkout-20251218` on the app registration, which makes the historical prefix worthless and is
+> cheap **because nothing reads it any more**, or (b) accept the residual risk and leave history alone.
+> **(a) is recommended.** Booked to task 090.
+>
+> **Convention going forward**: never record any portion of a secret value. Use a **SHA-256 prefix**
+> (`Convert.ToHexString(SHA256.HashData(...))[..12]`) — the same construction
+> `IdentityConfigurationValidator.Fingerprint` and `OrderedCredentialClientProvider` already use to compare
+> secrets in logs without either appearing.
+
+| Created | Expires | Description | Fingerprint | Used By | Status |
 |---------|---------|-------------|---------------|---------|--------|
-| 2025-12-18 | 2027-12-18 | Dataverse-Checkout-20251218 | `l8b8Q~J` | Graph (OBO), Dataverse (OBO), Playbooks | ✅ Active |
+| 2025-12-18 | 2027-12-18 | Dataverse-Checkout-20251218 | `[redacted]` | ~~Graph (OBO), Dataverse (OBO), Playbooks~~ — **no longer used by the BFF** since 2026-08-24 (task 033); the app-registration credential itself remains valid until expiry | ⚠️ Exists in Entra, **unreferenced** |
 
 ### DSM-SPE Dev 2 Secrets (`170c98e1`)
 
 | Created | Expires | Description | First 5 chars | Used By | Status |
 |---------|---------|-------------|---------------|---------|--------|
-| 2025-09-29 | 2027-09-22 | BFF-API-ClientSecret | `~Ac8Q~JGnsrv` | Dataverse ServiceClient (S2S) | ✅ Active |
+| 2025-09-29 | 2027-09-22 | BFF-API-ClientSecret | `[redacted]` | ~~Dataverse ServiceClient (S2S)~~ — attribution was already flagged stale further down this page; the KV entry was **deleted 2026-08-24** | ❌ Retired |
 
 ### Secret Storage Locations
 
@@ -408,7 +434,7 @@ az webapp config appsettings set \
 
 | Date | Change | Reason |
 |------|--------|--------|
-| 2025-12-18 | Created `l8b8Q~...` secret | Document checkout feature deployment |
+| 2025-12-18 | Created `[redacted]` secret | Document checkout feature deployment |
 | 2026-01-07 | Consolidated to `API_CLIENT_SECRET` | Unified Graph, Dataverse, Playbook auth under single secret |
 
 ### Where This Secret Is Used
@@ -679,8 +705,8 @@ Refer to the [Client Secrets Inventory](#client-secrets-inventory) above. Determ
 
 | App Registration | Client ID | Current Secret Prefix | Expires |
 |------------------|-----------|----------------------|---------|
-| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `l8b8Q~J` | 2027-12-18 |
-| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `~Ac8Q~JGnsrv` | 2027-09-22 |
+| **BFF API App** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `[redacted]` | 2027-12-18 |
+| **DSM-SPE Dev 2** | `170c98e1-d486-4355-bcbe-170454e0207c` | `[redacted]` | 2027-09-22 |
 
 ### Step 2: Create New Secret in Azure AD
 

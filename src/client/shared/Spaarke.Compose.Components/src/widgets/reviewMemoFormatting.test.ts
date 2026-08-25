@@ -29,8 +29,11 @@ describe('selectMemoNegativeMessage — split negative conditions (UAT round-1 #
     // The bug: the old server message said "there is no completed review to memo-ize" even when a
     // review HAD completed. The replacement message must not repeat that false claim.
     expect(MEMO_SESSION_NOT_BOUND_MESSAGE.toLowerCase()).not.toContain('no completed review');
-    // ...and must point the user at the existing promote affordance.
-    expect(MEMO_SESSION_NOT_BOUND_MESSAGE).toContain('Promote to Analysis');
+    // UAT (2026-08-18, owner): the flow is SAVE-driven and History-free — the message must tell the user
+    // to SAVE the document (which creates its Analysis), NOT to promote via Assistant History.
+    expect(MEMO_SESSION_NOT_BOUND_MESSAGE.toLowerCase()).toContain('save the document');
+    expect(MEMO_SESSION_NOT_BOUND_MESSAGE).not.toContain('Promote to Analysis');
+    expect(MEMO_SESSION_NOT_BOUND_MESSAGE).not.toContain('History');
     // ...and reassure the review is preserved.
     expect(MEMO_SESSION_NOT_BOUND_MESSAGE.toLowerCase()).toContain('preserved');
   });

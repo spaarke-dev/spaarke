@@ -231,9 +231,19 @@ public class LookupUserMembershipNodeExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_PassesRolesAndIncludeRelatedToResolver()
+    public async Task ExecuteAsync_PassesRolesButOmitsIncludeRelatedToResolver()
     {
-        // Arrange
+        // Arrange — FIXED 2026-08-21 (task 019 / FR-17 A-22): this test used to assert the
+        // executor passed the sentinel ["*"] to the resolver when includeRelated=true. That
+        // was the bug: MembershipResolverService.ResolveTransitiveAsync no longer "accepts-
+        // but-ignores" IncludeRelated — "*" is not a resolvable entity name, so it failed
+        // metadata discovery and threw MembershipDepthExceededException(reasonTag:
+        // "unknown-entity") on EVERY includeRelated=true execution (turned into
+        // NodeOutput.Error(InternalError) by the executor's catch(Exception)). The node has
+        // no config field for naming concrete related entities, so the corrected mapping
+        // omits IncludeRelated entirely (null) rather than inventing a value the resolver
+        // cannot resolve — see the ExecuteAsync comment + notes/task-019-fix-lookup-user
+        // -membership-node-executor.md for the accompanying product-semantics escalation.
         var userId = Guid.NewGuid();
         MembershipResolveOptions? capturedOptions = null;
         _resolverMock
@@ -258,8 +268,9 @@ public class LookupUserMembershipNodeExecutorTests
         result.Success.Should().BeTrue();
         capturedOptions.Should().NotBeNull();
         capturedOptions!.Roles.Should().BeEquivalentTo(new[] { "owner", "assignedAttorney" });
-        capturedOptions!.IncludeRelated.Should().NotBeNull();
-        capturedOptions!.IncludeRelated!.Should().Contain("*");
+        capturedOptions!.IncludeRelated.Should().BeNull(
+            "the node has no field for naming concrete related entities, so includeRelated=true " +
+            "must map to an omitted (null) IncludeRelated, not the unresolvable \"*\" sentinel");
     }
 
     #endregion

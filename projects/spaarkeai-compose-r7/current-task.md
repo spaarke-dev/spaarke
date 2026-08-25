@@ -1,9 +1,9 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-17 (task 090 IN PROGRESS — code MERGED TO MASTER; only the operator dev-deploy + final closure remain)
+> **Last Updated**: 2026-08-18 (session 3 — UAT round 3 fixes DONE + DEPLOYED; one open design discussion: R-5 History)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: `/worktree-sync` Full Sync DONE — pushed + **fast-forward merged to master** (`origin/master` @ `b8befe571`, main repo synced, 0 conflicts). `/conflict-check` CLEAN (no PR file-overlap; no sibling in-flight dev deploy; dev on net10 baseline). Branch == master + these closure-doc commits.
+> **Git**: branch `work/spaarkeai-compose-r7` @ `205fe39a0`, **0 behind master, 0 unpushed, clean**. All UAT work committed + pushed.
 
 ---
 
@@ -11,11 +11,26 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **PROJECT COMPLETE — 20/20 tasks.** 090 wrap-up done + deployed to dev 2026-08-17. |
-| **Step** | Done. BFF (44.95 MB net10, hash-verified, `/healthz` 200, Compose routes 401) + `sprk_spaarkeai` (published, R7 markers verified) deployed TOGETHER to dev (NFR-05). README→Complete, plan ✅, TASK-INDEX 090→✅, 090 POML completed. |
-| **Next Action** | Optional: `/devops-project-register` (board), archive the worktree. Operator interactive UAT: PDF end-to-end in a DI-enabled env + manual IME check (the two ⚙️ graduation criteria). Fidelity-wideners fast-follow = DEF-002/#777. |
+| **Task** | 🔬 **R7 IN UAT — NOT closed.** Resolving iterative UAT rounds. **Single source of truth: [`notes/uat-issues.md`](notes/uat-issues.md)** (UAT-01..26 + audit + "Follow-up UAT round session 3" R-1..R-6). |
+| **Step** | **UAT rounds 1–3 all FIXED + DEPLOYED to dev.** Session 2: UAT-21/22/23/11/13/12/04 + copy-gap + UAT-25/26 (concurrency 412) + UAT-08 (later reverted) + UAT-10 (env) + UAT-24→r8. Session 3 (owner UAT of the deploy): **model correction** — Document + Analysis are created on **SAVE** (not upload/run), and Assistant **History is NOT part of the flow**. Done: **R-2** save-driven Analysis (`ComposeWorkspace.onReviewedDocumentCreated` create-on-save-only, gated on `reviewSummaryFindings>0` → SpaarkeAi `useReviewedDocumentAnalysis` `/promote`) + "Not saved yet" notice; **R-3** memo copy ("Save the document first", no Promote/History); **R-6** removed blue scroll arrow; **R-4** kept "Set related record" (owner: saves conversation to a record); reverted the wrong UAT-08 auto-create-on-review. **DEPLOYED**: BFF (all 4 SHA-256 matched, health 200) + `sprk_spaarkeai` (published) together. |
+| **Next Action** | **ONE open item — R-5 (History stale, needs owner DESIGN DISCUSSION before coding):** root-caused = History reads the **Cosmos "warm tier" ONLY** (`SessionPersistenceService.ListRecentSessionsAsync`, ORDER BY `lastActivity` DESC), and Cosmos writes are **best-effort / fire-and-forget with silently-swallowed failures** (`UpsertToCosmosAsync` `SessionPersistenceService.cs:967-984` — only the FIRST user message is an awaited write). Chat keeps working (served from Redis/Dataverse). Symptom (frozen ~Aug 7, chat fine) = Cosmos warm-tier writes stopped landing ~Aug 7. **⚠️ OWNER DESIGN POINT (raised 2026-08-18): the durable fix I proposed = "back History with Dataverse `sprk_aichatsummary`" — BUT the owner recalls a PRIOR decision to NOT use Dataverse for this because *Cosmos DB is durable*. RECONCILE FIRST: Cosmos IS durable; the real defect is the FIRE-AND-FORGET WRITE PATH (turns 2+/tabs/uploads are not awaited + failures swallowed), not the choice of store. So the likely-correct fix is to make the Cosmos writes RELIABLE (await/retry/outbox + surface failures), KEEPING Cosmos — not switch to Dataverse. Discuss before building.** Immediate (env, like UAT-10): check App Service logs ~Aug 7 for `"Cosmos DB write failed … store=Cosmos"` + Cosmos 429/RU/credential/`CosmosPersistence:Endpoint` + tenant-partition (`tid`) match. |
 
-### ✅ Done this session (all on master @ b8befe571)
+### 🔬 SESSION 3 (2026-08-18) — UAT round 3 + R-5 design discussion (READ)
+- **Model correction (owner)**: Compose Document + Analysis are **SAVE-driven** — nothing persists on upload/run; Save creates both; **Assistant conversation History is NOT part of the Analysis flow**. Saved to memory: [[compose-analysis-save-model]]. My prior session-2 UAT-08 auto-create-on-review was the WRONG model → reverted.
+- **R-2 (save-driven Analysis) — the key new wiring**: `ComposeWorkspace` prop `onReviewedDocumentCreated(documentId, sessionId, documentName)` fires create-on-save-ONLY, gated on `hasReviewFindingsRef` (mirrors `reviewSummaryFindings`). SpaarkeAi `ComposeDirectWidget` wires it to `useReviewedDocumentAnalysis` → `POST /api/ai/analysis/promote` (create+bind, server already-bound guard, idempotent). Reopened Analysis (existing doc) saves = replace/version path → `onCreateOnSaveComplete`/`onReviewedDocumentCreated` do NOT fire → no duplicate Analysis (confirmed: both are `isTransientCreate`-gated). +8 tests.
+- **R-5 OPEN — do NOT build the Dataverse-backed History fix without discussing** the Cosmos-durability prior decision (see Next Action). The honest reframe: fix the fire-and-forget Cosmos WRITE path, keep Cosmos.
+- **Deployed this session**: `205fe39a0` (+ earlier round-3 commits). BFF + `sprk_spaarkeai` both live on dev.
+- **UAT to re-test**: upload→review→"Not saved" notice→Save creates Doc+Analysis→memo works (no History); reopen Analysis→edit→Save versions same file (no 2nd Analysis); scroll arrow gone.
+
+### 🔬 SESSION 2 (2026-08-18) — superseded by session 3 above; kept for history
+- **R7 reopened to In-UAT** (was wrongly marked Complete). Two UAT rounds + a **proactive hidden-issue audit** (3 parallel agents: fidelity / silent-failures / anchor-robustness) → **26 tracked issues** in `notes/uat-issues.md`.
+- **The big finding**: render-on-save re-authors the whole `<w:body>` from a THIN content model → **silent** fidelity loss (fonts/size/color UAT-15, footnotes UAT-16, cross-refs UAT-17, spacing UAT-18) + trust defects (AI redline mis-places to wrong text + reports success UAT-21; comments/edits silently dropped UAT-22/23). Architectural, not a widener patch.
+- **Owner split**: **R7 = HONEST/SAFE** (never lie: surface losses, no mis-placement) — batch in flight. **compose-r8 = FAITHFUL** (preserve formatting through save) — NEW project created: [`projects/spaarkeai-compose-r8/`](../spaarkeai-compose-r8/README.md) + [`fidelity-architecture-investigation.md`](../spaarkeai-compose-r8/notes/fidelity-architecture-investigation.md) (investigation-first; UAT-07a/15-20 moved there with links).
+- **8 unpushed/undeployed commits** this session (newest first): `770a647c9` r8+split · `c23d8d10a` audit findings · `1769e8d03` 07a→BLOCKER · `b4e12c771` mark 03/05/07b · `cdb1dbcb4` **UAT-03/05/07b fixes** · `fad1044c6` disposition realign · `9280985ec` UAT tracking created · `68e1ffcc8` **UAT-01 container fix**.
+- **Git**: branch is **21 behind master** (merge origin/master before continuing — watch ComposeWorkspace/ComposeEndpoints), **8 ahead**, unpushed. **Nothing deployed since the earlier BFF+sprk_spaarkeai dev deploy** — the batch fixes (all client so far) need a `sprk_spaarkeai` redeploy (+ BFF if server touched) when the batch completes. Deploy BFF + sprk_spaarkeai TOGETHER (NFR-05); never from a net8 tree.
+- **Standing**: commit `--no-verify` + trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; the dev `sprk_graphitemid_uk` key is now Active (UAT-02 fixed); DEF-001/#776, DEF-002/#777 (now→r8), DEF-003/#781 open.
+
+### ✅ Done earlier session (all on master @ b8befe571)
 - **Merge-to-master**: `/worktree-sync` Full Sync — 46 commits fast-forwarded to master, 0 conflicts, main repo synced.
 - **`/conflict-check`** (anti-clobber, per owner request): CLEAN. No open PR overlaps our 24 src files (checked #690/#508 + 6 BFF dependabot); 0 behind master; no active BFF/SpaarkeAi sibling has an in-flight dev deploy (55-row registry sweep — all are complete+merged, or initialize-only/owner-gated). dev runs the net10 master our branch targets. Residual risk = real-time deploy timing → operator window.
 - **lessons-learned.md** written (CS0535 cross-project build gap; nonce-baseline focus-steal; authenticatedFetch-throws; client-only-autosave; §6.5 Path A; deploy-coordination).

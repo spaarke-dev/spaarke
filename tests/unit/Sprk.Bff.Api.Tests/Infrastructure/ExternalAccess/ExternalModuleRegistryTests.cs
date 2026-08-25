@@ -257,16 +257,16 @@ public class ExternalModuleRegistryTests
 
     private static CallerPrincipal PolymorphicCiam(
         IEnumerable<Guid>? projects = null, IEnumerable<Guid>? matters = null, IEnumerable<Guid>? was = null) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = Guid.NewGuid(),
-        Email = "external@test.com",
-        Oid = Guid.NewGuid().ToString(),
-        ProjectAccess = (projects ?? Array.Empty<Guid>())
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = Guid.NewGuid(),
+            Email = "external@test.com",
+            Oid = Guid.NewGuid().ToString(),
+            ProjectAccess = (projects ?? Array.Empty<Guid>())
             .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = ExternalAccessLevel.Collaborate }).ToList(),
-        AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
-        AccessibleWorkAssignmentIds = (was ?? Array.Empty<Guid>()).ToHashSet(),
-    };
+            AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
+            AccessibleWorkAssignmentIds = (was ?? Array.Empty<Guid>()).ToHashSet(),
+        };
 
     // A document row projecting its typed parent lookups as EntityReference (the SDK's shape).
     private static IReadOnlyDictionary<string, object?> DocRow(

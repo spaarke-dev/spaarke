@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Service Bus: namespace + MI, and rotate the leaked SAS key (FR-E2)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs on the background-job path; includes a live credential rotation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The MI pattern already exists in-repo at a named reference site.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,jobs,servicebus,api-key</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ConnectionStrings:ServiceBus is a SAS credential. MembershipJunctionUpdaterHost.cs:120 already connects by namespace + DefaultAzureCredential — extend that pattern to the main job processor and retire the SAS string. Separately, a live SAS key was found in a local appsettings.Development.json and must be rotated regardless.</prompt>
+  <role>SPAARKE platform developer with Azure Service Bus experience.</role>
+  <goal>Service Bus connections use namespace + managed identity; the SAS connection string is removed; the leaked key is rotated.</goal>
+
+  <context>
+    <background>CREDENTIAL-INVENTORY §4 flags the SAS connection string as a genuine secret credential and notes the Membership path already uses namespace + MI. §8 separately records a live SAS key present in a gitignored local settings file — rotate-worthy independent of this migration.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdaterHost.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent of the OBO migration</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: copy the namespace + credential pattern from MembershipJunctionUpdaterHost.cs:120. Do not invent a second connection shape.</constraint>
+    <constraint source="project">Scope: the UAMI needs Azure Service Bus Data Sender/Receiver RBAC before the SAS string is removed. Verify first.</constraint>
+    <constraint source="project">Scope: ROTATE the leaked SAS key regardless of whether this migration completes. That is a live exposure, not a cleanup nicety.</constraint>
+    <constraint source="project">Scope: use the DI-injected TokenCredential, not an inline DefaultAzureCredential — MembershipJunctionUpdaterHost's inline construction at :120 is itself a minor deviation; do not propagate it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Service Bus, managed identity, RBAC</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Rotate the leaked SAS key first — this is independent and urgent.</step>
+    <step>Verify UAMI RBAC on the Service Bus namespace.</step>
+    <step>Migrate the job processor to namespace + DI-injected TokenCredential.</step>
+    <step>Verify job processing end to end on dev.</step>
+    <step>Remove the SAS connection string from config and Key Vault.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Service Bus RBAC cannot be granted — STOP; do not remove the SAS string.</trigger>
+    <trigger>Job processing regresses — restore the SAS path and report; background jobs are not a safe place to leave broken.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs</output>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/051-sas-rotation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The leaked SAS key is rotated and the rotation recorded.</criterion>
+    <criterion>Job processing runs on namespace + managed identity.</criterion>
+    <criterion>The SAS connection string is removed from config and Key Vault.</criterion>
+    <criterion>Negative case: with RBAC absent, the processor fails loudly at startup rather than silently not processing jobs.</criterion>
+    <criterion>Publish size reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <!-- auth-v4 task 051 — 2026-08-23. Record: notes/decisions/051-sas-rotation.md -->
+    Rotation: COMPLETE and irreversible (prior session). Code: COMPLETE.
+    Cutover + SAS removal: booked to 031/033 by design (cannot precede a deploy).
+
+    Census correction (4th in this workstream): this POML named ServiceBusJobProcessor.cs as a
+    site to modify — it CONSTRUCTS NOTHING; the client is injected. The real sites were four,
+    with THREE duplicate singleton registrations (WorkersModule:18, OfficeWorkersModule:95,
+    JobProcessingModule:64). Last-registration-wins meant only JobProcessingModule was ever
+    used; the other two were dead and read a DIFFERENT config key, so the SAS credential was
+    live under two spellings (ConnectionStrings:ServiceBus and ServiceBus:ConnectionString).
+
+    Built: Infrastructure/Auth/ServiceBusClientFactory.cs (mirrors SearchClientFactory from 053);
+    one unconditional registration; ServiceBusOptions.FullyQualifiedNamespace added and
+    ConnectionString [Required] relaxed; the two config keys reconciled via PostConfigure (without
+    which this task would have caused a second dev outage); MembershipJunctionUpdaterHost migrated
+    off its inline DefaultAzureCredential so the guard needs no allowlist.
+
+    Criterion 4 needed more than a throw: RBAC-absent surfaces at RECEIVE time, and the processor
+    retried forever while /healthz returned 200 — the observed 2026-08-23 outage. Auth failures now
+    log Critical and ServiceBusJobProcessor implements IHealthCheck (Degraded at 1, Unhealthy at 3
+    consecutive). Host is deliberately NOT killed (FAILURE-MODES AP-7).
+
+    RBAC verified present: mi-bff-api-dev (principal 9fd47efb-...) holds Azure Service Bus Data
+    Sender + Data Receiver at NAMESPACE scope on spaarke-servicebus-dev.servicebus.windows.net
+    (RG SharePointEmbedded, sub 484bc857-...). Escalation trigger did NOT fire.
+
+    031 must set, on BOTH SLOTS of spaarke-bff-dev (default + staging):
+      ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
+    033 must remove BOTH ConnectionStrings__ServiceBus and ServiceBus__ConnectionString, then the
+    KV secret.
+
+    Gates: build 0 errors; unit 10,614/0; ArchTests 56/56 (+4, negative AND positive controls
+    demonstrated); publish 44.99 MB compressed incl. PDBs / 215 files (delta 0.00, ceiling 60);
+    no vulnerable packages. adr-check found one violation — my own seam test used the ADR-038
+    ban-B4 ArgumentNullException shape; replaced with a structural guard assertion (path C).
+  </notes>
+</task>

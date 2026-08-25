@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Promote MI-FIC to the default slot, then retire the staging slot (FR-C2)</title>
+    <phase>3 Rollout</phase>
+    <gate>031 fully green</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, live environment change with total-lockout blast radius on the dev app.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive operational sequence; the judgment was made in 031.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live credential flip on the only running environment.</parallel-reason>
+    <deps>031</deps>
+    <tags>auth,deploy,rollout</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+
+    <!-- ============================================================================
+         RESCOPED 2026-08-23 by owner decision. Was: "Flip dev to MI-FIC via slot
+         swap, then soak (FR-C2)" (file 032-slot-swap-and-soak.poml).
+         Rationale + what was dropped: notes/decisions/032-slot-strategy.md.
+         Summary: the multi-day gated SOAK is removed, and RETIRING the staging
+         slot is added. The swap itself is KEPT — it is the cheapest promotion
+         available (atomic, and instantly reversible while the slot still exists).
+         ============================================================================ -->
+  </metadata>
+
+  <prompt>Swap the verified staging slot into the default slot of spaarke-bff-dev so MI-FIC becomes the live credential, confirm it, then DELETE the staging slot. The secret remains configured as the fallback throughout; 033 removes it.</prompt>
+  <role>SPAARKE platform developer executing a controlled credential flip on the dev app.</role>
+  <goal>The default slot of spaarke-bff-dev runs on MI-FIC with the §6.1 checklist re-passed, and the staging slot no longer exists.</goal>
+
+  <context>
+    <background>#3b attempt 1 took dev down with a SIGABRT from an eager connect under ValidateOnBuild — a CRASH AT STARTUP, not a rejected credential. That is the whole reason a slot exists here: you cannot config-rollback an app that will not boot. The slot is a deployment-safety device, NOT part of the auth design; nothing about Dataverse or managed identity requires one.</background>
+    <background>Scope reminder: "production" in App Service means the DEFAULT SLOT of spaarke-bff-dev. Spaarke runs no production environment; spaarke-bff-prod is Stopped and out of scope. This task touches one dev app.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/031-obo-verification-dev.md</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/032-slot-strategy.md</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/001-slot-creation.md</file>
+    </relevant-files>
+    <dependencies><dependency task="031" status="pending">Fully green verification checklist, INCLUDING the secret-first re-verification that proves config-only rollback works</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: promote and retire ONLY. Do not remove the secret, do not touch Key Vault, do not edit scripts — that is 033.</constraint>
+    <constraint source="project">Scope: SITE PROPERTIES DO NOT SWAP — only app settings and code do. keyVaultReferenceIdentity, and the slot's managed-identity assignment, must already be correct on BOTH slots before the swap; they will not arrive via it. Verify both sides first. See notes/decisions/001-slot-creation.md Finding A.</constraint>
+    <constraint source="project">Scope: do NOT use Deploy-BffApi.ps1 -UseSlotDeploy as the swap mechanism — it re-deploys first. This task swaps an ALREADY-VERIFIED slot. Use az webapp deployment slot swap directly.</constraint>
+    <constraint source="project">Scope: NO in-session flips. Swap as a discrete, announced operation with the rollback command prepared in advance.</constraint>
+    <constraint source="project">Scope: if anything looks wrong post-swap, swap BACK first and diagnose afterwards. Do not fix forward on a fail-closed auth path.</constraint>
+    <constraint source="project">Scope: DELETE THE STAGING SLOT once the swap is confirmed good — this is the point of the rescope. The slot is not free: task 001 mirrored all 213 app settings into it, so 16 PLAINTEXT SECRET VALUES currently exist in two places. It also reports the SAME cloud_RoleName to App Insights as the default slot, which is what made a 2026-08-23 dev outage take ~40 minutes to diagnose. Leaving it costs duplicate secret surface plus a permanent diagnostic blind spot.</constraint>
+    <constraint source="project">Scope: ORDERING IS LOAD-BEARING. Until the slot is deleted, rollback is "swap back". The moment it is deleted, rollback becomes "reorder credentials so the secret is first" — which is why 031 must have PROVEN that path (its secret-first re-verification). Do not delete the slot if 031's rollback re-verification did not pass.</constraint>
+    <constraint source="project">Scope: no multi-day soak gate. Verify immediately after the swap, then watch auth failure rates until the checklist is re-passed and error rates are flat. This is a dev app with a proven config-only rollback; a gated soak was ceremony. If anything is ambiguous, swap back rather than waiting it out.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>App Service slot swap, slot deletion, staged auth rollout</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Confirm 031 is fully green — including the secret-first rollback re-verification — and its record is committed.</step>
+    <step>Verify keyVaultReferenceIdentity and the managed-identity assignment on BOTH slots. Site properties do not swap.</step>
+    <step>Prepare and rehearse the rollback command (swap back) before swapping.</step>
+    <step>Swap the staging slot into the default slot.</step>
+    <step>Immediately re-run the §6.1 checklist against the default slot.</step>
+    <step>Watch auth failure rates and AuditEnrichmentMiddleware output until the checklist is green and rates are flat. Sample across at least a few minutes — see the AADSTS70025 criterion below.</step>
+    <step>Only when green: confirm the secret is still configured and selectable as fallback, then DELETE the staging slot (az webapp deployment slot delete). Record that rollback has now transitioned from "swap back" to "reorder credentials".</step>
+    <step>Record the swap time, what was observed, and the slot deletion.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any post-swap checklist item fails — SWAP BACK IMMEDIATELY, then diagnose. Do not deliberate while users are locked out. Do NOT delete the slot.</trigger>
+    <trigger>Auth error rates rise after the swap — swap back and report.</trigger>
+    <trigger>031's secret-first rollback re-verification did not pass — STOP before the slot deletion step; deleting it would leave no demonstrated rollback.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/032-dev-flip-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>OFFICE ADD-INS - handed forward from task 031, and this is the ONLY point at which it can be
+      tested. Verify the Outlook and Word save flows against the default slot AFTER the swap and BEFORE the
+      slot-deletion step (step 7).
+
+      Why it could not be done in 031: the add-ins are deployed and live at
+      https://icy-desert-0bfdbb61e.6.azurestaticapps.net, but the BFF URL is baked in at BUILD time -
+      .github/workflows/deploy-office-addins.yml sets BFF_API_BASE_URL=https://spaarke-bff-dev.azurewebsites.net,
+      the DEFAULT slot. Before the swap that is the pre-migration build on the client secret, so a green
+      add-in test would have proven nothing about MI-FIC. After the swap the same deployed artifact points
+      at the migrated build with no rebuild, no redeploy and no repointing.
+
+      Rebuilding the add-in against the staging host and back was considered and rejected: churn on a
+      shared live artifact for zero extra signal, minutes before this step tests it properly anyway.
+
+      This requires a HUMAN in Outlook and Word - it cannot be driven over HTTP, because the add-in mints
+      its own token inside the Office host. If it fails: rollback is still available in both forms at this
+      point (swap back, per step 3; or reorder credentials to secret-first, proven in 031 section 5.6).
+      DO NOT proceed to step 7 until it is green.
+    </criterion>
+    <criterion>Task 030 carry-forward (MEASURED 2026-08-21): if any FIC is created or modified as part
+      of this swap, expect ~2 minutes of INTERMITTENT AADSTS70025 failures while Entra replicas
+      converge — successes and failures interleaved, not a clean transition. Do not read an early
+      success as "the window closed", and do not read an early failure as a broken credential. Sample
+      across the window before making the swap/rollback decision.</criterion>
+    <criterion>Pre-swap: keyVaultReferenceIdentity and the managed-identity assignment are verified correct on BOTH slots, since site properties do not swap.</criterion>
+    <criterion>The default slot of spaarke-bff-dev runs on MI-FIC as the first-priority credential.</criterion>
+    <criterion>The full §6.1 checklist passes post-swap.</criterion>
+    <criterion>The secret is STILL configured and still selectable as fallback (its removal is 033).</criterion>
+    <criterion>Negative case: the rollback path was rehearsed and demonstrably available BEFORE the slot was deleted.</criterion>
+    <criterion>The staging slot no longer exists: `az webapp deployment slot list -n spaarke-bff-dev -g rg-spaarke-dev` returns empty.</criterion>
+    <criterion>The record states explicitly that rollback is now credential-reorder, not swap-back, and names the exact config change that performs it.</criterion>
+    <criterion>Swap time, observations and the slot deletion are recorded.</criterion>
+  </acceptance-criteria>
+</task>

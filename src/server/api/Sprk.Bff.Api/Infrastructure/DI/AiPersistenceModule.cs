@@ -1,3 +1,6 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Azure.Core;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Fluent;
@@ -44,6 +47,34 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class AiPersistenceModule
 {
     /// <summary>
+    /// The System.Text.Json options the CosmosClient serializes EVERY AI-persistence document with
+    /// (sessions, memory-items, memory/pins, audit, prompts, feedback). Exposed so tests assert the
+    /// EXACT production serializer behavior rather than raw <c>JsonSerializer</c> defaults.
+    ///
+    /// <para><b>Why STJ, and why <see cref="JsonIgnoreCondition.WhenWritingNull"/> is load-bearing:</b>
+    /// the models carry <c>System.Text.Json</c> attributes (<c>[JsonPropertyName]</c>,
+    /// <c>[JsonIgnore(WhenWritingNull)]</c>). The Cosmos SDK's DEFAULT serializer (configured via
+    /// <c>WithSerializerOptions(CosmosSerializationOptions)</c>) is Newtonsoft-based and IGNORES those
+    /// STJ attributes — it happened to produce the right camelCase names by convention but wrote
+    /// <c>null</c>-valued properties. That silently emitted <c>"ttl": null</c> for every UNFILED
+    /// session (<see cref="Sessions.StoredSession.Ttl"/>) and every retention-classless memory item
+    /// (<see cref="Memory.MemoryItemDocument.Ttl"/>). Because the <c>sessions</c> and <c>memory-items</c>
+    /// containers have TTL ENABLED, Cosmos rejects <c>ttl: null</c> with HTTP 400 — and the write path
+    /// swallows it at Warning, so History + memory writes silently stopped landing (dev: 2026-08-07).
+    /// Serializing with STJ + <see cref="JsonIgnoreCondition.WhenWritingNull"/> honors the models'
+    /// intent (null optional fields are OMITTED, not written as <c>null</c>), fixing the whole class
+    /// across every container. No enums / custom converters exist on the persisted models, and every
+    /// field has an explicit <c>[JsonPropertyName]</c>, so existing documents round-trip byte-for-byte.
+    /// </para>
+    /// </summary>
+    internal static readonly JsonSerializerOptions CosmosJsonSerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
     /// Registers AI Persistence (Cosmos DB) services with the DI container.
     /// </summary>
     /// <param name="services">The service collection.</param>
@@ -60,15 +91,16 @@ public static class AiPersistenceModule
 
         // CosmosClient: singleton — thread-safe, manages connection pool internally.
         // TokenCredential (UAMI-pinned) injected from DI singleton; no connection strings (ADR-015).
-        // SerializerOptions: use System.Text.Json for consistency with the rest of the BFF.
+        // Serializer: System.Text.Json via WithSystemTextJsonSerializerOptions (NOT the SDK default
+        // Newtonsoft serializer) so the models' [JsonPropertyName] / [JsonIgnore(WhenWritingNull)]
+        // attributes are HONORED — critically, null optional fields (e.g. an unfiled session's ttl)
+        // are OMITTED instead of written as "null", which a TTL-enabled container rejects with HTTP 400.
+        // See CosmosJsonSerializerOptions above for the full incident rationale (dev write-stoppage 2026-08-07).
         services.AddSingleton(sp =>
         {
             var credential = sp.GetRequiredService<TokenCredential>();
             return new CosmosClientBuilder(endpoint, credential)
-                .WithSerializerOptions(new CosmosSerializationOptions
-                {
-                    PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase
-                })
+                .WithSystemTextJsonSerializerOptions(CosmosJsonSerializerOptions)
                 .WithConnectionModeDirect()
                 .WithThrottlingRetryOptions(maxRetryWaitTimeOnThrottledRequests: TimeSpan.FromSeconds(30), maxRetryAttemptsOnThrottledRequests: 9)
                 .Build();
@@ -108,6 +140,16 @@ public static class AiPersistenceModule
         // the memory-governance project (#629), carried inert. Scoped: the store it delegates to is Scoped.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeMemoryCapture,
             Sprk.Bff.Api.Services.Ai.PublicContracts.ComposeMemoryCapture>();
+
+        // FR-08 (task 031): IPreferenceMemoryCapture — the E3 feedback→memory seam. The canonical ADR-013
+        // CRUD-safe facade through which FeedbackService persists a governed per-user `Preference` memory
+        // item (task 030 fact type) into the SHARED IMemoryItemStore above. No forked store, no second
+        // memory write path (§11). Resolves the caller's AAD oid → canonical Dataverse systemuserid via the
+        // Singleton ISystemUserIdentityResolver (registered in NotificationsModule) so the preference recalls
+        // under the same key chat-side user memory uses. Per-user ONLY: never mutates the ADR-039 global
+        // catalog; `trustLevel` carried inert (#616). Scoped: the store it delegates to is Scoped.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IPreferenceMemoryCapture,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.PreferenceMemoryCapture>();
 
         // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
         // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +

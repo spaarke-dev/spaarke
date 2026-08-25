@@ -426,6 +426,21 @@ jobs:
         working-directory: src/client/shared/Spaarke.AI.Outputs
         run: npx tsc
 
+      # Spaarke.Communication.Components was the ONE path-mapped sibling never built
+      # here. AI.Widgets' tsconfig maps @spaarke/communication-components to
+      # ../Spaarke.Communication.Components/dist/index.d.ts; with no dist, TypeScript
+      # fell back to that package's raw SOURCE, which cannot resolve its own react /
+      # @fluentui deps in this context — producing ~20 TS2307/TS2875/TS7026 errors and
+      # a permanently red Client Quality gate. MUST come after Spaarke.UI.Components
+      # (above): this package type-checks against @spaarke/ui-components' dist.
+      - name: Install Spaarke.Communication.Components deps
+        working-directory: src/client/shared/Spaarke.Communication.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Communication.Components (declarations required by Widgets typecheck)
+        working-directory: src/client/shared/Spaarke.Communication.Components
+        run: npx tsc
+
       - name: Install Spaarke.AI.Widgets deps
         working-directory: src/client/shared/Spaarke.AI.Widgets
         run: npm install --legacy-peer-deps --no-audit --no-fund

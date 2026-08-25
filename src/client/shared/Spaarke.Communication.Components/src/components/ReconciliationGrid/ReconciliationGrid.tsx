@@ -230,6 +230,20 @@ export interface ReconciliationGridProps {
   parentContext?: DataGridParentContext;
   /** OPTIONAL — turns the association column into an interactive "Related to" cell (task 052, FR-E3) that reuses `EmailConnectionsReview`. Left unset, that column keeps its static status badge. */
   relatedTo?: RelatedToGridBinding;
+  /**
+   * OPTIONAL — host-owned view list rendered in the DataGrid's NATIVE toolbar
+   * selector (item 2, owner UAT 2026-08-19). The reconciliation workspace passes its
+   * "Email Review views" (each a distinct grid config) here so the single view picker
+   * lives IN the grid toolbar (native dataset-grid look), not in a separate bar above.
+   * Forwarded verbatim to `<DataGrid externalViews />`.
+   */
+  externalViews?: DataGridProps['externalViews'];
+  /**
+   * OPTIONAL — per-instance page-size override forwarded to `<DataGrid pageSize />`.
+   * The reconciliation workspace passes a large value so the whole Needs-Review queue
+   * loads (item 1, owner UAT 2026-08-19) rather than a single 25-row page.
+   */
+  pageSize?: number;
   /** OPTIONAL — additional class merged after component classes. */
   className?: string;
 }
@@ -248,6 +262,8 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
   membershipResolver,
   parentContext,
   relatedTo,
+  externalViews,
+  pageSize,
   className,
 }) => {
   const mergedColumnRenderers = React.useMemo<NonNullable<DataGridOverrides['columnRenderers']>>(() => {
@@ -284,6 +300,8 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
       hostFilters={hostFilters}
       membershipResolver={membershipResolver}
       parentContext={parentContext}
+      externalViews={externalViews}
+      pageSize={pageSize}
       className={className}
     />
   );

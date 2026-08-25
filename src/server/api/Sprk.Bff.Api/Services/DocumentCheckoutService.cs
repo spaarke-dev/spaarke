@@ -726,7 +726,21 @@ public class DocumentCheckoutService
     /// <summary>
     /// Delete a document (both SPE file and Dataverse record).
     /// </summary>
-    public async Task<DeleteResult> DeleteAsync(
+    /// <remarks>
+    /// <para><b>No caller-identity parameter, by contrast with every sibling.</b>
+    /// <c>CheckoutAsync</c>, <c>CheckInAsync</c>, <c>DiscardAsync</c> and
+    /// <c>GetCheckoutStatusAsync</c> all take a <c>ClaimsPrincipal</c>; this one does not, and the
+    /// delete itself runs app-only. Authorization for <c>DELETE /api/documents/{documentId}</c>
+    /// therefore lives ENTIRELY in the endpoint filter
+    /// (<c>AddDocumentAuthorizationFilter("delete")</c>, finding C2, task 022) — there is no
+    /// defence in depth here. Any NEW call-site that reaches this method without that filter is
+    /// an unauthenticated destroy path.</para>
+    /// </remarks>
+    // `virtual` per ADR-038 §4 (substitution seam), added by task 022 for the same reason task 009
+    // made UpdateTodoAsync virtual: the C2 gate is only meaningfully verifiable if a test can assert
+    // the destroy DID NOT HAPPEN. A 403 assertion alone would pass even if the delete were issued
+    // first, and this method destroys the SPE file as well as the row.
+    public virtual async Task<DeleteResult> DeleteAsync(
         Guid documentId,
         string correlationId,
         CancellationToken ct = default)

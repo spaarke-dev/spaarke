@@ -374,7 +374,6 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
       tenantId: "",
       tenantName: "",
       rootSiteUrl: "",
-      graphEndpoint: "",
       isDefault: false,
       status: "active",
     };

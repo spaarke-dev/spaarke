@@ -1,5 +1,31 @@
 # Configuration Matrix Guide
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](auth-deployment-setup.md)
+
+
 > **Last Updated**: April 5, 2026
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
@@ -316,7 +342,7 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 |-------------|---------|-------------|
 | `ServiceBus-ConnectionString` | `ConnectionStrings:ServiceBus`, `ServiceBus:ConnectionString` | Azure Service Bus |
 | `Redis-ConnectionString` | `ConnectionStrings:Redis` | Redis cache |
-| `BFF-API-ClientSecret` | `Dataverse:ClientSecret`, `AgentToken:ClientSecret` | BFF API app secret |
+| ~~`BFF-API-ClientSecret`~~ | ~~`Dataverse:ClientSecret`, `AgentToken:ClientSecret`~~ | 🔴 **All DELETED 2026-08-24** (task 033). BFF identity is secret-free; use `Graph:Credentials:Order=[ManagedIdentityFederated]` |
 | `Dataverse-ServiceUrl` | `Dataverse:ServiceUrl` | Dataverse environment URL |
 | `ai-openai-endpoint` | `DocumentIntelligence:OpenAiEndpoint` | Azure OpenAI endpoint |
 | `ai-openai-key` | `DocumentIntelligence:OpenAiKey` | Azure OpenAI API key |

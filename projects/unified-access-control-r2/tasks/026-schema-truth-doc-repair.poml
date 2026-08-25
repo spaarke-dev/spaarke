@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="unified-access-control-r2">
+  <metadata>
+    <title>Schema-truth doc repair: views-schema.md, the inverted expiry claim, the undocumented delegation rule (M4, M5)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation only -- no code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical correction against live metadata; no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Docs only; no contended code path.</parallel-reason>
+    <deps>none</deps>
+    <tags>documentation, dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>Correct the schema documents that are the plausible seed of all five stale-column recurrences in this project, and fix two inverted or absent behavioural claims.</prompt>
+  <role>SPAARKE technical writer with Dataverse schema fluency. Verify every column against live metadata before writing it.</role>
+  <goal>The schema docs match live Dataverse metadata, the expiry claim is corrected, and the delegation rule is documented where an operator would look for it.</goal>
+
+  <context>
+    <background>Review findings M4 and M5 (Medium). M4: views-schema.md still documents sprk_contactid, sprk_projectid and sprk_expirydate -- 16-plus references, none of which exist in live metadata. Task 016 recorded the file as wrong and did not fix it, which is against root CLAUDE.md §2 (when code and docs disagree, fix the docs). This file is the plausible seed of all FIVE stale-column recurrences in this project, including the one this project itself introduced. secure-project-fields-schema.md is the corresponding seed for the C4/C5 provisioning-name family. M5: external-access-spa-architecture.md:110 still says expiry is NOT ENFORCED anywhere, which task 007 made false; and the delegation rule is documented NOWHERE outside code -- none of its four deny codes appear in the admin guide's troubleshooting table, so an operator seeing sdap.access.deny.delegation_write_required has nothing to look up.</background>
+    <relevant-files>
+      <file role="modify">docs/data-model/views-schema.md</file>
+      <file role="modify">docs/data-model/secure-project-fields-schema.md</file>
+      <file role="modify">docs/architecture/external-access-spa-architecture.md</file>
+      <file role="modify">docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="project">Every column named in a corrected doc must be verified against live metadata via Dataverse MCP describe. Do not correct one wrong name to another wrong name -- that is how this class of defect propagated.</constraint>
+    <constraint source="CLAUDE.md §2">Code wins, docs lag. Where a doc disagrees with live metadata or live code, the doc is what changes.</constraint>
+    <constraint source="project">Document the delegation rule where an OPERATOR will look: the admin guide's troubleshooting table, keyed by the four deny codes, each with what it means and what the operator should do. A code an operator cannot look up is not diagnosable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/notes/task-008-delegation-rule.md</file>
+      <file>projects/unified-access-control-r2/notes/task-007-grant-expiry.md</file>
+      <file>projects/unified-access-control-r2/notes/task-016-close-project-cascade.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Enumerate every column reference in views-schema.md and secure-project-fields-schema.md; verify each against live metadata.</step>
+    <step order="1">Correct every mismatch, and add a dated note recording that the file was reconciled against live metadata.</step>
+    <step order="2">Fix the inverted expiry claim at external-access-spa-architecture.md:110.</step>
+    <step order="3">Document the delegation rule and all four deny codes in the admin guide's troubleshooting table.</step>
+    <step order="4">Grep the repo for the corrected stale names to find any other doc repeating them.</step>
+    <step order="5">Update TASK-INDEX.</step>
+  </steps>
+
+  <justification>
+    <existing>All four documents exist. This is correction, not authoring.</existing>
+    <extension>Documentation edits only.</extension>
+    <cost-of-doing-nothing>The seed of five stale-column recurrences stays in place, so the sixth is likely. Cheap fix, high leverage -- this is the only task of the seven that attacks the CAUSE rather than an instance.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">docs/data-model/views-schema.md</output>
+    <output type="doc">docs/architecture/external-access-spa-architecture.md</output>
+    <output type="doc">docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No column name in views-schema.md or secure-project-fields-schema.md is absent from live Dataverse metadata.</criterion>
+    <criterion testable="true">sprk_contactid, sprk_projectid and sprk_expirydate no longer appear as if they existed.</criterion>
+    <criterion testable="true">The 'expiry is not enforced' claim is corrected to describe task 007's actual behaviour.</criterion>
+    <criterion testable="true">All four delegation deny codes appear in the admin guide's troubleshooting table with operator guidance.</criterion>
+    <criterion testable="true">A repo-wide grep finds no remaining doc repeating the corrected stale names.</criterion>
+  </acceptance-criteria>
+
+  <notes>Review findings M4 and M5. Cheapest task of the seven and the only one addressing the root cause.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

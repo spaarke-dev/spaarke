@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Spe.Integration.Tests;
 
@@ -88,6 +89,27 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient)
                 // A fake URI is sufficient; SecretClient is replaced by test doubles before any calls.
                 ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
+
+                // Ciam — required by CiamGraphClientFactory's CONSTRUCTOR, which throws
+                // InvalidOperationException for each missing key (CiamGraphClientFactory.cs:66-77).
+                // The factory is registered unconditionally (ExternalAccessModule.cs) and resolved
+                // when any /api/v1/external-access/* endpoint's dependency graph is built — i.e.
+                // BEFORE the handler's own request validation runs. Without these keys the ctor
+                // throws during DI resolution and the endpoint returns 500 instead of the 400 the
+                // request-validation tests assert. Fake values are sufficient: no CIAM call is made
+                // on the validation path, and the certificate is fetched lazily from Key Vault on
+                // first real use (CiamGraphClientFactory.cs:154-170).
+                // Root-caused 2026-08-19; matches bff-extensions.md §F.2 (Fixture-Config-FIRST).
+                // The full required set (each throws individually if absent):
+                //   CiamGraphClientFactory.cs:67,69,74,76 -> Instance, TenantId,
+                //                                            GraphProvisioner:ClientId, :CertificateName
+                //   CiamUserProvisioningService.cs:46     -> Domain
+                ["Ciam:Instance"] = "https://testciam.ciamlogin.com/",
+                ["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1",
+                ["Ciam:Domain"] = "testciam.onmicrosoft.com",
+                ["Ciam:Audience"] = "api://00000000-0000-0000-0000-0000000000c2",
+                ["Ciam:GraphProvisioner:ClientId"] = "00000000-0000-0000-0000-0000000000c2",
+                ["Ciam:GraphProvisioner:CertificateName"] = "test-ciam-graph-provisioner-cert",
 
                 // CosmosPersistence — required by AiPersistenceModule (raw config read, not bound to Options class)
                 // Per project sdap-bff.api-test-suite-repair task 062 + integration-test-triage.md Cluster A
@@ -214,6 +236,22 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();
             services.AddSingleton<IMemoryCache, MemoryCache>(sp =>
                 new MemoryCache(Options.Create(new MemoryCacheOptions())));
+
+            // ---------------------------------------------------------------
+            // DELEGATION RULE (unified-access-control-r2 task 008, FR-07):
+            // every /api/v1/external-access route now requires Write on the target
+            // record, evaluated as the caller via an OBO probe. These are endpoint
+            // CONTRACT tests — they assert validation and error shapes for an
+            // ENTITLED caller, not who is entitled — so the fixture's caller holds
+            // Write. Without this the real probe has no Dataverse offline, correctly
+            // answers "no rights", and every case 403s before the behaviour under
+            // test is reached.
+            //
+            // Who is entitled is asserted in
+            // tests/integration/auth/UnifiedAccessControl/, not here.
+            // ---------------------------------------------------------------
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new EntitledCallerProbe());
 
             // ---------------------------------------------------------------
             // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
@@ -492,4 +530,26 @@ internal sealed class ReportingRoleFakeAuthHandler : AuthenticationHandler<Authe
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
+}
+
+/// <summary>
+/// A caller who holds Write on whatever record the delegation rule asks about — the caller these
+/// endpoint contract tests are written from the perspective of (task 008, FR-07).
+/// </summary>
+/// <remarks>
+/// Substituted at the <c>virtual</c> seam on <see cref="CallerRecordAccessProbe"/>, so no OBO exchange
+/// or Dataverse call is attempted. Whether an UNENTITLED caller is refused — the actual subject of
+/// FR-07 — is asserted in <c>tests/integration/auth/UnifiedAccessControl/</c>, not here.
+/// </remarks>
+internal sealed class EntitledCallerProbe : CallerRecordAccessProbe
+{
+    public EntitledCallerProbe()
+        : base(new HttpClient(),
+               new ConfigurationBuilder().Build(),
+               Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRecordAccessProbe>.Instance)
+    { }
+
+    public override Task<AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(AccessRights.Read | AccessRights.Write);
 }
