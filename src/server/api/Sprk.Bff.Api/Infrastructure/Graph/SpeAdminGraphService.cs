@@ -1958,18 +1958,37 @@ public sealed class SpeAdminGraphService
         ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userIdentifier);
 
-        // `grantedToV2` carries either a userPrincipalName or an id; send whichever the caller gave
-        // rather than guessing, and let Graph reject an unknown principal on its own terms.
-        // Serialized rather than string-built so an identifier containing quotes cannot break the
-        // payload (or inject into it).
-        var user = userIdentifier.Contains('@', StringComparison.Ordinal)
-            ? (object)new { userPrincipalName = userIdentifier }
-            : new { id = userIdentifier };
+        /*
+         * 🔑 Graph accepts ONLY the user's directory object id here.
+         *
+         * Its reference for Create-permission is explicit: "Only the **user** property with the
+         * user's **id** is supported; group and application identities aren't supported."
+         *
+         * The first implementation sent `userPrincipalName` when the identifier looked like an email
+         * — which Graph rejects as `400 invalidRequest`, with the same message that names nothing as
+         * the etag defect did (notes/patch-400-resolution.md). Confirmed live 2026-08-25.
+         *
+         * So a UPN is resolved to an object id FIRST. That resolution is a real, separate failure
+         * mode — an unknown address must surface as "no such user", never as a generic 400 about
+         * arguments, because those read identically to the admin and mean completely different
+         * things.
+         */
+        var objectId = userIdentifier;
+        if (userIdentifier.Contains('@', StringComparison.Ordinal))
+        {
+            objectId = await ResolveUserObjectIdAsync(client, userIdentifier, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"No user was found for '{userIdentifier}'. Container-type ownership can only be " +
+                    "granted to a user Microsoft Entra can resolve, and only by object id — so an " +
+                    "address that does not resolve cannot be granted ownership.");
+        }
 
+        // Serialized rather than string-built so an identifier containing quotes cannot break the
+        // payload (or inject into it). `owner` is currently the ONLY role Graph supports here.
         var payload = JsonSerializer.Serialize(new
         {
             roles = new[] { "owner" },
-            grantedToV2 = new { user },
+            grantedToV2 = new { user = new { id = objectId } },
         });
 
         _logger.LogInformation(
@@ -1994,6 +2013,47 @@ public sealed class SpeAdminGraphService
         {
             throw ex.ToSpaarkeStorageException($"AddContainerTypeOwner({containerTypeId})");
         }
+    }
+
+    /// <summary>
+    /// Resolves a user principal name to a directory object id, or null when no user matches.
+    /// </summary>
+    /// <remarks>
+    /// Container-type ownership can only be granted by object id (Graph's Create-permission
+    /// reference), but an administrator types an email address. This bridges the two.
+    /// <para>
+    /// Returns null rather than throwing on 404 so the caller can say "no such user" — a different
+    /// and far more actionable message than the `400 invalidRequest` Graph returns for a malformed
+    /// grant. Conflating the two is what made the original failure unreadable.
+    /// </para>
+    /// </remarks>
+    private static async Task<string?> ResolveUserObjectIdAsync(
+        GraphServiceClient client, string userPrincipalName, CancellationToken ct)
+    {
+        // Base address derived from the client about to issue the request, never hardcoded — task
+        // 020's lesson. A hardcoded host would also make every contract test reach the REAL Graph
+        // instead of the fixture, which is a far worse failure than a wrong version. `/users` exists
+        // on both v1.0 and beta, so either base resolves it.
+        var url = ResolveGraphBaseUrl(client) + "/users/" +
+                  Uri.EscapeDataString(userPrincipalName) + "?$select=id";
+        try
+        {
+            using var json = await SendGraphJsonAsync(client, HttpMethod.Get, url, body: null, ct)
+                .ConfigureAwait(false);
+
+            if (json is not null &&
+                json.RootElement.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.String)
+            {
+                return id.GetString();
+            }
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     /// <summary>Revokes an ownership grant. Returns false when the grant (or the type) was not found.</summary>
@@ -4948,6 +5008,55 @@ public sealed class SpeAdminGraphService
 
         try
         {
+            /*
+             * 🔑 THE ETAG IS REQUIRED, AND ITS ABSENCE IS WHY EVERY WRITE 400'd.
+             *
+             * Microsoft's own reference for Update fileStorageContainerType lists `etag` as
+             * **Required** in the request BODY, and its "Example 2: Update without ETag" documents
+             * the response as `400 Bad Request`. That was our exact symptom, and it was recorded for
+             * two days as a suspected OWNERSHIP restriction ("only the owning app may modify its
+             * container type") — a hypothesis that would have cost either a throwaway container type
+             * or a change to the production SPA registration to test.
+             *
+             * Proven live 2026-08-25: the IDENTICAL no-op PATCH returns 400 without the etag and
+             * **200 with it**, on both beta and v1.0, followed by a real round-trip
+             * (499 written → 499 read back → restored). See notes/patch-400-resolution.md.
+             *
+             * ⚠️ `etag` is a BODY PROPERTY, not the `If-Match` HTTP header. An earlier session tried
+             * If-Match and saw no change, which is what kept the real cause hidden — the two are one
+             * word apart and mean different things here.
+             *
+             * The GET below is therefore load-bearing, not a convenience: it is the read half of a
+             * read-modify-write. Fetching immediately before the PATCH also keeps the concurrency
+             * window as small as this API allows — if another writer changes the type in between,
+             * Graph rejects our stale etag, which is the behaviour we want rather than a silent
+             * last-writer-wins overwrite.
+             */
+            var current = await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]
+                    .GetAsync(cancellationToken: ct),
+                ct);
+
+            if (current is null)
+            {
+                _logger.LogWarning(
+                    "Container type {ContainerTypeId} not found when reading its etag before update",
+                    containerTypeId);
+                return null;
+            }
+
+            patchBody.Etag = current.Etag ?? ReadAdditionalString(current, "etag");
+
+            if (string.IsNullOrWhiteSpace(patchBody.Etag))
+            {
+                // Do not attempt the PATCH: Graph would answer 400 with a message about "arguments"
+                // that names nothing, and the operator would be back where this project started.
+                throw new InvalidOperationException(
+                    $"Graph returned container type '{containerTypeId}' without an etag, which the " +
+                    "Update API requires in the request body. Without it the PATCH would fail as " +
+                    "400 invalidRequest with a message that does not name the cause.");
+            }
+
             // PATCH /storage/fileStorage/containerTypes/{typeId}
             var updated = await ExecuteWithRetryAsync(
                 () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]

@@ -38,6 +38,108 @@ public class SpeAdminContainerTypeSettingsPatchTests
         {"id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06","name":"Legal Documents"}
         """;
 
+    /// <summary>
+    /// The GET that now precedes every PATCH, carrying the <c>etag</c> the Update API requires.
+    /// </summary>
+    /// <remarks>
+    /// Every test here stubs this. That is not boilerplate — it models a real, load-bearing step:
+    /// Graph's Update API lists <c>etag</c> as a REQUIRED body property, and without it every write
+    /// returns <c>400 invalidRequest</c> with a message naming no cause. That 400 blocked four tasks
+    /// for two days and was misdiagnosed as an ownership restriction. A settings write is now a
+    /// read-modify-write, and these tests say so.
+    /// </remarks>
+    private const string GetResponseWithEtag = """
+        {"id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06","name":"Legal Documents","etag":"MC4wLjAuMA=="}
+        """;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The etag — why every write returned 400 for two days
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The load-bearing one for the write path.</summary>
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_SendsTheEtagInTheBody_BecauseTheUpdateApiRequiresIt()
+    {
+        /*
+         * 🔴 Regression guard for the defect that blocked tasks 023, 025, 026 and 029.
+         *
+         * Graph's Update fileStorageContainerType API lists `etag` as a REQUIRED body property, and
+         * its own "Example 2: Update without ETag" documents the response as 400 Bad Request. Every
+         * write this product attempted omitted it, so every write 400'd with
+         * "One of the provided arguments is not acceptable" — a message that names nothing. It was
+         * misdiagnosed for two days as an ownership restriction, which would have cost either a
+         * throwaway container type or a change to a production app registration to disprove.
+         *
+         * Proven live 2026-08-25: the IDENTICAL no-op PATCH returns 400 without the etag and 200
+         * with it, on both beta and v1.0.
+         *
+         * ⚠️ It is a BODY property, NOT the `If-Match` header. An earlier session tried If-Match,
+         * saw no change, and moved on — which is exactly how the real cause stayed hidden.
+         */
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: true,
+            itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: null);
+
+        var body = graph.PatchRequestsFor(ContainerTypesPath).Single().Body ?? string.Empty;
+
+        body.Should().Contain("MC4wLjAuMA==",
+            "without the etag Graph rejects the write as 400 invalidRequest with a message that " +
+            "names no cause — the failure mode this whole project exists to remove");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_ReadsTheEtagImmediatelyBefore_SoAConcurrentWriteIsRejectedNotOverwritten()
+    {
+        // The GET is the read half of a read-modify-write, not a convenience. Taking a fresh etag
+        // per write is what lets Graph reject a stale one, instead of this app silently
+        // last-writer-wins over an administrator who changed the same type moments earlier.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: true,
+            itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: null);
+
+        var all = graph.RequestsFor(ContainerTypesPath);
+        all.Should().HaveCount(2);
+        all[0].Method.Should().Be("GET", "the etag must be read before the write that carries it");
+        all[1].Method.Should().Be("PATCH");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task SettingsPatch_WhenGraphReturnsNoEtag_FailsLoudly_RatherThanSendingADoomedWrite()
+    {
+        // Sending the PATCH anyway would earn a 400 whose message names nothing, putting an operator
+        // back in front of the exact error that cost two days. Fail with a message that says what is
+        // missing and why it matters.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, """
+            {"id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06","name":"No Etag Returned"}
+            """);
+        graph.StubPatch(ContainerTypesPath, PatchResponse);
+
+        var act = async () => await CreateSut().UpdateContainerTypeSettingsAsync(
+            graph.CreateGraphClient(), ContainerTypeId,
+            sharingCapability: null, isItemVersioningEnabled: true,
+            itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: null);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("etag"));
+
+        graph.PatchRequestsFor(ContainerTypesPath).Should().BeEmpty(
+            "a write that cannot succeed should not be sent");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Shape — the reason names alone were not the bug
     // ─────────────────────────────────────────────────────────────────────────
@@ -51,6 +153,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // members on a merge-PATCH, which Graph ignores — returning 200 and changing nothing. That is
         // why correcting the property names alone would not have fixed the no-op.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -58,7 +161,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: null, isItemVersioningEnabled: true,
             itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: null);
 
-        var body = graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson();
+        var body = graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson();
 
         body.TryGetProperty("settings", out var settings).Should().BeTrue(
             "settings are a nested object — top-level members are silently ignored by Graph");
@@ -76,6 +179,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
     public async Task SettingsPatch_UsesTheRealPropertyNames()
     {
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -83,7 +187,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: null, isItemVersioningEnabled: true,
             itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: 10_737_418_240L);
 
-        var settings = graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+        var settings = graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson()
             .GetProperty("settings");
 
         settings.GetProperty("itemMajorVersionLimit").GetInt64().Should().Be(25);
@@ -99,6 +203,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // JSON rather than a parsed property so a name reappearing ANYWHERE — nested, top-level, or
         // smuggled through AdditionalData — fails this test.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -106,7 +211,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: "externalUserSharingOnly", isItemVersioningEnabled: true,
             itemMajorVersionLimit: 25, maxStoragePerContainerInBytes: 10_737_418_240L);
 
-        var raw = graph.RequestsFor(ContainerTypesPath).Single().Body ?? string.Empty;
+        var raw = graph.PatchRequestsFor(ContainerTypesPath).Single().Body ?? string.Empty;
 
         raw.Should().NotContain("storageUsedInBytes",
             "that is the CONSUMPTION metric on a container — a ceiling must never borrow its name");
@@ -155,6 +260,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // The client's SharingCapability union (types/spe.ts) sends camelCase; the SDK enum is
         // PascalCase. Matching is case-insensitive, and this proves it for both spellings.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -162,7 +268,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: capability, isItemVersioningEnabled: null,
             itemMajorVersionLimit: null, maxStoragePerContainerInBytes: null);
 
-        graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+        graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson()
             .GetProperty("settings").TryGetProperty("sharingCapability", out _)
             .Should().BeTrue();
     }
@@ -174,6 +280,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // Rejected here rather than sent on: Graph's response to an unparseable enum is not reliably
         // distinguishable from success, which is the failure mode this whole task exists to remove.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         var act = async () => await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -182,7 +289,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             itemMajorVersionLimit: null, maxStoragePerContainerInBytes: null);
 
         await act.Should().ThrowAsync<ArgumentException>();
-        graph.RequestsFor(ContainerTypesPath).Should().BeEmpty(
+        graph.PatchRequestsFor(ContainerTypesPath).Should().BeEmpty(
             "an invalid value must not reach Graph at all");
     }
 
@@ -197,6 +304,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // Merge-PATCH: a property present with a null value is a request to CLEAR it, which would
         // silently wipe settings the caller never mentioned.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -204,7 +312,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: null, isItemVersioningEnabled: null,
             itemMajorVersionLimit: 5, maxStoragePerContainerInBytes: null);
 
-        var settings = graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+        var settings = graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson()
             .GetProperty("settings");
 
         settings.GetProperty("itemMajorVersionLimit").GetInt64().Should().Be(5);
@@ -226,6 +334,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // `agent.chatEmbedAllowedHosts`, which exists in NEITHER api version, and omitted
         // `sharingCapability`, which does. See notes/task-025-schema-verification.md.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -236,7 +345,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             urlTemplate: "https://example.invalid/{containerId}",
             consumingTenantOverridables: "sharingCapability,itemMajorVersionLimit");
 
-        var settings = graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+        var settings = graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson()
             .GetProperty("settings");
 
         foreach (var name in new[]
@@ -263,6 +372,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // here the type is provably narrower than reality.
         const string live = "sharingCapability,itemMajorVersionLimit,isOfficeRestricted";
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -271,7 +381,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             itemMajorVersionLimit: null, maxStoragePerContainerInBytes: null,
             consumingTenantOverridables: live);
 
-        graph.RequestsFor(ContainerTypesPath).Single().BodyAsJson()
+        graph.PatchRequestsFor(ContainerTypesPath).Single().BodyAsJson()
             .GetProperty("settings").GetProperty("consumingTenantOverridables")
             .GetString().Should().Be(live, "flags outside the SDK enum must survive round-tripping");
     }
@@ -282,6 +392,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
     {
         // Guards against FR-C07's phantom being "restored" by a future reader of the spec.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, PatchResponse);
 
         await CreateSut().UpdateContainerTypeSettingsAsync(
@@ -289,7 +400,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
             sharingCapability: null, isItemVersioningEnabled: null,
             itemMajorVersionLimit: 10, maxStoragePerContainerInBytes: null);
 
-        (graph.RequestsFor(ContainerTypesPath).Single().Body ?? "")
+        (graph.PatchRequestsFor(ContainerTypesPath).Single().Body ?? "")
             .Should().NotContain("chatEmbedAllowedHosts")
             .And.NotContain("\"agent\"",
                 "no such property exists in v1.0 or beta metadata");
@@ -310,6 +421,7 @@ public class SpeAdminContainerTypeSettingsPatchTests
         // depended on which endpoint it had asked. Casing that varies by endpoint is not cosmetic:
         // every client comparison against Graph's own lowercase value silently fails on one path.
         using var graph = new GraphWireMockFixture();
+        graph.StubGet(ContainerTypesPath, GetResponseWithEtag);
         graph.StubPatch(ContainerTypesPath, """
             {
               "id":"8a6ce34c-6055-4681-8f87-2f4f9f921c06",

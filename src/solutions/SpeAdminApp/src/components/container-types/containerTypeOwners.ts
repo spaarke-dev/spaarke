@@ -11,27 +11,44 @@
 import type { ContainerTypeOwner } from "../../types/spe";
 
 /**
- * The owner count the SharePoint admin center allows.
+ * The maximum number of owners Graph allows on a container type.
  *
- * ⚠️ **This is a UX limit, not a Graph-enforced one, and the distinction is deliberate.**
+ * ✅ **Graph-enforced, and documented.** Microsoft's Create-permission reference states: *"A maximum
+ * of 3 permissions per container type is allowed. Adding a fourth permission returns a
+ * `400 Bad Request` error."*
  *
- * Task 027's POML states "The SharePoint admin center allows up to three owners for settings and
- * billing". That claim is **not corroborated anywhere available to this repo**: the word "owner" does
- * not appear in `knowledge/sharepoint-embedded/docs/learn-containertypes.md` at all, and neither the
- * v1.0 nor the beta CSDL places any bound on the `permissions` collection.
+ * ⚠️ Corrected 2026-08-25. This was first written as an **unsourced** admin-center UX claim, because
+ * the word "owner" appears nowhere in `knowledge/sharepoint-embedded/docs/learn-containertypes.md`
+ * and neither CSDL bounds the `permissions` collection. Both of those observations were true — and
+ * the conclusion drawn from them was still wrong, because the API reference was never checked. The
+ * corpus not saying something is not the platform not saying it.
  *
- * So the UI cites the admin center as the source rather than asserting Graph enforces it — and the
- * add path still surfaces the server's error, because a client-side guard is a convenience, never
- * evidence about what the API will accept. Stating an unverified limit as a fact would be the same
- * failure this project exists to remove, just pointed at a number.
+ * The client-side guard remains a convenience, not the enforcement: the add path still surfaces the
+ * server's error, since a UI check is never evidence about what the API will accept.
  */
 export const ADMIN_CENTER_OWNER_LIMIT = 3;
 
-/** Explains what an owner is, and where the limit comes from. */
+/**
+ * Explains what an owner is, the limit, and who may change it.
+ *
+ * The "who may add" sentence matters operationally: Graph permits this only for existing owners,
+ * SharePoint Embedded Administrators, and Global Administrators. Every container type in the live
+ * tenant currently has ZERO owners, so in practice it is the directory-role holders who can bootstrap
+ * one — and an admin who lacks the role needs to know that before reading a 403 as a product fault.
+ */
 export const ADMIN_CENTER_OWNER_GUIDANCE =
-  `Owners can change this container type's settings and billing. The SharePoint admin center allows ` +
-  `up to ${ADMIN_CENTER_OWNER_LIMIT} owners. This is separate from the Permissions tab, which controls ` +
-  `which applications may access containers of this type.`;
+  `Owners can change this container type's settings and billing. Microsoft Graph allows a maximum of ` +
+  `${ADMIN_CENTER_OWNER_LIMIT} owners. Only an existing owner, a SharePoint Embedded Administrator, or a ` +
+  `Global Administrator can add one. This is separate from the Permissions tab, which controls which ` +
+  `applications may access containers of this type.`;
+
+/**
+ * Only `owner` is currently supported by Graph for container-type permissions.
+ *
+ * Named rather than inlined so that if Graph adds roles, the place to change is obvious — and so a
+ * reader does not assume the single-element array is an accident.
+ */
+export const SUPPORTED_OWNER_ROLES = ["owner"] as const;
 
 /** Consequence of removing the only remaining owner. */
 export const LAST_OWNER_WARNING =

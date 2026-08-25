@@ -181,6 +181,22 @@ public sealed class GraphWireMockFixture : IDisposable
                 e.RequestMessage.Body))
             .ToList();
 
+    /// <summary>
+    /// PATCH requests whose path starts with <paramref name="pathPrefix"/>, in order.
+    /// </summary>
+    /// <remarks>
+    /// A container-type settings write is a read-modify-write — it GETs the resource to obtain the
+    /// <c>etag</c> that Graph's Update API requires in the body, then PATCHes. So
+    /// <see cref="RequestsFor"/> legitimately returns two requests, and an assertion that means
+    /// "the write we sent" has to say so. Without this, a test asserting <c>.Single()</c> fails on
+    /// the GET, and — worse — a test asserting "no write was attempted" would pass or fail for the
+    /// wrong reason.
+    /// </remarks>
+    public IReadOnlyList<RecordedGraphRequest> PatchRequestsFor(string pathPrefix) =>
+        RequestsFor(pathPrefix)
+            .Where(r => string.Equals(r.Method, "PATCH", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
     /// <summary>Requests whose path starts with <paramref name="pathPrefix"/>, in order.</summary>
     public IReadOnlyList<RecordedGraphRequest> RequestsFor(string pathPrefix) =>
         AllRequests.Where(r => r.Path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase)).ToList();

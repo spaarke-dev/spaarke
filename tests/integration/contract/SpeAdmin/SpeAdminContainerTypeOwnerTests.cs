@@ -51,37 +51,69 @@ public class SpeAdminContainerTypeOwnerTests
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task AddOwner_PostsTheOwnerRoleAndTheGrantee()
+    public async Task AddOwner_ResolvesAUpnToAnObjectId_BecauseGraphAcceptsOnlyTheId()
     {
+        /*
+         * 🔴 Regression guard. The first implementation sent `userPrincipalName` for an
+         * email-shaped identifier. Graph's Create-permission reference is explicit: "Only the
+         * **user** property with the user's **id** is supported". Live, that returned
+         * 400 invalidRequest — the same message that names nothing as the etag defect did.
+         *
+         * An administrator types an email, so the UPN must be resolved to an object id first.
+         */
         using var graph = new GraphWireMockFixture();
+        graph.StubGet("/users/", """{"id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}""");
         graph.StubPost(PermissionsPath, """{"id":"perm-1","roles":["owner"]}""");
 
         await CreateSut().AddContainerTypeOwnerAsync(
             graph.CreateGraphClient(), TypeId, "ada@contoso.com");
 
+        graph.RequestsFor("/users/").Should().ContainSingle(
+            "a UPN has to be resolved before it can be granted ownership");
+
         var request = graph.RequestsFor(PermissionsPath).Should().ContainSingle().Subject;
         request.Method.Should().Be("POST");
         request.Body.Should().Contain("owner", "the grant must name the role it confers");
-        request.Body.Should().Contain("ada@contoso.com");
-        request.Body.Should().Contain("userPrincipalName",
-            "an identifier containing '@' is a UPN — sending it as an object id would silently fail " +
-            "to match any principal");
+        request.Body.Should().Contain("3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+            "the RESOLVED object id is what Graph accepts");
+        request.Body.Should().NotContain("ada@contoso.com",
+            "Graph rejects a userPrincipalName here with a 400 that names no cause");
     }
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task AddOwner_SendsAnObjectIdAsAnId_NotAsAUpn()
+    public async Task AddOwner_WhenTheUpnResolvesToNobody_SaysSo_RatherThanSendingADoomedGrant()
     {
-        // The other half of the branch. Sending a GUID in the userPrincipalName slot would not error
-        // — it would simply match nobody, which is the silent-no-op shape this project exists to remove.
+        // "No such user" and "400 invalidRequest" read identically to an admin and mean completely
+        // different things. Sending the grant anyway would surface the wrong one.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet("/users/", """{"error":{"code":"Request_ResourceNotFound"}}""", statusCode: 404);
+        graph.StubPost(PermissionsPath, """{"id":"perm-1"}""");
+
+        var act = async () => await CreateSut().AddContainerTypeOwnerAsync(
+            graph.CreateGraphClient(), TypeId, "nobody@contoso.com");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("nobody@contoso.com"));
+
+        graph.RequestsFor(PermissionsPath).Should().BeEmpty(
+            "a grant that cannot succeed should not be sent");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task AddOwner_WhenGivenAnObjectId_SendsItDirectly_WithoutADirectoryLookup()
+    {
+        // An id needs no resolution, and a needless /users call would be a second way to fail.
         using var graph = new GraphWireMockFixture();
         graph.StubPost(PermissionsPath, """{"id":"perm-1"}""");
 
         await CreateSut().AddContainerTypeOwnerAsync(
             graph.CreateGraphClient(), TypeId, "3f2504e0-4f89-11d3-9a0c-0305e82c3301");
 
+        graph.RequestsFor("/users/").Should().BeEmpty();
         var body = graph.RequestsFor(PermissionsPath).Single().Body;
-        body.Should().Contain("\"id\"");
+        body.Should().Contain("3f2504e0-4f89-11d3-9a0c-0305e82c3301");
         body.Should().NotContain("userPrincipalName");
     }
 

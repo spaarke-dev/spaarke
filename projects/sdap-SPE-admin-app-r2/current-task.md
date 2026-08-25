@@ -12,42 +12,48 @@
 | **Task** | W1–W10 + **011 ✅ · 027 🔄(built) · 028 ✅ · 060 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
 | **Step** | Between tasks. |
 | **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
-| **Next Action** | 🔔 **BLOCKED ON THE OPERATOR — one device-code sign-in.** Re-run `python delegated-diagnostics.py` (see below), relay the code, wait. Then **(3) deploy to dev**. |
+| **Next Action** | **(3) DEPLOY TO DEV** — needs operator go-ahead (writes to Dataverse). Then re-verify 027's owner ADD live (one delegated run), then 041/042. |
 
-### 🔔 BLOCKED — the PATCH-400 escalation needs ONE delegated sign-in
+### ✅ THE PATCH-400 ESCALATION IS RESOLVED (2026-08-25) — it was never about auth
 
-Operator chose the order **(1) build 027 → (2) resolve PATCH-400 → (3) deploy to dev** (2026-08-24).
-(1) and (3)-readiness are done. (2) cannot proceed without them.
+**`etag` is a REQUIRED body property** on Graph's Update fileStorageContainerType API. Microsoft's own
+*"Example 2: Update without ETag"* documents the response as `400 Bad Request` — our exact symptom.
 
-**Two device codes were issued and both expired unused** (15-min window each) — the operator was away.
-Do NOT keep re-issuing blind; ask first, then issue.
+| Identical no-op PATCH | Result |
+|---|---|
+| without `etag` | **400** |
+| **with `etag` in the body** | **200** ✅ (beta AND v1.0) |
+| Round-trip: wrote 499 → read back **499 PERSISTED** → restored 500 | ✅ **task 023 AC-2** |
 
-**The script is written and ready**, and deliberately resolves BOTH open items in one sign-in:
-```
-python "<scratchpad>/delegated-diagnostics.py"          # read-only + no-op PATCH probes
-python "<scratchpad>/delegated-diagnostics.py" --allow-writes   # adds owner then REVERTS it
-```
-It is also reproduced at `notes/delegated-diagnostics.py` so it survives the scratchpad.
+⚠️ It is a **BODY property**, NOT the `If-Match` header. An earlier session tried the header, saw no
+change, and that dead end is what aimed the whole investigation at auth. The recorded hypothesis
+("only the owning app may modify") was **wrong**, and disproving it would have cost a throwaway
+container type or a change to the **production SPA registration**. Neither was needed; nothing was
+created, deleted, or reconfigured.
 
-What it settles:
-- **The escalation** — captures the FULL 400 body incl. `innerError` (previously recorded only as
-  "invalidRequest / badArgument"; Graph's outer message is usually generic, the inner one names the
-  cause). Then the decisive ownership test: a **no-op** PATCH (writing the current value back, so the
-  payload cannot be the variable) against a SPA-owned type vs a CLI-owned one.
-  **2xx on CLI-owned + 400 on SPA-owned ⇒ ownership IS the rule.** 400 on both ⇒ it is not; look elsewhere.
-- **Task 027 AC-1** — live owner list (and add/remove under `--allow-writes`).
+Fix: `UpdateContainerTypeSettingsAsync` is now a read-modify-write (GET → etag → PATCH), and **throws
+rather than sending a doomed write** when Graph returns no etag. Full record:
+[`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
 
-**Two options were ruled out first, read-only, so no side effect is spent needlessly:**
-- `170c98e1` has `allowPublicClient: null` → the "enable public-client flows" option really does
-  modify the production SPA registration. Not free.
-- Neither CSDL carries `UpdateRestrictions` on `containerTypes`, so metadata cannot settle
-  updatability the way it settled 025 / 026 / 028.
+**Unblocks 023 (✅ complete) · 025 · 026 · 029.** ⚠️ 025's form rebinding and 026's AC-2 finding were
+never about the 400 — this removes the blocker, not their scope.
 
-⚠️ **Worth re-costing option 1.** The escalation note assumed deleting `Spaarke DMS-SPE Trial` is
-expensive. That trial **expired 2025-10-10 — eleven months ago** and a trial "simply stops working"
-after expiry. If it holds no containers, deleting it is cheap, and it is the cleanest route to a
-CLI-owned type to PATCH. The script's enumeration answers this. **Do not delete anything without
-asking.**
+### ✅ Task 027 owners — read path live-verified; write path fixed but not yet re-run
+
+`GET …/permissions` → **200 on all four** live container types (Graph reports zero owners).
+`POST` returned 400 → cause found in Microsoft's reference: **only the user's object `id` is accepted**,
+never `userPrincipalName`. Now resolved via `/users/{upn}` first, failing with "no such user" rather
+than a doomed grant. ⚠️ **Not yet re-exercised live** — needs one more delegated run.
+
+🔴 **I was wrong about the 3-owner limit.** I recorded it as "unsourced UX" because our corpus and the
+CSDL are silent. Microsoft's Create-permission reference documents it explicitly (max 3, fourth →
+400), plus: only `owner` is a valid role, and only existing owners / SPE Admins / Global Admins may
+add one. **The corpus not saying something is not the platform not saying it.**
+
+> **The lesson, twice in one day**: both 400s were *documented requirements* returned as
+> `invalidRequest` — *"One of the provided arguments is not acceptable"* — naming no cause. Both were
+> one fetch of the vendor's reference away. **Read the vendor's doc for the exact operation before
+> hypothesising about auth.**
 
 ### 🔴 Task 027 — THREE premise errors found before writing a line of feature code
 

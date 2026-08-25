@@ -16,6 +16,15 @@ agents alongside. Realistic concurrency is **2–3 agents**, not the 6-agent max
 **Task 010 can reopen the auth ADR gate.** It is the project's highest-risk task. A `UNWORKABLE` verdict
 blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fallback.
 
+**✅ The PATCH-400 escalation is RESOLVED (2026-08-25).** It blocked 023 / 025 / 026 / 029 for two
+days and was recorded as a suspected *ownership* restriction requiring an ADR-028 §6.5 re-run. It was
+not: **`etag` is a REQUIRED body property** on Graph's Update API, and Microsoft's own
+"Example 2: Update without ETag" documents the 400 we were getting. The identical no-op PATCH returns
+400 without it and **200 with it**. No app registration was changed and nothing was created or
+deleted. ⚠️ It is a **body property**, NOT the `If-Match` header — an earlier session tried the header,
+saw no change, and that dead end is what pointed the investigation at auth.
+See [`../notes/patch-400-resolution.md`](../notes/patch-400-resolution.md).
+
 ---
 
 ## Task Registry
@@ -36,7 +45,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 030 | [Lifecycle constraints in UI](030-lifecycle-constraints-ui.poml) | 3 C | C13 | FULL | sonnet | high | W4 | ✅ | 011 | ✅ **quota → option A (operator, 2026-08-23); delete affordance does not exist → new task. 🔴 Found + fixed: `billingClassification` null since the Graph 6 upgrade** |
 | 021 | [Graph Endpoint setting — wire or delete](021-graph-endpoint-setting.poml) | 3 C | C02 | FULL | sonnet | high | W5 | ❌ | 020 | ✅ **DELETED** — field was on `sprk_speenvironment`, not the config; fully persisted + validated, read by nothing. ⚠️ Dataverse column removal is an operator action |
 | 022 | [Fix recycle-bin `$select`](022-recycle-bin-select-fix.poml) | 3 C | C03 | FULL | sonnet | medium | W6 | ❌ | 020, 040 | ✅ **POML described a different bug.** No OData error existed; the value was dropped on a `is string` type check. 040's 2 characterization tests inverted |
-| 023 | [Property names + quota/consumption split](023-property-names-and-quota-split.poml) | 3 C | C04, C05 | FULL | sonnet | high | W7 | ❌ | 020, 040 | 🔄 **shape+names LIVE-CONFIRMED; 🔔 WRITE BLOCKED — every PATCH 400s, escalation open.** POML's names were RIGHT (a first) — but the write path was broken at **3** independent points, plus a 4th defect **defended by 10 tests** |
+| 023 | [Property names + quota/consumption split](023-property-names-and-quota-split.poml) | 3 C | C04, C05 | FULL | sonnet | high | W7 | ❌ | 020, 040 | ✅ **COMPLETE 2026-08-25 — AC-2 proven live** (wrote 499 → read back 499 → restored 500). The PATCH-400 was a **missing `etag` BODY property**, required by Graph's Update API — NOT the suspected ownership rule. See [`../notes/patch-400-resolution.md`](../notes/patch-400-resolution.md). POML's names were RIGHT (a first) — but the write path was broken at **3** independent points, plus a 4th defect **defended by 10 tests** |
 | 024 | [SPIKE + branch — storage consumption](024-storage-consumption-spike.poml) | 3 C | C06 | FULL | sonnet | high | W8 | ❌ | 023 | ✅ **IMPLEMENT** — spike pre-answered by 020; beta LIST-only. All 4 nulls + all 4 `UtcNow` fabrications gone |
 | 025 | [Full 9-property settings surface](025-full-settings-surface.poml) | 3 C | C07 | FULL | sonnet | high | W9 | ❌ | 023, 040 | 🔄 **server complete; form deferred.** 🔴 FR-C07 listed a property that **does not exist** (`agent.chatEmbedAllowedHosts`) and omitted one that does (`sharingCapability`) |
 | 026 | [Replication + override state](026-replication-and-override-state.poml) | 3 C | C08 | FULL | sonnet | high | W10 | ✅ | 025 | 🔄 **AC-2 ESCALATED — not achievable from an owning tenant.** 🔴 `consumingTenantOverridables` is a **permission**, not a state |

@@ -169,3 +169,69 @@ modify its container type. Whether that extends to POSTing to a `permissions` su
 so it may well succeed where PATCH does not. Do not assume either way.
 
 Everything else is verified: build, 8 contract tests, code page build, and the request shapes.
+
+---
+
+## 7. ✅ Live verification 2026-08-25 — and two corrections to §1–§4 above
+
+### The read path works
+
+`GET /containerTypes/{id}/permissions` → **200** on **all four** live container types. Graph reports
+**zero owners** on every one of them. AC-1's read half is verified.
+
+### 🔴 CORRECTION to §4 — the three-owner limit IS documented and IS Graph-enforced
+
+§4 called it "unsourced" and had the UI cite the SharePoint admin center as the source. The two
+observations behind that were true — "owner" appears nowhere in
+`knowledge/sharepoint-embedded/docs/learn-containertypes.md`, and neither CSDL bounds the
+`permissions` collection — **and the conclusion was still wrong**, because the *API reference* was
+never checked. Microsoft's Create-permission page states:
+
+> *"A maximum of **3** permissions per container type is allowed. Adding a fourth permission returns a
+> `400 Bad Request` error."*
+
+**The corpus not saying something is not the platform not saying it.** Corrected in
+`containerTypeOwners.ts`; the client-side guard remains a convenience, not the enforcement.
+
+The same page adds two facts the POML never mentioned, now in the UI guidance:
+
+- **Only `owner` is supported** as a role.
+- **Only existing owners, SharePoint Embedded Administrators, or Global Administrators may add one.**
+  Since every live type has **zero** owners, bootstrapping depends on a directory-role holder — worth
+  saying out loud so an admin does not read a 403 as a product fault.
+- Duplicates are idempotent (`201` with the existing permission), and the response is **201**, not 200.
+
+### 🔴 CORRECTION to §5 — the ADD payload was wrong, and it is now fixed
+
+The live POST returned **400 `invalidRequest`** — the same uninformative message as the etag defect.
+Cause, from the same reference:
+
+> *"Only the **user** property with the user's **id** is supported; group and application identities
+> aren't supported."*
+
+The implementation sent `userPrincipalName` for an email-shaped identifier. Graph accepts **only the
+directory object id**.
+
+Fixed: `AddContainerTypeOwnerAsync` now resolves a UPN to an object id first, and **fails with "no
+such user" rather than sending a doomed grant** — because "no such user" and "400 invalidRequest" read
+identically to an administrator and mean entirely different things.
+
+`ResolveUserObjectIdAsync` derives its base address from the client (task 020's lesson). A hardcoded
+`https://graph.microsoft.com/v1.0` would have made every contract test hit the **real** Graph instead
+of the fixture — a worse failure than a wrong version.
+
+Pinned by 3 new tests: `AddOwner_ResolvesAUpnToAnObjectId…`,
+`AddOwner_WhenTheUpnResolvesToNobody_SaysSo…`, `AddOwner_WhenGivenAnObjectId_SendsItDirectly…`.
+
+⚠️ **AC-1's write half is still not live-verified** — the fix was derived from Microsoft's reference
+after the live 400, not yet re-exercised against the tenant. It needs one more delegated run.
+
+### The lesson, twice in one day
+
+Both 400s — the settings PATCH and the owner POST — were **documented requirements** returned as
+`invalidRequest` / *"One of the provided arguments is not acceptable"*. Neither error named its cause.
+In both cases the answer was one fetch of the vendor's own reference page away, and in the first case
+the wrong hypothesis (an ownership restriction) would have cost a production app-registration change
+or a throwaway container type to disprove.
+
+**Read the vendor's reference for the exact operation before hypothesising about auth.**
