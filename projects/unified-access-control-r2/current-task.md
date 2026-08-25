@@ -11,11 +11,44 @@
 | Field | Value |
 |---|---|
 | **Task** | ✅ **021 COMPLETE** (re-scoped + implemented) · ✅ 022 complete |
-| **Step** | Task complete, all gates green. **Not yet committed** |
-| **Status** | 15 files modified, uncommitted. Next: commit + push |
+| **Step** | 021 done + pushed. **Blocked on the auth-v4 integration for any CI verdict** |
+| **Status** | clean; `99408eee5` pushed. PR #812 is **CONFLICTING** → no workflows dispatched |
 | **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 2 of 9** (**021 ✅** 022 ✅ · remaining: 023 024 025 026 027 028 029) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft |
-| **Next Action** | **Commit the 021 changeset and push.** Then `/push-to-github`. After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
+| **Next Action** | ✅ 021 committed + pushed (`99408eee5`). **🔴 NEXT: the auth-v4 integration blocker below — CI cannot run on this PR at all until it is resolved.** Needs an owner ruling on Cause A (security path). After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
+
+### 🔴 BLOCKER FOUND AFTER 021 — CI has been DARK for two pushes
+
+Full diagnosis: [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
+
+**PR #812 is `mergeable=CONFLICTING`, and a conflicted PR produces NO gate rather than a red one.**
+GitHub cannot compute `refs/pull/812/merge`, so it dispatched **zero workflows** for `2035b1d16`
+(last session) and `99408eee5` (task 021). Not queued, not failed — no `github-actions` check suite
+at all. ⚠️ Last session I said `2035b1d16`'s run was "starting now"; that was an assumption and it
+was **wrong**.
+
+The conflict is trivial — **one hunk in `projects/INDEX.md`** (master inserted the auth-v4 row where
+this branch holds its own row; keep both). But resolving it pulls master in, and a **trial merge
+(aborted, not committed) produced 22 failures** from two independent causes:
+
+| Cause | What | Fix |
+|---|---|---|
+| **A** 🔔 | `CallerRecordAccessProbe.cs:134,137` (**task 008's**) calls `.WithClientSecret` → master's auth-v4 forcing functions **FR-F1 + FR-F2** both fail | Inject `IConfidentialClientProvider`, construct no credential. **Security path → owner decision (CLAUDE.md §6)** |
+| **B** | Master widened `DataverseWebApiClient`'s ctor to 4 params; Moq needs an exact match, so `Mock<DataverseWebApiClient>(config, logger)` throws in **5 fixtures** | One line per fixture |
+
+**Cause A is item D1 with its premise expired.** D1 was accepted 2026-08-23 as an ADR-028 A4 path-A
+exception *"to be handled in the broader MI migration"* — auth-v4 **completed 2026-08-24 and closed
+E-3**, and could not have handled a site living on an unmerged branch. The guard's own message says
+*"A failure here is NOT a prompt to update the number"*, so allowlisting is explicitly the wrong move.
+
+**Consequence to be clear about: nothing on this branch can be CI-verified until this is done.**
+Task 021's own verification is local-only (all 7 projects 11,443/0, NetArchTest 36/36, publish
+43.70 MB, both gates clean) — but that is *not* the Router, by this project's own standing lesson.
+
+**Recommended**: one new task, ordered AHEAD of the remaining Phase 0/0b work — (1) migrate
+`CallerRecordAccessProbe` per the owner's ruling, (2) fix the 5 mock ctors, (3) merge master keeping
+both INDEX rows, then **confirm a check suite actually exists** before claiming green. Fold in the
+auth-v4 PR comment's two `DATAVERSE-ACCESS-LAYER-ROUTING.md` corrections while there.
 
 ### ✅ Task 021 — what shipped
 
