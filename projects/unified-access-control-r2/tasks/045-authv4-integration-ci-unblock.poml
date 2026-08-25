@@ -3,7 +3,7 @@
   <metadata>
     <title>Integrate auth-v4 from master so CI can run at all: migrate CallerRecordAccessProbe off its client secret, repair 5 Moq ctor sites, merge master</title>
     <phase>0b Review remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a live authorization seam (the OBO credential for the delegation gate on six external-access mutations plus Office save), and merges a large body of master into the branch. Highest blast radius of any task in this project.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -143,5 +143,15 @@ The auth-v4 team left a comment on PR #812 (2026-08-24) asking for two correctio
     <criterion>The two DATAVERSE-ACCESS-LAYER-ROUTING.md corrections are applied.</criterion>
   </acceptance-criteria>
 
-  <notes>This task exists because a conflicted PR produces NO gate rather than a red one — a failure mode worth remembering independently of this project. It must run BEFORE any further Phase 0/0b work, because nothing on this branch can be CI-verified until it lands.</notes>
+  <notes>COMPLETED 2026-08-25. Router = SUCCESS at c5edf2448 (run 32874968847) — the FIRST CI-adjudicated state of this branch since ffc2cb1de. PR #812 is MERGEABLE. 22 checks pass, 0 failures; the one cancelled job is tier2/advisory (Markdown Link Validator), excluded from adjudication by construction.
+
+FOUR causes, not the two predicted: (A) the credential port, as planned; (B) the Moq ctors PLUS a deeper cause -- master also made DataverseWebApiClient/Service select the credential from Graph:ManagedIdentity:Enabled and THROW without one, so six fixtures needed that flag; (C) NOT PREDICTED -- the probe had ZERO test coverage (every fixture substitutes it), so its precondition logic could be inverted and the whole delegation gate opened with the suite green; added DelegationProbeFailClosedTests (7 tests, auth KEEP path); (D) NOT PREDICTED -- master shipped 6 stale tests asserting endpoints it had deliberately deleted, invisible to master own gate because tier1 filters that project by changed surface and tier2 is advisory.
+
+Perturbations 5 run, 1 bit (7 failures on the fail-closed inversion). The four zeros are each explained: P2/P3 absorbed by the generic fail-closed catch (property holds either way); P4 diagnosability-only, predicted before running; P5 MsalException UNREACHABLE offline (OrderedCredentialClientProvider is sealed) -- the POML escalation trigger firing as written.
+
+OBO correctness is NOT proven and NOT claimed -- no test performs a real exchange; task 034 owns that. What is proven: the deny direction, and that the secret is gone (FR-F1/FR-F2 executable).
+
+All 7 projects 11,538 passed / 0 failed. Publish 43.71 MB (+0.01, ceiling 60). --vulnerable clean.
+
+Original note: this task exists because a conflicted PR produces NO gate rather than a red one — a failure mode worth remembering independently of this project. It must run BEFORE any further Phase 0/0b work, because nothing on this branch can be CI-verified until it lands.</notes>
 </task>

@@ -10,18 +10,18 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **021 COMPLETE** (re-scoped + implemented) · ✅ 022 complete |
-| **Step** | 021 done + pushed. **Blocked on the auth-v4 integration for any CI verdict** |
-| **Status** | clean; `99408eee5` pushed. PR #812 is **CONFLICTING** → no workflows dispatched |
-| **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 2 of 9** (**021 ✅** 022 ✅ · remaining: 023 024 025 026 027 028 029) |
+| **Task** | ✅ **045 COMPLETE — CI IS UNBLOCKED** · ✅ 021 · ✅ 022 |
+| **Step** | **`Router = SUCCESS` at `c5edf2448`** — the first CI-adjudicated state of this branch since `ffc2cb1de`. 22 checks pass, 0 failures |
+| **Status** | clean + pushed. PR #812 is **MERGEABLE** (was CONFLICTING) |
+| **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 3 of 12** (**021 ✅ 022 ✅ 045 ✅** · remaining: **046** 047 023 024 025 026 027 028 029) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft |
-| **Next Action** | ✅ 021 committed + pushed (`99408eee5`). **🔴 NEXT: the auth-v4 integration blocker below — CI cannot run on this PR at all until it is resolved.** Needs an owner ruling on Cause A (security path). After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
+| **Next Action** | **Task 046 — create the `Secure Project Owner` role and REMOVE System Administrator from the owner team** (owner-approved 2026-08-25). Then **047** (live provisioning validation, needs a deploy). After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
 
-### 🔴 BLOCKER FOUND AFTER 021 — CI has been DARK for two pushes
+### ✅ RESOLVED — the CI blocker (task 045)
 
 Full diagnosis: [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
 
-**PR #812 is `mergeable=CONFLICTING`, and a conflicted PR produces NO gate rather than a red one.**
+**FIXED. `Router = SUCCESS` at `c5edf2448`; PR #812 is `MERGEABLE`.** The cause: a conflicted PR produces **NO gate rather than a red one** —
 GitHub cannot compute `refs/pull/812/merge`, so it dispatched **zero workflows** for `2035b1d16`
 (last session) and `99408eee5` (task 021). Not queued, not failed — no `github-actions` check suite
 at all. ⚠️ Last session I said `2035b1d16`'s run was "starting now"; that was an assumption and it

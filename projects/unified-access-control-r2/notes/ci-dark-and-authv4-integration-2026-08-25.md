@@ -1,8 +1,10 @@
 # CI has been dark for two pushes — root cause, and the auth-v4 integration it exposed
 
-> **Status**: 🔔 **OWNER DECISION REQUIRED.** Diagnosis complete, both causes isolated, fix path
-> known for each. Nothing has been changed to address them — the trial merge was **aborted**, not
-> committed, because one of the two causes is security-path auth code (CLAUDE.md §6).
+> **Status**: ✅ **RESOLVED by task 045, 2026-08-25.** `Router = SUCCESS` at `c5edf2448`, PR #812 is
+> `MERGEABLE`. See [§ RESOLVED](#-resolved--task-045-2026-08-25) at the end for the outcome — including
+> **two causes nobody predicted**: the probe had zero test coverage, and master had shipped 6 stale
+> tests invisible to its own gate. The diagnosis below is kept as written, because how the blocker was
+> found matters as much as the fix.
 > **Date**: 2026-08-25 · found while pushing task 021.
 
 ---
@@ -150,3 +152,106 @@ Two smaller items to fold in while there:
 - **Push discipline, restated**: after the last push of a session, *verify a check suite exists* —
   not merely that a run was "starting". Absence of runs is a state to check for explicitly, because
   it looks exactly like success from a distance.
+
+---
+
+# ✅ RESOLVED — task 045, 2026-08-25
+
+## The gate rendered a verdict: `Router = SUCCESS`
+
+**First CI-adjudicated state of this branch since `ffc2cb1de`.** Commit `c5edf2448`, run `32874968847`.
+
+| Check | Result |
+|---|---|
+| **`Router`** (the gate) | ✅ **SUCCESS** |
+| Tier 1 / Compile (Debug) | ✅ |
+| Tier 1 / Arch Tests (MUST-NOT subset) | ✅ |
+| Tier 1 / Classify Tier 1 Surfaces | ✅ |
+| **Tier 1 / Auth Smoke** | ✅ |
+| **Tier 1 / Changed-Surface Integration Smoke** | ✅ |
+| Tier 2 / Full Unit Tests (Debug) | ✅ — the root `dotnet test`, so CI independently validated the stale-test repairs |
+| Tier 2 / ADR Compliance · Format · Lint · Plugin Size · Last Reviewed | ✅ |
+| Tier 2 / Markdown Link Validator | ⚠️ cancelled — **advisory, excluded from adjudication by construction** (the 2026-08-24 Router fix) |
+| PR #812 overall | **22 SUCCESS · 0 FAILURE · 1 cancelled (advisory) · 1 in-flight (`SDAP CI`)** |
+| `mergeable` | **MERGEABLE** (was `CONFLICTING`) |
+
+⚠️ Note on reading the run: the *workflow run's* conclusion is `cancelled` because one advisory job was
+cancelled, while the **`Router` job itself is `success`**. The Router job is the required check — that
+separation is precisely what the 2026-08-24 repair engineered, and this is the first time it has been
+exercised in anger.
+
+## What actually had to be fixed — four things, not two
+
+The trial merge predicted two causes. Executing it found four.
+
+**A. The credential (predicted).** `CallerRecordAccessProbe` ported onto
+`OrderedCredentialClientProvider`, faithfully following master's `DataverseUserClient`. Client asked
+for **per exchange**, not held, so a transient blip cannot pin the path to a fallback. **No allowlist
+or census entry added** — the census guard's own message argues against exactly that, and FR-F1/FR-F2
+now pass on the merits.
+
+**B. The Moq ctor sites (predicted) — but the real cause was one layer deeper.** Widening the ctor was
+only half of it: master also made `DataverseWebApiClient` and `DataverseWebApiService` select their
+credential from `Graph:ManagedIdentity:Enabled` **and throw** when it is off with no provider. Six
+fixtures were still setting `API_CLIENT_SECRET` / `Dataverse:ClientSecret` — pointing at a credential
+deleted from Key Vault on 2026-08-24. Fixed by enabling the MI flag in the fixture configs (the
+branch's `DefaultAzureCredential` is lazy and never authenticates in a fully-stubbed double).
+
+**C. NOT PREDICTED — the probe had ZERO test coverage.** Every fixture substitutes it
+(`RemoveAll<CallerRecordAccessProbe>`); `DelegationProbeRetryPolicyTests` covers only a pure static.
+The real class had never been constructed by any test, so its precondition logic could be inverted —
+opening the entire delegation gate — with the suite green. Added
+`tests/integration/auth/UnifiedAccessControl/DelegationProbeFailClosedTests.cs` (7 tests, KEEP path).
+**Task 017's lesson, again: mocking at a seam proves the CALLER, never the CALLEE.**
+
+**D. NOT PREDICTED — master shipped 6 stale tests.** Master deleted `GET /api/containers` and
+`GET /api/drives/{id}/children` from `DocumentsEndpoints.cs` with a documented zero-caller sweep, and
+left 6 tests asserting those routes are *registered*. They failed on the literal assertion "should be
+registered" for deliberately retired routes. Retired entries removed from the two data-driven lists (2
+tests now **pass**); the 2 Facts + 1 Theory that exclusively target them are **skipped with reasons**
+rather than retargeted — pointing an authorization test at a different endpoint silently changes WHICH
+policy is under test, and that is the deletion owner's call.
+
+> **Why master's own CI never caught D**: Tier 1 runs a **changed-surface FILTERED subset** of
+> `Spe.Integration.Tests`, and Tier 2 — which runs everything — is **advisory**. So a whole-suite
+> failure in that project is invisible to the gate on master. Worth knowing independently of this task;
+> it is the same "the gate is not what you think it is" shape as the conflicted-PR finding.
+
+## Perturbations — 5 run, 1 bit, and the four zeros are each explained
+
+| # | Perturbation | Failures | Cause of a zero |
+|---|---|---|---|
+| **P1** | **no-credential path GRANTS instead of denying** | **7** | — |
+| P2 | `OboAvailable` ignores the provider | 0 | **(b) absorbed** — proceeding NREs into the generic fail-closed catch, which denies. Security property holds either way |
+| P3 | `OboAvailable` ignores tenant + client id | 0 | **(b) absorbed** — same |
+| P4 | remove the `InvalidOperationException` catch | 0 | **(b) by design** — the generic catch still denies; that catch buys *diagnosability* (a distinct log), not the outcome. Predicted before running |
+| P5 | `MsalException` path GRANTS | 0 | **(a)+(b) GENUINE GAP** — unreachable offline; needs a provider yielding a client whose exchange fails, and `OrderedCredentialClientProvider` is `sealed` so it cannot be stubbed |
+
+P1 is the one that matters, and before file **C** existed it would have failed **zero** tests. That is
+the whole value of the addition.
+
+## ⚠️ What is NOT proven, and is not claimed
+
+**OBO correctness.** No test performs a real exchange. Reaching the MSAL failure path needs a live
+tenant and a real user assertion — task 034's obligation, which already carries the same duty for task
+005's document-path use of `RetrievePrincipalAccess`. What IS proven here is the **deny** direction,
+which is the direction a mistake would break, plus that the secret-bearing credential is gone
+(FR-F1/FR-F2 executable, not asserted).
+
+## Verification
+
+- **All 7 test projects: 11,538 passed / 0 failed** — `Sprk.Bff.Api.Tests` 10,917 ·
+  `Spe.Integration.Tests` 373 · `Sprk.Bff.Api.IntegrationTests` 96 · **`Spaarke.ArchTests` 56 incl.
+  FR-F1 + FR-F2** · `Spaarke.Scheduling.Tests` 46 · `Spaarke.Core.Tests` 45 ·
+  `RecordSyncJob.IsolatedTests` 12
+- Publish **43.71 MB** compressed incl. PDBs (+0.01 vs task 021; ceiling 60). `--vulnerable` clean.
+- BFF `--warnaserror`: 0 errors (7 pre-existing `CS0618` in `Registration` code, none in changed files).
+- The two `DATAVERSE-ACCESS-LAYER-ROUTING.md` corrections auth-v4 requested are applied, with the
+  superseded wording quoted so it cannot quietly return.
+
+## Follow-up worth filing (not done here)
+
+Roughly ten test files still set `API_CLIENT_SECRET` / `Dataverse:ClientSecret` in their config. They
+pass — the key is simply ignored now — but they are dead references to a credential deleted from Key
+Vault. Harmless today; misleading to the next reader who takes them as evidence the secret path exists.
+A sweep belongs with whoever owns test hygiene, not in a merge commit.
