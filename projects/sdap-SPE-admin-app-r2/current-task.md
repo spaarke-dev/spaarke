@@ -9,41 +9,111 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W9 done + **029** (W10 half); 011 🔄 · 023 🔄 · 025 🔄 · 029 🔄 |
-| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 12 commits this session. |
-| **Status** | All work committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). Latest: `3c5c0205b`. |
-| **Next Action** | **Task 026** — `task-execute` on `tasks/026-replication-and-override-state.poml`. **Verify its premise first** (17 of 17 POMLs have now been wrong, incomplete, or mis-scoped) and **re-check its `parallel-safe` flag** — 029's proved false. See the two 026-specific warnings below. |
+| **Task** | **none in progress** — W1–W10 done + **011 completed**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
+| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 15 commits this session. |
+| **Status** | All committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). Latest: `9af552d9b`. |
+| **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
+| **Next Action** | **Task 028** — container URL + Purview deep-link. Chosen because the operator's own M365 admin-center screenshots showed container URL as the most visible missing field. Then the two defects below, then 027. |
 
-### ⚠️ Before starting 026 — three things already known
+### 🔴 Task 011 completed — but be precise about what now works
 
-1. **Its `parallel-safe=true` is suspect.** 029's was wrong: surfacing a new Graph field needs the
-   mapping layer, i.e. the god-file. 026 and 029 *also* both list `ContainerTypeDtos.cs` **and**
-   `components/container-types/` as modify targets, so W10's "no god-file contention" premise was false
-   twice over. They were run serially; check before ever dispatching 026 as an agent.
-2. **Its step 6 is blocked by the open PATCH escalation below.** 026 step 6 says *"save a setting and
-   confirm the pending state renders rather than a bare success"* — but **every** container-type PATCH
-   returns 400. Steps 1–5 (replication signal, override state, rendering) are unaffected and
-   deliverable; only the live save is blocked. This is the same shared escalation as 023/025, not a new one.
-3. **The 24-hour claim is sourced** — `knowledge/sharepoint-embedded/docs/learn-containertypes.md:101`:
-   *"Updating settings on a container type may take up to **24 hours** ... If a consuming tenant applied
-   overrides on container type settings, the new values aren't applied and the overrides remain in
-   place."* That one sentence supports both of 026's states. Note it says nothing about a replication
-   *progress* signal, so 026's honesty constraint likely resolves to "state the expectation", not "track it".
+The partial left **GET, CREATE and settings-SAVE on the app-only path**, which Graph rejects outright
+(403 on v1.0 *and* beta). Three of four container-type ops could never work in production. All are now
+on the delegated path that LIST already uses.
 
-### ✅ Task 029 done 2026-08-24 (AC-1 partial)
+| Op | Before | After | Live-verified? |
+|---|---|---|---|
+| GET | 403 | expected to work | ❌ **no** |
+| CREATE | 403 | expected to work (delegated create needs no admin role, design §4.2b) | ❌ **no** |
+| **SAVE** | 403 | 🔴 **STILL BROKEN — 400** | ❌ no |
 
-`billingStatus` existed in **0 files repo-wide** before this. Now end-to-end, with the warning branching
-on classification (only `standard` needs a billing profile in the developer tenant — a single generic
-warning would be wrong for the other two). Fixed in passing: settings-save returned `"Trial"` where the
-list returned `"trial"`. **AC-1 partial** — live render not re-confirmed; needs a delegated device-code
-sign-in (~20s), *not* a permission grant. See [`notes/task-029-findings.md`](notes/task-029-findings.md).
+**SAVE was not fixed.** The failure moved from 403 to 400: the write now reaches Graph's own validation
+for the first time instead of being rejected before it. That makes the PATCH-400 escalation the *actual*
+blocker rather than a symptom hiding behind a 403. Do not report SAVE as working.
 
-**Two measurement gaps found, neither fixed (both out of 029's scope):**
-- **SpeAdminApp has no ESLint dependency, config, or install** — its `lint` script has never run. Step
-  9.5's lint gate is unavailable for this code page; `tsc --noEmit` vs a stashed baseline was substituted.
-- **The publish-size baseline is unreproducible.** Measured 44.99 MB vs a recorded 43.67 MB. Stashing the
-  changes and remeasuring gave **44.99 MB** too — so the true delta is **0.00 MB** and the *method*
-  drifted, not the artifact. Don't chase the phantom +1.32 MB; pick one command and record it.
+**Found by walking the UI, not by reading code** — five prior tasks touched this file and missed it.
+
+### 🔴 Two REAL defects found in the UI review — neither owned by any task
+
+1. **"Manage Permissions" (Search results) lands on the Dashboard.**
+   [`ItemResultsGrid.tsx:552`](../../src/solutions/SpeAdminApp/src/components/search/ItemResultsGrid.tsx#L552)
+   opens a tab at `?page=containers&containerId=…`, but `App.tsx` never reads those params — it only
+   parses `configId`/`buId` from the Dataverse `data` param, and `activePage` always starts at
+   `"dashboard"`. A tab opens, so it *looks* like it worked. Signature §2.4 shape.
+2. **An expired trial container type is invisible on the grid.** The live tenant's trial expired
+   **2025-10-10 (11 months ago)**. `expiryDateTime` renders in exactly one place —
+   `ContainerTypeDetail.tsx:863` — as a plain date in the detail panel, with no indication it is past.
+   Task 030 added the 30-day warning to the **create** dialog only. design §4.2b: *"a trial type simply
+   stops working on day 31."* Also a now-stale comment at `ContainerTypesPage.tsx:108` claims the BFF
+   never sends `expiryDateTime` — task 030 made that untrue.
+
+### ✅ The nine-screen UI review happened (2026-08-24) — this was the missing gate
+
+design §9's first acceptance criterion — *"all nine screens work against Spaarke Dev"* — had **never**
+been exercised. Every prior fix was verified at the API/mapping/schema layer, which cannot prove a
+screen renders. Uncomfortably close to R1's *"4176 passing"* for an app that never ran.
+
+**How to re-run it:**
+```
+cd src/solutions/SpeAdminApp
+npx vite --config vite.review.config.ts       # → http://127.0.0.1:5178
+```
+It runs the **REAL app** (real routing, AppShell, all nine screens) and swaps ONLY
+`src/services/authInit.ts` — the single data choke point — for `dev-review/authInit.mock.ts`. Never used
+by `npm run build`. Fixtures carry per-route provenance (live / partial / synthetic).
+
+⚠️ **Bind `host: true`** — Vite's default came up IPv6-only (`[::1]`), which `curl` reached and the
+browser did not. That cost three debugging rounds.
+
+**Confirmed working against real captured data**: Dashboard **860.8 MB / 5 containers** (was `0 B`) ·
+Containers per-row storage (was `—`) · Container Types owning-app populated + billing status "Unknown"
+(correct) · Recycle Bin muted "Unknown" timestamp · Security's honest 403 · Settings has no Graph
+Endpoint field (021 deleted it).
+
+**Harness lessons (my bugs, not the app's) — don't re-derive:**
+- BFF list shapes are **NOT uniform**: `businessunits`/`configs`/`environments`/`security/alerts`/
+  `search/*`/`audit` are **bare arrays**; `containers`/`containertypes`/`recyclebin` are `{items,count}`;
+  `dashboard/metrics`/`security/score` are bare objects. Wrong shape ⇒ `d.filter is not a function`,
+  white screen. **TypeScript cannot catch this** — `get<T>()` CASTS, it does not parse. Same root cause
+  as task 030's row-selection defect.
+- `ContainerSearchResult` is `{ container: Container, score? }` — **nested**, not flat.
+- Route matching must be **path-segment + method aware**. `includes()` made
+  `/spe/containers/{id}/items` match `/spe/containers`, silently serving a wrong-but-plausible payload
+  instead of a loud NO FIXTURE.
+
+### ⚠️ Fixtures are partly synthetic — the operator noticed
+
+File-browser items are invented and identical for every container; `createdDateTime` values were
+invented from container *names* (M365 shows Spaarke Dev Container 2 created **5/28/26**; the fixture
+says Sep 30 2025). **App-only Graph works for containers/files/storage**, so real captures are available
+without an interactive sign-in — worth doing before any further UI review.
+
+**M365 admin centre comparison (operator screenshots, 2026-08-24):** billing status is **Active** on all
+four types (so `billingStatus` HAS a real value — our "Unknown" is a fixture artefact, not a code
+defect) · **container URL** is shown there and missing here → **task 028** · storage 0.03 GB ≈ our
+31.6 MB ✅ · container "Designer" belongs to a different owning app, correctly absent from our list.
+
+**Two measurement gaps, still unowned:**
+- **SpeAdminApp has no ESLint dependency, config, or install** — its `lint` script has never run.
+  `tsc --noEmit` against a stashed baseline was substituted.
+- **Publish-size baseline unreproducible.** 44.99 MB measured vs 43.67 recorded; stash-and-remeasure
+  gave 44.99 both ways, so the true delta is **0.00 MB** and the *method* drifted. Don't chase it.
+
+### 📋 Remaining work, ordered against the operator's goal (live data + deploy)
+
+| Order | Item | Why here |
+|---|---|---|
+| 1 | **028** container URL + Purview deep-link | Most visible gap vs the M365 admin centre; straightforward |
+| 2 | **Manage Permissions defect** (above) | Real, small, currently unowned |
+| 3 | **Expired-trial gap** (above) | Real, small, in scope for FR-C13 |
+| 4 | **027** container-type owner management | Needs the delegated path 011 just finished |
+| 5 | **PATCH 400 escalation** | 🔔 **operator decision required** — see below |
+| 6 | 050 archival · 051 quota ceiling · 052 item recycle bin | New capabilities (Workstream E) |
+| 7 | 041 / 042 test suite · 060 / 061 / 062 hygiene | |
+| 8 | **090 wrap-up** | `/test-diet` is a BINDING gate |
+
+**Deployment** is not yet attempted. The code page builds clean (2.34 MB single file). No deploy task
+exists in the WBS — decide whether it rides task 090 or gets its own.
 
 ### 🔑 Live verification is UNBLOCKED — use it
 
