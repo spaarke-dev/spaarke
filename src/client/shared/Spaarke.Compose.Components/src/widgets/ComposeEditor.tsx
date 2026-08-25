@@ -218,6 +218,9 @@ import {
   collectBlocks,
   type BlockInfo,
 } from './importedRevisions';
+// Task 054 (FR-C03): the whole-document closed set — the live text with each paragraph's paraId
+// prefixed, walked from the SAME collectBlocks placement resolves against (project invariant 3).
+import { buildAnchoredDocumentText, type AnchoredDocumentText } from './composeAnchoredDocumentText';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 // ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the WS-4 CLIENT CITATION RESOLVER
 // mirroring `Services/Compose/CitationResolver.cs`. See that module's header for the reuse-first
@@ -947,6 +950,23 @@ export interface ComposeEditorHandle {
    * verifies against. Empty for a born-in-editor doc (no snapshot / the server renders its ids).
    */
   getBaselineParaIdMap(): ComposeBaselineParaId[];
+
+  /**
+   * Task 054 (FR-C03): the LIVE document text with every id-bearing paragraph prefixed `[PARAID] `,
+   * plus the closed set of those ids in document order. Read-only, no dirty-flag side effect.
+   *
+   * This is what a WHOLE-DOCUMENT AI pass (`compose-revise-document`) sends as its operand, so the
+   * model can target a paragraph by copying an identifier it can see beside the content instead of
+   * quoting prose back. It must be read at DISPATCH time, not cached: the set has to describe the
+   * document as it is now, including paragraphs typed since load — an incomplete "closed" set would
+   * get the model refused on ids that genuinely exist.
+   *
+   * Sourced from the SAME block walk placement resolves against (`collectBlocks`), so the set the
+   * model chooses from and the set the redline resolves into cannot diverge (project invariant 3).
+   * `paraIds` is empty for a document whose paragraphs carry no stamped ids; the caller then omits
+   * the annotated text rather than presenting an id-free document as if it carried a closed set.
+   */
+  getAnchoredDocumentText(): AnchoredDocumentText;
 
   /**
    * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
@@ -3189,6 +3209,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),
+        // Task 054 (FR-C03): the live annotated text + closed paraId set for a whole-document AI pass.
+        // Computed on CALL (never cached) so it reflects paragraphs typed since load — see the handle
+        // doc comment for why an incomplete closed set is worse than none.
+        getAnchoredDocumentText: () =>
+          editor ? buildAnchoredDocumentText(editor) : { text: '', paraIds: [], totalBlocks: 0 },
         // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
         // R6 (task 012 scope amendment): the server removed the engine-based comment bake for ALL
         // ContentModel saves, so the born-in-editor build now folds session + advisory comment threads

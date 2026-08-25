@@ -201,21 +201,95 @@ public sealed class ComposeEditActionAnchorContractSeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
-    // The boundary — the whole-document pass is deliberately NOT anchored yet
+    // The whole-document pass (task 054) — anchored by a CLOSED SET rather than a single id
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Task 051 left this Action deliberately unanchored and pinned the omission, because requiring an id
+    // the model was never given would refuse every whole-document edit — strictly worse than the prose
+    // matching it replaces. Task 054 supplies the set, so the pin is replaced by its positive form.
+    //
+    // The set is NOT a separate list. It is the document text itself, annotated with each paragraph's
+    // paraId, supplied as the `documentText` operand by the Compose editor pane (which is the only holder
+    // of the COMPLETE current set — the server's ChatSession.ReferenceMap is a Load-time snapshot that
+    // omits paragraphs typed since, and carries no text to annotate with). Ids must appear where the
+    // content is read: naming one is then a COPY, whereas matching a paragraph to an id in a side list is
+    // a generation, which is the lossy step Track C exists to delete.
+    // Full reasoning: projects/spaarkeai-compose-r8/notes/054-closed-set-supply-decision.md
+
+    /// <summary>The two anchored item channels a whole-document revision emits.</summary>
+    public static TheoryData<string> WholeDocumentAnchoredChannels() => new() { "edits", "comments" };
+
+    [Theory]
+    [MemberData(nameof(WholeDocumentAnchoredChannels))]
+    public void WholeDocumentReviseAction_DeclaresTargetParaIdOnEveryAnchoredChannel(string channel)
+    {
+        // `comments` matters as much as `edits`: flag-risks emits an EMPTY edits array by contract, so the
+        // highest-volume whole-document capability is 100% comment-anchored. Leaving comments on prose
+        // would leave that capability entirely on the path this project is retiring.
+        var items = OutputSchema("compose-revise-document")
+            .GetProperty("properties").GetProperty(channel).GetProperty("items");
+
+        items.GetProperty("properties").TryGetProperty("target_para_id", out var prop)
+            .Should().BeTrue($"additionalProperties:false makes the anchor unreturnable on {channel}[] without it");
+
+        items.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("target_para_id",
+                "Structured Outputs requires EVERY property in `required`; nullability rides the type union");
+
+        prop.GetProperty("type").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "string", "null" },
+                "null is the honest answer when the model could not identify a paragraph — it keeps the "
+                + "legacy text path reachable for that item instead of failing the whole batch");
+    }
 
     [Fact]
-    public void WholeDocumentReviseAction_HasNoSingleAnchorYet_BecauseItNeedsAParagraphList()
+    public void WholeDocumentReviseAction_OutputSchema_IsValidOpenAiSubset()
     {
-        // NOT an oversight, and this test is here so it cannot silently become one. `compose-revise-document`
-        // has no selection, so there is no single paraId to echo — it needs an enumerated CLOSED SET of the
-        // document's paragraphs supplied on the request first. Its own task owns that. When that lands, this
-        // test is the thing that fails and tells the author to move the Action onto the anchored list above.
-        OutputSchema("compose-revise-document").GetProperty("properties")
-            .TryGetProperty("target_para_id", out _)
-            .Should().BeFalse(
-                "until the paragraph LIST is supplied, requiring an id the model was never given would "
-                + "refuse every whole-document edit — strictly worse than today's prose matching");
+        // Adding a nested property to two array item schemas is exactly where an invalid-subset mistake
+        // hides — and it would 400 at request time, not in any C#-side assertion.
+        OpenAiFunctionSchemaValidator.FindFirstError(OutputSchema("compose-revise-document").GetRawText())
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void WholeDocumentReviseAction_DeclaresTheOperandAndItsCompanions()
+    {
+        // Declaration is the contract (ADR-043 Amendment 1). Two distinct consequences here:
+        //   - `documentText` declared + supplied moves this dispatch onto the STRUCTURED-operand path.
+        //     Without it, HasStructuredOperand is false, the file-operand path runs, and that path passes
+        //     NO Args and NO InputSchemaJson to ContextBinder — so nothing the caller sent reaches the
+        //     prompt at all.
+        //   - `revisionIntent` / `instruction` then ride as declared companions. They do not reach the
+        //     model today, which is why the systemPrompt's four INSTRUCTIONS-BY-INTENT branches cannot
+        //     currently be selected.
+        var path = Path.Combine(RepoRoot(), "infra", "dataverse", "actions", "compose-revise-document.action.json");
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+
+        doc.RootElement.TryGetProperty("inputSchema", out var input)
+            .Should().BeTrue("a null sprk_inputschema means no companion input can ever reach the model");
+
+        var props = input.GetProperty("properties");
+        props.TryGetProperty("documentText", out _)
+            .Should().BeTrue("the annotated document IS the closed set, and it is the declared operand");
+        props.TryGetProperty("revisionIntent", out _)
+            .Should().BeTrue("without it the model cannot tell flag-risks from improve-clarity");
+        props.TryGetProperty("instruction", out _)
+            .Should().BeTrue("the custom intent is defined entirely by this field");
+    }
+
+    [Fact]
+    public void WholeDocumentReviseAction_Prompt_BindsTheModelToTheSuppliedIds()
+    {
+        var prompt = SystemPrompt("compose-revise-document");
+
+        prompt.Should().Contain("target_para_id", "the model must be told which output field carries the anchor");
+        prompt.Should().Contain("VERBATIM",
+            "echoing an id is a COPY; asking for it loosely reintroduces generation-is-lossy");
+        prompt.Should().Contain("revisionIntent",
+            "the intent now reaches the model as a declared input, so the prompt must name it as such");
+        prompt.Should().Contain("CLOSED SET",
+            "the model must be bound to ids that appear in the supplied text — an invented id is refused, "
+            + "so an unbounded prompt would produce silent per-item failures instead of anchored edits");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════

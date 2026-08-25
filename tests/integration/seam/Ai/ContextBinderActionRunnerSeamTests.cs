@@ -333,6 +333,80 @@ public sealed class ContextBinderActionRunnerSeamTests
             "the operand is still the content the completion runs over — the companion does not replace it");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // (vi) The WHOLE-DOCUMENT compose shape (spaarkeai-compose-r8 task 054, FR-C03)
+    //
+    //      The whole-document revise pass dispatches into a session that HAS a registered file. Before
+    //      task 054 its args were `{revisionIntent}` alone — no operand-vocabulary member — so
+    //      HasStructuredOperand was false and the dispatch took the FILE-operand path. That path builds
+    //      its ContextBindingRequest from the resolved DocumentText only: it passes NO Args and NO
+    //      InputSchemaJson, so `revisionIntent` was accepted at the endpoint and dropped before the
+    //      prompt. The Action's four INSTRUCTIONS-BY-INTENT branches could not be selected, and
+    //      flag-risks (comments-only, empty edits by contract) was indistinguishable from
+    //      improve-clarity.
+    //
+    //      Task 054 supplies `documentText` — the editor's own text with each paragraph's paraId
+    //      prefixed, which is simultaneously the operand and the CLOSED SET the model must choose an id
+    //      from. That flips the branch. These tests pin the flip itself, because it is the link that
+    //      makes every other part of the whole-document anchor chain reachable.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The whole-document Action's declared inputs: the operand plus its two companions.</summary>
+    private const string ReviseDocumentInputSchema =
+        """{"type":"object","required":["revisionIntent","documentText"],"properties":{"documentText":{"type":"string"},"revisionIntent":{"type":"string"},"instruction":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_WholeDocumentOperand_WinsOverTheSessionFile_AndCarriesTheIntent()
+    {
+        // The session has a file registered — exactly the real condition. The supplied operand must
+        // still win, because the file path would silently discard both the closed set and the intent.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession(fileId: "file-1"));
+        h.GivenBinding(inputSchema: ReviseDocumentInputSchema);
+        h.GivenFlatTextAction("ROLE: Revise the whole document per the supplied revisionIntent.");
+        h.GivenSessionFileText("RAG-EXTRACTED TEXT — a different projection of the same file.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string annotated = "[AAAA0001] 1. Definitions\n[AAAA0002] The receiving party shall indemnify.";
+        var chunks = await h.DispatchAsync(new { revisionIntent = "flag-risks", documentText = annotated });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+
+        // The closed set reached the model, ids beside the content they name.
+        h.OpenAi.LastPrompt.Should().Contain("## Input").And.Contain("[AAAA0002] The receiving party shall indemnify");
+
+        // The intent reached the model as a declared companion. Without this the model cannot tell
+        // flag-risks (comments only) from improve-clarity, and task 055's comments[] half has nothing
+        // reliable to place.
+        h.OpenAi.LastPrompt.Should().Contain("flag-risks",
+            "the declared intent must reach the prompt — the file-operand path drops it entirely");
+
+        // And the RAG extract did NOT come along: one document, one coordinate system. Sending both
+        // would let the model quote from a text the editor cannot place an edit into.
+        h.OpenAi.LastPrompt.Should().NotContain("RAG-EXTRACTED TEXT",
+            "the supplied operand replaces the file projection — the model must quote from the same "
+            + "text the redline is placed into, which is the editor's, not the search index's");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WholeDocumentWithoutOperand_StillTakesTheFilePath_Unregressed()
+    {
+        // The degradation path: no Compose tab open / no stamped ids ⇒ the client omits documentText and
+        // the dispatch is exactly what it was before task 054. Pinned so the fallback stays a KNOWN
+        // shape rather than an accident.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession(fileId: "file-1"));
+        h.GivenBinding(inputSchema: ReviseDocumentInputSchema);
+        h.GivenJpsAction(SummarizeSystemPromptJps, SummarizeOutputSchema);
+        h.GivenSessionFileText("RAG-EXTRACTED TEXT — a different projection of the same file.");
+        h.OpenAi.RawJsonToReturn = """{"summary":"ok"}""";
+
+        var chunks = await h.DispatchAsync(new { revisionIntent = "flag-risks" });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().Contain("## Document").And.Contain("RAG-EXTRACTED TEXT");
+    }
+
     // ─── Harness ─────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string? fileId = null)

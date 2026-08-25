@@ -5,16 +5,26 @@
   "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-revise-document' (spaarkeai-compose-r2 DEF-11). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-revise-document.action.json (the systemPrompt/schema author surface). The dual-channel payload — edits[] (structured, ledger-backed pending track-changes, same shape as compose-draft-alternative's ComposeDraftPayload) and comments[] (anchored review-flag comments, DEF-13 path) — becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; match_mode is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["edits", "comments", "rationale", "sources"],
-  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator). edits/comments MAY be empty arrays (e.g. flag-risks emits empty edits; align-clauses/improve-clarity MAY emit empty comments) but both arrays are always present. match_mode's closed set is expressed via the `enum` keyword.",
+  "required": [
+    "edits",
+    "comments",
+    "rationale",
+    "sources"
+  ],
+  "$comment-required": "Object-level required array (ALL four fields required — edits/comments MAY be empty arrays per intent, but the arrays themselves are always present). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required.",
   "properties": {
     "edits": {
       "type": "array",
-      "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item is exactly the compose-draft-alternative ComposeDraftPayload shape ({target_text, new_text, match_mode}).",
+      "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item is exactly the compose-draft-alternative ComposeDraftPayload shape.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["target_text", "new_text", "match_mode"],
+        "required": [
+          "target_text",
+          "new_text",
+          "match_mode",
+          "target_para_id"
+        ],
         "properties": {
           "target_text": {
             "type": "string",
@@ -29,18 +39,34 @@
           "match_mode": {
             "type": "string",
             "description": "How the editor locates target_text: 'strict' (this exact occurrence — default), 'first' (first occurrence of a shorter repeated fragment), or 'all' (every occurrence, e.g. a defined-term change).",
-            "enum": ["strict", "first", "all"]
+            "enum": [
+              "strict",
+              "first",
+              "all"
+            ]
+          },
+          "target_para_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this item applies to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. Null ONLY when the paragraph genuinely cannot be identified, in which case placement falls back to target_text/match_mode.",
+            "maxLength": 64
           }
         }
       }
     },
     "comments": {
       "type": "array",
-      "description": "Anchored review-flag comments this revision pass proposes. The ONLY output for a flag-risks request (no rewrite). Each item anchors a comment to a verbatim span of documentText — materializes as an AnchoredAnnotation type:'comment' (DEF-13 path).",
+      "description": "Anchored review-flag comments this revision pass proposes. The ONLY output for a flag-risks request (no rewrite). Each item anchors a comment to a verbatim span of documentText.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["target_text", "comment"],
+        "required": [
+          "target_text",
+          "comment",
+          "target_para_id"
+        ],
         "properties": {
           "target_text": {
             "type": "string",
@@ -51,6 +77,14 @@
             "type": "string",
             "description": "The review-flag text — concise, names the concrete risk or issue.",
             "maxLength": 1500
+          },
+          "target_para_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this item applies to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. Null ONLY when the paragraph genuinely cannot be identified, in which case placement falls back to target_text/match_mode.",
+            "maxLength": 64
           }
         }
       }
@@ -62,11 +96,15 @@
     },
     "sources": {
       "type": "array",
-      "description": "Grounding for the revision — each entry is { type, id, snippet }. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+      "description": "Grounding for the revision. Empty array when the retrieval layer supplied no grounding — never fabricated.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "id", "snippet"],
+        "required": [
+          "type",
+          "id",
+          "snippet"
+        ],
         "properties": {
           "type": {
             "type": "string",
@@ -85,5 +123,6 @@
         }
       }
     }
-  }
+  },
+  "$comment-mirror": "Task 054: re-projected from the seed's outputSchema. The DEPLOYED source is infra/dataverse/actions/compose-revise-document.action.json (Deploy-AnalysisAction.ps1 reads that file, not this one) — this mirror exists for CI schema validation."
 }

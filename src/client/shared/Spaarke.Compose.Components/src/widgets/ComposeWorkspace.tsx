@@ -108,6 +108,7 @@ import {
   useRegisterComposeInsertSuggestionHandler,
   useRegisterComposeSaveHandler,
   useComposeSaveCompleted,
+  useRegisterComposeAnchoredDocumentTextProvider,
 } from '../context/composeActionBridge';
 import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
@@ -3455,6 +3456,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     editorRef.current?.acceptPendingRedline(ledgerRef);
   }, []);
   useRegisterComposeRedlineAcceptHandler(handleBridgeAcceptRedline);
+
+  // Task 054 (FR-C03) — publish the editor's LIVE annotated document text + closed paraId set into the
+  // bridge, so the Assistant's whole-document revise dispatch can send the model a set of identifiers
+  // it can copy instead of asking it to quote prose back. Read on demand at dispatch time (never
+  // cached) so it describes the document as it is NOW, including paragraphs typed since load.
+  //
+  // Same single-writer multi-tab gate as the Accept slot above, and for a sharper reason: supplying an
+  // INACTIVE tab's document would hand the model identifiers from one document while the redline is
+  // placed into another. Returning null degrades to the pre-054 dispatch (no annotated text, no closed
+  // set) rather than to a wrong one.
+  const handleReadAnchoredDocumentText = React.useCallback((): {
+    text: string;
+    paraIds: readonly string[];
+  } | null => {
+    if (isActiveTabRef.current === false) return null;
+    const anchored = editorRef.current?.getAnchoredDocumentText?.();
+    return anchored && anchored.paraIds.length > 0
+      ? { text: anchored.text, paraIds: anchored.paraIds }
+      : null;
+  }, []);
+  useRegisterComposeAnchoredDocumentTextProvider(handleReadAnchoredDocumentText);
 
   // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT
   // compose draft from the ledger so a page refresh restores the drafted content — materialized

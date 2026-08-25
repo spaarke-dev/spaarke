@@ -91,6 +91,7 @@ import {
   useComposeInsertSuggestion,
   useComposeSave,
   useRegisterComposeSaveCompletedHandler,
+  useComposeAnchoredDocumentText,
 } from "@spaarke/compose-components/context/composeActionBridge";
 // spaarkeai-assistant-enhancements-r3 task 001 — READ the widget-agnostic active-item handle
 // (id/type/label; NEVER bytes — ADR-015) the WorkspacePane tab-focus feed publishes. This is the
@@ -1662,9 +1663,30 @@ export function ConversationPane(): React.JSX.Element {
   // NOT narrated prose. This reuses the SHIPPED `dispatchComposeAction` edit path verbatim: a
   // non-empty `documentSessionId` makes it an EDIT (routes to the doc session, confirmation-only,
   // no prose — DEF-09), and `revisionScope: 'whole-document'` selects the DEF-11 confirmation copy.
-  // The bindingId comes ONLY from capability discovery (ADR-039); documentText is resolved
-  // SERVER-SIDE from the registered document session's file (ContextBinder file-operand path when the
-  // args omit a documentText operand) — see the wave notes. `instruction` rides only for `custom`.
+  // The bindingId comes ONLY from capability discovery (ADR-039).
+  //
+  // TASK 054 (FR-C03) — `documentText` is now supplied from the Compose editor, annotated with each
+  // paragraph's `w14:paraId`. Two things change, and the second was not obvious:
+  //
+  //  1. It IS the closed set. The model targets a paragraph by copying an identifier it can see beside
+  //     the content (a copy) instead of quoting the prose back (a generation, and generation is lossy —
+  //     the "wording differs slightly" failure). The editor supplies it because only the LIVE editor
+  //     holds the COMPLETE current set: the server's session reference map is a Load-time snapshot that
+  //     omits paragraphs typed since, and carries no text to annotate with.
+  //
+  //  2. It changes which server path runs, which is what makes `revisionIntent` work AT ALL. Supplying
+  //     a `documentText` operand moves this dispatch onto the STRUCTURED-operand path, where the
+  //     Action's declared inputs render into `## Input` beside the operand (ADR-043 Amendment 1). The
+  //     file-operand path it took before passes NO args and NO input schema to ContextBinder, so
+  //     `revisionIntent` was accepted and dropped before the prompt — the systemPrompt's four
+  //     INSTRUCTIONS-BY-INTENT branches could not be selected, and flag-risks (comments-only, empty
+  //     edits) was indistinguishable from improve-clarity.
+  //
+  // No annotated text available (no Compose tab open, an inactive tab, or a document with no stamped
+  // ids) → `documentText` is omitted and the dispatch is byte-identical to the pre-054 one. That is a
+  // real degradation (back to prose matching) but never a WRONG placement: a half-supplied set would
+  // get the model refused on ids that genuinely exist.
+  const readAnchoredDocumentText = useComposeAnchoredDocumentText();
   const dispatchReviseDocument = React.useCallback(
     (revisionIntent: RevisionIntent, instruction: string | undefined, documentSessionId: string): void => {
       if (!reviseBindingId) {
@@ -1679,6 +1701,11 @@ export function ConversationPane(): React.JSX.Element {
       if (instruction && instruction.trim().length > 0) {
         slots.instruction = instruction.trim();
       }
+      // Read at DISPATCH time, never cached — the set must describe the document as it is now.
+      const anchored = readAnchoredDocumentText?.() ?? null;
+      if (anchored && anchored.paraIds.length > 0) {
+        slots.documentText = anchored.text;
+      }
       void dispatchComposeAction({
         id: `compose-revise-document#${(reviseDispatchSeqRef.current += 1)}`,
         bindingId: reviseBindingId,
@@ -1687,7 +1714,7 @@ export function ConversationPane(): React.JSX.Element {
         revisionScope: "whole-document",
       });
     },
-    [reviseBindingId, dispatchComposeAction, injection]
+    [reviseBindingId, dispatchComposeAction, injection, readAnchoredDocumentText]
   );
 
   // FIX #1 (editor-centric reframe) — a DOCUMENT-LEVEL action chip click (summarize / add-to-DMS /

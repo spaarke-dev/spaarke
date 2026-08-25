@@ -4,7 +4,7 @@
     <title>FR-C03 (whole-document half) — enumerate the closed paraId set for the whole-document review pass and deliver it to the model; catalog change for `compose-revise-document`</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>blocked-on-051</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what the whole-document review pass sends to the model and what its Action contract requires back; may cross into the SpaarkeAi code page (a hot path).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -153,4 +153,48 @@
     <criterion>If SpaarkeAi was touched: `/conflict-check` run, `projects/INDEX.md` updated, co-deploy noted.</criterion>
     <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-08-24. Decision: **client-side, from the Compose editor pane, as an id-annotated
+    `documentText` operand** — full reasoning in `notes/054-closed-set-supply-decision.md`.
+
+    The task framed the choice as server (`ChatSession.ReferenceMap`) vs client, and expected the server to
+    win on trust. Tracing the dispatch inverted it on stronger grounds:
+
+    - The closed set is NOT a separate list. A side list forces the model to match a paragraph to an entry
+      by number or first-words — prose matching moved, not removed. Ids go inline (`[PARAID] text`), so
+      naming a target is a COPY. Measured: the side-list alternative costs 9.5x more per paragraph and at
+      800 paragraphs (84,000 chars) EXCEEDS `MaxDeclaredCompanionChars` (32,768), where an oversize
+      companion is skipped and logged — i.e. it would have silently produced the incomplete closed set the
+      second escalation trigger forbids.
+    - Only the LIVE editor holds the COMPLETE set. `ChatSession.ReferenceMap` is a Load-time snapshot that
+      omits paragraphs typed since AND carries no text to annotate with, so a server build would have to
+      re-project — re-deriving what was already in hand (invariant 7).
+    - Six dark links were found, not one. The decisive one: the FILE-operand path
+      (`SessionDispatchOrchestrator.ResolveFileOperandAsync`) passes NO `Args` and NO `InputSchemaJson` to
+      `ContextBinder`. Supplying a `documentText` operand flips the dispatch onto the structured path,
+      which is why this ALSO fixes `revisionIntent` — it did not reach the model at all before, so the
+      systemPrompt's four INSTRUCTIONS-BY-INTENT branches could not be selected and `flag-risks`
+      (comments-only) was indistinguishable from `improve-clarity`. Task 055 depends on that.
+
+    ZERO server code changed — it rides ADR-043 Amendment 1 unchanged (Path C, no escalation).
+
+    Verified by tests observed to FAIL first: 4 catalog-contract tests, and the client supply test
+    (neutralised the supply line and watched it fail, printing the exact pre-054 wire body
+    `args:{"revisionIntent":"flag-risks"}`). Suites: BFF 11,179 passed / 0 failed; Compose components
+    95 suites / 1,162 tests; SpaarkeAi conversation 75 suites / 720 tests.
+
+    Publish 43.72 MB compressed incl. PDBs (under the 60 MB ceiling); no new NuGet; no vulnerable packages.
+    C-4 measured: anchors add 3.50% at realistic payload sizes (40.4 KB, under the 128 KB cap); the
+    over-cap case at the schema's declared maxima is pre-existing and the anchor contributes 0.09%.
+
+    Known limitations recorded in the note (L-1 hard breaks collapse in `collectBlocks().text`; L-2 the
+    provider-registration race is argued not proven; L-3 the `[XXXXXXXX]` prefix is unescaped) — each
+    bounded and safe-degrading; L-1's fix would breach invariant 3 and belongs with `collectBlocks`.
+
+    Also found: `compose-draft-alternative` / `compose-compare-to-playbook` have the WHOLE mirror file in
+    `sprk_inputschema` in dev, so `GetDeclaredProperties` returns null and task 051's `targetParaId` would
+    NOT render. Fixed by the 051 deploy-script change — the Action seed deploy is a PREREQUISITE for
+    observing either task's work.
+  </notes>
 </task>

@@ -48,6 +48,10 @@ const registerActiveDocumentSpy = jest.fn();
 let capturedSave: (() => void | Promise<void>) | null = null;
 let capturedAccept: ((ledgerRef: string) => void) | null = null;
 let capturedInsert: ((content: string, messageId?: string) => void) | null = null;
+// Task 054 — the whole-document closed-set provider is gated by the SAME isActiveTab rule, and for a
+// sharper reason than the others: supplying an INACTIVE tab's document would hand the model paragraph
+// identifiers from one document while the redline is placed into another.
+let capturedAnchoredDocText: (() => { text: string; paraIds: readonly string[] } | null) | null = null;
 jest.mock('../context/composeActionBridge', () => ({
   useComposeActiveDocumentRegistration: () => registerActiveDocumentSpy,
   useRegisterComposeRedlineAcceptHandler: (h: (ledgerRef: string) => void) => {
@@ -61,6 +65,11 @@ jest.mock('../context/composeActionBridge', () => ({
     capturedSave = h;
   },
   useComposeSaveCompleted: () => null,
+  useRegisterComposeAnchoredDocumentTextProvider: (
+    p: () => { text: string; paraIds: readonly string[] } | null
+  ) => {
+    capturedAnchoredDocText = p;
+  },
 }));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────
@@ -93,6 +102,11 @@ jest.mock('./ComposeEditor', () => {
         rejectPendingRedline: () => undefined,
         highlightCitedSpan: () => 'noop',
         clearCitedHighlight: () => undefined,
+        getAnchoredDocumentText: () => ({
+          text: '[AAAA0001] Clause one.',
+          paraIds: ['AAAA0001'],
+          totalBlocks: 1,
+        }),
       }));
       return <div data-testid="compose-editor-stub" />;
     }),
@@ -162,6 +176,7 @@ beforeEach(() => {
   capturedSave = null;
   capturedAccept = null;
   capturedInsert = null;
+  capturedAnchoredDocText = null;
 });
 
 describe('ComposeWorkspace — bridge conduits are active-tab-scoped (multi-Compose-tab)', () => {
@@ -180,6 +195,10 @@ describe('ComposeWorkspace — bridge conduits are active-tab-scoped (multi-Comp
 
     await capturedSave!();
     await waitFor(() => expect(saveFetchCount()).toBe(1));
+
+    // Task 054 — the active tab supplies its closed set, so the whole-document dispatch can hand the
+    // model identifiers to copy instead of prose to quote.
+    expect(capturedAnchoredDocText!()).toEqual({ text: '[AAAA0001] Clause one.', paraIds: ['AAAA0001'] });
   });
 
   it('an INACTIVE tab NO-OPS Save / Accept / Insert from the bridge (does not touch the hidden doc)', async () => {
@@ -199,5 +218,10 @@ describe('ComposeWorkspace — bridge conduits are active-tab-scoped (multi-Comp
     expect(materializeComposeDraftSpy).not.toHaveBeenCalled();
     expect(acceptPendingRedlineSpy).not.toHaveBeenCalled();
     expect(saveFetchCount()).toBe(0);
+
+    // Task 054 — and it supplies NO closed set. Returning a hidden tab's paragraph identifiers would
+    // be worse than returning none: the dispatch would look correctly anchored while naming paragraphs
+    // of a different document than the one the redline lands in.
+    expect(capturedAnchoredDocText!()).toBeNull();
   });
 });

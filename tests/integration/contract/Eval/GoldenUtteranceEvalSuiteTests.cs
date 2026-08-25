@@ -1252,14 +1252,33 @@ public class GoldenUtteranceEvalSuiteTests
             .Should().BeEquivalentTo(new[] { "edits", "comments", "rationale", "sources" },
                 "DEF-11: the dual-channel contract — edits[] (pending track-changes) AND comments[] " +
                 "(anchored review flags) are both always-present top-level fields, selected by revisionIntent");
+        // spaarkeai-compose-r8 task 054 (FR-C03): both item channels gained `target_para_id`. The
+        // whole-document pass has no selection, so the model is given the document with each paragraph's
+        // paraId prefixed — a CLOSED SET — and answers with an id copied from it rather than prose
+        // quoted back. `comments[]` matters as much as `edits[]`: flag-risks emits an EMPTY edits array
+        // by contract, so the highest-volume whole-document capability is entirely comment-anchored.
         schemaDoc.RootElement.GetProperty("properties").GetProperty("edits")
             .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(new[] { "target_text", "new_text", "match_mode" },
-                "each edits[] item is exactly the compose-draft-alternative ComposeDraftPayload shape");
+            .Should().BeEquivalentTo(new[] { "target_text", "new_text", "match_mode", "target_para_id" },
+                "each edits[] item is still exactly the compose-draft-alternative ComposeDraftPayload shape — "
+                + "which itself gained target_para_id in task 051, so the two stayed parallel");
         schemaDoc.RootElement.GetProperty("properties").GetProperty("comments")
             .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(new[] { "target_text", "comment" },
-                "each comments[] item anchors a review-flag comment to a verbatim document span (DEF-13 path)");
+            .Should().BeEquivalentTo(new[] { "target_text", "comment", "target_para_id" },
+                "each comments[] item anchors a review flag by paraId, falling back to a verbatim document "
+                + "span only when the model could not identify the paragraph (DEF-13 path)");
+
+        // The parallel above is ASSERTED, not just asserted-about: the sibling selection Action must
+        // carry the anchor too. Hardcoding the list on one side while claiming parity with the other is
+        // how this pin went stale after task 051 anchored the selection Actions and not this one.
+        var siblingPath = Path.Combine(
+            FindRepoRoot(), "infra", "dataverse", "actions", "compose-draft-alternative.action.json");
+        using var siblingDoc = JsonDocument.Parse(File.ReadAllText(siblingPath));
+        siblingDoc.RootElement.GetProperty("outputSchema").GetProperty("required")
+            .EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("target_para_id",
+                "the whole-document edits[] item shape mirrors compose-draft-alternative's payload — if the "
+                + "sibling drops the anchor, 'exactly the ComposeDraftPayload shape' stops being true");
     }
 
     [Fact]

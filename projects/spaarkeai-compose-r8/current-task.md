@@ -1,7 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-24 (by `context-handoff`) · **Pushed through**: `64548f227`
-> **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
+> **Last Updated**: 2026-08-24 · **Branch**: `work/spaarkeai-compose-r8`
 
 ---
 
@@ -9,22 +8,53 @@
 
 | Field | Value |
 |-------|-------|
-| **Last task** | **051** — anchor supply (`tasks/051-anchor-supply.poml`) — ✅ **COMPLETE** |
-| **Next task** | **054** — `tasks/054-whole-document-closed-set-supply.poml` (not started) |
-| **Status** | Branch clean, synced with master (**0 behind, 78 ahead**), all pushed. No task in progress. |
-| **Rigor / tier** | 054 is FULL · **opus @ xhigh** — do not run it on a lower tier |
-| **Next Action** | Start task 054 via the `task-execute` skill. Its step 2 owns the one real decision: enumerate the whole-document paragraph set **server-side** from `ChatSession.ReferenceMap`, or **client-side** in SpaarkeAi's `ConversationPane.tsx`. Read `notes/adr-043-041-assessment.md` C-1-as-amended and C-7 FIRST. |
+| **Last task** | **054** — whole-document closed-set supply — ✅ **COMPLETE** |
+| **Next task** | **055** — `tasks/055-whole-document-anchored-placement.poml` (not started) · FULL · **opus @ xhigh** |
+| **Status** | 054 committed. Track C: 051 ✅ · 054 ✅ · 055 → 052 → 053 remain. |
+| **Next Action** | Start 055 via `task-execute`. Its step 2 owns the real decision: does `comments[]` converge onto `ComposeEditor.placeAdvisoryComments`' existing deterministic `sectionRef` resolution, or stay separate (justify per CLAUDE.md §11)? Read `notes/054-closed-set-supply-decision.md` §6 FIRST — L-1/L-2/L-3 are live constraints on 055. |
 
-### Project status: 26 of 42 tasks complete, 15 open (1 dropped)
+### What 054 established (do not re-litigate)
 
-| Track | Open |
+**The closed set is the document text itself, annotated `[PARAID] text`, supplied by the Compose editor.**
+
+- **Not a side list** — a side list forces the model to match paragraph→entry by number/first-words, which
+  is prose matching moved rather than removed. Measured: a side list costs **9.5× more per paragraph** and
+  at 800 paragraphs (84,000 chars) **exceeds `MaxDeclaredCompanionChars` (32,768)**, where oversize is
+  *skipped and logged* — it would silently have produced an incomplete "closed" set.
+- **Editor, not server** — only the live editor holds the COMPLETE current set; `ChatSession.ReferenceMap`
+  is a Load-time snapshot with no text to annotate, so a server build means re-projecting (invariant 7).
+- **Supplying `documentText` also fixed `revisionIntent`**, which reached the model *not at all* before:
+  the file-operand path passes NO args/schema to `ContextBinder`. **055 depends on this** — `flag-risks`
+  (comments-only, empty `edits`) was previously indistinguishable from `improve-clarity`.
+- **Zero server code changed.** Rides ADR-043 Amendment 1 unchanged. Path C, no escalation.
+
+### Live constraints carried into 055
+
+| # | Constraint |
 |---|---|
-| **C — AI edit placement** | **054** supply · **055** placement · **052** demote text-search *(gated on 051+054+055)* · **053** bounded fallback |
-| **B — durable session files** | 060 blob store · 061 lazy re-index · 062 retention/TTL · 063 erasure — *not started, genuinely parallel* |
-| **D — decomposition** | 070–073 decompose 4 files · **074 ⛔ BLOCKED** (retire `ComposeShadowPatchEngine` — gate-confirm first; it still serves the op-log path) |
-| **Wrap-up** | **045** — residual-loss list ⏳ **awaiting OWNER sign-off** (not an agent task) · 090 wrap-up |
+| **L-1** | Hard breaks COLLAPSE in `collectBlocks().text` (`node.textContent` drops leaf nodes; `docxBridge.ts:498` maps them to `
+` in its own walk). Model may quote a `target_text` that exists nowhere. Placement unaffected — the anchor is primary. Fixing it inside the module = a second walk = invariant-3 breach. |
+| **L-2** | The provider-registration race is *argued, not proven*. Degrades safely to the pre-054 dispatch. |
+| **C-4** | Anchors add 3.50% at realistic payload size (40.4 KB, under the 128 KB cap). The over-cap case at the schema's declared maxima is **pre-existing**; anchors are 0.09% of it. Still unmeasured against a real model response. |
+
+### Verification standard held
+
+Tests were **observed to fail first**: 4 catalog-contract tests, and the client supply (neutralised the
+supply line, watched it fail printing the exact pre-054 wire body `args:{"revisionIntent":"flag-risks"}`).
+BFF **11,179 passed / 0 failed** · Compose components **95 suites / 1,162** · SpaarkeAi conversation
+**75 suites / 720**. Publish **43.72 MB** compressed incl. PDBs; no new NuGet; no vulnerable packages.
+
+### ⚠️ Deploy prerequisite (unchanged, now doubly binding)
+
+`Deploy-AnalysisAction.ps1` MUST run before any of Track C is observable. Dev currently stores the WHOLE
+mirror file in `sprk_inputschema` for `compose-draft-alternative` / `compose-compare-to-playbook`, so
+`GetDeclaredProperties` returns null and **051's `targetParaId` would not render either**. The 051
+deploy-script fix resolves it — but only when the deploy actually runs. Deploy BFF + `sprk_spaarkeai`
+together (NFR-05).
 
 ---
+
+## Prior context (task 051 and environment) — still accurate
 
 ## What task 051 delivered (all committed + pushed)
 
