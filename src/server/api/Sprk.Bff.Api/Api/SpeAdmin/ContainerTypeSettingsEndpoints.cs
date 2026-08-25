@@ -176,9 +176,12 @@ public static class ContainerTypeSettingsEndpoints
 
         try
         {
-            // PATCH container type settings via Graph API
-            var result = await graphService.UpdateContainerTypeSettingsForConfigAsync(
-                config,
+            // DELEGATED, not app-only. Container types reject application permissions outright (403),
+            // so this write could never have reached Graph's own validation. Routing it through the
+            // delegated path is what makes the remaining 400 escalation (notes/live-verification-
+            // 2026-08-24.md §2) the ACTUAL blocker rather than a symptom hidden behind an earlier 403.
+            var result = await graphService.UpdateContainerTypeSettingsForUserAsync(
+                context,
                 typeId,
                 request.SharingCapability,
                 request.IsItemVersioningEnabled,

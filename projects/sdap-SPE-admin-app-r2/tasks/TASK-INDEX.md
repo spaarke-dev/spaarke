@@ -29,7 +29,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 004 | [Diagnose + fix Search](004-fix-search.poml) | 1 A | A04 | FULL | sonnet | xhigh | W2 | ❌ | 001 | ✅ |
 | 010 | [🔔 SPIKE — owning-app delegated token](010-obo-spike.poml) | 2 B | B01 | FULL | **opus** | xhigh | W2 | ✅ | — | ✅ **UNWORKABLE** |
 | 040 | [WireMock Graph fixture infrastructure](040-wiremock-harness.poml) | 2 D | D01 | FULL | sonnet | high | W2 | ✅ | — | ✅ |
-| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | 🔄 **partial** |
+| 011 | [Wire hybrid delegated path](011-hybrid-delegated-path.poml) | 2 B | B02 | FULL | **opus** | xhigh | W3 | ❌ | 010 | ✅ **completed 2026-08-24** — 🔴 the partial left **GET, CREATE and settings-UPDATE on app-only**, which Graph rejects outright (403). 3 of 4 container-type ops could never work in production. Now all delegated |
 | 012 | [Operator role prerequisite message](012-operator-role-message.poml) | 2 B | B03 | FULL | sonnet | high | W3 | ✅ | 010 | ✅ |
 | 013 | [Grant `SecurityEvents.Read.All`](013-security-events-grant.poml) | 2 B | B04 | STANDARD | sonnet | medium | W3 | ✅ | 001 | ✅ **granted; Secure Score live. Alerts blocked on a NON-permission cause — escalated** |
 | 020 | [`/beta` → v1.0 migration](020-beta-to-v1-migration.poml) | 3 C | C01 | FULL | sonnet | high | W4 | ❌ | 011, 040 | ✅ **option A — containers stay on beta (documented); paging now derives base addr** |

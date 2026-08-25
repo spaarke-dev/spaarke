@@ -1697,6 +1697,75 @@ public sealed class SpeAdminGraphService
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes"); }
     }
 
+    // =========================================================================
+    // Delegated container-type operations (task 011 completion)
+    //
+    // 🔴 WHY THESE EXIST. Task 011 routed container-type LIST through the delegated path and stopped
+    // there, leaving GET, CREATE and settings-UPDATE on `…ForConfigAsync` — i.e. app-only. Graph does
+    // NOT support application permissions for container types AT ALL (design.md §3.1; re-proven live
+    // in task 010 and again in task 013: 403 accessDenied on v1.0 *and* beta with a healthy app-only
+    // token). So three of the four container-type operations could never succeed in production, no
+    // matter which credentials were configured — the same class of failure the Container Types screen
+    // was originally reported for, surviving inside the fix for it.
+    //
+    // The delegated client comes from IGraphClientFactory.ForUserAsync — the BFF's existing OBO
+    // exchange — exactly as the LIST path does. Deliberately NOT SpeAdminTokenProvider; see the
+    // remarks on ListContainerTypesForUserAsync for why that provider cannot work here.
+    //
+    // ⚠️ Same tenant-scoping caveat as LIST: no BU authorization happens here
+    // (notes/tenant-isolation-gap.md).
+    // =========================================================================
+
+    /// <summary>Builds the delegated client, or explains why container types have no app-only fallback.</summary>
+    private async Task<GraphServiceClient> GetDelegatedClientForContainerTypesAsync(
+        HttpContext httpContext, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container types cannot be read or written app-only (Graph returns 403), so there is " +
+                "no fallback.");
+        }
+
+        return await _graphClientFactory.ForUserAsync(httpContext, ct).ConfigureAwait(false);
+    }
+
+    public async Task<SpeContainerTypeSummary?> GetContainerTypeForUserAsync(
+        HttpContext httpContext, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try { return await GetContainerTypeAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerType({containerTypeId},delegated)"); }
+    }
+
+    public async Task<SpeContainerTypeSummary> CreateContainerTypeForUserAsync(
+        HttpContext httpContext, string displayName, string? billingClassification, CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName},delegated)"); }
+    }
+
+    public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForUserAsync(
+        HttpContext httpContext, string containerTypeId, string? sharingCapability,
+        bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes,
+        bool? isSearchEnabled = null, bool? isDiscoverabilityEnabled = null, bool? isSharingRestricted = null,
+        string? urlTemplate = null, string? consumingTenantOverridables = null, CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try
+        {
+            return await UpdateContainerTypeSettingsAsync(
+                client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit,
+                maxStoragePerContainerInBytes, isSearchEnabled, isDiscoverabilityEnabled, isSharingRestricted,
+                urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId},delegated)"); }
+    }
+
     public async Task<SpeContainerTypeSummary?> GetContainerTypeForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
     {

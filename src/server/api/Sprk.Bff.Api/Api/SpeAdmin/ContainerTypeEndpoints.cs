@@ -280,8 +280,13 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Retrieve the specific container type from Graph API
-            var containerType = await graphService.GetContainerTypeForConfigAsync(config, typeId, ct);
+            // DELEGATED, not app-only. Graph does not support application permissions for container
+            // types at all — app-only returns 403 on v1.0 and beta alike (design.md §3.1, re-proven
+            // live by tasks 010 and 013). This call was left on the app-only path when task 011
+            // converted LIST, so opening any container type failed in production regardless of
+            // credentials. The `config` above is still resolved and validated: it scopes the request
+            // and is what the tenant-scope filter authorizes against.
+            var containerType = await graphService.GetContainerTypeForUserAsync(context, typeId, ct);
 
             if (containerType is null)
             {
@@ -435,9 +440,11 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Create the container type in SharePoint Embedded via Graph API
-            var created = await graphService.CreateContainerTypeForConfigAsync(
-                config,
+            // DELEGATED — see the GET handler above. Graph container-type CREATE is delegated-only and
+            // needs NO admin role (design.md §4.2b): any non-guest owning-tenant user may create one,
+            // and the caller is auto-assigned as owner.
+            var created = await graphService.CreateContainerTypeForUserAsync(
+                context,
                 request.DisplayName,
                 request.BillingClassification,
                 ct);
