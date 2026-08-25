@@ -175,6 +175,38 @@ Live headroom on the dev app registration: **2 of 20 used**.
 
 ### 5.1 DECISION — which app registration does the shared Model 1 BFF act as?
 
+> ## ✅ DECIDED 2026-08-25 (owner): **Reading 1 — ONE shared multitenant app registration for Model 1.**
+>
+> **What this means for you concretely:**
+>
+> - **One FIC, created once.** Customer onboarding creates **no** federated credential at all — the
+>   per-customer FIC step described in §3.2 does **not** apply to Model 1.
+> - The BFF does **not** select an app registration per request and does **not** validate 20+ audiences.
+> - **`spec.md:236` and `design.md:57`** ("per-customer app registrations in both models") are hereby
+>   **scoped to Model 2 only**. They read as written for Model 2 and generalised without re-testing against
+>   Model 1's single shared BFF App Service. Please make that edit on your side — it is the one place the
+>   estate still contradicts this decision.
+> - §5.4's proposed invariant **I6 stands** (Model 1 only), consistent with this.
+>
+> **Why Reading 1** — three facts, all verifiable today:
+>
+> 1. The live app registration is **already `AzureADMultipleOrgs`** (verified 2026-08-19). That *is* the
+>    multitenant shape; nothing needs to change to adopt it.
+> 2. Model 1 deploys **one shared BFF App Service**. Under Reading 2 that single app would have to resolve
+>    the correct app registration per request and accept 20+ audiences — substantial BFF complexity bought
+>    for no capability.
+> 3. Onboarding gets **simpler, not harder**: no per-customer credential object to create, rotate, or leak.
+>
+> **What this does NOT decide**: Model 2 (customer-owned tenants) keeps per-customer app registrations —
+> credentials attach to the *application object*, so a customer-tenant UAMI can only be trusted by an app
+> registration that lives in that tenant. §9.2's raised question about Model 2's FIC issuer tenancy is
+> **still open** and unaffected by this.
+>
+> **If you disagree**, say so before wiring it — reversing later means adding per-request app-registration
+> selection to a shared BFF, which is the expensive direction.
+
+*(Original framing retained below for the reasoning trail.)*
+
 This is yours to make. It is not a feasibility or scaling question; **MI-FIC works either way**. It is an
 identity-design question, and it decides whether onboarding gains a per-customer step.
 
@@ -489,3 +521,106 @@ actually matters, in the environment that actually matters.
 
 Full reasoning: [`notes/decisions/031-obo-verification-dev.md`](decisions/031-obo-verification-dev.md) §6.1.
 
+
+---
+
+# 10. ADDENDUM (2026-08-25) — what §1–§9 did NOT tell you
+
+> **Read this if you read anything.** Everything above was written **2026-08-19** and scoped to the *app
+> registration credential* (the FIC). Tasks **051** and **053** cut over on **2026-08-24** and changed two
+> more credentials, and the live app settings contract moved with them. **Sections 1–9 are incomplete, not
+> wrong.** This addendum is the delta.
+>
+> **Short answer to "does provisioning need to change what it packages?" — yes, in five places.**
+
+> ### ✏️ CORRECTION (2026-08-25, same day) — two of the five were already handled
+>
+> After writing §10 we checked [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md)
+> rather than assuming. Task 033's doc sweep had **already** folded in two of the five:
+>
+> - **Delta 4 (`keyVaultReferenceIdentity`)** — covered in §1 Prerequisites.
+> - **Delta 5 (Dataverse application user for the UAMI)** — covered by its own §6, including the exact
+>   403 / `0x80072560` symptom.
+> - Deltas **1–3** (Service Bus, AI Search, the credential app settings) were the genuine gaps. The
+>   credential settings were partly covered; the **Group-2 RBAC was not covered at all**.
+>
+> **Genuinely new work is therefore 2 of 5, not 5 of 5.** Overstating the delta is its own failure — it
+> invites a reader to discount the whole list.
+>
+> **This contract has since been PROMOTED** into `auth-deployment-setup.md` **§5.1 — Azure data-plane RBAC
+> for the UAMI**, and the retired Key Vault secrets are struck through in its §4 table with the
+> `Deploy-AllIndexes.ps1` silent-re-mint warning attached. **Use the guide as the operational source.**
+> §10 below stays as the origin/reasoning record.
+
+## 10.1 The five deltas
+
+| # | What provisioning does today | What the BFF now needs | Where |
+|---|---|---|---|
+| 1 | Mints a **Service Bus SAS** and writes `ServiceBus-ConnectionString` to the customer Key Vault | **Nothing.** The BFF authenticates with the UAMI. Set `ServiceBus__FullyQualifiedNamespace` instead and grant the UAMI a Service Bus data role | [`Provision-Customer.ps1:520`](../../../scripts/Provision-Customer.ps1), [`Configure-ProductionAppSettings.ps1:94`](../../../scripts/Configure-ProductionAppSettings.ps1) |
+| 2 | Writes `AiSearch--AdminKey` and sets `AiSearch__AdminKey` / `AzureAISearchApiKey` as KV refs | **Nothing.** Set `AiSearch__ManagedIdentity__Enabled=true` and grant the UAMI Search data roles | [`scripts/ai-search/Deploy-AllIndexes.ps1`](../../../scripts/ai-search/Deploy-AllIndexes.ps1) |
+| 3 | Does not set the credential-selection settings | **Four new app settings are now load-bearing** (§10.2). Without them a fresh environment falls back to the code-side default and will look for a secret | — |
+| 4 | Does not set `keyVaultReferenceIdentity` | **Mandatory.** Without it every `@Microsoft.KeyVault(...)` app setting fails to resolve and the site aborts with **exit 134 (SIGABRT)** | task 001 finding **A** |
+| 5 | Registers the **app registration** as a Dataverse application user | The **UAMI** must ALSO be a Dataverse application user, or every app-only Dataverse call 401s | §10.4 |
+
+## 10.2 The exact live contract (copied from `spaarke-bff-dev`, 2026-08-25)
+
+```
+Graph__Credentials__Order__0                       = ManagedIdentityFederated   # the ONLY entry
+Graph__Credentials__RequireSecretFreeIdentity      = true                       # refuses to BOOT otherwise
+ManagedIdentity__ClientId                          = <UAMI clientId>
+Graph__ManagedIdentity__ClientId                   = <UAMI clientId>
+Graph__ManagedIdentity__Enabled                    = true
+ServiceBus__FullyQualifiedNamespace                = <ns>.servicebus.windows.net   # NOT a connection string
+Membership__EventPublisher__ServiceBusNamespace    = <ns>.servicebus.windows.net
+Membership__JunctionUpdater__ServiceBusNamespace   = <ns>.servicebus.windows.net
+AiSearch__ManagedIdentity__Enabled                 = true
+AiSafety__ContentSafety__ManagedIdentity__Enabled  = true
+```
+
+Site property (**not** an app setting, and **not** copied by `az webapp deployment slot create
+--configuration-source`):
+
+```
+keyVaultReferenceIdentity = /subscriptions/<sub>/resourcegroups/<rg>/providers/
+                            Microsoft.ManagedIdentity/userAssignedIdentities/<uami>
+```
+
+⚠️ **`RequireSecretFreeIdentity=true` is fail-fast by design.** A fresh environment that sets it without a
+working UAMI + FIC **will not start**. Provision the identity first, then the setting — never the reverse.
+
+## 10.3 Azure RBAC the UAMI now needs (beyond Graph app roles)
+
+Previously carried by the SAS / admin key, so it is new work:
+
+| Resource | Role |
+|---|---|
+| Service Bus namespace | `Azure Service Bus Data Sender` + `Azure Service Bus Data Receiver` (or Data Owner) |
+| Azure AI Search | `Search Index Data Contributor` + `Search Service Contributor` |
+| Key Vault | `Key Vault Secrets User` — required for `keyVaultReferenceIdentity` to resolve |
+| Content Safety / OpenAI | `Cognitive Services User` |
+
+## 10.4 Dataverse application user — for the UAMI, not just the app registration
+
+`spaarkedev1` carries **two** application users, and both are load-bearing:
+
+| `fullname` | `applicationid` | Why |
+|---|---|---|
+| `SDAP-BFF-SPE-API` | app registration | OBO — the token's `appid` stays the app registration even under MI-FIC |
+| `# mi-bff-api-dev` | **UAMI clientId** | app-only Dataverse — the MI is the principal here |
+
+Its `azureactivedirectoryobjectid` must equal the UAMI's **principalId** (not clientId). Evidence that this is
+the live path — every UAT row is stamped `# mi-bff-api-dev` — is in
+[`notes/decisions/mi-proof-dataverse-side.md`](decisions/mi-proof-dataverse-side.md).
+
+**This is the one most likely to be missed**, because §1–§9 only ever discussed the app registration.
+
+## 10.5 Two traps worth naming
+
+- **`appsettings.template.json` still declares** `"ServiceBus": "@Microsoft.KeyVault(SecretUri=#{KEY_VAULT_URL}#secrets/ServiceBus-ConnectionString)"`. If you deploy from that template you re-introduce the SAS contract on a BFF that no longer reads it. Tracked as auth-v4 obligation **051-E** (deliberately deferred while the KV rollback copy lives, to 2026-11-23).
+- **`Deploy-AllIndexes.ps1` falls back silently**: *"KV secret 'AiSearch--AdminKey' not found — falling back to live admin key from search service."* On a secret-free environment that fallback **re-mints a key** and hands it back, quietly undoing the migration. Gate it.
+
+## 10.6 What did NOT change
+
+`Register-EntraAppRegistrations.ps1 -SkipClientSecret` (task 030) is still correct and still the contract for
+the app-registration half. §5.1's open decision (one shared multitenant app registration vs one per customer)
+is **still open and still yours** — MI-FIC works either way, so it does not block this addendum.

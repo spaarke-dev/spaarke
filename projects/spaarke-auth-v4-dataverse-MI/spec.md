@@ -451,12 +451,17 @@ base shared layer, widening publish size and CVE surface for every downstream co
        lowercase alias — task 033; soft-deleted (recoverable to 2026-11-22), **not purged**.
 8. [x] **VERIFIED** Config validators relaxed consistently (FR-B5) — BFF boots with no secret configured; still
        fails fast with no credential at all. `CredentialOrderingSeamTests` holds both halves.
-9. [ ] ❌ **NOT MET — carried forward, deliberately unchecked.** Local `dotnet run` has **no credential path for
-       a fresh setup**: the code calls the user-secret fallback *"the legitimate — and only — way to run OBO
-       locally"*, and the only readable copy lived in the Key Vault secret this project deleted. A developer
-       cloning today cannot run OBO locally. This needs a deliberate replacement (dev-only FIC on a per-developer
-       app registration, or a documented `az login`-backed path) — **not** restoring the secret. See
-       `notes/lessons-learned.md` §7.2.
+9. [~] ⚠️ **DOCUMENTED, NOT YET PROVISIONED — no longer an undefined gap.**
+       **Closed at task 090 (2026-08-25)** with [`docs/guides/local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md):
+       the constraint is stated (a workstation has no route to IMDS, so MI-FIC cannot work locally, and neither
+       `az login` nor `DefaultAzureCredential` can perform an OBO exchange), the exact config keys are named
+       (`AzureAd:ClientSecret` → `API_CLIENT_SECRET` → `AZURE_CLIENT_SECRET` — **not** the `Graph:ClientSecret` /
+       `Dataverse:ClientSecret` a retired doc told people to set, which have zero consumers), four options are
+       compared, and **option D is recommended**: one *local-dev-only* app registration, separate from every
+       deployed identity, with its secret in `dotnet user-secrets`.
+       **Residual**: the option-D app registration is not yet created — a one-time Azure action, with the exact
+       commands in the guide. The property that mattered is preserved either way: **no deployed identity holds a
+       secret**; a workstation is not a deployed identity.
 10. [⏭️] ~~Power BI runs as a managed-identity principal; `PowerBi:ClientSecret` removed~~ — **WAIVED 2026-08-19
         (owner): Power BI is not yet in use at Spaarke; Workstream D deferred.** Instead verify at wrap-up that
         the deferral is *visible, not silent*: the Power BI sites are named in the FR-F1 allowlist with the
@@ -481,21 +486,37 @@ base shared layer, widening publish size and CVE surface for every downstream co
 14. [x] **VERIFIED** Operational estate reconciled — task 033 §4/§5. Note the count was wrong in this spec:
         **15 scripts and 33 docs**, not "11 scripts and ~25 docs". Re-derived, not inherited (see §4 of
         lessons-learned on systematic under-counting).
-15. [ ] ❌ **NOT MET — open OWNER decision, not a project deliverable.**
-        `notes/PROVISIONING-CHANGE-REQUEST.md` §5.1 asks which app registration the shared Model 1 BFF acts as
-        (one shared multitenant app vs one per customer). The document states plainly: *"This is yours to make."*
-        **MI-FIC works either way**, so it does not block this project — but it decides whether customer
-        onboarding gains a per-customer FIC step. §5.2 (a `design.md:1006` doc fix) is likewise for the
-        provisioning owner. Hand-off: `customer-provisioning-orchestration-r1` (#779).
+15. [x] ✅ **CLOSED 2026-08-25 — owner decided.**
+        §5.1 asked which app registration the shared Model 1 BFF acts as. **Answer: Reading 1 — ONE shared
+        multitenant app registration for Model 1**, recorded in `notes/PROVISIONING-CHANGE-REQUEST.md` §5.1.
+        Consequence for provisioning: **one FIC created once; customer onboarding creates no federated
+        credential at all**, and the BFF never selects an app registration per request. Rests on three
+        verifiable facts — the live app registration is already `AzureADMultipleOrgs`; Model 1 deploys a
+        single shared BFF App Service; and onboarding gets simpler, not harder.
+        **Residual (theirs, one edit)**: `spec.md:236` / `design.md:57` say "per-customer app registrations in
+        both models" — now scoped to **Model 2 only**. §5.2's `design.md:1006` doc fix and §9.2's Model-2 FIC
+        issuer question remain open on the provisioning side (#779); neither blocks this project.
 16. [x] **VERIFIED** `/test-diet` run at wrap-up — `notes/test-diet-report.md` (73 methods added, **0
         SCAFFOLDING**, 8 path-violation-protected, 1 ambiguous). Publish size **45.04 MB incl. PDBs** vs the
         **44.96 MB** baseline = **+0.08 MB**; ceiling 60 MB (NFR-01). PDB convention stated. No new HIGH CVE.
 
 ### Walk result
 
-**14 of 16 verified with evidence · 1 waived (Power BI, deferral re-verified as visible) · 2 NOT MET and carried
-forward with owners.** Neither open item blocks the secret-removal objective: #9 is a local developer-experience
-gap created by the removal, and #15 is an identity-design decision that MI-FIC satisfies either way.
+> **UPDATED 2026-08-25.** The walk originally closed at *14 verified · 1 waived · **2 NOT MET***. The operator
+> challenged the deferrals — *"we generally do not defer work to other projects unless it cannot be handled in
+> this project"* — and the challenge was right. **#15 was closed by an owner decision** (Reading 1) and **#9 was
+> closed to a documented procedure** rather than left undefined. Final: **14 verified · 1 waived · 1 partial
+> (#9 — documented, one one-time Azure action remaining) · 0 not-met.**
+
+| Criterion | Result |
+|---|---|
+| 1–8, 11–16 | ✅ **verified with evidence** (14) |
+| 10 — Power BI | ⏭️ **waived**, and the waiver re-verified as *visible* in both guards, not silent |
+| 9 — local-dev OBO | ⚠️ **documented** ([`local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md)); one one-time Azure action remains |
+| — | ❌ **none not-met** |
+
+The remaining #9 action does not weaken the objective: **no deployed identity holds a secret**, and a developer
+workstation is not a deployed identity.
 
 ---
 
