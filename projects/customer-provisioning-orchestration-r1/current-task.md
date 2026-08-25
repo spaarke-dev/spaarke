@@ -1,5 +1,74 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-25 SESSION 9 END — **🎯 SESSION 9 accomplishments** (all pushed to origin, master `28c2c1b38` = branch HEAD): (1) Task **203a foundation COMPLETE** (`45e14556a`) — 7 rows applied + 2 already-applied via verify-first. (2) **Fable-level deep review** of auth-v4 change request (`5bde2c750`, workflow `wl5blw993`) — 20 agents, 156 claims, 4 deliverables (remediation plan 304 lines / §6.5 decision doc 187 / draft punch rows 70 / open questions 119). (3) **All 11 owner decisions Q1-Q11 RESOLVED** (`c3e5b7d58`) — critical discovery: this branch was 281 behind master (auth-v4 A4+E-3+MI-migration missing here). (4) **S1∥ mini-wave DISPATCHED + LANDED** (A36+A37 `1bc049e4c`; A40 in `c3e5b7d58`) — 3 parallel background agents; `bff-runtime-rbac.bicep` (comprehensive) + `ArmAppServiceIdentityPatcher.cs` VERIFIED PASS + task 186 acceptance criterion + runbook §12.5/12.6. (5) **A35 master merge** (`28c2c1b38`) — 276 commits from master merged INTO branch; 15 conflicts resolved. (6) **/merge-to-master** completed — pushed `5532fc714..28c2c1b38` to origin/master; main repo local master fast-forward synced. Branch AND master now identical.
+
+## 🎯 SESSION 9 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 203a foundation (✅) + Fable deep review (4 deliverables) + all 11 owner decisions (Q1-Q11) + S1∥ mini-wave (A36+A37+A40) + A35 master merge (both directions) |
+| **Next actionable** | **Task 205 dispatch** (auth-v4 runtime-contract integration — A38 ∥ A42 → A39; A41 extended per Q8; A43/A44). Critical-path to task 186 = **11h serial**. |
+| **Alternate next** | Task 203c (skill wiring — A02/A03/A04/A15/A16) — was queued from prior session, now firing on merged baseline |
+| **Rigor** | FULL (per punch row landing-spot mix: bicep + code + skill-directive) |
+| **Model / Effort** | Sonnet-5 @ high (A36/A37/A40 pattern) OR **Fable/Opus @ xhigh for A38 + A42** (credential-logic + cross-worktree consumption; auth-tagged → code-review + adr-check unconditional per project CLAUDE.md §8.5) |
+| **Parallel-safe** | Mixed: A38 ∥ A42 (parallel-safe if scoped correctly); A39 serial after both; A41/A43/A44 parallelizable after A35 (now landed) |
+| **Estimated effort** | ~23h remaining critical-path (A38 4h ∥ A42 4h → A39 4h serial; A41 3.5h; A43 2h; A44 2.5h) = 16h across parallel lanes |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `28c2c1b38` (identical to master) |
+| **Working tree** | CLEAN |
+| **Next action for fresh session** | (option A) `task-execute projects/customer-provisioning-orchestration-r1/tasks/205-...poml` — need to CREATE task 205 POML first via `task-create` skill OR spec 6 sub-POMLs 205a-f. (option B) `task-execute projects/customer-provisioning-orchestration-r1/tasks/203c-apply-classA-punchlist-skill-wiring.poml` — already exists |
+
+### SESSION 9 Files Modified (ALL PUSHED, no uncommitted work)
+
+**Commits (in order)**:
+- `45e14556a` — feat(provisioning): apply task 203a Class-A punch list foundation (7 applied + 2 already-applied)
+- `5bde2c750` — docs(provisioning): Fable-level review of auth-v4 change request — 4 deliverables
+- `c3e5b7d58` — docs(provisioning): auth-v4 integration — 11 owner decisions resolved + A40 kv-ref-identity assertions
+- `1bc049e4c` — feat(provisioning-bicep): apply auth-v4 §10.1 Δ1+Δ2 — BFF UAMI SB + AI Search data-plane RBAC (rows A36 + A37)
+- `28c2c1b38` — Merge origin/master into work/customer-provisioning-orchestration-r1
+- `5532fc714..28c2c1b38` — pushed to origin/master via /merge-to-master (Path B fast-forward)
+
+**Master state**: `28c2c1b38` (fast-forwarded from `5532fc714`; main repo local master synced)
+
+### Critical Context (1-3 sentences)
+
+**Task 203a foundation LANDED + auth-v4 change request FULLY INTEGRATED into master via deep-review-guided workflow.** All 11 owner decisions recorded in `notes/auth-v4-integration-open-questions.md` resolution table (Q2 = reading (a), Q3 = §6.5 signed sunset 2026-11-23, Q4-Q11 all disposed). §6.5 conflict resolution APPROVED (`notes/decisions/adr-028-a4-integration-conflict-resolution.md`) — BFF-API-ClientSecret Path C + Dataverse-ClientSecret time-boxed Path A. Punch list §203a EXECUTION RESULTS annotated. Task 186 E2E remains gated on A38/A39/A41/A42 landing (task 205 scope).
+
+### Deferred follow-ups queued for post-merge (documented in merge commit `28c2c1b38`)
+
+1. **Task-010 idempotency layer re-port** to `Register-EntraAppRegistrations.ps1` — `Get-MissingPermissions` / `Add-MissingPermissions` / `Reconcile-IdentifierUri` / `$SecretExpiryMonths` param. Small, focused, testable PR (auth-v4 comprehensive version was taken during merge to reduce correctness risk).
+2. **Q4 doc port** (part of A44b): master's MI environment contract (§1 prereqs / §5.1 UAMI RBAC / §6 Dataverse app user from `docs/guides/auth-deployment-setup.md` master version) → `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. Verify master's 🔴 secret-free banner text isn't lost.
+3. **Cert-path re-add** to `scripts/Create-NewContainerType.ps1` + `scripts/Register-BffApiWithContainerType.ps1` if any active task still needs it (verify vs E-1 client-secret-preserved path first).
+4. **§6.5 EDIT package** application — Q3 signed 2026-08-25; text drafted in decision doc; apply to `.claude/constraints/provisioning.md` + `spec.md:259/:275` + root CLAUDE.md §17. A38/A44 scope.
+5. **Task 205 dispatch** (see below).
+6. **Q11 obligation** (BFF startup credential self-proof) — post-186 Phase-F planning; §10 obligations (Placement Justification + publish-size + BFF test update) tracked.
+
+### Task 205 dispatch prep (recommended next action)
+
+**Purpose**: auth-v4 runtime-contract integration. Fires the residual work from the Fable deep review's punch rows A38-A44 (excluding A35+A36+A37+A40 which already landed).
+
+**Sub-phases** (per remediation plan §7):
+- **205a A38** (Fable/Opus @ xhigh, FULL): H4/H4-shared credential-type seam — on secret-free envs, OMIT (never sentinel per §9.1) BFF-API-ClientSecret + ServiceBus-ConnectionString + AiSearch--AdminKey manifest entries. `StaticKvSecretManifest.cs:74` fix. Partially closes A30's sentinel contract (H4 half). Model 1 vs Model 2 KV behavior explicit. 4h.
+- **205b A42** (Fable/Opus @ xhigh, FULL): task 130 C# provisioner reconciliation per FR-C4 — contract-parity with `-FicOnly` script (Q5 disposition); port `Assert-SpaarkeFicTenancy` cross-tenant refusal guard into `CreateFic`; AADSTS70025 exact-match retry; exit-2 reporting. Task 130 already implements per-profile issuer (`GraphAppRegistrationProvisioner.cs:547-557` reading-(a)-consistent per Q2). 4h.
+- **205c A39** (Sonnet @ xhigh, FULL): H4b `per_env_settings` manifest extension — 8 §10.2 live-contract entries (`Graph__Credentials__Order__0=ManagedIdentityFederated`, `RequireSecretFreeIdentity=true` FAIL-FAST, etc.). **ORDERING GUARD**: depends on A42 (never set `RequireSecretFreeIdentity=true` before FIC exists — boot-loops fresh stamps). 4h.
+- **205d A41** (Sonnet @ high, STANDARD): H10/T2 dual Dataverse app-user rows per §10.4; **EXTENDED per Q8** to include design.md D3 wording fix + Naming Standards Model 1 UAMI row. 3.5h (+0.5h per Q8).
+- **205e A43** (Sonnet @ high, STANDARD): Gate `Deploy-AllIndexes.ps1` silent-fallback (§10.5 trap 2). 2h.
+- **205f A44** (Sonnet @ high, STANDARD): Consumer guard for `appsettings.template.json` ServiceBus KV-ref (§10.5 trap 1) + doc sweep (§6.5 EDIT package application, stale mirror deletion). 2.5h.
+
+**Sequencing**: A38 ∥ A42 → A39 (11h serial); A41/A43/A44 parallel after A35 (already landed). 205a + 205b can dispatch as parallel background agents (both Fable/xhigh). 205d + 205e + 205f can parallel-batch as Sonnet @ high.
+
+**Dispatch pattern**: either (a) `task-create` to author 6 sub-POMLs, then `task-execute` each; OR (b) ONE 205 POML that batches all 6 rows with Step 0.3 parallel execution detection.
+
+### To resume next session — say ONE of these
+
+- **"execute task 205"** — dispatch task 205 authoring + fan-out per above; blocks task 186 E2E completion
+- **"execute task 203c"** — skill wiring (A02/A03/A04/A15/A16); was queued from SESSION 7
+- **"apply §6.5 EDIT package"** — Q3-signed constraint file + spec edits; small main-session job (~30min)
+- **"start task-010 re-port"** — small focused PR to restore idempotency layer in Register-EntraAppRegistrations.ps1
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context; will point at task 205 per priority ranking
+- Do NOT invoke task 186 yet — blocked by A38/A39/A41/A42 (task 205 sub-phases)
+
+---
+
 > **Last Updated**: 2026-08-25 SESSION 8 END — **🎯 SESSION 8 accomplishments**: Task **203a COMPLETE** in a single main session (~3h actual vs 15h estimate). All 9 in-scope Class-A rows resolved via verify-first pattern (7 applied + 2 already-applied). Sub-Agent Write Boundary honored: all `.claude/**` writes from main session. Build sanity: ControlPlane.Core succeeded 0 warnings / 0 errors. See "SESSION 8 Quick Recovery" block below. Prior session block (SESSION 7) retained below for reference.
 
 ## 🎯 SESSION 8 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
