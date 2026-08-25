@@ -9,11 +9,37 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W10 done + **011 completed**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
-| **Step** | Between tasks. Working tree **clean**, branch **level with origin**, 15 commits this session. |
-| **Status** | All committed + pushed to `work/sdap-SPE-admin-app-r2` (draft PR **#811**). Latest: `9af552d9b`. |
+| **Task** | **none in progress** — W1–W10 done + **011 ✅** + **028 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
+| **Step** | Between tasks. |
 | **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
-| **Next Action** | **Task 028** — container URL + Purview deep-link. Chosen because the operator's own M365 admin-center screenshots showed container URL as the most visible missing field. Then the two defects below, then 027. |
+| **Next Action** | The two unowned defects below (**Manage Permissions** → Dashboard; **expired trial invisible**), then **027** container-type owner management. |
+
+### ✅ Task 028 done — and Graph itself committed this project's signature defect
+
+`fileStorageContainer` has **no URL property in either API version**. The URL lives on the `drive`
+navigation property — and on the containers **COLLECTION** Graph accepts
+`$expand=drive($select=webUrl)`, returns **200**, echoes `drive(webUrl)` in its own `@odata.context`,
+and **omits `drive` from every row**. Both versions, every expand shape. The natural implementation
+would have shipped an empty URL column backed by a 200 and a header asserting the field was there.
+
+- **GET-single DOES return it**, and `$select` does **not** suppress it there — verified with the
+  code's *actual* 7-field `$select`, not a simplified probe.
+- **Escalation trigger evaluated, did NOT fire.** The fabrication path was live and refused: the
+  container id decodes to the site GUID that appears in the URL, but the tenant hostname does not, so
+  any assembled URL hard-codes a guess (NFR-06).
+- ⚠️ **Grid resolves per row on demand**, deliberately — an eager column costs one Graph call per row
+  per load and can render a false absent state. Detail carries it free. See `notes/task-028-findings.md` §3.
+- **Purview link is the portal ROOT**: a bogus path 302s identically to `/ediscovery`, so a 302 proves
+  the host, never the path.
+- 🔴 **Also fixed — the review harness was itself a source of the fabricated data the operator
+  reported**: `createdDateTime` was invented from container NAMES (Spaarke Dev Container 2 claimed
+  2025-09-30; truth **2026-05-28**, matching the operator's M365 screenshot), and
+  `GET /spe/containers/{id}` returned `CONTAINERS[0]` for **every** id — which would have hidden this
+  task completely. Fixtures now carry real per-container URLs; the mock resolves by id.
+
+📏 **Publish-size method settled** (was flagged unreproducible): DEFLATE-6 zip over the publish dir →
+**43.70 MB incl. PDBs** (+0.04 vs task 030's 43.66), ceiling 60. Task 029's 44.99 came from a
+different method, not a real regression.
 
 ### 🔴 Task 011 completed — but be precise about what now works
 

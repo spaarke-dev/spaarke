@@ -29,12 +29,28 @@ const ENV_ID = "e0000001-0000-0000-0000-000000000000";
  * Five containers totalling 902,616,643 bytes = 860.8 MB, which the Dashboard rendered as `0 B`.
  * Names and byte counts exact; GUIDs were never recorded, so they are zero-padded.
  */
+/*
+ * Containers — LIVE captured 2026-08-24 (app-only, owning app 170c98e1), ids padded.
+ *
+ * 🔴 `createdDateTime` WAS INVENTED HERE and the operator caught it. The earlier values were derived
+ * from the container NAMES ("API Test 2025-09-30 14:43:59" → 2025-09-30), which is not the same fact
+ * — a container named after the script run that created it can be created at any later time. The
+ * operator's M365 admin-centre screenshot showed Spaarke Dev Container 2 created **5/28/26** while
+ * this fixture claimed 2025-09-30. Every value below is now the real one from Graph, and the fixture
+ * that existed to catch fabricated data is no longer a source of it.
+ *
+ * `webUrl` is likewise real, and DISTINCT per container (a different CSP site GUID each) — the point
+ * task 028 turns on. Note it appears ONLY on the detail route below, never on the list, mirroring
+ * what the BFF actually emits.
+ */
 const CONTAINERS = [
-  { id: "c0000001-0000-0000-0000-000000000000", displayName: "Spaarke Inc", storageUsedInBytes: 869320675, createdDateTime: "2025-09-30T14:43:59Z" },
-  { id: "c0000002-0000-0000-0000-000000000000", displayName: "Spaarke Dev Container 2", storageUsedInBytes: 33112969, createdDateTime: "2025-09-30T14:51:26Z" },
-  { id: "c0000003-0000-0000-0000-000000000000", displayName: "Test New Container 8-20-2026", storageUsedInBytes: 86624, createdDateTime: "2026-08-20T00:00:00Z" },
-  { id: "c0000004-0000-0000-0000-000000000000", displayName: "Full Flow Test 2025-09-30 14:51:26", storageUsedInBytes: 49081, createdDateTime: "2025-09-30T14:51:26Z" },
-  { id: "c0000005-0000-0000-0000-000000000000", displayName: "API Test 2025-09-30 14:43:59", storageUsedInBytes: 47294, createdDateTime: "2025-09-30T14:43:59Z" },
+  { id: "c0000001-0000-0000-0000-000000000000", displayName: "Spaarke Inc", storageUsedInBytes: 869320675, createdDateTime: "2025-10-08T13:28:25Z", webUrl: "https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document%20Library" },
+  { id: "c0000002-0000-0000-0000-000000000000", displayName: "Spaarke Dev Container 2", storageUsedInBytes: 33112969, createdDateTime: "2026-05-28T20:35:39Z", webUrl: "https://spaarke.sharepoint.com/contentstorage/CSP_7c8331bf-5d3a-49ee-bffb-f1f7f10e997d/Document%20Library" },
+  { id: "c0000003-0000-0000-0000-000000000000", displayName: "Test New Container 8-20-2026", storageUsedInBytes: 86624, createdDateTime: "2026-08-21T02:17:21Z", webUrl: "https://spaarke.sharepoint.com/contentstorage/CSP_ba11c673-31ee-4721-8df7-0808ca72f6cb/Document%20Library" },
+  { id: "c0000004-0000-0000-0000-000000000000", displayName: "Full Flow Test 2025-09-30 14:51:26", storageUsedInBytes: 49081, createdDateTime: "2025-09-30T18:51:28Z", webUrl: "https://spaarke.sharepoint.com/contentstorage/CSP_dc5a0bac-7f7b-42cc-a5e8-0aa240e6db95/Document%20Library" },
+  // Deliberately NO webUrl — exercises task 028's "Not reported" absent state (NFR-06). A container
+  // still provisioning has no drive yet, so this is a real state, not a gap in the capture.
+  { id: "c0000005-0000-0000-0000-000000000000", displayName: "API Test 2025-09-30 14:43:59", storageUsedInBytes: 47294, createdDateTime: "2025-09-30T18:44:02Z" },
 ].map((c) => ({
   ...c,
   containerTypeId: PAYGO1_CONTAINER_TYPE_ID,
@@ -197,7 +213,19 @@ export const FIXTURES: Record<string, { body: unknown; status: number }> = {
   },
 
   // ── Screens ──
-  "/spe/containers": { status: 200, body: { items: CONTAINERS, count: CONTAINERS.length } },
+  /*
+   * The list STRIPS `webUrl`, mirroring the BFF's `JsonIgnore(WhenWritingNull)` — and mirroring
+   * Graph, which cannot return container URLs on a collection at all (it accepts the $expand,
+   * answers 200, and omits `drive` from every row). If this fixture served the URL on list rows it
+   * would make a broken grid look fine in review, which is the one thing this harness must not do.
+   */
+  "/spe/containers": {
+    status: 200,
+    body: {
+      items: CONTAINERS.map(({ webUrl: _omitted, ...listRow }) => listRow),
+      count: CONTAINERS.length,
+    },
+  },
   "/spe/containertypes": { status: 200, body: { items: CONTAINER_TYPES, count: CONTAINER_TYPES.length } },
   "/spe/recyclebin": { status: 200, body: { items: RECYCLE_BIN, count: RECYCLE_BIN.length } },
   /*
@@ -245,8 +273,22 @@ export const FIXTURES: Record<string, { body: unknown; status: number }> = {
       },
     ],
   },
-  // Single container GET — the File Browser and detail panes resolve the container itself.
-  "/spe/containers/:containerId": { status: 200, body: CONTAINERS[0] },
+  /*
+   * Single container GET — the File Browser, the detail pane, and task 028's per-row "Get URL".
+   *
+   * 🔴 This used to return `CONTAINERS[0]` for EVERY id. That is a second instance of the "same data
+   * in every container" the operator reported, and it would have hidden task 028 completely: every
+   * row's URL would have resolved to Spaarke Inc's, looking perfectly plausible while being wrong
+   * for four containers out of five. Resolved by id now, with an explicit 404 for an unknown one
+   * rather than a silent fallback to the first row.
+   */
+  "/spe/containers/:containerId": {
+    status: 200,
+    body: (segments: string[]) => {
+      const id = decodeURIComponent(segments[2] ?? "");
+      return CONTAINERS.find((c) => c.id === id);
+    },
+  },
 
   /*
    * Search — BARE ARRAY of NESTED results.

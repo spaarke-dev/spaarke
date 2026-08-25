@@ -69,11 +69,22 @@ import {
   CheckmarkCircle20Regular,
   Storage20Regular,
   FolderOpen20Regular,
+  Copy16Regular,
+  CheckmarkCircle16Filled,
+  Link16Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
+import { copyToClipboard } from "../../services/clipboard";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
+import {
+  CONTAINER_URL_LABEL,
+  CONTAINER_URL_ABSENT_LABEL,
+  CONTAINER_URL_ABSENT_TOOLTIP,
+  CONTAINER_URL_ON_DEMAND_TOOLTIP,
+  type ContainerUrlState,
+} from "./containerCompliance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -251,9 +262,121 @@ const useStyles = makeStyles({
 // Column Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Per-row container URL (FR-C10) — resolved on demand, then copyable.
+ *
+ * 🔑 WHY ON DEMAND, AND WHY THIS IS NOT A SHORTCUT. Microsoft Graph cannot return container URLs on
+ * a LIST at all. `fileStorageContainer` has no URL property in either API version; the value lives on
+ * the `drive` navigation property, and on the containers COLLECTION Graph accepts
+ * `$expand=drive($select=webUrl)`, answers 200, echoes `drive(webUrl)` back in `@odata.context` — and
+ * omits `drive` from every row. Measured 2026-08-24 across both versions and every expand shape
+ * (notes/task-028-findings.md §1).
+ *
+ * So an eagerly-populated column is not available at any price short of N extra Graph calls on every
+ * grid load. Resolving the one container the admin actually asks about costs one call, matches the
+ * real workflow (find a container → copy its URL → paste into a Purview eDiscovery search), and —
+ * decisively — cannot render a false absent state: there is no point at which this cell claims a
+ * container has no URL because nobody asked Graph for it.
+ */
+const ContainerUrlCell: React.FC<{ container: Container; configId?: string }> = ({
+  container,
+  configId,
+}) => {
+  const [state, setState] = React.useState<ContainerUrlState>({ kind: "idle" });
+  const [copied, setCopied] = React.useState(false);
+
+  const resolveAndCopy = React.useCallback(async () => {
+    if (!configId) return;
+    setState({ kind: "loading" });
+    try {
+      const detail = await speApiClient.containers.get(container.id, configId);
+      if (!detail.webUrl) {
+        // Asked, and Graph reported none — a real state (e.g. a container still provisioning
+        // has no drive yet), distinct from "not asked". Never synthesise a URL to fill it.
+        setState({ kind: "absent" });
+        return;
+      }
+      setState({ kind: "resolved", url: detail.webUrl });
+      const ok = await copyToClipboard(detail.webUrl);
+      setCopied(ok);
+      if (ok) setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: describeApiError(err, "Could not retrieve the container URL."),
+      });
+    }
+  }, [container.id, configId]);
+
+  if (state.kind === "loading") {
+    return <Spinner size="tiny" label="" aria-label="Retrieving container URL" />;
+  }
+
+  if (state.kind === "absent") {
+    return (
+      <Tooltip content={CONTAINER_URL_ABSENT_TOOLTIP} relationship="label">
+        <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+          {CONTAINER_URL_ABSENT_LABEL}
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <Tooltip content={state.message} relationship="label">
+        <Text italic style={{ color: tokens.colorPaletteRedForeground1 }}>
+          Unavailable
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "resolved") {
+    return (
+      <Tooltip content={decodeURIComponent(state.url)} relationship="label">
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={copied ? <CheckmarkCircle16Filled /> : <Copy16Regular />}
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyToClipboard(state.url).then((ok) => {
+              setCopied(ok);
+              if (ok) setTimeout(() => setCopied(false), 2000);
+            });
+          }}
+          aria-label={`Copy the URL for ${container.displayName}`}
+        >
+          {copied ? "Copied" : "Copy URL"}
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip content={CONTAINER_URL_ON_DEMAND_TOOLTIP} relationship="label">
+      <Button
+        appearance="subtle"
+        size="small"
+        icon={<Link16Regular />}
+        disabled={!configId}
+        onClick={(e) => {
+          e.stopPropagation();
+          void resolveAndCopy();
+        }}
+        aria-label={`Get and copy the URL for ${container.displayName}`}
+      >
+        Get URL
+      </Button>
+    </Tooltip>
+  );
+};
+
 /** Build typed Fluent DataGrid column definitions for Container rows. */
 function buildColumns(
   onBrowse?: (containerId: string, containerName?: string) => void,
+  configId?: string,
 ): TableColumnDefinition<Container>[] {
   return [
     createTableColumn<Container>({
@@ -310,6 +433,13 @@ function buildColumns(
         ) : (
           <Text>{formatBytes(container.storageUsedInBytes)}</Text>
         ),
+    }),
+    createTableColumn<Container>({
+      columnId: "webUrl",
+      renderHeaderCell: () => CONTAINER_URL_LABEL,
+      renderCell: (container) => (
+        <ContainerUrlCell container={container} configId={configId} />
+      ),
     }),
     createTableColumn<Container>({
       columnId: "browse",
@@ -481,7 +611,10 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
 
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
-  const columns = React.useMemo(() => buildColumns(onOpenContainer), [onOpenContainer]);
+  const columns = React.useMemo(
+    () => buildColumns(onOpenContainer, selectedConfig?.id),
+    [onOpenContainer, selectedConfig],
+  );
 
   // ── Derived: Selected Container Objects ────────────────────────────────────
 

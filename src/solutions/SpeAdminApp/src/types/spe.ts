@@ -374,6 +374,21 @@ export interface Container {
   lastModifiedDateTime?: string;
   /** Storage used in bytes */
   storageUsedInBytes?: number;
+  /**
+   * The container's SharePoint URL — the scoping key for a Purview eDiscovery search (FR-C10).
+   *
+   * 🔑 Present on a DETAIL response only. The BFF omits the key entirely from LIST rows, because
+   * Graph structurally cannot supply it there: the containers collection accepts
+   * `$expand=drive($select=webUrl)`, answers 200, echoes it in `@odata.context`, and returns no
+   * `drive` on any row (measured 2026-08-24 on both API versions — notes/task-028-findings.md §1).
+   *
+   * So `undefined` here means one of two things depending on WHERE the object came from, and only
+   * the detail case is renderable:
+   *   • from `containers.list(...)` → NOT ASKED. Never render an absent state from a list row.
+   *   • from `containers.get(...)`  → asked, and Graph reported none → render the explicit absent
+   *     state (NFR-06), never a blank.
+   */
+  webUrl?: string;
   /** Custom properties (key-value pairs) */
   customProperties?: Record<string, ContainerCustomProperty>;
   /** Storage settings */

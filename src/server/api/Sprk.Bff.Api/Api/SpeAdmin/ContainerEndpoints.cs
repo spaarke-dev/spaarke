@@ -865,7 +865,20 @@ public static class ContainerEndpoints
         string ContainerTypeId,
         DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
-        string Status)
+        string Status,
+        // FR-C10 — the container's SharePoint URL, the scoping key for a Purview eDiscovery search.
+        //
+        // 🔑 `WhenWritingNull` is LOAD-BEARING, not tidiness. Graph cannot return this on a LIST
+        // (measured 2026-08-24 — the collection accepts $expand=drive($select=webUrl), answers 200,
+        // and drops `drive` from every row; notes/task-028-findings.md §1). Emitting `"webUrl": null`
+        // on 5 list rows would invite exactly one reading — "these containers have no URL" — which is
+        // false; we never asked. Omitting the key means a client cannot bind the grid to it by
+        // accident, and `webUrl === undefined` on a DETAIL response carries its honest meaning:
+        // Graph was asked and did not report one. Pinned by
+        // SpeAdminContainerUrlMappingTests.ListRows_DoNotCarryAWebUrlKey_BecauseGraphCannotSupplyIt.
+        [property: System.Text.Json.Serialization.JsonIgnore(
+            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        string? WebUrl = null)
     {
         /// <summary>Maps a <see cref="SpeAdminGraphService.SpeContainerSummary"/> domain record to a DTO.</summary>
         public static ContainerDto FromSummary(SpeAdminGraphService.SpeContainerSummary summary) =>
@@ -876,6 +889,7 @@ public static class ContainerEndpoints
                 summary.ContainerTypeId,
                 summary.CreatedDateTime,
                 summary.StorageUsedInBytes,
-                summary.Status);
+                summary.Status,
+                summary.WebUrl);
     }
 }

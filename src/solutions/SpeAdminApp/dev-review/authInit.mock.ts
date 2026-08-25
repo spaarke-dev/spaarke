@@ -47,7 +47,7 @@ export function ensureAuthInitialized(): Promise<void> {
 function matchRoute(
   url: string,
   method: string,
-): { body: unknown; status: number } | undefined {
+): { body: unknown; status: number; segments: string[] } | undefined {
   const path = url.split("?")[0];
   // Normalise to the part from `/spe/` onward, so an absolute BFF base URL matches too.
   const idx = path.indexOf("/spe/");
@@ -71,12 +71,12 @@ function matchRoute(
     const [maybeMethod, ...rest] = key.split(" ");
     if (rest.length === 0) continue; // bare-path key; handled below
     if (maybeMethod.toUpperCase() !== method) continue;
-    if (segmentsMatch(rest.join(" "))) return value;
+    if (segmentsMatch(rest.join(" "))) return { ...value, segments: target };
   }
 
   for (const [key, value] of Object.entries(FIXTURES)) {
     if (key.includes(" ")) continue; // method-qualified; already tried
-    if (segmentsMatch(key)) return value;
+    if (segmentsMatch(key)) return { ...value, segments: target };
   }
   return undefined;
 }
@@ -101,6 +101,26 @@ export async function authenticatedFetch(
 
   console.info(`[review-mock] ${method} ${url} → ${hit.status}`);
 
+  /*
+   * A fixture body may be a RESOLVER, so a per-id route can answer for the id that was asked for
+   * rather than always answering with row 0. Returning row 0 for every id is how the harness came to
+   * show "the same files and dates in every container" — plausible, uniform, and wrong.
+   */
+  const resolved =
+    typeof hit.body === "function"
+      ? (hit.body as (segments: string[]) => unknown)(hit.segments)
+      : hit.body;
+
+  if (resolved === undefined && hit.status < 400) {
+    // The resolver found nothing. Say so, rather than falling back to something that looks right.
+    console.warn(`[review-mock] resolver returned nothing for ${method} ${url} — returning 404`);
+    throw new ApiError(
+      `No fixture row matches ${method} ${url}.`,
+      404,
+      { status: 404, title: "Not Found" } as never,
+    );
+  }
+
   // Writes are accepted but NOT persisted — the review is about rendering, and a fake persistence
   // layer would let a screen appear to save when the real PATCH currently 400s in the live tenant.
   if (method !== "GET" && hit.status < 400) {
@@ -111,15 +131,15 @@ export async function authenticatedFetch(
   }
 
   if (hit.status >= 400) {
-    const problem = hit.body as { detail?: string; title?: string };
+    const problem = resolved as { detail?: string; title?: string };
     throw new ApiError(
       problem.detail ?? problem.title ?? "Request failed",
       hit.status,
-      hit.body as never,
+      resolved as never,
     );
   }
 
-  return new Response(JSON.stringify(hit.body), {
+  return new Response(JSON.stringify(resolved), {
     status: hit.status,
     headers: { "Content-Type": "application/json" },
   });

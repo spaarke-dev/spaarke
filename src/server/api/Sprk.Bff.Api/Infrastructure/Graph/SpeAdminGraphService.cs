@@ -62,7 +62,30 @@ public sealed class SpeAdminGraphService
             !string.IsNullOrWhiteSpace(OwningAppSecretName);
     }
 
-    /// <summary>Summarised container data returned from Graph API.</summary>
+    /// <summary>
+    /// Summarised container data returned from Graph API.
+    /// </summary>
+    /// <param name="WebUrl">
+    /// The container's SharePoint URL — the scoping key for a Purview eDiscovery search (FR-C10).
+    ///
+    /// 🔑 <b>Populated by GET-single ONLY. Always null from a LIST.</b> This is not an oversight;
+    /// it is a measured Graph limitation (2026-08-24, task 028 — see notes/task-028-findings.md §1):
+    /// <c>fileStorageContainer</c> has <b>no URL property</b> in either API version. The value lives
+    /// on the <c>drive</c> navigation property, and on the containers <b>collection</b> Graph accepts
+    /// <c>$expand=drive($select=webUrl)</c>, returns <b>200</b>, echoes <c>drive(webUrl)</c> in
+    /// <c>@odata.context</c> — and omits <c>drive</c> from every row. Silently. On v1.0 and beta, for
+    /// every expand shape tried (<c>$expand=drive</c>, <c>$select=id,drive</c>, multi-expand).
+    ///
+    /// That is precisely this project's signature defect shape, arriving from the platform itself, so
+    /// do NOT "fix" a null here by adding an expand to <see cref="ListContainersAsync"/> — it will
+    /// still be null and you will have paid for a lie. The list contract deliberately omits the field
+    /// from the wire entirely (see <c>ContainerDto.WebUrl</c>) so that absent cannot be misread as
+    /// "this container has no URL".
+    ///
+    /// Null on a GET-single genuinely means Graph did not report one, and must render as an explicit
+    /// absent state, never a blank (NFR-06). Never synthesise it from the container id — the id
+    /// encodes the site GUID but not the tenant host, so any derived URL would be a fabricated value.
+    /// </param>
     public sealed record SpeContainerSummary(
         string Id,
         string DisplayName,
@@ -70,7 +93,8 @@ public sealed class SpeAdminGraphService
         string ContainerTypeId,
         DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
-        string Status = "active");
+        string Status = "active",
+        string? WebUrl = null);
 
     /// <summary>
     /// A single file or folder item returned from the Graph drive items API.
@@ -1184,6 +1208,15 @@ public sealed class SpeAdminGraphService
                             "id", "displayName", "description", "containerTypeId",
                             "createdDateTime", "storageUsedInBytes", "status"
                         };
+                        // The container URL (FR-C10). `fileStorageContainer` exposes no URL property
+                        // in either API version — it lives on the `drive` navigation property.
+                        //
+                        // Verified live 2026-08-24 that $select and $expand DO co-exist here: this
+                        // exact pairing returns `drive: { webUrl }`. That check was not ceremony —
+                        // on the containers COLLECTION the identical expand is accepted, returns 200,
+                        // and is silently dropped, so "the expand is valid" could not be assumed from
+                        // the list's behaviour. See notes/task-028-findings.md §1.
+                        config.QueryParameters.Expand = new[] { "drive($select=webUrl)" };
                     }, ct),
                 ct);
 
@@ -1204,7 +1237,9 @@ public sealed class SpeAdminGraphService
                 // is normally null. Read anyway: if Graph starts returning it, we get it for free
                 // instead of discarding it for another year.
                 StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
-                Status: containerStatus);
+                Status: containerStatus,
+                // FR-C10. GET-single is the ONLY call that can carry this — see SpeContainerSummary.
+                WebUrl: ReadContainerWebUrl(container.Drive?.WebUrl, container.AdditionalData));
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -3719,6 +3754,67 @@ public sealed class SpeAdminGraphService
                 System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
             System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number
                 && je.TryGetInt64(out var fromJson) => fromJson,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Reads a container's SharePoint URL from the expanded <c>drive</c> navigation property.
+    /// </summary>
+    /// <param name="typedDriveWebUrl">
+    /// <c>container.Drive?.WebUrl</c> — the typed path, tried FIRST. Task 030's lesson: reading only
+    /// from <c>AdditionalData</c> is what silently nulled <c>billingClassification</c> for ten days
+    /// when the Graph 6 upgrade started typing it. A comment naming an SDK version is a claim with an
+    /// expiry date; reading both makes the code survive the next upgrade in either direction.
+    /// </param>
+    /// <param name="additionalData">
+    /// The untyped bag, tried SECOND. Every shape Kiota can produce for an expanded navigation
+    /// property is accepted — task 022's lesson, where <c>is string</c> could never match the
+    /// <c>DateTime</c> Kiota had actually stored, discarding a present and correct value.
+    /// </param>
+    /// <returns>
+    /// The URL, or null when Graph did not report one. <b>Null means NOT REPORTED</b> and must render
+    /// as an explicit absent state, never a blank cell (NFR-06). Never synthesise a URL to avoid a
+    /// null — see <see cref="SpeContainerSummary"/>.
+    /// </returns>
+    internal static string? ReadContainerWebUrl(
+        string? typedDriveWebUrl,
+        IDictionary<string, object>? additionalData)
+    {
+        if (!string.IsNullOrWhiteSpace(typedDriveWebUrl))
+        {
+            return typedDriveWebUrl;
+        }
+
+        if (additionalData is null ||
+            !additionalData.TryGetValue("drive", out var rawDrive) ||
+            rawDrive is null)
+        {
+            return null;
+        }
+
+        // The expanded `drive` arrives as a nested object. Kiota may hand it back as an untyped
+        // node, a dictionary, or a raw JsonElement depending on whether the property is modelled.
+        switch (rawDrive)
+        {
+            case IDictionary<string, object> driveBag:
+                return driveBag.TryGetValue("webUrl", out var nested) ? CoerceUrl(nested) : null;
+
+            case System.Text.Json.JsonElement je
+                when je.ValueKind == System.Text.Json.JsonValueKind.Object
+                     && je.TryGetProperty("webUrl", out var jsonWebUrl):
+                return CoerceUrl(jsonWebUrl);
+
+            default:
+                return null;
+        }
+
+        static string? CoerceUrl(object? value) => value switch
+        {
+            string s when !string.IsNullOrWhiteSpace(s) => s,
+            System.Text.Json.JsonElement el
+                when el.ValueKind == System.Text.Json.JsonValueKind.String
+                     && !string.IsNullOrWhiteSpace(el.GetString()) => el.GetString(),
             _ => null,
         };
     }

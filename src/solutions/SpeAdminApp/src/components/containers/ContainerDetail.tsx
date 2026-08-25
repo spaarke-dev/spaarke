@@ -34,8 +34,11 @@ import {
   type SelectTabData,
   type SelectTabEvent,
   Button,
+  Link,
   MessageBar,
   MessageBarBody,
+  MessageBarTitle,
+  Tooltip,
   Divider,
   shorthands,
 } from "@fluentui/react-components";
@@ -47,12 +50,26 @@ import {
   ColumnTriple20Regular,
   Settings20Regular,
   Info20Regular,
+  Copy16Regular,
+  CheckmarkCircle16Filled,
+  Open16Regular,
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
+import { copyToClipboard } from "../../services/clipboard";
 import { PermissionPanel } from "./PermissionPanel";
 import { ColumnEditor } from "./ColumnEditor";
+import {
+  PURVIEW_PORTAL_URL,
+  PURVIEW_GUIDANCE_TITLE,
+  PURVIEW_GUIDANCE_BODY,
+  PURVIEW_GUIDANCE_STEPS,
+  CONTAINER_URL_PURPOSE,
+  CONTAINER_URL_LABEL,
+  CONTAINER_URL_ABSENT_LABEL,
+  CONTAINER_URL_ABSENT_TOOLTIP,
+} from "./containerCompliance";
 import { CustomPropertyEditor } from "./CustomPropertyEditor";
 import type {
   Container,
@@ -292,6 +309,116 @@ const PropertyRow: React.FC<{ label: string; children: React.ReactNode }> = ({
 // Details Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The container URL with a copy affordance, or an explicit absent state.
+ *
+ * `webUrl` is undefined here only when Graph was asked and reported none — the BFF omits the key
+ * from LIST rows entirely, and this panel always renders from a GET-single. So the absent state is
+ * honest, and is a labelled state rather than a blank cell (NFR-06).
+ */
+const ContainerUrlRow: React.FC<{ webUrl?: string }> = ({ webUrl }) => {
+  const [copied, setCopied] = React.useState(false);
+  const [copyFailed, setCopyFailed] = React.useState(false);
+
+  const handleCopy = React.useCallback(async () => {
+    if (!webUrl) return;
+    const ok = await copyToClipboard(webUrl);
+    // Report what actually happened. A "Copied!" that did not copy is only discovered when the
+    // admin pastes into Purview and gets nothing.
+    setCopied(ok);
+    setCopyFailed(!ok);
+    setTimeout(() => {
+      setCopied(false);
+      setCopyFailed(false);
+    }, 2000);
+  }, [webUrl]);
+
+  if (!webUrl) {
+    return (
+      <PropertyRow label={CONTAINER_URL_LABEL}>
+        <Tooltip content={CONTAINER_URL_ABSENT_TOOLTIP} relationship="label">
+          <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+            {CONTAINER_URL_ABSENT_LABEL}
+          </Text>
+        </Tooltip>
+      </PropertyRow>
+    );
+  }
+
+  return (
+    <PropertyRow label={CONTAINER_URL_LABEL}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: tokens.spacingHorizontalXS }}>
+        <Text size={200} style={{ wordBreak: "break-all", flex: 1 }}>
+          {decodeURIComponent(webUrl)}
+        </Text>
+        <Tooltip
+          content={
+            copyFailed
+              ? "Could not copy — select the text and copy manually"
+              : "Copy the container URL"
+          }
+          relationship="label"
+        >
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={copied ? <CheckmarkCircle16Filled /> : <Copy16Regular />}
+            onClick={() => void handleCopy()}
+            aria-label="Copy the container URL"
+          />
+        </Tooltip>
+      </div>
+      {copyFailed && (
+        <Text size={100} style={{ color: tokens.colorPaletteRedForeground1 }}>
+          Copy was blocked by the browser — select the URL and copy it manually.
+        </Text>
+      )}
+    </PropertyRow>
+  );
+};
+
+/**
+ * Routes an admin looking for hold / retention / eDiscovery to Purview (FR-C11, spec §4.2c).
+ *
+ * R2 deliberately builds no compliance MANAGEMENT — see containerCompliance.ts. This section exists
+ * so the boundary reads as a design decision with a next step, not as a missing feature.
+ */
+const ComplianceSection: React.FC<{ webUrl?: string }> = ({ webUrl }) => {
+  const styles = useStyles();
+  return (
+    <>
+      <Text
+        size={200}
+        weight="semibold"
+        className={styles.sectionTitle}
+        style={{ marginTop: tokens.spacingVerticalM }}
+      >
+        Compliance
+      </Text>
+      <Divider />
+      <MessageBar intent="info" style={{ marginTop: tokens.spacingVerticalS }}>
+        <MessageBarBody>
+          <MessageBarTitle>{PURVIEW_GUIDANCE_TITLE}</MessageBarTitle>
+          <div style={{ marginTop: tokens.spacingVerticalXS }}>{PURVIEW_GUIDANCE_BODY}</div>
+          <div style={{ marginTop: tokens.spacingVerticalXS }}>
+            {webUrl ? CONTAINER_URL_PURPOSE : null}
+          </div>
+          <ol style={{ marginTop: tokens.spacingVerticalXS, paddingLeft: "1.2em" }}>
+            {PURVIEW_GUIDANCE_STEPS.map((step) => (
+              <li key={step}>
+                <Text size={200}>{step}</Text>
+              </li>
+            ))}
+          </ol>
+          <Link href={PURVIEW_PORTAL_URL} target="_blank" rel="noopener noreferrer">
+            Open the Microsoft Purview portal <Open16Regular />
+          </Link>
+        </MessageBarBody>
+      </MessageBar>
+    </>
+  );
+};
+
 const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
   const styles = useStyles();
   return (
@@ -319,6 +446,7 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
           {container.containerTypeId}
         </Text>
       </PropertyRow>
+      <ContainerUrlRow webUrl={container.webUrl} />
       {container.description && (
         <PropertyRow label="Description">
           <Text>{container.description}</Text>
@@ -361,6 +489,8 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
       <PropertyRow label="Storage Used">
         <Text>{formatBytes(container.storageUsedInBytes)}</Text>
       </PropertyRow>
+
+      <ComplianceSection webUrl={container.webUrl} />
     </div>
   );
 };
