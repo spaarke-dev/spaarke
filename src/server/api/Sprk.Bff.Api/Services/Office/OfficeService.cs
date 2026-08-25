@@ -125,8 +125,8 @@ public class OfficeService : IOfficeService
                     Success = true,
                     Duplicate = true,
                     JobId = existingJob.JobId,
-                    StatusUrl = $"/office/jobs/{existingJob.JobId}",
-                    StreamUrl = $"/office/jobs/{existingJob.JobId}/stream"
+                    StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
+                    StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream"
                 };
             }
 
@@ -359,8 +359,8 @@ public class OfficeService : IOfficeService
                         Success = true,
                         Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
                         JobId = jobId,
-                        StatusUrl = $"/office/jobs/{jobId}",
-                        StreamUrl = $"/office/jobs/{jobId}/stream"
+                        StatusUrl = $"/api/office/jobs/{jobId}",
+                        StreamUrl = $"/api/office/jobs/{jobId}/stream"
                     };
                 }
 
@@ -442,8 +442,8 @@ public class OfficeService : IOfficeService
                 Success = true,
                 Duplicate = false,
                 JobId = jobId,
-                StatusUrl = $"/office/jobs/{jobId}",
-                StreamUrl = $"/office/jobs/{jobId}/stream"
+                StatusUrl = $"/api/office/jobs/{jobId}",
+                StreamUrl = $"/api/office/jobs/{jobId}/stream"
             };
         }
         catch (Exception ex)

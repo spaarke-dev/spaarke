@@ -204,8 +204,8 @@ public class DuplicateDetectionTests : IDisposable
             Success = true,
             Duplicate = false,
             JobId = expectedJobId,
-            StatusUrl = $"/office/jobs/{expectedJobId}",
-            StreamUrl = $"/office/jobs/{expectedJobId}/stream"
+            StatusUrl = $"/api/office/jobs/{expectedJobId}",
+            StreamUrl = $"/api/office/jobs/{expectedJobId}/stream"
         };
         var cacheKey = SimulateCachedResponse(idempotencyKey, cachedResponse);
 
@@ -509,8 +509,8 @@ public class DuplicateDetectionTests : IDisposable
             Success = true,
             Duplicate = true,
             JobId = expectedJobId,
-            StatusUrl = $"/office/jobs/{expectedJobId}",
-            StreamUrl = $"/office/jobs/{expectedJobId}/stream"
+            StatusUrl = $"/api/office/jobs/{expectedJobId}",
+            StreamUrl = $"/api/office/jobs/{expectedJobId}/stream"
         };
 
         // Assert - verify expected fields

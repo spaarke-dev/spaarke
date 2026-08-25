@@ -211,7 +211,16 @@ public static class OfficeEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // This value is stamped as the job's CreatedBy (OfficeService.SaveAsync) and is later
+        // compared against JobOwnershipFilter's userId, which comes from
+        // OfficeAuthFilter.ExtractUserId — and that resolves 'oid' FIRST.
+        // Reading NameIdentifier ('sub') first here stamped a DIFFERENT claim than the filter
+        // compares, so every subsequent job poll returned 403 OFFICE_009
+        // ("You do not have access to this job") for every user. Both sides must resolve
+        // identity identically; this now matches the sibling handlers at GetJobStatusAsync
+        // and StreamJobAsync, which already read UserIdKey first.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Get idempotency key from header if provided

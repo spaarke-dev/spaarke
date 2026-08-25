@@ -66,8 +66,8 @@ const mockEntities: EntitySearchResult[] = [
 const mockSaveResponse: SaveJobResponse = {
   jobId: 'job-12345',
   documentId: 'doc-67890',
-  statusUrl: '/office/jobs/job-12345',
-  streamUrl: '/office/jobs/job-12345/stream',
+  statusUrl: '/api/office/jobs/job-12345',
+  streamUrl: '/api/office/jobs/job-12345/stream',
   status: 'Queued',
   duplicate: false,
   correlationId: 'corr-abc123',
@@ -449,7 +449,7 @@ test.describe('Word Save Flow - SSE Status Updates @e2e @word', () => {
 
   test('should fallback to polling when SSE fails', async ({ page }) => {
     // Mock SSE failure
-    await page.route(`${testConfig.apiBaseUrl}/office/jobs/job-12345/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/job-12345/stream`, (route) => {
       route.abort('failed');
     });
 
