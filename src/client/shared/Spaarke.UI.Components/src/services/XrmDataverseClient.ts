@@ -182,6 +182,13 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
     attr?.DisplayName?.LocalizedLabels?.[0]?.Label ??
     (typeof attr?.displayName === 'string' ? attr.displayName : undefined);
 
+  // Lookup target entity logical names. Xrm exposes this as `Targets` (PascalCase)
+  // on the attribute metadata; probe the camelCase form too for resilience, mirroring
+  // FieldUpdateReconcileTab.tsx:149. Guard with Array.isArray so a malformed/absent
+  // value never surfaces as `[]` — the contract requires `undefined`, not empty array.
+  const targetsRaw = attr?.Targets ?? attr?.targets;
+  const targets = Array.isArray(targetsRaw) ? targetsRaw : undefined;
+
   return {
     attributeType,
     format,
@@ -189,6 +196,7 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
     isPrimaryName: attr?.IsPrimaryName === true || attr?.isPrimaryName === true || undefined,
     isPrimaryId: attr?.IsPrimaryId === true || attr?.isPrimaryId === true || undefined,
     optionSet,
+    targets,
   };
 }
 
@@ -294,6 +302,39 @@ function projectEntityMetadata(meta: any): EntityMetadata {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Entity metadata cache (page-session lifetime) — FR-21 / NFR-01
+// ---------------------------------------------------------------------------
+
+/**
+ * Module-level cache of `retrieveEntityMetadata` results, keyed by entity
+ * logical name. Page-session lifetime — mirrors `_navPropCache` in
+ * `PolymorphicResolverService.ts:451`.
+ *
+ * Caches the in-flight {@link Promise} (not just the resolved value) so
+ * concurrent first callers for the same entity share one network round-trip
+ * instead of racing duplicate `getEntityMetadata` + `EntityDefinitions`
+ * fetches. A rejected promise is evicted immediately so a later retry issues
+ * a fresh fetch — failures are never cached.
+ */
+const _entityMetadataCache: Record<string, Promise<EntityMetadata>> = {};
+
+/**
+ * Reset the entity metadata cache. Test-only.
+ *
+ * @param entityName  Optional — clear a single entity's entry; omit to clear all.
+ * @internal
+ */
+export function _resetEntityMetadataCacheForTests(entityName?: string): void {
+  if (entityName) {
+    delete _entityMetadataCache[entityName];
+    return;
+  }
+  for (const k of Object.keys(_entityMetadataCache)) {
+    delete _entityMetadataCache[k];
+  }
+}
+
 /**
  * MDA-host implementation of {@link IDataverseClient}.
  *
@@ -357,6 +398,34 @@ export class XrmDataverseClient implements IDataverseClient {
   }
 
   /**
+   * Retrieve projected entity metadata for `entityName`.
+   *
+   * Page-session cached (FR-21 / NFR-01): a second call for the same
+   * `entityName` returns the first call's result (or, if still in flight,
+   * its in-flight {@link Promise}) with zero additional network requests.
+   * A rejected fetch is evicted from the cache so a later retry re-attempts
+   * — see {@link fetchEntityMetadataUncached} for the actual fetch + the
+   * two-call rationale.
+   */
+  async retrieveEntityMetadata(entityName: string): Promise<EntityMetadata> {
+    const cached = _entityMetadataCache[entityName];
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.fetchEntityMetadataUncached(entityName);
+    _entityMetadataCache[entityName] = promise;
+    // Fire-and-forget eviction subscription: does not alter what
+    // `retrieveEntityMetadata` returns to its caller (that's `promise`,
+    // returned below), and attaching a `.catch()` here means the rejection
+    // is always "handled" — no unhandledrejection noise from this subscription.
+    promise.catch(() => {
+      delete _entityMetadataCache[entityName];
+    });
+    return promise;
+  }
+
+  /**
    * Retrieve projected entity metadata via `Xrm.Utility.getEntityMetadata` and
    * (in parallel) fetch attribute DisplayName labels via the EntityDefinitions
    * Web API.
@@ -370,8 +439,10 @@ export class XrmDataverseClient implements IDataverseClient {
    * Throws if `Xrm.Utility` is unavailable (rare — older clients only). The
    * DisplayName fetch is best-effort: a failure logs a warning and falls back to
    * the humanized logical name in `configResolution.buildResolvedColumn`.
+   *
+   * @internal — called only through the cache wrapper {@link retrieveEntityMetadata}.
    */
-  async retrieveEntityMetadata(entityName: string): Promise<EntityMetadata> {
+  private async fetchEntityMetadataUncached(entityName: string): Promise<EntityMetadata> {
     const xrm = this.getXrm();
     if (!xrm.Utility) {
       throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);

@@ -4,7 +4,7 @@
     <title>TextField — em-dash for empty string, aligning with sibling renderers (FR-11)</title>
     <phase>1 Renderers</phase>
     <gate>after-001-002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shipped shared-library .tsx component that MatterHeaderPcf v1.0.20 consumes (Step 3.5.5: modifies code files = FULL).</rigor-reason>
     <model-tier>sonnet</model-tier>

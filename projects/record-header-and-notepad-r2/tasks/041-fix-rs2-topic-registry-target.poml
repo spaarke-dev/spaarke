@@ -4,7 +4,7 @@
     <title>RS-2 — Retarget sprk_aitopicregistry "Matter Summary" row to sprk_recordsummary (Dataverse data fix) + fix stale sprk_aisummary comment</title>
     <phase>4 Schema-drift remediation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Primarily a Dataverse DATA fix (one field on one registry row) plus a comment-only .cs edit — no executable code changes. The comment-only touch of src/server/api/** does not constitute code implementation, so the FULL trigger for .cs modification does not apply; explicit constraints present → STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,6 +112,36 @@
     <criterion testable="true">notes/rs2-registry-fix.md records: before/after values of the registry row, the grep result for the §10 test-update obligation check, and the identified consumer of extraction.aiSummary with its confirmed sprk_recordsummary destination (or documents the fired escalation instead).</criterion>
     <criterion testable="true">Negative: the "Matter Health Insight" row and every other sprk_aitopicregistry row are byte-identical to their pre-task state; no re-investigation of sprk_performancesummary was performed (it was verified existing on 2026-08-25 — take that as given).</criterion>
   </acceptance-criteria>
+
+  <completion>
+    Completed 2026-08-25. **Primary fix landed and verified**: `sprk_aitopicregistry` row
+    cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 on spaarkedev1, `sprk_targetfield` sprk_mattersummary →
+    sprk_recordsummary (PATCH 204; re-queried; ETag 14349324 → 23866967). All sibling fields
+    byte-identical. The other registry row ("Matter Health Insight") untouched, still targeting
+    sprk_performancesummary. See notes/rs2-registry-fix.md.
+
+    **Step 4 deviated, deliberately.** The step prescribed rewriting the InvoiceExtractionJobHandler
+    comment to say the value flows to OutputRouter "whose registry-driven target is sprk_recordsummary".
+    Tracing showed that is FALSE: `extraction.aiSummary` (line 236) feeds OutputOrchestratorService, a
+    structurally different class on a different path from OutputRouter. Writing the prescribed text
+    would have replaced a stale false statement with a new false one. Escalation trigger 1 fired
+    correctly; the main session verified the claim independently (grep confirmed PlaybookService.cs
+    never selects sprk_configjson) rather than accepting the sub-agent report on trust, then took the
+    narrow factual rewrite instead. BFF build green: 0 errors, 7 warnings (unchanged baseline).
+
+    **Acceptance criterion 2 not met as literally written** ("zero sprk_aisummary in the BFF"): one
+    occurrence remains, inside the new remarks block, where it names sprk_aisummary as the
+    NON-EXISTENT seed-data target. That is factual documentation of a defect, not a live reference —
+    the criterion's intent (no stale or misleading reference) is exceeded, its letter is not. Recorded
+    rather than gamed by deleting the word.
+
+    **Follow-up filed** (out of R2 scope): notes/issues/ISSUE-output-mapping-unreachable.md —
+    PlaybookService.GetPlaybookAsync never selects sprk_configjson, so
+    OutputOrchestratorService.ParseOutputMapping short-circuits to null for EVERY playbook, making all
+    outputMapping config dead. `extraction.aiSummary` consequently has no live consumer at all. The
+    doc argues question order: decide whether outputMapping is superseded by the topic-registry path
+    BEFORE repairing it — repairing a superseded mechanism would be worse than deleting it.
+  </completion>
 
   <notes>
     Spec refs: FR-22, FR-23/RS-2; design.md §9 "Two live breakages" + "Verified NOT broken" list. Prescriptive mode

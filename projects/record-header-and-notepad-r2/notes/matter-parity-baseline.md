@@ -79,3 +79,22 @@ Equivalent `layoutJson` for task 080's parity binding:
 - [ ] Runtime behaviours that a screenshot cannot show: form-buffer dirty state with **no re-render flash**, 25%×35% Notepad modal, `openTodos` SmartTodo filter
 
 > The four runtime behaviours are blocked until task 040 restores rendering. Everything visual/static above is now settled.
+
+---
+
+## FR-11 em-dash change (task 014, 2026-08-25)
+
+`TextField` (the shared-lib renderer Matter's Matter Number / Matter Name / Matter Type / Practice Area fields
+all use) previously rendered an **empty-string** value as an empty styled box — only `null`/`undefined`
+rendered the `—` placeholder. `OptionSetField` and `TextareaField` already treated `''` as empty. Per FR-11
+("`null`, `undefined` and `''` must all render `—` across ALL renderers"), `TextField.tsx:117` now includes
+the strict `value === ''` case, matching `OptionSetField.tsx:110`'s condition shape exactly. The edit-state
+draft normalization (5 sites) was verified, not rewritten — an empty-string field still opens its edit draft
+as `''`, not `'—'`.
+
+**Task 080 must treat this as an intended change, not a regression**: any Matter text field that is
+empty-string-valued (as opposed to null/undefined) in the live R2 control will now show `—` where the
+shipped v1.0.20 baseline showed an empty box. The baseline capture above (`Matter Description`) happened to
+be a `null` Memo, so it already showed `—` in both v1.0.20 and R2 — the empty-string case is a distinct
+scenario the light/dark screenshots above may not have captured for every field. Whitespace-only strings
+(e.g. `' '`) are explicitly out of scope and continue to render as-is (not treated as empty).

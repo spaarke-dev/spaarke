@@ -12,7 +12,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { XrmDataverseClient } from '../XrmDataverseClient';
+import { XrmDataverseClient, _resetEntityMetadataCacheForTests } from '../XrmDataverseClient';
 
 const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
 
@@ -74,6 +74,13 @@ function resetWindowAndParent(): void {
 }
 
 describe('XrmDataverseClient', () => {
+  beforeEach(() => {
+    // Entity metadata cache is module-level (page-session lifetime in prod);
+    // reset it before every test so tests reusing an entity name (e.g. 'sprk_event')
+    // don't observe a prior test's cached result.
+    _resetEntityMetadataCacheForTests();
+  });
+
   afterEach(() => {
     resetWindowAndParent();
     jest.clearAllMocks();
@@ -255,7 +262,12 @@ describe('XrmDataverseClient', () => {
       const client = new XrmDataverseClient();
       const meta = await client.retrieveEntityMetadata('sprk_event');
 
-      expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledWith('sprk_event', ['Attributes']);
+      // NOTE (pre-existing fix, unrelated to FR-21): the source intentionally omits
+      // the second arg — `getEntityMetadata`'s 2nd param is an attribute FILTER, not
+      // an "include this section" hint (see XrmDataverseClient.ts comment above the
+      // call). This assertion was stale against that behavior; corrected here since
+      // task 020 already owns this file and the shared-lib suite must be green.
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledWith('sprk_event');
       expect(meta.primaryIdAttribute).toBe('sprk_eventid');
       expect(meta.primaryNameAttribute).toBe('sprk_name');
       expect(meta.attributes.sprk_name).toEqual({
@@ -298,6 +310,115 @@ describe('XrmDataverseClient', () => {
 
       const client = new XrmDataverseClient();
       await expect(client.retrieveEntityMetadata('sprk_event')).rejects.toThrow(/Xrm\.Utility/);
+    });
+  });
+
+  describe('retrieveEntityMetadata — targets projection (FR-21)', () => {
+    it('projects targets from a Lookup attribute carrying Targets', async () => {
+      const xrm = makeMockXrm();
+      xrm.Utility!.getEntityMetadata.mockResolvedValue({
+        PrimaryIdAttribute: 'sprk_matterid',
+        PrimaryNameAttribute: 'sprk_matternumber',
+        Attributes: [
+          {
+            LogicalName: 'sprk_mattertype_refid',
+            AttributeType: 'Lookup',
+            Targets: ['sprk_mattertype_ref'],
+          },
+        ],
+      });
+      xrm.WebApi.retrieveMultipleRecords.mockResolvedValue({ entities: [] });
+      setWindowXrm(xrm);
+
+      const client = new XrmDataverseClient();
+      const meta = await client.retrieveEntityMetadata('sprk_matter');
+
+      expect(meta.attributes.sprk_mattertype_refid.targets).toEqual(['sprk_mattertype_ref']);
+    });
+
+    it('leaves targets undefined (not []) for a non-lookup attribute', async () => {
+      const xrm = makeMockXrm();
+      xrm.Utility!.getEntityMetadata.mockResolvedValue({
+        PrimaryIdAttribute: 'sprk_matterid',
+        PrimaryNameAttribute: 'sprk_matternumber',
+        Attributes: [{ LogicalName: 'sprk_matternumber', AttributeType: 'String', IsPrimaryName: true }],
+      });
+      xrm.WebApi.retrieveMultipleRecords.mockResolvedValue({ entities: [] });
+      setWindowXrm(xrm);
+
+      const client = new XrmDataverseClient();
+      const meta = await client.retrieveEntityMetadata('sprk_matter');
+
+      expect(meta.attributes.sprk_matternumber.targets).toBeUndefined();
+    });
+  });
+
+  describe('retrieveEntityMetadata — page-session cache (FR-21 / NFR-01)', () => {
+    it('issues zero additional network calls on a second call for the same entity', async () => {
+      const xrm = makeMockXrm();
+      xrm.Utility!.getEntityMetadata.mockResolvedValue({
+        PrimaryIdAttribute: 'sprk_matterid',
+        PrimaryNameAttribute: 'sprk_matternumber',
+        Attributes: [{ LogicalName: 'sprk_matternumber', AttributeType: 'String', IsPrimaryName: true }],
+      });
+      xrm.WebApi.retrieveMultipleRecords.mockResolvedValue({ entities: [] });
+      setWindowXrm(xrm);
+
+      const client = new XrmDataverseClient();
+      const first = await client.retrieveEntityMetadata('sprk_matter');
+      const second = await client.retrieveEntityMetadata('sprk_matter');
+
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledTimes(1);
+      expect(xrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+      expect(second).toBe(first);
+    });
+
+    it('misses the cache for a different entity name (per-entity keying)', async () => {
+      const xrm = makeMockXrm();
+      xrm.Utility!.getEntityMetadata
+        .mockResolvedValueOnce({
+          PrimaryIdAttribute: 'sprk_matterid',
+          PrimaryNameAttribute: 'sprk_matternumber',
+          Attributes: [],
+        })
+        .mockResolvedValueOnce({
+          PrimaryIdAttribute: 'sprk_projectid',
+          PrimaryNameAttribute: 'sprk_projectnumber',
+          Attributes: [],
+        });
+      xrm.WebApi.retrieveMultipleRecords.mockResolvedValue({ entities: [] });
+      setWindowXrm(xrm);
+
+      const client = new XrmDataverseClient();
+      const matter = await client.retrieveEntityMetadata('sprk_matter');
+      const project = await client.retrieveEntityMetadata('sprk_project');
+
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledTimes(2);
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenNthCalledWith(1, 'sprk_matter');
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenNthCalledWith(2, 'sprk_project');
+      expect(matter.primaryIdAttribute).toBe('sprk_matterid');
+      expect(project.primaryIdAttribute).toBe('sprk_projectid');
+    });
+
+    it('does not cache a rejected first call — a retry re-fetches and the error is unchanged', async () => {
+      const xrm = makeMockXrm();
+      const networkError = new Error('network down');
+      xrm.Utility!.getEntityMetadata.mockRejectedValueOnce(networkError).mockResolvedValueOnce({
+        PrimaryIdAttribute: 'sprk_eventid',
+        PrimaryNameAttribute: 'sprk_name',
+        Attributes: [],
+      });
+      xrm.WebApi.retrieveMultipleRecords.mockResolvedValue({ entities: [] });
+      setWindowXrm(xrm);
+
+      const client = new XrmDataverseClient();
+
+      await expect(client.retrieveEntityMetadata('sprk_event')).rejects.toThrow('network down');
+
+      const retried = await client.retrieveEntityMetadata('sprk_event');
+
+      expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledTimes(2);
+      expect(retried.primaryIdAttribute).toBe('sprk_eventid');
     });
   });
 

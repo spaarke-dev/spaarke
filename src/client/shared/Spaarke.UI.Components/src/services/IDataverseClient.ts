@@ -100,6 +100,14 @@ export interface EntityAttributeMetadata {
   isPrimaryId?: boolean;
   /** Option set values (Picklist, Status, State only). */
   optionSet?: OptionSetOption[];
+  /**
+   * Lookup target entity logical names, populated for Lookup/Customer/Owner
+   * attributes from the Xrm `Targets` metadata array. `targets[0]` is the
+   * primary target — used by the RecordHeader OOB `Xrm.Utility.lookupObjects`
+   * picker's `entityTypes` (FR-15a). `undefined` for non-lookup attributes
+   * (never an empty array).
+   */
+  targets?: string[];
 }
 
 /**

@@ -9,6 +9,7 @@ Grouped by record / component type, as requested.
 | [ISSUE-event-schema-drift.md](ISSUE-event-schema-drift.md) | **Event** — side pane, shared `EventTypeService`, one AI node doc string | High | Side pane cannot load any event (400, caught → error state) | 0.25–0.5 d |
 | [ISSUE-daily-briefing-schema-drift.md](ISSUE-daily-briefing-schema-drift.md) | **Daily Briefing** — `DailyBriefingCollector` | High | **Silent** — flagged Projects and Events vanish from every briefing with no user-visible error | 0.25 d |
 | [ISSUE-work-assignment-schema-drift.md](ISSUE-work-assignment-schema-drift.md) | **Work Assignment** — create endpoint | Medium-High | HTTP 500 whenever a matter or due date is supplied | 0.25–1 d |
+| [ISSUE-output-mapping-unreachable.md](ISSUE-output-mapping-unreachable.md) | **BFF AI** — `PlaybookService` / `OutputOrchestratorService` | High | **Silent** — every playbook `outputMapping` is dead config; `extraction.aiSummary` has no consumer at all | scoping first, then TBD |
 
 ## Common root cause
 
