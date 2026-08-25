@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-25 (by `context-handoff`) · **Committed through**: `738778643`
+> **Last Updated**: 2026-08-25 (by `context-handoff`) · **Committed through**: see `git log`
 > **Branch**: `work/spaarkeai-compose-r8` · **Recovery**: read "Quick Recovery" first.
 > Everything below is recoverable from files alone.
 
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none in progress** — task **052** landed (the project's highest-risk deletion) |
-| **Status** | Full solution builds · BFF **11,285 passed / 0 failed** · ArchTests **56/56** · integration **96** · eval **40/40** · compose-components **100 suites / 1,234** · SpaarkeAi **121 suites / 1,119** |
-| **Progress** | **34 of 54 complete**, 13 open, 1 blocked |
-| **Next Action** | **053** (`tasks/053-bounded-confirmable-fallback.poml`, FULL · opus @ xhigh) — 052 left it the exact structural boundary it needs: `resolveLegacyReplayedSpans` in `usePendingRedline.ts`, pinned to `strict`, the sole remaining edit-path caller of `resolveTargetSpans`. **Read 053's step 1 first**: if NO genuinely anchorless source remains, the correct outcome is to NOT build the fallback and report that. Then **061–063** in parallel (the only `parallel-safe: ✅` family). |
+| **Task** | **none in progress** — **052 · 053 · 061** all landed (Track C AI-edit placement is now COMPLETE) |
+| **Status** | Full solution builds · ArchTests **62/62** · compose-components **101 suites / 1,273** · SpaarkeAi **121 suites / 1,119** |
+| **Progress** | **36 of 54 complete**, 11 open, 1 blocked |
+| **Next Action** | **062** then **063** — SEQUENTIALLY, not in parallel (see the parallelism warning below). Before dispatching, read 061's sequencing hand-off in `notes/` + the TASK-INDEX 061 row: 063 adds the delete surface to `SessionFileBlobStore`, at which point `SessionFilesCleanupScopeTests` becomes load-bearing — **do not weaken it** — and 063 must enumerate for erasure by **tenant PREFIX, not by walking the manifest** (rehydration creates no manifest entries, so orphans are invisible to a manifest walk). Also pending: the **null-identifier refusal** decision below. |
 
 ### Files modified this session
 All committed. Nothing uncommitted, nothing at risk.
@@ -31,28 +31,32 @@ not detected at all (silent overwrite of the user's newer text). Full reasoning:
 
 ---
 
-## ⚠️ Publish-size measurement — a recorded number was WRONG (corrected 2026-08-25)
+## ⚠️ Publish-size: the ~1.3 MB divergence is the SHELL — settled 2026-08-25
 
-**Current: 43.73 MB compressed incl. PDBs** (215 files, 4 `.pdb`, **raw dir sum 137.41 MB**) —
-**−1.23 MB** vs the 44.96 MB net10 baseline; ceiling 60 MB.
+**Current: 45.03 MB compressed incl. PDBs under `pwsh` 7** (215 files, 4 `.pdb`, **raw dir sum 137.41 MB**)
+— **+0.07 MB** vs the 44.96 MB net10 baseline; ceiling 60 MB.
 
-A sub-agent reported 45.03 MB and cited the 45.00 MB figure in `notes/track-b-placement-justification.md`
-to argue the 43.7x cluster was stale. **Both 45.xx figures were artifacts.** An independent re-measure
-produced 43.73 MB twice, with raw sum and file count *byte-identical* to the 45.03 MB run — identical
-content cannot compress to two sizes. The note has been corrected in place.
+This project has carried two conflicting clusters (43.68–43.74 vs 45.00–45.04) for months. Zipping the
+*same directory twice in the same minute* settled it:
 
-**The method that reproduces — use exactly this:**
+| Shell | `Compress-Archive -CompressionLevel Optimal` |
+|---|---|
+| Windows PowerShell **5.1** (what `powershell` resolves to from Git Bash) | **43.73 MB** |
+| **pwsh 7.6.3** (what the `PowerShell` tool and CI use) | **45.03 MB** |
 
+Neither is an artifact — different `System.IO.Compression` implementations. **Canonical: `pwsh` 7**, because
+CI uses it and it reconciles with the 44.96 MB baseline at +0.07 MB; PS 5.1 would imply a −1.23 MB drop no
+code-only change could produce, which is itself the evidence the baseline was taken under pwsh 7.
+
+**Method — pin the shell:**
 ```
-rm -rf <out>                                     # FIRST. A dirty output dir is the suspected cause.
+rm -rf <out>
 dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>
-Compress-Archive -Path '<out>\*' -CompressionLevel Optimal
+pwsh -Command "Compress-Archive -Path '<out>\*' -DestinationPath '<out>.zip' -CompressionLevel Optimal -Force"
 ```
-
-**Always report the raw directory sum (~137 MB) next to the compressed figure.** It is the invariant that
-makes an inflated zip visible immediately — it is what caught this.
-
----
+**Always report the raw dir sum (~137 MB) + file count (215 / 4 `.pdb`) next to the zip.** Those are
+shell-independent, so a mismatch there is a real content change while a zip-only mismatch is tooling. That
+invariant is exactly what made this diagnosable.
 
 ## Owner decisions still in force (do not re-ask)
 
@@ -78,12 +82,11 @@ retention and erasure for a persisted store, and the empty endpoint is the only 
 
 ---
 
-## Remaining queue (13 open, 1 blocked)
+## Remaining queue (11 open, 1 blocked)
 
 | # | Task | Gate |
 |---|---|---|
-| **053** | Bounded confirmable fallback + prove "wording differs slightly" unreachable | 052 ✅ — **dispatch next** |
-| **061 · 062 · 063** | Track B lazy re-index · retention/TTL · erasure | 060 ✅ — **the only `parallel-safe: ✅` family** |
+| **062 · 063** | Track B retention/TTL · erasure | 061 ✅ — ⚠️ their `parallel-safe: ✅` flag is MISLEADING (see below); **062 then 063, sequentially** |
 | **052b** | Stale-target DETECTION durability (052's answer is ledger-durable; the question is `sessionStorage`) | 052 ✅ |
 | **047b** | Never-silent hole (unpaired block reports no loss) | 056 ✅ |
 | **058** | Nested / conditional merge fields | 049 ✅ 057 ✅ |
@@ -92,7 +95,28 @@ retention and erasure for a persisted store, and the empty endpoint is the only 
 | **074** ⛔ | Retire `ComposeShadowPatchEngine` | gate-confirm before deleting 3,000 lines |
 | **090** | Wrap-up (incl. `/test-diet`) | all |
 
-### One-line owner decision waiting
+### 🔔 Decision waiting #1 — a false `applied` that contradicts what we tell the model (surfaced by 053 §5)
+
+A **post-052** payload can carry `target_para_id: null` — Structured Outputs requires the key to be present,
+so "no identifier" arrives as an explicit null, not an absent field. Such an edit has no anchor **and no
+prose**, so 053's fallback cannot serve it; it falls through to the insertion-at-cursor branch and reports
+**`applied`**. Meanwhile the catalog prompt tells the model, verbatim:
+
+> *"Set target_para_id to null ONLY when you genuinely cannot identify the paragraph. An EDIT with a null
+> identifier is **REFUSED rather than placed** — there is no prose fallback — so a missing identifier costs
+> you the edit."*
+
+So the system currently lies to the model and gives the user a stray insertion reported as success. It is
+**not** a UAT-21 mis-placement (nothing is struck; it is a pending insertion at the user's own caret), which
+is why 053 surfaced it instead of changing it — the same branch also serves `compose-draft-document` and
+`compose_context_insert`, which are *legitimately* anchorless.
+
+**The discriminator that separates them cleanly**: `hasOwnProperty(payload, 'target_para_id')` — key present
+and null ⇒ an edit that failed to identify its target ⇒ **refuse**; key absent ⇒ a genuine insertion ⇒ insert
+as today. **Fix it, or change the catalog promise to match the code?** Recommend fixing the code: the promise
+is the correct behavior and R8's charter is no false `applied`.
+
+### 🔔 Decision waiting #2 — orphaned code
 `ComposeEditBatch` + `ComposeEditTransaction` are now orphaned — the text-offset APPLY half of the
 mechanism 052 retired, with no producer and no production consumer, so they can never apply anything. They
 do **not** violate I-7 (they apply spans, they do not search), so 052 left them rather than delete ~500
@@ -107,7 +131,14 @@ alongside task 074?** Evidence: `notes/052-…-decisions.md` §1.4.
 toolchain disjointness per pair**. Task 052 split cleanly into `src/server/**`+`tests/**/*.cs` (dotnet) ∥
 `src/client/**`+`infra/dataverse/**` (jest) — but give each agent an explicit "you MUST NOT touch X"
 boundary naming the *other* agent's paths, or they collide. **052 ∥ 047b/058 would collide** (all
-`Services/Compose`). **061–063 are the safe parallel family.**
+`Services/Compose`).
+
+⚠️ **Do NOT trust the POML `parallel-safe` flag — read the file sets.** 061/062/063 are all marked
+`parallel-safe: ✅`, but **all three declare `Services/Ai/Sessions/` as `primary-edit`**, and 062
+additionally touches the Compose client. They are safe *relative to other tracks*, not *to each other*.
+Running them concurrently would collide on `SessionFileBlobStore` / `SessionFilesCleanupJob` /
+`SessionRestoreService`. **Sequence them: 061 → 062 → 063.** The genuinely disjoint pair is
+**053 (Compose client / jest) ∥ 061 (Ai Sessions server / dotnet)**, which is what was dispatched.
 
 **Main session reserves** `TASK-INDEX.md`, `current-task.md`, `.claude/**` and ALL git operations. Tell
 agents explicitly they cannot write `.claude/` (root §3) and should report proposed CHANGELOG text instead.

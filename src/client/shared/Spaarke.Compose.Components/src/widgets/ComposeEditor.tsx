@@ -158,6 +158,7 @@ import {
   type ConfidenceBand,
   type PendingRedlineError,
   type PendingRedlineStaleTarget,
+  type PendingRedlineLegacyProposal,
 } from './hooks/usePendingRedline';
 // FR-C01 (r8 task 051) — the anchor supply for AI edits. Both hooks shipped in R4 (tasks 040/041) and
 // were never given a production consumer: every `<ComposeAiToolbar>` mount below omitted them, so
@@ -722,6 +723,17 @@ export interface ComposeEditorProps {
   onRedlineStaleTargetChange?: (stale: PendingRedlineStaleTarget | null) => void;
 
   /**
+   * FR-C06 (spaarkeai-compose-r8 task 053) — surfaces the "is this the right place?" question for a
+   * REPLAYED/LEGACY anchorless suggestion UP to the host, which renders it as a `ConfirmModal`
+   * (ADR-050) and writes the DURABLE resolution via the same FR-17 supersession seam the stale
+   * question uses (O-2/O-3/O-5). Null clears it. NOTHING is in the document while it is non-null —
+   * this is a PROPOSAL, and the bounded fallback that produced it has no way to place anything on its
+   * own. The two answers route back via {@link ComposeEditorHandle.applyLegacyRedlineProposal} /
+   * {@link ComposeEditorHandle.dismissLegacyRedlineProposal}.
+   */
+  onRedlineLegacyProposalChange?: (proposal: PendingRedlineLegacyProposal | null) => void;
+
+  /**
    * Called with the server projection's fidelity-warning array after each DOCX mount (task 013:
    * formerly mammoth's per-conversion warnings; now `projection.warnings` + unresolved-revision
    * notices). The host can surface a "this document was simplified on load" banner (deferred to R2
@@ -1001,6 +1013,17 @@ export interface ComposeEditorHandle {
 
   /** FR-C05 (task 052) — "skip this suggestion": discard the held-back suggestion(s), placing nothing. */
   dismissStaleRedline(): void;
+
+  /**
+   * FR-C06 (task 053) — "yes, place it there": confirm the proposed location for the replayed/legacy
+   * anchorless suggestion(s). This is the ONLY route from a prose match to marks in the document; the
+   * bounded fallback (`hooks/anchorlessReplayFallback.ts`) has no `applied` outcome of its own. The
+   * host MUST also write the durable supersession, exactly as for the stale question.
+   */
+  applyLegacyRedlineProposal(): void;
+
+  /** FR-C06 (task 053) — "no, skip it": discard the proposed suggestion(s), placing nothing. */
+  dismissLegacyRedlineProposal(): void;
 
   /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
@@ -2069,6 +2092,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onDirtyChange,
       onRedlineErrorChange,
       onRedlineStaleTargetChange,
+      onRedlineLegacyProposalChange,
       onImportWarnings,
       enqueueComposeAction,
       onOpenInWord,
@@ -2693,6 +2717,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onRedlineStaleTargetChange?.(redline.staleTarget);
     }, [redline.staleTarget, onRedlineStaleTargetChange]);
 
+    // FR-C06 (task 053): same pattern again for the anchorless-replay PROPOSAL — the editor's bounded
+    // fallback DETECTS a candidate location, the host ASKS (ConfirmModal) and RESOLVES it durably.
+    // The editor deliberately does not render either question itself: one confirmation surface, in
+    // the host, is what keeps "nothing is placed until a human says yes" a single auditable place.
+    React.useEffect(() => {
+      onRedlineLegacyProposalChange?.(redline.legacyProposal);
+    }, [redline.legacyProposal, onRedlineLegacyProposalChange]);
+
     // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
     // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
     // §6.2). Splitting the pending set here — rather than inside usePendingRedline's accept/reject
@@ -2728,7 +2760,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // degraded anchor but NO anchor: `useBookmark` in ComposeAiToolbar is `!!aiGenerateBookmark && …`,
     // so with the prop absent it was permanently false, `targetParaId` never reached the model, and the
     // apply path text-searched for the model's echoed wording every single time. That search is what
-    // produces the "wording differs slightly" dead-end.
+    // produced the dead-end R7 users saw as "its wording differs slightly from this document" — copy
+    // that task 053 (FR-C07) deleted along with the state it described. Historical note only: the
+    // banner no longer has that branch, and no path renders that sentence (see
+    // `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`).
     //
     // Invariant (6) — ONE edit-capture mechanism — is satisfied by construction here, not by a parallel
     // rebaser: the bookmark rebases on the editor's own Mapping, and `applyValidatedComposeOperation`
@@ -3318,6 +3353,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // FR-C05 (task 052) — the two answers to the host's stale-target ConfirmModal.
         applyStaleRedlineAnyway: () => redline.applyStaleTargetAnyway(),
         dismissStaleRedline: () => redline.dismissStaleTarget(),
+        // FR-C06 (task 053) — the two answers to the host's anchorless-replay ConfirmModal. The
+        // confirm leg is the ONLY route from a prose match to marks in the document.
+        applyLegacyRedlineProposal: () => redline.applyLegacyProposal(),
+        dismissLegacyRedlineProposal: () => redline.dismissLegacyProposal(),
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),

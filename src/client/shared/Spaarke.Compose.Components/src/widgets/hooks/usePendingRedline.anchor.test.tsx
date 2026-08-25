@@ -221,7 +221,7 @@ describe('usePendingRedline — anchored materialize (FR-C01/C02)', () => {
     editor.destroy();
   });
 
-  it('un-anchored edits still take the legacy text path unchanged (task 052 retires it, not 051)', () => {
+  it('un-anchored edits take the BOUNDED fallback: proposed, nothing placed until confirmed (task 053)', () => {
     const { editor, referenceMap } = makeTwoClauseDoc();
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
 
@@ -233,8 +233,19 @@ describe('usePendingRedline — anchored materialize (FR-C01/C02)', () => {
       );
     });
 
-    expect(status).toBe('applied');
+    // Task 052 left this leg pinned to `strict` and auto-applying. FR-C06 (task 053) bounded it: an
+    // anchorless replayed entry PROPOSES and places nothing until a human answers.
+    expect(status).toBe('proposed');
+    expect(textOf(editor, 'STAB0042')).not.toContain('Clause 4.2 (revised)');
+    expect(result.current.legacyProposal).toMatchObject({ ledgerRef: PROV.ledgerRef, quotedTarget: 'Clause 4.2' });
+
+    // ...and the confirmation places exactly what the proposal showed.
+    act(() => {
+      result.current.applyLegacyProposal();
+    });
+    expect(status).toBe('proposed');
     expect(textOf(editor, 'STAB0042')).toContain('Clause 4.2 (revised)');
+    expect(result.current.legacyProposal).toBeNull();
     editor.destroy();
   });
 });

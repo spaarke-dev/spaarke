@@ -159,7 +159,26 @@ Fixed by anchoring `\A…\z` (the true end-of-string anchor). The trailing-`\n` 
 | New NuGet packages | **0** |
 | New Azure resources | **0** |
 | New secrets in configuration | **0** — the endpoint is a bare URI and a secret-bearing value is refused at construction |
-| Publish size (compressed, incl. PDBs, `Compress-Archive -CompressionLevel Optimal`) | **43.73 MB** — 215 files, 4 `.pdb`, raw dir sum 137.41 MB, framework-dependent; **−1.23 MB vs the 44.96 MB net10 baseline**; 16.27 MB under the 60 MB ceiling. Zero `.csproj` delta, so the change is code only. **CORRECTED 2026-08-25 (task 052 verification)** — this row previously read *45.00 MB / +0.04 MB*, which was a measurement artifact: re-measuring produced 43.73 MB reproducibly, with the raw sum and file count byte-identical to the run that reported 45.00 MB. Same content cannot compress to two sizes. **Method that reproduces**: `rm -rf <out>` FIRST (a dirty output directory is the suspected cause), then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>`, then `Compress-Archive -Path '<out>\*' -CompressionLevel Optimal`. Always report the raw sum (~137 MB) alongside the zip so an inflated figure is visible immediately. |
+| Publish size (compressed, incl. PDBs, `Compress-Archive -CompressionLevel Optimal` **under pwsh 7**) | **45.00 MB** — 215 files, 4 `.pdb`, raw dir sum ~137.4 MB, framework-dependent; **+0.04 MB vs the 44.96 MB net10 baseline**; 15.00 MB under the 60 MB ceiling; far below the +5 MB escalation threshold. Zero `.csproj` delta, so the change is code only. **This row is CORRECT as originally written** — see the note below. |
+
+> **⚠️ Publish-size measurements in this project diverged by ~1.3 MB for months. The cause is the SHELL, not the tree, and not a dirty output directory.** Settled empirically 2026-08-25 during task 052 verification, by zipping the *same directory* twice in the same minute:
+>
+> | Shell | `Compress-Archive -CompressionLevel Optimal` |
+> |---|---|
+> | Windows PowerShell **5.1** (what `powershell` resolves to from Git Bash) | **43.73 MB** |
+> | **pwsh 7.6.3** (what the `PowerShell` tool and CI use) | **45.03 MB** |
+>
+> Different `System.IO.Compression` implementations, identical input. Neither figure was an artifact — the two long-standing clusters in this project's notes (43.68–43.74 vs 45.00–45.04) are simply the two shells.
+>
+> **Canonical tool: `pwsh` 7.** It is what the repo's `PowerShell` tool and CI invoke, and it reconciles with the 44.96 MB net10 baseline at +0.07 MB — whereas PS 5.1 would imply an implausible −1.23 MB drop, which is itself the evidence that the baseline was taken under pwsh 7.
+>
+> **Method — pin the shell explicitly:**
+> ```
+> rm -rf <out>
+> dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>
+> pwsh -Command "Compress-Archive -Path '<out>\*' -DestinationPath '<out>.zip' -CompressionLevel Optimal -Force"
+> ```
+> Report the **raw directory sum (~137 MB) and the file count (215 / 4 `.pdb`) alongside** the compressed figure. Those are shell-independent, so a mismatch there is a real content change while a mismatch in the zip alone is a tooling difference. An earlier "correction" of this row (which blamed a dirty output directory) was itself wrong and has been reverted.
 | `dotnet list package --vulnerable --include-transitive` | **no vulnerable packages** |
 
 > **Note on the suite baseline**: the task brief cited 11,179 passing. That is the count on `work/spaarkeai-compose-r8`. This worktree was created from **master @ `845b4cdc9`**, where the count is 10,615 — the difference is the R8 branch's own added tests, not a regression. The delta that matters here is 10,615 → 10,653 with 0 failures.

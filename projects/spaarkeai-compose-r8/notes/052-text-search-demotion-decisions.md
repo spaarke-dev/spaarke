@@ -188,25 +188,41 @@ and every claim below was re-run in the main session.
 | Publish size | **43.73 MB** compressed incl. PDBs (215 files, 4 `.pdb`, raw 137.41 MB) — **−1.23 MB** vs the 44.96 MB net10 baseline; 16.27 MB under the 60 MB ceiling |
 | CVE / NuGet | no vulnerable packages; no new NuGet |
 
-### 6.1 Publish-size measurement — a recorded number was WRONG, and is corrected
+### 6.1 Publish-size measurement — the ~1.3 MB divergence is the SHELL, and it is now settled
 
-The server agent reported **45.03 MB** and, on the strength of the 45.00 MB figure in
-`notes/track-b-placement-justification.md`, argued the 43.7x cluster in the older notes was a stale tree
-state. **Both 45.xx figures are measurement artifacts.** An independent re-measure produced **43.73 MB,
-reproducibly, twice**, with the raw directory sum (**137.41 MB**) and file count (**215**) *byte-identical*
-to the run that reported 45.03 MB. Identical content cannot compress to two different sizes.
+Two sub-agents reported **45.03 / 45.04 MB**; the main session measured **43.73 MB**. Both were reproducible.
+The main session first concluded the 45.xx figures were artifacts of a dirty output directory and "corrected"
+`track-b-placement-justification.md` accordingly. **That diagnosis was wrong and has been reverted.**
 
-Suspected cause: a publish output directory that was not emptied first. **The method that reproduces**:
+Settled empirically by zipping the *same directory twice in the same minute*:
+
+| Shell | `Compress-Archive -CompressionLevel Optimal` |
+|---|---|
+| Windows PowerShell **5.1** (what `powershell` resolves to from Git Bash) | **43.73 MB** |
+| **pwsh 7.6.3** (what the repo's `PowerShell` tool and CI use) | **45.03 MB** |
+
+Different `System.IO.Compression` implementations, identical input. This explains both long-standing clusters
+in this project's notes (43.68-43.74 vs 45.00-45.04) — they are the two shells, not two tree states.
+
+**Canonical tool: `pwsh` 7**, because it is what CI uses and because it reconciles with the 44.96 MB net10
+baseline at **+0.07 MB**; PS 5.1 would imply a -1.23 MB drop that no code-only change could produce, which is
+itself the evidence the baseline was taken under pwsh 7.
+
+**Task 052's publish figure, restated canonically: 45.03 MB compressed incl. PDBs** (215 files, 4 `.pdb`, raw
+dir sum 137.41 MB) — **+0.07 MB vs the 44.96 MB baseline**, 14.97 MB under the 60 MB ceiling.
+
+**Method — pin the shell:**
 
 ```
-rm -rf <out>                                     # FIRST — this is the step that matters
+rm -rf <out>
 dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>
-Compress-Archive -Path '<out>\*' -CompressionLevel Optimal
+pwsh -Command "Compress-Archive -Path '<out>\*' -DestinationPath '<out>.zip' -CompressionLevel Optimal -Force"
 ```
 
-**Always report the raw directory sum (~137 MB) next to the compressed figure.** It is the invariant that
-makes an inflated zip visible immediately — as it did here. `track-b-placement-justification.md`'s row has
-been corrected in place with the same note.
+Always report the **raw directory sum (~137 MB) and file count (215 / 4 `.pdb`)** next to the compressed
+figure. Those are shell-independent: a mismatch there is a real content change, a mismatch in the zip alone is
+a tooling difference. That invariant is what made this diagnosable — the raw sums agreed to within 0.02 MB
+while the zips differed by 1.3 MB, which is impossible for a content change and pointed straight at the tool.
 
 ### 6.2 What verification caught that neither agent's report did
 

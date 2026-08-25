@@ -18,8 +18,11 @@
  *  - Placement is by DETERMINISTIC ANCHOR (`target_para_id` / `target_ref`). Prose matching is NOT a
  *    placement channel for an AI edit (ADR-049 I-7). Task 052 completed that demotion: the four
  *    compose EDIT Actions no longer ask the model for `target_text` or `match_mode` at all, so the
- *    text leg below is reachable ONLY by a LEGACY ledger entry produced before that catalog change —
- *    see {@link resolveLegacyReplayedSpans}, which is the bounded case task 053 owns.
+ *    text leg is reachable ONLY by a LEGACY ledger entry produced before that catalog change.
+ *    Task 053 BOUNDED that leg: it now lives in `./anchorlessReplayFallback.ts`, it cannot be called
+ *    with an anchored payload (its input type has no public constructor), it has no `applied` outcome
+ *    to return, and every placement it reaches goes through the user's explicit confirmation
+ *    ({@link UsePendingRedlineResult.legacyProposal}). Prose can PROPOSE here; it can never PLACE.
  *
  * FR-C05 — the three deterministic outcomes an anchored edit can now produce (task 052):
  *  - SUB-PARAGRAPH EDIT → the redline covers only the words that changed, diffed LOCALLY inside the
@@ -62,13 +65,22 @@ import type { ParaIdMapEntry } from '../../types/compose-contracts';
 // it is a REPLACEABLE collaborator. That is what lets a test assert STRUCTURALLY that an anchored edit
 // never reaches it — the client twin of the server's `ThrowIfTextSearched` `IComposeEditValidator`
 // double. Re-exported below so every existing importer of `resolveTargetSpans` is unaffected.
-import { resolveTargetSpans } from './redlineTextSearch';
-import type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineTextSearch';
+//
+// Task 053: THIS FILE NO LONGER IMPORTS THE SEARCH AS A VALUE. The only value import left is the
+// `RedlineSpan` shape; `resolveTargetSpans` survives here purely as a re-export for the module's
+// existing importers (`ComposeEditor`, `useDocQaHighlight`, `hooks/index.ts` — annotation and
+// decoration consumers, not placements). The hook's own route to prose now runs exclusively through
+// `./anchorlessReplayFallback`, which cannot be handed an anchored edit and cannot return a placement.
+import type { RedlineSpan } from './redlineTextSearch';
 // Task 052 (FR-C05) — the two collaborators the three deterministic outcomes need. Both are pure and
 // paragraph-scoped: `redlineLocalDiff` cannot address a position outside the paragraph it is handed,
 // and `redlineProposalBaseline` only remembers text, it never locates anything.
 import { narrowAnchoredSpan, readRangeText } from './redlineLocalDiff';
 import { readProposalBaseline, recordProposalBaseline } from './redlineProposalBaseline';
+// Task 053 (FR-C06) — the BOUNDED confirmable fallback for replayed/legacy anchorless entries. Its
+// input type has no public constructor (an anchored payload cannot be classified into it) and its
+// outcome vocabulary has no `applied` member, so neither bound is a convention this file must keep.
+import { classifyAnchorlessReplay, resolveAnchorlessReplay } from './anchorlessReplayFallback';
 
 export { resolveTargetSpans } from './redlineTextSearch';
 export type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineTextSearch';
@@ -126,6 +138,14 @@ export type MaterializeStatus =
    * "apply anyway?" question. Silently overwriting here is the data loss this outcome exists to close.
    */
   | 'stale'
+  /**
+   * FR-C06 (task 053) — a REPLAYED/LEGACY anchorless suggestion was located by prose and is being
+   * PROPOSED for the user's confirmation. NOTHING has been placed; {@link UsePendingRedlineResult.legacyProposal}
+   * carries the question. This status can only be produced by the bounded fallback
+   * (`./anchorlessReplayFallback.ts`), which has no `applied` outcome of its own — a prose match can
+   * propose, it can never place.
+   */
+  | 'proposed'
   | 'already_present'
   | 'noop'
   | 'retracted';
@@ -160,6 +180,21 @@ export interface PendingRedline {
 export interface PendingRedlineError {
   ledgerRef: string;
   kind: 'not_found' | 'ambiguous' | 'target_deleted';
+  /**
+   * FR-C07 (task 053) — WHICH targeting channel failed, so the banner can say something TRUE.
+   *
+   *  - `'anchored'` — the suggestion named a `target_para_id` / `target_ref` and that anchor did not
+   *    resolve. Nothing about the document's WORDING is involved: no text was compared, so copy that
+   *    blames a wording difference would be a fabrication. This is the branch that used to render
+   *    "its wording differs slightly from this document".
+   *  - `'legacy-replay'` — a REPLAYED pre-anchor ledger entry (FR-C06) whose quoted prose could not be
+   *    located. Here prose really was compared, and the honest answer is that the entry predates
+   *    paragraph anchoring and should be re-run.
+   *
+   * Defaulted at every construction site rather than left optional-and-forgotten: the banner switches
+   * on it, and an absent value would silently pick one of the two stories.
+   */
+  source: 'anchored' | 'legacy-replay';
   /** Tier 3 — the target snippet; shown truncated in UI, never logged. */
   targetText: string;
   matchCount: number;
@@ -204,6 +239,45 @@ export interface PendingRedlineStaleTarget {
   totalCount: number;
 }
 
+/**
+ * FR-C06 (spaarkeai-compose-r8 task 053) — the "we think this suggestion belongs here — is that right?"
+ * question, raised for a REPLAYED/LEGACY suggestion that carries no deterministic anchor.
+ *
+ * WHEN THIS EXISTS AT ALL. Since task 052 the four compose EDIT Actions do not ask the model for
+ * `target_text`, so no newly-produced edit can be anchorless. A payload with prose and no anchor is a
+ * `compose`-disposition ledger entry written BEFORE that catalog change and replayed afterwards — by
+ * the reopen pass, a refresh, or an undo/try-another re-render of an older turn. Compose sessions are
+ * durable (ADR-040; 90-day default, indefinite when filed), so that population is real, bounded, and
+ * shrinking. It is the ONLY producer of this question.
+ *
+ * WHY A PROPOSAL AND NOT A PLACEMENT. The prose match tells us where that wording occurs today; it
+ * does not tell us that the paragraph containing it is the paragraph the model was looking at. Under
+ * the UAT-21 charter ("never silently mis-place, never a false 'applied'") the honest move is to show
+ * the user exactly what would be struck and let them decide. NOTHING is placed while this is non-null.
+ *
+ * NOT an ADR-041 Gate, for the same reason FR-C05's question is not (task-050 assessment §4.2 / O-1):
+ * the Action has already run, there is no invocation to suspend, and the trigger is a runtime document
+ * fact no catalog datum can declare. No `PendingPlanManager`, no `SessionGate`, no `gateId`, no
+ * `BindingRisk`. What IS binding is O-2 — the ANSWER must be ledger-durable — which the host satisfies
+ * with the shipped FR-17 supersession write, exactly as it does for the stale question (O-3 reuse).
+ */
+export interface PendingRedlineLegacyProposal {
+  /**
+   * The ledger entry this question belongs to: `{bindingId}@t{n}` — the BASE key for a batch. This is
+   * the key the host supersedes to make the answer durable (O-4 append-only, keyed by the edit's key).
+   */
+  ledgerRef: string;
+  bindingId: string;
+  /** Tier 3 — the document text the proposal would strike, as it reads NOW. Shown truncated; never logged. */
+  matchedText: string;
+  /** Tier 3 — the prose the replayed suggestion quoted as its target. Shown truncated; never logged. */
+  quotedTarget: string;
+  /** How many suggestions in this entry are awaiting confirmation (1 for a single-edit draft). */
+  proposedCount: number;
+  /** How many target-bearing suggestions the entry carried in total. */
+  totalCount: number;
+}
+
 export interface UsePendingRedlineResult {
   /** Pending redlines currently rendered (drives the accept/reject affordances). */
   pending: PendingRedline[];
@@ -215,6 +289,13 @@ export interface UsePendingRedlineResult {
    * discards them. Either way the HOST must write the durable resolution (O-2).
    */
   staleTarget: PendingRedlineStaleTarget | null;
+  /**
+   * FR-C06 — the pending "is this the right place?" question for a REPLAYED/LEGACY anchorless
+   * suggestion, or null. While non-null NOTHING has been placed for that suggestion;
+   * {@link applyLegacyProposal} places it, {@link dismissLegacyProposal} discards it. Either way the
+   * HOST must write the durable resolution (O-2), exactly as for {@link staleTarget}.
+   */
+  legacyProposal: PendingRedlineLegacyProposal | null;
   /**
    * Materialize a stored compose output as a pending redline. Idempotent per `ledgerRef`; a newer
    * output for the same binding supersedes (removes) the prior one's marks (FR-17 alignment).
@@ -250,6 +331,14 @@ export interface UsePendingRedlineResult {
   applyStaleTargetAnyway: () => void;
   /** FR-C05 — "skip this suggestion": discard the deferred stale suggestion(s) without placing them. */
   dismissStaleTarget: () => void;
+  /**
+   * FR-C06 — "yes, place it there": the user CONFIRMED the proposed location for the replayed/legacy
+   * suggestion(s). This is the ONLY route from a prose match to a placement; nothing else in this hook
+   * can turn an {@link PendingRedlineLegacyProposal} into marks in the document.
+   */
+  applyLegacyProposal: () => void;
+  /** FR-C06 — "no, skip it": discard the proposed replayed/legacy suggestion(s) without placing them. */
+  dismissLegacyProposal: () => void;
 }
 
 /** Options for {@link usePendingRedline}. */
@@ -265,42 +354,6 @@ export interface UsePendingRedlineOptions {
 
 const INSERTION = 'insertion';
 const DELETION = 'deletion';
-
-/**
- * The mode the LEGACY leg is pinned to. See {@link resolveLegacyReplayedSpans} — `first` and `all` are
- * retired, and this constant exists so the pin is a named decision rather than an argument literal.
- */
-const LEGACY_REPLAY_MATCH_MODE: RedlineMatchMode = 'strict';
-
-/**
- * LEGACY REPLAYED ENTRIES ONLY — the prose-matching placement leg (spaarkeai-compose-r8 task 052).
- *
- * DO NOT CALL THIS FOR A NEWLY-PRODUCED EDIT. Since task 052 the four compose EDIT Actions do not ask
- * the model for `target_text` at all (`infra/dataverse/actions/compose-{draft-alternative,make-concise,
- * rewrite-instruction,revise-document}.action.json`), so a payload that carries prose and NO anchor is,
- * by construction, a ledger entry written BEFORE that catalog change and now being replayed — a refresh
- * replay, a reopen pass, or an undo/try-another re-render of an old turn. That bounded population is
- * exactly what task 053 turns into a CONFIRMABLE fallback; this function is the structural boundary it
- * will bound. Nothing else may route through it, and no new caller may be added.
- *
- * `match_mode` IS NOT HONORED, deliberately, and this leg therefore gains no reach it did not have:
- *   - `all` is retired in full (notes/052-text-search-demotion-decisions.md §2 — an over-applied
- *     defined-term sweep is an INVISIBLE wrong edit, and user-invoked find/replace already does the
- *     job with a visible match count);
- *   - `first` picks an occurrence when several match, which is precisely the silent mis-placement
- *     UAT-21 forbids;
- *   - `strict` is the only mode that REFUSES rather than guesses, and pinning to it can only turn a
- *     would-be guess into an honest refusal. A replayed entry can never land somewhere `strict` would
- *     not have put it.
- *
- * Returns `null` when there is no prose to replay (nothing to do — the caller treats the payload as an
- * insertion-style draft).
- */
-function resolveLegacyReplayedSpans(editor: Editor, payload: { target_text?: string } | undefined): ResolveResult | null {
-  const targetText = payload?.target_text ?? '';
-  if (targetText.length === 0) return null;
-  return resolveTargetSpans(editor, targetText, LEGACY_REPLAY_MATCH_MODE);
-}
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -625,20 +678,40 @@ function applyRedlineSpans(
 type TargetedPlacement =
   | { status: 'applied'; hasDeletion: boolean }
   | { status: 'stale'; paraId: string; currentText: string; proposedAgainst: string }
-  | { status: 'not_found' | 'ambiguous' | 'target_deleted'; matchCount: number };
+  | { status: 'proposed'; matchedText: string; quotedTarget: string }
+  | { status: 'not_found' | 'ambiguous' | 'target_deleted'; matchCount: number; source: 'anchored' | 'legacy-replay' };
 
 /**
- * THE ONE targeted-placement path, shared by `materialize`, `materializeMany` and the stale-target
- * "apply anyway" replay, so the three cannot drift apart (project invariant 6 — one edit-capture
- * mechanism). Resolution order is FIXED and never the reverse:
+ * Which held-back question the user has ALREADY answered. Passing one is the only way past the
+ * corresponding gate below, and each value has exactly one producer:
+ *
+ *  - `'stale-clause'` ← {@link UsePendingRedlineResult.applyStaleTargetAnyway} (FR-C05);
+ *  - `'anchorless-replay'` ← {@link UsePendingRedlineResult.applyLegacyProposal} (FR-C06).
+ *
+ * Both producers are reached only from the host's `ConfirmModal` confirm handler, so "the user said
+ * yes" is a value that has to travel from a click to here — it cannot be defaulted into existence.
+ */
+type ConfirmedQuestion = 'stale-clause' | 'anchorless-replay';
+
+/**
+ * THE ONE targeted-placement path, shared by `materialize`, `materializeMany` and both confirmation
+ * replays, so they cannot drift apart (project invariant 6 — one edit-capture mechanism). Resolution
+ * order is FIXED and never the reverse:
  *
  *   1. DETERMINISTIC ANCHOR (`target_para_id` / `target_ref`) → the paragraph, then the LOCAL diff
  *      inside it (FR-C05 outcome 1) — bounded by that paragraph by construction.
- *   2. Only when the payload named NO anchor at all: {@link resolveLegacyReplayedSpans}, the
- *      legacy/replayed leg. An anchor that is PRESENT and does not resolve is REFUSED, never searched.
+ *   2. Only when the payload named NO anchor at all: the FR-C06 BOUNDED FALLBACK
+ *      (`./anchorlessReplayFallback.ts`) for a replayed/legacy entry. An anchor that is PRESENT and
+ *      does not resolve is REFUSED, never searched.
  *
- * Returns `null` when the payload has neither an anchor nor legacy prose — the caller's signal to run
- * its insertion-at-cursor branch.
+ * The two legs are NOT symmetric, and that asymmetry is the point (FR-C06 / ADR-049 I-7):
+ *
+ *   - the ANCHORED leg can return `applied` — it resolved an address, not a resemblance;
+ *   - the FALLBACK leg returns `proposed` and cannot return `applied` unless the caller hands in
+ *     `confirmed: 'anchorless-replay'`, which only a user click produces. A prose match PROPOSES.
+ *
+ * Returns `null` when the payload has neither an anchor nor replayable prose — the caller's signal to
+ * run its insertion-at-cursor branch.
  */
 function planAndApplyTargeted(args: {
   editor: Editor;
@@ -648,21 +721,31 @@ function planAndApplyTargeted(args: {
   bindingId: string;
   newText: string;
   proposalScope: string | undefined;
-  /** True on the "apply anyway" replay — skips the stale check for a question the user already answered. */
-  force: boolean;
+  /** The question the user already answered, if any. See {@link ConfirmedQuestion}. */
+  confirmed?: ConfirmedQuestion;
 }): TargetedPlacement | null {
-  const { editor, payload, referenceMap, ledgerRef, bindingId, newText, proposalScope, force } = args;
+  const { editor, payload, referenceMap, ledgerRef, bindingId, newText, proposalScope, confirmed } = args;
 
   const anchored = resolveAnchoredSpans(editor, payload, referenceMap);
 
   if (anchored === null) {
-    const legacy = resolveLegacyReplayedSpans(editor, payload);
-    if (legacy === null) return null;
-    if (!legacy.ok) return { status: legacy.kind, matchCount: legacy.matchCount };
-    applyRedlineSpans(editor, legacy.spans, newText, bindingId, ledgerRef);
+    // FR-C06 — the bounded fallback. `classifyAnchorlessReplay` is the only mint of the argument type
+    // `resolveAnchorlessReplay` takes, and it refuses any payload carrying an anchor; reaching here
+    // with an anchored payload is therefore not a branch to guard but a value that cannot be built.
+    const replayTarget = classifyAnchorlessReplay(payload);
+    if (replayTarget === null) return null; // no anchor AND no prose → insertion-style draft.
+    const outcome = resolveAnchorlessReplay(editor, replayTarget);
+    if (outcome.kind === 'unresolved') {
+      return { status: outcome.reason, matchCount: outcome.matchCount, source: 'legacy-replay' };
+    }
+    if (confirmed !== 'anchorless-replay') {
+      // NOTHING is placed. The user is shown what would be struck and decides.
+      return { status: 'proposed', matchedText: outcome.matchedText, quotedTarget: outcome.quotedTarget };
+    }
+    applyRedlineSpans(editor, outcome.spans, newText, bindingId, ledgerRef);
     return { status: 'applied', hasDeletion: true };
   }
-  if (!anchored.ok) return { status: anchored.kind, matchCount: anchored.matchCount };
+  if (!anchored.ok) return { status: anchored.kind, matchCount: anchored.matchCount, source: 'anchored' };
 
   const paragraphSpan = anchored.spans[0];
   // FR-C05 outcome 1 — narrow to the words that actually changed. `null` ⇒ one of the three defined
@@ -678,7 +761,7 @@ function planAndApplyTargeted(args: {
       // moments ago, so the paragraph as it reads NOW *is* the capture-time text. Record it.
       recordProposalBaseline(proposalScope, ledgerRef, currentText);
     } else if (proposedAgainst !== currentText) {
-      if (!force) {
+      if (confirmed !== 'stale-clause') {
         return { status: 'stale', paraId: anchored.paraId, currentText, proposedAgainst };
       }
       // Answered "apply anyway" — re-baseline so this tab does not re-ask before the host's durable
@@ -692,8 +775,11 @@ function planAndApplyTargeted(args: {
   return { status: 'applied', hasDeletion: spans.some(s => s.to > s.from) };
 }
 
-/** One suggestion held back by a stale-target question, awaiting the user's answer. */
-interface DeferredStaleEdit {
+/**
+ * One suggestion held back by a confirmation question, awaiting the user's answer. NOTHING is in the
+ * document for a deferred edit — it is held here precisely so it is not.
+ */
+interface DeferredEdit {
   readonly payload: ComposeDraftPayload;
   readonly ledgerRef: string;
   readonly bindingId: string;
@@ -718,10 +804,15 @@ export function usePendingRedline(
   const [pending, setPending] = React.useState<PendingRedline[]>([]);
   const [error, setError] = React.useState<PendingRedlineError | null>(null);
   const [staleTarget, setStaleTarget] = React.useState<PendingRedlineStaleTarget | null>(null);
+  const [legacyProposal, setLegacyProposal] = React.useState<PendingRedlineLegacyProposal | null>(null);
   const proposalScope = options?.proposalScope;
   // The suggestions held back by the CURRENT stale question. A ref (not state) because it is written
   // and read inside the same user gesture and must never drive a render on its own.
-  const deferredStaleRef = React.useRef<DeferredStaleEdit[]>([]);
+  const deferredStaleRef = React.useRef<DeferredEdit[]>([]);
+  // FR-C06 — the same holding pattern for the CURRENT anchorless-replay proposal. A SEPARATE ref, not
+  // a shared queue with a discriminant: the two questions are answered by two different buttons, and a
+  // shared queue would let one answer release the other's suggestions.
+  const deferredProposalRef = React.useRef<DeferredEdit[]>([]);
 
   const clearError = React.useCallback(() => setError(null), []);
 
@@ -790,8 +881,8 @@ export function usePendingRedline(
         intendedTo = mapping.map(intendedTo);
       }
 
-      // Task 051/052 — FIXED ordering, never the reverse: (1) DETERMINISTIC anchor + local diff,
-      // (2) the LEGACY replayed text leg. `null` ⇒ the payload named no target at all.
+      // Task 051/052/053 — FIXED ordering, never the reverse: (1) DETERMINISTIC anchor + local diff,
+      // (2) the BOUNDED anchorless-replay fallback, which can only PROPOSE. `null` ⇒ no target at all.
       const placement = planAndApplyTargeted({
         editor,
         payload,
@@ -800,11 +891,28 @@ export function usePendingRedline(
         bindingId,
         newText,
         proposalScope,
-        force: false,
       });
       let hasDeletion = false;
 
       if (placement !== null) {
+        if (placement.status === 'proposed') {
+          // FR-C06 — NOTHING is placed. A replayed/legacy suggestion located by prose is a PROPOSAL:
+          // the match says where that wording occurs today, not that this is the clause the model was
+          // looking at. Hold it and ask.
+          deferredProposalRef.current = [{ payload, ledgerRef, bindingId, turn }];
+          setLegacyProposal({
+            ledgerRef,
+            bindingId,
+            matchedText: placement.matchedText,
+            quotedTarget: placement.quotedTarget,
+            proposedCount: 1,
+            totalCount: 1,
+          });
+          if (superseded.length > 0) {
+            setPending(prev => prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef)));
+          }
+          return 'proposed';
+        }
         if (placement.status === 'stale') {
           // FR-C05 outcome 2 — NOTHING is placed. Hold the suggestion and ask; the alternative is
           // silently overwriting the user's newer edit, which is the data loss this closes.
@@ -837,6 +945,7 @@ export function usePendingRedline(
           setError({
             ledgerRef,
             kind: placement.status,
+            source: placement.source,
             targetText: unplaceableLabel(payload),
             matchCount: placement.matchCount,
           });
@@ -911,8 +1020,12 @@ export function usePendingRedline(
       const failures: PendingRedlineError[] = [];
       // FR-C05 outcome 2 — suggestions whose clause drifted. Held back (NOT placed) until the user
       // answers one batched question, rather than raising a modal storm per change.
-      const deferredStale: DeferredStaleEdit[] = [];
+      const deferredStale: DeferredEdit[] = [];
       let firstStale: { paraId: string; currentText: string; proposedAgainst: string } | null = null;
+      // FR-C06 — replayed/legacy suggestions located by prose. Held back (NOT placed) until the user
+      // confirms ONE batched proposal, for the same reason the stale set is batched.
+      const deferredProposals: DeferredEdit[] = [];
+      let firstProposal: { matchedText: string; quotedTarget: string } | null = null;
       let targetedCount = 0;
 
       edits.forEach((payload, i) => {
@@ -935,7 +1048,6 @@ export function usePendingRedline(
           bindingId,
           newText,
           proposalScope,
-          force: false,
         });
 
         if (placement === null) {
@@ -961,6 +1073,15 @@ export function usePendingRedline(
 
         targetedCount += 1;
 
+        if (placement.status === 'proposed') {
+          deferredProposals.push({ payload, ledgerRef: subRef, bindingId, turn });
+          if (firstProposal === null) {
+            firstProposal = { matchedText: placement.matchedText, quotedTarget: placement.quotedTarget };
+          }
+          statuses.push('proposed');
+          return;
+        }
+
         if (placement.status === 'stale') {
           deferredStale.push({ payload, ledgerRef: subRef, bindingId, turn });
           if (firstStale === null) {
@@ -979,6 +1100,7 @@ export function usePendingRedline(
           failures.push({
             ledgerRef: subRef,
             kind: placement.status,
+            source: placement.source,
             targetText: unplaceableLabel(payload),
             matchCount: placement.matchCount,
           });
@@ -1017,6 +1139,20 @@ export function usePendingRedline(
       } else {
         setStaleTarget(null);
       }
+      deferredProposalRef.current = deferredProposals;
+      if (firstProposal !== null) {
+        const proposal: { matchedText: string; quotedTarget: string } = firstProposal;
+        setLegacyProposal({
+          ledgerRef: baseRef,
+          bindingId,
+          matchedText: proposal.matchedText,
+          quotedTarget: proposal.quotedTarget,
+          proposedCount: deferredProposals.length,
+          totalCount: targetedCount,
+        });
+      } else {
+        setLegacyProposal(null);
+      }
       setPending(prev => {
         const kept = prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef));
         return [...kept, ...newPending];
@@ -1052,13 +1188,16 @@ export function usePendingRedline(
         bindingId: item.bindingId,
         newText: item.payload?.new_text ?? '',
         proposalScope,
-        force: true,
+        confirmed: 'stale-clause',
       });
-      if (placement === null || placement.status === 'stale') continue; // unreachable with force:true
+      // Unreachable with `confirmed: 'stale-clause'` — the stale gate is the only producer of both,
+      // and an anchored payload (the only kind that can be stale) never reaches the fallback.
+      if (placement === null || placement.status === 'stale' || placement.status === 'proposed') continue;
       if (placement.status !== 'applied') {
         failures.push({
           ledgerRef: item.ledgerRef,
           kind: placement.status,
+          source: placement.source,
           targetText: unplaceableLabel(item.payload),
           matchCount: placement.matchCount,
         });
@@ -1090,6 +1229,81 @@ export function usePendingRedline(
   const dismissStaleTarget = React.useCallback(() => {
     deferredStaleRef.current = [];
     setStaleTarget(null);
+  }, []);
+
+  /**
+   * FR-C06 — "yes, place it there". THE ONLY ROUTE from a prose match to marks in the document.
+   *
+   * Replays the deferred suggestion(s) through the SAME placement path with `confirmed:
+   * 'anchorless-replay'`, which is the single value that lets the bounded fallback's `proposed`
+   * outcome become an `applied` one. Nothing about HOW they are placed differs from a normal apply —
+   * what differs is that a human said yes first.
+   *
+   * Like FR-C05's twin, this is NOT the durable resolution: per the task-050 assessment §4.4 O-2/O-3
+   * the host writes the FR-17 supersession for {@link PendingRedlineLegacyProposal.ledgerRef}, which is
+   * what stops the reopen pass re-raising the question after a refresh (O-5).
+   */
+  const applyLegacyProposal = React.useCallback(() => {
+    const deferred = deferredProposalRef.current;
+    deferredProposalRef.current = [];
+    setLegacyProposal(null);
+    if (!editor || deferred.length === 0) return;
+
+    const placed: PendingRedline[] = [];
+    const failures: PendingRedlineError[] = [];
+    for (const item of deferred) {
+      const placement = planAndApplyTargeted({
+        editor,
+        payload: item.payload,
+        referenceMap,
+        ledgerRef: item.ledgerRef,
+        bindingId: item.bindingId,
+        newText: item.payload?.new_text ?? '',
+        proposalScope,
+        confirmed: 'anchorless-replay',
+      });
+      // Unreachable with `confirmed: 'anchorless-replay'`: a deferred proposal is anchorless by
+      // construction (it was minted by `classifyAnchorlessReplay`), so it can be neither `stale` (an
+      // anchored-only outcome) nor `proposed` again.
+      if (placement === null || placement.status === 'stale' || placement.status === 'proposed') continue;
+      if (placement.status !== 'applied') {
+        // The document changed between the proposal and the answer (the quoted prose was edited or
+        // duplicated in the meantime). Refuse rather than re-guess — same rule as the first pass.
+        failures.push({
+          ledgerRef: item.ledgerRef,
+          kind: placement.status,
+          source: placement.source,
+          targetText: unplaceableLabel(item.payload),
+          matchCount: placement.matchCount,
+        });
+        continue;
+      }
+      const hasSources = Array.isArray(item.payload?.sources) && item.payload.sources.length > 0;
+      placed.push({
+        ledgerRef: item.ledgerRef,
+        bindingId: item.bindingId,
+        turn: item.turn,
+        rationale: item.payload?.rationale,
+        hasDeletion: placement.hasDeletion,
+        hasSources,
+        confidenceBand: deriveConfidenceBand(hasSources, placement.hasDeletion),
+      });
+    }
+    if (failures.length > 0) {
+      setError({ ...failures[0], failedCount: failures.length, totalCount: deferred.length });
+    }
+    if (placed.length > 0) {
+      setPending(prev => [...prev.filter(p => !placed.some(n => n.ledgerRef === p.ledgerRef)), ...placed]);
+    }
+  }, [editor, referenceMap, proposalScope]);
+
+  /**
+   * FR-C06 — "no, skip it". Discards the proposed suggestion(s) without placing anything. The host
+   * still writes the durable supersession, so the question is not re-raised after a refresh (O-5).
+   */
+  const dismissLegacyProposal = React.useCallback(() => {
+    deferredProposalRef.current = [];
+    setLegacyProposal(null);
   }, []);
 
   const accept = React.useCallback(
@@ -1164,6 +1378,7 @@ export function usePendingRedline(
       pending,
       error,
       staleTarget,
+      legacyProposal,
       materialize,
       materializeMany,
       accept,
@@ -1171,11 +1386,14 @@ export function usePendingRedline(
       clearError,
       applyStaleTargetAnyway,
       dismissStaleTarget,
+      applyLegacyProposal,
+      dismissLegacyProposal,
     }),
     [
       pending,
       error,
       staleTarget,
+      legacyProposal,
       materialize,
       materializeMany,
       accept,
@@ -1183,6 +1401,8 @@ export function usePendingRedline(
       clearError,
       applyStaleTargetAnyway,
       dismissStaleTarget,
+      applyLegacyProposal,
+      dismissLegacyProposal,
     ]
   );
 }

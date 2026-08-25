@@ -4,7 +4,7 @@
     <title>FR-C06/C07 — Bounded confirmable fallback for replayed/legacy edits; prove "wording differs slightly" is unreachable; no UAT-21 regression</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>blocked-on-052</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Reintroduces tolerant matching in bounded form — the exact mechanism just retired. Must not become a back door.</rigor-reason>
     <model-tier>opus</model-tier>

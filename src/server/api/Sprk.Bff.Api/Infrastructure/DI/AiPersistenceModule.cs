@@ -220,6 +220,31 @@ public static class AiPersistenceModule
             credential: sp.GetRequiredService<TokenCredential>(),
             logger: sp.GetRequiredService<ILogger<SessionFileBlobStore>>()));
 
+        // spaarkeai-compose-r8 FR-B02 (task 061): SessionFileRehydrationService - the LAZY re-index that
+        // makes the durable copy above actually do something. Without it, task 060 writes bytes nothing
+        // ever reads and a day-60 recall still returns nothing.
+        //
+        // UNCONDITIONAL, for the same ADR-032 P1 reason as the store: its consumers
+        // (RecallSessionFileHandler, SessionFileTextSource) are registered on paths that do not share
+        // this service's feature gates, so a conditional registration here would be the asymmetric
+        // pattern F.1 exists to catch. The two collaborators that ARE conditional
+        // (RagIndexingPipeline via the DocumentIntelligence gate, ITextExtractor via the same gate's
+        // Null-Object peer) are resolved with GetService and handled as runtime state INSIDE the
+        // service - it reports StoreDisabled / Unavailable / TextOnly rather than failing to resolve.
+        // That keeps the DI graph symmetric in every configuration.
+        //
+        // Concrete class, no interface: ADR-010 forbids a 1:1 seam with no multi-implementation need.
+        // Singleton: all three collaborators are singletons and the service holds no per-request state.
+        //
+        // ADR-010 budget: this is the project's SECOND registration (the store above was the first, and
+        // spec section 11 budgeted one). The alternative shapes were worse, not cheaper - see the
+        // service's own section-11 gate in its XML docs, and task 061's report.
+        services.AddSingleton(sp => new SessionFileRehydrationService(
+            durableStore: sp.GetRequiredService<SessionFileBlobStore>(),
+            textExtractor: sp.GetService<Sprk.Bff.Api.Services.Ai.ITextExtractor>(),
+            indexingPipeline: sp.GetService<Sprk.Bff.Api.Services.Ai.RagIndexingPipeline>(),
+            logger: sp.GetRequiredService<ILogger<SessionFileRehydrationService>>()));
+
         return services;
     }
 }

@@ -193,7 +193,21 @@ describe('materializeMany — a whole-document change list (8 changes, mixed anc
     });
 
     expect(statuses).toHaveLength(edits.length);
-    expect(statuses.every(s => s === 'applied')).toBe(true);
+    // FR-C06 (task 053): the six ANCHORED changes place immediately; the two LEGACY prose changes are
+    // held back as a PROPOSAL until the user confirms. That asymmetry is the requirement, not a gap —
+    // an address places, a resemblance asks.
+    expect(ANCHORED_INDEXES.map(i => statuses[i])).toEqual(ANCHORED_INDEXES.map(() => 'applied'));
+    expect(LEGACY_INDEXES.map(i => statuses[i])).toEqual(LEGACY_INDEXES.map(() => 'proposed'));
+    expect(result.current.legacyProposal).toMatchObject({ proposedCount: 2, totalCount: edits.length });
+    // Nothing is in the document for a held-back change while the question is open.
+    expect(editor.state.doc.textContent).not.toContain('REV-5');
+    expect(editor.state.doc.textContent).not.toContain('REV-6');
+
+    // The user confirms; both proposals land where the proposal said they would.
+    act(() => {
+      result.current.applyLegacyProposal();
+    });
+    expect(result.current.legacyProposal).toBeNull();
 
     // Anchored changes landed on the paragraph they NAMED, not on a paragraph that merely reads alike.
     expect(textOf(editor, 'AAAA0002')).toContain('REV-1');
@@ -243,7 +257,18 @@ describe('materializeMany — a whole-document change list (8 changes, mixed anc
     act(() => {
       result.current.materializeMany(edits, PROV);
     });
-    expect(result.current.pending.map(p => p.ledgerRef)).toEqual(edits.map((_, i) => PROV.ledgerRef + '#' + i));
+    // FR-C06 (task 053): the two legacy prose changes are PROPOSED, so they are not pending yet.
+    expect(result.current.pending.map(p => p.ledgerRef)).toEqual(
+      ANCHORED_INDEXES.map(i => PROV.ledgerRef + '#' + i)
+    );
+    act(() => {
+      result.current.applyLegacyProposal();
+    });
+    // After the confirmation every change is pending under its own sub-key. Order follows placement
+    // (anchored first, then the confirmed proposals), so compare as sets.
+    expect(result.current.pending.map(p => p.ledgerRef).sort()).toEqual(
+      edits.map((_, i) => PROV.ledgerRef + '#' + i).sort()
+    );
 
     // Reject ONE anchored change — the other seven survive, and only that clause reverts.
     act(() => {
@@ -349,14 +374,20 @@ describe('materializeMany — per-item isolation and honest N-of-M reporting', (
       'target_deleted', // DEAD-ANCHOR
       'applied', // REV-3 citation
       'applied', // REV-4 citation
-      'applied', // REV-5 prose
+      // FR-C06 (task 053): a legacy prose change PROPOSES; it is not placed until the user confirms.
+      'proposed', // REV-5 prose
       'not_found', // DEAD-CITATION (the numbering map has no clause 99.9 — nothing to delete)
-      'applied', // REV-6 prose
+      'proposed', // REV-6 prose
       'applied', // REV-7 paraId
       'applied', // REV-8 paraId
-      'not_found', // DEAD-PROSE
+      'not_found', // DEAD-PROSE (prose that is nowhere in the document — refused, never proposed)
     ]);
-    expect(statuses.filter(s => s === 'applied')).toHaveLength(8);
+    expect(statuses.filter(s => s === 'applied')).toHaveLength(6);
+    expect(statuses.filter(s => s === 'proposed')).toHaveLength(2);
+
+    act(() => {
+      result.current.applyLegacyProposal();
+    });
 
     // The whole document still received its eight real revisions.
     expect(textOf(editor, 'AAAA0002')).toContain('REV-1');

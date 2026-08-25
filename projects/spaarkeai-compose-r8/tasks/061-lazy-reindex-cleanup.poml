@@ -4,7 +4,7 @@
     <title>FR-B02/B03 — Lazy re-index from the durable copy on recall; SessionFilesCleanupJob evicts the hot index ONLY</title>
     <phase>6 Track B — Durable Session Files</phase>
     <gate>blocked-on-060</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a background cleanup job that deletes data; a scope error destroys the durable copies the previous task created.</rigor-reason>
     <model-tier>opus</model-tier>

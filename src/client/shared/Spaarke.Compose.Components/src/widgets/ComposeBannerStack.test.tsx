@@ -568,3 +568,70 @@ describe('ComposeBannerStack — "Opened from PDF" honest-lossiness notice (task
     expect(banner.textContent).not.toMatch(/pdf-intake-fixed-layout-reflowed/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR-C07 (spaarkeai-compose-r8 task 053) — "wording differs slightly" is not a state this rail can
+// render. The banner is the ONE place that sentence was ever produced (see
+// `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`), so the elimination is
+// asserted HERE, over the CLOSED set of shapes `PendingRedlineError` can take: 3 kinds × 2 sources ×
+// single/batched. A test over the closed set is the difference between "the string is gone from the
+// file" (a grep, which a future branch can undo) and "no reachable input produces it".
+// ---------------------------------------------------------------------------
+describe('ComposeBannerStack — FR-C07: the unresolved-target banner never blames the wording', () => {
+  const KINDS = ['not_found', 'ambiguous', 'target_deleted'] as const;
+  const SOURCES = ['anchored', 'legacy-replay'] as const;
+
+  function redlineError(
+    kind: (typeof KINDS)[number],
+    source: (typeof SOURCES)[number],
+    batched: boolean
+  ): NonNullable<ComposeBannerStackProps['pendingRedlineError']> {
+    return {
+      ledgerRef: 'b1@t1',
+      kind,
+      source,
+      targetText: 'clause 4.2',
+      matchCount: kind === 'ambiguous' ? 3 : 0,
+      ...(batched ? { failedCount: 2, totalCount: 5 } : {}),
+    };
+  }
+
+  it.each(
+    KINDS.flatMap(kind =>
+      SOURCES.flatMap(source =>
+        [false, true].map(batched => [kind, source, batched] as const)
+      )
+    )
+  )('renders a specific, non-empty message for %s / %s (batched: %s)', (kind, source, batched) => {
+    renderStack({ pendingRedlineError: redlineError(kind, source, batched) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+
+    // The eliminated state, in every shape that can reach this banner.
+    expect(text).not.toMatch(/wording differs/i);
+    expect(text).not.toMatch(/differs slightly/i);
+    // Still honest about the outcome — a message that says nothing is not an improvement.
+    expect(text.length).toBeGreaterThan(40);
+    expect(text).toMatch(/Nothing was changed|no longer exist|won't guess|Select the exact passage/i);
+  });
+
+  it('an ANCHORED miss blames the named paragraph, never the wording (the fabrication FR-C07 removes)', () => {
+    renderStack({ pendingRedlineError: redlineError('not_found', 'anchored', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain("named a paragraph or section this document doesn't have");
+    expect(text).toContain('clause 4.2');
+  });
+
+  it('a REPLAYED miss explains the real cause and offers the remedy that works', () => {
+    renderStack({ pendingRedlineError: redlineError('not_found', 'legacy-replay', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain('came from an earlier session');
+    expect(text).toContain('re-run it');
+  });
+
+  it('a REPLAYED ambiguity says it will not guess (UAT-21 in copy)', () => {
+    renderStack({ pendingRedlineError: redlineError('ambiguous', 'legacy-replay', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain('appears in 3 places');
+    expect(text).toContain("we won't guess");
+  });
+});

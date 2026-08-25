@@ -29,6 +29,9 @@ export type {
   PendingRedlineError,
   // FR-C05 (r8 task 052) — the "this clause changed since the suggestion — apply anyway?" question.
   PendingRedlineStaleTarget,
+  // FR-C06 (r8 task 053) — the "is this the right place?" question for a REPLAYED/LEGACY anchorless
+  // suggestion. The bounded confirmable fallback's only user-visible surface.
+  PendingRedlineLegacyProposal,
   AnchorResolveResult,
   MaterializeStatus,
   RedlineMatchMode,

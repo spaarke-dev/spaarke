@@ -1149,6 +1149,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   >(null);
   const [staleResolutionBusy, setStaleResolutionBusy] = React.useState(false);
 
+  // FR-C06 (r8 task 053) — the anchorless-replay PROPOSAL. Raised only for a `compose` ledger entry
+  // written BEFORE task 052's catalog change and replayed afterwards: it carries prose and no anchor,
+  // so the bounded fallback located a candidate paragraph and is asking whether that is the right
+  // place. NOTHING is in the document while this is non-null. Same host contract as the stale question
+  // above — ask with a ConfirmModal, then write the durable FR-17 supersession either way (O-2/O-5).
+  const [redlineLegacyProposal, setRedlineLegacyProposal] = React.useState<
+    import('./hooks/usePendingRedline').PendingRedlineLegacyProposal | null
+  >(null);
+  const [proposalResolutionBusy, setProposalResolutionBusy] = React.useState(false);
+
   // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
   // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave
   // behavior (client-only local draft, beforeunload guard, recovery) is Phase 4 (tasks 040/041), which
@@ -3463,6 +3473,44 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     [redlineStaleTarget, staleResolutionBusy, supersedeComposeOutput]
   );
 
+  /**
+   * FR-C06 — the user's answer to "we think this replayed suggestion belongs here — is that right?".
+   *
+   * Structurally identical to {@link resolveRedlineStaleTarget}, and deliberately so: BOTH answers
+   * write the supersession, because either way this proposal has been CONSUMED and must not be
+   * replayed (O-4 append-only, keyed by the edit's ledger key; O-5 the reopen pass finds it superseded
+   * and does not ask again). "Place it" leaves a normal pending redline the user can still
+   * accept/reject; "Skip" leaves the document untouched. Neither is an ADR-041 Gate (assessment §4.2 /
+   * O-1) — the Action already ran, there is nothing to suspend, and the trigger is a runtime document
+   * fact no catalog datum can declare.
+   */
+  const resolveRedlineLegacyProposal = React.useCallback(
+    async (answer: 'place' | 'skip'): Promise<void> => {
+      const proposal = redlineLegacyProposal;
+      if (!proposal || proposalResolutionBusy) return;
+      setProposalResolutionBusy(true);
+      try {
+        if (answer === 'place') {
+          editorRef.current?.applyLegacyRedlineProposal();
+        } else {
+          editorRef.current?.dismissLegacyRedlineProposal();
+        }
+        const recorded = await supersedeComposeOutput(proposal.ledgerRef);
+        if (!recorded) {
+          // Honest, not silent (R7 charter): the in-editor outcome IS what the user asked for, but the
+          // durable record did not land, so the question can legitimately return after a refresh.
+          setComposeDraftError(
+            'Your choice was applied to this document, but it could not be recorded — you may be asked ' +
+              'about this suggestion again after a refresh.'
+          );
+        }
+      } finally {
+        setProposalResolutionBusy(false);
+      }
+    },
+    [redlineLegacyProposal, proposalResolutionBusy, supersedeComposeOutput]
+  );
+
   // -------------------------------------------------------------------------
   // PaneEventBus receivers — Compose three-pane coordination, WORKSPACE leg
   // (task 104 / E2E-R5; supersedes/absorbs task 070). The Workspace pane OWNS
@@ -4925,6 +4973,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               onDirtyChange={handleDirtyChange}
               onRedlineErrorChange={setPendingRedlineError}
               onRedlineStaleTargetChange={setRedlineStaleTarget}
+              onRedlineLegacyProposalChange={setRedlineLegacyProposal}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
@@ -5165,6 +5214,62 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }}
         onClose={() => {
           void resolveRedlineStaleTarget('skip');
+        }}
+      />
+
+      {/* FR-C06 (r8 task 053) — the anchorless-replay PROPOSAL.
+
+          WHEN THIS CAN OPEN AT ALL: only for a `compose` ledger entry written before task 052 retired
+          `target_text` from the four compose EDIT Actions, replayed afterwards (reopen, refresh, or an
+          undo/try-another re-render of an older turn). No newly-produced edit can reach it — the model
+          is not asked for prose any more, and an edit that HAS an anchor is refused rather than
+          searched. The population is real, bounded, and shrinks with session retention.
+
+          NOTHING is in the document while this is open — that is the whole point. The bounded fallback
+          found where that wording occurs today; it cannot know that is the clause the model meant, so
+          the user sees what would be struck and decides. Confirm = place it as a normal pending
+          redline (still accept/rejectable); Cancel = skip it. Either way the answer is written to the
+          ledger (resolveRedlineLegacyProposal) so a refresh cannot re-ask.
+
+          Rendered only when the stale question is closed: two ConfirmModals at once would stack, and
+          `dismiss="alert"` means neither can be Esc'd past. They are answered one at a time.
+
+          Canonical ConfirmModal shell (ADR-050), semantic tokens only (ADR-021), no bespoke chrome —
+          same contract as its FR-C05 sibling above. NOT an ADR-041 Gate (assessment §4.2 / O-1). */}
+      <ConfirmModal
+        open={redlineStaleTarget === null && redlineLegacyProposal !== null}
+        busy={proposalResolutionBusy}
+        title="Where should this suggestion go?"
+        message={
+          redlineLegacyProposal === null ? (
+            ''
+          ) : (
+            <>
+              {redlineLegacyProposal.proposedCount > 1
+                ? `${redlineLegacyProposal.proposedCount} of ${redlineLegacyProposal.totalCount} suggestions in this set came from an earlier session, before suggestions carried a paragraph reference. We found the wording they quoted — check the first one below before placing them.`
+                : 'This suggestion came from an earlier session, before suggestions carried a paragraph reference. We found the wording it quoted, but we cannot confirm it is the clause that was meant.'}
+              <br />
+              <br />
+              {'It would replace: “'}
+              {truncateClause(redlineLegacyProposal.matchedText)}
+              {'”'}
+              <br />
+              {'The suggestion quoted: “'}
+              {truncateClause(redlineLegacyProposal.quotedTarget)}
+              {'”'}
+              <br />
+              <br />
+              Place the suggestion here?
+            </>
+          )
+        }
+        confirmLabel="Place it here"
+        cancelLabel="Skip this suggestion"
+        onConfirm={() => {
+          void resolveRedlineLegacyProposal('place');
+        }}
+        onClose={() => {
+          void resolveRedlineLegacyProposal('skip');
         }}
       />
 
