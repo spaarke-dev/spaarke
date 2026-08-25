@@ -549,7 +549,7 @@ Full reasoning: [`notes/decisions/031-obo-verification-dev.md`](decisions/031-ob
 >
 > **This contract has since been PROMOTED** into `auth-deployment-setup.md` **§5.1 — Azure data-plane RBAC
 > for the UAMI**, and the retired Key Vault secrets are struck through in its §4 table with the
-> `Deploy-AllIndexes.ps1` silent-re-mint warning attached. **Use the guide as the operational source.**
+> `Deploy-AllIndexes.ps1 -CutoverBffSettings` warning attached. **Use the guide as the operational source.**
 > §10 below stays as the origin/reasoning record.
 
 ## 10.1 The five deltas
@@ -617,7 +617,14 @@ the live path — every UAT row is stamped `# mi-bff-api-dev` — is in
 ## 10.5 Two traps worth naming
 
 - **`appsettings.template.json` still declares** `"ServiceBus": "@Microsoft.KeyVault(SecretUri=#{KEY_VAULT_URL}#secrets/ServiceBus-ConnectionString)"`. If you deploy from that template you re-introduce the SAS contract on a BFF that no longer reads it. Tracked as auth-v4 obligation **051-E** (deliberately deferred while the KV rollback copy lives, to 2026-11-23).
-- **`Deploy-AllIndexes.ps1` falls back silently**: *"KV secret 'AiSearch--AdminKey' not found — falling back to live admin key from search service."* On a secret-free environment that fallback **re-mints a key** and hands it back, quietly undoing the migration. Gate it.
+- **`Deploy-AllIndexes.ps1 -CutoverBffSettings` re-introduces the key.** ⚠️ *Corrected 2026-08-25 — an earlier
+  revision of this bullet claimed the script "silently re-mints a key". **That was wrong.** Its key-resolution
+  fallback calls `az search admin-key show`, which **reads** the existing key (`renew` would regenerate), and it
+  uses it for **index management** — a legitimate admin-key operation unrelated to the BFF's runtime auth.*
+  The actual trap is `-CutoverBffSettings` (script line ~610): it sets `AzureAISearchApiKey` and
+  `AiSearch__AdminKey` on the BFF as Key Vault references to `AiSearch--AdminKey` — **a secret that no longer
+  exists** — re-introducing the key-based configuration task 053 removed. Do not run that switch against a
+  migrated environment; gate it on the secret's existence.
 
 ## 10.6 What did NOT change
 

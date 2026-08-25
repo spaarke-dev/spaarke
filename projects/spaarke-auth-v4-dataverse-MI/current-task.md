@@ -89,7 +89,7 @@ rollback into a redeploy on a fail-closed surface** — which is why they wait.
 |---|---|---|
 | 9b | **CORS config drift has no forcing function** — the only item that *has already bitten us* (it caused the UAT blocker). Nothing fails in CI when a deployed environment's allow-list omits a live SWA | platform / CI |
 | 7 | `/healthz/catalog` — **self-shrinking**: 8 of 12 findings resolve as agreements / nda / compose / smart-todo merge their constants. Residue is 4 legacy description rows + the Unhealthy-vs-Degraded asymmetry (an ADR-039 question) | AI-catalog |
-| — | `Deploy-AllIndexes.ps1` **silently re-mints an AI Search admin key** when the KV secret is absent — quietly undoing task 053 on a secret-free environment. Warned in `auth-deployment-setup.md` §4; **not yet gated in the script** | AI-search / provisioning |
+| — | `Deploy-AllIndexes.ps1 -CutoverBffSettings` writes `AzureAISearchApiKey` + `AiSearch__AdminKey` onto the BFF as KV refs to the **deleted** `AiSearch--AdminKey`, re-introducing the key config task 053 removed. Warned in `auth-deployment-setup.md` §4; **not yet gated in the script**. *(An earlier note here said the script "silently re-mints a key" — wrong: it `show`s, not `renew`s, and index management legitimately uses an admin key.)* | AI-search / provisioning |
 | — | `Configure-ProductionAppSettings.ps1` + `Provision-Customer.ps1` still write `ServiceBus-ConnectionString` | provisioning (#779) |
 | — | Scope `spec.md:236` / `design.md:57` to Model 2; §5.2 `design.md:1006` fix; §9.2 Model-2 FIC issuer question | provisioning (#779) |
 | 10 | Word "no extractable content" — the authenticated write completed; this is content extraction | owner-routed to a focused project |
