@@ -131,6 +131,19 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.UamiPrincipalId);
 
+        // A42 / SF-5 (W-1): tenancy guard runs BEFORE ANY Graph mutation —
+        // not only ahead of the FIC step. Model 2 provisioning reaches the
+        // FIC step unconditionally, so a cross-tenant pair is doomed to
+        // refusal anyway; refusing up-front prevents creating an ORPHAN
+        // app-reg (with a live client secret) in the wrong tenant first.
+        // Blank issuer-tenant is NOT refused here — the FIC step returns its
+        // pre-existing config-fault Failure for that case.
+        var uamiTenantId = ResolveUamiTenantId(request.Profile, request.TenantId, _options.SpaarkeTenantId);
+        if (!string.IsNullOrWhiteSpace(uamiTenantId))
+        {
+            AssertFicTenancy(request.TenantId, uamiTenantId, request.Profile);
+        }
+
         var graph = BuildTenantScopedGraphClient(request.TenantId);
         var displayName = $"spaarke-bff-api-{request.CustomerId}";
 
@@ -199,6 +212,12 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 BffAppRegId = app.AppId!,
                 BffClientSecretKvUri = kvUriRef,
                 PendingKvWrites = pendingWrites,
+                // A42 / SF-8: the FIC persisted + re-GET-confirmed its triple,
+                // but L2 can NEVER exchange-verify at creation time (GOTCHA 2)
+                // — this is the script exit-2 equivalent, and it REQUIRES a
+                // recorded post-App-Service verification (H13/T4). Never
+                // terminal success.
+                FicVerification = FicVerificationState.PendingPostAppServiceVerification,
             });
         }
         catch (ODataError ex)
@@ -530,7 +549,12 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     }
 
     // ---------------------------------------------------------------------
-    // FIC (Model 2 only, auth-v4 §3.1) — see file-header GOTCHA 2
+    // FIC (Model 2 only, auth-v4 §3.1) — see file-header GOTCHA 2.
+    // A42 (task 205b, FR-C4) hardening: cross-tenant refusal guard (SF-5),
+    // triple-keyed idempotency (SF-7), exit-2-equivalent verification state
+    // (SF-8). Parity contract:
+    // projects/customer-provisioning-orchestration-r1/notes/decisions/
+    // 205b-a42-fic-parity-contract.md
     // ---------------------------------------------------------------------
 
     /// <summary>
@@ -538,15 +562,18 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     /// an INDEPENDENT re-GET (never trusting the write call's own echoed
     /// response) to confirm it persisted exactly as requested — see
     /// GOTCHA 2 in the file header for why a literal OAuth2 exchange is not
-    /// something L2 can legitimately perform here. Returns null on success,
-    /// or a Failure outcome to propagate.
+    /// something L2 can legitimately perform here. Returns null on success
+    /// (the caller reports <see cref="FicVerificationState.PendingPostAppServiceVerification"/>
+    /// — the script exit-2 equivalent, NEVER terminal success per SF-8), or a
+    /// Failure outcome to propagate. Throws
+    /// <see cref="CrossTenantFicRefusedException"/> BEFORE any Graph call when
+    /// the (app-reg tenant, UAMI tenant) pair is cross-tenant — the
+    /// `Assert-SpaarkeFicTenancy` port (SF-5, A42).
     /// </summary>
     private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialAsync(
         GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
     {
-        var issuerTenantId = string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase)
-            ? request.TenantId
-            : _options.SpaarkeTenantId;
+        var issuerTenantId = ResolveUamiTenantId(request.Profile, request.TenantId, _options.SpaarkeTenantId);
         if (string.IsNullOrWhiteSpace(issuerTenantId))
         {
             return new EntraAppRegOutcome.Failure(
@@ -554,6 +581,19 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppReg:SpaarkeTenantId config")}, " +
                 $"which is blank. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
         }
+
+        // A42 / SF-5: cross-tenant refusal FIRST, before any Graph FIC call —
+        // the `Assert-SpaarkeFicTenancy` port. A cross-tenant pair would
+        // CREATE successfully and fail only at token exchange, weeks later at
+        // the customer's first OBO (see CrossTenantFicRefusedException header
+        // + notes/decisions/adr-028-a4-integration-conflict-resolution.md
+        // §9.2 contingency). Under §9.2 reading (a) — owner-ratified Q2,
+        // 2026-08-25 — every sanctioned profile derives an intra-tenant pair,
+        // so this guard is inert protection that only fires on genuine
+        // misconfiguration (e.g. a spaarke-hosted profile dispatched with a
+        // customer tenantId).
+        AssertFicTenancy(request.TenantId, issuerTenantId, request.Profile);
+
         var issuer = $"https://login.microsoftonline.com/{issuerTenantId}/v2.0";
 
         try
@@ -563,20 +603,38 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
 
             var existing = await graph.Applications[appObjectId].FederatedIdentityCredentials
                 .GetAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
-            var already = existing?.Value?.FirstOrDefault(f => string.Equals(f.Name, _options.FicName, StringComparison.Ordinal));
 
-            var isCurrent = already is not null
-                && string.Equals(already.Subject, request.UamiPrincipalId, StringComparison.Ordinal)
-                && string.Equals(already.Issuer, issuer, StringComparison.Ordinal)
-                && (already.Audiences ?? new List<string>()).Contains(_options.FicAudience, StringComparer.Ordinal);
+            // A42 / SF-7: idempotency is keyed by the (issuer, subject,
+            // audience) TRIPLE — NEVER by name. Entra matches assertions
+            // against the triple and enforces (issuer, subject) uniqueness
+            // per application; a name-only check turns a correct no-op into a
+            // failed run (the PS estate hit exactly this live on its first
+            // run: a differently-named equivalent caused the create to be
+            // rejected with "The combination of issuer and subject must be
+            // unique for the application"). An equivalent triple under ANY
+            // name already satisfies the request.
+            var equivalent = FindEquivalentByTriple(
+                existing?.Value, issuer, request.UamiPrincipalId, _options.FicAudience);
 
-            if (!isCurrent)
+            if (equivalent is null)
             {
-                if (already is not null)
+                // No equivalent triple exists. If OUR name is squatted by a
+                // credential with a DIFFERENT triple, that is drift —
+                // delete + recreate (subject/issuer/audience are immutable on
+                // PATCH per Graph's documented FIC contract). This is the
+                // provisioning-run equivalent of the script's explicit
+                // -ForceFederatedCredentialUpdate reconcile path — a
+                // DOCUMENTED divergence from the operator script's
+                // refuse-without-Force default; see the parity contract §4.
+                var nameCollision = existing?.Value?.FirstOrDefault(
+                    f => string.Equals(f.Name, _options.FicName, StringComparison.Ordinal));
+                if (nameCollision is not null)
                 {
-                    // Subject/issuer/audience are immutable on PATCH per
-                    // Graph's documented FIC contract — delete + recreate.
-                    await graph.Applications[appObjectId].FederatedIdentityCredentials[already.Id]
+                    _logger.LogWarning(
+                        "FIC '{FicName}' exists with a NON-matching (issuer, subject, audience) triple — " +
+                        "drift; deleting + recreating (provisioning-run Force-equivalent, A42 parity contract §4). " +
+                        "appObjectId={AppObjectId}", _options.FicName, appObjectId);
+                    await graph.Applications[appObjectId].FederatedIdentityCredentials[nameCollision.Id]
                         .DeleteAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
                 }
 
@@ -585,10 +643,12 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                     Name = _options.FicName,
                     Issuer = issuer,
                     // §3.1 documented trap: subject MUST be the UAMI's
-                    // principalId (object id), NOT its clientId.
+                    // principalId (object id), NOT its clientId — the
+                    // wrong-subject FIC creates cleanly and dies at exchange
+                    // with AADSTS700213 (auth-v4 §11 invariant 1).
                     Subject = request.UamiPrincipalId,
                     Audiences = new List<string> { _options.FicAudience },
-                    Description = "Trust for the shared BFF UAMI (auth-v4 §3.1 recipe) — created by H3 (task 130).",
+                    Description = "Managed-identity trust for the stamp's BFF UAMI (auth-v4 §3.1 recipe; issuer tenant per profile) — created by H3 (task 130; A42 triple-idempotency).",
                 }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
             }
         }
@@ -600,8 +660,12 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         }
 
         // Independent re-GET verification (GOTCHA 2) — retries a few times to
-        // absorb read-after-write propagation lag, NOT AADSTS70021 (there is
-        // no live OAuth2 exchange call here — see file header).
+        // absorb read-after-write propagation lag, NOT AADSTS70025 (there is
+        // no live OAuth2 exchange call here — see file header; the exchange-
+        // side propagation policy lives in FicExchangeOutcomeClassifier for
+        // the exchange-capable hosts). Verification matches by TRIPLE, not
+        // name — a pre-existing equivalent under a different name is a
+        // legitimate satisfied state (SF-7).
         for (var attempt = 1; attempt <= _options.FicExchangeRetryCount; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -611,14 +675,16 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 verifyTimeoutCts.CancelAfter(_options.GraphRequestTimeout);
                 var reGet = await graph.Applications[appObjectId].FederatedIdentityCredentials
                     .GetAsync(cancellationToken: verifyTimeoutCts.Token).ConfigureAwait(false);
-                var confirmed = reGet?.Value?.FirstOrDefault(f => string.Equals(f.Name, _options.FicName, StringComparison.Ordinal));
+                var confirmed = FindEquivalentByTriple(
+                    reGet?.Value, issuer, request.UamiPrincipalId, _options.FicAudience);
 
-                if (confirmed is not null
-                    && string.Equals(confirmed.Subject, request.UamiPrincipalId, StringComparison.Ordinal)
-                    && string.Equals(confirmed.Issuer, issuer, StringComparison.Ordinal)
-                    && (confirmed.Audiences ?? new List<string>()).Contains(_options.FicAudience, StringComparer.Ordinal))
+                if (confirmed is not null)
                 {
-                    return null; // Verified.
+                    // Persisted + structurally verified. NOT exchange-verified
+                    // (GOTCHA 2) — the caller reports the exit-2 equivalent
+                    // (PendingPostAppServiceVerification), never terminal
+                    // success (SF-8).
+                    return null;
                 }
             }
             catch (ODataError ex) when (attempt < _options.FicExchangeRetryCount)
@@ -635,8 +701,64 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         }
 
         return new EntraAppRegOutcome.Failure(
-            $"FIC re-GET verification did not confirm subject/issuer/audience after " +
+            $"FIC re-GET verification did not confirm the (issuer, subject, audience) triple after " +
             $"{_options.FicExchangeRetryCount} attempts. [{EntraAppRegRejectionCodes.FicVerificationFailed}]");
+    }
+
+    /// <summary>
+    /// Derives the tenant the FIC-issuing UAMI lives in, per profile
+    /// (auth-v4 §3.1 + §9.2 reading (a), owner-ratified 2026-08-25):
+    /// <c>customer-owned-model2</c> → the customer's own tenant (stamp UAMI
+    /// lives in the customer's subscription); every other profile → Spaarke's
+    /// tenant (shared/stamp UAMI lives in Spaarke's subscription). Extracted
+    /// internal-static (A42) so the derivation + guard are unit-testable
+    /// without live Graph.
+    /// </summary>
+    internal static string? ResolveUamiTenantId(string profile, string requestTenantId, string? spaarkeTenantId)
+        => string.Equals(profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase)
+            ? requestTenantId
+            : spaarkeTenantId;
+
+    /// <summary>
+    /// C# port of master `Register-EntraAppRegistrations.ps1`'s
+    /// `Assert-SpaarkeFicTenancy` (script :350-396) — task 205b row A42,
+    /// SF-5 closure. Throws <see cref="CrossTenantFicRefusedException"/> when
+    /// the app registration's tenant and the UAMI's tenant differ. The
+    /// refusal is UNCONDITIONAL (PS parity — Entra's same-tenant FIC rule has
+    /// no profile exception); <paramref name="profile"/> is diagnostic
+    /// context only. Tenant GUIDs compare case-insensitively (PS `-ne`
+    /// parity).
+    /// </summary>
+    internal static void AssertFicTenancy(string appRegistrationTenantId, string uamiTenantId, string profile)
+    {
+        if (!string.Equals(appRegistrationTenantId, uamiTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CrossTenantFicRefusedException(appRegistrationTenantId, uamiTenantId, profile);
+        }
+    }
+
+    /// <summary>
+    /// Returns the first federated credential whose (issuer, subject,
+    /// audience) TRIPLE matches — regardless of its name (SF-7; parity with
+    /// the script's `Find-SpaarkeEquivalentFederatedCredential`, incl. the
+    /// exactly-one-audience requirement). The name of a FIC is a label; the
+    /// triple is what Entra matches assertions against and enforces
+    /// uniqueness on. Null when no credential carries the triple.
+    /// </summary>
+    internal static FederatedIdentityCredential? FindEquivalentByTriple(
+        IEnumerable<FederatedIdentityCredential>? candidates,
+        string issuer, string subject, string audience)
+    {
+        if (candidates is null)
+        {
+            return null;
+        }
+
+        return candidates.FirstOrDefault(f =>
+            string.Equals(f.Issuer, issuer, StringComparison.Ordinal)
+            && string.Equals(f.Subject, subject, StringComparison.Ordinal)
+            && f.Audiences is { Count: 1 }
+            && string.Equals(f.Audiences[0], audience, StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------------

@@ -106,6 +106,33 @@ public sealed class InterStepState
     public string? SpeConsentCorrelationId { get; set; }
 
     /// <summary>
+    /// True when H3's Model 2 FIC creation completed with the <c>-FicOnly</c>
+    /// script's exit-2 equivalent (H3 output; task 205b row A42, SF-8): the
+    /// federated identity credential persisted and its (issuer, subject,
+    /// audience) triple was structurally confirmed by an independent re-GET,
+    /// but it could NOT be exchange-verified from L2 (L2's Worker cannot mint
+    /// the BFF UAMI's assertion — GraphAppRegistrationProvisioner GOTCHA 2 /
+    /// SF-4). This is the NORMAL creation-time result, and it is NEVER
+    /// terminal success: H13/T4 (post-App-Service verification) MUST discharge
+    /// it with a REAL token exchange, using FicExchangeOutcomeClassifier's
+    /// parity semantics. Null = not applicable (Model 1 — zero FIC objects
+    /// per I6 — or H3 not yet run).
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (task 205b / row A42). design.md §6.2's
+    /// enumerated interStepState keys did not include a FIC-verification
+    /// slot; auth-v4's §10 DELIVERED exit-code contract (0/1/2) +
+    /// remediation-plan §5 item 2 ("run reports MUST distinguish
+    /// persisted-verified from exchange-verified") require one. Follows the
+    /// enumerated-keys discipline established by tasks 049/050/053/054: a
+    /// deliberate type extension, not an ad-hoc dictionary insert. design.md
+    /// §6.2 key-list refresh rides the S3 doc cascade (main session).
+    /// </remarks>
+    [JsonPropertyName("ficPendingPostAppServiceVerification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FicPendingPostAppServiceVerification { get; set; }
+
+    /// <summary>
     /// H6-authored manifest of the 8 authoritative Spaarke managed solutions
     /// imported by Package Deployer (spec.md §11.1a + FR-09). Populated once
     /// H6 completes successfully; each record carries the solution unique

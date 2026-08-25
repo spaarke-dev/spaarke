@@ -83,8 +83,30 @@ public static class EntraAppRegRejectionCodes
     /// <summary>Model 2's federated identity credential creation (auth-v4 §3.1 recipe) failed.</summary>
     public const string FicCreationFailed = "appreg-fic-creation-failed";
 
-    /// <summary>Model 2's FIC exchange-based verification (a real OAuth2 client_credentials token request using the FIC's client_assertion) did not succeed after exhausting the AADSTS70021 propagation-delay retry budget.</summary>
+    /// <summary>
+    /// Model 2's FIC structural verification (independent re-GET of the
+    /// just-written FIC confirming its (issuer, subject, audience) triple —
+    /// see GraphAppRegistrationProvisioner GOTCHA 2: L2 cannot perform a live
+    /// exchange) did not succeed after exhausting the read-after-write retry
+    /// budget. NOTE (A42): the EXCHANGE-side propagation code is the measured
+    /// AADSTS70025 (~8 intermittent failures over ~130s; 70021 documented but
+    /// never observed live) — that policy lives in FicExchangeOutcomeClassifier
+    /// for the exchange-capable hosts, not in this re-GET path.
+    /// </summary>
     public const string FicVerificationFailed = "appreg-fic-verification-failed";
+
+    /// <summary>
+    /// Model 2's FIC would pair an app registration with a UAMI from a
+    /// DIFFERENT tenant — refused loudly at provisioning time by
+    /// <see cref="GraphAppRegistrationProvisioner.AssertFicTenancy"/>
+    /// (task 205b row A42, SF-5 closure; port of the master script's
+    /// <c>Assert-SpaarkeFicTenancy</c>). Entra's same-tenant FIC rule makes
+    /// the cross-tenant pair structurally impossible — it would CREATE
+    /// successfully and fail only at the customer's first OBO exchange,
+    /// weeks later, silently. Resumable: operator corrects the run's tenant /
+    /// profile configuration and resumes.
+    /// </summary>
+    public const string CrossTenantFicRefused = "appreg-cross-tenant-fic-refused";
 
     /// <summary>
     /// The provisioner reported a hard failure (PS script non-zero exit / Graph

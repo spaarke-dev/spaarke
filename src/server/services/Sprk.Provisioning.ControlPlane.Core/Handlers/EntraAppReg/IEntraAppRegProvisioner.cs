@@ -167,6 +167,43 @@ public sealed class EntraAppRegOutputs
     /// shared-vault entries, nothing to commit).
     /// </summary>
     public IReadOnlyList<PendingKvSecretWrite> PendingKvWrites { get; init; } = Array.Empty<PendingKvSecretWrite>();
+
+    /// <summary>
+    /// FIC verification state for this provisioning outcome — the C# exit-code
+    /// equivalent of the <c>-FicOnly</c> script contract (task 205b row A42,
+    /// SF-8). Defaults to <see cref="FicVerificationState.NotApplicable"/>
+    /// (Model 1 — zero FIC objects, I6). The production Model 2 provisioner
+    /// sets <see cref="FicVerificationState.PendingPostAppServiceVerification"/>
+    /// on every success — L2 can NEVER produce
+    /// <see cref="FicVerificationState.ExchangeVerified"/> at creation time
+    /// (GOTCHA 2: it cannot mint the UAMI's assertion). The handler records
+    /// the pending state into
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.FicPendingPostAppServiceVerification"/>
+    /// so H13/T4 discharges the real exchange verification post-App-Service.
+    /// </summary>
+    public FicVerificationState FicVerification { get; init; } = FicVerificationState.NotApplicable;
+}
+
+/// <summary>
+/// C# equivalent of the <c>-FicOnly</c> script's exit-code contract
+/// (task 205b row A42 / FR-C4 parity — see
+/// <c>projects/customer-provisioning-orchestration-r1/notes/decisions/205b-a42-fic-parity-contract.md</c>):
+/// <list type="bullet">
+/// <item>script exit 0 ↔ <see cref="ExchangeVerified"/> — created + verified by a REAL token exchange. NOT producible by L2 at creation time (GOTCHA 2); reserved for exchange-capable verifiers (H13/T4 post-App-Service, task-186 E2E runner, Q11 BFF warmup self-proof).</item>
+/// <item>script exit 1 ↔ (no enum value) — a fault. Surfaces as <see cref="EntraAppRegOutcome.Failure"/> / a thrown <see cref="CrossTenantFicRefusedException"/>, never as a Success state.</item>
+/// <item>script exit 2 ↔ <see cref="PendingPostAppServiceVerification"/> — persisted + structurally verified (independent re-GET confirms the (issuer, subject, audience) triple) but NOT exchange-verified from this host. The NORMAL off-Azure/L2 result. NEVER terminal success: it REQUIRES a recorded post-App-Service verification (SF-8), tracked via <c>InterStepState.FicPendingPostAppServiceVerification</c>.</item>
+/// </list>
+/// </summary>
+public enum FicVerificationState
+{
+    /// <summary>No FIC was created or touched by this outcome (Model 1 — I6: zero per-customer app-reg/FIC objects).</summary>
+    NotApplicable = 0,
+
+    /// <summary>The FIC was proven by a REAL OAuth2 token exchange (script exit-0 equivalent). Only an exchange-capable host can assert this — never L2 at creation time.</summary>
+    ExchangeVerified = 1,
+
+    /// <summary>The FIC persisted and its (issuer, subject, audience) triple was structurally confirmed by an independent re-GET, but no exchange proof exists from this host (script exit-2 equivalent). Requires recorded post-App-Service verification — never report as terminal success.</summary>
+    PendingPostAppServiceVerification = 2,
 }
 
 /// <summary>

@@ -485,6 +485,23 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 Profile: run.Profile ?? string.Empty);
             outcome = await _provisioner.ProvisionAsync(request, cancellationToken).ConfigureAwait(false);
         }
+        catch (CrossTenantFicRefusedException ex)
+        {
+            // A42 / SF-5: the tenancy guard fired — a cross-tenant
+            // (app-reg, UAMI) FIC pair was refused BEFORE creation. Distinct
+            // rejection code so operators/reconcilers route it without
+            // string-matching (vs. discovering it weeks later at the
+            // customer's first OBO as an opaque AADSTS error). Resumable:
+            // operator corrects the run's tenant/profile configuration.
+            _logger.LogError(ex,
+                "H3 cross-tenant FIC REFUSED: runId={RunId} customerId={CustomerId} " +
+                "appRegTenantId={AppRegTenantId} uamiTenantId={UamiTenantId} profile={Profile}",
+                envelope.RunId, envelope.CustomerId,
+                ex.AppRegistrationTenantId, ex.UamiTenantId, ex.Profile);
+            return (await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.CrossTenantFicRefused, ex.Message, cancellationToken)
+                .ConfigureAwait(false), null, null);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
@@ -638,6 +655,21 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         // Write bffAppRegId regardless of consent state — H4/H10 need it
         // whether consent is Verified now or pending.
         run.InterStepState.BffAppRegId = outputs.BffAppRegId;
+
+        // A42 / SF-8: when the FIC's creation-time result is the script
+        // exit-2 equivalent (persisted + structurally re-GET-verified, but
+        // NOT exchange-verified — the NORMAL L2 outcome, GOTCHA 2), record
+        // the pending marker so the run report distinguishes
+        // "persisted-verified" from "exchange-verified" and H13/T4 discharges
+        // the REAL post-App-Service exchange verification. Exit-2 is NEVER
+        // terminal success. Written on both consent paths (Pending +
+        // Verified) — the FIC's verification debt is independent of the
+        // admin-consent gate.
+        if (outputs.FicVerification == FicVerificationState.PendingPostAppServiceVerification)
+        {
+            run.InterStepState.FicPendingPostAppServiceVerification = true;
+        }
+
         run.ErrorDetail = null;
 
         if (consentResult is AdminConsentVerificationResult.Pending pending)
