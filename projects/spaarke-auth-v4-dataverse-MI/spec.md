@@ -451,12 +451,17 @@ base shared layer, widening publish size and CVE surface for every downstream co
        lowercase alias — task 033; soft-deleted (recoverable to 2026-11-22), **not purged**.
 8. [x] **VERIFIED** Config validators relaxed consistently (FR-B5) — BFF boots with no secret configured; still
        fails fast with no credential at all. `CredentialOrderingSeamTests` holds both halves.
-9. [ ] ❌ **NOT MET — carried forward, deliberately unchecked.** Local `dotnet run` has **no credential path for
-       a fresh setup**: the code calls the user-secret fallback *"the legitimate — and only — way to run OBO
-       locally"*, and the only readable copy lived in the Key Vault secret this project deleted. A developer
-       cloning today cannot run OBO locally. This needs a deliberate replacement (dev-only FIC on a per-developer
-       app registration, or a documented `az login`-backed path) — **not** restoring the secret. See
-       `notes/lessons-learned.md` §7.2.
+9. [~] ⚠️ **DOCUMENTED, NOT YET PROVISIONED — no longer an undefined gap.**
+       **Closed at task 090 (2026-08-25)** with [`docs/guides/local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md):
+       the constraint is stated (a workstation has no route to IMDS, so MI-FIC cannot work locally, and neither
+       `az login` nor `DefaultAzureCredential` can perform an OBO exchange), the exact config keys are named
+       (`AzureAd:ClientSecret` → `API_CLIENT_SECRET` → `AZURE_CLIENT_SECRET` — **not** the `Graph:ClientSecret` /
+       `Dataverse:ClientSecret` a retired doc told people to set, which have zero consumers), four options are
+       compared, and **option D is recommended**: one *local-dev-only* app registration, separate from every
+       deployed identity, with its secret in `dotnet user-secrets`.
+       **Residual**: the option-D app registration is not yet created — a one-time Azure action, with the exact
+       commands in the guide. The property that mattered is preserved either way: **no deployed identity holds a
+       secret**; a workstation is not a deployed identity.
 10. [⏭️] ~~Power BI runs as a managed-identity principal; `PowerBi:ClientSecret` removed~~ — **WAIVED 2026-08-19
         (owner): Power BI is not yet in use at Spaarke; Workstream D deferred.** Instead verify at wrap-up that
         the deferral is *visible, not silent*: the Power BI sites are named in the FR-F1 allowlist with the
