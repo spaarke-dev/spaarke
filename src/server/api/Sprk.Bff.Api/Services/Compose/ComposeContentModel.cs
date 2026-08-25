@@ -117,6 +117,74 @@ public sealed record ComposeSymbol
     public required string CharCode { get; init; }
 }
 
+/// <summary>
+/// A Word FIELD carried as a dedicated marker run (task 049 — the same mechanism as
+/// <see cref="ComposeSymbol"/>): the run IS a field, and the renderer re-emits it from these scalars rather
+/// than from the text the field happened to be displaying.
+/// <para>
+/// <b>The instruction is the identity; the cached result is only the display.</b> Until this record existed,
+/// editing a paragraph replaced <c>{ REF _Ref_Confidentiality \r \h }</c> with the literal characters
+/// <c>4</c>. Nothing looked wrong — and that is the problem: the cross-reference had stopped being one, so
+/// when the agreement renumbered, the paragraph went on claiming "Section 4" forever. A stale number
+/// presented as prose is worse in an executed agreement than a visible error, because nobody audits it.
+/// Carrying the instruction restores the document's own behaviour; carrying the result alongside it means
+/// the save changes nothing on screen while doing so.
+/// </para>
+/// <para>
+/// <b>Self-describing, so ADR-049 I-2 holds.</b> Like <c>w:sym</c>'s font + code point, everything here is a
+/// scalar the document already stated in plain text — an instruction string and its last computed value. No
+/// markup crosses the wire and the client never interprets OOXML; it hands back the same strings it was
+/// given. Constructs that need their original subtree (an embedded object, a content-control shell) stay on
+/// the base-carry path instead, which is exactly why they are not modelled this way.
+/// </para>
+/// <para>
+/// <b>What is NOT carried, and why</b> (see <c>projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</c>):
+/// a NESTED field (<c>{ IF { PAGE } = 1 … }</c>) and a field whose begin/end straddle paragraphs have no
+/// single recoverable instruction, so re-emitting one would author a DIFFERENT field than the document
+/// contained. Those keep flattening and are reported <c>field-flattened-to-text</c> — the gate is structural
+/// (can the construct be reproduced exactly?), never a keyword allow-list, because freezing PAGE in the one
+/// paragraph a user edited while the other 39 pages stay live makes a document that behaves two ways.
+/// </para>
+/// </summary>
+public sealed record ComposeField
+{
+    /// <summary>
+    /// The field instruction VERBATIM — <c>w:fldSimple/@w:instr</c>, or the concatenated <c>w:instrText</c>
+    /// content of the <c>w:fldChar</c> code phase. Carried as the source string (leading/trailing spaces
+    /// included: Word writes <c>" REF _Ref1 \h "</c>, and trimming would change the field).
+    /// </summary>
+    public required string Instruction { get; init; }
+
+    /// <summary>
+    /// The result Word last computed and the reader currently sees. Carried so the save is visually a no-op
+    /// — Word displays the cached result until something asks the field to update.
+    /// </summary>
+    public string CachedResult { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <c>true</c> when the source authored this field as the <c>w:fldChar</c> begin/instrText/separate/
+    /// result/end RUN sequence; <c>false</c> for the compact <c>w:fldSimple</c> element. The renderer
+    /// re-emits the FORM the document used. Word treats the two as equivalent, but normalising one into the
+    /// other rewrites what the file contains — and the residual-loss parity test counts element names, so a
+    /// silent normalisation would read there as a loss of one form and an invention of the other.
+    /// </summary>
+    public bool Complex { get; init; }
+
+    /// <summary>
+    /// <c>w:fldLock</c> — the author froze this field so it never updates. Carried because dropping it is
+    /// the one way this carry could make things WORSE than flattening: it would convert a deliberately
+    /// frozen field into a live one.
+    /// </summary>
+    public bool Locked { get; init; }
+
+    /// <summary>
+    /// <c>w:dirty</c> — the author asked Word to re-evaluate this field the next time the document opens.
+    /// Carried for the same reason as <see cref="Locked"/>: it is the document's own instruction about when
+    /// the field may change, and silently dropping it changes behaviour.
+    /// </summary>
+    public bool Dirty { get; init; }
+}
+
 /// <summary>Revision kind for <see cref="ComposeRevision"/> (task 025). Serialized as its STRING name.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeRevisionKind
@@ -368,6 +436,21 @@ public sealed record ComposeInlineRun
     /// with it and with the two break markers.
     /// </summary>
     public ComposeSymbol? Symbol { get; init; }
+
+    /// <summary>
+    /// Task 049 (r8, FR-A10 residual): this run IS a Word field (<c>w:fldSimple</c>, or a <c>w:fldChar</c>
+    /// begin/instrText/separate/result/end run sequence) — see <see cref="ComposeField"/>. Marker-run
+    /// contract like <see cref="IsTab"/>: <see cref="Text"/> and the other content fields are ignored, but
+    /// run PROPERTIES still apply, because a cross-reference is routinely bold or italic and the field's
+    /// result run is where that formatting lives. Mutually exclusive with the other markers.
+    /// <para>
+    /// Unlike them, a field is not emitted from inside <c>BuildRun</c>: <c>w:fldSimple</c> is a
+    /// paragraph-level element (<c>EG_PContent</c>) and the complex form is FIVE runs, so the renderer
+    /// authors it at paragraph level — the same shape the revised-hyperlink case already uses (wrapper
+    /// OUTSIDE, <c>w:ins</c>/<c>w:del</c> INSIDE).
+    /// </para>
+    /// </summary>
+    public ComposeField? Field { get; init; }
 
     /// <summary>
     /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null

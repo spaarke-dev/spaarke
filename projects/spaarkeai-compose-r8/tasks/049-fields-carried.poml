@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-A10 residual — carry Word FIELDS through an edited paragraph (`Field{Instruction,CachedResult}` marker run); retire the `field-flattened-to-text` row</title>
     <phase>4 Track A — Fidelity</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the content model and the save renderer — the write path ADR-049 governs. A field re-emitted wrongly is a document-correctness defect, not a cosmetic one.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -142,4 +142,31 @@
     <criterion>NEGATIVE: untouched blocks still clone byte-for-byte (invariant 2 unaffected).</criterion>
     <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-08-25.
+
+    DECISION: the carry gate is STRUCTURAL, not a keyword allow-list. Every field whose OOXML can be
+    reproduced exactly is carried LIVE, in the form the document used; only NESTED fields, fields whose
+    begin/end straddle paragraphs, and instruction-less fields keep flattening. Full reasoning + evidence:
+    projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md.
+
+    STALE-COMMENT VERIFICATION (the task's pivotal question): ComposeDocumentRenderer's review-011-P4/P9
+    remark "the model does not carry bookmarks" WAS stale — task 041 made bookmarks survive an edit to
+    their own paragraph (ComposeBlockMerge.CarryBookmarks) and an untouched block clones them verbatim.
+    Measured this task over ref-cross-references.docx, not inferred. The comment is corrected in place.
+    That is what licensed carrying REF/PAGEREF live instead of freezing them.
+
+    NEITHER ESCALATION TRIGGER FIRED. The re-evaluation hazard is closed by the bookmark carry plus the
+    fact that the cached result rides along (display is unchanged by the save). The projection did NOT
+    preserve the instruction as found — FieldScanState swallowed w:instrText — but fixing that is inside
+    this task's own step 3 scope, not a blocker.
+
+    RESIDUAL, stated plainly: the CLIENT half is not in this task's file boundary. docxBridge.ts drops a
+    `field` atom when it rebuilds an edited paragraph, so a keystroke edit in the browser still loses the
+    field until the client mapper is taught to return it (task 048 did the equivalent for tab/symbol). The
+    read-side producer IS shipped here — data-field-instr/-complex/-locked/-dirty on the field atom.
+
+    Suite: 11,192 passing / 0 failing (was 11,179). Publish 45.02 MB compressed incl. PDBs vs 44.96 MB
+    baseline (+0.06). No new NuGet, no new CVE. ArchTests 56/56.
+  </notes>
 </task>

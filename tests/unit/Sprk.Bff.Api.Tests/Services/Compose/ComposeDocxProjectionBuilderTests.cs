@@ -72,6 +72,14 @@ public sealed class ComposeDocxProjectionBuilderTests
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Task 049: the text a reader actually SEES — the projection HTML with its tags stripped. Used where a
+    /// test means "this string is not shown to the user", which is not the same claim as "this string does
+    /// not appear in the markup" now that atoms carry `data-*` payloads.
+    /// </summary>
+    private static string VisibleTextOf(string html) =>
+        System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]*>", string.Empty));
+
     private static readonly Regex ParaIdAttr = new("data-paraid=\"([0-9A-Fa-f]+)\"", RegexOptions.Compiled);
 
     private static List<string> EmittedParaIds(string html) =>
@@ -499,8 +507,17 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        // Task 049 sharpened this assertion. It used to be `Html.Should().NotContain("PAGE")` — a PROXY for
+        // "the field code is never editor-visible" that reads the whole markup string, attributes included.
+        // The atom now carries the instruction in a `data-*` attribute so a save can hand the field back, so
+        // the proxy no longer separates "shown to the user" from "present in the markup". The property under
+        // test is unchanged and is now asserted directly: the code is absent from the RENDERED TEXT.
+        VisibleTextOf(projection.Html).Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        VisibleTextOf(projection.Html).Should().Be("1", "only the cached result is shown");
         projection.Html.Should().Contain("data-atom-kind=\"field\"").And.Contain(">1</span>");
+        projection.Html.Should().Contain("data-field-instr=\" PAGE \"",
+            "the instruction is the payload that lets an edited paragraph return the field instead of " +
+            "dropping it (task 049) — asserted here so the read half is a tested contract, not a side effect");
         var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "44440001");
         map.Runs.Should().ContainSingle();
         map.Runs[0].AtomKind.Should().Be(ComposeAtomKind.Field);

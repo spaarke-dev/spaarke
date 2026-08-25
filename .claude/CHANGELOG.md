@@ -8,7 +8,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
-### 2026-08-25 — `spaarkeai-compose-r8` task 055 (whole-document anchored placement)
+#### 2026-08-25 — Compose write fidelity: Word fields carried (task 049, `spaarkeai-compose-r8`)
+
+- `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`: the field row moves **§2 (lost) → §3 (carried)**.
+  Ordinary Word fields now round-trip an edit to their own paragraph as their **instruction** plus the
+  result Word last computed, in the authoring form the document used. §2 keeps a narrower row for
+  **nested and unterminated** fields, which have no single reproducible instruction. Owner sign-off on the
+  list is now blocked on task 056 (embedded objects) alone.
+- **The gate is STRUCTURAL, not a keyword allow-list.** A per-instruction freeze would make one document
+  behave two ways, and a frozen `REF` goes *silently wrong* rather than visibly broken — it keeps printing
+  "Section 4" after renumbering. `w:fldLock` is carried so fields an author deliberately froze stay frozen.
+  Decision record: `projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md`.
+- **Corrects a stale claim in `ComposeDocumentRenderer`** (review 011-P4/P9) that "the model does not carry
+  bookmarks". Untrue since task 041 (`ComposeBlockMerge.CarryBookmarks`), and verifying it rather than
+  inheriting it is what allowed `REF`/`PAGEREF` to be carried LIVE instead of frozen — a carried
+  cross-reference is only an improvement if its target is still there.
+- **Known gap, tracked as task 057:** the carry is server-side (projection → model → renderer). A
+  *keystroke* edit does not yet preserve a field, because `docxBridge.ts` does not map a `field` atom back
+  into the posted model. Task 049 shipped the payload (`data-field-instr` et al) so the client half is a
+  small, well-specified change; 057 owns it.
+
+## 2026-08-25 — `spaarkeai-compose-r8` task 055 (whole-document anchored placement)
 
 No procedure-surface change. Recorded for the ADR-049 evidence trail:
 

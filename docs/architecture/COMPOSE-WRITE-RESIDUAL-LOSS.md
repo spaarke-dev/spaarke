@@ -6,7 +6,9 @@
 > Governed by [`ADR-049`](../../.claude/adr/ADR-049-compose-shadow-document.md).
 >
 > **Status**: published 2026-08-23 by `spaarkeai-compose-r8` task 045 (FR-A10);
-> **two rows retired 2026-08-24** by task 048 — tabs and symbols moved from §2 (lost) to §3 (carried).
+> **two rows retired 2026-08-24** by task 048 — tabs and symbols moved from §2 (lost) to §3 (carried);
+> **the field row retired 2026-08-25** by task 049 — ordinary Word fields moved to §3, leaving only the
+> nested/unterminated case in §2.
 > **Owner sign-off**: ⏳ *pending* — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
@@ -39,10 +41,10 @@ silent.
 
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
-| Field (`w:fldSimple`, `w:fldChar`) — **body** cross-references, TOC entries. **Not** header/footer page numbers: those live in parts the save does not re-author (the trailing `sectPr` is detached and re-attached around the body swap, so header/footer parts stay referenced) | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
+| **Nested or unterminated field** — `{ IF { PAGE } = 1 … }`, or a field whose `begin`/`end` straddle paragraphs (a `TOC`, an `INDEX`). Ordinary fields are **carried** — see §3 | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
 | Embedded object / image / chart (`w:drawing`, `w:object`, `w:pict`) | Removed from the paragraph. The underlying part stays in the file | `complex-object-dropped` |
 
-> **⚠️ Two of these rows are scheduled for removal, not sign-off.** Owner decision 2026-08-25: fields and embedded objects are to be **carried**, not accepted as losses — task **049** (fields) and task **056** (objects). Both follow the same move that already retired line breaks (task 046) and tabs + symbols (task 048): add a marker run / opaque carry, and let the parity test prove it before the row moves. This list is **not signed off** until they land; the sign-off below then covers the three remaining rows.
+> **⚠️ One of these rows is scheduled for removal, not sign-off.** Owner decision 2026-08-25: fields and embedded objects are to be **carried**, not accepted as losses — task **049** (fields, **landed 2026-08-25**) and task **056** (objects, outstanding). Both follow the same move that already retired line breaks (task 046) and tabs + symbols (task 048): add a marker run / opaque carry, and let the parity test prove it before the row moves. This list is **not signed off** until task 056 lands.
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
@@ -61,9 +63,17 @@ of the list is enforced too — if a future change starts losing one, the parity
 | **Soft line breaks** (`w:br`) | Round-trip as a marker run. Address blocks, party blocks and signature blocks are held together by these, so the paragraphs users edit most were the ones collapsing (fixed task 046) |
 | **Tabs** (`w:tab`) | Round-trip as a marker run. Definitions lists, signature blocks and table-of-contents lines are held in alignment by exactly these; flattening one to a space is invisible in a diff and obvious on the page (fixed task 048) |
 | **Symbols** (`w:sym`) — §, ¶, Wingdings glyphs | Round-trip as their **font + code point**, not as the glyph the reader resolved for display. § in a legal document is usually Symbol-font `F0A7`, so re-authoring the resolved look-alike would quietly change the character the document contains — and for a code point we cannot resolve, it would have written the on-screen placeholder into the file as content (fixed task 048) |
+| **Fields** (`w:fldSimple`, `w:fldChar`) — `REF`, `PAGEREF`, `PAGE`, `DATE`, `SEQ`, `STYLEREF`, vendor instructions | Round-trip as their **instruction**, alongside the result Word last computed — so the save changes nothing on screen and the field is a field again. `w:fldLock` rides along, because the one way this could be worse than freezing is converting a field the author deliberately locked into a live one. The form the document used (`fldSimple` vs the `fldChar` run sequence) is re-emitted, not normalised. **Not** nested or unterminated fields — those stay in §2 (fixed task 049) |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
 | Comments, tracked changes, hyperlinks | Carried on the content model itself |
+
+> **What a carried field does *not* keep.** The field comes back with its instruction, its cached result and
+> its lock; the result text is re-authored with the bold / italic / underline the model carries, so run
+> properties on the result beyond those three (`w:noProof`, a character style, a colour) are not restored,
+> and a result that was several differently-formatted runs comes back as one. This is the same edited-block
+> property tier every other run is subject to — it is stated here rather than left to be discovered, because
+> "carried" should not be read as "byte-identical".
 
 ## 4. Known gaps that are not construct loss
 
@@ -92,12 +102,13 @@ edited block — and holds this document to the result in **both** directions:
   "safely conservative" — it tells you we damage things we do not, which is how a document stops being
   read.
 
-### Measured 2026-08-24 (task 048; `sym` + `tab` rows changed since the 2026-08-23 publication)
+### Measured 2026-08-25 (task 049; the two field rows changed since the 2026-08-24 run)
 
 | Family | Untouched block | Edited block | Code emitted |
 |---|---|---|---|
-| `fldSimple` | 1/1 kept | 0/1 | `field-flattened-to-text` |
-| `fldChar` | 2/2 kept | 0/2 | `field-flattened-to-text` |
+| `fldSimple` | 1/1 kept | **1/1 kept** | *(none — carried, task 049)* |
+| `fldChar` | 2/2 kept | **2/2 kept** | *(none — carried, task 049)* |
+| `fldNested` — `{ IF { PAGE } = 1 … }` | 6/6 kept | 0/6 | `field-flattened-to-text` |
 | `drawing` | 1/1 kept | 0/1 | `complex-object-dropped` |
 | `object` | 1/1 kept | 0/1 | `complex-object-dropped` |
 | `pict` | 1/1 kept | 0/1 | `complex-object-dropped` |
@@ -123,6 +134,12 @@ would have inherited the same blind spot: you cannot document a loss you do not 
 Fixed in task 045 by adding `sdt` to the reportable set and reusing the code whose client copy already
 said the right thing.
 
+And on its third it did the same for fields. Task 049 taught both field forms to round-trip, and the
+check failed in the over-claim direction until this document stopped calling them lost — while the
+`fldNested` row was added in the same change precisely so `field-flattened-to-text` remains a code the
+renderer really does emit. Retiring the last producer of a code without noticing would have left the
+document naming a warning nothing can raise, which is direction B's failure mode arriving by the front door.
+
 And on its second run it caught the document going stale in the other direction: task 046 taught soft
 line breaks to round-trip, and the parity check failed because this document still listed
 `edited-paragraph-line-break-dropped` as a loss that no longer happens. That is the accretion failure the
@@ -143,7 +160,7 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 |---|---|
 | Version | 2026-08-23 (first publication) |
 | Measured against | `spaarkeai-compose-r8` @ task 045, corpus of 23 documents |
-| Signed off by | ⏳ *pending* — **blocked on tasks 049 + 056** (owner declined the field + object rows 2026-08-25) |
+| Signed off by | ⏳ *pending* — **blocked on task 056** (owner declined the field + object rows 2026-08-25; task 049 landed the field carry the same day, so only the object row remains outstanding) |
 | Date | ⏳ *pending* |
 
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the

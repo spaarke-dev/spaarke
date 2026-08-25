@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 residual — the CLIENT half of the field carry: a `field` atom must round-trip into the posted content model, or task 049's carry is unreachable from a keystroke edit</title>
+    <phase>4 Track A — Fidelity</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches `docxBridge.ts` — the client's authoritative editor→model projection, whose text coordinate space the diff/redline paths depend on. A segment that contributes the wrong number of characters silently corrupts every offset after it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: a field is NOT the tab/symbol case it superficially resembles. Those contribute exactly one character each, so task 048's segment walk stayed byte-identical to `rejectStateText`. A field contributes ZERO characters and must still emit a run — so this is the first segment that is present in the run stream and absent from the coordinate space, and `collectSegments`' documented byte-identity contract has to be re-established rather than assumed.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`docxBridge.ts` is the client save spine — NEVER delete this file (project CLAUDE.md).</parallel-reason>
+    <deps>049</deps>
+    <tags>frontend, compose, testing</tags>
+    <estimated-effort>5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Task 049 carried Word fields through the SERVER path: projection → content model → renderer. It is
+    tested end to end there and the residual-list row moved §2 → §3 on that evidence.
+
+    **It is not yet reachable from a keystroke edit.** Task 049's own report says so, and it was verified
+    independently: `composeInlineAtom` appears EXACTLY ONCE in `docxBridge.ts` — inside
+    `renderableAtomText`, the text-coordinate helper. The run-building walk (`collectSegments` →
+    `buildRunsFromNode`) does not handle atoms at all, so a `field` atom in an edited paragraph falls
+    through to `(n.content ?? []).forEach(walk)`, contributes nothing (a leaf has no content), and the field
+    never reaches the posted model. The server then has nothing to re-emit.
+
+    This is the project's recurring failure mode with the polarity reversed: a PRODUCER with no CONSUMER.
+    It was caught and reported rather than shipped silently, and this task closes it.
+
+    **The payload already exists.** Task 049 shipped the server side of the contract: the read-walk field
+    atom now carries `data-field-instr`, `data-field-complex`, `data-field-locked`, `data-field-dirty`.
+    The presence of `data-field-instr` IS the carryability gate — a nested or unterminated field gets no
+    payload, so the client structurally cannot return something the server would refuse.
+
+    **Why this is not simply "do what task 048 did".** Read `collectSegments` around the
+    `renderableAtomText` branch before designing. Task 048's atoms (`tab`, `symbol`) each contribute
+    exactly ONE character, which is what let that walk stay byte-identical to `rejectStateText` — a
+    contract `collectSegments`' own doc comment states, and which the diff coordinate space depends on.
+
+    A field contributes ZERO characters (`renderableAtomText` returns null for it deliberately: its display
+    text is a UI label like "Field: 3", and injecting a label into the document's coordinate space would be
+    worse than the zero it contributes today). So a field segment is the FIRST one that must be present in
+    the run stream and absent from the text coordinate space. Establish that the byte-identity contract
+    still holds — do not assume it, and do not "fix" it by giving the field a character.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in `docxBridge.ts`'s editor→model projection, its segment/run walk, and the `opaqueAtomNode` schema.</role>
+
+  <goal>
+    A Word field in a paragraph the user typed in survives the save as a field. The client emits a marker
+    run carrying the field's instruction (and its complex/locked/dirty facts) from the atom's own
+    attributes, contributing zero characters to the text coordinate space, and `rejectStateText` /
+    `collectSegments` byte-identity is demonstrably preserved.
+  </goal>
+
+  <context>
+    <background>
+      Task 048 is the precedent for the atom→marker-run move, and its shape is visible at
+      `docxBridge.ts` ~line 548 (segment build) and ~line 779 (segment → marker run). Follow its structure;
+      diverge only where the zero-width difference forces it, and say where.
+
+      Task 049's server contract to bind against: `ComposeInlineRun.Field` is a `ComposeField` record with
+      `Instruction` / `CachedResult` / `Complex` / `Locked` / `Dirty`. The server sanitizes and
+      length-caps the instruction at authoring time and refuses control characters — so the client does not
+      need to re-validate, but it must not send something structurally different from what the server
+      parses.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md">NEVER delete `docxBridge.ts`.</constraint>
+    <constraint source="task 048 contract">`collectSegments`' walk MUST stay byte-identical to `rejectStateText`'s. A field contributes ZERO characters to both — prove it, do not assert it.</constraint>
+    <constraint source="task 049">The client MUST NOT invent a field. Only an atom carrying `data-field-instr` round-trips; absence of that attribute is the server's own carryability refusal and must be honoured.</constraint>
+    <constraint source="ADR-049 I-5">One body author (server-side). This task only makes the client SUPPLY the model; it must not author OOXML.</constraint>
+    <constraint source="project">MUST NOT delete or retire anything; MUST NOT touch `src/server/**` (task 049 owns the server half and it is complete).</constraint>
+    <constraint source="ADR-038">Client tests over a REAL headless TipTap editor with a real atom node, not a hand-built node literal standing in for one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Editor→model projection, atom round-trip, text coordinate space</topic>
+    <files>
+      <file>docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read `collectSegments` + `buildRunsFromNode` + task 048's two touch points FIRST.</step>
+    <step order="1">Write the failing test FIRST: an editor containing a real `field` atom, edited, produces a posted model whose run carries the instruction. Observe it fail.</step>
+    <step order="2">Prove the coordinate-space contract: assert `collectSegments`' concatenated text equals `rejectStateText` for a document containing a field atom, BEFORE and AFTER the change.</step>
+    <step order="3">Implement the zero-width segment + marker run, gated on `data-field-instr`.</step>
+    <step order="4">Prove the refusal path: an atom WITHOUT `data-field-instr` (nested/unterminated field) round-trips as it does today — no invented field.</step>
+    <step order="5">Full client suite green; report anything you could not verify.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If preserving `collectSegments`/`rejectStateText` byte-identity turns out to require giving the field a character in the coordinate space, STOP. That would shift every offset after it and silently corrupt the diff/redline paths — surface it rather than trading a fidelity fix for an offset bug.</trigger>
+    <trigger>If the atom's attributes do not survive the editor round-trip (parse → edit → serialize), STOP: the payload half is then also incomplete and the fix cannot be built on it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/utils/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A field in an EDITED paragraph round-trips from a real headless editor into the posted model with its instruction intact.</criterion>
+    <criterion>`collectSegments` text is byte-identical to `rejectStateText` for a field-bearing document — asserted, both before and after.</criterion>
+    <criterion>An atom lacking `data-field-instr` produces NO field run (the server's carryability refusal is honoured client-side).</criterion>
+    <criterion>Every test observed to FAIL before its fix.</criterion>
+    <criterion>Full client suite green (98 suites / 1201 tests at the current baseline).</criterion>
+    <criterion>NEGATIVE: nothing deleted; `docxBridge.ts` intact; no `src/server/**` edits.</criterion>
+  </acceptance-criteria>
+</task>

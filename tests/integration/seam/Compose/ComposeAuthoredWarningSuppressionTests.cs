@@ -36,8 +36,14 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
     // Task 046 re-levered this fixture. It was "Engagement Letter.docx", whose only loss was two dropped
     // soft breaks — and task 046 taught soft breaks to round-trip, so that document now loses NOTHING and
     // this test would have been proving suppression against a save that would not have warned anyway. The
-    // lever moved to a still-lossy construct (a complex field) rather than the assertion being weakened.
-    private const string WarningFixtureFileName = "ref-cross-references.docx";
+    // lever moved to a still-lossy construct rather than the assertion being weakened.
+    //
+    // Task 049 re-levered it AGAIN, for the same reason and by the same rule: the lever had become
+    // "ref-cross-references.docx" (a complex field), and fields now round-trip too. It is now a FOOTNOTE
+    // reference — an accepted loss on the residual list with no scheduled carry, so it is the durable
+    // choice. This churn is the forcing function working: every time a loss gets fixed, the test that used
+    // it as a control has to move to a real one instead of quietly asserting a loss that stopped happening.
+    private const string WarningFixtureFileName = "footnote-references.docx";
     private const string EditMarker = " [A08-SUPPRESSION]";
 
     private readonly ComposeFidelitySeamFixture _fixture;
@@ -55,10 +61,10 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
         var warnings = await SaveWithPersistedOriginAsync(ComposeOrigin.Imported);
 
         warnings.Should().NotBeNull(
-            "an IMPORTED document has an original to lose against, and this edit genuinely drops soft " +
-            "breaks — suppressing that would be exactly the silence this project exists to end");
+            "an IMPORTED document has an original to lose against, and this edit genuinely drops a footnote " +
+            "reference — suppressing that would be exactly the silence this project exists to end");
         warnings!.Should().Contain(
-            w => w.Contains("field-flattened", StringComparison.OrdinalIgnoreCase),
+            w => w.Contains("footnote-reference", StringComparison.OrdinalIgnoreCase),
             "the warning must name what was lost");
     }
 

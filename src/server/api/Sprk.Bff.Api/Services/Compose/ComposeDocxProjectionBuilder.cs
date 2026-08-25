@@ -528,11 +528,36 @@ public sealed class ComposeDocxProjectionBuilder
         public FieldPhase Phase = FieldPhase.None;
         public readonly List<Run> ResultRuns = new();
 
+        /// <summary>
+        /// Task 049: the field INSTRUCTION accumulated from the code phase's <c>w:instrText</c> /
+        /// <c>w:delInstrText</c> children. Swallowing these was correct while a field could only ever be
+        /// flattened to its display text; carrying the field needs the half that says what it IS.
+        /// </summary>
+        public readonly StringBuilder Instruction = new();
+
+        /// <summary>
+        /// Task 049: the deepest nesting reached in this span. A field is carryable only at 1 — at 2 the
+        /// inner field's own <c>w:instrText</c> has been folded into this accumulation, so the string is a
+        /// concatenation that would author a DIFFERENT field. Recorded rather than inferred from
+        /// <see cref="Depth"/>, which is back at 0 by the time the caller decides.
+        /// </summary>
+        public int MaxDepth;
+
+        /// <summary><c>w:fldLock</c> on the outermost <c>begin</c> — the author froze this field.</summary>
+        public bool Locked;
+
+        /// <summary><c>w:dirty</c> on the outermost <c>begin</c> — re-evaluate on next open.</summary>
+        public bool Dirty;
+
         public void Reset()
         {
             Depth = 0;
             Phase = FieldPhase.None;
             ResultRuns.Clear();
+            Instruction.Clear();
+            MaxDepth = 0;
+            Locked = false;
+            Dirty = false;
         }
     }
 
@@ -558,8 +583,14 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     field.Phase = FieldPhase.Code;
                     field.ResultRuns.Clear();
+                    field.Instruction.Clear();
+                    // Task 049: fldLock / dirty are declared on the OUTERMOST begin and govern the whole
+                    // field, so they are read here and not overwritten by a nested begin below.
+                    field.Locked = fldChar.FieldLock?.Value == true;
+                    field.Dirty = fldChar.Dirty?.Value == true;
                 }
                 field.Depth++;
+                if (field.Depth > field.MaxDepth) field.MaxDepth = field.Depth;
                 return true;
             }
             if (type == FieldCharValues.Separate)
@@ -584,11 +615,56 @@ public sealed class ComposeDocxProjectionBuilder
             {
                 field.ResultRuns.Add(run); // cached result content — becomes the atom's display text
             }
-            // Phase == Code: field-code (w:instrText) runs are never editor-visible — swallowed.
+            else
+            {
+                // Phase == Code: field-code runs are never editor-VISIBLE, and still are not — the atom's
+                // display text is unchanged. Task 049 accumulates them anyway, because the instruction is
+                // what makes the construct a field rather than the number it printed last time.
+                foreach (var child in run.ChildElements)
+                {
+                    switch (child)
+                    {
+                        case FieldCode code: field.Instruction.Append(code.Text); break;
+                        case DeletedFieldCode deleted: field.Instruction.Append(deleted.Text); break;
+                        default: break;
+                    }
+                }
+            }
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Task 049: the self-describing payload an inline FIELD atom carries back to the client, or <c>null</c>
+    /// when the field is not carryable.
+    /// </summary>
+    /// <remarks>
+    /// <para>The PRESENCE of <c>data-field-instr</c> is the contract: it means "this field can be handed
+    /// back verbatim on save". A nested or instruction-less field gets no payload at all, so a client cannot
+    /// accidentally return a construct the server would have to refuse — the gate lives in one place
+    /// (<see cref="TryCarryField"/>'s rule, mirrored here) rather than being restated as client policy.</para>
+    /// <para>Emitting this is the read half of the carry. Without it the write half is unreachable from the
+    /// editor: an edited paragraph is rebuilt from the client's own nodes, and a field atom that carries
+    /// nothing contributes nothing.</para>
+    /// </remarks>
+    private static (string Name, string Value)[]? FieldAtomDataAttributes(
+        string instruction, bool complex, bool locked, bool dirty, bool nested)
+    {
+        if (nested || string.IsNullOrWhiteSpace(instruction))
+        {
+            return null;
+        }
+
+        var attributes = new List<(string, string)>(4)
+        {
+            ("data-field-instr", instruction),
+        };
+        if (complex) attributes.Add(("data-field-complex", "1"));
+        if (locked) attributes.Add(("data-field-locked", "1"));
+        if (dirty) attributes.Add(("data-field-dirty", "1"));
+        return attributes.ToArray();
     }
 
     /// <summary>A run carrying a complex/floating object — DrawingML (<c>w:drawing</c>, image/shape), an
@@ -744,7 +820,17 @@ public sealed class ComposeDocxProjectionBuilder
                     {
                         if (fieldClosed)
                         {
-                            ctx.AppendAtom(ComposeAtomKind.Field, ExtractRunsDisplayText(field.ResultRuns));
+                            // Task 049: the atom's DISPLAY is unchanged — still the field's cached result,
+                            // still a non-editable leaf. What is new is the self-describing payload beside
+                            // it, so a client that rebuilds an edited paragraph can hand the field back
+                            // instead of dropping it. Same mechanism (and same I-2 argument) as w:sym's
+                            // font + code point: scalars only, no markup crosses the wire.
+                            ctx.AppendAtom(
+                                ComposeAtomKind.Field,
+                                ExtractRunsDisplayText(field.ResultRuns),
+                                dataAttributes: FieldAtomDataAttributes(
+                                    field.Instruction.ToString(), complex: true,
+                                    locked: field.Locked, dirty: field.Dirty, nested: field.MaxDepth > 1));
                             field.Reset();
                         }
                         break;
@@ -757,7 +843,13 @@ public sealed class ComposeDocxProjectionBuilder
                     RenderRun(r, ctx);
                     break;
                 case SimpleField sf:
-                    ctx.AppendAtom(ComposeAtomKind.Field, ExtractAtomDisplayText(sf));
+                    ctx.AppendAtom(
+                        ComposeAtomKind.Field,
+                        ExtractAtomDisplayText(sf),
+                        dataAttributes: FieldAtomDataAttributes(
+                            sf.Instruction?.Value ?? string.Empty, complex: false,
+                            locked: sf.FieldLock?.Value == true, dirty: sf.Dirty?.Value == true,
+                            nested: sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any()));
                     break;
                 case Hyperlink h:
                     RenderHyperlink(h, ctx);
@@ -2425,10 +2517,24 @@ public sealed class ComposeDocxProjectionBuilder
                     {
                         if (fieldClosed)
                         {
-                            // Field flattens to its cached RESULT text as plain prose (the field's dynamic
-                            // behavior does not survive; its visible value does). 026 refines the surface.
-                            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx, revision);
-                            ctx.AddWarning("field-flattened-to-text", 1);
+                            // Task 049: the field is CARRIED when its instruction can be reproduced exactly
+                            // — see TryCarryField. Otherwise it flattens to its cached RESULT text as plain
+                            // prose, which is what every field did before this task: the visible value
+                            // survives, the dynamic behaviour does not, and the loss is named.
+                            var complexResult = ExtractRunsDisplayText(field.ResultRuns);
+                            if (!TryCarryField(
+                                    sink, ctx, href, revision,
+                                    instruction: field.Instruction.ToString(),
+                                    cachedResult: complexResult,
+                                    complex: true,
+                                    locked: field.Locked,
+                                    dirty: field.Dirty,
+                                    nested: field.MaxDepth > 1,
+                                    firstResultRun: field.ResultRuns.FirstOrDefault()))
+                            {
+                                AddPlainRun(sink, complexResult, href, ctx, revision);
+                                ctx.AddWarning("field-flattened-to-text", 1);
+                            }
                             field.Reset();
                         }
                         break;
@@ -2458,8 +2564,23 @@ public sealed class ComposeDocxProjectionBuilder
                     ProjectRun(r, sink, href, ctx, revision);
                     break;
                 case SimpleField sf:
-                    AddPlainRun(sink, ExtractAtomDisplayText(sf), href, ctx, revision);
-                    ctx.AddWarning("field-flattened-to-text", 1);
+                    // Task 049: the compact form. Its instruction is an attribute rather than a code phase,
+                    // so it is read directly — but the carryability gate is the same one the complex form
+                    // uses, including the nesting exclusion (a w:fldSimple may itself contain a field).
+                    var simpleResult = ExtractAtomDisplayText(sf);
+                    if (!TryCarryField(
+                            sink, ctx, href, revision,
+                            instruction: sf.Instruction?.Value ?? string.Empty,
+                            cachedResult: simpleResult,
+                            complex: false,
+                            locked: sf.FieldLock?.Value == true,
+                            dirty: sf.Dirty?.Value == true,
+                            nested: sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any(),
+                            firstResultRun: sf.Descendants<Run>().FirstOrDefault()))
+                    {
+                        AddPlainRun(sink, simpleResult, href, ctx, revision);
+                        ctx.AddWarning("field-flattened-to-text", 1);
+                    }
                     break;
                 case Hyperlink h:
                     var resolved = ResolveHyperlinkHref(h, ctx.MainPart);
@@ -2830,6 +2951,81 @@ public sealed class ComposeDocxProjectionBuilder
         }
 
         FlushText(); // trailing text after the last break (or the whole run when no break split it)
+    }
+
+    /// <summary>
+    /// Task 049 (FR-A10 residual): adds the field as a <see cref="ComposeInlineRun.Field"/> marker run when
+    /// it can be reproduced EXACTLY, and returns <c>false</c> when it cannot — the caller then flattens it
+    /// to its cached display text exactly as every field did before this task.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The gate is structural, not a keyword allow-list.</b> The obvious-looking alternative was to
+    /// carry <c>PAGE</c>/<c>DATE</c> (harmless on re-evaluation) and freeze <c>REF</c>/<c>PAGEREF</c> (which
+    /// show Word's broken-reference text if their target bookmark did not survive). Three findings ruled
+    /// that out, recorded in <c>notes/049-field-carry-decisions.md</c>:</para>
+    /// <list type="number">
+    /// <item><description><b>The target survives.</b> Bookmarks are carried since task 041 — an untouched
+    /// block is cloned verbatim and an edited one gets <c>ComposeBlockMerge.CarryBookmarks</c>. The
+    /// renderer's own 011-P4/P9 remark ("the model does not carry bookmarks") predates that and has been
+    /// corrected. So the hazard the allow-list existed to dodge is closed, and measured:
+    /// <c>ComposeFieldCarrySeamTests.EditedBookmarkParagraph_StillCarriesTheTarget_SoACarriedRefResolves</c>.</description></item>
+    /// <item><description><b>A keyword allow-list makes one document behave two ways.</b> Freezing the
+    /// <c>DATE</c> in the paragraph a user edited while the other 39 pages keep live <c>DATE</c> fields is
+    /// an inconsistency nothing on screen explains — worse than either uniform outcome.</description></item>
+    /// <item><description><b>Freezing is not the null action.</b> A flattened <c>REF</c> keeps printing
+    /// "Section 4" after the agreement renumbers to 5. A visible broken reference is a worse-looking failure
+    /// and a better one: silence in a legal document is the failure nobody catches.</description></item>
+    /// </list>
+    /// <para>What genuinely cannot be reproduced is excluded here, and only that: a NESTED field (the
+    /// instruction recoverable from the outer scan is a concatenation of two fields, so re-emitting it would
+    /// author neither), and a field with no instruction at all. A field whose begin/end straddle paragraphs
+    /// never closes, so it never reaches this method — it keeps its own <c>field-unterminated</c> anomaly on
+    /// the read side and flattens on the write side.</para>
+    /// <para><b>Run properties come from the field's RESULT run</b> — a cross-reference is routinely bold or
+    /// italic, and that formatting lives there. Same rule as <c>IsTab</c>: the marker replaces the content,
+    /// never the properties.</para>
+    /// </remarks>
+    private static bool TryCarryField(
+        List<ComposeInlineRun> sink,
+        ModelWalkContext ctx,
+        string? href,
+        ComposeRevision? revision,
+        string instruction,
+        string cachedResult,
+        bool complex,
+        bool locked,
+        bool dirty,
+        bool nested,
+        Run? firstResultRun)
+    {
+        if (nested || string.IsNullOrWhiteSpace(instruction) || !ctx.HasOutputBudget)
+        {
+            return false;
+        }
+
+        var rPr = firstResultRun?.RunProperties;
+
+        sink.Add(new ComposeInlineRun
+        {
+            Field = new ComposeField
+            {
+                Instruction = instruction,
+                // Clamped like any other projected text: the result is document prose and shares the same
+                // output budget. The INSTRUCTION is never clamped — a truncated instruction is a different
+                // field, so an oversized one is refused above rather than shortened.
+                CachedResult = ctx.ClampText(cachedResult),
+                Complex = complex,
+                Locked = locked,
+                Dirty = dirty,
+            },
+            Bold = IsOn(rPr?.Bold),
+            Italic = IsOn(rPr?.Italic),
+            Underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None,
+            Href = href,
+            Revision = revision,
+        });
+
+        return true;
     }
 
     private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)

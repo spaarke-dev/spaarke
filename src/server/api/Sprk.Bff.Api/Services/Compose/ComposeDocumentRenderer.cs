@@ -382,12 +382,24 @@ public sealed partial class ComposeDocumentRenderer
     /// <b>Carrier metadata preserved</b>: core properties (creator etc.) are left untouched when present;
     /// <paramref name="author"/> is used only when the carrier lacks a core-properties part entirely.
     /// Orphaned parts (images/footnotes referenced only by the replaced body) remain in the package as inert
-    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). Two further
-    /// documented degradations (review 011-P4/P9): a preserved header/footer whose <c>REF</c> field or
-    /// anchor hyperlink targets a BODY bookmark loses its target with the body swap (the model does not
-    /// carry bookmarks — Word shows its standard broken-reference text on field update); and a carrier
-    /// instance referencing an UNDEFINED abstractNumId that happens to equal a remapped renderer abstract id
-    /// would resolve to it — only observable from numbered paragraphs inside preserved parts, accepted.
+    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). One further
+    /// documented degradation: a carrier instance referencing an UNDEFINED abstractNumId that happens to
+    /// equal a remapped renderer abstract id would resolve to it — only observable from numbered paragraphs
+    /// inside preserved parts, accepted.
+    /// </para>
+    /// <para>
+    /// <b>Review 011-P4/P9 is CLOSED (task 049).</b> It recorded that a preserved header/footer whose
+    /// <c>REF</c> field or anchor hyperlink targets a BODY bookmark would lose its target with the body
+    /// swap, "because the model does not carry bookmarks". That reason stopped being true at task 041:
+    /// bookmarks survive a save in both block positions — an untouched block is cloned verbatim, and an
+    /// edited one has its base block's bookmarks restored by <c>ComposeBlockMerge.CarryBookmarks</c> (span
+    /// widened to the paragraph, which keeps a cross-reference resolving). Measured by
+    /// <c>ComposeFieldCarrySeamTests.EditedBookmarkParagraph_StillCarriesTheTarget_SoACarriedRefResolves</c>
+    /// over <c>ref-cross-references.docx</c>. Verifying this rather than inheriting it is what let task 049
+    /// carry <c>REF</c>/<c>PAGEREF</c> LIVE instead of freezing them: a carried cross-reference is only an
+    /// improvement if its target is still there. Residual: a bookmark whose paragraph the user DELETED is
+    /// gone — Word's own semantics for the same edit — and the R6 fail-open path (baseline unprojectable)
+    /// loses bookmarks along with everything else it does not clone.
     /// </para>
     /// </remarks>
     /// <param name="carrierBytes">The retained source package (a valid WordprocessingML OPC package).</param>
@@ -1163,6 +1175,31 @@ public sealed partial class ComposeDocumentRenderer
                 continue;
             }
 
+            // Task 049: a FIELD marker run is authored at paragraph level rather than from BuildRun, for two
+            // schema reasons: `w:fldSimple` is an EG_PContent element (it is not a run and cannot sit inside
+            // `w:ins`/`w:del`), and the complex form is FIVE runs rather than one. Revision and hyperlink
+            // context are handled inside — wrapper OUTSIDE, `w:ins`/`w:del` INSIDE, exactly the nesting the
+            // revised-linked-run case above establishes.
+            if (run.Field is { } field)
+            {
+                CloseWrapper();
+                if (AppendField(paragraph, run, field, state))
+                {
+                    continue;
+                }
+
+                // The instruction did not survive authoring hardening (see AppendField). Degrade to the
+                // cached result as plain prose — today's flatten, and a defined outcome (invariant 1).
+                // Deliberately NOT warned here: the merge's base-vs-rendered count already reports the
+                // field as lost, and task 045 established that saying it twice is how a taxonomy stops
+                // being read.
+                paragraph.AppendChild(BuildRun(
+                    run with { Field = null, Text = field.CachedResult },
+                    state,
+                    deleted: run.Revision?.Kind == ComposeRevisionKind.Deleted));
+                continue;
+            }
+
             if (run.Revision is not { } revision)
             {
                 CloseWrapper();
@@ -1195,6 +1232,154 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         return paragraph;
+    }
+
+    /// <summary>
+    /// Task 049 (FR-A10 residual): re-authors a carried Word field onto <paramref name="paragraph"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The FORM the document used is reproduced</b>, not normalised: <c>w:fldSimple</c> comes back
+    /// as <c>w:fldSimple</c> and the <c>w:fldChar</c> run sequence as a run sequence. Word treats them as
+    /// equivalent, but a save is not licensed to rewrite what the file contains just because the two render
+    /// alike — the same reasoning that makes task 048 carry a symbol's code point instead of its glyph.</para>
+    /// <para><b>The cached result is re-emitted with the field.</b> Word displays that until something asks
+    /// the field to update, so the save is visually a no-op while the field becomes a field again. A field
+    /// with no cached result is legal (Word shows the instruction's default) and simply has no result run.</para>
+    /// <para><b>Nesting.</b> `w:ins`/`w:del` may not contain `w:fldSimple`, so the simple form puts the
+    /// revision wrapper INSIDE, around its result run — which is what Word itself writes. The complex form
+    /// is plain runs, so its wrapper goes outside them. Either way the field element is what the paragraph
+    /// (or the hyperlink, which admits EG_PContent) receives.</para>
+    /// </remarks>
+    private static bool AppendField(Paragraph paragraph, ComposeInlineRun run, ComposeField field, ListRenderState state)
+    {
+        // CLIENT INPUT REACHING OOXML AUTHORING — the recurring review-finding class this file already
+        // gates for revision attribution (021-F1 / 022-F1 / 024-F1), applied to the instruction. A posted
+        // model is not necessarily one we projected: it can carry XML-illegal control characters (which
+        // would make the saved package unopenable — an UNDEFINED outcome, and invariant 1 forbids that) or
+        // an unbounded string. Sanitized and clamped here rather than trusted, and a request that does not
+        // survive that returns false so the caller can flatten instead.
+        var instruction = SanitizeText(field.Instruction);
+        if (string.IsNullOrWhiteSpace(instruction) || instruction.Length > MaxFieldInstructionChars)
+        {
+            return false;
+        }
+
+        var deleted = run.Revision?.Kind == ComposeRevisionKind.Deleted;
+
+        // The result run carries the field's own character formatting (marker-run contract: properties
+        // still apply). Built through BuildRun so bold/italic/underline and the delText rule stay in ONE
+        // place rather than being restated here.
+        var resultRun = field.CachedResult.Length > 0
+            ? BuildRun(new ComposeInlineRun
+            {
+                Text = field.CachedResult,
+                Bold = run.Bold,
+                Italic = run.Italic,
+                Underline = run.Underline,
+            }, state, deleted)
+            : null;
+
+        OpenXmlElement fieldElement;
+
+        if (field.Complex)
+        {
+            // begin / instrText / separate / result / end. A run sequence is valid anywhere a run is, so
+            // the revision wrapper (when present) simply contains all of them.
+            var begin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
+            ApplyFieldFlags(begin.GetFirstChild<FieldChar>()!, field);
+
+            OpenXmlElement instructionRun = deleted
+                ? new Run(new DeletedFieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve })
+                : new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve });
+
+            var parts = new List<OpenXmlElement> { begin, instructionRun };
+            if (resultRun is not null)
+            {
+                parts.Add(new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }));
+                parts.Add(resultRun);
+            }
+            parts.Add(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+
+            if (run.Revision is { } complexRevision)
+            {
+                var wrapper = NewRevisionWrapper(complexRevision, state);
+                foreach (var part in parts) wrapper.AppendChild(part);
+                fieldElement = wrapper;
+            }
+            else if (!string.IsNullOrWhiteSpace(run.Href))
+            {
+                // A hyperlink admits EG_PContent, so it can hold the whole sequence.
+                var link = new Hyperlink { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+                foreach (var part in parts) link.AppendChild(part);
+                paragraph.AppendChild(link);
+                return true;
+            }
+            else
+            {
+                // No element may hold a bare run sequence, so the parts go straight onto the paragraph.
+                foreach (var part in parts) paragraph.AppendChild(part);
+                return true;
+            }
+        }
+        else
+        {
+            var simple = new SimpleField { Instruction = instruction };
+            ApplyFieldFlags(simple, field);
+
+            if (resultRun is not null)
+            {
+                // Word's own nesting for a revised simple field: w:fldSimple outside, w:ins/w:del inside.
+                if (run.Revision is { } simpleRevision)
+                {
+                    var wrapper = NewRevisionWrapper(simpleRevision, state);
+                    wrapper.AppendChild(resultRun);
+                    simple.AppendChild(wrapper);
+                }
+                else
+                {
+                    simple.AppendChild(resultRun);
+                }
+            }
+
+            fieldElement = simple;
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            paragraph.AppendChild(new Hyperlink(fieldElement) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
+            return true;
+        }
+
+        paragraph.AppendChild(fieldElement);
+        return true;
+    }
+
+    /// <summary>
+    /// Authoring cap on a posted field instruction. Real instructions are tens of characters
+    /// (a <c>REF</c> to a bookmark with two switches is about 32 characters); this is generous by two
+    /// orders of magnitude and still bounded, in the same spirit as <see cref="MaxRevisionAuthorChars"/>. Over the cap the field
+    /// flattens rather than being truncated — a truncated instruction is a DIFFERENT field, and silently
+    /// authoring one would be exactly the "re-authored look-alike" defect the carry exists to avoid.
+    /// </summary>
+    private const int MaxFieldInstructionChars = 4096;
+
+    /// <summary>
+    /// Copies <c>w:fldLock</c> / <c>w:dirty</c> onto the emitted field. <c>fldLock</c> is the one attribute
+    /// this carry MUST not drop: the author set it so the field never updates, and re-authoring it without
+    /// the lock would silently convert a deliberately frozen field into a live one — the single way carrying
+    /// a field could be worse than flattening it.
+    /// </summary>
+    private static void ApplyFieldFlags(SimpleField element, ComposeField field)
+    {
+        if (field.Locked) element.FieldLock = true;
+        if (field.Dirty) element.Dirty = true;
+    }
+
+    /// <inheritdoc cref="ApplyFieldFlags(SimpleField, ComposeField)"/>
+    private static void ApplyFieldFlags(FieldChar element, ComposeField field)
+    {
+        if (field.Locked) element.FieldLock = true;
+        if (field.Dirty) element.Dirty = true;
     }
 
     /// <summary>Task 012: revision-author resolution — a fact that carries an author keeps it

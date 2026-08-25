@@ -119,12 +119,17 @@ public sealed class ComposeSaveWarningTaxonomyTests
         // dropped soft breaks — and task 046 taught soft breaks to round-trip, so that document now
         // loses NOTHING and the test would have been asserting a loss that no longer happens. The lever
         // moved to a still-lossy construct rather than the assertion being weakened: a complex field,
-        // which the content model genuinely cannot hold.
+        // which the content model genuinely could not hold.
+        //
+        // Task 049 re-levered it AGAIN — fields round-trip now too. The lever is a FOOTNOTE REFERENCE, an
+        // accepted loss on the residual list with no scheduled carry, so it should not need moving a third
+        // time. Both paragraphs that carry one are edited so the COUNT assertion below still measures
+        // instances rather than degenerating to a single-item check that would pass for either meaning.
 
-        var source = LoadCorpus("ref-cross-references.docx");
+        var source = LoadCorpus("footnote-references.docx");
         var model = Project(source);
-        // The field lives in the LAST paragraph, so the representative first-run edit would miss it.
-        var edited = EditLastNonEmptyRun(model, out var applied);
+        // Blocks 1 and 2 each carry a w:footnoteReference; block 0 carries none.
+        var edited = EditBlocks(model, new[] { 1, 2 }, out var applied);
         applied.Should().BeTrue();
 
         var warnings = new List<ComposeProjectionWarning>();
@@ -132,16 +137,15 @@ public sealed class ComposeSaveWarningTaxonomyTests
         new ComposeDocumentRenderer().RenderIntoCarrier(
             source, edited, "seam-044", warnings, mergeUnchangedBlocks: true, mergeStats: stats);
 
-        stats.RenderedBlocks.Should().Be(1, "exactly one block was edited");
+        stats.RenderedBlocks.Should().Be(2, "exactly the two reference-bearing blocks were edited");
         _output.WriteLine($"warnings: {string.Join(", ", warnings.Select(w => $"{w.Code}×{w.Count}"))}");
 
-        warnings.Should().Contain(w => w.Code == "field-flattened-to-text",
-            "the edited paragraph carries a complex field (w:fldChar begin/separate/end) that the content " +
-            "model cannot hold, so it is genuinely lost — and a loss the save does not report is the " +
-            "failure this whole project exists to end. Suppressing FALSE warnings is only safe if the TRUE " +
-            "ones fire in the same change");
+        warnings.Should().Contain(w => w.Code == "unrepresented-footnote-reference",
+            "the edited paragraphs each carry a w:footnoteReference that the content model cannot hold, so " +
+            "it is genuinely lost — and a loss the save does not report is the failure this whole project " +
+            "exists to end. Suppressing FALSE warnings is only safe if the TRUE ones fire in the same change");
 
-        warnings.Where(w => w.Code == "field-flattened-to-text").Sum(w => w.Count).Should().Be(3,
+        warnings.Where(w => w.Code == "unrepresented-footnote-reference").Sum(w => w.Count).Should().Be(2,
             "the count must be the number of things actually lost, not the number of KINDS of thing — a " +
             "banner that says 'something was simplified' without saying how much is barely a signal");
     }
@@ -186,6 +190,42 @@ public sealed class ComposeSaveWarningTaxonomyTests
         var path = ComposeCorpusFixtureLocator.EnumerateDocumentPaths()
             .Single(p => string.Equals(Path.GetFileName(p), fileName, StringComparison.OrdinalIgnoreCase));
         return ComposeCorpusFixtureLocator.LoadVerifiedBytes(path);
+    }
+
+    /// <summary>Task 049: edits the first text-bearing run of each NAMED block — for a fixture whose
+    /// construct sits in more than one paragraph and where the warning COUNT is the thing under test.</summary>
+    private static ComposeContentModel EditBlocks(ComposeContentModel model, int[] blockIndexes, out bool applied)
+    {
+        var blocks = model.Blocks.ToList();
+        applied = true;
+
+        foreach (var b in blockIndexes)
+        {
+            if (b < 0 || b >= blocks.Count)
+            {
+                applied = false;
+                continue;
+            }
+
+            var runs = blocks[b].Runs;
+            var editedThisBlock = false;
+            for (var r = 0; r < runs.Count && !editedThisBlock; r++)
+            {
+                if (string.IsNullOrEmpty(runs[r].Text))
+                {
+                    continue;
+                }
+
+                var newRuns = runs.ToList();
+                newRuns[r] = newRuns[r] with { Text = newRuns[r].Text + EditMarker };
+                blocks[b] = blocks[b] with { Runs = newRuns };
+                editedThisBlock = true;
+            }
+
+            applied &= editedThisBlock;
+        }
+
+        return model with { Blocks = blocks };
     }
 
     /// <summary>Edits the LAST block that has text — for fixtures whose construct is not in the first

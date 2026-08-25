@@ -51,8 +51,18 @@ public sealed class ComposeResidualLossParityTests
     /// </summary>
     public static IEnumerable<object?[]> Families() => new[]
     {
-        new object?[] { "fldSimple", "fldSimple", "field-flattened-to-text" },
-        new object?[] { "fldChar", "fldChar", "field-flattened-to-text" },
+        // Task 049: both field forms are now CARRIED through an edit to their own block — the INSTRUCTION
+        // round-trips as ComposeInlineRun.Field (with its cached result, so the display is unchanged), and
+        // the FORM the document used is re-emitted rather than normalised. Kept in the table with a null
+        // code so the preserve direction is enforced: a regression fails this row instead of going quiet.
+        new object?[] { "fldSimple", "fldSimple", null },
+        new object?[] { "fldChar", "fldChar", null },
+        // …but NOT every field. A NESTED field's instruction cannot be recovered intact (the outer scan
+        // folds the inner one in, so the string is a concatenation that would author neither field), so it
+        // keeps flattening and keeps saying so. This row is what stops the retirement above from turning
+        // `field-flattened-to-text` into a code the document names and the renderer never emits — the
+        // accretion failure direction B exists to catch.
+        new object?[] { "fldNested", "fldChar", "field-flattened-to-text" },
         new object?[] { "drawing", "drawing", "complex-object-dropped" },
         new object?[] { "object", "object", "complex-object-dropped" },
         new object?[] { "pict", "pict", "complex-object-dropped" },
@@ -220,6 +230,18 @@ public sealed class ComposeResidualLossParityTests
         "fldChar" => "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
                      + "<w:r><w:instrText xml:space=\"preserve\"> REF _Ref1 \\h </w:instrText></w:r>"
                      + "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
+        // `{ IF { PAGE } = 1 "First" "Later" }` — a field whose instruction contains another field.
+        "fldNested" => "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+                       + "<w:r><w:instrText xml:space=\"preserve\"> IF </w:instrText></w:r>"
+                       + "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+                       + "<w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r>"
+                       + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+                       + "<w:r><w:t>1</w:t></w:r>"
+                       + "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+                       + "<w:r><w:instrText xml:space=\"preserve\"> = 1 \"First\" \"Later\" </w:instrText></w:r>"
+                       + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+                       + "<w:r><w:t>First</w:t></w:r>"
+                       + "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
         "drawing" => "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"
                      + "<wp:extent cx=\"914400\" cy=\"914400\"/><wp:docPr id=\"1\" name=\"P\"/>"
                      + "<a:graphic><a:graphicData uri=\"x\"/></a:graphic></wp:inline></w:drawing></w:r>",
