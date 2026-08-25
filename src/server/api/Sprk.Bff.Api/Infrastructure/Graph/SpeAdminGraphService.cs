@@ -1,11 +1,14 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text.Json;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Graph.Search;
+using Microsoft.Kiota.Abstractions;
+using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Authentication.Azure;
 using Spaarke.Dataverse;
 
@@ -1799,6 +1802,355 @@ public sealed class SpeAdminGraphService
                 urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false);
         }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId},delegated)"); }
+    }
+
+    // =========================================================================
+    // Container-type OWNERS — fileStorageContainerType.permissions (FR-C09, task 027)
+    //
+    // 🔑 Three things about this surface that are not obvious and cost real time to establish
+    //    (measured 2026-08-24, notes/task-027-findings.md):
+    //
+    // 1. It is NOT the same thing as the existing "/containertypes/{id}/permissions" BFF endpoint.
+    //    That one maps to Graph's `applicationPermissions` — which APPLICATIONS may access
+    //    containers, with what scopes. This is `Collection(graph.permission)` — which PEOPLE own the
+    //    container type. Orthogonal, not overlapping. Neither supersedes the other; do not "unify"
+    //    them.
+    //
+    // 2. It requires a DELEGATED client pointed at BETA, which had never existed here. Container
+    //    types reject app-only outright (403, both versions), and `permissions` is absent from the
+    //    v1.0 CSDL — a live v1.0 call returns 400 "Resource not found for the segment 'permissions'"
+    //    (routing failing before auth) while the identical beta call returns 403 (route exists, auth
+    //    stops it). Hence GraphClientFactory.ForUserBetaAsync.
+    //
+    // 3. The SDK has NO typed builder for it (Graph 6.5.0 models v1.0), so these calls are made
+    //    through Kiota's untyped request path. That is why the JSON is read by hand below — and why
+    //    every read applies the same "accept the shapes Kiota can produce" discipline as
+    //    ReadStorageUsedInBytes, rather than assuming one.
+    // =========================================================================
+
+    /// <summary>A person who owns / administers an SPE container type.</summary>
+    /// <param name="PermissionId">Graph permission id — the handle needed to revoke this grant.</param>
+    /// <param name="DisplayName">Display name, or null when Graph did not report one.</param>
+    /// <param name="Email">Email/UPN, or null. Null means NOT REPORTED, never "no email".</param>
+    /// <param name="UserId">Directory object id, or null when Graph did not report one.</param>
+    /// <param name="Roles">Roles carried by the grant (e.g. "owner"). Empty when none were reported.</param>
+    public sealed record SpeContainerTypeOwner(
+        string PermissionId,
+        string? DisplayName,
+        string? Email,
+        string? UserId,
+        IReadOnlyList<string> Roles);
+
+    /// <summary>Builds the delegated BETA client owners require, or explains why there is no fallback.</summary>
+    private async Task<GraphServiceClient> GetDelegatedBetaClientForContainerTypesAsync(
+        HttpContext httpContext, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container-type owners cannot be read or written app-only (Graph returns 403) and do " +
+                "not exist on v1.0 (Graph returns 400 for the 'permissions' segment), so there is no " +
+                "fallback on either axis.");
+        }
+
+        return await _graphClientFactory.ForUserBetaAsync(httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Absolute URL of a container type's permissions collection on the client's own base address.</summary>
+    /// <remarks>
+    /// Derived from the client about to issue the request (task 020's lesson) rather than hardcoded,
+    /// so a client built for the wrong version cannot silently address the wrong endpoint.
+    /// </remarks>
+    private static string ContainerTypePermissionsUrl(GraphServiceClient graphClient, string containerTypeId) =>
+        $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containerTypes/" +
+        $"{Uri.EscapeDataString(containerTypeId)}/permissions";
+
+    /// <summary>Lists the owners of a container type. Returns null when the container type is not found.</summary>
+    public async Task<IReadOnlyList<SpeContainerTypeOwner>?> ListContainerTypeOwnersForUserAsync(
+        HttpContext httpContext, string containerTypeId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await ListContainerTypeOwnersAsync(client, containerTypeId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists container-type owners against a supplied client.
+    /// </summary>
+    /// <remarks>
+    /// Takes the <see cref="GraphServiceClient"/> as a parameter, like the other 47 methods in this
+    /// file, so the contract tests can drive it against the WireMock fixture. The
+    /// <c>…ForUserAsync</c> wrapper above is the only part that needs an <see cref="HttpContext"/>,
+    /// and it is a two-line client factory call — nothing worth testing lives in it.
+    /// </remarks>
+    public async Task<IReadOnlyList<SpeContainerTypeOwner>?> ListContainerTypeOwnersAsync(
+        GraphServiceClient client, string containerTypeId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+
+        _logger.LogInformation("Listing owners for container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            using var json = await SendGraphJsonAsync(
+                client, HttpMethod.Get, ContainerTypePermissionsUrl(client, containerTypeId), body: null, ct)
+                .ConfigureAwait(false);
+
+            if (json is null)
+            {
+                return Array.Empty<SpeContainerTypeOwner>();
+            }
+
+            var owners = new List<SpeContainerTypeOwner>();
+            if (json.RootElement.TryGetProperty("value", out var value) &&
+                value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in value.EnumerateArray())
+                {
+                    owners.Add(MapContainerTypeOwner(element));
+                }
+            }
+
+            _logger.LogInformation(
+                "Listed {Count} owners for container type {ContainerTypeId}", owners.Count, containerTypeId);
+            return owners;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("Container type {ContainerTypeId} not found when listing owners", containerTypeId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"ListContainerTypeOwners({containerTypeId})");
+        }
+    }
+
+    /// <summary>
+    /// Grants ownership of a container type to a user.
+    /// </summary>
+    /// <param name="userIdentifier">
+    /// The user's email/UPN or directory object id. Passed to Graph as given — this method does NOT
+    /// resolve or validate it. A non-existent user must surface as Graph's own error, never as a
+    /// silent no-op (AC-6).
+    /// </param>
+    public async Task<SpeContainerTypeOwner?> AddContainerTypeOwnerForUserAsync(
+        HttpContext httpContext, string containerTypeId, string userIdentifier,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userIdentifier);
+
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await AddContainerTypeOwnerAsync(client, containerTypeId, userIdentifier, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Grants ownership against a supplied client. See the LIST overload for why this split exists.</summary>
+    public async Task<SpeContainerTypeOwner?> AddContainerTypeOwnerAsync(
+        GraphServiceClient client, string containerTypeId, string userIdentifier,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userIdentifier);
+
+        // `grantedToV2` carries either a userPrincipalName or an id; send whichever the caller gave
+        // rather than guessing, and let Graph reject an unknown principal on its own terms.
+        // Serialized rather than string-built so an identifier containing quotes cannot break the
+        // payload (or inject into it).
+        var user = userIdentifier.Contains('@', StringComparison.Ordinal)
+            ? (object)new { userPrincipalName = userIdentifier }
+            : new { id = userIdentifier };
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            roles = new[] { "owner" },
+            grantedToV2 = new { user },
+        });
+
+        _logger.LogInformation(
+            "Adding owner to container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            using var json = await SendGraphJsonAsync(
+                client, HttpMethod.Post, ContainerTypePermissionsUrl(client, containerTypeId), payload, ct)
+                .ConfigureAwait(false);
+
+            // A 2xx with no body is a successful grant we cannot describe — say so by returning null
+            // rather than fabricating an owner record the response never contained.
+            return json is null ? null : MapContainerTypeOwner(json.RootElement);
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("Container type {ContainerTypeId} not found when adding owner", containerTypeId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"AddContainerTypeOwner({containerTypeId})");
+        }
+    }
+
+    /// <summary>Revokes an ownership grant. Returns false when the grant (or the type) was not found.</summary>
+    public async Task<bool> RemoveContainerTypeOwnerForUserAsync(
+        HttpContext httpContext, string containerTypeId, string permissionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionId);
+
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await RemoveContainerTypeOwnerAsync(client, containerTypeId, permissionId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Revokes a grant against a supplied client. See the LIST overload for why this split exists.</summary>
+    public async Task<bool> RemoveContainerTypeOwnerAsync(
+        GraphServiceClient client, string containerTypeId, string permissionId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionId);
+
+        var url = $"{ContainerTypePermissionsUrl(client, containerTypeId)}/{Uri.EscapeDataString(permissionId)}";
+
+        _logger.LogInformation(
+            "Removing owner {PermissionId} from container type {ContainerTypeId}", permissionId, containerTypeId);
+
+        try
+        {
+            using var _ = await SendGraphJsonAsync(client, HttpMethod.Delete, url, body: null, ct)
+                .ConfigureAwait(false);
+            return true;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Owner grant {PermissionId} not found on container type {ContainerTypeId}",
+                permissionId, containerTypeId);
+            return false;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"RemoveContainerTypeOwner({containerTypeId},{permissionId})");
+        }
+    }
+
+    /// <summary>
+    /// Maps one Graph <c>permission</c> element to a domain owner record.
+    /// </summary>
+    /// <remarks>
+    /// Reads <c>grantedToV2</c> first and falls back to the legacy <c>grantedTo</c>. Both are in the
+    /// beta schema, and which one a response carries is not ours to assume — the same lesson as
+    /// task 030's typed-first/AdditionalData-second billing fix. Every absent field stays null:
+    /// a missing display name must render as unknown, never as an empty string that reads as "no name".
+    /// </remarks>
+    private static SpeContainerTypeOwner MapContainerTypeOwner(JsonElement element)
+    {
+        var roles = new List<string>();
+        if (element.TryGetProperty("roles", out var rolesEl) && rolesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var r in rolesEl.EnumerateArray())
+            {
+                if (r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } role)
+                {
+                    roles.Add(role);
+                }
+            }
+        }
+
+        JsonElement user = default;
+        var haveUser =
+            (element.TryGetProperty("grantedToV2", out var g2) && g2.TryGetProperty("user", out user)) ||
+            (element.TryGetProperty("grantedTo", out var g1) && g1.TryGetProperty("user", out user));
+
+        static string? Str(JsonElement parent, bool present, string name) =>
+            present && parent.TryGetProperty(name, out var v) &&
+            v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s
+                ? s
+                : null;
+
+        return new SpeContainerTypeOwner(
+            PermissionId: element.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                ? id.GetString() ?? string.Empty
+                : string.Empty,
+            DisplayName: Str(user, haveUser, "displayName"),
+            Email: Str(user, haveUser, "email") ?? Str(user, haveUser, "userPrincipalName"),
+            UserId: Str(user, haveUser, "id"),
+            Roles: roles);
+    }
+
+    /// <summary>
+    /// Issues a Graph request through the SDK's own request pipeline for a resource the SDK does not
+    /// model, returning the parsed JSON body (or null when the response had none).
+    /// </summary>
+    /// <remarks>
+    /// Goes through <c>RequestAdapter</c> rather than a bare <see cref="HttpClient"/> so the call
+    /// keeps the SDK's auth provider, retry/circuit-breaker handlers, AND — critically — its error
+    /// mapping, so a Graph failure still arrives as an <c>ODataError</c> and flows into the same
+    /// translation the rest of this file depends on (ADR-007 §1, ADR-019). A hand-rolled HttpClient
+    /// call here would surface raw status codes and bypass every one of those.
+    /// </remarks>
+    private static async Task<JsonDocument?> SendGraphJsonAsync(
+        GraphServiceClient graphClient, HttpMethod method, string url, string? body, CancellationToken ct)
+    {
+        var requestInfo = new RequestInformation
+        {
+            HttpMethod = method switch
+            {
+                _ when method == HttpMethod.Get => Method.GET,
+                _ when method == HttpMethod.Post => Method.POST,
+                _ when method == HttpMethod.Delete => Method.DELETE,
+                _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported Graph method."),
+            },
+            URI = new Uri(url),
+        };
+        requestInfo.Headers.Add("Accept", "application/json");
+
+        if (body is not null)
+        {
+            requestInfo.SetStreamContent(
+                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body)), "application/json");
+        }
+
+        // Without this mapping Kiota throws a bare ApiException and the real Graph error is lost —
+        // exactly the "error message names the wrong cause" failure this project exists to remove.
+        var errorMapping = new Dictionary<string, ParsableFactory<IParsable>>
+        {
+            { "XXX", ODataError.CreateFromDiscriminatorValue },
+        };
+
+        var stream = await graphClient.RequestAdapter
+            .SendPrimitiveAsync<Stream>(requestInfo, errorMapping, ct)
+            .ConfigureAwait(false);
+
+        if (stream is null)
+        {
+            return null;
+        }
+
+        await using (stream.ConfigureAwait(false))
+        {
+            if (stream.CanSeek && stream.Length == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (JsonException)
+            {
+                // A 204 or an empty body is normal for DELETE. Absence of JSON is not a failure.
+                return null;
+            }
+        }
     }
 
     public async Task<SpeContainerTypeSummary?> GetContainerTypeForConfigAsync(

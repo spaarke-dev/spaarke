@@ -12,7 +12,7 @@
 | **Task** | **none in progress** — W1–W10 done + **011 ✅** + **028 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
 | **Step** | Between tasks. |
 | **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
-| **Next Action** | **Task 027 IN PROGRESS** — delegated-beta client done + building. Next: untyped `permissions` list/add/remove in `SpeAdminGraphService`. Then **PATCH-400 escalation**, then **deploy to dev**. Operator chose this order 2026-08-24. |
+| **Next Action** | **027 BUILT** (AC-1 needs operator device-code). Next: **(2) resolve the PATCH-400 escalation**, then **(3) deploy to dev**. Operator chose this order 2026-08-24. |
 
 ### 🔴 Task 027 — THREE premise errors found before writing a line of feature code
 

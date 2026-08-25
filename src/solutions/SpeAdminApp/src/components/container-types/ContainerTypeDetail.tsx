@@ -62,6 +62,7 @@ import {
   Save20Regular,
   Warning20Regular,
   People20Regular,
+  Person20Regular,
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
@@ -72,6 +73,7 @@ import {
   type SharingCapabilityValue,
 } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
+import { ContainerTypeOwnersPanel } from "./ContainerTypeOwnersPanel";
 import {
   assessBilling,
   assessTrialExpiry,
@@ -97,7 +99,7 @@ export interface ContainerTypeDetailProps {
 // Tab identifiers
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabId = "settings" | "permissions" | "consumers";
+type TabId = "settings" | "owners" | "permissions" | "consumers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -661,6 +663,9 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
         <Tab value="settings" icon={<Settings20Regular />}>
           Settings
         </Tab>
+        <Tab value="owners" icon={<Person20Regular />}>
+          Owners
+        </Tab>
         <Tab value="permissions" icon={<LockClosed20Regular />}>
           Permissions
         </Tab>
@@ -936,6 +941,17 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                 containerTypeId={containerTypeId}
                 configId={selectedConfig.id}
               />
+            </div>
+          )}
+
+          {/*
+            ── Owners Tab (spec FR-C09) ──
+            PEOPLE who administer the container type. Distinct from the Permissions tab below, which
+            lists which APPLICATIONS may access containers of this type. Neither supersedes the other.
+          */}
+          {activeTab === "owners" && containerTypeId && (
+            <div className={styles.tabContent}>
+              <ContainerTypeOwnersPanel containerTypeId={containerTypeId} />
             </div>
           )}
 

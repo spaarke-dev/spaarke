@@ -187,6 +187,31 @@ export type BillingStatus = "valid" | "invalid";
  * SPE Container Type — returned by the Graph API and proxied through
  * GET /api/spe/containertypes?configId={id}.
  */
+/**
+ * A person who owns (administers) a container type — spec FR-C09, task 027.
+ *
+ * 🔑 NOT the same thing as `ContainerTypePermission`. That describes which APPLICATIONS may access
+ * containers of a type (Graph `applicationPermissions`); this describes which PEOPLE administer the
+ * type itself (Graph `fileStorageContainerType.permissions`). They share a Graph word and nothing
+ * else — neither supersedes the other, and they are served by different routes (`/owners` vs
+ * `/permissions`) precisely so the distinction survives a glance at the network tab.
+ */
+export interface ContainerTypeOwner {
+  /** Graph permission id — the handle needed to revoke this grant. */
+  permissionId: string;
+  /**
+   * Display name, or undefined when Graph did not report one.
+   * `undefined` means UNKNOWN — render it as such, never as a blank that reads as "no name".
+   */
+  displayName?: string;
+  /** Email / UPN, or undefined when Graph did not report one. */
+  email?: string;
+  /** Directory object id, or undefined when Graph did not report one. */
+  userId?: string;
+  /** Roles carried by the grant (e.g. "owner"). Empty means Graph reported none. */
+  roles: string[];
+}
+
 export interface ContainerType {
   /** Container Type ID (GUID from Graph) */
   containerTypeId: string;

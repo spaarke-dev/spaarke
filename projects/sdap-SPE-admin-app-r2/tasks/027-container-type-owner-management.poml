@@ -4,7 +4,7 @@
     <title>Container-type owner management via fileStorageContainerType.permissions</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>011 complete, 020 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path plus endpoints and UI; permission-management surface; tags include bff-api and authorization.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -130,7 +130,43 @@
     <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-C09.</notes>
+  <notes>
+    Spec FR-C09. Built 2026-08-24; AC-1 awaits operator device-code sign-in.
+    Full record: notes/task-027-findings.md
+
+    🔴 CENTRAL PREMISE FALSE. The task says the new relationship "supersedes part of the current
+    ContainerTypePermissions screen". It supersedes NOTHING — the two are orthogonal surfaces that
+    share one Graph word: the existing endpoint maps to `applicationPermissions` (which APPLICATIONS
+    may access containers, with what scopes); the new one is Collection(graph.permission) (which
+    PEOPLE own the type). Nothing was retired, and retiring anything would have deleted
+    application-permission management outright — exactly what the escalation trigger guards. NOT
+    escalated for adjudication: the correct action is non-destructive and unambiguous, and asking an
+    operator to approve not-deleting-something spends attention for no decision. AC-4 is met
+    vacuously (only one OWNER surface exists); its second clause has no referent. Guarded
+    structurally, not just in prose — route is /owners, DTOs are separate records, separate tab.
+
+    🔴 delegated+beta had never existed and is the ONLY combination Graph serves. Container types
+    reject app-only (403 both versions); `permissions` is beta-only (absent from the v1.0 CSDL —
+    v1.0 fileStorageContainerType has no navigation properties at all). Live: v1.0 → 400 "Resource
+    not found for the segment 'permissions'" (routing fails BEFORE auth), beta → 403 identical to the
+    control GET (route exists, auth stops it). Added ForUserBetaAsync — NOT an auth change: same OBO
+    exchange, same cached token, same version-agnostic .default scope, only the base address differs,
+    so no new credential and no ADR-028 A4/E-3 surface.
+
+    🔴 The SDK has no .Permissions builder (compiler-verified), so requests are hand-built through
+    Kiota's untyped path — deliberately via RequestAdapter, not a bare HttpClient, so ODataError
+    mapping and the retry handlers survive. Nothing here is compiler-checked, hence 8 contract tests
+    with the PATH assertion load-bearing.
+
+    ⚠️ The "three owners" limit is UNSOURCED — zero occurrences of "owner" in the SPE knowledge
+    corpus, and neither CSDL bounds the collection. Stated in the UI as SharePoint-admin-center UX
+    with its source named, never as Graph-enforced, and the API error is still surfaced.
+
+    ⚠️ AC-1 NOT live-verified — container types are delegated-only, so it needs an interactive
+    device-code sign-in (~20s operator time). It MAY hit the open PATCH-400 escalation, though a POST
+    to a sub-collection is not the same operation as a PATCH to the entity, so it may well succeed
+    where PATCH does not. Do not assume either way.
+  </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

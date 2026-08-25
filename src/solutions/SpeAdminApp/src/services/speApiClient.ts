@@ -23,6 +23,7 @@ import type {
   SpeContainerTypeConfigUpsert,
   ContainerType,
   ContainerTypePermission,
+  ContainerTypeOwner,
   Container,
   ContainerCustomProperty,
   ContainerPermission,
@@ -452,6 +453,47 @@ export const speApiClient = {
       return get<{ items: ContainerTypePermission[]; count: number }>(
         "/spe/containertypes/" + typeId + "/permissions" + qs({ configId }),
       ).then(r => r.items);
+    },
+
+    /*
+     * ── Container-type OWNERS (spec FR-C09, task 027) ──
+     *
+     * 🔑 `/owners`, NOT `/permissions`. `listPermissions` above returns which APPLICATIONS may access
+     * containers of this type; these return which PEOPLE administer the type. Orthogonal surfaces
+     * that happen to share a Graph word — task 027's own POML conflated them, and the separate route
+     * is what keeps that mistake from being easy to repeat.
+     *
+     * Server-side these run delegated against Graph BETA: container types reject app-only auth (403),
+     * and the `permissions` relationship does not exist on v1.0 (400 "Resource not found for the
+     * segment 'permissions'"). No `configId` — the delegated path derives the tenant from the caller.
+     */
+
+    /** GET /api/spe/containertypes/{typeId}/owners — the people who administer this container type. */
+    listOwners(typeId: string): Promise<ContainerTypeOwner[]> {
+      return get<{ items: ContainerTypeOwner[] }>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+      ).then(r => r.items ?? []);
+    },
+
+    /**
+     * POST /api/spe/containertypes/{typeId}/owners — grant ownership.
+     *
+     * `userIdentifier` is an email/UPN or a directory object id, passed to Graph as given. An unknown
+     * user surfaces Graph's own error rather than appearing to succeed.
+     */
+    addOwner(typeId: string, userIdentifier: string): Promise<ContainerTypeOwner> {
+      return post<{ userIdentifier: string }, ContainerTypeOwner>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+        { userIdentifier },
+      );
+    },
+
+    /** DELETE /api/spe/containertypes/{typeId}/owners/{permissionId} — revoke an ownership grant. */
+    removeOwner(typeId: string, permissionId: string): Promise<void> {
+      return del(
+        "/spe/containertypes/" + encodeURIComponent(typeId) +
+        "/owners/" + encodeURIComponent(permissionId),
+      );
     },
 
     /**

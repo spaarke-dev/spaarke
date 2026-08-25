@@ -33,6 +33,10 @@ public class SpeFileStoreTests
     {
         public Task<GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default)
             => Task.FromResult<GraphServiceClient>(null!);
+        // Beta delegated variant (SPE container-type owners). Same stub as ForUserAsync — these
+        // tests never exercise the beta surface.
+        public Task<GraphServiceClient> ForUserBetaAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default)
+            => Task.FromResult<GraphServiceClient>(null!);
         public GraphServiceClient ForApp() => null!;
     }
 

@@ -146,6 +146,27 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Serves a response for a DELETE — used where the thing worth asserting is that the right
+    /// resource was targeted with the right verb.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>204 No Content</c>, which is what Graph actually returns for a successful
+    /// revoke. That default matters: a stub returning 200-with-a-body would let a caller that
+    /// mishandles an empty response pass here and fail in production.
+    /// </remarks>
+    public GraphWireMockFixture StubDelete(string pathPrefix, string jsonBody = "", int statusCode = 204)
+    {
+        _server
+            .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingDelete())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Observation — the REQUEST half
     // ─────────────────────────────────────────────────────────────────────────
