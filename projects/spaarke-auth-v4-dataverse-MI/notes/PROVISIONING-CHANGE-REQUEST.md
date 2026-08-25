@@ -175,6 +175,38 @@ Live headroom on the dev app registration: **2 of 20 used**.
 
 ### 5.1 DECISION — which app registration does the shared Model 1 BFF act as?
 
+> ## ✅ DECIDED 2026-08-25 (owner): **Reading 1 — ONE shared multitenant app registration for Model 1.**
+>
+> **What this means for you concretely:**
+>
+> - **One FIC, created once.** Customer onboarding creates **no** federated credential at all — the
+>   per-customer FIC step described in §3.2 does **not** apply to Model 1.
+> - The BFF does **not** select an app registration per request and does **not** validate 20+ audiences.
+> - **`spec.md:236` and `design.md:57`** ("per-customer app registrations in both models") are hereby
+>   **scoped to Model 2 only**. They read as written for Model 2 and generalised without re-testing against
+>   Model 1's single shared BFF App Service. Please make that edit on your side — it is the one place the
+>   estate still contradicts this decision.
+> - §5.4's proposed invariant **I6 stands** (Model 1 only), consistent with this.
+>
+> **Why Reading 1** — three facts, all verifiable today:
+>
+> 1. The live app registration is **already `AzureADMultipleOrgs`** (verified 2026-08-19). That *is* the
+>    multitenant shape; nothing needs to change to adopt it.
+> 2. Model 1 deploys **one shared BFF App Service**. Under Reading 2 that single app would have to resolve
+>    the correct app registration per request and accept 20+ audiences — substantial BFF complexity bought
+>    for no capability.
+> 3. Onboarding gets **simpler, not harder**: no per-customer credential object to create, rotate, or leak.
+>
+> **What this does NOT decide**: Model 2 (customer-owned tenants) keeps per-customer app registrations —
+> credentials attach to the *application object*, so a customer-tenant UAMI can only be trusted by an app
+> registration that lives in that tenant. §9.2's raised question about Model 2's FIC issuer tenancy is
+> **still open** and unaffected by this.
+>
+> **If you disagree**, say so before wiring it — reversing later means adding per-request app-registration
+> selection to a shared BFF, which is the expensive direction.
+
+*(Original framing retained below for the reasoning trail.)*
+
 This is yours to make. It is not a feasibility or scaling question; **MI-FIC works either way**. It is an
 identity-design question, and it decides whether onboarding gains a per-customer step.
 
