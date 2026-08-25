@@ -1,8 +1,55 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 T~20:30Z (by context-handoff, SESSION 5 END) — **🎯 SESSION 5 END. Task 202 authored + committed + pushed; task-execute invoked but Step 3 (Context Budget Check) triggered handoff. Task 202 remains not-started. User will `/compact` + start task 202 in fresh session. Everything needed for continuation is captured below + on origin (commits `e3a15db91` + `7519f32eb` + `dac4aa38c`).**
+> **Last Updated**: 2026-08-24 SESSION 6 END (by task-execute Step 11 transition) — **🎯 TASK 202 COMPLETE ✅. All 13 acceptance criteria met. Deliverables shipped (see below). Task 203 is NEXT: apply class-A rows from `notes/task-202-punch-list.md` (34 rows total, 26 blocks_e2e=yes). Class-B rows (22) route OUT to `code-quality-and-assurance-r3` per BINDING owner directive 2026-08-24. Task 186 E2E live-fire blocked until 203 + class-B fixes both landed.**
 
-## 🎯 QUICK RECOVERY — 2026-08-24 T~20:30Z SESSION 5 END (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 SESSION 6 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Task (next)** | 203 - Apply pre-live-fire lessons per task-202-punch-list.md (class-A rows only) |
+| **Task file** | `projects/customer-provisioning-orchestration-r1/tasks/203-*.poml` (PLACEHOLDER — needs to be authored via `/task-create` or manual before dispatch) |
+| **Status** | not-started (queued; blocked-until-203 chain is 203 → 186 → 090) |
+| **Rigor (planned)** | FULL (per TASK-INDEX row + POML §c-c2 constraint: "likely FULL for .cs + TEST-MODIFYING for any ArchTest additions") |
+| **Model / Effort (planned)** | opus / xhigh (per TASK-INDEX row — apply-phase requires xhigh for complex brownfield) |
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **HEAD after task 202 commit** | (updated on commit — see git log) |
+| **Working tree** | Should be CLEAN post-commit |
+| **Next action for a fresh session** | Fresh Opus session; **either** `/task-create` to author 203 POML from the task-202-punch-list class-A rows **or** `task-execute` if 203 POML exists |
+
+### Task 202 deliverables (all shipped 2026-08-24 SESSION 6 in ONE atomic commit)
+
+- **NEW**: [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) — 27 prereqs across 4 scopes (once_per_tenant / once_per_subscription / once_per_env / once_per_customer); §11 Component Justification header
+- **NEW**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) — machine-parseable source-of-truth (27 prereqs w/ programmatic check_recipe per entry)
+- **NEW**: [`notes/provisioning-run-structure-design.md`](notes/provisioning-run-structure-design.md) — 7-file per-run folder + `provisioning-runs/INDEX.md` schema + templates + `.claude/patterns/provisioning/` proposal + `.claude/constraints/provisioning.md` proposal
+- **NEW**: [`notes/provisioning-run-agent-autonomy-design.md`](notes/provisioning-run-agent-autonomy-design.md) — Tier A/B/C gate classification + `--batch` flag proposal + JSON intake schema + 9 concrete task-203 items
+- **NEW**: [`notes/task-202-punch-list.md`](notes/task-202-punch-list.md) — **62 rows** (34 class-A + 22 class-B + 6 class-C; 41 blocks_e2e=yes across 26-A + 12-B + 3-C); IActionSeam commit `e3a15db91` case study with KEEP-IN-PLACE decision + class-B ArchTest follow-on
+- **NEW**: [`.claude/patterns/provisioning/`](../../.claude/patterns/provisioning/) — INDEX.md + README.md + 9 skeleton pattern files (main-session-only per Sub-Agent Write Boundary; task 203 fills content)
+- **MODIFY**: [`.claude/patterns/INDEX.md`](../../.claude/patterns/INDEX.md) — added `provisioning/` row (10th subdir; 62 total pointer files)
+- **MODIFY**: [`tasks/186-real-phase-f-e2e-acceptance-rerun-task-089-for-real-this-time.poml`](tasks/186-real-phase-f-e2e-acceptance-rerun-task-089-for-real-this-time.poml) — added `pre-live-fire-punch-list-gate` escalation trigger (BINDING per owner 2026-08-24)
+- **MODIFY**: [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) — flipped task 202 🔲 → ✅ with expanded landing details
+
+### Critical Context (1-3 sentences)
+
+**Task 202 codified the pre-live-fire audit + designed the provisioning-run structure + produced the actionable punch list.** ~207 raw lessons from 108 notes files consolidated + deduped to 62 unique rows classified A (provisioning-owned, task 203 scope), B (BFF-owned, routes to `code-quality-and-assurance-r3`), C (shared/coordination). **Task 186 E2E live-fire now BLOCKED by the pre-check trigger** — cannot fire until class-A + class-B `blocks_e2e=yes` rows are all `applied`.
+
+### 🎯 TASK 203 SCOPE (blocked-by 202; needs POML authoring next)
+
+Per punch list § "Task 203 scope brief":
+- **IN SCOPE**: All 34 Class-A rows (26 block E2E). Sub-phase by dependency:
+  - **203a foundation** (10-15h): A05/A06/A07/A08/A09/A10/A11/A12/A24 — provisioning-runs root + INDEX + templates + patterns fill + skill profile enum fix + skill environmentId intake + skill registry prereq + jwtAudience fix + healthCheckPath fix
+  - **203b bicep hardening** (30-40h): A13/A14/A17/A18/A19/A20/A21/A22/A23/A25/A26/A27 — SB Data Receiver RBAC + config-key aliases + artifacts storage + ACR + L2 UAMI RBAC × 6 + FromBicepOutput wire-up + kv-secrets clobber fix + Model 1 sharedBffUami KV grant + queue recreate ceremony + CustomerRunGuard config
+  - **203c skill wiring** (15-20h): A02/A03/A04/A15/A16 — Step 0.5 external prereqs + `--batch` flag + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs
+  - **203d nice-to-have post-186** (5h): A32/A33/A34 — skill Step 6 read-verify + h9-workflow cadence runbook + SC #11 env-var checks
+- Class-C rows: C01 (auth-v4 FIC sentinel coord), C04 (I6 ArchTest), C06 (spec/design v3.4 amendment)
+
+- **OUT OF SCOPE (route OUT)**: All 22 Class-B rows → file separately in `code-quality-and-assurance-r3` or new BFF-quality worktree. Includes: B01 (IActionSeam ArchTest), B02 (IOptions inventory ArchTest), B03 (dispatcher never written), B04 (multi-tenant DV routing gap — Path A/B decision), B05-B12 (H1/H4/H13/H12b placeholders, config-key aliases, staging-slot defect, H9 re-scope), B13-B15 (RecordMatchService compile, MI factory scope gap, IOptions checklist), B16-B22 (hygiene / docs / retired-class sweep / 429 wiring)
+- **BLOCKING SEQUENCE**: 203 landing (main branch) → BFF-worktree class-B PRs merged → this branch pulls master → task 186 fires against fully-fixed state.
+
+### 🎯 SESSION 5 END block (retained below)
+
+---
+
+## 🎯 QUICK RECOVERY — 2026-08-24 T~20:30Z SESSION 5 END (historical reference)
 
 | Field | Value |
 |-------|-------|

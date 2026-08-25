@@ -23,8 +23,9 @@
 | [testing/](testing/INDEX.md) | 4 | Unit tests, mocking, integration/arch tests, god-class ratchet | 2026-08-15 | Verified |
 | [webresource/](webresource/INDEX.md) | 4 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup | 2026-04-05 | Verified |
 | [ui/](ui/INDEX.md) | 7 | Choice dialog + **Fluent v9 component authoring / theming / portal-gotcha / React-version boundaries / host-visual-fit / embedded-widget-sizing** | 2026-06-09 | Verified + 6 Current |
+| [provisioning/](provisioning/INDEX.md) | 9 | Customer-provisioning L2/L3 handlers, prereqs, RBAC bootstrap, secret-catalog, KV-ref invariant, OpenAI quota composition, ADR-032 asymmetric-registration, BFF/provisioning boundary | 2026-08-24 | Skeleton (task 203 fills content) |
 
-**Total**: 53 pointer files across 9 subdirectories (8 added 2026-05-26..06-09 for Fluent v9 + host-visual-fit + embedded-widget-sizing)
+**Total**: 62 pointer files across 10 subdirectories (9 added 2026-08-24 for provisioning; 8 added 2026-05-26..06-09 for Fluent v9)
 
 ---
 
