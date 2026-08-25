@@ -4,7 +4,7 @@
     <title>Container-type owner management via fileStorageContainerType.permissions</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>011 complete, 020 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF Graph hot path plus endpoints and UI; permission-management surface; tags include bff-api and authorization.</rigor-reason>
     <model-tier>sonnet</model-tier>

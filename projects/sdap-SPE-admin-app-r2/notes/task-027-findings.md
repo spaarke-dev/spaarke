@@ -235,3 +235,36 @@ the wrong hypothesis (an ownership restriction) would have cost a production app
 or a throwaway container type to disprove.
 
 **Read the vendor's reference for the exact operation before hypothesising about auth.**
+
+---
+
+## 8. ✅ AC-1 FULLY VERIFIED LIVE — 2026-08-25
+
+Against `Spaarke PAYGO 1` in Spaarke Dev, using the **corrected** payload (object id), i.e. the exact
+shape `SpeAdminGraphService` now sends — so this verifies the shipped code path, not a lookalike:
+
+```
+list owners                              → 200, count 0
+POST {roles:["owner"],grantedToV2:{user:{id}}}  → 201 Created   ✅
+list owners                              → 200, count 1  (roles=['owner'])
+DELETE …/permissions/{permissionId}      → 204            ✅
+list owners                              → 200, count 0   ✅ reverted
+```
+
+Nothing was left behind. **AC-1 is met**: owners can be listed, added, and removed against Spaarke Dev.
+
+The permission id is a base64 of `owner_{objectId}` — deterministic, not a random handle. Useful to
+know when reasoning about the documented idempotency (a duplicate add returns `201` with the existing
+permission rather than creating a second one).
+
+### ⚠️ Known limitation — the owners list will show a GUID, not a name
+
+Graph returned `grantedToV2.user` with **only `id`** — no `displayName`, no `email`. So
+`describeOwner()` falls through to its id branch and the UI shows a raw object id.
+
+That is *honest* (it never invents a name) but it is not *useful*: an administrator cannot tell who
+`c74ac1af-…` is. Fixing it means resolving each owner id back to a user via `/users/{id}`, which is an
+N+1 directory lookup on a list capped at 3 — cheap, but it is added scope and a new failure mode
+(a deleted user resolves to nothing, which must render as "unknown user", not as an error).
+
+**Deliberately not done here.** Recorded so it is chosen rather than defaulted into.
