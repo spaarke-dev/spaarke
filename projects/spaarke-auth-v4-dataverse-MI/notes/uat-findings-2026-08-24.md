@@ -286,3 +286,53 @@ contract, while skipped, is holding nothing.
 | Secret-free posture | unchanged — no credential, DI, or config surface touched |
 
 **Still open**: retest Outlook + Word save. Finding 3 is the one that needs a human with a real token.
+
+---
+
+# ✅ UAT RESULT — PASSED (2026-08-24)
+
+Operator-run, in the real Office hosts, against the **secret-free MI-FIC build**.
+
+| Surface | Result |
+|---|---|
+| **Outlook** — save | ✅ Passed. The created `.eml` **opens** — an end-to-end byte-level confirmation, not a status code |
+| **Word** — save | ✅ Passed. Document record created, **including the file profile** |
+| **Auth (the thing under test)** | ✅ **PASSING on both surfaces** — operator's determination |
+
+This closes **task 031**'s last open item — the one surface that required a human in the Office host and
+could not be proven from a terminal.
+
+## Why this is a real proof, not a green status code
+
+[lessons-learned §2](lessons-learned.md) catalogues eight shapes in which a status code establishes nothing
+on this codebase. This result dodges all of them: **a `.eml` that opens** is a byte-level artifact produced
+by a full round trip — save → SPE upload → record creation → retrieval → parse. Nothing in the
+fail-closed / fall-through / error-open family can fabricate that.
+
+Combined with the structural argument already recorded in `current-task.md` §UAT — `Graph__Credentials__Order__0
+= ManagedIdentityFederated` as the **only** entry, `RequireSecretFreeIdentity=true`, and no secret in app
+settings **or** Key Vault — a working OBO round trip is MI-FIC **by construction**. There is nothing else
+left for it to have used.
+
+## Explicitly NOT an auth finding
+
+> Word: *"with no extractable content due to unsupported file type."*
+
+The Document record and file profile were both created — the authenticated write path completed. This is a
+**content-extraction / file-type defect** downstream of auth. **Owner decision: routed to a focused
+project**, not to this one. Recorded here so the boundary is unambiguous and nobody later re-reads it as an
+auth regression.
+
+## Scoreboard for the whole UAT round
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | CORS origin missing for the add-in SWA | ✅ fixed (config) |
+| 2 | `/healthz/catalog` Unhealthy | ⚠️ 5 of 17 fixable here; booked to the AI-catalog owner |
+| 3 | 403 `OFFICE_009` on every job poll | ✅ fixed (`77f61574b`) |
+| 4 | SSE preflight rejected `Cache-Control` | ✅ fixed (`77f61574b`) |
+| 5 | `streamUrl` missing `/api` | ✅ fixed (`77f61574b`) |
+| 6 | Word "no extractable content" | ➡️ owner-routed to a focused project |
+
+**Not one of the six was an auth-v4 regression.** Five were pre-existing defects that this project's deploy
+was simply the first to exercise.
