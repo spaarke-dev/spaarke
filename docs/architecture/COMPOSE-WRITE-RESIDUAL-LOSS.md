@@ -11,7 +11,7 @@
 > nested/unterminated case in §2;
 > **the embedded-object row retired 2026-08-25** by task 056 — images, charts, shapes and OLE embeds moved
 > to §3, leaving only the text-carrying box in §2.
-> **Owner sign-off**: ⏳ *pending* — see [Sign-off](#sign-off).
+> **Owner sign-off**: ✅ **ACCEPTED 2026-08-25** — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
 > list and the code disagree **in either direction**.
@@ -180,8 +180,15 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 |---|---|
 | Version | 2026-08-25 (objects carried; supersedes the 2026-08-23 first publication) |
 | Measured against | `spaarkeai-compose-r8` @ task 056, corpus of 24 documents |
-| Signed off by | ⏳ *pending* — **both declined rows are now closed.** Owner declined the field and object rows on 2026-08-25; task 049 landed the field carry and task 056 landed the object carry the same day. §2 now holds five rows: the three the owner already called acceptable (footnote references, endnote references, content controls), the nested/unterminated-field remainder from task 049, and the **text-box remainder from task 056** — narrower than the object row it replaces (the box's words are kept; only its frame is not) but a row the owner has not separately ruled on, so it is flagged here rather than folded into the accepted set |
-| Date | ⏳ *pending* |
+| Signed off by | **Project owner** — accepted in session, 2026-08-25 |
+| Date | 2026-08-25 |
+
+
+**What was accepted — and what was NOT.** The owner **declined** the original field and embedded-object
+rows on 2026-08-25. Those were not signed off; they were **fixed** (tasks 049 + 057 carry fields, task
+056 carries objects). This sign-off covers only the five rows remaining in §2:
+nested/unterminated fields · text boxes · footnote references · endnote references · content controls.
+Two of those five are narrower carve-outs created by the fixes, not pre-existing losses.
 
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the
 paragraph a user edits and are reported by name every time. Declining any single item makes it a scope

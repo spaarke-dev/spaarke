@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047b" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 - close the never-silent hole: an edited block with NO base counterpart reports no construct loss</title>
+    <phase>4 Track A - Fidelity</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The never-silent guarantee is what makes the published residual-loss list trustworthy. A loss that is real but unreported invalidates the list rather than merely extending it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the fix is not "warn on unpaired blocks". ComposeBlockMerge.Plan fails to pair because two paragraphs have byte-identical projected text, so the pairing is AMBIGUOUS, not absent. Warning unconditionally would fire on every legitimately-new paragraph; warning never leaves a real loss silent. Distinguishing "this content is new" from "this content had a base we could not identify" is the work.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same save spine as 049/056/058.</parallel-reason>
+    <deps>056</deps>
+    <tags>bff-api, compose, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Owner decision 2026-08-25: fix this in R8.
+
+    Found by task 056, not caused by it, and written up in notes/056-object-carry-decisions.md section 7.
+
+    On interior-text-boxes.docx, editing block 1 loses a w:pict with NO warning, while editing block 2
+    reports the same loss correctly. Cause: the two paragraphs have byte-identical projected text, so
+    ComposeBlockMerge.Plan pairs the edited block against NO base - and the loss-reporting carry is skipped
+    entirely for unpaired blocks.
+
+    Why this outranks a normal defect. The whole residual-loss list rests on one promise: a loss is always
+    REPORTED BY NAME, never silent. docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md says so at the top of
+    section 2, and the owner SIGNED the list on 2026-08-25 on that basis. An edited block that drops a
+    construct and says nothing does not extend the list - it undermines it.
+
+    The fix is NOT "warn whenever a block is unpaired". An unpaired block is also what a genuinely NEW
+    paragraph looks like, and warning on those would make the banner meaningless - the failure mode that
+    made users ignore warnings in R7. The judgment is distinguishing new content from content whose base
+    could not be identified, and reporting only the second.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in ComposeBlockMerge.Plan pairing and WarnForConstructsLostOnThisBlock.</role>
+
+  <goal>
+    An edited block that loses a construct reports it, whether or not its base could be paired. A
+    genuinely-new paragraph reports nothing. The never-silent guarantee holds for every block position.
+  </goal>
+
+  <constraints>
+    <constraint source="FR-A10">A loss MUST be reported by name. This is the guarantee the signed list rests on.</constraint>
+    <constraint source="project">MUST NOT make the banner noisy - a warning on every new paragraph is how a warning surface becomes ignorable (R7 lesson).</constraint>
+    <constraint source="ADR-049 invariant 2">Untouched blocks still clone byte-for-byte. This changes reporting for EDITED blocks only.</constraint>
+    <constraint source="ADR-038">Seam test over interior-text-boxes.docx - the fixture that exposed it - plus a negative arm proving a new paragraph stays quiet.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read notes/056-object-carry-decisions.md section 7 and ComposeBlockMerge.Plan.</step>
+    <step order="1">Reproduce with a failing seam test on interior-text-boxes.docx block 1, observed to fail.</step>
+    <step order="2">Decide how to distinguish new content from an unidentifiable base. Record the reasoning.</step>
+    <step order="3">Implement; prove the negative arm (a new paragraph warns nothing).</step>
+    <step order="4">Audit for other unpaired-block paths that skip reporting - this may not be the only one.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the two cases cannot be distinguished without a heuristic that guesses, STOP and surface it. A guessed warning is a false positive on every new paragraph; a guessed silence is the bug being fixed. The owner should choose which error to prefer.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBlockMerge.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/047b-unpaired-block-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Editing interior-text-boxes.docx block 1 reports the w:pict loss, proven by a test observed to fail first.</criterion>
+    <criterion>A genuinely new paragraph produces NO construct-loss warning.</criterion>
+    <criterion>Other unpaired-block reporting paths audited; findings recorded.</criterion>
+    <criterion>NEGATIVE: untouched blocks still clone byte-for-byte.</criterion>
+  </acceptance-criteria>
+</task>

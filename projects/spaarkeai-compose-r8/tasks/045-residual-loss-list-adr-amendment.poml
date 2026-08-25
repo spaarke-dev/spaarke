@@ -4,7 +4,7 @@
     <title>FR-A10 — Publish the residual loss list with owner sign-off, and merge the ADR-049 third amendment (7 invariants) — MAIN SESSION ONLY</title>
     <phase>4 Track A — Faithful Save</phase>
     <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes a binding ADR amendment and the published contract for what Compose does not preserve. PROVISIONAL — amendable by task 031.</rigor-reason>
     <model-tier>opus</model-tier>
