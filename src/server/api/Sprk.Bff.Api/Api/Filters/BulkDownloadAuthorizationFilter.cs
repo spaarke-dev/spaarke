@@ -183,16 +183,24 @@ public sealed class BulkDownloadAuthorizationFilter : IEndpointFilter
             {
                 // Fail closed: an errored decision is a denial, never a pass-through.
                 //
-                // DEFENCE IN DEPTH, not the load-bearing guard. AuthorizationService.AuthorizeAsync
-                // has its own catch-all that returns IsAllowed=false with
-                // "sdap.access.error.system_failure", so a failing access data source is already
-                // denied one layer down and never reaches here. Verified by perturbation: inverting
-                // this catch to authorize breaks NO test, because it is unreachable by that route.
-                // It is kept for the faults AuthorizeAsync cannot absorb on our behalf (a DI
-                // resolution failure inside the call, an OOM), where the alternative is an unhandled
-                // exception aborting the whole batch rather than denying one document. If you are
-                // testing fail-closed behaviour, perturb AuthorizationService's catch — that is the
-                // one the tests actually bite on.
+                // DEFENCE IN DEPTH — currently unreachable, but LIVE AND TESTED, not dead code.
+                // The distinction was measured, not assumed (2026-08-24, task 022):
+                //
+                //   AuthorizeAsync catches Exception around everything except its own
+                //   ArgumentNullException.ThrowIfNull, so a failing access data source is denied one
+                //   layer down and never propagates here. Inverting this catch to authorize
+                //   therefore breaks 0 of 30 tests.
+                //
+                //   That is a fact about AuthorizationService, NOT about test coverage. A two-factor
+                //   experiment proved it: force AuthorizeAsync to throw from outside its own try and
+                //   14 of 30 tests fail (everything denies, as it should); do that AND invert this
+                //   catch and 17 fail. The 3-test delta IS this catch's coverage. It is load-bearing
+                //   the moment it becomes reachable, and the tests that pin it already exist.
+                //
+                // So: keep it. If AuthorizationService ever narrows its catch or adds validation
+                // ahead of its try, this guard activates already-covered. If you are testing
+                // fail-closed behaviour TODAY, perturb AuthorizationService's catch — that is the
+                // one the tests bite on now (2 of 30).
                 _logger?.LogWarning(ex,
                     "Bulk download: authorization check failed for document {DocumentId}; treating as denied",
                     rawId);

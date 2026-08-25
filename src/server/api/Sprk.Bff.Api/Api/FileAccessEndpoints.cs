@@ -30,7 +30,31 @@ public static class FileAccessEndpoints
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
 
         // Register endpoints using method groups (fixes CS1593 compilation error)
+        // The URL-MINTING reads (task-022 inventory): preview-url, preview, office, open-links,
+        // view-url. Each returns a url that OUTLIVES the request, and none carried a per-document
+        // filter.
+        //
+        // ⚠️ These are NOT the same shape as /content and /download, and the difference was verified
+        // rather than assumed: all five reach SPE through *AsUserAsync → IGraphClientFactory
+        // .ForUserAsync, i.e. genuine OBO. Graph therefore already enforces the caller's own SPE
+        // access, so — unlike the bulk-download route, whose identical-sounding claim turned out to
+        // be false because its lookup was app-only — there WAS real enforcement here. Checking that
+        // before writing this comment is the whole lesson of finding C1.
+        //
+        // The gate is still correct, and it NARROWS behaviour deliberately: SPE permission is
+        // container-scoped and coarser than per-document Dataverse rights, so a caller with
+        // container access but no Read on the sprk_document row previously succeeded and now gets
+        // 403. That caller seeing another client's document is precisely the disclosure this project
+        // exists to close (spec FR-01), so the narrowing is the point, not a side effect.
+        //
+        // Operation is `read`, not a new mint-specific key. A separate key would carry the SAME
+        // required right and therefore change no decision — CLAUDE.md §11 asks for a concrete
+        // behaviour that fails without the new surface, and there is none. What IS different about
+        // these routes is url LIFETIME, not authorization: revoking a caller's access later does not
+        // invalidate a url already minted. That is a real gap, deliberately NOT solved by an
+        // operation key because no key can. It belongs with task 012's link-lifecycle work.
         docs.MapGet("/{documentId}/preview-url", GetPreviewUrl)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentPreviewUrl")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -42,6 +66,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/preview", GetPreview)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentPreview")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -66,6 +91,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/office", GetOffice)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentOfficeViewer")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -74,6 +100,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/open-links", GetOpenLinks)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentOpenLinks")
             .WithTags("File Access")
             .Produces<OpenLinksResponse>(StatusCodes.Status200OK)
@@ -98,6 +125,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status502BadGateway);
 
         docs.MapGet("/{documentId}/view-url", GetViewUrl)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentViewUrl")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)

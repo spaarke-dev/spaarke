@@ -176,9 +176,40 @@ Fixed by opting **this one request** into synchronous body IO via `IHttpBodyCont
 
 That last zero is **not** a test gap, and chasing it as one would have been wrong. `AuthorizationService.AuthorizeAsync` already has a catch-all returning `IsAllowed=false`, so a failing access data source is denied one layer down and never reaches the filter's catch — it is unreachable defence-in-depth. The load-bearing guard is `AuthorizationService`'s, and perturbing *that* fails 2 tests, so the fail-closed path IS covered. Both facts are now in the filter's own comment so the next reader does not repeat the investigation. **Lesson: before "fix the test", check whether the perturbed code is reachable at all — a zero can mean redundant code rather than absent coverage.**
 
-### Remaining, in order
+### ✅ `analyze` + the five URL-minting reads — gated
 
-1. **`POST /api/documents/{documentId}/analyze`** — the one H3 route deliberately left ungated pending a decision: it reads the document and writes an analysis to a *different* entity, so `read` is the least-privilege answer against the resource this filter authorizes (same reasoning as `finance.confirm`'s "deliberately NOT Create" note). But it also spends money and enqueues background work, which is an argument for `write`. Decide explicitly; do not let it fall through because it is ambiguous.
-3. **The five URL-minting reads** (`preview-url`, `preview`, `office`, `view-url`, `open-links`) — these outlive the request; decide whether `read` is the right operation or whether minting deserves its own key.
-4. **The six OBO read routes** — decide whether OBO alone suffices or a record check is still required, and record the reasoning either way (POML escalation trigger if a check is needed that does not exist).
-5. **The 3 collection-shaped routes** — collection scoping is Phase 1 evaluator work; confirm they stay out of scope rather than silently dropping them.
+**`analyze` → `write`**, decided by the owner 2026-08-24 rather than defaulted. The case for `read` was real (the analysis is written to a DIFFERENT entity than the one the filter authorizes — the same reasoning that made `finance.confirm` deliberately not require Create). `write` won because the route commits real resources on the caller's say-so (AI spend + queued background work) and the profile fields it populates are the document's own.
+
+**The five URL-minting reads** gated with `read`, and the "does minting deserve its own key?" question is answered **no**: a separate key would carry the same required right and change no decision, so CLAUDE.md §11 cannot be satisfied — there is no behaviour that fails without it. The real difference is url LIFETIME, which no operation key can address; revoking access later does not invalidate an already-minted url. Filed with task 012's link-lifecycle work.
+
+#### ⚠️ These five are NOT the same shape as `/content` and `/download` — verified, not assumed
+
+All five reach SPE through `*AsUserAsync` → `IGraphClientFactory.ForUserAsync`, i.e. **genuine OBO**. Graph therefore already enforced the caller's own SPE access. So this inventory's earlier framing — "any authenticated caller could mint a url for any document by GUID" — was **overstated**, and the first draft of the code comment repeated it before the OBO check was run. Corrected before commit. Same class of error as C1's false claim, caught this time only because C1 taught it.
+
+That also answers the open item "do the OBO read routes need a record check too?": **yes**. SPE permission is container-scoped and coarser than per-document Dataverse rights, so the gate deliberately **narrows** behaviour — a caller with container access but no `Read` on the `sprk_document` row previously succeeded and now gets 403. That caller seeing another client's document is exactly the disclosure spec FR-01 exists to close.
+
+`share-link` (H4) stays with task 012, and its OBO claim was checked too: `CreateSharingLinkAsUserAsync` really does call `ForUserAsync`, so unlike bulk-download's identical-sounding claim, **this one is true**. Useful contrast: "OBO means the caller's own access enforces" is a valid mechanism; C1's version was false because the call was app-only, not because the reasoning pattern is wrong.
+
+**Perturbations — 5 of 5 bite, baseline 0/42**: remove the analyze filter (1), downgrade analyze to `read` (1), remove the preview-url / view-url / open-links filters (1 each).
+
+### ✅ Resolved: the filter-catch zero was REDUNDANT CODE, not missing coverage
+
+Confirmed by a two-factor experiment rather than by reading the code (owner asked for confirmation):
+
+| A: `AuthorizeAsync` throws outside its own try | B: filter catch inverted to authorize | Failures |
+|---|---|---|
+| off | off | 0 of 30 |
+| off | on | 0 of 30 ← the original puzzling result |
+| **on** | off | **14 of 30** |
+| **on** | **on** | **17 of 30** |
+
+The **3-test delta between the last two rows is the catch's coverage**. The guard is live, correct, and already pinned by tests — it simply cannot be reached today, because `AuthorizeAsync` wraps everything except its own `ArgumentNullException.ThrowIfNull` in a catch-all that returns a denial. The zero was a fact about `AuthorizationService`, not about the test suite. Both measurement and conclusion now live in the filter's own comment so nobody repeats the investigation.
+
+**Generalised lesson, carried forward:** a zero-failure perturbation has **two** possible causes — the test is at the wrong level, *or the perturbed code is unreachable*. Distinguish them before rewriting tests, or you add coverage for a path that cannot execute.
+
+### Remaining
+
+1. **The 3 collection-shaped routes** (`POST /api/v1/documents/`, `GET /api/v1/documents/`, `GET /api/v1/containers/{containerId}/documents`) — no caller-supplied document id, so they need collection-level scoping, which is Phase 1 evaluator work (tasks 032/054). Confirmed still out of scope here rather than silently dropped.
+2. **`share-link`** (H4) — owned by task 012. Its OBO enforcement is real (verified above), so it is not an open disclosure; what task 012 owns is the anonymous-link *policy* and lifecycle.
+
+**Route status: 19 of 22 gated.** The 3 remaining are the collection-shaped ones above.

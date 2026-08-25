@@ -279,6 +279,91 @@ public class DocumentDestroyAuthorizationTests
             "different question");
     }
 
+    /// <summary>
+    /// <c>analyze</c> requires <c>write</c> — an owner decision (2026-08-24), not a default. The case
+    /// for <c>read</c> was genuine: the analysis lands on a different entity than the one this filter
+    /// authorizes, which is exactly why <c>finance.confirm</c> deliberately does NOT require Create.
+    /// <c>write</c> won because the route commits real resources on the caller's say-so — AI spend
+    /// plus queued background work — and the profile fields it populates are the document's own.
+    /// </summary>
+    [Fact]
+    public async Task TriggerAnalysis_ForCallerWithReadOnly_IsDenied()
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess");
+
+        var response = await client.PostAsync($"/api/documents/{DocumentId}/analyze", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "queueing analysis spends AI credits and enqueues background work — Read is not enough");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("sdap.access.deny.insufficient_rights");
+        body.Should().NotContain("unknown_operation");
+    }
+
+    [Fact]
+    public async Task TriggerAnalysis_ForCallerWithWriteRight_IsNotDeniedByAuthorization()
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+
+        var response = await client.PostAsync($"/api/documents/{DocumentId}/analyze", content: null);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+            "a caller holding Write must pass the filter");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The URL-minting reads — five routes that hand out urls outliving the request
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Unlike <c>/content</c> and <c>/download</c>, these five reach SPE through OBO, so Graph
+    /// already enforced the caller's own SPE access. The gate is a SECOND boundary and it narrows
+    /// deliberately: SPE permission is container-scoped and coarser than per-document Dataverse
+    /// rights, so a caller with container access but no Read on the row is now refused. That caller
+    /// seeing another client's document is the disclosure spec FR-01 exists to close.
+    /// </summary>
+    [Theory]
+    [InlineData("preview-url")]
+    [InlineData("preview")]
+    [InlineData("office")]
+    [InlineData("open-links")]
+    [InlineData("view-url")]
+    public async Task UrlMintingRoute_ForCallerWithoutReadRight_IsDeniedBeforeAnyUrlIsMinted(string route)
+    {
+        using var client = _fixture.CreateClientWithRights("");
+
+        var response = await client.GetAsync($"/api/documents/{DocumentId}/{route}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a url that outlives the request must not be mintable by a caller with no rights on the " +
+            "document");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("sdap.access.deny.insufficient_rights");
+        body.Should().NotContain("unknown_operation");
+    }
+
+    /// <summary>
+    /// The positive direction, so the five gates are not merely "deny everyone". Asserting "not 403"
+    /// rather than a success status: these handlers call real SPE/Graph paths that cannot succeed
+    /// offline, so what is pinned here is the authorization verdict, not the payload.
+    /// </summary>
+    [Theory]
+    [InlineData("preview-url")]
+    [InlineData("preview")]
+    [InlineData("office")]
+    [InlineData("open-links")]
+    [InlineData("view-url")]
+    public async Task UrlMintingRoute_ForCallerWithReadRight_IsNotDeniedByAuthorization(string route)
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess");
+
+        var response = await client.GetAsync($"/api/documents/{DocumentId}/{route}");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+    }
+
     [Fact]
     public async Task GetCheckoutStatus_ForCallerWithoutReadRight_IsDenied()
     {

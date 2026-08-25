@@ -101,11 +101,21 @@ public static class DocumentOperationsEndpoints
             .AddDocumentAuthorizationFilter("read");
 
         // POST /api/documents/{documentId}/analyze
+        //
+        // Finding H3. Operation is `write`, decided explicitly by the owner 2026-08-24 rather than
+        // defaulted. The case for `read` was real: the analysis is written to a DIFFERENT entity
+        // than the one this filter authorizes, which is the same reasoning that made
+        // "finance.confirm" deliberately NOT require Create (see OperationAccessPolicy). The case
+        // for `write` won because this route commits real resources on the caller's say-so — it
+        // spends AI credits and enqueues background work — and because the analysis lands back on
+        // the document's own profile fields, so it does mutate the authorized record's state.
         group.MapPost("/analyze", TriggerDocumentAnalysis)
             .WithName("TriggerDocumentAnalysis")
             .WithDescription("Queues a document for AI analysis (Document Profile) via Service Bus")
             .Produces(202)
-            .ProducesProblem(401);
+            .ProducesProblem(403)
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("write");
 
         return app;
     }
