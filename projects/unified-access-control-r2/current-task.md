@@ -11,11 +11,42 @@
 | Field | Value |
 |---|---|
 | **Task** | ✅ **022 COMPLETE** — document-surface authorization sweep. **19 of 22 routes gated**; the 3 remaining have no caller-supplied document id and are Phase 1 collection-scoping work |
-| **Step** | **Next task: 021** — provisioning stamping PATCH (Critical C4/C5). ⚠️ its nav-prop names MUST come from `$metadata`; escalate rather than guess |
+| **Step** | 🔔 **021 ESCALATED at step 0** — the two `@odata.bind` nav-property names cannot be recovered from any available source (see the escalation below). **Next unblocked task: 025**, or 026/027 which are parallel-safe |
 | **Status** | clean — all work committed and pushed (`f076b1e38`) |
 | **Phase** | Phase 0 — enforcement remediation · **14 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ **009 ✅** 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) · **+ Phase 0b filed: 021–029** — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6); **029 added 2026-08-24 by owner decision** (To Do read/create parity — task 009 left PATCH wider than list) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | **Start task 021** — provisioning stamping PATCH (C4/C5). Creates real infrastructure but leaves the project pointing at none, because three `@odata.bind` names are wrong AND the 400 is swallowed. **Step 0 is the gate**: get the three navigation-property names from live `$metadata` (Dataverse MCP `describe`). A wrong nav prop is accepted as an unknown property and the write silently does not happen — the exact class under repair. **If the names cannot be read, STOP and escalate; do not guess.** Fix the names AND the swallow together: names alone leaves the next drift invisible, the swallow alone hard-blocks provisioning on names we know are wrong. |
+| **Next Action** | **Start task 025** (test-integrity — the reason the rest could hide: `CallerRecordAccessProbe.GetCallerRightsAsync` can be replaced with "return all rights" and the suite stays green). 026 and 027 are parallel-safe and can run any time. **021 stays blocked** until the owner supplies the two nav-property names — see the escalation below. |
+
+### 🔔 ESCALATION — task 021 blocked at step 0 (2026-08-24)
+
+**ADR/POML constraint invoked**: *"MANDATORY FIRST STEP: recover the navigation-property names from
+live `$metadata`. DO NOT GUESS."* Full detail + evidence:
+[`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md).
+
+**Two findings that change the task**, both from live metadata:
+
+1. **Only 2 of the 3 writes are lookups.** `sprk_containerid` is `NVARCHAR(100)` — a plain string
+   write needing no navigation property. The POML's "three wrong names" framing obscured this.
+2. **ROOT CAUSE: a stale schema doc, not a typo.**
+   `src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md` documents
+   `sprk_securitybuid` / `sprk_externalaccountid`; live metadata has `sprk_securitybu` /
+   `sprk_externalaccount`. **The code was implemented faithfully from that doc.** Its relationship
+   names and its `pac data export` example are wrong too. Scope added to task 026.
+
+**Blocked because**: `describe` returns logical names only; `read_query` is SQL-over-data and cannot
+reach `EntityDefinitions`; the one repo source is the stale doc; no secure project exists in dev to
+read back. A wrong nav property is silently accepted and the write does not happen — guessing
+re-commits the exact sin under repair.
+
+**Nothing shipped, deliberately** — the three writes go out in ONE PATCH, so fixing only the verified
+container changes no behaviour, and fixing only the swallow hard-blocks provisioning on names known
+to be wrong.
+
+**Owner options**: (A) supply the two names from `$metadata` on any environment with the solution
+deployed — *recommended, one lookup*; (B) deploy a secure project in dev and read them back (also
+gives task 034 a live target); (C) switch this write to the SDK path (`EntityReference` addresses
+lookups by **logical** name, no nav property) — the only option that stops this recurring, but an
+architectural change beyond 021's scope.
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
