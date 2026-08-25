@@ -435,21 +435,26 @@ describe('usePendingRedline (materialize from ledger)', () => {
     editor.destroy();
   });
 
-  it('all mode: replaces EVERY occurrence (accept leaves the alternative at each site)', () => {
+  // Task 052 — `match_mode` is RETIRED IN FULL, including `all`
+  // (notes/052-text-search-demotion-decisions.md §2). This test formerly asserted that
+  // `match_mode: 'all'` fanned one edit out to every occurrence; that capability is gone, and its
+  // replacement is user-invoked find/replace (which shows the match count before committing).
+  // The LEGACY replay leg is pinned to `strict`, so a stored `all` payload can only ever RESOLVE
+  // MORE NARROWLY than it used to — an honest refusal instead of an invisible over-application.
+  it('a legacy `match_mode: "all"` payload no longer fans out — it resolves STRICTLY and refuses', () => {
     const editor = makeEditor('<p>fee then fee again</p>');
     const { result } = renderHook(() => usePendingRedline(editor));
 
+    let status: string | undefined;
     act(() => {
-      result.current.materialize({ target_text: 'fee', new_text: 'fie', match_mode: 'all' }, PROV);
-    });
-    act(() => {
-      result.current.accept('b1@t1');
+      status = result.current.materialize({ target_text: 'fee', new_text: 'fie', match_mode: 'all' }, PROV);
     });
 
-    const text = editor.getText();
-    expect(text).not.toContain('fee');
-    // Both occurrences replaced by the alternative.
-    expect(text.match(/fie/g)).toHaveLength(2);
+    // Two occurrences under `strict` ⇒ ambiguous ⇒ nothing placed (UAT-21: never silently mis-place).
+    expect(status).toBe('ambiguous');
+    expect(result.current.error).toMatchObject({ kind: 'ambiguous', matchCount: 2 });
+    expect(editor.getText()).toBe('fee then fee again');
+    expect(editor.getHTML()).not.toContain('data-compose-mark');
     editor.destroy();
   });
 

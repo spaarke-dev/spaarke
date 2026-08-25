@@ -157,6 +157,7 @@ import {
   type MaterializeStatus,
   type ConfidenceBand,
   type PendingRedlineError,
+  type PendingRedlineStaleTarget,
 } from './hooks/usePendingRedline';
 // FR-C01 (r8 task 051) — the anchor supply for AI edits. Both hooks shipped in R4 (tasks 040/041) and
 // were never given a production consumer: every `<ComposeAiToolbar>` mount below omitted them, so
@@ -488,11 +489,22 @@ export interface ComposeEditorDocumentRef {
  * and MUST NOT be logged; `sources` are identifiers only.
  */
 export interface ComposeDraftPayload {
-  /** Text the draft targets for replacement; absent/empty for an insertion-style draft. */
+  /**
+   * LEGACY ONLY (r8 task 052) — prose the draft targeted for replacement. The four compose EDIT
+   * Actions no longer ask the model for this, so a payload carrying it and no anchor is a REPLAYED
+   * ledger entry written before that catalog change (`usePendingRedline.resolveLegacyReplayedSpans`,
+   * the bounded case task 053 owns). Retained on the type so replayed entries still parse — never
+   * emitted by a new edit, and never a placement channel when an anchor is present.
+   */
   target_text?: string;
   /** The drafted content to materialize into the editor (load-bearing single-edit field). */
   new_text?: string;
-  /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
+  /**
+   * LEGACY ONLY (r8 task 052) — RETIRED IN FULL, including `all`
+   * (notes/052-text-search-demotion-decisions.md §2). Retained on the type so replayed entries parse;
+   * it is NOT read by any placement path — the legacy leg is pinned to `strict`, which can only refuse
+   * where `first`/`all` would have guessed.
+   */
   match_mode?: string;
   /**
    * FR-C01/FR-C03 (spaarkeai-compose-r8 task 051) — the DETERMINISTIC anchor: the exact `w14:paraId`
@@ -536,7 +548,7 @@ export interface ComposeDraftEdit {
   target_text?: string;
   /** The proposed replacement clause language, inserted as a pending track-change. */
   new_text: string;
-  /** How to locate `target_text`: `strict` (default) | `first` | `all`. */
+  /** LEGACY ONLY (r8 task 052) — retired; not read by any placement path. See ComposeDraftPayload. */
   match_mode?: string;
   /** FR-C01/C03 (task 051) — the exact `w14:paraId` this change targets. Outranks `target_text`. */
   target_para_id?: string;
@@ -699,6 +711,15 @@ export interface ComposeEditorProps {
    * via {@link ComposeEditorHandle.clearRedlineError}.
    */
   onRedlineErrorChange?: (error: PendingRedlineError | null) => void;
+
+  /**
+   * FR-C05 (spaarkeai-compose-r8 task 052) — surfaces the "this clause changed since the suggestion —
+   * apply anyway?" question UP to the host, which renders it as a `ConfirmModal` (ADR-050) and — the
+   * load-bearing half — writes the DURABLE resolution via the FR-17 supersession seam so a refresh
+   * cannot re-ask (task-050 assessment §4.4 O-2/O-3). Null clears it. The two answers route back via
+   * {@link ComposeEditorHandle.applyStaleRedlineAnyway} / {@link ComposeEditorHandle.dismissStaleRedline}.
+   */
+  onRedlineStaleTargetChange?: (stale: PendingRedlineStaleTarget | null) => void;
 
   /**
    * Called with the server projection's fidelity-warning array after each DOCX mount (task 013:
@@ -973,6 +994,15 @@ export interface ComposeEditorHandle {
   clearRedlineError(): void;
 
   /**
+   * FR-C05 (task 052) — "apply anyway": place the suggestion(s) held back by the stale-target question.
+   * The host MUST also write the durable supersession; this only resolves the in-editor placement.
+   */
+  applyStaleRedlineAnyway(): void;
+
+  /** FR-C05 (task 052) — "skip this suggestion": discard the held-back suggestion(s), placing nothing. */
+  dismissStaleRedline(): void;
+
+  /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
    * sends on save so the server can stamp minted ids physically onto the retained-original baseline's
    * id-less paragraphs before the synthesizer resolves. Read-only (no dirty-flag side effect) — sourced
@@ -1137,12 +1167,14 @@ export interface ComposeEditorHandle {
    * FR-16 pending track-change materialization (spaarkeai-compose-r2 task 033).
    * Render the stored `compose`-disposition draft as a PENDING redline using the
    * FR-15 marks (task 031), tagged with `{bindingId}@t{n}` provenance, with inline
-   * accept/reject. A `target_text` produces an insertion/deletion pair (resolved by
-   * the payload's `match_mode`); an insertion-style draft produces a pending
-   * insertion at the cursor. Idempotent per `ledgerRef`; a newer output for the same
-   * binding supersedes the prior one (FR-17 alignment). Returns the outcome so the
-   * host can distinguish applied vs an unresolved (`ambiguous`/`not_found`) target —
-   * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
+   * accept/reject. An ANCHORED draft (`target_para_id`/`target_ref`) resolves to its
+   * paragraph and then diffs LOCALLY inside it, so only the changed words are struck
+   * (r8 task 052, FR-C05); a targetless draft produces a pending insertion at the
+   * cursor. Idempotent per `ledgerRef`; a newer output for the same binding supersedes
+   * the prior one (FR-17 alignment). Returns the outcome so the host can distinguish
+   * applied vs an unresolved (`ambiguous` / `not_found` / `target_deleted`) target and
+   * vs a `stale` one held back for confirmation — the FR-19 "do not guess" rule. The
+   * true ledger-supersession WRITE is FR-17/034.
    */
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
 
@@ -2036,6 +2068,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       sessionId = '',
       onDirtyChange,
       onRedlineErrorChange,
+      onRedlineStaleTargetChange,
       onImportWarnings,
       enqueueComposeAction,
       onOpenInWord,
@@ -2642,7 +2675,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Task 051 (FR-C02): the paraId map is what a citation-anchored edit ("clause 4.2") resolves
     // through — the SAME map `placeAdvisoryComments` already uses for `sectionRef`. One coordinate
     // system for both anchor consumers (project invariant 3).
-    const redline = usePendingRedline(editor, paraIdMap);
+    // Task 052 (FR-C05): `proposalScope` is the DOCUMENT session id — the scope the stale-target
+    // proposal baseline is recorded under, so two documents' suggestions can never compare against
+    // each other. Absent session ⇒ the stale check is inert (fail-open to pre-052 behaviour).
+    const redline = usePendingRedline(editor, paraIdMap, { proposalScope: sessionId ?? undefined });
 
     // Banner consolidation (2026-08-19): surface the redline anchor-failure notice up to the host so
     // it renders in the single ComposeBannerStack rail (one location, MessageBar styling) instead of a
@@ -2650,6 +2686,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       onRedlineErrorChange?.(redline.error);
     }, [redline.error, onRedlineErrorChange]);
+
+    // FR-C05 (task 052): same pattern for the stale-target question — the editor DETECTS it, the host
+    // ASKS it (ConfirmModal) and RESOLVES it durably (FR-17 supersession).
+    React.useEffect(() => {
+      onRedlineStaleTargetChange?.(redline.staleTarget);
+    }, [redline.staleTarget, onRedlineStaleTargetChange]);
 
     // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
     // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
@@ -3273,6 +3315,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // Banner consolidation (2026-08-19): dismiss the redline anchor-failure notice now rendered in
         // the host's ComposeBannerStack rail. Delegates to the redline hook's own clearError.
         clearRedlineError: () => redline.clearError(),
+        // FR-C05 (task 052) — the two answers to the host's stale-target ConfirmModal.
+        applyStaleRedlineAnyway: () => redline.applyStaleTargetAnyway(),
+        dismissStaleRedline: () => redline.dismissStaleTarget(),
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),

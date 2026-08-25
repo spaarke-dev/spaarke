@@ -192,10 +192,11 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        // (8) POST /api/compose/edit-batch/validate — FR-19 deterministic edit validation (task 020)
+        // (8) POST /api/compose/edit-batch/validate — deterministic ANCHOR-ONLY edit validation
+        // (FR-C01/C02/C03; the text-search leg was retired by task 052 / FR-C04)
         group.MapPost("/edit-batch/validate", ValidateEditBatch)
             .WithName("ComposeValidateEditBatch")
-            .WithSummary("Deterministically resolve match_mode edits against document text; 422 on ambiguity/no-match/empty-target/overlap")
+            .WithSummary("Deterministically resolve each edit's paraId/citation anchor against the request's reference map; 422 on an unresolvable, conflicting, or missing anchor")
             .RequireRateLimiting("ai-context")
             .Produces<BatchValidationResult>(StatusCodes.Status200OK)
             .Produces<BatchValidationResult>(StatusCodes.Status422UnprocessableEntity)
@@ -369,17 +370,19 @@ public static class ComposeEndpoints
     // Handlers
     // ─────────────────────────────────────────────────────────────────────────
 
-    // FR-19 (task 020): deterministic match_mode edit validation. Pure — delegates to
-    // IComposeEditValidator (ADR-013: no AI internals). 200 when the batch resolves cleanly,
-    // 422 with the structured ambiguity/no-match/empty-target/overlap result otherwise.
+    // FR-C01/C02/C03/C04: deterministic ANCHOR-ONLY edit validation, delegated to
+    // ComposeEditAnchorPass (pure; ADR-013: no AI internals). An edit names its target paragraph by
+    // `target_para_id` or by legal citation (`target_ref`) and resolves through the request's reference
+    // map, or it is refused. 200 when every edit resolves; 422 with the structured refusal otherwise.
     //
-    // FR-C01/C02/C03 (task 051): resolution is now ANCHOR-FIRST via ComposeEditAnchorPass. An edit that
-    // names its target by paraId or by legal citation resolves through the reference map and never
-    // reaches the text search; only un-anchored edits still do. Task 052 (FR-C04) retires that leg — it
-    // is deliberately left intact here so no anchor source is broken before all three are live.
+    // Task 052 (FR-C04) DELETED the legacy leg: there is no IComposeEditValidator, no target_text, and no
+    // whole-document search behind this endpoint any more (ADR-049 I-7). An un-anchored edit now returns
+    // EditErrorKind.NoAnchor. `documentText` stays on the REQUEST contract (callers still send it, and the
+    // apply side speaks in offsets against that same projection) but is no longer read to place anything —
+    // ComposeEditAnchorPass does not even receive it, which is what makes "no placement path searches
+    // document text" a property of the signature rather than of a comment.
     private static IResult ValidateEditBatch(
         [FromBody] EditBatchValidateRequest? body,
-        IComposeEditValidator validator,
         ILoggerFactory loggerFactory,
         HttpContext httpContext)
     {
@@ -388,7 +391,7 @@ public static class ComposeEndpoints
         if (body.DocumentText is null) return Results.BadRequest("documentText is required.");
         if (body.Edits is null || body.Edits.Count == 0) return Results.BadRequest("edits must contain at least one proposed edit.");
 
-        var result = ComposeEditAnchorPass.Validate(body.DocumentText, body.Edits, body.ReferenceMap, validator);
+        var result = ComposeEditAnchorPass.Validate(body.Edits, body.ReferenceMap);
 
         var anchoredCount = result.Verdicts.Count(v => v.ResolvedParaId is not null);
         logger.LogInformation(

@@ -4,7 +4,7 @@
     <title>FR-C04/C05 — Retire the text-search placement path (server + client) and give stale/deleted targets deterministic outcomes</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>blocked-on-051</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes a placement mechanism the product currently depends on; a missed consumer breaks AI editing in production.</rigor-reason>
     <model-tier>opus</model-tier>

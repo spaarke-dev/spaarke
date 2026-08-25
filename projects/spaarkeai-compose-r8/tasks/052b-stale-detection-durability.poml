@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052b" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C05 residual — make stale-target DETECTION durable beyond the tab; today a cross-tab reopen silently restores the overwrite that 052 closed</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Closes a silent-data-loss path. The failure is invisible by construction — the user's newer text is replaced and the apply reports success — so a missed case produces no signal.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the hard part is choosing the capture-time carrier. The obvious candidates each fail for a non-obvious reason — the model must NOT be asked to echo the paragraph back (that is `target_text`, which task 052 retired as lossy and a placement hazard, ADR-049 I-7), `ParaIdMapEntry` carries no text, and growing the ledger payload runs at the ADR-040 128 KB cap that `ProjectComposeOutputs` SKIPS entirely when exceeded. Picking the wrong one re-opens a defect this project already closed twice.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same client edit path and same compose payload surface as 052/053.</parallel-reason>
+    <deps>052</deps>
+    <tags>bff-api, frontend, compose, ai, testing</tags>
+    <estimated-effort>5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Task 052 closed FR-C05's stale-target hole: the paraId resolves, the paragraph changed since the
+    suggestion, and the model's `new_text` silently overwrote whatever the user typed in between. It now
+    asks *"this clause changed since the suggestion — apply anyway?"*, and the user's ANSWER is
+    ledger-durable (the FR-17 supersession write) exactly as the task-050 assessment's O-2 requires.
+
+    **The answer is durable. The QUESTION is not.** Asking it needs two texts — the clause now, and the
+    clause as the model saw it — and the second has no durable home. Task 052 recorded it client-side in
+    `sessionStorage` (`redlineProposalBaseline.ts`), which covers the O-5 acceptance scenario (same-tab
+    refresh) and nothing beyond it.
+
+    **Where the hole is open**, each ending in the silent overwrite 052 exists to close:
+    - a reopen in a DIFFERENT tab or a new window (sessionStorage is per-tab);
+    - more than `MAX_ENTRIES` (200) materialized suggestions in one session — oldest baselines evict;
+    - private browsing / storage quota / storage disabled — `storage()` returns null and every check is inert.
+
+    In each case the detection degrades to "no prompt", which reads as safe and is not: "no prompt" IS the
+    pre-052 behavior, and the pre-052 behavior in the stale case is the silent overwrite.
+
+    **This is a DETECTION problem, not a resolution problem.** Do not re-open O-1…O-6 — the resolution
+    half is correct and shipped. Do not solve it by asking the model to echo the paragraph back: that is
+    `target_text`, retired by 052 as lossy (a generation, not a copy) and as a placement hazard under
+    ADR-049 I-7. The capture-time text must be a COPY the system takes, never a reproduction the model
+    makes.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the compose ledger payload, `SessionOutput` projection, ADR-040 payload caps, and the Compose client redline path.</role>
+
+  <goal>
+    A stale target is detected wherever the suggestion can be re-materialized — including a different tab,
+    a new window, and after baseline eviction — not only in the tab that first rendered it. Where detection
+    genuinely cannot be established, the outcome is an honest one, not a silent apply.
+  </goal>
+
+  <context>
+    <background>
+      Task 052's own module doc states the limitation plainly
+      (`redlineProposalBaseline.ts` header, "WHY sessionStorage") — this task closes what that comment
+      names. The precedent it cites, `writeReviewFindingsMarker`, is a same-tab marker for a state the
+      server projection cannot express; the difference is that a missed review-findings marker costs a
+      re-render, while a missed staleness check costs the user's text.
+
+      A fingerprint is very likely sufficient and much cheaper than the text: the check is
+      "did this paragraph change", which a hash answers, and a hash carries no Tier-3 content into a
+      durable store (ADR-015). Verify that against the actual comparison the client performs before
+      committing to it — `redlineLocalDiff` needs the TEXT, not just a hash, to compute the local edit
+      range, so establish whether the durable datum must be the text, or whether the hash gates a check
+      whose text comes from elsewhere.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/redlineProposalBaseline.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ProjectComposeOutputs — the read projection)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task 050 O-1">MUST NOT become an ADR-041 Gate. No `PendingPlanManager`, no `SessionGate`, no `gateId`, no invented `BindingRisk`. This task touches DETECTION only; the resolution half is shipped and correct.</constraint>
+    <constraint source="ADR-049 I-7 / task 052">MUST NOT reintroduce `target_text` or ask the model to echo the paragraph back. The capture-time datum is a COPY the system takes, never a reproduction the model makes (project invariant 7).</constraint>
+    <constraint source="ADR-040 / assessment C-4">`SessionLedger.CapInlinePayload` caps inline payloads at 128 KB and `ProjectComposeOutputs` SKIPS truncated entries ENTIRELY — a whole-document change list that grows past the cap vanishes from the read projection rather than degrading. Measure the worst realistic case (whole-document revise, N edits) before choosing a payload-borne carrier, and state the headroom.</constraint>
+    <constraint source="ADR-015">Paragraph text is Tier-3 content. If the durable datum is the text rather than a hash, state which governed store it lands in and under what retention; prefer a hash if it is sufficient.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse an existing carrier. Enumerate what already crosses this boundary (`SessionOutput.Payload`, the reference map, `ChatSession.ReferenceMap`) and justify in one sentence each why the chosen one fits and the others do not. Do not build a third store.</constraint>
+    <constraint source="project invariant 1">Where detection cannot be established at all, the outcome MUST be defined and honest. Decide explicitly whether that means confirm-before-apply or apply-with-notice, and say why — "no prompt" is the current behavior and is the thing being fixed.</constraint>
+    <constraint source="ADR-038">A seam test over the real boundary. The acceptance scenario is a re-materialize with NO tab-local state at all — that is what a different tab looks like to the code.</constraint>
+    <constraint source="CLAUDE.md §10">If the BFF changes: Placement Justification, publish-size report vs the 44.96 MB baseline (measure COMPRESSED after `rm -rf` of the output dir, and report the raw sum alongside it), no new NuGet, no new HIGH CVE, tests updated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>stale-target detection, ledger payload caps, capture-time provenance</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read `redlineProposalBaseline.ts`'s header and the task-050 assessment §4.4 FIRST. Do not re-derive O-1…O-6.</step>
+    <step order="1">Establish empirically what the comparison actually needs — a hash, or the text — by reading `redlineLocalDiff`'s inputs. The answer decides everything downstream.</step>
+    <step order="2">Enumerate the candidate durable carriers and pick one, with the §11 three-question justification. Measure the ADR-040 cap headroom for the worst realistic whole-document case BEFORE committing.</step>
+    <step order="3">Write the failing seam test FIRST — re-materialize with zero tab-local state — and observe it fail.</step>
+    <step order="4">Implement. Keep the sessionStorage path only if it still earns its place as a fast path; delete it if the durable carrier subsumes it (do not leave two sources of truth).</step>
+    <step order="5">Define the outcome for genuinely-undeterminable detection, per the invariant-1 constraint.</step>
+    <step order="6">Verify: cross-tab case, eviction case, storage-disabled case. Publish size + CVE if the BFF changed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the only durable carrier that fits pushes a realistic whole-document payload past the ADR-040 128 KB cap, STOP — `ProjectComposeOutputs` skips truncated entries, so the fix would make the whole suggestion vanish instead of making it safe. Surface the trade rather than shipping it.</trigger>
+    <trigger>If closing this requires storing paragraph text in a store ADR-015 does not already govern for Tier-3 content, STOP and surface it — a governed-store row is an owner decision (see the ADR-015 §6.5 Path B precedent set by task 060).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/redlineProposalBaseline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/052b-stale-detection-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A stale target is detected on a re-materialize with NO tab-local state — asserted by a test, since that is what a different tab looks like to the code.</criterion>
+    <criterion>Detection survives baseline eviction and a storage-disabled environment, or those cases reach the defined honest outcome from the invariant-1 constraint — stated explicitly either way.</criterion>
+    <criterion>The capture-time datum is a COPY the system takes; the model is NOT asked to echo the paragraph back (no `target_text` revival).</criterion>
+    <criterion>ADR-040 cap headroom measured for the worst realistic whole-document case and stated.</criterion>
+    <criterion>The chosen carrier is an existing one, with the §11 three-question justification recorded; no third store was built.</criterion>
+    <criterion>NEGATIVE: not built as an ADR-041 Gate; the shipped resolution half (FR-17 supersession) is unchanged.</criterion>
+    <criterion>NEGATIVE: no placement path searches document text (052's guarantee still holds — re-assert by grep).</criterion>
+    <criterion>Publish size + CVE reported if the BFF changed; client suites green.</criterion>
+  </acceptance-criteria>
+</task>

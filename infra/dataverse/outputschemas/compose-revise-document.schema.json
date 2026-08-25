@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spaarke.com/schemas/analysisaction/compose-revise-document.schema.json",
   "title": "Compose — Revise Document — Output Schema (compose-revise-document)",
-  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-revise-document' (spaarkeai-compose-r2 DEF-11). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-revise-document.action.json (the systemPrompt/schema author surface). The dual-channel payload — edits[] (structured, ledger-backed pending track-changes, same shape as compose-draft-alternative's ComposeDraftPayload) and comments[] (anchored review-flag comments, DEF-13 path) — becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; match_mode is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-revise-document' (spaarkeai-compose-r2 DEF-11). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-revise-document.action.json (the systemPrompt/schema author surface). The dual-channel payload — edits[] (structured, ledger-backed pending track-changes, same shape as compose-draft-alternative's ComposeDraftPayload) and comments[] (anchored review-flag comments, DEF-13 path) — becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; spaarkeai-compose-r8 task 052 retired target_text/match_mode from edits[] — target_para_id is the targeting field and no placement path searches document text (ADR-049 I-7); comments[] keeps target_text as an ANNOTATION anchor.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,46 +11,30 @@
     "rationale",
     "sources"
   ],
-  "$comment-required": "Object-level required array (ALL four fields required — edits/comments MAY be empty arrays per intent, but the arrays themselves are always present). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required.",
+  "$comment-required": "Object-level required array (ALL four fields required — edits/comments MAY be empty arrays per intent, but the arrays themselves are always present). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. spaarkeai-compose-r8 task 052 RETIRED target_text and match_mode from edits[]: text matching is no longer a placement channel for an AI edit (ADR-049 I-7). comments[] KEEPS target_text because a review flag is an ANNOTATION anchored within its paragraph, not an edit placement — the surviving role the task-052 consumer check records (notes/052-text-search-demotion-decisions.md §1.3).",
   "properties": {
     "edits": {
       "type": "array",
-      "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item is exactly the compose-draft-alternative ComposeDraftPayload shape.",
+      "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item names its target paragraph by identifier and carries that paragraph's full revised text — the same shape compose-draft-alternative emits.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "target_text",
           "new_text",
-          "match_mode",
           "target_para_id"
         ],
         "properties": {
-          "target_text": {
-            "type": "string",
-            "description": "The exact substring of documentText this edit replaces — copied VERBATIM so the editor can locate it.",
-            "maxLength": 16000
-          },
           "new_text": {
             "type": "string",
-            "description": "The proposed replacement language — self-contained, drafting-ready prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+            "description": "The proposed replacement language — self-contained, drafting-ready prose (no placeholders, no commentary, no markup). The FULL revised text of the paragraph target_para_id names; the editor diffs it against that paragraph's current text and marks ONLY the words that changed, inserted as a pending track-change.",
             "maxLength": 16000
-          },
-          "match_mode": {
-            "type": "string",
-            "description": "How the editor locates target_text: 'strict' (this exact occurrence — default), 'first' (first occurrence of a shorter repeated fragment), or 'all' (every occurrence, e.g. a defined-term change).",
-            "enum": [
-              "strict",
-              "first",
-              "all"
-            ]
           },
           "target_para_id": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this item applies to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. Null ONLY when the paragraph genuinely cannot be identified, in which case placement falls back to target_text/match_mode.",
+            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this edit applies to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. This is the ONLY placement channel for an edit (spaarkeai-compose-r8 task 052, ADR-049 I-7): the editor never searches the document text for the edit's wording. Null ONLY when the paragraph genuinely cannot be identified, in which case the edit is REFUSED — there is no prose fallback.",
             "maxLength": 64
           }
         }
@@ -83,7 +67,7 @@
               "string",
               "null"
             ],
-            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this item applies to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. Null ONLY when the paragraph genuinely cannot be identified, in which case placement falls back to target_text/match_mode.",
+            "description": "The bracketed [XXXXXXXX] identifier of the paragraph this comment anchors to, copied VERBATIM from documentText. MUST be one of the identifiers present there (a CLOSED SET) — an identifier outside it is refused and the item dropped. Null ONLY when the paragraph genuinely cannot be identified, in which case the comment hangs on target_text within the document (an ANNOTATION anchor, not an edit placement — the role ADR-049 I-7 leaves intact).",
             "maxLength": 64
           }
         }

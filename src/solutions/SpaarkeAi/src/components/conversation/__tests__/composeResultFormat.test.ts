@@ -102,8 +102,22 @@ describe('formatDraftAlternativeResult', () => {
     expect(md).toContain('playbook: pb-9');
   });
 
-  it('returns null when the required triad (target_text/new_text/match_mode) is incomplete', () => {
+  // r8 task 052: the shape test is now `new_text` PLUS a target of either vintage.
+  it('returns null when new_text is present but NO target of either vintage is', () => {
     expect(formatDraftAlternativeResult({ new_text: 'x', match_mode: 'strict' })).toBeNull();
+    expect(formatDraftAlternativeResult({ target_para_id: 'A1B2C3D4' })).toBeNull();
+  });
+
+  it('renders a POST-052 payload that carries target_para_id and no prose target', () => {
+    const md = formatDraftAlternativeResult({
+      target_para_id: 'A1B2C3D4',
+      new_text: 'The Vendor liability shall be capped at the fees paid in the preceding 12 months.',
+      rationale: 'Provides a bounded, market-standard cap instead of a full carve-out.',
+      sources: [],
+    });
+    expect(md).not.toBeNull();
+    expect(md).toContain('**Drafted an alternative clause.**');
+    expect(md).toContain('capped at the fees paid in the preceding 12 months');
   });
 });
 

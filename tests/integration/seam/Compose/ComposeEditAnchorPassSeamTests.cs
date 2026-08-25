@@ -1,4 +1,4 @@
-// Task 051 (spaarkeai-compose-r8, FR-C01/C02/C03) — the ANCHOR-FIRST edit-resolution seam slice.
+// Tasks 051 + 052 (spaarkeai-compose-r8, FR-C01/C02/C03/C04) — the ANCHOR-ONLY edit-resolution seam slice.
 //
 // The defect this pins: an AI edit used to name its target in PROSE (`target_text` + `match_mode`) and the
 // apply path searched the whole document for the model's echoed wording — deterministic information that
@@ -8,22 +8,33 @@
 //   POSITIVE — a paraId anchor (FR-C01/C03) and a legal citation (FR-C02) each resolve to the exact
 //   paragraph of a REAL corpus document, through the REAL numbering engine's computed ParaIdMap.
 //
-//   NEGATIVE — the assertion that actually matters, and the one a shape-only test cannot make: the text
-//   search is NEVER INVOKED for an anchored edit. This is enforced structurally, not by inspecting output:
-//   the pass is handed a text validator that THROWS if called, so an anchored edit that leaked into the
-//   legacy leg fails the test loudly instead of quietly returning a plausible-looking span. The
-//   un-anchored case then proves the same validator IS still reached, so the negative is a real
-//   constraint rather than an unreachable branch.
+//   NEGATIVE — the assertion that actually matters: an edit is NEVER placed by matching document prose.
+//
+// HOW THE NEGATIVE IS ENFORCED NOW (task 052 changed this, and it is a strengthening). Under task 051 the
+// text leg still existed, so the guarantee needed a runtime tripwire: the pass was handed an
+// `IComposeEditValidator` fake that THREW if called. Task 052 DELETED that leg, the validator, and the
+// interface — so the tripwire is now the TYPE SYSTEM. `ComposeEditAnchorPass.Validate` accepts only
+// (edits, referenceMap): it receives no document text and no text-searching collaborator, so there is
+// nothing here that COULD search prose. The `ThrowIfTextSearched` / `RecordingTextValidator` fakes are gone
+// because they are literally un-writable — there is no interface left to implement.
+//
+// What replaces them, so the negative stays a real constraint rather than an unenforced claim:
+//   1. `AnchorPass_Signature_CannotSeeDocumentText` — reflection over the public signature. It fails if a
+//      future change re-admits a document-text or text-validator parameter, which is the only way the
+//      search could come back through this door.
+//   2. The un-anchored case (`EditWithNoAnchor_...`) asserts the POSITIVE outcome of the removal: a
+//      deterministic `NoAnchor` refusal naming the anchors the edit should have supplied — not a search,
+//      and not a silent pass.
 //
 // The seam: corpus bytes -> ComposeDocxProjectionBuilder -> real ParaIdMap (closed set + numbering)
 //           -> ProposedEdit envelope -> ComposeEditAnchorPass -> EditVerdict.ResolvedParaId.
 //
 // KEEP-path classification (ADR-038 §"vertical-slice-seam"): tests/integration/seam/**. Drives the REAL
-// projection builder over REAL corpus fixtures + the REAL CitationResolver/ComposeAnchorResolver. The one
-// hand-written collaborator is a first-party IComposeEditValidator fake used as a TRIPWIRE, not as a
-// stand-in for behavior under test — none of the ADR-038 banned shapes (Mock<HttpMessageHandler>,
+// projection builder over REAL corpus fixtures + the REAL CitationResolver/ComposeAnchorResolver. There are
+// now NO hand-written collaborators at all — none of the ADR-038 banned shapes (Mock<HttpMessageHandler>,
 // DI-registration, ctor-null) appear here.
 
+using System.Reflection;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Compose;
 using Xunit;
@@ -36,32 +47,6 @@ public sealed class ComposeEditAnchorPassSeamTests
     // Fixtures
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// The tripwire. Any call means an edit that carried a deterministic anchor still fell through to the
-    /// text-search leg — the exact regression FR-C01/C02 exists to prevent, so it fails the test rather
-    /// than returning something plausible.
-    /// </summary>
-    private sealed class ThrowIfTextSearched : IComposeEditValidator
-    {
-        public BatchValidationResult Validate(string documentText, IReadOnlyList<ProposedEdit> edits)
-            => throw new InvalidOperationException(
-                $"Text search was invoked for {edits.Count} edit(s) that carried a deterministic anchor. "
-                + "An anchored edit must resolve through the reference map and never reach target_text.");
-    }
-
-    /// <summary>Records that the legacy leg WAS reached, so the un-anchored path can be proven live.</summary>
-    private sealed class RecordingTextValidator : IComposeEditValidator
-    {
-        private readonly ComposeEditValidator _real = new();
-        public List<ProposedEdit> Seen { get; } = new();
-
-        public BatchValidationResult Validate(string documentText, IReadOnlyList<ProposedEdit> edits)
-        {
-            Seen.AddRange(edits);
-            return _real.Validate(documentText, edits);
-        }
-    }
-
     private static ComposeDocxProjection ProjectCorpus(string fileName)
     {
         var corpusDir = Path.GetDirectoryName(ComposeCorpusFixtureLocator.EnumerateDocumentPaths().First())!;
@@ -71,10 +56,37 @@ public sealed class ComposeEditAnchorPassSeamTests
 
     private static ProposedEdit Edit(
         string newText = "REPLACEMENT",
-        string targetText = "",
         string? paraId = null,
         string? reference = null)
-        => new(targetText, newText, MatchMode.Strict, TargetParaId: paraId, TargetRef: reference);
+        => new(newText, TargetParaId: paraId, TargetRef: reference);
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // FR-C04 — the structural guarantee: the pass CANNOT search document prose
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void AnchorPass_Signature_CannotSeeDocumentText_OrAnyTextSearchingCollaborator()
+    {
+        // This replaces task 051's throwing test double. A runtime tripwire could only catch a leak on the
+        // paths a test happens to exercise; the signature closes the door on every path at once. It fails
+        // if anyone re-admits the document body (or a searcher for it) into anchor resolution — which is
+        // exactly how the retired mechanism would come back.
+        var validate = typeof(ComposeEditAnchorPass)
+            .GetMethod(nameof(ComposeEditAnchorPass.Validate), BindingFlags.Public | BindingFlags.Static);
+
+        validate.Should().NotBeNull();
+        var parameters = validate!.GetParameters();
+
+        parameters.Should().NotContain(
+            p => p.ParameterType == typeof(string),
+            "a string parameter here is document prose by another name — the anchor pass resolves ids, "
+            + "not text (ADR-049 I-7)");
+
+        parameters.Select(p => p.Name).Should().BeEquivalentTo(
+            new[] { "edits", "referenceMap" },
+            "the closed parameter set IS the guarantee: an edit's target comes from the reference map or "
+            + "nowhere");
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // FR-C01/C03 — an explicit paraId anchor resolves, with zero text matching
@@ -87,10 +99,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var target = projection.ParaIdMap.Single(e => e.Index == 9).ParaId;
 
         var result = ComposeEditAnchorPass.Validate(
-            documentText: "irrelevant — an anchored edit must never read this",
             edits: new[] { Edit(paraId: target) },
-            referenceMap: projection.ParaIdMap,
-            textValidator: new ThrowIfTextSearched());
+            referenceMap: projection.ParaIdMap);
 
         result.IsValid.Should().BeTrue();
         result.Verdicts.Should().ContainSingle()
@@ -106,10 +116,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var canonical = projection.ParaIdMap.Single(e => e.Index == 9).ParaId;
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(paraId: canonical.ToLowerInvariant()) },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched());
+            projection.ParaIdMap);
 
         // Downstream paraId comparisons are ordinal, so echoing the caller's casing would silently fail
         // to match later. The set's own spelling is what comes back.
@@ -134,10 +142,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var expected = projection.ParaIdMap.Single(e => e.Index == 9).ParaId;
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant — a citation-anchored edit must never read this",
             new[] { Edit(reference: citation) },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched());
+            projection.ParaIdMap);
 
         result.IsValid.Should().BeTrue();
         result.Verdicts[0].ResolvedParaId.Should().Be(expected);
@@ -149,10 +155,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var projection = ProjectCorpus("heading-style-numbering.docx");
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(reference: "Sections 1-9") },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched());
+            projection.ParaIdMap);
 
         // Picking matches[0] would be exactly the silently-wrong-target failure this task removes.
         result.IsValid.Should().BeFalse();
@@ -170,10 +174,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var projection = ProjectCorpus("heading-style-numbering.docx");
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(paraId: "DEADBEEF") },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched()); // reaching the text leg on a bad anchor would throw
+            projection.ParaIdMap);
 
         result.IsValid.Should().BeFalse();
         var verdict = result.Verdicts.Should().ContainSingle().Subject;
@@ -189,10 +191,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         var projection = ProjectCorpus("heading-style-numbering.docx");
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(reference: "Section 4127") },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched());
+            projection.ParaIdMap);
 
         result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.UnresolvedReference);
     }
@@ -203,10 +203,8 @@ public sealed class ComposeEditAnchorPassSeamTests
         // The dangerous degradation: an anchored edit arriving without a map, quietly falling through to
         // the very search path the anchor exists to replace. It is refused instead.
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(paraId: "AAAA1111") },
-            referenceMap: null,
-            new ThrowIfTextSearched());
+            referenceMap: null);
 
         result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.NoReferenceMap);
     }
@@ -218,63 +216,62 @@ public sealed class ComposeEditAnchorPassSeamTests
         var otherParaId = projection.ParaIdMap.Single(e => e.Index == 0).ParaId;
 
         var result = ComposeEditAnchorPass.Validate(
-            "irrelevant",
             new[] { Edit(paraId: otherParaId, reference: "Section 4.2") },
-            projection.ParaIdMap,
-            new ThrowIfTextSearched());
+            projection.ParaIdMap);
 
         result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.ConflictingAnchors);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
-    // The legacy leg is still REACHABLE (so the negatives above are a real constraint), and mixed
-    // batches keep their verdict indices — task 052 retires this leg, task 051 must not break it.
+    // FR-C04 — the un-anchored edit: what USED TO reach the text search now has a defined outcome
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void UnanchoredEdit_StillReachesTheTextValidator()
+    public void EditWithNoAnchorAtAll_IsRefusedDeterministically_InsteadOfBeingTextSearched()
     {
-        var recorder = new RecordingTextValidator();
+        // Task 051's version of this test asserted the opposite — that an un-anchored edit STILL reached
+        // the legacy validator — because the leg was deliberately kept alive until every anchor source
+        // shipped. This is the positive form of its retirement, and it is the assertion that proves the
+        // removal actually landed rather than merely being unreachable.
+        var projection = ProjectCorpus("heading-style-numbering.docx");
 
         var result = ComposeEditAnchorPass.Validate(
-            "The Receiving Party shall keep the information confidential.",
-            new[] { Edit(targetText: "confidential") },
-            referenceMap: null,
-            recorder);
+            new[] { Edit(newText: "The Receiving Party shall keep the information confidential.") },
+            projection.ParaIdMap);
 
-        recorder.Seen.Should().ContainSingle("nothing anchored it, so the legacy path is still the only answer");
-        result.IsValid.Should().BeTrue();
-        result.Verdicts[0].ResolvedParaId.Should().BeNull();
+        result.IsValid.Should().BeFalse("an edit that names no target cannot be placed");
+        var verdict = result.Verdicts.Should().ContainSingle().Subject;
+        verdict.Error!.Kind.Should().Be(EditErrorKind.NoAnchor);
+        verdict.ResolvedParaId.Should().BeNull();
+        verdict.Matches.Should().BeEmpty("nothing was searched, so there is nothing to report a span for");
+        verdict.Error.ResolutionHint.Should().Contain("target_para_id")
+            .And.Contain("target_ref", "the refusal must tell the caller which anchors would have worked");
     }
 
     [Fact]
-    public void MixedBatch_SendsOnlyUnanchoredEditsToTheTextLeg_AndKeepsRequestOrderIndices()
+    public void MixedBatch_DecidesEveryEditIndependently_AndKeepsRequestOrderIndices()
     {
         var projection = ProjectCorpus("heading-style-numbering.docx");
         var target = projection.ParaIdMap.Single(e => e.Index == 9).ParaId;
-        var recorder = new RecordingTextValidator();
 
         var result = ComposeEditAnchorPass.Validate(
-            "The Receiving Party shall keep the information confidential.",
             new[]
             {
-                Edit(newText: "A", targetText: "confidential"), // 0 — legacy
-                Edit(newText: "B", paraId: target),             // 1 — anchored
-                Edit(newText: "C", reference: "Section 4.2"),   // 2 — anchored
-                Edit(newText: "D", targetText: "Receiving"),    // 3 — legacy
+                Edit(newText: "A"),                           // 0 — no anchor  -> NoAnchor refusal
+                Edit(newText: "B", paraId: target),           // 1 — anchored
+                Edit(newText: "C", reference: "Section 4.2"), // 2 — anchored
+                Edit(newText: "D"),                           // 3 — no anchor  -> NoAnchor refusal
             },
-            projection.ParaIdMap,
-            recorder);
+            projection.ParaIdMap);
 
-        recorder.Seen.Select(e => e.NewText).Should().Equal(
-            new[] { "A", "D" }, "only the un-anchored edits may reach the text leg");
-
-        // The validator numbered its own subset 0..1; those verdicts must come back re-keyed onto the
-        // caller's positions, or "Edit N failed" would name the wrong edit.
+        // Verdict indices must track the CALLER's positions, or "Edit N failed" names the wrong edit.
         result.Verdicts.Select(v => v.EditIndex).Should().Equal(0, 1, 2, 3);
         result.Verdicts[1].ResolvedParaId.Should().Be(target);
         result.Verdicts[2].ResolvedParaId.Should().Be(target);
+        result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.NoAnchor);
+        result.Verdicts[3].Error!.Kind.Should().Be(EditErrorKind.NoAnchor);
         result.Verdicts[0].ResolvedParaId.Should().BeNull();
         result.Verdicts[3].ResolvedParaId.Should().BeNull();
+        result.IsValid.Should().BeFalse("one refused edit is enough to fail the batch");
     }
 }

@@ -206,6 +206,10 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 jest.mock('@spaarke/ui-components', () => ({
+  // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
+  // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
+  // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
+  ConfirmModal: () => null,
   createXrmNavigationService: () => ({ openLookup: jest.fn() }),
   createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
   SendEmailDialog: () => null,

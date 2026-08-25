@@ -5,9 +5,10 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// ADR-013 / NFR-05 (spaarkeai-compose-r2 task 025): Tier-1 facade guard scoped to
-/// <c>Sprk.Bff.Api.Services.Compose</c>. The Phase 2 LLM Editing Pattern services
-/// (<c>IComposeEditValidator</c>, <c>ComposeEditBatch</c>, <c>ComposeEditTransaction</c>,
-/// <c>SemanticAppendixGenerator</c>, <c>CriticMarkupRenderer</c>, <c>ComposeService</c>, ...)
+/// <c>Sprk.Bff.Api.Services.Compose</c>. The Compose edit/annotation services
+/// (<c>ComposeEditAnchorPass</c>, <c>ComposeAnchorResolver</c>, <c>ComposeEditBatch</c>,
+/// <c>ComposeEditTransaction</c>, <c>SemanticAppendixGenerator</c>, <c>CriticMarkupRenderer</c>,
+/// <c>ComposeService</c>, ...)
 /// are pure deterministic text-transform logic per design.md §6.1 — the LLM proposes edits
 /// out-of-band (via the shipped session-dispatch seam), and Compose only resolves/applies spans
 /// against text it already has. None of these types may reach the model or the
@@ -18,7 +19,7 @@ namespace Spaarke.ArchTests;
 /// against <c>IOpenAiClient</c>/<c>IPlaybookService</c> with a grandfathered-exception list for
 /// the AI API surface itself). <c>Services/Compose/</c> has ZERO legitimate exceptions — it is
 /// the reference example of a facade-compliant consumer per the Compose project's own doc
-/// comments (see <c>IComposeEditValidator.cs</c>, <c>ComposeEditTransaction.cs</c>,
+/// comments (see <c>ComposeAnchorResolver.cs</c>, <c>ComposeEditTransaction.cs</c>,
 /// <c>ComposeEditBatch.cs</c> remarks, all of which cite this test by task number). Without this
 /// guard, a future edit could inject <c>IOpenAiClient</c>, a <c>Services/Ai/Nodes</c> executor, or
 /// <c>IConsumerRoutingService</c> into a Compose service and pass CI, silently reintroducing an

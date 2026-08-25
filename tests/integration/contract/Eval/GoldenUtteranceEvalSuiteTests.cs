@@ -1257,16 +1257,30 @@ public class GoldenUtteranceEvalSuiteTests
         // paraId prefixed — a CLOSED SET — and answers with an id copied from it rather than prose
         // quoted back. `comments[]` matters as much as `edits[]`: flag-risks emits an EMPTY edits array
         // by contract, so the highest-volume whole-document capability is entirely comment-anchored.
+        //
+        // task 052 (FR-C04) then RETIRED `target_text`/`match_mode` from the EDIT channel only. The two
+        // channels deliberately diverge now, and the divergence is the point: an EDIT is a PLACEMENT and
+        // must be anchored (ADR-049 I-7 — an un-anchored edit is refused, never text-searched), whereas a
+        // COMMENT is an ANNOTATION and keeps its verbatim span as the DEF-13 fallback for the case where
+        // the model could not identify a paragraph. Asserting both here is what stops a future "tidy-up"
+        // from making them uniform in either direction.
         schemaDoc.RootElement.GetProperty("properties").GetProperty("edits")
             .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
-            .Should().BeEquivalentTo(new[] { "target_text", "new_text", "match_mode", "target_para_id" },
+            .Should().BeEquivalentTo(new[] { "new_text", "target_para_id" },
                 "each edits[] item is still exactly the compose-draft-alternative ComposeDraftPayload shape — "
-                + "which itself gained target_para_id in task 051, so the two stayed parallel");
+                + "which lost target_text/match_mode in task 052 alongside the server-side text search, so "
+                + "the two stayed parallel");
+        schemaDoc.RootElement.GetProperty("properties").GetProperty("edits")
+            .GetProperty("items").GetProperty("properties").EnumerateObject().Select(prop => prop.Name)
+            .Should().NotContain("match_mode", "match_mode was retired in full (including 'all') by task 052 — "
+                + "a global defined-term sweep is served by user-invoked find/replace, which shows the match "
+                + "count and requires an explicit Replace-All, not by an AI edit that fans out silently");
         schemaDoc.RootElement.GetProperty("properties").GetProperty("comments")
             .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
             .Should().BeEquivalentTo(new[] { "target_text", "comment", "target_para_id" },
                 "each comments[] item anchors a review flag by paraId, falling back to a verbatim document "
-                + "span only when the model could not identify the paragraph (DEF-13 path)");
+                + "span only when the model could not identify the paragraph (DEF-13 path). A comment is an "
+                + "ANNOTATION, not a placement — ADR-049 I-7 does not reach it, so its span survives task 052");
 
         // The parallel above is ASSERTED, not just asserted-about: the sibling selection Action must
         // carry the anchor too. Hardcoding the list on one side while claiming parity with the other is

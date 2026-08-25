@@ -104,10 +104,13 @@ describe('resolveAnchoredSpans (deterministic anchor contract)', () => {
     editor.destroy();
   });
 
-  it('refuses a paraId that is not in the live document — never repairs it', () => {
+  it('refuses a paraId that is not in the live document — never repairs it (task 052: target_deleted)', () => {
     const { editor, referenceMap } = makeTwoClauseDoc();
     const r = resolveAnchoredSpans(editor, { target_para_id: 'DEADBEEF' }, referenceMap);
-    expect(r).toEqual({ ok: false, kind: 'not_found', matchCount: 0 });
+    // FR-C05 outcome 3 (task 052): the anchor RESOLVED to a paragraph identity that is no longer in
+    // the document — a DISTINCT outcome from `not_found` (an anchor that never resolved at all), so
+    // the banner can say "the text this suggestion referred to no longer exists".
+    expect(r).toEqual({ ok: false, kind: 'target_deleted', matchCount: 0, paraId: 'DEADBEEF' });
     editor.destroy();
   });
 
@@ -197,8 +200,9 @@ describe('usePendingRedline — anchored materialize (FR-C01/C02)', () => {
       );
     });
 
-    expect(status).toBe('not_found');
-    expect(result.current.error?.kind).toBe('not_found');
+    // Task 052: a resolvable-but-absent paraId is `target_deleted`, not the generic `not_found`.
+    expect(status).toBe('target_deleted');
+    expect(result.current.error?.kind).toBe('target_deleted');
     expect(textOf(editor, 'STAB0041')).not.toContain('REWRITTEN');
     editor.destroy();
   });
@@ -275,7 +279,8 @@ describe('usePendingRedline — anchored change list (materializeMany)', () => {
       );
     });
 
-    expect(statuses).toEqual(['applied', 'not_found']);
+    // Task 052: the dead paraId is `target_deleted` (FR-C05 outcome 3), not the generic `not_found`.
+    expect(statuses).toEqual(['applied', 'target_deleted']);
     expect(textOf(editor, 'STAB0041')).toContain('GOOD');
     expect(result.current.error?.failedCount).toBe(1);
     editor.destroy();

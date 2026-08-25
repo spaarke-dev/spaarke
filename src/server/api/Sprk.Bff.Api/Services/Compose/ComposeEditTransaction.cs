@@ -40,6 +40,13 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// caller as part of <see cref="ComposeEditTransactionResult"/>, never stored on <c>this</c>.
 /// That is what makes a shared singleton instance safe under concurrent requests.
 /// </para>
+/// <para>
+/// <b>Status (task 052 / FR-C04)</b>: see <see cref="ComposeEditBatch"/>'s status note — the
+/// offset-span producer this pair was built for was deleted with the text-search validator, so
+/// neither type has a production caller today. Both are retained deliberately; their retirement is a
+/// separate owner decision recorded in
+/// <c>projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</c> §1.4.
+/// </para>
 /// </remarks>
 public sealed class ComposeEditTransaction
 {
@@ -58,7 +65,7 @@ public sealed class ComposeEditTransaction
     /// </summary>
     /// <param name="documentText">
     /// The pre-batch document (plaintext projection — same contract as
-    /// <see cref="IComposeEditValidator.Validate"/> / <see cref="ComposeEditBatch.Apply"/>).
+    /// <see cref="ComposeEditBatch.Apply"/>).
     /// </param>
     /// <param name="edits">The proposed edits, in caller order — passed through unchanged.</param>
     /// <param name="validation">

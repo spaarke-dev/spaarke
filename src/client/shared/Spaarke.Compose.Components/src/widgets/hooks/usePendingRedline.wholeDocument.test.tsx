@@ -344,11 +344,13 @@ describe('materializeMany — per-item isolation and honest N-of-M reporting', (
     expect(statuses).toEqual([
       'applied', // REV-1 paraId
       'applied', // REV-2 paraId
-      'not_found', // DEAD-ANCHOR
+      // Task 052 (FR-C05 outcome 3): a paraId that RESOLVES as an identity but is absent from the live
+      // document is `target_deleted` — distinguishable from a citation that never resolved at all.
+      'target_deleted', // DEAD-ANCHOR
       'applied', // REV-3 citation
       'applied', // REV-4 citation
       'applied', // REV-5 prose
-      'not_found', // DEAD-CITATION
+      'not_found', // DEAD-CITATION (the numbering map has no clause 99.9 — nothing to delete)
       'applied', // REV-6 prose
       'applied', // REV-7 paraId
       'applied', // REV-8 paraId
@@ -425,7 +427,7 @@ describe('materializeMany — per-item isolation and honest N-of-M reporting', (
       );
     });
 
-    expect(statuses).toEqual(['not_found']);
+    expect(statuses).toEqual(['target_deleted']);
     expect(mockTextSearchTargets).toEqual([]);
     expect(editor.state.doc.textContent).not.toContain('must not be placed');
     expect(textOf(editor, 'AAAA0005')).toContain('thirty days notice');

@@ -127,7 +127,16 @@ export function formatCompareToPlaybookResult(payload: unknown): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// compose-draft-alternative — { target_text, new_text, match_mode, rationale, sources[] }
+// compose-draft-alternative — { target_para_id, new_text, rationale, sources[] }
+//
+// spaarkeai-compose-r8 task 052: the detector formerly required the triad
+// { target_text, new_text, match_mode }. The four compose EDIT Actions no longer ASK the model for
+// target_text or match_mode (text matching is not a placement channel for an AI edit — ADR-049 I-7),
+// so that triad went permanently incomplete and this renderer silently returned null for every new
+// edit result — the Assistant's confirmation line would have vanished. The shape test is now
+// `new_text` PLUS a target of either vintage (`target_para_id` for a post-052 payload,
+// `target_text` for a replayed legacy one), which stays as specific as before: no other compose
+// payload carries `new_text` alongside a target field.
 // ---------------------------------------------------------------------------
 
 /** Detects + renders a `compose-draft-alternative` result, or `null` if the shape doesn't match. */
@@ -135,9 +144,9 @@ export function formatDraftAlternativeResult(payload: unknown): string | null {
   const record = asRecord(payload);
   if (record === null) return null;
   const newText = asNonEmptyString(record.new_text);
+  const targetParaId = asNonEmptyString(record.target_para_id);
   const targetText = asNonEmptyString(record.target_text);
-  const matchMode = asNonEmptyString(record.match_mode);
-  if (newText === null || targetText === null || matchMode === null) return null;
+  if (newText === null || (targetParaId === null && targetText === null)) return null;
 
   const rationale = asNonEmptyString(record.rationale);
   const parts: string[] = ['**Drafted an alternative clause.**'];

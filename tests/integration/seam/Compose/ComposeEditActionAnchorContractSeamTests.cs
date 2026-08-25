@@ -18,6 +18,14 @@
 // single id, and it is covered by its own task. The negative below pins that boundary deliberately so the
 // omission reads as a decision rather than an oversight.
 //
+// TASK 052 (FR-C04) UPDATE. The legacy text-search consumer is DELETED, so the two `IComposeEditValidator`
+// fakes this file used as tripwires (`ThrowIfTextSearched` / `RecordingTextValidator`) are un-writable --
+// the interface no longer exists. The guarantee they asserted is now structural: `ComposeEditAnchorPass`
+// takes no document text and no text validator, so an anchored edit CANNOT reach a search. What remains
+// asserted here is the half that is still falsifiable at the catalog seam: the model's schema-shaped
+// payload binds to `ProposedEdit` and places at its anchor, and a NULL anchor now produces a deterministic
+// `NoAnchor` refusal instead of falling through to prose matching.
+//
 // KEEP-path classification (ADR-038 §"vertical-slice-seam"): tests/integration/seam/**. Drives the REAL
 // catalog seed files, the REAL schema validator, the REAL JSON binding, and the REAL anchor pass over a
 // REAL corpus projection. No mocks.
@@ -88,8 +96,9 @@ public sealed class ComposeEditActionAnchorContractSeamTests
 
         prop.GetProperty("type").EnumerateArray().Select(e => e.GetString())
             .Should().BeEquivalentTo(new[] { "string", "null" },
-                "null is the honest answer when no anchor was supplied — which is what keeps the legacy "
-                + "target_text path reachable for anchorless callers instead of failing the request");
+                "null is the honest answer when no anchor was supplied — the model must be able to say so "
+                + "rather than invent an id; the consumer turns that null into a deterministic NoAnchor "
+                + "refusal (task 052), which is a defined outcome, not a silent search");
     }
 
     [Theory]
@@ -172,32 +181,38 @@ public sealed class ComposeEditActionAnchorContractSeamTests
         edit.Should().NotBeNull();
         edit!.TargetParaId.Should().Be(target, "the wire name must bind to the property the anchor pass reads");
 
+        // No documentText is passed because the signature has none to pass (task 052): the anchor places
+        // without any access to document prose, which is the guarantee made structural.
         var result = ComposeEditAnchorPass.Validate(
-            documentText: "irrelevant — the anchor must place without reading document prose",
             edits: new[] { edit },
-            referenceMap: projection.ParaIdMap,
-            textValidator: new ThrowIfTextSearched());
+            referenceMap: projection.ParaIdMap);
 
         result.IsValid.Should().BeTrue();
         result.Verdicts[0].ResolvedParaId.Should().Be(target);
     }
 
     [Fact]
-    public void NullAnchor_StillBinds_AndFallsThroughToTheLegacyTextPath()
+    public void NullAnchor_StillBinds_AndIsRefusedDeterministically_NotTextSearched()
     {
-        // The nullable half of the contract: an anchorless caller must keep working unchanged until the
-        // retirement task lands. If this ever fails, `["string","null"]` was narrowed to `"string"`.
+        // The nullable half of the contract, in its post-FR-C04 form. Two things are asserted together and
+        // both matter: (1) a payload whose anchor is null still BINDS -- if this ever fails,
+        // `["string","null"]` was narrowed to `"string"` and every honest "I could not identify a
+        // paragraph" answer would 400 instead of arriving; (2) that bound-but-anchorless edit produces a
+        // NoAnchor refusal. Before task 052 this same input fell through to a whole-document target_text
+        // search, so this assertion is the one that would fail if the search were ever reinstated.
         var edit = JsonSerializer.Deserialize<ProposedEdit>(
-            """{"target_text":"confidential","target_para_id":null,"new_text":"secret","match_mode":"strict"}""");
+            """{"target_para_id":null,"new_text":"secret","rationale":"clarity"}""");
 
+        edit.Should().NotBeNull();
         edit!.TargetParaId.Should().BeNull();
+        edit.NewText.Should().Be("secret");
 
-        var recorder = new RecordingTextValidator();
-        ComposeEditAnchorPass.Validate(
-            "The Receiving Party shall keep the information confidential.",
-            new[] { edit }, referenceMap: null, textValidator: recorder);
+        var result = ComposeEditAnchorPass.Validate(new[] { edit }, referenceMap: null);
 
-        recorder.Seen.Should().ContainSingle("a null anchor is not an anchor — the legacy path still owns it");
+        result.IsValid.Should().BeFalse();
+        result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.NoAnchor,
+            "a null anchor is not an anchor — and there is no longer a text path for it to fall through to");
+        result.Verdicts[0].Matches.Should().BeEmpty("nothing was searched, so there is no span to report");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -238,8 +253,8 @@ public sealed class ComposeEditActionAnchorContractSeamTests
 
         prop.GetProperty("type").EnumerateArray().Select(e => e.GetString())
             .Should().BeEquivalentTo(new[] { "string", "null" },
-                "null is the honest answer when the model could not identify a paragraph — it keeps the "
-                + "legacy text path reachable for that item instead of failing the whole batch");
+                "null is the honest answer when the model could not identify a paragraph — that ITEM is "
+                + "then refused with NoAnchor (task 052) rather than the whole batch failing to bind");
     }
 
     [Fact]
@@ -296,25 +311,11 @@ public sealed class ComposeEditActionAnchorContractSeamTests
     // Helpers
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>Any call means an anchored edit reached the text-search leg — the FR-C01/C02 regression.</summary>
-    private sealed class ThrowIfTextSearched : IComposeEditValidator
-    {
-        public BatchValidationResult Validate(string documentText, IReadOnlyList<ProposedEdit> edits)
-            => throw new InvalidOperationException(
-                "Text search was invoked for an edit carrying a deterministic anchor.");
-    }
-
-    private sealed class RecordingTextValidator : IComposeEditValidator
-    {
-        private readonly ComposeEditValidator _real = new();
-        public List<ProposedEdit> Seen { get; } = new();
-
-        public BatchValidationResult Validate(string documentText, IReadOnlyList<ProposedEdit> edits)
-        {
-            Seen.AddRange(edits);
-            return _real.Validate(documentText, edits);
-        }
-    }
+    // The `ThrowIfTextSearched` / `RecordingTextValidator` fakes that lived here under task 051 were
+    // deleted with `IComposeEditValidator` itself (task 052 / FR-C04). They are not replaced by an
+    // equivalent runtime tripwire because none is expressible: `ComposeEditAnchorPass.Validate` no longer
+    // accepts document text or a text-searching collaborator, so there is no seam left to trip. That
+    // signature is asserted directly by `ComposeEditAnchorPassSeamTests`.
 
     private static ComposeDocxProjection ProjectCorpus(string fileName)
     {
@@ -336,7 +337,6 @@ public sealed class ComposeEditActionAnchorContractSeamTests
             var value = prop.Name switch
             {
                 "target_para_id" => JsonSerializer.Serialize(paraId),
-                "match_mode" => "\"strict\"",
                 "sources" => "[]",
                 _ when IsArray(prop.Value) => "[]",
                 _ => JsonSerializer.Serialize($"value-for-{prop.Name}"),

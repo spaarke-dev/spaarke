@@ -24,8 +24,12 @@ export { useComposeHeartbeatGate } from './useComposeHeartbeatGate';
 export { usePendingRedline, resolveTargetSpans, collectMarkedRanges } from './usePendingRedline';
 export type {
   UsePendingRedlineResult,
+  UsePendingRedlineOptions,
   PendingRedline,
   PendingRedlineError,
+  // FR-C05 (r8 task 052) — the "this clause changed since the suggestion — apply anyway?" question.
+  PendingRedlineStaleTarget,
+  AnchorResolveResult,
   MaterializeStatus,
   RedlineMatchMode,
   RedlineSpan,

@@ -126,6 +126,9 @@ import {
   createXrmDataService,
   RichFilePreviewDialog,
   SendEmailDialog,
+  // FR-C05 (r8 task 052) — the stale-target "apply anyway?" question. ADR-050 canonical shell +
+  // ADR-021 semantic tokens; no bespoke chrome (assessment §4.4 O-6).
+  ConfirmModal,
   type LookupResult,
 } from '@spaarke/ui-components';
 // FR-14 (task 051) — "Create Summary Memo" toolbar control: shared types + pure email-body formatting
@@ -601,6 +604,19 @@ export interface ComposeLedgerOutput {
   disposition: string;
   /** The Compose-owned structured-edit payload. */
   payload: ComposeDraftPayload;
+}
+
+/**
+ * FR-C05 (r8 task 052) — Tier-3 safe excerpt for the stale-target confirmation. The two clause texts
+ * are shown so the user can SEE what changed rather than take our word for it; they are truncated
+ * because a 40-line clause in an `xs` modal is unreadable, and they are never logged.
+ */
+const STALE_CLAUSE_EXCERPT_CHARS = 160;
+function truncateClause(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  return collapsed.length > STALE_CLAUSE_EXCERPT_CHARS
+    ? `${collapsed.slice(0, STALE_CLAUSE_EXCERPT_CHARS)}…`
+    : collapsed;
 }
 
 /**
@@ -1122,6 +1138,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [pendingRedlineError, setPendingRedlineError] = React.useState<
     import('./hooks/usePendingRedline').PendingRedlineError | null
   >(null);
+
+  // FR-C05 (r8 task 052) — the stale-target question the editor raises when an anchored suggestion's
+  // clause no longer reads the way it did when the model wrote it. The editor DETECTS and holds the
+  // suggestion back (placing nothing); this host ASKS (ConfirmModal below) and — the load-bearing
+  // half — writes the DURABLE resolution through the shipped FR-17 supersession seam so the reopen
+  // pass cannot re-raise it after a refresh (task-050 assessment §4.4 O-2/O-4/O-5).
+  const [redlineStaleTarget, setRedlineStaleTarget] = React.useState<
+    import('./hooks/usePendingRedline').PendingRedlineStaleTarget | null
+  >(null);
+  const [staleResolutionBusy, setStaleResolutionBusy] = React.useState(false);
 
   // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
   // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave
@@ -3359,6 +3385,84 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     ]
   );
 
+  /**
+   * FR-C05 (r8 task 052) — the DURABLE half of the stale-target resolution.
+   *
+   * REUSE, NOT A NEW CARRIER (root §11 / assessment §4.4 O-3). This is the SHIPPED FR-17 supersession
+   * seam — the same `POST /api/ai/chat/sessions/{id}/compose-outputs/supersede` endpoint
+   * (`ChatEndpoints.SupersedeComposeOutputAsync`) that "undo that" / "try another approach" already
+   * write through, with the same body and the same append-only ledger semantics (O-4: a NEW superseding
+   * entry referencing `supersedesRef`; the original compose entry is never mutated or deleted).
+   *
+   * It is called from here rather than from `useEditSupersession` because that hook lives in the
+   * SpaarkeAi Assistant pane (`src/solutions/SpaarkeAi/src/components/conversation/`), which DEPENDS on
+   * this package — importing it here would invert the dependency. Same seam, second call site; not a
+   * third carrier.
+   *
+   * WHY THIS SATISFIES O-2/O-5. Once the entry is superseded it is no longer the head, so the
+   * untargeted reopen pass in {@link materializeComposeDraftFromLedger} does not re-materialize it and
+   * the question cannot be asked a second time about a decision already made. `React.useState` and
+   * `sessionStorage` would BOTH fail that test — `lastMaterializedKey` is the demonstrated
+   * counter-example (assessment §4.3).
+   *
+   * Returns false on any failure, so the caller can be honest rather than silently pretend it stuck.
+   */
+  const supersedeComposeOutput = React.useCallback(
+    async (supersedesRef: string): Promise<boolean> => {
+      if (!bffBaseUrl || !state.sessionId || !supersedesRef) return false;
+      try {
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(
+          state.sessionId
+        )}/compose-outputs/supersede`;
+        const response = await authenticatedFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ supersedesRef }),
+        });
+        const data = (await response.json()) as { key?: string; outcome?: string };
+        return typeof data?.key === 'string';
+      } catch {
+        return false;
+      }
+    },
+    [bffBaseUrl, state.sessionId]
+  );
+
+  /**
+   * FR-C05 — the user's answer to "this clause changed since the suggestion — apply anyway?".
+   *
+   * BOTH answers write the supersession: whichever way the user went, this proposal has been CONSUMED
+   * and must not be replayed. "Apply anyway" leaves the redline pending in the document (accept/reject
+   * still apply normally); "skip" leaves the document untouched. Neither is an ADR-041 Gate — no
+   * `PendingPlanManager`, no `SessionGate`, no `gateId` (assessment §4.2 / O-1).
+   */
+  const resolveRedlineStaleTarget = React.useCallback(
+    async (answer: 'apply' | 'skip'): Promise<void> => {
+      const target = redlineStaleTarget;
+      if (!target || staleResolutionBusy) return;
+      setStaleResolutionBusy(true);
+      try {
+        if (answer === 'apply') {
+          editorRef.current?.applyStaleRedlineAnyway();
+        } else {
+          editorRef.current?.dismissStaleRedline();
+        }
+        const recorded = await supersedeComposeOutput(target.ledgerRef);
+        if (!recorded) {
+          // Honest, not silent (R7 charter): the in-editor outcome IS what the user asked for, but the
+          // durable record did not land, so the question can legitimately return after a refresh.
+          setComposeDraftError(
+            'Your choice was applied to this document, but it could not be recorded — you may be asked ' +
+              'about this clause again after a refresh.'
+          );
+        }
+      } finally {
+        setStaleResolutionBusy(false);
+      }
+    },
+    [redlineStaleTarget, staleResolutionBusy, supersedeComposeOutput]
+  );
+
   // -------------------------------------------------------------------------
   // PaneEventBus receivers — Compose three-pane coordination, WORKSPACE leg
   // (task 104 / E2E-R5; supersedes/absorbs task 070). The Workspace pane OWNS
@@ -4820,6 +4924,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               activeWorkType={activeWorkType}
               onDirtyChange={handleDirtyChange}
               onRedlineErrorChange={setPendingRedlineError}
+              onRedlineStaleTargetChange={setRedlineStaleTarget}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
@@ -5014,6 +5119,53 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           void forceCloseAndAcquire();
         }}
         onCancel={discardAndCancel}
+      />
+
+      {/* FR-C05 (r8 task 052) — the stale-target question. NOT an ADR-041 Gate (task-050 assessment
+          §4.2): the Action already ran, there is nothing to suspend, and the trigger is a runtime
+          document fact no catalog datum can declare. It IS a real confirmation, so it uses the
+          canonical ConfirmModal shell (ADR-050) with semantic tokens only (ADR-021) — no bespoke
+          chrome. `dismiss="alert"` (the preset's default) is deliberate: this must be answered, not
+          Esc'd away, because "nothing happened" is not one of the outcomes.
+
+          NOTHING has been placed while this is open. Confirm = apply anyway; Cancel = skip this
+          suggestion. Either way the resolution is written to the ledger (see
+          resolveRedlineStaleTarget) so a refresh cannot re-ask. */}
+      <ConfirmModal
+        open={redlineStaleTarget !== null}
+        busy={staleResolutionBusy}
+        title="This clause changed since the suggestion"
+        message={
+          redlineStaleTarget === null ? (
+            ''
+          ) : (
+            <>
+              {redlineStaleTarget.staleCount > 1
+                ? `${redlineStaleTarget.staleCount} of ${redlineStaleTarget.totalCount} suggested edits target clauses that have changed since the suggestion was made. Applying them will replace the newer wording.`
+                : 'This clause has changed since the suggestion was made. Applying it will replace the newer wording.'}
+              <br />
+              <br />
+              {'Now: “'}
+              {truncateClause(redlineStaleTarget.currentText)}
+              {'”'}
+              <br />
+              {'When suggested: “'}
+              {truncateClause(redlineStaleTarget.proposedAgainst)}
+              {'”'}
+              <br />
+              <br />
+              Apply anyway?
+            </>
+          )
+        }
+        confirmLabel="Apply anyway"
+        cancelLabel="Skip this suggestion"
+        onConfirm={() => {
+          void resolveRedlineStaleTarget('apply');
+        }}
+        onClose={() => {
+          void resolveRedlineStaleTarget('skip');
+        }}
       />
 
       {/* gap 3.5 — return-from-Word conflict panel (task 054 component, mounted here). Opened from

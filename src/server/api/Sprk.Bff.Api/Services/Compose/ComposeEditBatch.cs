@@ -8,8 +8,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// bottom-up (design.md §6.1 "4-phase atomic batch pipeline"; validated by
 /// <c>notes/spikes/spike-3-edit-batch.md</c> + <c>edit-batch-prototype.cs</c>, all 4 proofs
 /// PASS). Ported faithfully from that prototype — the ordering/atomicity invariant is identical;
-/// only the resolved-span SOURCE differs (production consumes <see cref="IComposeEditValidator"/>
-/// output instead of re-resolving text itself, per the validator's contract: "edits enter the
+/// only the resolved-span SOURCE differs (this class never resolves spans itself — "edits enter the
 /// batch pre-validated").
 /// </summary>
 /// <remarks>
@@ -18,17 +17,18 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// there are TWO SEPARATE failure classes with OPPOSITE semantics. Do not conflate them.
 /// <list type="bullet">
 /// <item><b>Validation failure</b> — a per-edit <see cref="EditVerdict.IsValid"/> of <c>false</c>
-/// (<c>not-found</c> / <c>ambiguous-strict</c> / <c>empty-target</c>, produced upstream by
-/// <see cref="IComposeEditValidator"/>). This is FATAL: the WHOLE batch rolls back and NONE of
+/// (an anchor refusal such as <see cref="EditErrorKind.NoAnchor"/> or
+/// <see cref="EditErrorKind.UnknownParaId"/>, produced upstream by
+/// <see cref="ComposeEditAnchorPass"/>). This is FATAL: the WHOLE batch rolls back and NONE of
 /// the edits apply — <see cref="ComposeEditBatchResult.DocumentText"/> is the untouched input,
 /// byte-identical.</item>
 /// <item><b>Within-batch span overlap</b> — two edits' resolved spans intersect. This is
 /// NON-FATAL: the later-claimed overlapping span is skipped and reported
 /// (<see cref="ComposeEditBatchResult.Skipped"/>), and the batch STILL COMMITS. Overlap is
 /// detected and handled entirely inside THIS class (Phase 3) — it is intentionally NOT gated by
-/// <see cref="BatchValidationResult.BatchErrors"/> (the validator's own <c>Overlap</c>-kind
-/// batch errors exist for the client-facing <c>/edit-batch/validate</c> dry-run UX, a different
-/// consumer; the apply pipeline's overlap semantics are this class's own contract).</item>
+/// <see cref="BatchValidationResult.BatchErrors"/> (a caller may report <c>Overlap</c>-kind batch
+/// errors for a dry-run UX, a different consumer; the apply pipeline's overlap semantics are this
+/// class's own contract).</item>
 /// </list>
 /// </para>
 /// <para>
@@ -36,16 +36,22 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <c>IOpenAiClient</c>/executor/<c>IConsumerRoutingService</c> — nothing here reaches the model.
 /// </para>
 /// <para>
-/// <b>ADR-010 DI minimalism</b>: stateless (no constructor dependencies) — intentionally NOT
-/// registered in <c>ComposeModule</c> yet. No endpoint consumes it directly; FR-21
+/// <b>ADR-010 DI minimalism</b>: stateless (no constructor dependencies), registered as a single
+/// concrete singleton in <c>ComposeModule</c>. No endpoint consumes it directly; FR-21
 /// (<c>ComposeEditTransaction</c>, task 022) wraps it with document snapshot/apply semantics.
-/// Register only when a direct consumer needs DI (single line:
-/// <c>services.AddSingleton&lt;ComposeEditBatch&gt;();</c>).
 /// </para>
 /// <para>
-/// <b>Batch-apply ordering is the WHOLE POINT (not this validator's job)</b>: every edit resolves
-/// against the SAME original <c>documentText</c> (via <see cref="IComposeEditValidator.Validate"/>
-/// upstream). Applying naively in list order (or any order that doesn't account for offset shift)
+/// <b>Status (task 052 / FR-C04)</b>: with the text-search validator deleted, an anchored verdict
+/// carries an EMPTY <see cref="EditVerdict.Matches"/> — the paraId is the address, and the editor
+/// resolves it to a live span. Nothing in the BFF currently produces the offset spans this class
+/// applies, so it has no production caller today. The batch/transaction pair is retained
+/// deliberately (its retirement is a separate owner decision, recorded in
+/// <c>projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</c> §1.4), not
+/// because anything here still runs.
+/// </para>
+/// <para>
+/// <b>Batch-apply ordering is the WHOLE POINT</b>: every edit resolves against the SAME original
+/// <c>documentText</c> upstream. Applying naively in list order (or any order that doesn't account for offset shift)
 /// would corrupt the document as soon as an earlier-applied edit changes length. Sorting
 /// descending and applying bottom-up means every remaining LOWER offset stays valid throughout
 /// the splice sequence — the offset-stability guarantee this class exists to provide.
@@ -55,17 +61,17 @@ public sealed class ComposeEditBatch
 {
     /// <summary>
     /// Applies <paramref name="edits"/> to <paramref name="documentText"/> using the pre-computed
-    /// <paramref name="validation"/> result from <see cref="IComposeEditValidator.Validate"/>.
+    /// <paramref name="validation"/> result (see <see cref="ComposeEditAnchorPass.Validate"/>).
     /// </summary>
     /// <param name="documentText">
-    /// The SAME plaintext projection <paramref name="validation"/> was resolved against (see
-    /// <see cref="IComposeEditValidator"/> document-projection contract). Returned unchanged,
-    /// byte-identical, when the batch rolls back.
+    /// The SAME plaintext projection <paramref name="validation"/>'s spans are relative to (see the
+    /// offset contract in <c>ComposeEditModels.cs</c>). Returned unchanged, byte-identical, when the
+    /// batch rolls back.
     /// </param>
     /// <param name="edits">
     /// The proposed edits in caller order — <see cref="EditVerdict.EditIndex"/> in
     /// <paramref name="validation"/> indexes into this same list (used to recover
-    /// <see cref="ProposedEdit.NewText"/> at apply time; the validator's resolved
+    /// <see cref="ProposedEdit.NewText"/> at apply time; the resolved
     /// <see cref="ResolvedMatch"/> spans do not carry replacement text).
     /// </param>
     /// <param name="validation">
@@ -90,13 +96,13 @@ public sealed class ComposeEditBatch
             throw new ArgumentException(
                 $"validation.Verdicts.Count ({validation.Verdicts.Count}) must match edits.Count " +
                 $"({edits.Count}) — every edit must have a corresponding verdict from the SAME " +
-                "IComposeEditValidator.Validate call.",
+                "validation call.",
                 nameof(validation));
         }
 
-        // PHASE 1 (continued from IComposeEditValidator) — the FATAL gate. Any per-edit
-        // resolution failure (not-found / ambiguous-strict / empty-target) rolls back the WHOLE
-        // batch: none of the edits apply, and the untouched document is returned verbatim.
+        // PHASE 1 (continued from the upstream validation pass) — the FATAL gate. Any per-edit
+        // resolution failure (an anchor refusal) rolls back the WHOLE batch: none of the edits
+        // apply, and the untouched document is returned verbatim.
         // EDGE-1: this is Proof 2's exact assertion (spike-3-edit-batch.md §4) — one invalid
         // edit among otherwise-valid ones still means zero edits apply.
         var validationErrors = validation.Verdicts
@@ -115,9 +121,8 @@ public sealed class ComposeEditBatch
         }
 
         // Flatten every resolved span across all (now guaranteed-valid) verdicts, tagged with its
-        // origin edit index so we can recover NewText at apply time. match_mode:all fans one edit
-        // out to N spans (IComposeEditValidator.Resolve) — each span is an independent apply
-        // candidate below.
+        // origin edit index so we can recover NewText at apply time. A verdict MAY carry more than
+        // one span — each is an independent apply candidate below.
         var resolvedSpans = new List<(int EditIndex, ResolvedMatch Match)>();
         foreach (var verdict in validation.Verdicts)
         {

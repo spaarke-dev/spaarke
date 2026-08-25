@@ -25,7 +25,13 @@ public static class ComposeModule
 
         // R2 W1 edit/annotation services — pure deterministic text logic (ADR-013:
         // NO AI-internal injection; stateless concretes registered per ADR-010).
-        services.AddSingleton<IComposeEditValidator, ComposeEditValidator>();   // FR-19 (task 020)
+        // IComposeEditValidator/ComposeEditValidator RETIRED (task 052, FR-C04): the whole-document
+        // target_text search was the last PLACEMENT path that located an edit by prose (ADR-049 I-7).
+        // Placement is now anchor-only (ComposeEditAnchorPass -> ComposeAnchorResolver); an edit with no
+        // anchor is refused deterministically (EditErrorKind.NoAnchor), never searched for. The removed
+        // registration was UNCONDITIONAL (never inside an `if (flag)`), so its removal leaves no
+        // asymmetric registration (bff-extensions.md §F.1) — the sole consumer, the /edit-batch/validate
+        // endpoint, no longer takes the parameter.
         services.AddSingleton<ComposeEditBatch>();                              // FR-20 (task 021)
         services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)

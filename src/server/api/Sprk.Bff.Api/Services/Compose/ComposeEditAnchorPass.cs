@@ -1,120 +1,69 @@
 namespace Sprk.Bff.Api.Services.Compose;
 
 /// <summary>
-/// FR-C01/C02/C03 (spaarkeai-compose-r8 task 051) — the batch-level, ANCHOR-FIRST edit validation pass:
+/// FR-C01/C02/C03/C04 (spaarkeai-compose-r8 tasks 051 + 052) — the batch-level edit validation pass:
 /// the Compose-owned validation path the ADR-043/041 assessment (§7, C-7) designates as the home for
-/// closed-set validation. One fixed ordering, never the reverse:
+/// closed-set validation. It has exactly ONE leg:
 ///
-/// <list type="number">
+/// <list type="bullet">
 ///   <item><b>DETERMINISTIC</b> — an edit carrying <c>target_para_id</c> and/or <c>target_ref</c> is
 ///   resolved by <see cref="ComposeAnchorResolver"/> against the supplied reference map. It resolves to a
-///   paragraph or it is REFUSED. It never falls through to step 2, so no text search runs for it — that is
-///   the FR-C01/C02 guarantee, and it is asserted by test rather than assumed.</item>
-///   <item><b>LEGACY TEXT</b> — only edits carrying NO anchor reach
-///   <see cref="IComposeEditValidator.Validate"/> and its <c>target_text</c> search. Task 052 (FR-C04)
-///   retires this leg; until every anchor source is live, deleting it early would break whichever source
-///   was missed, so it stays and is simply unreachable for anchored edits.</item>
+///   paragraph, or it is REFUSED with a structured <see cref="EditValidationError"/>.</item>
+///   <item><b>NO ANCHOR ⇒ REFUSAL</b> — an edit that names no target at all yields
+///   <see cref="EditErrorKind.NoAnchor"/>. It is NOT searched for.</item>
 /// </list>
 ///
 /// <para>
-/// <b>Why the split matters mechanically.</b> The text validator indexes verdicts by position in the list
-/// it was handed, so anchored edits cannot merely be ignored in its output — they must never be IN its
-/// input, or <c>FindAll</c> runs over the whole document for an edit whose target was already known
-/// exactly. This pass therefore hands the validator only the un-anchored subset and maps its verdict
-/// indices back onto the original batch positions.
+/// <b>The achieved contract (task 052, FR-C04).</b> Task 051 left a second leg in place — un-anchored
+/// edits fell through to <c>IComposeEditValidator</c>'s whole-document <c>target_text</c> search — because
+/// deleting it before every anchor source was live would have broken whichever source was missed. All
+/// sources are live (tasks 051/054/055), so that leg and the validator behind it are DELETED. The
+/// guarantee that used to need a throwing test double is now enforced by the TYPE SYSTEM: this pass takes
+/// no document text and no text validator, so there is no document prose here to search and no collaborator
+/// to search it with (ADR-049 I-7).
 /// </para>
 ///
-/// <para><b>Pure.</b> No I/O and no DI of its own; the text validator is passed in by the caller.</para>
+/// <para><b>Pure.</b> No I/O, no DI, no state. Total — every edit takes exactly one branch below.</para>
 /// </summary>
 public static class ComposeEditAnchorPass
 {
     /// <summary>
-    /// Validates <paramref name="edits"/> anchor-first. See the type remarks for the ordering contract.
+    /// Validates <paramref name="edits"/> against the document's anchor set. See the type remarks for the
+    /// contract: every edit resolves to a paragraph or is refused, and nothing here reads document prose.
     /// </summary>
-    /// <param name="documentText">The plaintext projection the legacy text leg searches. Only read for
-    /// un-anchored edits; an all-anchored batch never touches it.</param>
     /// <param name="edits">The proposed batch, in request order. Verdict indices refer to this order.</param>
     /// <param name="referenceMap">The closed set + numbering data. Null/empty refuses every anchored edit
-    /// (<see cref="EditErrorKind.NoReferenceMap"/>) rather than degrading them to a text search.</param>
-    /// <param name="textValidator">The legacy text-search validator (task 052 removes this parameter).</param>
+    /// (<see cref="EditErrorKind.NoReferenceMap"/>) rather than degrading it to a guess.</param>
     public static BatchValidationResult Validate(
-        string documentText,
         IReadOnlyList<ProposedEdit> edits,
-        IReadOnlyList<ParaIdMapEntry>? referenceMap,
-        IComposeEditValidator textValidator)
+        IReadOnlyList<ParaIdMapEntry>? referenceMap)
     {
-        ArgumentNullException.ThrowIfNull(documentText);
         ArgumentNullException.ThrowIfNull(edits);
-        ArgumentNullException.ThrowIfNull(textValidator);
 
-        var verdicts = new EditVerdict?[edits.Count];
-
-        // Pass 1 — anchors. Each anchored edit is decided here and removed from the text leg's input.
-        var unanchored = new List<ProposedEdit>(edits.Count);
-        var unanchoredOriginalIndex = new List<int>(edits.Count);
+        var verdicts = new List<EditVerdict>(edits.Count);
 
         for (var i = 0; i < edits.Count; i++)
         {
             var edit = edits[i];
             var anchor = ComposeAnchorResolver.Resolve(edit.TargetParaId, edit.TargetRef, referenceMap);
 
-            switch (anchor.Status)
-            {
-                case ComposeAnchorStatus.Resolved:
-                    verdicts[i] = new EditVerdict(
-                        EditIndex: i,
-                        IsValid: true,
-                        Matches: Array.Empty<ResolvedMatch>(),
-                        Error: null,
-                        ResolvedParaId: anchor.ParaId);
-                    break;
-
-                case ComposeAnchorStatus.NoAnchor:
-                    unanchored.Add(edit);
-                    unanchoredOriginalIndex.Add(i);
-                    break;
-
-                default:
-                    verdicts[i] = new EditVerdict(
-                        EditIndex: i,
-                        IsValid: false,
-                        Matches: Array.Empty<ResolvedMatch>(),
-                        Error: BuildAnchorError(i, anchor));
-                    break;
-            }
+            verdicts.Add(anchor.Status == ComposeAnchorStatus.Resolved
+                ? new EditVerdict(
+                    EditIndex: i,
+                    IsValid: true,
+                    Matches: Array.Empty<ResolvedMatch>(),
+                    Error: null,
+                    ResolvedParaId: anchor.ParaId)
+                : new EditVerdict(
+                    EditIndex: i,
+                    IsValid: false,
+                    Matches: Array.Empty<ResolvedMatch>(),
+                    Error: BuildAnchorError(i, anchor)));
         }
 
-        // Pass 2 — legacy text search, over the un-anchored subset ONLY.
-        IReadOnlyList<EditValidationError> batchErrors = Array.Empty<EditValidationError>();
-        if (unanchored.Count > 0)
-        {
-            var textResult = textValidator.Validate(documentText, unanchored);
-            batchErrors = textResult.BatchErrors;
-
-            foreach (var verdict in textResult.Verdicts)
-            {
-                // Re-key onto the caller's batch positions; the validator numbered them 0..n over the subset.
-                var originalIndex = unanchoredOriginalIndex[verdict.EditIndex];
-                verdicts[originalIndex] = verdict with { EditIndex = originalIndex };
-            }
-        }
-
-        // Every slot is filled by construction (each edit takes exactly one of the three branches above),
-        // but materialize defensively rather than with a null-forgiving operator.
-        var ordered = new List<EditVerdict>(edits.Count);
-        for (var i = 0; i < verdicts.Length; i++)
-        {
-            ordered.Add(verdicts[i] ?? new EditVerdict(
-                i, IsValid: false, Matches: Array.Empty<ResolvedMatch>(),
-                Error: new EditValidationError(
-                    EditErrorKind.NoMatch,
-                    $"Edit {i + 1}: no verdict was produced.",
-                    MatchCount: 0,
-                    Examples: Array.Empty<MatchExample>(),
-                    ResolutionHint: "Resubmit this edit.")));
-        }
-
-        return new BatchValidationResult(ordered, batchErrors);
+        // No batch-level errors are possible here: an anchored verdict carries no span, so two edits have
+        // nothing to collide over. Cross-edit span overlap belongs to the apply side (ComposeEditBatch).
+        return new BatchValidationResult(verdicts, Array.Empty<EditValidationError>());
     }
 
     /// <summary>
@@ -126,6 +75,12 @@ public static class ComposeEditAnchorPass
     {
         var (kind, hint) = anchor.Status switch
         {
+            ComposeAnchorStatus.NoAnchor => (
+                EditErrorKind.NoAnchor,
+                "This edit named no target: supply target_para_id (a w14:paraId drawn from the paragraph "
+                + "set supplied with the request) or target_ref (a clause number that exists in this "
+                + "document). Quoting the text to be replaced is no longer a way to place an edit."),
+
             ComposeAnchorStatus.UnknownParaId => (
                 EditErrorKind.UnknownParaId,
                 "Re-issue the edit with a target_para_id drawn from the paragraph set supplied with the "
@@ -147,8 +102,8 @@ public static class ComposeEditAnchorPass
 
             _ => (
                 EditErrorKind.NoReferenceMap,
-                "Include the document's referenceMap with the request, or omit the anchor to use the "
-                + "legacy text path."),
+                "Include the document's referenceMap with the request so the anchor can be validated "
+                + "against the paragraph set it names."),
         };
 
         return new EditValidationError(

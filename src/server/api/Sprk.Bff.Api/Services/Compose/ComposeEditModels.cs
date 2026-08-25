@@ -4,7 +4,14 @@ using System.Text.Json.Serialization;
 namespace Sprk.Bff.Api.Services.Compose;
 
 // ---------------------------------------------------------------------------
-// FR-19 (task 020) — models for IComposeEditValidator / POST /api/compose/edit-batch/validate.
+// Models for the ANCHOR-FIRST compose edit pass (ComposeEditAnchorPass) and
+// POST /api/compose/edit-batch/validate.
+//
+// FR-C04 (spaarkeai-compose-r8 task 052) — the R2-era text-search validator these models were
+// born with (`IComposeEditValidator` / `ComposeEditValidator` / `FindAll`, plus
+// `ProposedEdit.TargetText` + `match_mode`) is DELETED. An edit names its target by anchor
+// (`target_para_id` or `target_ref`) or it is refused; nothing here searches document prose for a
+// placement (ADR-049 I-7).
 //
 // Wire-contract note: ProposedEdit / EditSource use the SAME snake_case keys as the
 // compose-draft-alternative catalog action's structured output payload (HANDOFF §1 —
@@ -13,19 +20,19 @@ namespace Sprk.Bff.Api.Services.Compose;
 // translation layer. All other (BFF-authored, non-LLM-facing) shapes below use the BFF's
 // normal camelCase convention (see ComposeEndpoints.cs response DTOs).
 //
-// Document-projection contract: the `documentText` this validator is called with (see
-// IComposeEditValidator) is a PLAINTEXT PROJECTION of the editor/DOCX content — the same
-// projection the `compose-selection` JPS scope payload builds. Every offset in these models
-// (ResolvedMatch.Offset, MatchExample.Offset) is relative to THAT projection, not to the DOCX
-// byte stream or the TipTap JSON document model. Mapping back into TipTap JSON / DOCX for
-// apply is the caller's job (FR-20 ComposeEditBatch), not this validator's.
+// Offset contract (ResolvedMatch / MatchExample): these describe spans in the PLAINTEXT
+// PROJECTION of the editor/DOCX content — the same projection the `compose-selection` JPS scope
+// payload builds — NOT the DOCX byte stream or the TipTap JSON document model. They are the
+// apply-side vocabulary of FR-20's ComposeEditBatch. The anchor pass itself never produces them:
+// an anchored verdict carries `ResolvedParaId` and an EMPTY `Matches`, because the paraId IS the
+// address (see EditVerdict.ResolvedParaId).
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Serializes an enum to/from its lower-case wire form (e.g. <c>Strict</c> &lt;-&gt;
-/// <c>"strict"</c>) via <see cref="JsonNamingPolicy.CamelCase"/> — single-word enum members
-/// camelCase to all-lowercase, matching both the LLM catalog-payload contract (<c>match_mode</c>
-/// values) and the BFF's normal camelCase JSON convention (<c>EditErrorKind</c> values).
+/// Serializes an enum to/from its lower-case wire form (e.g. <c>Overlap</c> &lt;-&gt;
+/// <c>"overlap"</c>) via <see cref="JsonNamingPolicy.CamelCase"/> — single-word enum members
+/// camelCase to all-lowercase, matching the BFF's normal camelCase JSON convention
+/// (<see cref="EditErrorKind"/> values, the one remaining enum on this wire surface).
 /// </summary>
 internal sealed class CamelCaseStringEnumConverter : JsonStringEnumConverter
 {
@@ -35,30 +42,9 @@ internal sealed class CamelCaseStringEnumConverter : JsonStringEnumConverter
 }
 
 /// <summary>
-/// <c>match_mode</c> — how precisely a <see cref="ProposedEdit.TargetText"/> must match the
-/// document before <see cref="IComposeEditValidator"/> resolves it. The LLM declares its match
-/// precision; the engine owns correctness (design.md §6.1; notes/spikes/spike-2-edit-validator.md
-/// §2). Serializes as <c>"strict"</c> / <c>"first"</c> / <c>"all"</c>.
-/// </summary>
-[JsonConverter(typeof(CamelCaseStringEnumConverter))]
-public enum MatchMode
-{
-    /// <summary>Exactly one match required; zero or N&gt;1 matches both refuse. The safe
-    /// default — never applies to the wrong occurrence silently.</summary>
-    Strict,
-
-    /// <summary>Resolves the earliest occurrence in document order. Zero matches still
-    /// refuses.</summary>
-    First,
-
-    /// <summary>Resolves every occurrence. Zero matches still refuses.</summary>
-    All,
-}
-
-/// <summary>
 /// One provenance source cited by the LLM for a proposed edit (HANDOFF §1 <c>sources[]</c>) —
-/// surfaced in the Context pane per design.md §2.0 provenance pattern. Not consumed by the
-/// validator itself; carried through unchanged so the same payload the catalog action emits
+/// surfaced in the Context pane per design.md §2.0 provenance pattern. Not consumed by the anchor
+/// pass itself; carried through unchanged so the same payload the catalog action emits
 /// round-trips through <c>/edit-batch/validate</c>.
 /// </summary>
 public sealed record EditSource(
@@ -67,24 +53,22 @@ public sealed record EditSource(
     [property: JsonPropertyName("snippet")] string? Snippet = null);
 
 /// <summary>
-/// One LLM-proposed find-and-replace edit — mirrors the <c>compose-draft-alternative</c>
+/// One LLM-proposed replacement edit — mirrors the <c>compose-draft-alternative</c>
 /// catalog action's structured output payload (HANDOFF §1 / design.md §6.1) verbatim so
 /// <c>POST /api/compose/edit-batch/validate</c> consumes the same JSON the catalog action
 /// emits, with no translation layer.
 /// </summary>
 /// <remarks>
-/// <b>FR-C01/C02/C03 (spaarkeai-compose-r8 task 051) — the two ANCHOR members.</b>
-/// <see cref="TargetParaId"/> and <see cref="TargetRef"/> are the deterministic way to name the target
-/// paragraph; <see cref="TargetText"/> + <see cref="Mode"/> are the legacy text-search way. Both shapes
-/// are accepted here DELIBERATELY and only for now: task 051 supplies the anchors without removing
-/// anything, and task 052 (FR-C04) retires the text pair once every anchor source is live. When an anchor
-/// is present, <see cref="ComposeEditAnchorPass"/> resolves it through the reference map and the text
-/// members are never read — see that type for the ordering guarantee.
+/// <b>FR-C01/C02/C03/C04 — the ANCHOR members are the ONLY targeting channel.</b>
+/// <see cref="TargetParaId"/> and <see cref="TargetRef"/> name the target paragraph deterministically,
+/// and <see cref="ComposeEditAnchorPass"/> resolves them through the request's reference map. There is no
+/// second channel: task 052 (FR-C04) deleted <c>target_text</c> + <c>match_mode</c> along with the
+/// whole-document search that consumed them, so an edit that supplies neither anchor is refused
+/// (<see cref="EditErrorKind.NoAnchor"/>) rather than searched for (ADR-049 I-7). Supplying BOTH anchors is
+/// allowed only while they agree; disagreement is <see cref="EditErrorKind.ConflictingAnchors"/>.
 /// </remarks>
 public sealed record ProposedEdit(
-    [property: JsonPropertyName("target_text")] string TargetText,
     [property: JsonPropertyName("new_text")] string NewText,
-    [property: JsonPropertyName("match_mode")] MatchMode Mode,
     [property: JsonPropertyName("rationale")] string? Rationale = null,
     [property: JsonPropertyName("sources")] IReadOnlyList<EditSource>? Sources = null,
     /// <summary>FR-C01/FR-C03 — the exact <c>w14:paraId</c> this edit targets: captured from the user's
@@ -97,17 +81,19 @@ public sealed record ProposedEdit(
 
 /// <summary>
 /// A resolved span in <c>documentText</c> — <c>[Offset, Offset+Length)</c>, addressable for
-/// downstream apply (FR-20 <c>ComposeEditBatch</c>). Relative to the same plaintext projection
-/// <see cref="IComposeEditValidator.Validate"/> was called with (see file header).
+/// downstream apply (FR-20 <c>ComposeEditBatch</c>). Relative to the plaintext projection the
+/// caller applies against (see the offset contract in the file header).
 /// </summary>
 public sealed record ResolvedMatch(
     [property: JsonPropertyName("offset")] int Offset,
     [property: JsonPropertyName("length")] int Length);
 
 /// <summary>
-/// One example occurrence with adeu's ±50-char pre/post context window, newlines flattened to
-/// a single space for a single-line, copy-pasteable display
-/// (notes/spikes/spike-2-edit-validator.md §3).
+/// One example span with a ±50-char pre/post context window, newlines flattened to a single space for a
+/// single-line, copy-pasteable display. Part of the <see cref="EditValidationError"/> wire shape and
+/// produced today only by batch-level <see cref="EditErrorKind.Overlap"/> reporting on the apply side:
+/// an ANCHOR refusal deliberately carries none, because inventing "nearest" occurrences would reintroduce
+/// exactly the guessing FR-C04 removed.
 /// </summary>
 public sealed record MatchExample(
     [property: JsonPropertyName("offset")] int Offset,
@@ -115,25 +101,31 @@ public sealed record MatchExample(
     [property: JsonPropertyName("matched")] string Matched,
     [property: JsonPropertyName("contextAfter")] string ContextAfter);
 
-/// <summary>The kind of structured refusal a validated edit (or batch) can carry.</summary>
+/// <summary>
+/// The kind of structured refusal a validated edit (or batch) can carry.
+/// <para>
+/// FR-C04 (task 052) removed <c>Ambiguous</c> / <c>NoMatch</c> / <c>EmptyTarget</c> with the text-search
+/// validator that was their only producer — all three described an outcome of matching <c>target_text</c>
+/// against document prose, which no longer happens. <see cref="Overlap"/> survives because it is a
+/// BATCH-level span collision detected on the apply side, not a text-matching outcome.
+/// </para>
+/// </summary>
 [JsonConverter(typeof(CamelCaseStringEnumConverter))]
 public enum EditErrorKind
 {
-    /// <summary><c>match_mode:strict</c> resolved N&gt;1 matches — the core safety refusal
-    /// FR-19 exists to enforce.</summary>
-    Ambiguous,
-
-    /// <summary>Zero matches for <c>target_text</c>, in any match_mode.</summary>
-    NoMatch,
-
-    /// <summary><c>target_text</c> was empty or whitespace-only.</summary>
-    EmptyTarget,
-
     /// <summary>Two edits in the same batch resolved to overlapping spans.</summary>
     Overlap,
 
-    // ── FR-C02/FR-C03 anchor rejections (task 051). All are LOUD refusals: the edit named a target
-    // the document does not have, or named it two ways at once. None of them fall back to a search. ──
+    // ── FR-C02/FR-C03/FR-C04 anchor rejections. All are LOUD refusals: the edit named a target the
+    // document does not have, named it two ways at once, or named none at all. None fall back to a
+    // search — after task 052 there is no search to fall back to. ──
+
+    /// <summary>
+    /// FR-C04 — the edit supplied NO anchor: neither <c>target_para_id</c> nor <c>target_ref</c>. Before
+    /// task 052 this fell through to a whole-document <c>target_text</c> search; it is now a deterministic
+    /// refusal, because an edit that cannot say which paragraph it targets is not placeable (ADR-049 I-7).
+    /// </summary>
+    NoAnchor,
 
     /// <summary>FR-C03 — <c>target_para_id</c> is not a member of the document's paraId reference map.</summary>
     UnknownParaId,
@@ -152,10 +144,11 @@ public enum EditErrorKind
 }
 
 /// <summary>
-/// Structured, actionable refusal returned instead of a silently-wrong match. Carries an
-/// honest match count, up to 5 example occurrences with surrounding context, and a
-/// copy-pasteable <see cref="ResolutionHint"/> the LLM can act on without re-reasoning (adeu
-/// <c>format_ambiguity_error</c>; notes/spikes/spike-2-edit-validator.md §3).
+/// Structured, actionable refusal returned instead of a silently-wrong placement. Carries an honest
+/// <see cref="MatchCount"/>, any example spans with surrounding context, and a copy-pasteable
+/// <see cref="ResolutionHint"/> the LLM can act on without re-reasoning. For an anchor refusal
+/// <see cref="MatchCount"/> is 0 and <see cref="Examples"/> is empty by construction (see
+/// <see cref="MatchExample"/>); the hint names the anchor the edit should have supplied.
 /// </summary>
 public sealed record EditValidationError(
     [property: JsonPropertyName("kind")] EditErrorKind Kind,
@@ -175,19 +168,19 @@ public sealed record EditVerdict(
     [property: JsonPropertyName("matches")] IReadOnlyList<ResolvedMatch> Matches,
     [property: JsonPropertyName("error")] EditValidationError? Error,
     /// <summary>
-    /// FR-C01/C02/C03 (task 051) — the paragraph this edit ANCHORED to, when it carried a
-    /// <c>target_para_id</c> or <c>target_ref</c>. Non-null exactly when the edit resolved through the
-    /// reference map instead of through text search, in which case <see cref="Matches"/> is empty: the
-    /// paraId IS the address, and mapping it to a live span is the editor's job (it already does this for
-    /// imported comments and revisions). Null for a legacy text-resolved edit.
+    /// FR-C01/C02/C03 — the paragraph this edit ANCHORED to, from its <c>target_para_id</c> or
+    /// <c>target_ref</c>. Non-null on EVERY valid verdict the anchor pass produces, and
+    /// <see cref="Matches"/> is then empty: the paraId IS the address, and mapping it to a live span is
+    /// the editor's job (it already does this for imported comments and revisions). Null only on a
+    /// refusal — after FR-C04 there is no text-resolved verdict for it to mean instead.
     /// </summary>
     [property: JsonPropertyName("resolvedParaId")] string? ResolvedParaId = null);
 
 /// <summary>
 /// Batch outcome: one <see cref="EditVerdict"/> per proposed edit, plus any cross-edit overlap
 /// errors detected at the batch level. Offset-drift / apply-ordering across the batch is FR-20's
-/// job (<c>ComposeEditBatch</c>, task 021) — this validator's only batch-level duty is flagging
-/// overlap (see <see cref="EditErrorKind.Overlap"/>).
+/// job (<c>ComposeEditBatch</c>, task 021); <see cref="ComposeEditAnchorPass"/> itself produces no
+/// batch-level errors, since anchored verdicts carry no spans to collide.
 /// </summary>
 public sealed record BatchValidationResult(
     [property: JsonPropertyName("verdicts")] IReadOnlyList<EditVerdict> Verdicts,
@@ -245,7 +238,7 @@ public sealed record SkippedEdit(
 /// kept as separate code paths (Spike 3 §2, the whole point of task 021):
 /// <list type="bullet">
 /// <item><b>Validation failure</b> (a resolved <see cref="EditVerdict.IsValid"/> is <c>false</c>
-/// — <c>not-found</c> / <c>ambiguous</c> / <c>empty-target</c>) is FATAL: <see cref="Committed"/>
+/// — any anchor refusal, e.g. <see cref="EditErrorKind.NoAnchor"/>) is FATAL: <see cref="Committed"/>
 /// is <c>false</c>, <see cref="DocumentText"/> equals the untouched input verbatim, NOTHING
 /// applies, and <see cref="ValidationErrors"/> names every failing edit.</item>
 /// <item><b>Within-batch span overlap</b> is NON-FATAL: the later-claimed span lands in

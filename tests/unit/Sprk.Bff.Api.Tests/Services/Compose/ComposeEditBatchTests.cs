@@ -10,13 +10,24 @@ namespace Sprk.Bff.Api.Tests.Services.Compose;
 ///
 /// <para>
 /// <b>ADR-038 KEEP category</b>: <c>domain-logic</c>. <see cref="ComposeEditBatch"/> is pure,
-/// stateless text processing (ADR-013 facade boundary + ADR-010 minimalism). Every test below
-/// exercises the REAL <see cref="ComposeEditValidator"/> (FR-19) to produce the
-/// <see cref="BatchValidationResult"/> input — no hand-crafted verdicts, no
-/// <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI-registration tests, no ctor null-check tests (all
-/// banned per ADR-038 / <c>tests/CLAUDE.md</c>). This also proves genuine FR-19→FR-20
-/// composition end to end, exactly as a real caller (a future endpoint, or FR-21's
-/// <c>ComposeEditTransaction</c>) will use it.
+/// stateless text processing (ADR-013 facade boundary + ADR-010 minimalism).
+/// </para>
+///
+/// <para>
+/// <b>Why the verdicts are hand-built (task 052 / FR-C04 — this is an IMPROVEMENT, not a
+/// concession).</b> This suite previously drove the real <c>ComposeEditValidator</c> to produce
+/// its <see cref="BatchValidationResult"/> input. That validator was the whole-document
+/// <c>target_text</c> search ADR-049 I-7 forbids, and task 052 deleted it. The verdicts are now
+/// constructed directly — which is what ADR-038 wants anyway: <b>the subject under test is the
+/// batch, not the producer of its input</b>. Coupling these assertions to a second component meant
+/// a change in that component's matching behavior could move offsets here and make an
+/// offset-stability test fail for a reason that has nothing to do with offset stability. The spans
+/// below are still derived from the fixture document by an explicit ordinal
+/// <see cref="string.IndexOf(string, System.StringComparison)"/> (see <see cref="Span"/>), so they
+/// are computed rather than copied, and they are byte-identical to the offsets the previous
+/// validator-driven version resolved ([46,73), [52,73), [25,33), [0,10), [10,20), [21,25)).
+/// No <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI-registration tests, no ctor null-check tests
+/// (all banned per ADR-038 / <c>tests/CLAUDE.md</c>).
 /// </para>
 ///
 /// <para>
@@ -38,8 +49,47 @@ public class ComposeEditBatchTests
         "The Tenant shall pay Rent monthly. The Tenant shall maintain the Premises. " +
         "The Landlord shall provide access to the Premises.";
 
-    private static readonly ComposeEditValidator Validator = new();
     private static readonly ComposeEditBatch Sut = new();
+
+    // ── Arrange helpers ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>An edit as the batch sees it: only <c>NewText</c> is read at apply time.</summary>
+    private static ProposedEdit Edit(string newText) => new(newText);
+
+    /// <summary>
+    /// The span a given fixture substring occupies, computed ordinally from
+    /// <see cref="Document"/> — never hand-typed, so a fixture edit cannot silently desync the
+    /// asserted offsets.
+    /// </summary>
+    private static ResolvedMatch Span(string target)
+    {
+        var offset = Document.IndexOf(target, StringComparison.Ordinal);
+        offset.Should().BeGreaterThanOrEqualTo(0, "the fixture substring '{0}' must exist in the test document", target);
+        return new ResolvedMatch(offset, target.Length);
+    }
+
+    private static EditVerdict Resolved(int editIndex, params ResolvedMatch[] spans)
+        => new(editIndex, IsValid: true, Matches: spans, Error: null);
+
+    /// <summary>
+    /// A refused verdict. The kind shown is a real post-FR-C04 refusal (an anchor the document does
+    /// not have); the batch's fatal gate keys off <see cref="EditVerdict.IsValid"/>, and carries the
+    /// error through verbatim.
+    /// </summary>
+    private static EditVerdict Refused(int editIndex, EditErrorKind kind = EditErrorKind.UnknownParaId)
+        => new(
+            editIndex,
+            IsValid: false,
+            Matches: Array.Empty<ResolvedMatch>(),
+            Error: new EditValidationError(
+                kind,
+                $"Edit {editIndex + 1}: the anchor names no paragraph in this document.",
+                MatchCount: 0,
+                Examples: Array.Empty<MatchExample>(),
+                ResolutionHint: "Re-issue the edit with a target_para_id drawn from the supplied set."));
+
+    private static BatchValidationResult Validation(params EditVerdict[] verdicts)
+        => new(verdicts, Array.Empty<EditValidationError>());
 
     // ── Proof 1 equivalent — offset stability across non-overlapping, different-length edits ──
 
@@ -48,11 +98,14 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("pay Rent monthly", "pay the Rent on the first day of each month", MatchMode.Strict), // grows
-            new ProposedEdit("maintain the Premises", "keep the Premises in good repair", MatchMode.Strict),        // ~same length
-            new ProposedEdit("provide access to the Premises", "grant entry", MatchMode.Strict),                   // shrinks
+            Edit("pay the Rent on the first day of each month"), // grows
+            Edit("keep the Premises in good repair"),            // ~same length
+            Edit("grant entry"),                                 // shrinks
         };
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation(
+            Resolved(0, Span("pay Rent monthly")),
+            Resolved(1, Span("maintain the Premises")),
+            Resolved(2, Span("provide access to the Premises")));
         validation.IsValid.Should().BeTrue();
 
         var result = Sut.Apply(Document, edits, validation);
@@ -73,13 +126,17 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("pay Rent monthly", "pay the Rent on the first day of each month", MatchMode.Strict),
-            new ProposedEdit("maintain the Premises", "keep the Premises in good repair", MatchMode.Strict),
-            new ProposedEdit("provide access to the Premises", "grant entry", MatchMode.Strict),
-            new ProposedEdit("indemnify the Guarantor", "hold harmless", MatchMode.Strict), // NOT in the document
+            Edit("pay the Rent on the first day of each month"),
+            Edit("keep the Premises in good repair"),
+            Edit("grant entry"),
+            Edit("hold harmless"), // refused upstream — its anchor resolves to nothing
         };
-        var validation = Validator.Validate(Document, edits);
-        validation.IsValid.Should().BeFalse("edit index 3's target_text does not exist in the document");
+        var validation = Validation(
+            Resolved(0, Span("pay Rent monthly")),
+            Resolved(1, Span("maintain the Premises")),
+            Resolved(2, Span("provide access to the Premises")),
+            Refused(3));
+        validation.IsValid.Should().BeFalse("edit index 3 was refused upstream");
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -88,7 +145,8 @@ public class ComposeEditBatchTests
         result.Applied.Should().BeEmpty();
         result.Skipped.Should().BeEmpty("validation failure is a distinct, separate code path from overlap-skip");
         result.ValidationErrors.Should().ContainSingle()
-            .Which.Should().Match<EditValidationError>(e => e.Kind == EditErrorKind.NoMatch);
+            .Which.Should().Match<EditValidationError>(e => e.Kind == EditErrorKind.UnknownParaId,
+                "the refusal must flow through verbatim, not be flattened to a generic failure");
     }
 
     // ── Proof 4 regression fixture — within-batch overlap is NON-FATAL ──────────────────────
@@ -104,14 +162,29 @@ public class ComposeEditBatchTests
         // computation, not assumed from the prototype's prose.
         var edits = new[]
         {
-            new ProposedEdit("shall maintain the Premises", "shall keep the Premises tidy", MatchMode.Strict), // [46,73)
-            new ProposedEdit("maintain the Premises", "repair the Premises", MatchMode.Strict),                 // [52,73) — overlaps above
+            Edit("shall keep the Premises tidy"), // [46,73)
+            Edit("repair the Premises"),          // [52,73) — overlaps above
         };
-        var validation = Validator.Validate(Document, edits);
+
+        // ARRANGE, deliberately: a caller that reports cross-edit span collision as a BATCH-level
+        // error (the /edit-batch/validate dry-run UX). That makes BatchValidationResult.IsValid
+        // false while every per-edit verdict is valid — which is the exact input shape this test
+        // exists to pin, because ComposeEditBatch must IGNORE that batch error and apply its own
+        // Phase-3 overlap semantics instead.
+        var validation = new BatchValidationResult(
+            new[] { Resolved(0, Span("shall maintain the Premises")), Resolved(1, Span("maintain the Premises")) },
+            new[]
+            {
+                new EditValidationError(
+                    EditErrorKind.Overlap,
+                    "Edits 1 and 2 resolve to overlapping spans ([46,73) vs [52,73)).",
+                    MatchCount: 2,
+                    Examples: Array.Empty<MatchExample>(),
+                    ResolutionHint: "Merge them into one edit, or make the spans disjoint."),
+            });
         validation.IsValid.Should().BeFalse(
-            "the VALIDATOR flags cross-edit overlap as a batch error (its own IsValid contract) — " +
+            "a batch-level overlap error makes the RESULT's own IsValid false — " +
             "but that is a DIFFERENT consumer's gate (the /edit-batch/validate dry-run UX), not this pipeline's");
-        validation.BatchErrors.Should().ContainSingle().Which.Kind.Should().Be(EditErrorKind.Overlap);
         validation.Verdicts.Should().OnlyContain(v => v.IsValid, "each edit resolves unambiguously on its own; only the CROSS-edit span collides");
 
         var result = Sut.Apply(Document, edits, validation);
@@ -131,7 +204,7 @@ public class ComposeEditBatchTests
     public void Apply_EmptyEditList_ReturnsDocumentUnchanged()
     {
         var edits = Array.Empty<ProposedEdit>();
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation();
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -141,14 +214,35 @@ public class ComposeEditBatchTests
         result.Skipped.Should().BeEmpty();
     }
 
+    // ── A valid verdict that resolved ZERO spans — the post-FR-C04 anchored shape ────────────
+
+    [Fact]
+    public void Apply_ValidVerdictsCarryingNoSpans_CommitsTheDocumentUnchanged()
+    {
+        // This is what EVERY verdict ComposeEditAnchorPass produces now looks like: valid, anchored
+        // by paraId, and carrying an EMPTY Matches because the paraId IS the address. The batch has
+        // nothing to splice, so it must commit a byte-identical document rather than treat the
+        // absence of spans as a failure.
+        var edits = new[] { Edit("replacement") };
+        var validation = Validation(
+            new EditVerdict(0, IsValid: true, Matches: Array.Empty<ResolvedMatch>(), Error: null, ResolvedParaId: "1A2B3C4D"));
+
+        var result = Sut.Apply(Document, edits, validation);
+
+        result.Committed.Should().BeTrue("a no-op batch is not a failure");
+        result.DocumentText.Should().Be(Document);
+        result.Applied.Should().BeEmpty();
+        result.Skipped.Should().BeEmpty();
+        result.ValidationErrors.Should().BeEmpty();
+    }
+
     // ── EDGE-6: empty NewText is a pure deletion — degenerate (zero-length) replacement ─────
 
     [Fact]
     public void Apply_EmptyNewText_AppliesPureDeletionAtCorrectOffset()
     {
-        var edits = new[] { new ProposedEdit(" monthly", "", MatchMode.Strict) }; // unique, [25,33)
-        var validation = Validator.Validate(Document, edits);
-        validation.IsValid.Should().BeTrue();
+        var edits = new[] { Edit("") };
+        var validation = Validation(Resolved(0, Span(" monthly"))); // unique, [25,33)
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -167,11 +261,12 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("The Tenant shall pay", "The Tenant will pay", MatchMode.Strict),                                       // offset 0
-            new ProposedEdit("The Landlord shall provide access to the Premises.", "The Landlord grants access to the Premises.", MatchMode.Strict), // ends at doc.Length
+            Edit("The Tenant will pay"),                            // offset 0
+            Edit("The Landlord grants access to the Premises."),    // ends at doc.Length
         };
-        var validation = Validator.Validate(Document, edits);
-        validation.IsValid.Should().BeTrue();
+        var validation = Validation(
+            Resolved(0, Span("The Tenant shall pay")),
+            Resolved(1, Span("The Landlord shall provide access to the Premises.")));
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -190,12 +285,12 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("The Tenant", "The Client", MatchMode.First), // [0,10) — "The Tenant" recurs, resolve earliest
-            new ProposedEdit(" shall pay", " must remit", MatchMode.Strict), // [10,20) — touches edit 0's end, does not overlap
+            Edit("The Client"),  // [0,10)
+            Edit(" must remit"), // [10,20) — touches edit 0's end, does not overlap
         };
-        var validation = Validator.Validate(Document, edits);
-        validation.IsValid.Should().BeTrue();
-        validation.BatchErrors.Should().BeEmpty("adjacent [0,10) and [10,20) spans touch but do not intersect");
+        var validation = Validation(
+            Resolved(0, Span("The Tenant")),
+            Resolved(1, Span(" shall pay")));
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -204,6 +299,9 @@ public class ComposeEditBatchTests
             "The Landlord shall provide access to the Premises.";
         result.Committed.Should().BeTrue();
         result.Applied.Should().HaveCount(2);
+        // The half-open-interval rule lives in the SUT's own Phase 3; the previous version of this
+        // test ALSO asserted it against the retired validator's duplicate detector, which is gone
+        // with that validator. The assertion that matters is this one, against the pipeline itself.
         result.Skipped.Should().BeEmpty("touching, non-intersecting spans must NOT be treated as overlap");
         result.DocumentText.Should().Be(expected);
     }
@@ -215,11 +313,11 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("Rent", "the Rent sum", MatchMode.Strict),    // [21,25) — declared first, applies
-            new ProposedEdit("Rent", "the Rent amount", MatchMode.Strict), // resolves to the SAME [21,25) — skipped
+            Edit("the Rent sum"),    // [21,25) — declared first, applies
+            Edit("the Rent amount"), // the SAME [21,25) — skipped
         };
-        var validation = Validator.Validate(Document, edits);
-        validation.Verdicts.Should().OnlyContain(v => v.IsValid, "each edit's OWN target_text is unique in the document (one match each)");
+        var validation = Validation(Resolved(0, Span("Rent")), Resolved(1, Span("Rent")));
+        validation.Verdicts.Should().OnlyContain(v => v.IsValid, "each edit resolved on its own; only the CROSS-edit span is identical");
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -239,11 +337,14 @@ public class ComposeEditBatchTests
     {
         var edits = new[]
         {
-            new ProposedEdit("shall maintain the Premises", "shall keep the Premises tidy", MatchMode.Strict), // overlapped-away
-            new ProposedEdit("maintain the Premises", "repair the Premises", MatchMode.Strict),                 // wins the overlap
-            new ProposedEdit("pay Rent monthly", "pay the Rent promptly", MatchMode.Strict),                    // unrelated, unique
+            Edit("shall keep the Premises tidy"), // overlapped-away
+            Edit("repair the Premises"),          // wins the overlap
+            Edit("pay the Rent promptly"),        // unrelated, unique
         };
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation(
+            Resolved(0, Span("shall maintain the Premises")),
+            Resolved(1, Span("maintain the Premises")),
+            Resolved(2, Span("pay Rent monthly")));
 
         var result = Sut.Apply(Document, edits, validation);
 
@@ -258,8 +359,8 @@ public class ComposeEditBatchTests
     [Fact]
     public void Apply_ValidationVerdictCountDoesNotMatchEditCount_ThrowsArgumentException()
     {
-        var edits = new[] { new ProposedEdit("Rent", "Fee", MatchMode.Strict) };
-        var mismatchedValidation = Validator.Validate(Document, Array.Empty<ProposedEdit>()); // 0 verdicts, 1 edit
+        var edits = new[] { Edit("Fee") };
+        var mismatchedValidation = Validation(); // 0 verdicts, 1 edit
 
         var act = () => Sut.Apply(Document, edits, mismatchedValidation);
 

@@ -10,12 +10,22 @@ namespace Sprk.Bff.Api.Tests.Services.Compose;
 ///
 /// <para>
 /// <b>ADR-038 KEEP category</b>: <c>domain-logic</c>. <see cref="ComposeEditTransaction"/> is
-/// pure, stateless wrapper logic (ADR-013 facade boundary + ADR-010 minimalism). Every test
-/// below exercises the REAL <see cref="ComposeEditValidator"/> (FR-19) and
-/// <see cref="ComposeEditBatch"/> (FR-20) to produce the transaction's inputs and outputs — no
-/// hand-crafted verdicts, no <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI-registration tests, no
-/// ctor null-check tests (all banned per ADR-038 / <c>tests/CLAUDE.md</c>). This proves genuine
-/// FR-19 → FR-20 → FR-21 composition end to end, exactly as a real caller will use it.
+/// pure, stateless wrapper logic (ADR-013 facade boundary + ADR-010 minimalism). It composes the
+/// REAL <see cref="ComposeEditBatch"/> (FR-20) — the collaborator that actually matters here.
+/// </para>
+///
+/// <para>
+/// <b>Why the verdicts are hand-built (task 052 / FR-C04 — this is an IMPROVEMENT, not a
+/// concession).</b> This suite previously also drove the real <c>ComposeEditValidator</c> to
+/// produce its <see cref="BatchValidationResult"/> input. That validator was the whole-document
+/// <c>target_text</c> search ADR-049 I-7 forbids, and task 052 deleted it. Verdicts are now
+/// constructed directly, which is what ADR-038 wants anyway: <b>the subject under test is the
+/// transaction (and, through it, the batch) — not the producer of its input</b>. The genuine
+/// composition still under test is FR-20 → FR-21; only the retired FR-19 hop is gone. Spans are
+/// derived from the fixture document by an explicit ordinal
+/// <see cref="string.IndexOf(string, System.StringComparison)"/>, so they are computed rather than
+/// copied. No <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI-registration tests, no ctor null-check
+/// tests (all banned per ADR-038 / <c>tests/CLAUDE.md</c>).
 /// </para>
 ///
 /// <para>
@@ -31,8 +41,37 @@ public class ComposeEditTransactionTests
         "The Tenant shall pay Rent monthly. The Tenant shall maintain the Premises. " +
         "The Landlord shall provide access to the Premises.";
 
-    private static readonly ComposeEditValidator Validator = new();
     private static readonly ComposeEditTransaction Sut = new(new ComposeEditBatch());
+
+    // ── Arrange helpers (mirror ComposeEditBatchTests) ──────────────────────────────────────
+
+    private static ProposedEdit Edit(string newText) => new(newText);
+
+    private static ResolvedMatch Span(string target)
+    {
+        var offset = Document.IndexOf(target, StringComparison.Ordinal);
+        offset.Should().BeGreaterThanOrEqualTo(0, "the fixture substring '{0}' must exist in the test document", target);
+        return new ResolvedMatch(offset, target.Length);
+    }
+
+    private static EditVerdict Resolved(int editIndex, ResolvedMatch span)
+        => new(editIndex, IsValid: true, Matches: new[] { span }, Error: null);
+
+    /// <summary>A refused verdict — a real post-FR-C04 anchor refusal.</summary>
+    private static EditVerdict Refused(int editIndex)
+        => new(
+            editIndex,
+            IsValid: false,
+            Matches: Array.Empty<ResolvedMatch>(),
+            Error: new EditValidationError(
+                EditErrorKind.UnknownParaId,
+                $"Edit {editIndex + 1}: the anchor names no paragraph in this document.",
+                MatchCount: 0,
+                Examples: Array.Empty<MatchExample>(),
+                ResolutionHint: "Re-issue the edit with a target_para_id drawn from the supplied set."));
+
+    private static BatchValidationResult Validation(params EditVerdict[] verdicts)
+        => new(verdicts, Array.Empty<EditValidationError>());
 
     // ── Acceptance criterion 1 — all edits valid and apply: commits transformed document ────
 
@@ -41,10 +80,12 @@ public class ComposeEditTransactionTests
     {
         var edits = new[]
         {
-            new ProposedEdit("pay Rent monthly", "pay the Rent on the first day of each month", MatchMode.Strict),
-            new ProposedEdit("maintain the Premises", "keep the Premises in good repair", MatchMode.Strict),
+            Edit("pay the Rent on the first day of each month"),
+            Edit("keep the Premises in good repair"),
         };
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation(
+            Resolved(0, Span("pay Rent monthly")),
+            Resolved(1, Span("maintain the Premises")));
         validation.IsValid.Should().BeTrue();
 
         var result = Sut.Execute(Document, edits, validation);
@@ -65,12 +106,15 @@ public class ComposeEditTransactionTests
     {
         var edits = new[]
         {
-            new ProposedEdit("pay Rent monthly", "pay the Rent on the first day of each month", MatchMode.Strict),
-            new ProposedEdit("maintain the Premises", "keep the Premises in good repair", MatchMode.Strict),
-            new ProposedEdit("indemnify the Guarantor", "hold harmless", MatchMode.Strict), // NOT in the document
+            Edit("pay the Rent on the first day of each month"),
+            Edit("keep the Premises in good repair"),
+            Edit("hold harmless"), // refused upstream
         };
-        var validation = Validator.Validate(Document, edits);
-        validation.IsValid.Should().BeFalse("edit index 2's target_text does not exist in the document");
+        var validation = Validation(
+            Resolved(0, Span("pay Rent monthly")),
+            Resolved(1, Span("maintain the Premises")),
+            Refused(2));
+        validation.IsValid.Should().BeFalse("edit index 2 was refused upstream");
 
         var result = Sut.Execute(Document, edits, validation);
 
@@ -85,12 +129,8 @@ public class ComposeEditTransactionTests
     [Fact]
     public void Execute_AllEditsFailValidation_ReturnsOriginalDocumentAndFailureReportForEachEdit()
     {
-        var edits = new[]
-        {
-            new ProposedEdit("indemnify the Guarantor", "hold harmless", MatchMode.Strict),   // not in document
-            new ProposedEdit("terminate for cause", "terminate for convenience", MatchMode.Strict), // not in document
-        };
-        var validation = Validator.Validate(Document, edits);
+        var edits = new[] { Edit("hold harmless"), Edit("terminate for convenience") };
+        var validation = Validation(Refused(0), Refused(1));
         validation.IsValid.Should().BeFalse();
 
         var result = Sut.Execute(Document, edits, validation);
@@ -98,7 +138,8 @@ public class ComposeEditTransactionTests
         result.Committed.Should().BeFalse();
         result.DocumentText.Should().Be(Document);
         result.Batch.ValidationErrors.Should().HaveCount(2, "every failing edit must be enumerated in the failure report");
-        result.Batch.ValidationErrors.Should().OnlyContain(e => e.Kind == EditErrorKind.NoMatch);
+        result.Batch.ValidationErrors.Should().OnlyContain(e => e.Kind == EditErrorKind.UnknownParaId,
+            "each refusal must flow through with its own kind, not be flattened to a generic failure");
     }
 
     // ── Acceptance criterion 4 — empty batch commits the unchanged document (NEGATIVE) ───────
@@ -107,7 +148,7 @@ public class ComposeEditTransactionTests
     public void Execute_EmptyBatch_CommitsUnchangedDocument()
     {
         var edits = Array.Empty<ProposedEdit>();
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation();
 
         var result = Sut.Execute(Document, edits, validation);
 
@@ -122,11 +163,8 @@ public class ComposeEditTransactionTests
     [Fact]
     public void Rollback_AfterCleanCommit_RevertsToByteIdenticalSnapshot()
     {
-        var edits = new[]
-        {
-            new ProposedEdit("pay Rent monthly", "pay the Rent promptly", MatchMode.Strict),
-        };
-        var validation = Validator.Validate(Document, edits);
+        var edits = new[] { Edit("pay the Rent promptly") };
+        var validation = Validation(Resolved(0, Span("pay Rent monthly")));
         var committed = Sut.Execute(Document, edits, validation);
         committed.Committed.Should().BeTrue();
         committed.DocumentText.Should().NotBe(Document, "sanity check — the commit really did transform the document");
@@ -144,11 +182,8 @@ public class ComposeEditTransactionTests
     [Fact]
     public void Rollback_OnAlreadyRolledBackTransaction_IsIdempotentNoOp()
     {
-        var edits = new[]
-        {
-            new ProposedEdit("indemnify the Guarantor", "hold harmless", MatchMode.Strict), // not in document -> fatal
-        };
-        var validation = Validator.Validate(Document, edits);
+        var edits = new[] { Edit("hold harmless") };
+        var validation = Validation(Refused(0)); // fatal
         var fatal = Sut.Execute(Document, edits, validation);
         fatal.Committed.Should().BeFalse();
 
@@ -164,10 +199,12 @@ public class ComposeEditTransactionTests
     {
         var edits = new[]
         {
-            new ProposedEdit("shall maintain the Premises", "shall keep the Premises tidy", MatchMode.Strict),
-            new ProposedEdit("maintain the Premises", "repair the Premises", MatchMode.Strict),
+            Edit("shall keep the Premises tidy"), // [46,73)
+            Edit("repair the Premises"),          // [52,73) — overlaps above
         };
-        var validation = Validator.Validate(Document, edits);
+        var validation = Validation(
+            Resolved(0, Span("shall maintain the Premises")),
+            Resolved(1, Span("maintain the Premises")));
 
         var result = Sut.Execute(Document, edits, validation);
 

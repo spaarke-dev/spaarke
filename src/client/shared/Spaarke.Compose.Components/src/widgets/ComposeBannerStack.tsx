@@ -902,12 +902,24 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       {pendingRedlineError ? (
         <MessageBar intent="warning" data-testid="compose-redline-error" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Suggested edit couldn&apos;t be placed</MessageBarTitle>
-            {pendingRedlineError.kind === 'ambiguous'
-              ? `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
-              : (pendingRedlineError.failedCount ?? 0) > 1
-                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
-                : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
+            <MessageBarTitle>
+              {pendingRedlineError.kind === 'target_deleted'
+                ? "Suggested edit's target is gone"
+                : "Suggested edit couldn't be placed"}
+            </MessageBarTitle>
+            {/* FR-C05 outcome 3 (r8 task 052): a DELETED target gets its own sentence. It used to share
+                the generic "wording differs slightly" copy with an unresolvable citation, which was
+                simply untrue — the anchor resolved fine, the paragraph it named is no longer there,
+                and "re-select the passage and try again" is advice the user cannot act on. */}
+            {pendingRedlineError.kind === 'target_deleted'
+              ? (pendingRedlineError.failedCount ?? 0) > 1
+                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits referred to text that no longer exists in this document. Nothing was changed for them.`
+                : `The text this suggestion referred to no longer exists.`
+              : pendingRedlineError.kind === 'ambiguous'
+                ? `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
+                : (pendingRedlineError.failedCount ?? 0) > 1
+                  ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                  : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
           </MessageBarBody>
           {onClearRedlineError ? (
             <MessageBarActions

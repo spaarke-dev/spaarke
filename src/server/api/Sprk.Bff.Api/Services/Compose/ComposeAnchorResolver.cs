@@ -18,12 +18,12 @@ namespace Sprk.Bff.Api.Services.Compose;
 ///
 /// <para>
 /// <b>Why this exists / CLAUDE.md §11.</b> (1) <i>Existing</i> — <see cref="CitationResolver"/> resolves a
-/// citation string but has no notion of an explicit paraId, a closed set, or a rejection outcome;
-/// <see cref="ComposeEditValidator"/> resolves by TEXT SEARCH over document prose, which is the mechanism
-/// FR-C04 (task 052) retires. Neither answers "what paragraph does this edit target, and may I trust it".
-/// (2) <i>Extension</i> — extending <c>CitationResolver</c> was rejected: it is a pure citation↔paraId
-/// function used by three call sites with no closed-set concept, and pushing admission policy into it
-/// would couple string parsing to edit-envelope trust. This type composes it instead. (3)
+/// citation string but has no notion of an explicit paraId, a closed set, or a rejection outcome; the only
+/// other resolver was the R2-era text-search validator, which located an edit by matching document prose
+/// and was DELETED by FR-C04 (task 052). Neither answered "what paragraph does this edit target, and may I
+/// trust it". (2) <i>Extension</i> — extending <c>CitationResolver</c> was rejected: it is a pure
+/// citation↔paraId function used by three call sites with no closed-set concept, and pushing admission
+/// policy into it would couple string parsing to edit-envelope trust. This type composes it instead. (3)
 /// <i>Cost-of-doing-nothing</i> — without a single resolution point, each anchor source grows its own
 /// fallback, and task 052's deletion of the text-search path silently breaks whichever source was missed.
 /// </para>
@@ -40,7 +40,8 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <b>Invariant 3 (one coordinate system).</b> Both branches resolve through the projection's reference
 /// map and nothing else. There is deliberately NO text-matching branch here, not even as a fallback: an
 /// edit with no anchor returns <see cref="ComposeAnchorStatus.NoAnchor"/> and the CALLER decides what to
-/// do with it. Task 052 removes the caller's remaining text-search fallback; this type never had one.
+/// do with it. Task 052 removed the caller's remaining text-search fallback — <see cref="ComposeEditAnchorPass"/>
+/// now turns that status into an <see cref="EditErrorKind.NoAnchor"/> refusal; this type never had one.
 /// </para>
 /// </summary>
 public static class ComposeAnchorResolver
