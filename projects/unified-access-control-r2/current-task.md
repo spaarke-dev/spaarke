@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-24 (mid-task-022 — keys + C2/C3/H2/H3 gated)
+> **Last Updated**: 2026-08-24 (task 022 COMPLETE — 19 of 22 routes gated)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **022 IN PROGRESS** — document-surface authorization sweep (Critical). Inventory ✅ · H5 ✅ · **keys + C2 + C3 + H2 + H3 gated ✅** (8 routes, 21 tests, 10/10 perturbations bite) |
-| **Step** | 022 — **8 of 22 routes now gated (12 total incl. task 002's 4)**. Remaining: C1 (bulk), `analyze`, 5 URL-minting reads, 6 OBO reads, 3 collection-shaped |
-| **Status** | clean — all work committed and pushed (`f0747bb33`) |
+| **Task** | ✅ **022 COMPLETE** — document-surface authorization sweep. **19 of 22 routes gated**; the 3 remaining have no caller-supplied document id and are Phase 1 collection-scoping work |
+| **Step** | **Next task: 021** — provisioning stamping PATCH (Critical C4/C5). ⚠️ its nav-prop names MUST come from `$metadata`; escalate rather than guess |
+| **Status** | clean — all work committed and pushed (`f076b1e38`) |
 | **Phase** | Phase 0 — enforcement remediation · **14 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ **009 ✅** 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) · **+ Phase 0b filed: 021–029** — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6); **029 added 2026-08-24 by owner decision** (To Do read/create parity — task 009 left PATCH wider than list) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | **Task 022 — C1, the bulk-download route.** `BulkDownloadAuthorizationFilter` reads a tenant claim, logs "authorization granted", and calls `next()` — **no per-document decision at any point**. 500 GUIDs per request, streamed app-only. Needs per-item authorization **plus** an explicit partial-failure contract: the `_FAILED.txt` manifest distinguishes "denied" from "missing", which stays an enumeration oracle even after per-item auth exists. Then `analyze` (decide `read` vs `write` — it reads the doc but spends money and enqueues work), then the 5 URL-minting reads. |
+| **Next Action** | **Start task 021** — provisioning stamping PATCH (C4/C5). Creates real infrastructure but leaves the project pointing at none, because three `@odata.bind` names are wrong AND the 400 is swallowed. **Step 0 is the gate**: get the three navigation-property names from live `$metadata` (Dataverse MCP `describe`). A wrong nav prop is accepted as an unknown property and the write silently does not happen — the exact class under repair. **If the names cannot be read, STOP and escalate; do not guess.** Fix the names AND the swallow together: names alone leaves the next drift invisible, the swallow alone hard-blocks provisioning on names we know are wrong. |
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
@@ -29,50 +29,42 @@ Low practical impact — `AccessGrantModal` and the external SPA send well-forme
 real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
 flipped to match, with the rationale in their doc comments.
 
-### Where task 022 stands (READ BEFORE RESUMING)
+### ✅ Task 022 — what shipped
 
-**Inventory complete** — [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md).
-The class is **22 routes across 4 files**, not the "~15" the review estimated:
-4 gated · 1 gated-in-form-only (C1) · 2 ungated destroy (C2, C3) · 8 ungated mutate/disclose
-(H2, H3, H4) · 5 ungated URL-minting reads · 3 collection-shaped with no caller-supplied id.
+Full inventory + reasoning: [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md).
+The class was **22 routes across 4 files**, not the "~15" the review estimated. **19 gated.**
 
-**H5 fixed** (`081477bd3`). `GetProjectsAsync` ordered by `sprk_name`, absent from `sprk_project`
-(the `$select` one line above already had `sprk_projectname` right) → Dataverse 400 → caught →
-empty list → **the external SPA showed "you have no grants" to every caller who had grants.**
-Sixth instance of the stale-column class; it survived review because `$select` and `$orderby` sit
-on adjacent lines and disagree, so checking the select gives a false all-clear.
+| Landed | Detail |
+|---|---|
+| **2 operation keys** (`write`, `delete`) | The filter's own `<param>` doc had always advertised `"read", "write", "delete"` while two thirds could not be honoured. Verified reachable in the snapshot before adding |
+| **C2, C3** | Two app-only destroy paths, one reachable from a shipped client hook |
+| **H2** | `PUT` tamper-by-GUID + the `GET` that discloses `GraphDriveId`/`GraphItemId` — the pointers the destroy and bulk paths consume |
+| **H3** | checkout · checkin · discard · checkout-status · **`analyze` → `write`** (owner decision) |
+| **C1** | Bulk download: per-document authorization **plus** collapsing the `_FAILED.txt` denial reason. Fixing only the first would have created a 500×-amplified enumeration oracle that did not exist before |
+| **5 URL-minting reads** | `read`; a mint-specific key was rejected — it would change no decision. Url **lifetime** is the real gap and belongs to task 012 |
+| **H5** | Sixth stale-column instance — `$orderby sprk_name` on `sprk_project` |
 
-### ✅ The blocker is cleared — keys `write` + `delete` registered (`f0747bb33`)
+**New defect found by writing the first ever test for bulk download**: `ZipArchive` is synchronous,
+Kestrel disallows sync IO, and `AllowSynchronousIO` appears nowhere in the repo — so the endpoint
+threw on its happy path. Fixed per-request via `IHttpBodyControlFeature`. Honest reading: C1 was a
+**working enumeration** primitive and a **broken exfiltration** one.
 
-Both landed **in the same commit as their consumers**, verified reachable first
-(`DataverseAccessRightsMapper` maps `WriteAccess`/`DeleteAccess`; RPA returns the full rights
-string). `AddDocumentAuthorizationFilter`'s own `<param>` doc had always advertised
-`"read", "write", "delete"` while two thirds of that contract could not be honoured.
+⚠️ **`write`/`delete` gates depend on RPA being live.** The fallback probe caps rights at Read *by
+construction*, so on an RPA outage they deny — correct fail-closed direction, same trade as task 008,
+but those routes go **unavailable, not degraded**. Task 034 owns live verification (`RPA-FALLBACK`).
 
-⚠️ **Both new gates depend on RPA being live.** The fallback probe caps rights at Read *by
-construction*, so on an RPA outage every `write`/`delete` gate denies — correct fail-closed
-direction, same trade as task 008, but it means those routes are **unavailable, not degraded**.
-Task 034 owns live verification (`RPA-FALLBACK` marker).
+⚠️ **The 5 OBO routes narrowed behaviour deliberately.** They already had real Graph-level OBO
+enforcement; the gate adds the per-document Dataverse answer. A caller with SPE *container* access but
+no `Read` on the row now gets 403 — which is precisely FR-01's intent, not a regression.
 
-### Then, in order
+**Still open on this surface**: the 3 collection-shaped routes (no caller-supplied id → Phase 1
+evaluator work, tasks 032/054) and `share-link` (task 012 — its OBO enforcement is real, so it is a
+*policy* question, not an open disclosure).
 
-1. **C1** — bulk. Needs per-item authorization **plus** an explicit partial-failure contract: the
-   `_FAILED.txt` manifest distinguishes "denied" from "missing", which stays an enumeration oracle
-   even after per-item auth exists.
-2. **`analyze`** — deliberately left ungated pending a decision, not by oversight. It reads the
-   document and writes to a *different* entity (so `read` by the `finance.confirm` reasoning), but
-   spends money and enqueues background work (so `write`). Decide explicitly.
-3. **The 5 URL-minting reads** — they outlive the request; decide whether `read` is right or
-   whether minting deserves its own key.
-4. **The 6 OBO read routes** — decide whether OBO alone suffices; POML escalation trigger if a
-   record check is needed that does not exist.
-5. **The 3 collection-shaped routes** — confirm they stay Phase 1 evaluator work rather than
-   silently dropping them.
+### Phase 0b — the 9 review tasks are FILED (owner-approved 2026-08-24)
 
-### Phase 0b — the 8 review tasks are FILED (owner-approved 2026-08-24)
-
-`021`–`028` exist as POMLs and are registered in [`TASK-INDEX.md`](tasks/TASK-INDEX.md).
-Recommended order **022 → 021 → 025 → 023 → 028 → 024**, with **026 and 027 parallel-safe**
+`021`–`029` exist as POMLs and are registered in [`TASK-INDEX.md`](tasks/TASK-INDEX.md).
+Order: ~~022~~ ✅ → **021** → 025 → 023 → 029 → 028 → 024, with **026 and 027 parallel-safe**
 (no deps, no contended code — runnable any time, by anyone).
 
 - **021** ⚠️ the three `@odata.bind` names MUST come from `$metadata`. Escalate rather than guess —
@@ -91,7 +83,7 @@ Recommended order **022 → 021 → 025 → 023 → 028 → 024**, with **026 an
 
 ### Last verified state
 
-**ALL SEVEN test projects — 11,410 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,798 ·
+**ALL SEVEN test projects — 11,431 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,819 ·
 `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
 `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
 Publish **43.70 MB** compressed incl. PDBs (unchanged by tasks 009 + 022 — no packages added; ceiling 60) · `--vulnerable` clean.
@@ -273,6 +265,9 @@ caught real gaps every time.
 | **A green local suite is NOT CI — read the gate, not the substitute** | This project reported "11,374 passed locally" as verification for six consecutive commits while `CI / Router` had never once rendered a verdict on the branch (17 runs, 0 successes). Local runs never execute Arch Tests, Changed-Surface Integration Smoke, Auth Smoke, Plugin Size or the Last-Reviewed stamp. **And when the gate is red for reasons that look unrelated to the diff, that is a finding to chase — not noise to route around.** It hid a repo-wide CI defect for weeks |
 | **A check with only a happy-path test is not tested** | Task 009 hit the zero-failure perturbation TWICE. (a) Two guards denied the same case, so a status-code assertion could not tell them apart — deleting the A-7 fix left every test green; fixed by asserting WHICH guard denied. (b) The new work-assignment membership check had a positive test but no negative one — bypassing it entirely failed zero; fixed by adding the negative. **Pair every positive with a negative, and assert the distinguishing observable.** |
 | **Check the `$orderby`, not just the `$select`** | H5's sixth stale-column instance sat one line below a CORRECT `$select`. Reading the select gave a false all-clear for months. Verify EVERY clause that names a column — select, filter, orderby, expand, and `@odata.bind`. |
+| **A zero-failure perturbation has TWO causes — distinguish them** | Either the test is at the wrong level, **or the perturbed code is unreachable**. Task 022's `BulkDownloadAuthorizationFilter` catch inverted to fail-open broke 0 of 30 — not a coverage gap: `AuthorizeAsync` absorbs its own exceptions, so nothing reaches that catch. Proved with a two-factor experiment (force `AuthorizeAsync` to throw outside its try → 14 failures; do that AND invert the catch → 17; **the 3-test delta IS the guard's coverage**). Rewriting tests would have added coverage for a path that cannot execute. **Check reachability before "fix the test".** |
+| **A doc comment asserting "enforcement happens elsewhere" is a claim to verify, not evidence** | Task 022 found four. `BulkDownloadAuthorizationFilter` said twice that per-document access was "enforced at Dataverse lookup time via the user's identity (same model as `preview-url`)" — the lookup is app-only, and `preview-url` had no authorization either, so the claim cited a route making the same empty claim. `/checkout` claimed OBO+PCF enforcement on an app-only path. But `share-link`'s identical-sounding claim was **TRUE** (`CreateSharingLinkAsUserAsync` really does call `ForUserAsync`). **Check the named mechanism — the pattern is valid, the instances vary.** |
+| **State the blast radius you verified, not the one that sounds worse** | I nearly shipped "any authenticated caller could mint a url for any document by GUID" for the five URL-minting reads. They use OBO, so Graph already enforced SPE access; the gate is a second, narrowing boundary. Overstating a finding in a comment is the same defect as understating one — both mislead the next reader. |
 | **A perturbation harness needs a clean-tree BASELINE and fresh mtimes** | Task 022's first sweep produced FAKE numbers. The harness restored files with `shutil.copy2`, which preserves the *backup's* mtime — older than the built DLL — so MSBuild skipped recompiling and some runs measured a **stale binary still carrying the previous perturbation**. It reported 3 failures where the truth was 1. Two fixes, both mandatory for any future harness here: `os.utime(f, None)` after restore, and a clean-tree baseline run that must be **0 failures** before the sweep. Without the baseline every count is measured against unknown noise. Caught only because an unexplained number was checked instead of accepted. |
 | **A doc comment claiming "enforced elsewhere" is a finding, not evidence** | `/checkout`'s comment said "PCF controls button visibility based on Dataverse security profile / actual permissions enforced by Graph API via OBO". Both halves false: client-side button visibility is not enforcement, and the path is app-only so nothing downstream saw the caller. Sixth doc-comment-lies instance in this area. **When a comment explains why no check is needed, verify the mechanism it names actually runs on that route.** |
 | **Distinguish "the gate needs X" from "the service lacks X"** | I recorded C2 as "NOT a filter attachment — needs a signature change with call-site fallout" because `DeleteAsync` takes no identity. Wrong: `DocumentAuthorizationFilter` reads identity from `HttpContext`. The missing parameter was a real observation (app-only destroy → no defence in depth) attached to the wrong conclusion (a blocker). It nearly cost a whole extra step. |

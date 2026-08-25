@@ -59,7 +59,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 
 | # | Task | Finding | Deps | Safe | Tier | Effort | Why |
 |---|---|---|---|---|---|---|---|
-| 🔲 **022** | Document-surface authorization sweep | **C1,C2,C3**,H2,H3,H5 | 002 | ❌ | **opus** | **xhigh** | **START HERE** — live disclosure AND destroy surface. Task 002 gated 4 of ~15 |
+| ✅ **022** | Document-surface authorization sweep | **C1,C2,C3**,H2,H3,H5 | 002 | ❌ | **opus** | **xhigh** | **DONE 2026-08-24** — 19 of 22 routes gated; 3 remaining are collection-shaped (Phase 1). See outcome below |
 | 🔲 **021** | Provisioning stamping PATCH: 3 wrong names + swallowed 400 | Critical (C4/C5) | 008 | ❌ | **opus** | **xhigh** | Creates real infra since 2026-03, leaves the project pointing at none. ⚠️ nav-prop names MUST come from `$metadata` — do not guess |
 | 🔲 **025** | Test-integrity: 4 untested seams + gate mechanism + false-claim tests | H6,M3,M7 | 003,007,017 | ❌ | **opus** | **xhigh** | This is WHY the rest could hide — the central gate can return blanket rights with the suite green |
 | 🔲 **023** | Grant upsert must write `sprk_expiresdate` (+ FR-09 acceptance) | H1 | 007,010 | ❌ | sonnet | high | A-5's shape resurrected on the write path by the two tasks that closed it on the read path |
@@ -69,7 +69,32 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 | 🔲 **026** | Schema-truth doc repair | M4,M5 | — | ✅ | sonnet | medium | Cheapest, and the only one attacking the CAUSE of five stale-column recurrences |
 | 🔲 **027** | e2e tier reconciliation — or deliberate retirement | M6 | — | ✅ | sonnet | high | A suite that reads as coverage, pins 4 nonexistent contracts, and runs in no workflow |
 
-**Recommended order**: 022 → 021 → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
+> **Task 022 outcome (2026-08-24)** — the class was **22 routes across 4 files**, not the "~15" the
+> review estimated. **19 are now gated**; the 3 remaining have no caller-supplied document id and need
+> collection-level scoping (Phase 1 evaluator work, tasks 032/054). Full inventory + reasoning:
+> [`notes/task-022-document-surface-inventory.md`](../notes/task-022-document-surface-inventory.md).
+>
+> - **Two operation keys added** (`write`, `delete`) — `AddDocumentAuthorizationFilter`'s own `<param>`
+>   doc had always advertised `"read", "write", "delete"` while two thirds of that contract could not
+>   be honoured, and honouring it would have produced an unconditional 403 rather than a compile error.
+>   Both verified reachable in the snapshot before being added.
+> - **C2 + C3** (destroy), **H2** (tamper + pointer disclosure), **H3** (checkout family + `analyze`),
+>   **C1** (bulk download), **5 URL-minting reads**. **H5** fixed (sixth stale-column instance).
+> - **C1 needed both halves**: per-document authorization AND collapsing the `_FAILED.txt` denial
+>   reason into the not-found reason. Fixing only the first would have created a 500×-amplified
+>   enumeration oracle that did not exist before.
+> - **New defect found by writing the first ever test for bulk download**: `ZipArchive` is synchronous
+>   and Kestrel disallows sync IO, so the endpoint threw on its happy path. Fixed per-request via
+>   `IHttpBodyControlFeature`. Honest reading: C1 was a *working enumeration* primitive and a *broken
+>   exfiltration* one.
+> - **Three doc comments asserting "enforcement happens elsewhere" were false** (bulk-download twice,
+>   `/checkout` once). One — `share-link`'s — was **true** on inspection. Verify the mechanism a
+>   comment names; do not treat the comment as evidence.
+> - **Perturbations: 21 run, 20 bite.** The one zero was confirmed by a two-factor experiment to be
+>   *unreachable* code rather than missing coverage (14 → 17 failure delta proves the guard is
+>   covered once reachable).
+
+**Recommended order**: ~~022~~ ✅ → 021 → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
 in parallel at any time (both `parallel-safe: true`, no deps, no contended code).
 
 **029 before 028**: 029 closes a live incoherence on the shipped surface (writable-but-not-listable
