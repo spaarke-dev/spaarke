@@ -576,6 +576,79 @@ if ($UseSlotDeploy) {
     }
 }
 
+# ---------------------------------------------------------------------------
+# [6/4] CORS origin assertion — the forcing function
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS. Commit 66a45cf6a removed the blanket credentialed
+# *.azurestaticapps.net CORS rule — correct, since that is an attacker-registrable
+# shared domain — and its commit message named a DEPLOYMENT PREREQ: enumerate our own
+# SWA origins in Cors__AllowedOrigins__N. Nobody ran it. Nothing failed. The gap
+# surfaced only when a human opened the Outlook add-in during UAT and got a preflight
+# rejection. Config drift had no gate anywhere in CI or deploy, so this is it.
+#
+# CONTRACT: every origin declared in config/environments.json requiredCorsOrigins MUST
+# be present. Deliberately NOT an equality check — environments legitimately carry extra
+# origins (the *.dynamics.com entries are redundant with CorsModule's suffix rules but
+# harmless). An exact-match gate would fail on every deploy and be disabled within a
+# month, which is how gates die.
+Write-Host ""
+Write-Host "[6/4] Verifying required CORS origins..." -ForegroundColor Cyan
+
+$envConfigPath = Join-Path $RepoRoot "config/environments.json"
+if (-not (Test-Path $envConfigPath)) {
+    Write-Host "  SKIPPED — config/environments.json not found." -ForegroundColor Yellow
+} else {
+    $envConfig = Get-Content $envConfigPath -Raw | ConvertFrom-Json
+    $envEntry  = $envConfig.environments.$Environment
+
+    if ($null -eq $envEntry -or $null -eq $envEntry.PSObject.Properties['requiredCorsOrigins']) {
+        # Absent key = unaudited, and saying so is the point. Silence here would read as a pass.
+        Write-Host "  WARNING: '$Environment' declares no requiredCorsOrigins in config/environments.json." -ForegroundColor Yellow
+        Write-Host "           This environment is UNAUDITED for CORS drift — add the key (an empty array" -ForegroundColor Yellow
+        Write-Host "           is a valid assertion that it has no SWA front-ends)." -ForegroundColor Yellow
+    }
+    else {
+        $required = @($envEntry.requiredCorsOrigins)
+        if ($required.Count -eq 0) {
+            Write-Host "  '$Environment' declares no required origins (explicit empty array) — nothing to assert." -ForegroundColor Gray
+        }
+        else {
+            # NOTE: fetch ALL settings and filter in PowerShell rather than using a server-side
+            # --query. A JMESPath containing parentheses (e.g. starts_with(...)) is passed through
+            # the az.cmd batch shim to cmd.exe, which parses the ')' itself and fails with
+            # "].value was unexpected at this time" — the query never reaches Azure and the result
+            # is an empty list, i.e. the gate would report every origin missing on every Windows run.
+            $settingsJson = az webapp config appsettings list `
+                --resource-group $ResourceGroupName --name $AppServiceName -o json
+            $liveList = @()
+            if ($settingsJson) {
+                $liveList = @($settingsJson | ConvertFrom-Json |
+                    Where-Object { $_.name -like 'Cors__AllowedOrigins__*' } |
+                    ForEach-Object { "$($_.value)".Trim().TrimEnd('/') })
+            }
+
+            $missing = @($required | Where-Object { $liveList -notcontains $_.TrimEnd('/') })
+
+            if ($missing.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  CORS ORIGIN CHECK FAILED — $($missing.Count) declared origin(s) missing from '$AppServiceName':" -ForegroundColor Red
+                foreach ($m in $missing) { Write-Host "    MISSING: $m" -ForegroundColor Red }
+                Write-Host ""
+                Write-Host "  Every browser client on a missing origin will fail CORS preflight — the request" -ForegroundColor Yellow
+                Write-Host "  never reaches application auth, so this looks like an auth bug and is not one." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  Fix (append at the next free index; do NOT overwrite an existing one):" -ForegroundColor Gray
+                Write-Host "    az webapp config appsettings set -g $ResourceGroupName -n $AppServiceName --settings 'Cors__AllowedOrigins__<N>=<origin>'" -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "  Declared in config/environments.json -> environments.$Environment.requiredCorsOrigins" -ForegroundColor Gray
+                exit 1
+            }
+
+            Write-Host "  All $($required.Count) declared CORS origin(s) present." -ForegroundColor Green
+        }
+    }
+}
+
 # --- Summary ---
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
