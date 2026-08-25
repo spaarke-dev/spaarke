@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="203a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Apply Class-A punch list — Sub-phase 203a foundation (provisioning-runs root + templates + patterns fill + constraint + skill Step 1 + 2 bicep fixes)</title>
+    <phase>Phase Pre-Live-Fire — Class-A punch list foundation</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches `.claude/skills/provision-environment/SKILL.md`, `.claude/constraints/provisioning.md`, `.claude/patterns/provisioning/**` (9 skeleton files), AND `infrastructure/bicep/**` — mixed skill-directive + bicep changes require FULL rigor per project CLAUDE.md; skill wiring in particular is L3 operator surface that fires against live customer stamps.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Predominantly file authoring (per-run templates, pattern content, constraint doc) + small skill Step 1 edits + 2 mechanical bicep parameter fixes. Fully-specified from task 202 punch list rows A05..A12 + A24; no root-cause needed. Sonnet @ high per project CLAUDE.md's default tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to `.claude/skills/`, `.claude/patterns/provisioning/**`, and `.claude/constraints/provisioning.md` — Sub-Agent Write Boundary (root CLAUDE.md §3) forbids sub-agents from editing `.claude/**`, so this task MUST run in main session.</parallel-reason>
+    <deps>202</deps>
+    <tags>provisioning, skill-directive, root-claude, bicep, l2-controlplane, docs</tags>
+    <estimated-effort>15 hours (per task 202 punch list §Task 203 scope brief: A05(2) + A06(4) + A07(6) + A08(3) + A09(1) + A10(1) + A11(3) + A12(1) + A24(1); some overlap in skill Step 1 edits)</estimated-effort>
+  </metadata>
+
+  <prompt>Apply Class-A rows A05, A06, A07, A08, A09, A10, A11, A12, A24 from `notes/task-202-punch-list.md` — the foundation sub-phase of task 203. Row-by-row: (a) grep-verify current repo state BEFORE applying (many rows may have landed via Wave G-8 batch 155-198+); (b) if `already-applied`, annotate row `last_known_status_after_execution: already-applied` and skip; (c) if `open`, apply per row landing-spot + effort; (d) checkpoint via context-handoff after every 3 rows completed. Foundation scope: create `provisioning-runs/` root + INDEX + `_archive/` (A05); author 8-file per-run templates in `provisioning-runs/_templates/` (A06); fill CONTENT into 9 existing `.claude/patterns/provisioning/**` skeleton files (A07 — skeletons already exist per task 202 output); author `.claude/constraints/provisioning.md` + wire into task-execute Step 4a tag map (A08); patch `/provision-environment` SKILL.md Step 1 for profile enum + environmentId intake + placeholder `sprk_dataverseenvironment` create (A09/A10/A11); fix `platform-controlplane.bicep` `jwtAudience` (A12); fix `app-service.bicep` `healthCheckPath` (A24). Amend punch list `last_known_status_after_execution` annotations per row. Do NOT commit — main session handles commit after review.</prompt>
+
+  <role>SPAARKE platform architect. Expert in this project's r1 domain (customer-provisioning-orchestration-r1 spec.md + design.md v3.6); the `/provision-environment` L3 skill Step 0-7 flow; the task-execute tag map (root CLAUDE.md §17 + `.claude/skills/task-execute/SKILL.md` Step 4a); coding-project structural pattern mirrored to provisioning-runs (per `notes/provisioning-run-structure-design.md`); ADR-032 asymmetric-registration + L2 control-plane Bicep authoring conventions.</role>
+
+  <goal>All 9 in-scope Class-A rows are annotated in `notes/task-202-punch-list.md` with `last_known_status_after_execution: applied|already-applied|deferred-because-X`. `provisioning-runs/{INDEX.md,_archive/,_templates/*}` exists with 8 per-run templates matching `notes/provisioning-run-structure-design.md` §folder-layout. Nine files under `.claude/patterns/provisioning/` (per §Related project files) have populated content (not skeletons). `.claude/constraints/provisioning.md` exists AND `task-execute` Step 4a tag map recognizes the `provisioning` tag. `/provision-environment` SKILL.md Step 1 accepts profile ∈ {spaarke-hosted-model1-trial, spaarke-hosted-model2, customer-owned-model2}, requires `environmentId` intake, and creates a placeholder `sprk_dataverseenvironment` row before POST /api/runs. `platform-controlplane.bicep` sets `jwtAudience` to `api://spaarke.com/provisioning-controlplane-{env}`. `app-service.bicep` `healthCheckPath` matches BFF-mapped `/healthz`. Build succeeds against `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` (no C# changes expected but sanity-check). No unauthorized `.claude/` sub-agent invocations (verify via git status attribution).</goal>
+
+  <context>
+    <background>Task 202 (2026-08-24 SESSION 6) authored the master punch list at `notes/task-202-punch-list.md` — 34 Class-A rows sourced from 6 agents / 108 source files, with a verification obligation: executor MUST grep-verify actual repo state BEFORE applying each row, because many may have landed via Wave G-8 batch (tasks 155-198+). Owner directive 2026-08-24 SESSION 5 sub-phased 203 into a/b/c/d groups by (i) parallel-safety (touches `.claude/**` vs doesn't), (ii) skill-vs-bicep-vs-code tag alignment, and (iii) time-window. Sub-phase 203a is the foundation: it creates the run-project structure the operator lives in, fills the pattern content the constraint file references, patches the three skill Step 1 gaps that L2 rejects requests on (400s), and fixes two mechanical bicep parameter drifts (jwtAudience + healthCheckPath) that block downstream handler success.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file role="target-modify">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/bff-vs-provisioning-boundary.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/handler-registration-completeness.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/keyvault-reference-identity-invariant.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/manifest-driven-secret-catalog.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/null-object-kill-switch-anti-pattern.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/openai-quota-region-composition.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/operator-rbac-bootstrap.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/progressive-fail-fast-recovery.md</file>
+      <file role="target-new-content">.claude/patterns/provisioning/resource-name-availability-precheck.md</file>
+      <file role="target-new">.claude/constraints/provisioning.md</file>
+      <file role="target-modify">.claude/skills/task-execute/SKILL.md</file>
+      <file role="target-new">provisioning-runs/INDEX.md</file>
+      <file role="target-new">provisioning-runs/_archive/.gitkeep</file>
+      <file role="target-new">provisioning-runs/_templates/CLAUDE.md</file>
+      <file role="target-new">provisioning-runs/_templates/intake.md</file>
+      <file role="target-new">provisioning-runs/_templates/prerequisites-check.md</file>
+      <file role="target-new">provisioning-runs/_templates/preflight-report.md</file>
+      <file role="target-new">provisioning-runs/_templates/handler-log.md</file>
+      <file role="target-new">provisioning-runs/_templates/manual-gates.md</file>
+      <file role="target-new">provisioning-runs/_templates/handoff-report.md</file>
+      <file role="target-new">provisioning-runs/_templates/lessons-learned.md</file>
+      <file role="target-modify">infrastructure/bicep/modules/platform-controlplane.bicep</file>
+      <file role="target-modify">infrastructure/bicep/modules/app-service.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored; row-verify obligation set; skeleton pattern files created</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each row's actual code state BEFORE applying to prevent double-fixing. Many rows may have landed via Wave G-8; verify FIRST per §Verification obligation for tasks 203 + 204 execution.</constraint>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary">All edits under `.claude/**` (skills, patterns, constraints) MUST occur in the MAIN SESSION. Sub-agents cannot Write/Edit these paths and will fail with "Edit denied". DO NOT dispatch this task to a sub-agent.</constraint>
+    <constraint source="root CLAUDE.md §11 component justification">For any NEW file created (pattern content file, template, constraint doc): the file already has a clear justification chain from task 202 punch list. Cite the row number in each new file's header (e.g. "Created by task 203a per punch list row A05/A06/A07/A08").</constraint>
+    <constraint source="project CLAUDE.md MUST rules">Skill Step 1 profile enum MUST match L2 API exactly — `spaarke-hosted-model1-trial` / `spaarke-hosted-model2` / `customer-owned-model2` (per DS-5 c6-1). Any drift from these three literal strings triggers L2 400 responses.</constraint>
+    <constraint source="A12 row source-of-truth">`jwtAudience` MUST be `api://spaarke.com/provisioning-controlplane-{env}` (tenant-policy verifier-domain form) NOT `api://spaarke-provisioning-controlplane-{env}`. See DS-5 c5.2.</constraint>
+    <constraint source="A24 row source-of-truth">`app-service.bicep` `healthCheckPath` MUST match BFF-mapped endpoint `/healthz`, NOT `/health` (staging slot default is `/healthz` — current asymmetric config marks prod instances unhealthy per audit gap-16).</constraint>
+    <constraint source="A07 skeleton-preservation">The 9 pattern files ALREADY EXIST as skeletons from task 202. Do NOT recreate them; open each in-place and FILL content while preserving existing header + filename. Confirmed present: `bff-vs-provisioning-boundary.md`, `handler-registration-completeness.md`, `keyvault-reference-identity-invariant.md`, `manifest-driven-secret-catalog.md`, `null-object-kill-switch-anti-pattern.md`, `openai-quota-region-composition.md`, `operator-rbac-bootstrap.md`, `progressive-fail-fast-recovery.md`, `resource-name-availability-precheck.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-A punch list execution — foundation (provisioning-runs + patterns fill + skill Step 1 + 2 bicep fixes)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+      <file>.claude/patterns/provisioning/INDEX.md</file>
+      <file>.claude/patterns/provisioning/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL block (FULL, high effort). Read `notes/task-202-punch-list.md` §Punch list — CLASS A rows A05..A12 + A24 in scope. Read project CLAUDE.md + `.claude/skills/provision-environment/SKILL.md` current Step 1. Verify (git status) main session ownership before touching `.claude/**`.</step>
+    <step order="1" name="Grep-verify each row BEFORE applying">For each row A05..A12 + A24: run the row-specific grep verification per punch list §Verification obligation. Record verified status in a scratchpad row-status table BEFORE any edit. If any row grep shows fixed state → mark `already-applied` + skip apply.</step>
+    <step order="2" name="A05 apply">Create `provisioning-runs/INDEX.md` (cross-run registry per `provisioning-run-structure-design.md`) + `provisioning-runs/_archive/.gitkeep`. Cite punch list row A05 in INDEX header.</step>
+    <step order="3" name="A06 apply">Author 8 per-run templates under `provisioning-runs/_templates/`: `CLAUDE.md`, `intake.md`, `prerequisites-check.md`, `preflight-report.md`, `handler-log.md`, `manual-gates.md`, `handoff-report.md`, `lessons-learned.md`. Follow templates specified in `provisioning-run-structure-design.md`. Cite row A06 in each header.</step>
+    <step order="4" name="Checkpoint (after 2 rows)">Run `context-handoff` (silent "✅ Checkpoint. A05, A06 applied.").</step>
+    <step order="5" name="A07 apply">Open each of the 9 existing skeleton files under `.claude/patterns/provisioning/` in-place and fill content per patterns described in `provisioning-run-structure-design.md` + related design-study-ds5 material. Preserve existing headers + filenames. Do NOT delete the INDEX or README.</step>
+    <step order="6" name="A08 apply">Author `.claude/constraints/provisioning.md` enumerating cross-cutting provisioning rules (tenant-isolation invariants I1-I5, KV never-delete BFF-API/Dataverse-ClientSecret, publish-size ≤60 MB reminder, handler registration completeness, etc.). Then EDIT `.claude/skills/task-execute/SKILL.md` Step 4a tag map to include `provisioning` tag → this constraint file.</step>
+    <step order="7" name="Checkpoint (after 4 rows)">Run `context-handoff` (silent).</step>
+    <step order="8" name="A09/A10/A11 apply (skill Step 1)">EDIT `.claude/skills/provision-environment/SKILL.md` Step 1: (A09) constrain profile to enum {spaarke-hosted-model1-trial, spaarke-hosted-model2, customer-owned-model2} + reject any other value pre-POST; (A10) require `environmentId` intake before POST /api/runs (L2 400s without it); (A11) add placeholder `sprk_dataverseenvironment` create step via Dataverse MCP or `pac data` fallback BEFORE POST /api/runs. Cross-reference each with punch list row + design-study-ds5 c6-1/c6-2/c6-3.</step>
+    <step order="9" name="A12 apply (jwtAudience bicep fix)">EDIT `infrastructure/bicep/modules/platform-controlplane.bicep` to set `jwtAudience` to `api://spaarke.com/provisioning-controlplane-{env}`. Sanity-check the emitted app-setting via `az bicep build` (dry-run compile).</step>
+    <step order="10" name="A24 apply (healthCheckPath bicep fix)">EDIT `infrastructure/bicep/modules/app-service.bicep` to set `healthCheckPath` default to `/healthz`. Sanity-check via `az bicep build`.</step>
+    <step order="11" name="Checkpoint (after 7 rows)">Run `context-handoff` (silent).</step>
+    <step order="12" name="Build sanity">Run `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` — must succeed (no C# changes expected, but confirms nothing regressed via touching adjacent config).</step>
+    <step order="13" name="Amend punch list annotations">EDIT `notes/task-202-punch-list.md` — for each in-scope row A05..A12 + A24, add `last_known_status_after_execution: applied|already-applied|deferred-because-X` in the row's status column OR append per-row annotation lines under a new subsection §203a execution results.</step>
+    <step order="14" name="Report">Emit a concise summary: rows applied, rows already-applied, rows deferred (with reason), bicep dry-run + dotnet build results, and any grep-verify surprises. Do NOT commit — main session handles commit after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any grep-verify shows a row LANDED via Wave G-8 batch but with a partial fix (e.g. skill profile constrained to 2 of 3 enum values), STOP and escalate rather than "patching the patch" — the punch list row's `last_known_status` was authoritative at task 202 time; drift means Wave G-8 landed something the punch list missed. Reconcile via a new punch-list row rather than silent extension.</trigger>
+    <trigger>If bicep dry-run (`az bicep build`) fails after A12 or A24 edits, STOP — this indicates a parameter contract drift beyond the trivial value change, and requires re-reading the module's parameter graph before proceeding.</trigger>
+    <trigger>If `.claude/patterns/provisioning/` skeleton file count is not 9 (INDEX + README + 9 = 11 total), STOP — task 202's output shape doesn't match A07's expectation; reconcile with punch list author before filling content.</trigger>
+    <trigger name="sub-agent-write-boundary-tripped">If any Edit/Write to `.claude/**` returns "Edit denied", it means this task was dispatched to a sub-agent by mistake. STOP and re-invoke in main session — do NOT attempt workarounds.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every in-scope Class-A row (A05, A06, A07, A08, A09, A10, A11, A12, A24) has `last_known_status_after_execution` annotated in `notes/task-202-punch-list.md`.</criterion>
+    <criterion testable="true">`provisioning-runs/INDEX.md`, `provisioning-runs/_archive/`, and `provisioning-runs/_templates/{CLAUDE,intake,prerequisites-check,preflight-report,handler-log,manual-gates,handoff-report,lessons-learned}.md` all exist.</criterion>
+    <criterion testable="true">Nine files under `.claude/patterns/provisioning/` (excluding INDEX + README) have content-body length &gt; 100 lines each (was &lt; 25 lines pre-task per task 202 skeleton convention).</criterion>
+    <criterion testable="true">`.claude/constraints/provisioning.md` exists AND `.claude/skills/task-execute/SKILL.md` Step 4a tag map references it under a `provisioning` tag row.</criterion>
+    <criterion testable="true">`grep -c "spaarke-hosted-model1-trial" .claude/skills/provision-environment/SKILL.md` returns ≥ 1. Similarly for `spaarke-hosted-model2` and `customer-owned-model2`.</criterion>
+    <criterion testable="true">`grep -c "environmentId" .claude/skills/provision-environment/SKILL.md` returns ≥ 1 (was 0 per DS-5 c6-2).</criterion>
+    <criterion testable="true">`grep "api://spaarke.com/provisioning-controlplane" infrastructure/bicep/modules/platform-controlplane.bicep` matches (A12 fix landed).</criterion>
+    <criterion testable="true">`grep "/healthz" infrastructure/bicep/modules/app-service.bicep` matches (A24 fix landed).</criterion>
+    <criterion testable="true">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` succeeds.</criterion>
+    <criterion testable="true">Any newly created files justified per CLAUDE.md §11 by punch list row citation in file header.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing — task 202 authored the punch list (34 Class-A rows) + skeleton pattern files; this task consumes both. Extension — 203a is the foundation sub-phase (provisioning-runs root + template content + skill Step 1 + 2 mechanical bicep fixes) that unblocks the operator's ability to run + document a run coherently. Cost-of-doing-nothing — task 186 E2E ceremony fires without: (a) provisioning-runs project structure to organize the run in (SESSION 5 lesson); (b) constraint file that task-execute Step 4a can load for provisioning tasks; (c) working skill Step 1 that L2 accepts (L2 400s today per DS-5 c6-1/c6-2/c6-3); (d) correct `jwtAudience` (auth fails otherwise); (e) correct `healthCheckPath` (prod slot marked unhealthy). Any one of these blocks task 186's demonstration of FR-18/SC#5.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

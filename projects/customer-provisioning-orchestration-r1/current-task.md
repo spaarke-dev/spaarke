@@ -1,20 +1,51 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 SESSION 6 END (by task-execute Step 11 transition) — **🎯 TASK 202 COMPLETE ✅. All 13 acceptance criteria met. Deliverables shipped (see below). Task 203 is NEXT: apply class-A rows from `notes/task-202-punch-list.md` (34 rows total, 26 blocks_e2e=yes). Class-B rows (22) route OUT to `code-quality-and-assurance-r3` per BINDING owner directive 2026-08-24. Task 186 E2E live-fire blocked until 203 + class-B fixes both landed.**
+> **Last Updated**: 2026-08-24 SESSION 7 END — **🎯 SESSION 7 accomplishments: (1) Verified all 22 Class-B rows against live repo state — 8 ALREADY APPLIED via Wave G-7/G-8; (2) Amended punch list with Class-B verification matrix + re-scoped Class-B to task 204 IN THIS PROJECT (`code-quality-and-assurance-r3` closed); (3) Authored 11 POML files (203a/b/c/d + 204a/b/c/d/e/f/g); (4) Updated TASK-INDEX with new sub-phase rows.** Task 203a is next actionable. Task 186 E2E live-fire remains blocked until 203a-c + 204a/b/c + verified Class-B blockers all land (203d + 204d deferred-post-186).
 
-## 🎯 QUICK RECOVERY — 2026-08-24 SESSION 6 END (READ THIS FIRST)
+## 🎯 QUICK RECOVERY — 2026-08-24 SESSION 7 END (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task (next)** | 203 - Apply pre-live-fire lessons per task-202-punch-list.md (class-A rows only) |
-| **Task file** | `projects/customer-provisioning-orchestration-r1/tasks/203-*.poml` (PLACEHOLDER — needs to be authored via `/task-create` or manual before dispatch) |
-| **Status** | not-started (queued; blocked-until-203 chain is 203 → 186 → 090) |
-| **Rigor (planned)** | FULL (per TASK-INDEX row + POML §c-c2 constraint: "likely FULL for .cs + TEST-MODIFYING for any ArchTest additions") |
-| **Model / Effort (planned)** | opus / xhigh (per TASK-INDEX row — apply-phase requires xhigh for complex brownfield) |
+| **Task (next actionable)** | **203a** — Apply Class-A punch list sub-phase foundation (provisioning-runs root + templates + 9 patterns fill + constraint file + skill Step 1 + 2 bicep fixes) |
+| **Task file** | [`projects/customer-provisioning-orchestration-r1/tasks/203a-apply-classA-punchlist-foundation.poml`](tasks/203a-apply-classA-punchlist-foundation.poml) |
+| **Status** | not-started (blocked-only-by-202-which-is-complete → ready to dispatch) |
+| **Rigor** | FULL (per POML `<rigor>` + reason: touches `.claude/skills/**` + `.claude/patterns/**` + `.claude/constraints/**` + `infrastructure/bicep/**`) |
+| **Model / Effort** | sonnet / high (per POML `<model-tier>` + reason: predominantly file authoring + small skill edits + mechanical bicep fixes) |
+| **Parallel-safe** | false — touches `.claude/**` (Sub-Agent Write Boundary per root CLAUDE.md §3) → MAIN SESSION ONLY |
+| **Estimated effort** | 15h |
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD after task 202 commit** | (updated on commit — see git log) |
+| **HEAD after SESSION 7 commit** | (updated on commit — see git log) |
 | **Working tree** | Should be CLEAN post-commit |
-| **Next action for a fresh session** | Fresh Opus session; **either** `/task-create` to author 203 POML from the task-202-punch-list class-A rows **or** `task-execute` if 203 POML exists |
+| **Next action for a fresh session** | `task-execute projects/customer-provisioning-orchestration-r1/tasks/203a-apply-classA-punchlist-foundation.poml` (main session only — cannot dispatch to sub-agent) |
+
+### Full 12-task Phase Pre-Live-Fire runway (from TASK-INDEX)
+
+| ID | Sub-phase | Effort | Parallel | Blocks 186? |
+|---|---|---|---|---|
+| ✅ 202 | Audit + PREREQUISITES + provisioning-run structure design | DONE | — | — |
+| 🔲 203a | Foundation (provisioning-runs + templates + patterns fill + constraint + skill Step 1 + 2 bicep) | 15h | false (touches `.claude/`) | yes |
+| 🔲 203b | Bicep hardening (12 rows: SB RBAC, config-key aliases, artifacts storage, ACR, L2 UAMI RBAC ×6, FromBicepOutput, kv-secrets clobber, sharedBffUami KV, queue recreate, CustomerRunGuard) | 30-40h | true | yes |
+| 🔲 203c | Skill wiring (Step 0.5 external prereqs + `--batch` + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs) | 15-20h | false (touches `.claude/` + BFF) | yes |
+| 🔲 203d | Nice-to-have (skill Step 6 read-verify + h9-workflow cadence + SC #11 env-var) | 5h | false | POST-186 |
+| 🔲 204a | Class-B verify-first (B10/B14/B16/B18/B20/B22) | 15-25h (MAY reduce) | true | conditional |
+| ⏸ 204b | Class-B B04 multi-tenant DV routing — ADR tension resolution FIRST (owner-decision-gate) | 1-40h path-dependent | false | conditional |
+| 🔲 204c | **Class-B B07 H13 real probes — 10 sub-tasks (T1-T6 + I2-I5) — HARD-BLOCKS 186** | 40-80h | false | **YES (hard)** |
+| 🔲 204d | Class-B B11 staging-slot topology split | 16h | false | POST-186 |
+| 🔲 204e | Class-B ArchTests + IOptions checklist (B01 + B02 + B15) | 11h | false (B15 `.claude/`) | no (regression prevention) |
+| 🔲 204f | Class-B B17 docs drift (remove PLAYBOOK_EMBEDDINGS_INDEX_NAME) | 2h | true | no |
+| 🔲 204g | Class-B B21 spec amendment (SC #2 retired-on-disk convention) | 2h | true | no |
+
+**Post-Pre-Live-Fire path**: 186 E2E live-fire against sub `cd95fcec-6b89-49ea-8339-c2b579b12587` → 090 wrap-up (blocked by 186).
+
+### Suggested execution sequencing (from punch list §Sequencing)
+
+1. **Parallel wave (safe)**: 203b + 204a + 204e + 204f + 204g (all `parallel-safe:true` OR non-overlapping `.claude/` sub-paths).
+2. **Serial (main session)**: 203a → 203c (both touch `.claude/`, sequenced to avoid `.claude/skills/provision-environment/SKILL.md` conflicts).
+3. **Serial (owner-gate)**: 204b (ADR tension → owner picks Path A/B/C → apply chosen path).
+4. **Serial (hard-blocker)**: 204c (10 sub-tasks; may sub-sub-phase to 204c-1..204c-10).
+5. **Task 186 gate check**: verify all `blocks_e2e=yes` rows annotated `applied|already-applied`.
+6. **Task 186 fires**.
+7. **POST-186 mop-up**: 203d + 204d + regression-prevention follow-ups.
 
 ### Task 202 deliverables (all shipped 2026-08-24 SESSION 6 in ONE atomic commit)
 

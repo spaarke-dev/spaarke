@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B verify-first rows (B10, B14, B16, B18, B20, B22) — grep-verify current state, apply-if-open, annotate punch list</title>
+    <phase>Pre-Live-Fire — Class-B verified-open sweep (routing amendment 2026-08-24 SESSION 7)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches src/server/api/Sprk.Bff.Api/** and src/server/services/Sprk.Provisioning.ControlPlane.Core/** (BFF + L2 code). Per root CLAUDE.md §8 rigor decision tree: `bff-api` + `l2-controlplane` tags always trigger FULL. Per §10 BFF hygiene: any BFF-touching task requires publish-size verification + adr-check + code-review at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified per-row verify-then-apply loop. Punch-list verification matrix precisely names each file/class/string to grep. Not xhigh — the discovery work was done by task 202's verification pass; this task executes the row-level verify against a defined check list. Sonnet @ high is the fit.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG8-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Rows target 6 distinct file surfaces (KV binding config, ManagedIdentityCredentialFactory, H2b handler, EnvVarValuesOptions, Worker/Program.cs comments, ~30 AI endpoints). No .claude/ writes expected. Safe to run alongside 204e/204f/204g.</parallel-reason>
+    <deps>202</deps>
+    <tags>bff-api, l2-controlplane, verify-then-decide, class-b-verified-open</tags>
+    <estimated-effort>15-25 hours (may reduce after verify — some rows may show `already-applied`)</estimated-effort>
+  </metadata>
+
+  <prompt>Execute 6 Class-B rows (B10, B14, B16, B18, B20, B22) from task-202-punch-list.md's verification matrix marked `NEEDS ROW-LEVEL VERIFY`. For each row, the executor's primary work is: (1) grep-verify the actual current code state per the row's title + verification-matrix evidence, (2) if OPEN, apply the fix per the row's title/effort estimate + row-level tests, (3) if `already-applied` (post-verification-matrix work landed the fix), annotate the punch list row + skip, (4) update the verification matrix with per-row outcome (`applied` / `already-applied` / `not-applicable`). Rows carry BFF hygiene obligations (publish size + delta reporting per CLAUDE.md §10). Rows may collectively reduce below the 25h upper estimate as verification finds landed fixes.</prompt>
+
+  <role>SPAARKE platform developer. Expert in: task 202's punch list format + verification matrix; BFF hygiene per `.claude/constraints/bff-extensions.md`; L2 control-plane KV-binding + credential-config patterns; ADR-032 F.1 asymmetric-registration anti-pattern (row B18 EnvVarValuesOptions ClientSecret refactor); Worker Program.cs registration boundaries (row B20).</role>
+
+  <goal>All 6 rows (B10, B14, B16, B18, B20, B22) have per-row annotations in `notes/task-202-punch-list.md`'s verification matrix with `applied|already-applied|not-applicable` outcome + evidence citation. Applied rows have accompanying tests + build green. BFF publish-size + delta reported in task notes AND PR description per §10 for every BFF-touching row that actually shipped code. Zero rows remain in `NEEDS ROW-LEVEL VERIFY` state after this task lands.</goal>
+
+  <context>
+    <background>Task 202 SESSION 7 amendment authored the Class-B verification matrix. 6 rows (B10 H6/H7 credential config, B14 I5 ManagedIdentityCredentialFactory TenantId gap, B16 H2b retired-lineage reject, B18 EnvVarValuesOptions → KeyVaultSecretRef refactor, B20 Worker Program.cs:784-795 comment drift, B22 429 wireup at ~30 AI endpoints) are marked `NEEDS ROW-LEVEL VERIFY` — meaning the SESSION 7 verification-pass grep did not conclusively determine current state. These rows require executor-time inspection: some may have LANDED via later Wave G-7/G-8 batches; others may still be OPEN. This task executes the verify-then-decide loop per-row.
+
+**Why verify-first matters**: task 202's punch list header explicitly forbids double-fixing. Row B03 (dispatcher-does-not-exist) went from `original: 24h implementation` to `✅ APPLIED (Wave G — dispatcher live)` in the verification pass. Same double-check discipline applies here — no code changes without verification evidence.</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (verification matrix — authoritative row state)</file>
+      <file role="verify-B10">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/CanonicalSolutionCatalog.cs + SolutionImportRejectionCodes.cs (existence confirmed; KV binding for ClientSecret unverified)</file>
+      <file role="verify-B14">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs (existence confirmed; TenantId-scope gap unverified)</file>
+      <file role="verify-B16">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearch/H2bAiSearchIndexHandler.cs + CanonicalIndexCatalog.cs (existence confirmed; full retired-lineage reject behavior unverified)</file>
+      <file role="verify-B18">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs + EnvVarValuesWriteRequest.cs (ClientSecret cleartext vs KeyVaultSecretRef seam unverified)</file>
+      <file role="verify-B20">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs:784-795 (comment content drift unverified this pass)</file>
+      <file role="verify-B22">grep across src/server/api/Sprk.Bff.Api/Api/**/*.cs for `Results.Problem` / `429` / `TooManyRequests` at AI-consuming endpoints</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (annotate verification matrix per row)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored + Class-B verification matrix landed 2026-08-24 SESSION 7</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each row's actual code state BEFORE applying to prevent double-fixing. Wave G-7/G-8 batches (tasks ~155-198+) landed many fixes; verification matrix already found 8 of 22 rows `already-applied`. Same discipline here — no code changes without verification evidence + row annotation.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">Any change to src/server/api/Sprk.Bff.Api/ or src/server/shared/Spaarke.*/ MUST report publish-size + delta in PR per CLAUDE.md §10; ceiling ≤60 MB compressed; current baseline 44.96 MB incl. PDBs (2026-08-13 net10 framework-dependent linux-x64). Threshold for escalation: ≥+5 MB single-task delta requires explicit justification.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md § F test update obligation">Rows B14 (Infrastructure/Auth) + B18 (EnvVarValuesOptions refactor) + B22 (AI endpoints) MUST have accompanying unit/integration test additions/updates per `bff-extensions.md` § F. Exceptions require code review sign-off with reason.</constraint>
+    <constraint source="ADR-032 asymmetric-registration governance">If B18 refactor touches DI registration inside `if (flag)` blocks, apply ADR-032 F.1 static-scan recipe + Null-Object kill-switch pattern (P1/P2/P3) per `.claude/constraints/bff-extensions.md` § F.1.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">All 6 rows are MODIFICATION-only (edit existing files); §11 does NOT trigger. If verification surfaces a row that would require a NEW component, escalate rather than expanding scope silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B verify-first rows sweep (B10, B14, B16, B18, B20, B22)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, sonnet/high). Read `notes/task-202-punch-list.md` Class-B verification matrix in full. Read `.claude/constraints/bff-extensions.md` (mandatory before BFF touch). Read `.claude/constraints/testing.md`.</step>
+    <step order="1" name="B10 verify H6/H7 credential config">Grep for `SolutionImportOptions.ClientSecret` + `EnvVarValuesOptions.ClientSecret` KV binding provisioning in `customer.bicep` + `kv-secrets.generated.bicep`. If KV binding provisioned + consumed → annotate `already-applied`. If OPEN → provision KV binding + wire consumer path + row-level test (~4h).</step>
+    <step order="2" name="B14 verify ManagedIdentityCredentialFactory">Read `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs` end-to-end. Determine whether TenantId-scope gap (per `GraphClientFactory` analogue) exists — options-level TenantId source vs per-call scope. If gap real → extend I5 ArchTest (`Spaarke.ArchTests.TenantIsolation.I5_*`) to cover `Infrastructure/Auth` (currently scoped to `Infrastructure/Graph`) + fix the factory + tests (~3h). If no gap → annotate `not-applicable`.</step>
+    <step order="3" name="B16 verify H2b retired-lineage reject">Read `H2bAiSearchIndexHandler` + `CanonicalIndexCatalog`. Grep for the full retired lineage list (not just `spaarke-playbook-embeddings` but also historic aliases per `ai-search-catalog-audit`). If reject covers only `spaarke-playbook-embeddings` → extend to full retired lineage + tests (~2h). If already comprehensive → annotate `already-applied`.</step>
+    <step order="4" name="Checkpoint">Run context-handoff (silent "✅ Checkpoint.") — 3 rows complete, 3 remaining.</step>
+    <step order="5" name="B18 verify EnvVarValuesOptions refactor">Grep for `KeyVaultSecretRef` seam landed by task 084 in shared options. If seam landed AND `EnvVarValuesOptions.ClientSecret` still cleartext → refactor to `KeyVaultSecretRef` per shared pattern + tests + verify no HIGH-severity CVE from `dotnet list package --vulnerable` (~6h). If task 084 seam not landed → annotate `blocked-on-084`. If already refactored → annotate `already-applied`.</step>
+    <step order="6" name="B20 verify Worker Program.cs comment drift">Read `src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs:784-795` verbatim. If comments still claim placeholders in use (contradicting Wave G-6/G-7 real-impl landings) → correct comment to reflect current registration state + explain retirement (~1h). If comments already accurate → annotate `already-applied`.</step>
+    <step order="7" name="B22 verify 429 wireup at AI endpoints">Grep `src/server/api/Sprk.Bff.Api/Api/**/*.cs` for `Results.Problem` / `429` / `TooManyRequests` at each of ~30 AI-consuming endpoints (task 077 deferred list). Enumerate current wire-up state. If task 077 deferred wire-up still pending → wire per endpoint + tests + verify publish-size delta (~8h — largest of the 6 rows). If landed → annotate `already-applied`.</step>
+    <step order="8" name="Annotate verification matrix">For each of 6 rows, update `notes/task-202-punch-list.md` Class-B verification matrix `Verified status` column with one of: `applied 2026-XX-XX task 204a` OR `already-applied — evidence: <cite>` OR `not-applicable — reason: <cite>` OR `blocked-on-XXX`.</step>
+    <step order="9" name="Build + publish-size verify">`dotnet build src/server/api/Sprk.Bff.Api/` — 0 warnings 0 errors. If any row shipped BFF code: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — record compressed size + delta vs 44.96 MB baseline in task notes.</step>
+    <step order="9.5" name="Quality gates">FULL rigor + BFF/tests touched → invoke `code-review` + `adr-check` skills per root CLAUDE.md §8. Address any Critical findings before marking complete.</step>
+    <step order="10" name="Report">Update `current-task.md` + `TASK-INDEX.md`; cross-reference the annotated verification matrix + per-row outcomes; note total effort vs 15-25h estimate (may reduce).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any row's verification reveals a DIFFERENT bug than the punch-list row's title (e.g., B18's ClientSecret refactor uncovers a broader shared-options structural issue), STOP and file a new punch-list row rather than silently expanding this task's scope. Task 202's punch list is the authority for what's in scope; expansion requires explicit re-scoping.</trigger>
+    <trigger>If any row's fix would require touching `.claude/` paths (patterns / constraints / skills), STOP and defer to main session per root CLAUDE.md §3 Sub-Agent Write Boundary. This task's `parallel-safe: true` presumes zero `.claude/` writes.</trigger>
+    <trigger>If BFF publish-size delta ≥+5 MB for a single row, escalate per §10 threshold rule with explicit justification. If cumulative ≥55 MB triggers architecture review; ≥60 MB is HARD STOP.</trigger>
+    <trigger>If a row's fix reveals an ADR conflict (e.g., B14 I5 ArchTest scope extension challenges an ADR-028 rule), invoke root CLAUDE.md §6.5 ADR Conflict Resolution protocol — do NOT silently comply or violate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="grep">row verification (via Grep tool)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-modifications">src/server/api/Sprk.Bff.Api/** + src/server/services/Sprk.Provisioning.ControlPlane.Core/** (per-row, only if OPEN)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (verification matrix per-row outcomes)</output>
+    <output type="report">projects/customer-provisioning-orchestration-r1/current-task.md (task 204a completion + publish-size delta if BFF-touched)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 rows (B10, B14, B16, B18, B20, B22) have annotated verification matrix entries with one of: applied|already-applied|not-applicable|blocked-on-XXX + evidence citation.</criterion>
+    <criterion testable="true">For every OPEN row that shipped code: accompanying tests exist per `.claude/constraints/bff-extensions.md` § F test-update obligation.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` exit 0 with 0 warnings.</criterion>
+    <criterion testable="true">If any row shipped BFF code, publish size + delta vs 44.96 MB baseline recorded in task notes; delta &lt; +5 MB OR justification present.</criterion>
+    <criterion testable="true">Zero rows remain in `NEEDS ROW-LEVEL VERIFY` state after this task lands.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) invoked for FULL rigor; any Critical findings addressed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): All 6 rows are MODIFICATION-only — no new components introduced. §11 does not trigger. Existing verification-matrix scoping is authoritative; scope expansion requires escalation per this task's escalation triggers.
+
+Effort range 15-25h is deliberately wide because verification may find rows already landed. Executor should report actual vs estimate in wrap-up to inform sizing of future verify-first waves.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204f" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B17 docs drift fix — remove PLAYBOOK_EMBEDDINGS_INDEX_NAME from appsettings.tokens.md</title>
+    <phase>Pre-Live-Fire — Class-B docs hygiene (post-186 safe)</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Docs-only cleanup: remove a single stale token declaration from BFF's `appsettings.tokens.md` reference doc (zero code consumers since task 035 retired playbook-embeddings). No .cs modifications; no test additions; no `.claude/` writes. Per root CLAUDE.md §8 rigor decision tree: docs/inventory/simple-updates = MINIMAL. Quality gates skipped per MINIMAL row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Trivial doc removal + grep-verify; Sonnet @ high is more than sufficient.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG8-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches one docs file + no .claude/ or .cs code. Safe to run alongside 204a/204g.</parallel-reason>
+    <deps>202</deps>
+    <tags>docs, bff-api, cleanup, class-b-verified-open</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove the stale `PLAYBOOK_EMBEDDINGS_INDEX_NAME` token declaration from `src/server/api/Sprk.Bff.Api/appsettings.tokens.md` (lines 29 + 114 per task 202 verification matrix). This token was declared as active but has ZERO code consumers post task 035 (playbook-embeddings retired per AI-search catalog audit). First verify zero consumers via grep, then remove both references, then verify BFF builds cleanly.</prompt>
+
+  <role>SPAARKE platform developer. Familiar with BFF's `appsettings.tokens.md` reference doc format (token declaration + consumer citation format); playbook-embeddings retirement history (task 035 dropped the index; AI-search catalog audit surfaced remaining drift references).</role>
+
+  <goal>`src/server/api/Sprk.Bff.Api/appsettings.tokens.md` no longer declares `PLAYBOOK_EMBEDDINGS_INDEX_NAME` on lines 29 or 114. Grep-verified zero code consumers remain (would already be the case per task 035 retirement). `dotnet build src/server/api/Sprk.Bff.Api/` still exits 0 with 0 warnings. Punch list B17 row annotated `applied 2026-XX-XX task 204f`.</goal>
+
+  <context>
+    <background>Task 202 SESSION 7 verification matrix row B17: "`PLAYBOOK_EMBEDDINGS_INDEX_NAME` still referenced in `src/server/api/Sprk.Bff.Api/appsettings.tokens.md`" — flagged OPEN. Task 035 (playbook-embeddings retirement per ADR-039 grounded-execution closed catalogs) dropped the underlying index; AI-search catalog audit surfaced remaining token declarations as stale docs. Zero-consumer state is stable — this is pure hygiene.
+
+**Why post-186 safe**: docs-only cleanup; token doc is human reference material, not runtime-loaded. No E2E impact.</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B17 row + verification matrix</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.tokens.md (lines 29 + 114 — remove `PLAYBOOK_EMBEDDINGS_INDEX_NAME` declarations)</file>
+      <file role="verify-zero-consumers">src/server/ (grep for `PLAYBOOK_EMBEDDINGS_INDEX_NAME` — should return zero code hits)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B17 row annotation</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list B17 row + verification matrix state</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify B17's actual code state BEFORE removing — confirm ZERO consumers of `PLAYBOOK_EMBEDDINGS_INDEX_NAME` in `src/server/`. If ANY consumer found, STOP + escalate (removal would break code).</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">Docs-only change — no publish size impact expected. Verify with `dotnet publish` anyway if paranoid; baseline 44.96 MB.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">Modification-only (edit existing file); §11 does not trigger.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B17 docs drift fix — appsettings.tokens.md cleanup</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (MINIMAL, sonnet/high). Read `notes/task-202-punch-list.md` B17 row.</step>
+    <step order="1" name="Verify zero consumers">Grep `src/server/` for `PLAYBOOK_EMBEDDINGS_INDEX_NAME` — expect zero code hits (only docs reference). If ANY code consumer found, STOP + escalate.</step>
+    <step order="2" name="Read + remove">Read `src/server/api/Sprk.Bff.Api/appsettings.tokens.md` around lines 29 + 114. Remove both `PLAYBOOK_EMBEDDINGS_INDEX_NAME` declarations. Preserve surrounding structure + section headers.</step>
+    <step order="3" name="Build verify">`dotnet build src/server/api/Sprk.Bff.Api/` — 0 warnings 0 errors (docs change should not affect build; verify anyway).</step>
+    <step order="4" name="Annotate + report">Update `notes/task-202-punch-list.md` B17 row: `applied 2026-XX-XX task 204f — removed lines 29 + 114`. Update `current-task.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Step 1 grep finds ANY code consumer of `PLAYBOOK_EMBEDDINGS_INDEX_NAME` in `src/`, STOP + escalate. Removing the docs declaration would leave the consumer without documentation, and the punch-list precondition (zero consumers post task 035) is violated. File as separate row.</trigger>
+    <trigger>If the token doc's structure requires the declaration for some reason (e.g., ordering / grouping / cross-reference), consider replacing with a deprecation notice `[RETIRED task 035 — playbook-embeddings]` rather than deletion. Document choice in annotation.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="grep">consumer verification</tool>
+    <tool name="dotnet">build verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">src/server/api/Sprk.Bff.Api/appsettings.tokens.md (removals at lines 29 + 114)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B17 row outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -r PLAYBOOK_EMBEDDINGS_INDEX_NAME src/server/` returns zero matches after task lands.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` exits 0 with 0 warnings.</criterion>
+    <criterion testable="true">`notes/task-202-punch-list.md` B17 row annotated `applied 2026-XX-XX task 204f — <evidence>`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Modification-only cleanup; §11 not triggered. Cost-of-doing-nothing: docs drift persists → future authors mistake declaration as active → cargo-cult wire-up of a retired token. Small but real.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
