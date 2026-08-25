@@ -304,10 +304,25 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
         // 057 made it the field's `cachedResult`, i.e. a string written into the saved document. The
         // round trip is real and reachable: `ComposeEditor.getDraftHtml` persists `getHTML()` to the
         // local draft store on the dirty-autosave tick, and the FR-03 recovery path re-mounts it.
+        //
+        // Task 056 — the same defect, in the case 057's fix did not reach. The attribute was emitted only
+        // when the display text was TRUTHY, so an atom the server emits EMPTY still had nothing to
+        // re-emit and read its own label back on the next parse. `object` is that entire family (its span
+        // has no content at all), and an `sdt` whose content resolves to nothing is another: `Object` →
+        // `Object: Object` → `Object: Object: Object`. So an OPAQUE atom now always emits the attribute,
+        // empty when it has no display text — "there is none" said explicitly, which is what stops the
+        // placeholder from answering the question instead.
+        //
+        // A RENDERABLE atom (tab, symbol) is deliberately left alone: its rendered content IS its display
+        // text, with no label to absorb, so `textContent` already round-trips it exactly.
         parseHTML: (element: HTMLElement) =>
-          element.getAttribute('data-atom-display') ?? (element.textContent || null),
+          element.hasAttribute('data-atom-display')
+            ? element.getAttribute('data-atom-display')
+            : (element.textContent || null),
         renderHTML: attributes =>
-          attributes.displayText ? { 'data-atom-display': attributes.displayText as string } : {},
+          atomRendersAsItself(attributes.kind as string | null | undefined)
+            ? (attributes.displayText ? { 'data-atom-display': attributes.displayText as string } : {})
+            : { 'data-atom-display': (attributes.displayText as string | null) ?? '' },
       },
       symFont: {
         default: null,

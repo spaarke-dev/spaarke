@@ -8,7 +8,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
-##### 2026-08-25 — Compose write fidelity: the CLIENT half of the field carry (task 057, `spaarkeai-compose-r8`)
+###### 2026-08-25 — `spaarkeai-compose-r8` task 056: embedded objects carried through an edited paragraph
+
+- **ADR-049 residual list**: the `complex-object-dropped` row moves **§2 (lost) → §3 (carried)**. Images,
+  charts, shapes and OLE embeds now survive an edit to their own paragraph. A **text box** keeps the row
+  (its words are already preserved as prose; carrying the box too would duplicate the sentence) — the new
+  `pictTextBox` parity family keeps the warning code honest, exactly as `fldNested` does for fields.
+- **Empirically settled**: the save's body swap does NOT prune main-part relationships. Verified by OPENING
+  the saved package and resolving every `r:*` attribute, not by reading the renderer's "orphaned … inert
+  weight" remark — now corrected in place. **Second stale-comment correction in this project**, after task
+  049's bookmark claim. Evidence: `projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md` §1.
+- **One opaque-carry mechanism, two consumers**: `TryParsePreviousProperties<T>` renamed
+  `TryParseOpaqueCarry<T>`. No second contract (CLAUDE.md §11).
+- **New gate — parsing is not sufficient for this construct.** Every attribute in the OOXML relationships
+  namespace must RESOLVE against the carrier before a subtree is authored: a valid drawing naming a missing
+  relationship would produce a file Word reports as damaged, which is worse than the drop it replaces.
+- **ADR-049 I-2 unchanged** — no OOXML crosses the wire. A browser keystroke edit keeps its image because
+  `ComposeBlockMerge.CarryUnmodeledConstructs` (the task-041 base carry already used for bookmarks and SDT
+  shells) restores it from the block's pre-edit base.
+- **Corrects task 057's `data-atom-display` fix**, which did not reach the `object` family: the attribute
+  was re-emitted only when display text was TRUTHY, and the server emits an `object` atom EMPTY — so the
+  placeholder label still leaked (`Object` → `Object: Object` → …) across `getHTML()` round trips. Opaque
+  atoms now always emit the attribute, empty when absent; renderable atoms (tab/symbol) untouched.
+- **Owner sign-off unblocked**: both rows the owner declined on 2026-08-25 are closed (fields 049/057,
+  objects 056). Residual §2 is now nested/unterminated fields, text boxes, footnote refs, endnote refs,
+  content controls.
+
+## 2026-08-25 — Compose write fidelity: the CLIENT half of the field carry (task 057, `spaarkeai-compose-r8`)
 
 - Task 049's Word-field carry was **unreachable from a keystroke edit**: `docxBridge.ts` never mapped a
   `field` atom into the posted model, and `composeInlineAtom` did not DECLARE the `data-field-*` payload,

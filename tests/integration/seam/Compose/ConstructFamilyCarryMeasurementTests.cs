@@ -143,13 +143,25 @@ public sealed class ConstructFamilyCarryMeasurementTests
         var blocks = model.Blocks.ToList();
         var runs = blocks[blockIndex].Runs.ToList();
 
-        if (runs.Count == 0)
+        // Task 056: append to the first PROSE run, not simply to `runs[0]`. Since embedded objects are
+        // carried, a paragraph holding only an image projects as one MARKER run — and a marker run ignores
+        // `Text` by contract, so setting it there made the edit vanish and this measurement silently stopped
+        // measuring anything (caught by its own "the edit must land" floor, which is what that assertion is
+        // for). A block with no prose run gets a new one, exactly as an empty block did before.
+        var proseIndex = runs.FindIndex(r =>
+            r.EmbeddedObject is null && r.Field is null && r.Symbol is null
+            && r.CommentAnchor is null && !r.IsTab && !r.IsPageBreak && !r.IsLineBreak);
+
+        if (proseIndex < 0)
         {
             runs.Add(new ComposeInlineRun { Text = EditMarker.TrimStart() });
         }
         else
         {
-            runs[0] = runs[0] with { Text = (runs[0].Text ?? string.Empty) + EditMarker };
+            runs[proseIndex] = runs[proseIndex] with
+            {
+                Text = (runs[proseIndex].Text ?? string.Empty) + EditMarker,
+            };
         }
 
         blocks[blockIndex] = blocks[blockIndex] with { Runs = runs };

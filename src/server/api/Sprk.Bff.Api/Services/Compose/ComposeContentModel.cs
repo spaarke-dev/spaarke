@@ -185,6 +185,54 @@ public sealed record ComposeField
     public bool Dirty { get; init; }
 }
 
+/// <summary>
+/// An EMBEDDED OBJECT carried as a dedicated marker run (task 056 — the same marker mechanism as
+/// <see cref="ComposeField"/>, but the OPAQUE-CARRY contract of
+/// <see cref="ComposeFormatChange.PreviousPropertiesXml"/> rather than a set of scalars).
+/// <para>
+/// <b>Why opaque and not typed.</b> A <c>w:drawing</c> is a DrawingML document in its own right — extents,
+/// effect extents, graphic frame locks, a <c>pic:pic</c> with fill/geometry/transform, or a chart
+/// reference, or an entire VML shape. A typed model of that would be a second OOXML library, and every
+/// property it failed to enumerate would be silently discarded — the exact failure this project exists to
+/// end. Carrying the subtree VERBATIM preserves properties nobody enumerated, for the same reason cloning
+/// an untouched block does.
+/// </para>
+/// <para>
+/// <b>The subtree is never string-injected.</b> Same gate as <see cref="ComposeFormatChange"/>: the XML is
+/// parsed through the typed OpenXML SDK class (whose generated constructor validates the root element's
+/// NAME and NAMESPACE), schema-validated, and the whole record is dropped when that fails — so client junk
+/// cannot reach the package.
+/// </para>
+/// <para>
+/// <b>…and a second gate this construct alone needs.</b> A drawing refers to its image by RELATIONSHIP id
+/// (<c>r:embed="rId7"</c>), resolved against the MAIN DOCUMENT PART — the very part whose body this save
+/// replaces. A subtree that parses perfectly but names a relationship the carrier does not have would
+/// author a package Word reports as DAMAGED, which is strictly worse than the honest drop it replaces. The
+/// renderer therefore also resolves every attribute in the relationships namespace against the carrier and
+/// refuses the carry if any does not resolve. (Measured: the body swap does NOT prune relationships — the
+/// SDK rewrites the part's XML, never its <c>.rels</c>. Evidence in
+/// <c>projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md</c> §1.)
+/// </para>
+/// <para>
+/// <b>Server-set; clients preserve it untouched on re-post.</b> A client that drops it entirely is also
+/// fine: <c>ComposeBlockMerge.CarryUnmodeledConstructs</c> restores the object from the block's BASE
+/// counterpart, which is what makes a browser keystroke edit keep its image today without any OOXML
+/// crossing the wire (ADR-049 I-2).
+/// </para>
+/// </summary>
+public sealed record ComposeEmbeddedObject
+{
+    /// <summary>
+    /// The <c>w:drawing</c> / <c>w:object</c> / <c>w:pict</c> element as OuterXml, exactly as captured by
+    /// the projection. Parsed through the typed SDK class at render and dropped whole on failure — see the
+    /// type remarks. The element must be self-contained: namespace declarations for every prefix it uses
+    /// have to be present on the element itself, because it is parsed OUT of its original document's
+    /// namespace scope (the projection captures <c>OuterXml</c>, which the SDK emits with the needed
+    /// declarations).
+    /// </summary>
+    public required string Xml { get; init; }
+}
+
 /// <summary>Revision kind for <see cref="ComposeRevision"/> (task 025). Serialized as its STRING name.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeRevisionKind
@@ -451,6 +499,27 @@ public sealed record ComposeInlineRun
     /// </para>
     /// </summary>
     public ComposeField? Field { get; init; }
+
+    /// <summary>
+    /// Task 056 (r8, FR-A10 residual): this run IS an embedded object — a picture, chart, shape or OLE
+    /// embed (<c>w:drawing</c> / <c>w:object</c> / <c>w:pict</c>) — carried as its own subtree (see
+    /// <see cref="ComposeEmbeddedObject"/>). Marker-run contract like <see cref="IsTab"/>: <see cref="Text"/>
+    /// and the other content fields are ignored, run PROPERTIES still apply. Mutually exclusive with the
+    /// other markers.
+    /// <para>
+    /// Until this field existed, an edit anywhere in the paragraph removed the object from it and reported
+    /// <c>complex-object-dropped</c>. The image's own bytes were never deleted — they stayed in the package
+    /// as an unreferenced part — so the file was intact and the page had a hole in it, which is the shape of
+    /// loss users notice last and trust least. An executed signature image and an exhibit chart are exactly
+    /// the content a legal document cannot re-derive.
+    /// </para>
+    /// <para>
+    /// A TEXT-CARRYING box (a DrawingML/VML text box) is deliberately NOT carried here: its text is
+    /// accept-flattened into the paragraph as prose (<c>text-box-flattened</c>), so carrying the box as well
+    /// would put the same words in the document twice. That family keeps its own named outcome.
+    /// </para>
+    /// </summary>
+    public ComposeEmbeddedObject? EmbeddedObject { get; init; }
 
     /// <summary>
     /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null

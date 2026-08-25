@@ -63,9 +63,21 @@ public sealed class ComposeResidualLossParityTests
         // `field-flattened-to-text` into a code the document names and the renderer never emits — the
         // accretion failure direction B exists to catch.
         new object?[] { "fldNested", "fldChar", "field-flattened-to-text" },
-        new object?[] { "drawing", "drawing", "complex-object-dropped" },
-        new object?[] { "object", "object", "complex-object-dropped" },
-        new object?[] { "pict", "pict", "complex-object-dropped" },
+        // Task 056: all three embedded-object forms are now CARRIED through an edit to their own block. The
+        // subtree round-trips as ComposeInlineRun.EmbeddedObject (opaque OuterXml, SDK-parse-gated) and,
+        // when a posted model does not carry it — which is what a keystroke edit from the browser looks
+        // like — ComposeBlockMerge restores it from the BASE block. Null code so the preserve direction is
+        // enforced: a regression fails this row instead of going quiet.
+        new object?[] { "drawing", "drawing", null },
+        new object?[] { "object", "object", null },
+        new object?[] { "pict", "pict", null },
+        // …but NOT every object. A box that CARRIES TEXT has its text accept-flattened into the paragraph
+        // as prose, so carrying the box as well would put the same sentence in the document twice. It keeps
+        // today's outcome and keeps saying so. This row is what stops the three retirements above from
+        // turning `complex-object-dropped` into a code the published document names and the renderer can no
+        // longer emit — the accretion failure direction B exists to catch, exactly as `fldNested` does for
+        // fields.
+        new object?[] { "pictTextBox", "pict", "complex-object-dropped" },
         new object?[] { "footnoteReference", "footnoteReference", "unrepresented-footnote-reference" },
         new object?[] { "endnoteReference", "endnoteReference", "unrepresented-endnote-reference" },
         // Task 046: a soft line break is now CARRIED, not lost — it round-trips as an IsLineBreak
@@ -248,6 +260,13 @@ public sealed class ComposeResidualLossParityTests
         "object" => "<w:r><w:object w:dxaOrig=\"100\" w:dyaOrig=\"100\">"
                     + "<v:shape id=\"s1\" style=\"width:10pt;height:10pt\"/></w:object></w:r>",
         "pict" => "<w:r><w:pict><v:shape id=\"s2\" style=\"width:10pt;height:10pt\"/></w:pict></w:r>",
+        // A VML shape wrapping a TEXT BOX — the shape `interior-text-boxes.docx` takes. Its interior text is
+        // accept-flattened into the paragraph, so the box itself is deliberately not carried.
+        "pictTextBox" => "<w:r><w:pict><v:shape id=\"s3\" type=\"#_x0000_t202\" "
+                         + "style=\"width:200pt;height:60pt\"><v:textbox><w:txbxContent>"
+                         + "<w:p w14:paraId=\"4B000001\" w14:textId=\"4B000001\">"
+                         + "<w:r><w:t xml:space=\"preserve\">Boxed line.</w:t></w:r></w:p>"
+                         + "</w:txbxContent></v:textbox></v:shape></w:pict></w:r>",
         "footnoteReference" => "<w:r><w:footnoteReference w:id=\"2\"/></w:r>",
         "endnoteReference" => "<w:r><w:endnoteReference w:id=\"2\"/></w:r>",
         "br" => "<w:r><w:t xml:space=\"preserve\">before</w:t><w:br/>"

@@ -194,7 +194,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 048 | **Tabs + symbols carried** — `IsTab` / `Symbol{Font,CharCode}` marker runs on the existing atom node; two more rows retired | FR-A10 residual | FULL | opus/xhigh | ❌ | 047 | ✅ |
 | 049 | **Fields carried** — `Field{Instruction,CachedResult}` marker run; per-class carry decision (PAGE/DATE live vs REF/TOC bookmark-dependent); corrects the field row's misleading page-numbers wording | FR-A10 residual | FULL | opus/xhigh | ❌ | 040, 048 | ✅ |
 | 057 | **Field carry — CLIENT half** · map a `field` atom back into the posted model in `docxBridge.ts`; without it 049's carry is unreachable from a keystroke edit. A field contributes ZERO characters, so `collectSegments`/`rejectStateText` byte-identity must be re-proven | FR-A10 residual | FULL | opus/xhigh | ❌ | 049 | ✅ |
-| 056 | **Objects carried** — opaque `OuterXml` carry on `ComposeFormatChange`'s SDK-parse-gated contract; **relationship survival must be proven empirically** (a carried drawing with a dead `r:embed` = a package Word calls corrupt, worse than today's drop); place-indicator is the evidence-gated fallback | FR-A10 residual | FULL | opus/xhigh | ❌ | 040, 048, 049 | 🔲 |
+| 056 | **Objects carried** — opaque `OuterXml` carry on `ComposeFormatChange`'s SDK-parse-gated contract; **relationship survival must be proven empirically** (a carried drawing with a dead `r:embed` = a package Word calls corrupt, worse than today's drop); place-indicator is the evidence-gated fallback | FR-A10 residual | FULL | opus/xhigh | ❌ | 040, 048, 049 | ✅ |
 
 ¹ `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
 
@@ -219,7 +219,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | FR | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 060 | **Durable byte store** (blob, tenant-partitioned, existing MI RBAC + provisioned container) | FR-B01 | FULL | opus/xhigh | ✅ | — | 🔲 |
+| 060 | **Durable byte store** (blob, tenant-partitioned, existing MI RBAC + provisioned container) | FR-B01 | FULL | opus/xhigh | ✅ | — | ✅ |
 | 061 | **Lazy re-index** on recall + `SessionFilesCleanupJob` evicts the **hot index only** | FR-B02/03 | FULL | opus/xhigh | ✅ | 060 | 🔲 |
 | 062 | **Retention follows session TTL** (incl. `-1` filed = indefinite) + server-authoritative availability | FR-B04/05 | FULL | opus/xhigh | ✅ | 060 | 🔲 |
 | 063 | **Erasure deletes the bytes** + tenant-isolation verification (ADR-014/015) | FR-B06 | FULL | opus/xhigh | ✅ | 060 | 🔲 |

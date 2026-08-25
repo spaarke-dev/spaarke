@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-A10 residual — carry EMBEDDED OBJECTS / images / charts through an edited paragraph (opaque OuterXml carry, SDK-parse-gated); retire the `complex-object-dropped` row</title>
     <phase>4 Track A — Fidelity</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Round-trips raw OOXML into the saved package. A carried drawing whose relationship id no longer resolves produces a document Word reports as corrupt — strictly worse than today's honest drop.</rigor-reason>
     <model-tier>opus</model-tier>

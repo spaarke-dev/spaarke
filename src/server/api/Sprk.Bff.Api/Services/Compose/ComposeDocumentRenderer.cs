@@ -513,6 +513,12 @@ public sealed partial class ComposeDocumentRenderer
             // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
             state.DefaultRevisionAuthor = author;
 
+            // Task 056: the ids a carried embedded object is allowed to reference. Read from the LIVE part —
+            // relationships are NOT touched by the body swap (measured; see TryBuildCarriedObject) — so an
+            // object carried out of this very document resolves by construction, while one a client
+            // fabricated does not and is refused rather than authored as a dangling reference.
+            state.CarrierRelationshipIds = CollectRelationshipIds(mainPart);
+
             // Step-9.5 F2 + task 012: anchors may only reference ids the target will actually contain —
             // the carrier part's own ids (scanned READ-ONLY from the bytes) PLUS any NEW model comments
             // (ids the carrier part lacks — session/advisory comments the client mapper folded into the
@@ -1116,7 +1122,7 @@ public sealed partial class ComposeDocumentRenderer
         // on the render degradation sink (task 026; was render-silent, 025-F4/F7 routing).
         if (block.PropertiesChange is { } propsChange)
         {
-            if (TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
+            if (TryParseOpaqueCarry<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
             {
                 pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
                 {
@@ -1434,7 +1440,7 @@ public sealed partial class ComposeDocumentRenderer
         // the change record lives inside it (LAST in CT_RPr order). A record whose opaque carry fails the
         // parse gate drops — counted on the render degradation sink (task 026).
         var formatChange = run.FormatChange is { } change
-            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml))
+            ? (Change: change, Previous: TryParseOpaqueCarry<PreviousRunProperties>(change.PreviousPropertiesXml))
             : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
         if (formatChange is { Previous: null })
         {
@@ -1481,6 +1487,22 @@ public sealed partial class ComposeDocumentRenderer
         //
         // Both are schema-legal inside a w:del wrapper as-is (only w:t must become w:delText), so `deleted`
         // needs no special case.
+        // Task 056: an EMBEDDED-OBJECT marker run swaps the run's content child for the carried subtree —
+        // the same "properties still apply, content is replaced" contract as IsTab/Symbol above, one level
+        // bigger. A carry that does not survive BOTH gates yields a run with no content child at all, which
+        // is exactly today's drop; it is deliberately NOT warned here, because ComposeBlockMerge's
+        // base-vs-rendered count already reports it and task 045 established that a taxonomy which says a
+        // thing twice is one users stop reading.
+        if (run.EmbeddedObject is { } embedded)
+        {
+            var carried = TryBuildCarriedObject(embedded, state);
+            if (carried is not null)
+            {
+                element.AppendChild(carried);
+            }
+            return WrapInPendingHyperlink(element, run);
+        }
+
         OpenXmlElement textElement =
             run.IsTab ? new TabChar()
             : run.Symbol is { } symbol ? new SymbolChar { Font = symbol.Font, Char = symbol.CharCode }
@@ -1488,16 +1510,158 @@ public sealed partial class ComposeDocumentRenderer
             : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
         element.AppendChild(textElement);
 
-        // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
-        // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
-        // sentinel Hyperlink.Id here; ResolveHyperlinkRelationships (called by both byte-authors after the
-        // body is built) swaps it for the true rId. Zero text-search — the wrap is by the model's own run.
-        if (!string.IsNullOrWhiteSpace(run.Href))
+        return WrapInPendingHyperlink(element, run);
+    }
+
+    /// <summary>
+    /// G5: a run carrying an href renders as a clean <c>w:hyperlink</c> wrapping the run. The real external
+    /// relationship id can only be minted once the MainDocumentPart is in scope, so the href is stashed on a
+    /// sentinel <see cref="Hyperlink.Id"/> here; <see cref="ResolveHyperlinkRelationships"/> (called by both
+    /// byte-authors after the body is built) swaps it for the true rId. Zero text-search — the wrap is by the
+    /// model's own run.
+    /// </summary>
+    private static OpenXmlElement WrapInPendingHyperlink(Run element, ComposeInlineRun run) =>
+        string.IsNullOrWhiteSpace(run.Href)
+            ? element
+            : new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+
+    /// <summary>
+    /// Task 056 (FR-A10 residual): parses a carried embedded object and returns it ONLY if it is safe to
+    /// author into this carrier. Returns <c>null</c> when it is not, and the caller then emits a run with no
+    /// content — today's drop, which <c>ComposeBlockMerge</c> reports as <c>complex-object-dropped</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two gates, and the second one is the point of the task.</b></para>
+    /// <list type="number">
+    /// <item><description>The shared opaque-carry gate (<see cref="TryParseOpaqueCarry{T}"/>) — the same one
+    /// <c>w:pPrChange</c>/<c>w:rPrChange</c> have used since task 025. Client XML never reaches the package
+    /// unparsed.</description></item>
+    /// <item><description><b>Relationship resolution.</b> A <c>w:drawing</c> names its image by relationship
+    /// id (<c>r:embed="rId7"</c>), resolved against the MAIN DOCUMENT PART — the part whose body this save
+    /// replaces. A subtree that parses and validates PERFECTLY can still name a relationship this package
+    /// does not have, and authoring that produces a file Word reports as DAMAGED: strictly worse than the
+    /// honest drop it would replace, and exactly the silent-damage regression R8 exists to end. So every
+    /// attribute in the relationships namespace must resolve against the carrier before the subtree is
+    /// authored.</description></item>
+    /// </list>
+    /// <para><b>Measured, not reasoned.</b> The carrier's relationships DO survive the body swap: the SDK
+    /// rewrites the main part's XML and never its <c>.rels</c>, so an id the source used still resolves in
+    /// the saved package. That was verified by opening a saved package and resolving the reference, not by
+    /// reading this file's own remarks — which called such parts "orphaned", a word that does not
+    /// distinguish "present with its relationship" from "relationship pruned". Evidence:
+    /// <c>projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md</c> §1;
+    /// <c>ComposeObjectCarrySeamTests</c> asserts it continuously.</para>
+    /// <para><b>Why the gate is keyed on the NAMESPACE, not on attribute names.</b> <c>r:id</c>,
+    /// <c>r:embed</c>, <c>r:link</c>, <c>r:pict</c>, <c>r:dm</c>/<c>r:lo</c>/<c>r:qs</c>/<c>r:cs</c> are all
+    /// relationship references, and the list grows with each DrawingML part type. An allow-list of names
+    /// would silently stop guarding the first construct nobody thought of.</para>
+    /// </remarks>
+    private static OpenXmlElement? TryBuildCarriedObject(ComposeEmbeddedObject embedded, ListRenderState state)
+    {
+        var parsed = RootLocalName(embedded.Xml) switch
         {
-            return new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+            "drawing" => (OpenXmlElement?)TryParseOpaqueCarry<Drawing>(embedded.Xml),
+            "object" => TryParseOpaqueCarry<EmbeddedObject>(embedded.Xml),
+            "pict" => TryParseOpaqueCarry<Picture>(embedded.Xml),
+            _ => null,
+        };
+
+        if (parsed is null)
+        {
+            return null;
         }
 
-        return element;
+        return CarriedObjectRelationshipsResolve(parsed, state.CarrierRelationshipIds) ? parsed : null;
+    }
+
+    /// <summary>
+    /// Whether every relationship reference inside <paramref name="element"/> resolves against
+    /// <paramref name="carrierRelationshipIds"/>. An object that references nothing (a shape with no image
+    /// part) passes trivially — it has nothing to dangle.
+    /// </summary>
+    private static bool CarriedObjectRelationshipsResolve(
+        OpenXmlElement element, IReadOnlySet<string> carrierRelationshipIds)
+    {
+        foreach (var node in new[] { element }.Concat(element.Descendants()))
+        {
+            foreach (var attribute in node.GetAttributes())
+            {
+                if (!string.Equals(attribute.NamespaceUri, OoxmlRelationshipNamespace, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (string.IsNullOrEmpty(attribute.Value))
+                {
+                    continue;
+                }
+                if (!carrierRelationshipIds.Contains(attribute.Value))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>The OOXML relationships namespace — every attribute in it names a package relationship.</summary>
+    private const string OoxmlRelationshipNamespace =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+    /// <summary>
+    /// Every relationship id <paramref name="mainPart"/> can resolve — internal part relationships, external
+    /// ones, and hyperlinks. All three kinds are addressed by the same <c>r:*</c> attributes from the body,
+    /// so all three belong in the set a carried object is checked against.
+    /// </summary>
+    private static IReadOnlySet<string> CollectRelationshipIds(MainDocumentPart mainPart)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var pair in mainPart.Parts)
+        {
+            if (pair.RelationshipId is { Length: > 0 } id) ids.Add(id);
+        }
+        foreach (var relationship in mainPart.ExternalRelationships)
+        {
+            if (relationship.Id is { Length: > 0 } id) ids.Add(id);
+        }
+        foreach (var relationship in mainPart.HyperlinkRelationships)
+        {
+            if (relationship.Id is { Length: > 0 } id) ids.Add(id);
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// The local name of an XML fragment's ROOT element (<c>"&lt;w:drawing …"</c> → <c>drawing</c>), read
+    /// without parsing. Used only to choose which typed SDK class the opaque carry is parsed through; the
+    /// typed ctor is what actually VALIDATES the name and namespace, so a wrong guess here fails the gate
+    /// rather than admitting anything.
+    /// </summary>
+    private static string RootLocalName(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return string.Empty;
+        }
+
+        var start = xml.IndexOf('<');
+        if (start < 0 || start + 1 >= xml.Length)
+        {
+            return string.Empty;
+        }
+
+        var i = start + 1;
+        var nameStart = i;
+        while (i < xml.Length && xml[i] is not (' ' or '\t' or '\r' or '\n' or '>' or '/'))
+        {
+            if (xml[i] == ':')
+            {
+                nameStart = i + 1;
+            }
+            i++;
+        }
+
+        return i > nameStart ? xml[nameStart..i] : string.Empty;
     }
 
     /// <summary>
@@ -2141,7 +2305,16 @@ public sealed partial class ComposeDocumentRenderer
     // schema-validated (never string-injected), revision ids ALWAYS server-minted.
 
     private const int MaxRevisionAuthorChars = 255;
-    private const int MaxPreviousPropertiesXmlChars = 32 * 1024;
+
+    /// <summary>
+    /// Authoring cap on ANY opaque OOXML carry — <see cref="ComposeFormatChange.PreviousPropertiesXml"/>
+    /// (task 025) and <see cref="ComposeEmbeddedObject.Xml"/> (task 056). One number for one mechanism:
+    /// a second cap would be a second contract in everything but name. Generous for both (a real
+    /// <c>w:drawing</c> in the corpus is 0.6–2.4 KB, a <c>w:rPr</c> a few hundred bytes) and still bounded
+    /// against a hostile payload. Over the cap the carry is REFUSED, never truncated — a truncated subtree
+    /// is not the construct the document contained.
+    /// </summary>
+    internal const int MaxOpaqueCarryXmlChars = 32 * 1024;
 
     // Step-9.5 F3: the xsd:dateTime LEXICAL forms (K covers Z / ±hh:mm / no-zone). A merely
     // DateTime.TryParse-able string ("08/01/2026") is NOT a valid @w:date and must be dropped.
@@ -2180,18 +2353,33 @@ public sealed partial class ComposeDocumentRenderer
         NormalizeXsdDateTime(date) is { } valid ? new DateTimeValue { InnerText = valid } : null;
 
     /// <summary>
-    /// The <see cref="ComposeFormatChange.PreviousPropertiesXml"/> gate: parses the opaque carry through
-    /// the TYPED SDK class — the generated ctor VALIDATES the root element (name + namespace; a
-    /// wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are prohibited by the
-    /// SDK reader) — then schema-validates the parsed subtree; any failure drops the whole change record
-    /// (the current formatting simply stands; equivalent to accepting the formatting change). Never
-    /// string-injection into the package. Size-clamped against hostile payloads. The validator is
-    /// per-call — <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and
-    /// this runs on concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// THE opaque-carry gate — one mechanism, two consumers:
+    /// <see cref="ComposeFormatChange.PreviousPropertiesXml"/> (task 025) and
+    /// <see cref="ComposeEmbeddedObject.Xml"/> (task 056).
+    /// <para>
+    /// Parses the carry through the TYPED SDK class — the generated ctor VALIDATES the root element (name +
+    /// namespace; a wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are
+    /// prohibited by the SDK reader) — then schema-validates the parsed subtree; any failure returns null
+    /// and the CALLER degrades (the format-change record is not emitted / the object is dropped). Never
+    /// string-injection into the package. Size-clamped against hostile payloads. The validator is per-call —
+    /// <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and this runs on
+    /// concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// </para>
+    /// <para>
+    /// Named for what it does rather than for its first caller (task 056 renamed it from
+    /// <c>TryParsePreviousProperties</c>): a method called <c>…PreviousProperties</c> parsing a
+    /// <c>w:drawing</c> is precisely the kind of stale naming that let a stale REMARK about bookmarks
+    /// survive two tasks past being true.
+    /// </para>
+    /// <para>
+    /// <b>Parsing is not sufficient for every carry.</b> A subtree that parses and validates can still name
+    /// a package RELATIONSHIP that does not exist — see <see cref="CarriedObjectRelationshipsResolve"/>,
+    /// which is the second gate the embedded-object carry needs and the format-change carry does not.
+    /// </para>
     /// </summary>
-    private static T? TryParsePreviousProperties<T>(string? xml) where T : OpenXmlElement
+    private static T? TryParseOpaqueCarry<T>(string? xml) where T : OpenXmlElement
     {
-        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxPreviousPropertiesXmlChars)
+        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxOpaqueCarryXmlChars)
         {
             return null;
         }
@@ -2336,6 +2524,20 @@ public sealed partial class ComposeDocumentRenderer
         /// user; a fact that CARRIES an author (imported revisions) keeps it. Raw — sanitized at the
         /// emission sites via <see cref="ResolveRevisionAuthorValue"/>.</summary>
         public string? DefaultRevisionAuthor { get; set; }
+
+        /// <summary>
+        /// Task 056: every relationship id the RENDER TARGET's main document part can resolve. A carried
+        /// embedded object is authored only when every relationship its subtree references is in this set —
+        /// otherwise the save would emit a reference to nothing, and Word reports such a file as damaged.
+        /// <para>
+        /// EMPTY by default, which is the correct answer for <see cref="SynthesizeDocument"/>: a
+        /// born-in-editor package has no relationships, so a posted object naming one is refused rather than
+        /// authored into a document that cannot resolve it. Populated by
+        /// <see cref="RenderIntoCarrier"/> from the carrier's own part.
+        /// </para>
+        /// </summary>
+        public IReadOnlySet<string> CarrierRelationshipIds { get; set; } =
+            System.Collections.Immutable.ImmutableHashSet<string>.Empty;
 
         /// <summary>Task 025: mints the next revision <c>w:id</c> — monotonic per render, seeded above the
         /// carrier's existing revision ids (<see cref="ScanCarrierRevisionIdSeed"/>) so re-authored body

@@ -2551,6 +2551,17 @@ public sealed class ComposeDocxProjectionBuilder
                         // text is never doubled here.
                         var runBoxText = ExtractTextBoxDisplayText(r, ctx);
                         var directRunText = ExtractRunsDisplayText(new[] { r });
+
+                        // Task 056 (FR-A10 residual): a TEXT-FREE object — a picture, chart, shape or OLE
+                        // embed — is CARRIED as its own subtree instead of being dropped. Only the text-free
+                        // case: a box that carries text is accept-flattened into the paragraph as prose just
+                        // above, so carrying it as well would put the same words in the document twice.
+                        if (runBoxText.Length == 0
+                            && TryCarryEmbeddedObjects(sink, ctx, href, revision, r, directRunText))
+                        {
+                            break;
+                        }
+
                         var combined = directRunText.Length > 0 && runBoxText.Length > 0
                             ? directRunText + " " + runBoxText
                             : directRunText.Length > 0 ? directRunText : runBoxText;
@@ -3025,6 +3036,80 @@ public sealed class ComposeDocxProjectionBuilder
             Revision = revision,
         });
 
+        return true;
+    }
+
+    /// <summary>
+    /// Task 056 (FR-A10 residual): captures a run's embedded objects (<c>w:drawing</c> / <c>w:object</c> /
+    /// <c>w:pict</c>) as <see cref="ComposeInlineRun.EmbeddedObject"/> marker runs, and returns <c>false</c>
+    /// when they cannot be carried — the caller then drops them exactly as every object did before this task.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The subtree is carried VERBATIM rather than modelled.</b> A <c>w:drawing</c> is a DrawingML
+    /// document in its own right (extents, effect extents, frame locks, a <c>pic:pic</c> with fill, geometry
+    /// and transform — or a chart reference, or an entire VML shape). Any typed model of that would silently
+    /// discard every property it failed to enumerate, which is the exact failure this project exists to end.
+    /// Carrying the bytes preserves properties nobody enumerated, for the same reason cloning an untouched
+    /// block does. What makes that SAFE is the renderer's two gates — the shared SDK parse gate and the
+    /// relationship-resolution check — not anything asserted here.</para>
+    /// <para><b>All or nothing per run.</b> A run with two objects where only one is carryable would emit
+    /// one and drop the other while the merge's count reported a single loss with no way to say WHICH. The
+    /// whole run falls back to the flatten instead, which is a state the taxonomy already describes.</para>
+    /// <para><b>Ordering caveat, stated rather than discovered.</b> A TRANSITIONAL run carrying its own
+    /// <c>w:t</c> text ALONGSIDE the object (the 026 F3 shape) emits the text first and the object second,
+    /// regardless of their order inside the source run. The alternative — walking the run's children to
+    /// interleave them exactly — buys correct ordering for a shape the corpus does not contain, at the cost
+    /// of a second content walk in the hottest method in this file.</para>
+    /// </remarks>
+    private static bool TryCarryEmbeddedObjects(
+        List<ComposeInlineRun> sink,
+        ModelWalkContext ctx,
+        string? href,
+        ComposeRevision? revision,
+        Run run,
+        string directRunText)
+    {
+        if (!ctx.HasOutputBudget)
+        {
+            return false;
+        }
+
+        // The SAME carryability rule the base-side carry applies (ComposeBlockMerge.IsCarryableEmbeddedObject
+        // — text boxes excluded, because their text is accept-flattened into the paragraph above and
+        // carrying the box as well would put the same words in the document twice). One rule, one place: if
+        // the two sides could disagree, the disagreement would show up as a DUPLICATED sentence in a saved
+        // legal document, which is a bad way to learn that a boolean drifted.
+        var objects = run.Elements().Where(ComposeBlockMerge.IsCarryableEmbeddedObject).ToList();
+        if (objects.Count == 0)
+        {
+            return false;
+        }
+
+        var rPr = run.RunProperties;
+        var carried = new List<ComposeInlineRun>(objects.Count);
+        foreach (var element in objects)
+        {
+            var xml = element.OuterXml;
+            if (xml.Length == 0 || xml.Length > ComposeDocumentRenderer.MaxOpaqueCarryXmlChars)
+            {
+                // Over the shared opaque-carry cap (or unserializable). Refused, never truncated — a
+                // truncated subtree is not the construct the document contained.
+                return false;
+            }
+
+            carried.Add(new ComposeInlineRun
+            {
+                EmbeddedObject = new ComposeEmbeddedObject { Xml = xml },
+                Bold = IsOn(rPr?.Bold),
+                Italic = IsOn(rPr?.Italic),
+                Underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None,
+                Href = href,
+                Revision = revision,
+            });
+        }
+
+        AddPlainRun(sink, directRunText, href, ctx, revision);
+        sink.AddRange(carried);
         return true;
     }
 

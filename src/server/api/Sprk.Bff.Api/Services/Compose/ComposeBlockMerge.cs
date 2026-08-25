@@ -590,6 +590,28 @@ internal static class ComposeBlockMerge
             carried += CarryBookmarks(baseParagraph, renderedParagraph);
         }
 
+        // ── 1b. Embedded objects (task 056) ─────────────────────────────────────────────────────
+        //
+        // The object's own subtree ALSO round-trips through the content model
+        // (`ComposeInlineRun.EmbeddedObject`), which is what preserves its exact position inside the
+        // paragraph. This is the other half: the restore for a save whose posted model does NOT carry it.
+        //
+        // That is not a corner case — it is what a KEYSTROKE EDIT from the browser looks like today. The
+        // editor shows an embedded object as an opaque atom, and the mapper contributes nothing for one, so
+        // the object never reaches the posted model at all. Without this, the model carry would be a
+        // producer with no consumer (task 049 shipped exactly that shape for fields and needed task 057 to
+        // finish it).
+        //
+        // Base-carry is the RIGHT half to add rather than a client payload, for the four reasons in the
+        // FR-A05 header above — and one more that is specific to this construct: an object references its
+        // image by RELATIONSHIP id, and the base block's ids are the CARRIER's own, so a base-carried
+        // object resolves by construction. A client round trip would put OOXML in the browser (ADR-049 I-2)
+        // and hand back ids the server would then have to distrust.
+        if (baseParagraph is not null && renderedParagraph is not null)
+        {
+            carried += CarryEmbeddedObjects(baseParagraph, renderedParagraph);
+        }
+
         // ── 2. A block-level `w:sdt` shell ──────────────────────────────────────────────────────
         //
         // The projection emits an SDT's inner paragraph as an ordinary block, so editing it renders a bare
@@ -813,6 +835,160 @@ internal static class ComposeBlockMerge
 
         return carried;
     }
+
+    /// <summary>
+    /// Task 056: restores embedded objects (<c>w:drawing</c> / <c>w:object</c> / <c>w:pict</c>) the base
+    /// paragraph had and the rendered one does not, each inside its own run, at the base's own content
+    /// ordinal. Returns the number restored.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Restore-if-missing, so it composes with the model carry instead of competing with it.</b>
+    /// Objects already present in the rendered paragraph — because the posted model carried them, which is
+    /// what every server-side model round trip does — are matched by their own OuterXml and left alone. When
+    /// the model carried everything, this method restores nothing and changes nothing. That also means the
+    /// two paths can never double an object, which is the failure a naive "append the base's objects" would
+    /// have shipped.</para>
+    ///
+    /// <para><b>Position is the base's content ordinal, clamped.</b> The exact character position no longer
+    /// exists — the runs around it are the user's new text — so the object is placed at the same index among
+    /// the paragraph's content children that it held in the base. For the shape this overwhelmingly takes in
+    /// a legal document (an image, chart or embed alone in its own paragraph) that is EXACT. For an object
+    /// mid-sentence in a heavily rewritten paragraph it is an approximation, and an approximate POSITION is
+    /// a strictly smaller loss than the deletion it replaces. Stated here because a silently relocated image
+    /// is the kind of thing that should be found in a comment rather than in a document.</para>
+    ///
+    /// <para><b>Objects inside an opaque region are not touched.</b> A text box's interior is carried whole
+    /// or not at all, and a text-CARRYING box is accept-flattened to prose on the projection side — carrying
+    /// the box as well would put the same words in the document twice. Only DIRECT run children of the
+    /// paragraph are considered, which is exactly the set the projection would have dropped.</para>
+    /// </remarks>
+    private static int CarryEmbeddedObjects(Paragraph baseParagraph, Paragraph rendered)
+    {
+        var baseObjects = new List<(OpenXmlElement Element, int Ordinal)>();
+        var ordinal = 0;
+        foreach (var child in baseParagraph.ChildElements)
+        {
+            if (child is ParagraphProperties)
+            {
+                continue;
+            }
+
+            if (child is Run baseRun)
+            {
+                foreach (var element in baseRun.ChildElements)
+                {
+                    if (IsCarryableEmbeddedObject(element))
+                    {
+                        baseObjects.Add((element, ordinal));
+                    }
+                }
+            }
+
+            ordinal++;
+        }
+
+        if (baseObjects.Count == 0)
+        {
+            return 0;
+        }
+
+        // Identity for "is this object already here". NOT the subtree's bytes: an object the posted model
+        // carried is re-parsed standalone by the renderer, and the SDK re-emits namespace declarations
+        // differently once an element is no longer nested in its original scope — so byte equality reports
+        // a MISS on the very object that is sitting right there, and the paragraph ends up with two of them.
+        // (Found by ComposeObjectCarrySeamTests before this line existed, which is why it says so.)
+        // Local name plus the relationship ids the subtree references is stable across that re-serialization
+        // and is what actually distinguishes one embedded object from another. Counted rather than
+        // set-matched, so a paragraph holding the same image twice restores the right NUMBER of them.
+        var present = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var element in rendered.Descendants())
+        {
+            if (element is Drawing or EmbeddedObject or Picture)
+            {
+                var key = EmbeddedObjectIdentity(element);
+                present[key] = present.TryGetValue(key, out var seen) ? seen + 1 : 1;
+            }
+        }
+
+        var carried = 0;
+        foreach (var (element, baseOrdinal) in baseObjects)
+        {
+            var key = EmbeddedObjectIdentity(element);
+            if (present.TryGetValue(key, out var remaining) && remaining > 0)
+            {
+                present[key] = remaining - 1;
+                continue;
+            }
+
+            var run = new Run(element.CloneNode(true));
+            var contentStart = rendered.ParagraphProperties is null ? 0 : 1;
+            var insertAt = Math.Min(contentStart + baseOrdinal, rendered.ChildElements.Count);
+            rendered.InsertAt(run, insertAt);
+            carried++;
+        }
+
+        return carried;
+    }
+
+    /// <summary>
+    /// Whether an element is an embedded object this carry may restore — a <c>w:drawing</c>,
+    /// <c>w:object</c> or <c>w:pict</c> that does NOT contain a text box.
+    /// </summary>
+    /// <remarks>
+    /// The text-box exclusion is the whole reason this is a method rather than a type check. A box that
+    /// carries text is accept-flattened into the paragraph as prose by the projection
+    /// (<c>text-box-flattened</c>), so restoring the box on top of that would put the same words in the
+    /// document TWICE — a "fix" that corrupts the sentence it was meant to protect. Structural (does the
+    /// subtree contain a <c>w:txbxContent</c> / <c>v:textbox</c>?) rather than "does it currently have text
+    /// in it", so an empty box behaves the same way as a full one and the two halves of the carry — this and
+    /// the projection's <c>TryCarryEmbeddedObjects</c> — agree by construction rather than by coincidence.
+    /// Shared by <see cref="ComposeDocxProjectionBuilder"/>, which applies the same rule on the model side.
+    /// </remarks>
+    internal static bool IsCarryableEmbeddedObject(OpenXmlElement element)
+    {
+        if (element is not (Drawing or EmbeddedObject or Picture))
+        {
+            return false;
+        }
+
+        foreach (var descendant in element.Descendants())
+        {
+            if (string.Equals(descendant.LocalName, "txbxContent", StringComparison.Ordinal)
+                || string.Equals(descendant.LocalName, "textbox", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A re-serialization-stable identity for an embedded object: its local name plus every relationship id
+    /// its subtree references, in document order. See <see cref="CarryEmbeddedObjects"/> for why OuterXml is
+    /// not usable here.
+    /// </summary>
+    private static string EmbeddedObjectIdentity(OpenXmlElement element)
+    {
+        var ids = new List<string>();
+        foreach (var node in new[] { element }.Concat(element.Descendants()))
+        {
+            foreach (var attribute in node.GetAttributes())
+            {
+                if (string.Equals(attribute.NamespaceUri, OoxmlRelationshipNamespace, StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(attribute.Value))
+                {
+                    ids.Add(attribute.Value);
+                }
+            }
+        }
+
+        return element.LocalName + "|" + string.Join(",", ids);
+    }
+
+    /// <summary>The OOXML relationships namespace — every attribute in it names a package relationship.</summary>
+    private const string OoxmlRelationshipNamespace =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
     /// <summary>
     /// Rebuilds the base content control around the freshly rendered paragraph: the base <c>w:sdt</c> cloned

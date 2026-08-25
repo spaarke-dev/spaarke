@@ -8,7 +8,9 @@
 > **Status**: published 2026-08-23 by `spaarkeai-compose-r8` task 045 (FR-A10);
 > **two rows retired 2026-08-24** by task 048 — tabs and symbols moved from §2 (lost) to §3 (carried);
 > **the field row retired 2026-08-25** by task 049 — ordinary Word fields moved to §3, leaving only the
-> nested/unterminated case in §2.
+> nested/unterminated case in §2;
+> **the embedded-object row retired 2026-08-25** by task 056 — images, charts, shapes and OLE embeds moved
+> to §3, leaving only the text-carrying box in §2.
 > **Owner sign-off**: ⏳ *pending* — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
@@ -42,9 +44,7 @@ silent.
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
 | **Nested or unterminated field** — `{ IF { PAGE } = 1 … }`, or a field whose `begin`/`end` straddle paragraphs (a `TOC`, an `INDEX`). Ordinary fields are **carried** — see §3 | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
-| Embedded object / image / chart (`w:drawing`, `w:object`, `w:pict`) | Removed from the paragraph. The underlying part stays in the file | `complex-object-dropped` |
-
-> **⚠️ One of these rows is scheduled for removal, not sign-off.** Owner decision 2026-08-25: fields and embedded objects are to be **carried**, not accepted as losses — task **049** (fields, **landed 2026-08-25**) and task **056** (objects, outstanding). Both follow the same move that already retired line breaks (task 046) and tabs + symbols (task 048): add a marker run / opaque carry, and let the parity test prove it before the row moves. This list is **not signed off** until task 056 lands.
+| **Text box** (a `w:pict` / `w:drawing` wrapping `w:txbxContent`) — a floating callout or signature block. Text-free objects (images, charts, shapes, OLE embeds) are **carried** — see §3 | The box's **text is kept**, as ordinary prose at the box's position; the box itself — its frame, size, wrap and float — is not | `complex-object-dropped` (plus `text-box-flattened` at open) |
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
@@ -64,9 +64,19 @@ of the list is enforced too — if a future change starts losing one, the parity
 | **Tabs** (`w:tab`) | Round-trip as a marker run. Definitions lists, signature blocks and table-of-contents lines are held in alignment by exactly these; flattening one to a space is invisible in a diff and obvious on the page (fixed task 048) |
 | **Symbols** (`w:sym`) — §, ¶, Wingdings glyphs | Round-trip as their **font + code point**, not as the glyph the reader resolved for display. § in a legal document is usually Symbol-font `F0A7`, so re-authoring the resolved look-alike would quietly change the character the document contains — and for a code point we cannot resolve, it would have written the on-screen placeholder into the file as content (fixed task 048) |
 | **Fields** (`w:fldSimple`, `w:fldChar`) — `REF`, `PAGEREF`, `PAGE`, `DATE`, `SEQ`, `STYLEREF`, vendor instructions | Round-trip as their **instruction**, alongside the result Word last computed — so the save changes nothing on screen and the field is a field again. `w:fldLock` rides along, because the one way this could be worse than freezing is converting a field the author deliberately locked into a live one. The form the document used (`fldSimple` vs the `fldChar` run sequence) is re-emitted, not normalised. On a KEYSTROKE edit the result's bold/italic/underline are NOT carried (an opaque atom holds no marks), so a bold cross-reference in a plain paragraph returns plain — the field itself survives. **Not** nested or unterminated fields — those stay in §2 (fixed task 049; client half task 057) |
+| **Embedded objects** (`w:drawing`, `w:object`, `w:pict`) — a picture, chart, shape or OLE embed | The object's own OOXML subtree is carried **verbatim**, so properties nobody enumerated survive for the same reason cloning an untouched block preserves them. The picture's bytes never travel: they stay in their own package part and only the reference moves, and the save **resolves that reference against the document before authoring it** — a subtree naming a relationship the package does not have is refused rather than written, because a file Word reports as *damaged* is worse than a missing picture. Works for a keystroke edit too, without the object's markup ever reaching the browser: when the posted content model does not carry it, the object is restored from the paragraph's pre-edit base (fixed task 056). **Not** a text box — that stays in §2 |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
 | Comments, tracked changes, hyperlinks | Carried on the content model itself |
+
+> **What a carried object does *not* keep.** Its POSITION inside the paragraph, in one case. When the
+> object round-trips through the content model — every server-side path, including an AI edit — the position
+> is exact. When it is restored from the base instead (a keystroke edit, where the editor's opaque atom
+> contributes nothing to the posted model) it is placed at the index it held among the paragraph's parts
+> before the edit: **exact** for an object alone in its own paragraph, which is the shape a signature image,
+> an exhibit chart or an embedded schedule almost always takes, and an approximation for one sitting
+> mid-sentence in a paragraph the user rewrote. An approximate position is a smaller loss than deletion,
+> which is what it replaces — said here rather than left to be discovered.
 
 > **What a carried field does *not* keep.** The field comes back with its instruction, its cached result and
 > its lock; the result text is re-authored with the bold / italic / underline the model carries, so run
@@ -102,16 +112,17 @@ edited block — and holds this document to the result in **both** directions:
   "safely conservative" — it tells you we damage things we do not, which is how a document stops being
   read.
 
-### Measured 2026-08-25 (task 049; the two field rows changed since the 2026-08-24 run)
+### Measured 2026-08-25 (task 056; the four object rows changed since the task-049 run)
 
 | Family | Untouched block | Edited block | Code emitted |
 |---|---|---|---|
 | `fldSimple` | 1/1 kept | **1/1 kept** | *(none — carried, task 049)* |
 | `fldChar` | 2/2 kept | **2/2 kept** | *(none — carried, task 049)* |
 | `fldNested` — `{ IF { PAGE } = 1 … }` | 6/6 kept | 0/6 | `field-flattened-to-text` |
-| `drawing` | 1/1 kept | 0/1 | `complex-object-dropped` |
-| `object` | 1/1 kept | 0/1 | `complex-object-dropped` |
-| `pict` | 1/1 kept | 0/1 | `complex-object-dropped` |
+| `drawing` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
+| `object` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
+| `pict` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
+| `pictTextBox` — a shape wrapping `w:txbxContent` | 1/1 kept | 0/1 | `complex-object-dropped` |
 | `footnoteReference` | 1/1 kept | 0/1 | `unrepresented-footnote-reference` |
 | `endnoteReference` | 1/1 kept | 0/1 | `unrepresented-endnote-reference` |
 | `br` | 1/1 kept | **1/1 kept** | *(none — carried, task 046)* |
@@ -133,6 +144,15 @@ would have inherited the same blind spot: you cannot document a loss you do not 
 
 Fixed in task 045 by adding `sdt` to the reportable set and reusing the code whose client copy already
 said the right thing.
+
+And on its fourth run the same mechanism did the work for embedded objects, in both directions at once.
+Task 056 taught all three object forms to round-trip, and the check failed in the over-claim direction
+until this document stopped calling them lost — while the `pictTextBox` row was added in the same change so
+`complex-object-dropped` remains a code the renderer really does emit. That row is not a formality: a text
+box's words are already preserved as prose, so carrying the box on top of them would have written the same
+sentence into the document twice. The rule that prevents it is shared by both halves of the carry rather
+than restated in each, because a boolean that drifts between two files would announce itself as a
+duplicated paragraph in a saved agreement.
 
 And on its third it did the same for fields. Task 049 taught both field forms to round-trip, and the
 check failed in the over-claim direction until this document stopped calling them lost — while the
@@ -158,9 +178,9 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 
 | Field | Value |
 |---|---|
-| Version | 2026-08-23 (first publication) |
-| Measured against | `spaarkeai-compose-r8` @ task 045, corpus of 23 documents |
-| Signed off by | ⏳ *pending* — **blocked on task 056** (owner declined the field + object rows 2026-08-25; task 049 landed the field carry the same day, so only the object row remains outstanding) |
+| Version | 2026-08-25 (objects carried; supersedes the 2026-08-23 first publication) |
+| Measured against | `spaarkeai-compose-r8` @ task 056, corpus of 24 documents |
+| Signed off by | ⏳ *pending* — **both declined rows are now closed.** Owner declined the field and object rows on 2026-08-25; task 049 landed the field carry and task 056 landed the object carry the same day. §2 now holds five rows: the three the owner already called acceptable (footnote references, endnote references, content controls), the nested/unterminated-field remainder from task 049, and the **text-box remainder from task 056** — narrower than the object row it replaces (the box's words are kept; only its frame is not) but a row the owner has not separately ruled on, so it is flagged here rather than folded into the accepted set |
 | Date | ⏳ *pending* |
 
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the
