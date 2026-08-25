@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Per-container storage quota ceiling, distinct from consumption</title>
+    <phase>5 Workstream E — New capabilities</phase>
+    <gate>023 complete, 024 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New capability adding .cs endpoints + .tsx controls; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified capability; the semantic groundwork was laid by tasks 023 and 024.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W16</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>023, 024, 040</deps>
+    <tags>bff-api, api, endpoints, frontend, fluent-ui, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make maxStoragePerContainerInBytes a real per-container ceiling control, cleanly separated from consumption reporting. This gives legal customers per-matter storage caps — a control that does not exist today in any form.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph SPE container settings and Fluent UI v9 forms. Follow ADRs strictly.</role>
+
+  <goal>A ceiling can be set and read back per container, presented distinctly from any usage display.</goal>
+
+  <context>
+    <background>Spec FR-E02 / §3.2. Task 023 corrected the property name and split the semantics; task 024 settled what happens with consumption. This task makes the ceiling a first-class capability. The confusion being avoided: a limit and a metric are different features and must never share a field or a label.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/containers</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">The corrected property name and the ceiling/consumption split.</dependency>
+      <dependency task="024" status="pending">The consumption branch decision — determines what the ceiling is displayed alongside.</dependency>
+      <dependency task="040" status="pending">WireMock fixture.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: semantics. The ceiling MUST NOT share a field, DTO property, parameter, or label with consumption. Task 023's split is load-bearing — do not undo it.</constraint>
+    <constraint source="project">Scope: validation. A ceiling below current consumption is operationally meaningful but potentially harmful — warn explicitly rather than silently accepting or silently rejecting.</constraint>
+    <constraint source="project">Scope: verification. Every ceiling write MUST be confirmed by read-back, not by a 200 response.</constraint>
+    <constraint source="ADR-001">Scope: new endpoints. Minimal API pattern.</constraint>
+    <constraint source="ADR-008">Scope: authorization via the existing endpoint filter.</constraint>
+    <constraint source="ADR-021">Scope: the ceiling control. Fluent v9 semantic tokens; dark-mode correct; label unambiguously a limit.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF addition. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Container storage quota model</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">PATCH construction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec FR-E02 and task 023's split.</step>
+    <step order="1">Verify the ceiling property's writability at container scope against current docs.</step>
+    <step order="2">Add read and write paths for the ceiling, plus endpoints under the existing group.</step>
+    <step order="3">Add a ceiling control to the container detail UI, labelled unambiguously as a limit.</step>
+    <step order="4">Warn when a ceiling is set below current consumption (if consumption is available per task 024's branch).</step>
+    <step order="5">Add read-back verification so a write is confirmed, not assumed.</step>
+    <step order="6">Add WireMock coverage for the PATCH body.</step>
+    <step order="7">Build BFF and code page; run tests.</step>
+    <step order="8">Verify against Spaarke Dev: set a ceiling on a throwaway container, read it back.</step>
+    <step order="9">Measure publish size; record. Update TASK-INDEX.md: task 051 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If maxStoragePerContainerInBytes proves settable only at container-TYPE scope rather than per container, STOP and escalate — spec FR-E02 promises a per-container ceiling, and delivering a type-wide setting instead is a different capability with different customer semantics.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No quota-ceiling capability exists — the property was previously misused as a consumption field (SpeAdminGraphService.cs:3945, corrected by task 023). Grep confirms no other storage-limit control.</existing>
+    <extension>Extends the existing container endpoint group and service. No new abstraction.</extension>
+    <cost-of-doing-nothing>There is no per-matter storage control at all; a single matter can consume unbounded storage with no cap available to an administrator.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Ceiling set and read back">
+      <steps>
+        <step>Set a storage ceiling on a throwaway container and save</step>
+        <step>Reload the container detail</step>
+      </steps>
+      <expected>The ceiling persists and displays after reload.</expected>
+    </test>
+    <test name="Ceiling is not presented as usage">
+      <steps><step>Inspect the ceiling control and any usage display together</step></steps>
+      <expected>The ceiling is unambiguously labelled a limit and is visually distinct from any consumption value.</expected>
+    </test>
+    <test name="Below-consumption warning">
+      <steps><step>Set a ceiling below current consumption, if consumption is available</step></steps>
+      <expected>An explicit warning appears; the value is neither silently accepted nor silently rejected.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the ceiling control</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/containers</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (quota coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a ceiling is set on a container, when it is read back from Spaarke Dev, then the value matches what was written.</criterion>
+    <criterion testable="true">The ceiling shares no field, DTO property, parameter, or label with consumption — verified by grep.</criterion>
+    <criterion testable="true">Negative: a ceiling below current consumption produces an explicit warning rather than silent acceptance or silent rejection.</criterion>
+    <criterion testable="true">Negative: an invalid ceiling value (negative, non-numeric, out of range) is rejected with a validation error.</criterion>
+    <criterion testable="true">Negative: an unauthorized caller receives 403 ProblemDetails.</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E02. Satisfies spec success criterion 7. Depends on task 024's branch for what the ceiling is displayed alongside.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -30,6 +30,7 @@ decomposition is real debt — it moves to the end, where a harness exists to ma
 
 ## Quick links
 
+- **[spec.md](spec.md) — AI implementation spec (2026-08-21). 31 FRs, completed §6.5 ADR Tensions block, owner clarifications. This is what `/project-pipeline` consumes.**
 - [design.md](design.md) — verified current state, root causes, six workstreams, open decisions, acceptance
 - [notes/spe-platform-research-2026-08-20.md](notes/spe-platform-research-2026-08-20.md) — SPE platform state as of today
 - [notes/RED-1-investigation-research.md](notes/RED-1-investigation-research.md) — original RED-1 seed (superseded framing; retained for lineage)
@@ -42,7 +43,7 @@ decomposition is real debt — it moves to the end, where a harness exists to ma
 | **B** | Resolve the auth model | App-only → hybrid delegated. The architectural decision of the project. 🔔 **Gated on an explicit ADR-028 / ADR-008 §6.5 conflict check** (design.md §5.1) — path A/B/C named by a human before any implementation task starts. Not advisory. |
 | **C** | Correct the API surface | `/beta` → v1.0; three wrong property names; quota-vs-consumption split. |
 | **D** | Build the harness | WireMock mapping tests + `[Category("LiveIntegration")]`. R1 recommended this and never did it. |
-| **E** | New capabilities | Container archival (**up to 75% storage cost reduction**); real per-container quota; per-container item recycle bin; information barriers (ethical walls, beta). |
+| **E** | New capabilities | Container archival (**up to 75% storage cost reduction**); real per-container quota; per-container item recycle bin. *(Information barriers removed from scope 2026-08-21 — owner decision.)* |
 | **F** | Decomposition | Last, not first — protected by D, along seams revealed by B–C. |
 
 ## Decisions
@@ -52,7 +53,7 @@ decomposition is real debt — it moves to the end, where a harness exists to ma
 | D1 | Container Types screens | ✅ **Rebuild** on delegated auth. D2 pays for the delegated path anyway; and listing is ownership-filtered (not admin-gated) while Graph create needs **no admin role** — much cheaper than first assumed. Billing-profile attach deep-links out. |
 | D2 | Auth model | ✅ **Hybrid** — delegated where required, app-only where supported. ADR-028 / ADR-008 check required. |
 | D3 | Recycle bin | ✅ **Both** — deleted containers (one-line fix) + per-container item recycle bin (the likelier intent). |
-| D4 | New capabilities | ✅ **Archival + quota + item recycle bin + owner management**; information barriers conditional on beta-risk review. **Legal hold / retention / eDiscovery excluded — Purview's surface, not ours.** |
+| D4 | New capabilities | ✅ **Archival + quota + item recycle bin + owner management.** ~~Information barriers~~ **removed from scope 2026-08-21 (owner decision — ethical walls / conflict-of-interest not needed)**. **Legal hold / retention / eDiscovery excluded — Purview's surface, not ours.** |
 | D5 | **Does Workstream F (splitting the 4,911-line file) ship inside R2, or as its own follow-on project?** | ✅ **Split out** → follow-on `speadmingraphservice-decomposition-r1`, entry-gated on A–E merged + the D harness green. A–E is already a full project; F is a large rewrite in a contended hot path; and F is *better work after* A–E, when the seams are known rather than inferred. Two cheap hygiene moves (dead stub, misfiled endpoints file) still ship in R2. |
 
 **Out of scope, with a home:** billing-profile attach (`Add-SPOContainerTypeBilling`) is PowerShell, needs

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="unified-access-control-r2">
+  <metadata>
+    <title>Service request is a CORE record type with no accessible set -- add the fourth root</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the caller-principal resolution path -- the source of every record-scope decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The three existing root sets are the template; this adds the fourth by the same mechanism.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/CallerPrincipalResolver.cs -- the shared principal surface.</parallel-reason>
+    <deps>009</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>This project's model names FOUR core record types -- project, matter, work assignment, service request -- but CallerPrincipal carries accessible sets for only three. Service request is missing, so nothing parented to a service request can be record-scoped on the external plane. Add the fourth root by the same mechanism as the other three.</prompt>
+  <role>SPAARKE platform developer. Expert in CallerPrincipalResolver, AccessibleRecordSetService and the ScopeDimension registry.</role>
+  <goal>CallerPrincipal exposes an accessible service-request set alongside the other three core roots, populated by the same grant and membership composition, and usable by the same scoping mechanisms.</goal>
+
+  <context>
+    <background>Found 2026-08-24 while resolving task 009's escalation. The project CLAUDE.md states: core (project, matter, work assignment, service request) need direct grants; child records inherit one hop via a denormalized core ancestor. But CallerPrincipal exposes ProjectAccess, AccessibleMatterIds and AccessibleWorkAssignmentIds -- there is no AccessibleServiceRequestIds, and no ScopeDimension for sprk_servicerequest. Consequences: a to-do (or any child) parented via sprk_regardingservicerequest cannot be scoped at all and is denied by fail-closed default, even for a caller who legitimately holds that service request. Task 009 widened the external To Do PATCH to project, matter and work assignment per owner decision; service request could not be included because the set does not exist. Note the related asymmetry recorded in task 009: matter and work-assignment sets carry NO access level (bare IReadOnlySet&lt;Guid&gt;), so membership implies write for them; decide deliberately whether service request follows that shape or carries a level like project.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/ServiceRequestAccessibleSetTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1.</constraint>
+    <constraint source="ADR-003">Fail closed: an unresolvable or errored service-request set must deny, exactly as the other three roots do.</constraint>
+    <constraint source="ADR-034">Reuse the existing grant and membership composition. Do not build a parallel query for service requests -- follow whatever AccessibleRecordSetService already does for matter and work assignment.</constraint>
+    <constraint source="CLAUDE.md §11">The three existing roots are the template. This is a fourth instance of an established pattern, not a new mechanism. If it cannot be expressed the same way, say why before diverging.</constraint>
+    <constraint source="project">DECIDE AND RECORD whether the service-request set carries an access level. Project does (ExternalAccessLevel -> AccessRights, gated on Write); matter and work assignment do not, so membership implies write there. Pick one deliberately and document the reasoning -- do not inherit the asymmetry by accident.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/task-009-external-todo-scope.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Verify sprk_servicerequest and the grant table's service-request lookup against live metadata.</step>
+    <step order="1">Trace how AccessibleMatterIds is composed end to end, from grant rows through AccessibleRecordSetService to CallerPrincipal.</step>
+    <step order="2">Decide whether the service-request set carries an access level; record the decision and rationale.</step>
+    <step order="3">Add AccessibleServiceRequestIds by the same mechanism, including the ScopeDimension registration.</step>
+    <step order="4">Extend the external To Do PATCH scope check to the fourth root, completing task 009's owner decision.</step>
+    <step order="5">Author tests: an accessible service request succeeds; one outside the set denies; holding another root does not confer access.</step>
+    <step order="6">Perturb: bypass the new membership check; cross-wire it to the matter set. Record the counts.</step>
+    <step order="7">Full suite; publish size; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If service-request grants turn out not to exist in the grant model at all (no lookup on sprk_externalrecordaccess), STOP and escalate: whether service requests are grantable is a product decision, and the answer may be that the model doc is wrong rather than the code.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ProjectAccess, AccessibleMatterIds and AccessibleWorkAssignmentIds already exist with a working composition path. This adds the fourth by the same mechanism.</existing>
+    <extension>Extends CallerPrincipal and the existing AccessibleRecordSetService. No new service or interface.</extension>
+    <cost-of-doing-nothing>One of the four core record types cannot be record-scoped at all, so every child parented to a service request is denied on the external plane regardless of the caller's legitimate access -- and task 009's owner decision (matter and work assignment get parity with project) stays partially unimplementable.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ServiceRequestAccessibleSetTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-028-service-request-root.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CallerPrincipal exposes an accessible service-request set populated by the same composition as matter and work assignment.</criterion>
+    <criterion testable="true">A ScopeDimension exists for sprk_servicerequest, so child scoping can use it.</criterion>
+    <criterion testable="true">The notes record whether the set carries an access level, and why.</criterion>
+    <criterion testable="true">The external To Do PATCH scopes service-request-parented to-dos against the new set.</criterion>
+    <criterion testable="true">A caller holding a different root does not gain access to a service request.</criterion>
+    <criterion testable="true">Perturbation: bypassing the new check fails at least one test; cross-wiring it to the matter set fails at least one test.</criterion>
+    <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Filed 2026-08-24 from the task-009 To Do discussion. Completes the owner decision that non-project roots get parity.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-04: Lift the AccessRights.Read ceiling so Write+ policies can pass</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (rights derivation in Spaarke.Dataverse) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Rights mapping against a documented ceiling defect with the caller-scoped plumbing already landed by task 004; the fix shape is specified by A-20 evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Rights derivation may require a RetrievePrincipalAccess-style call added to Spaarke.Dataverse/DataverseWebApiService.cs (a known-contended file); conservatively serialized. Even if the fix stays inside DataverseAccessDataSource.cs, this touches the auth-rights spine — merge with /conflict-check.</parallel-reason>
+    <deps>001, 004</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the Read-ceiling half of finding A-20 (spec FR-04, High): DataverseAccessDataSource.QueryUserPermissionsAsync returns at most AccessRights.Read on success, so EVERY policy requiring more than Read (upload_file = Write|Create, create_container = Create|Write, candownloadfiles, cansharefiles, …) unconditionally denies. Make the snapshot carry the caller's ACTUAL Dataverse rights (Read/Write/Create/Delete/Share/Append) so Write+ policies pass for genuinely authorized users — without over-granting anyone.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse Web API access evaluation (RetrievePrincipalAccess semantics) and the Spaarke IAccessDataSource seam. Follow ADRs strictly.</role>
+  <goal>An authorized user's access snapshot carries their real rights; canwritefiles / canmanagecontainers succeed for a user with Write/Create in Dataverse; a read-only user is still denied Write+ operations. The rights ceiling defect is gone.</goal>
+
+  <context>
+    <background>Finding A-20 Read-ceiling half (10-finding-confirmations.md): DataverseAccessDataSource.QueryUserPermissionsAsync:305-379 returns at most a single PermissionRecord(..., AccessRights.Read) on success (:368-372, comment "Grant Read access… Dataverse will enforce Write/Delete separately"); it never returns Write/Create/Delete/Share. upload_file = Write|Create (AuthorizationModule.cs:244-245, OperationAccessPolicy.cs:141) and create_container = Create|Write (:246-247, :147) therefore always deny: (Read &amp; required) != required. Affected endpoints: UploadEndpoints.cs:108,159,214; DocumentsEndpoints.cs:61,106,149,192,245,304,365,418. Task 004 has landed: the data source now receives the caller's token on caller-scoped paths — so real per-principal rights are obtainable (e.g. via RetrievePrincipalAccess or an equivalent caller-scoped rights read). CRITICAL direction: the fix must derive rights from Dataverse's answer FOR THE CALLER; it must not blanket-elevate the app-only path (that would convert a fail-closed defect into an over-grant).</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="modify">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning the Read-ceiling denials, flipped here.</dependency>
+      <dependency task="004" status="pending">Caller token reaches the data source — real per-principal rights are queryable.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: an error resolving rights yields NO rights (deny), never a default grant. On the app-only path, rights above Read MUST NOT be granted by inference from app visibility. Scope: QueryUserPermissionsAsync and every path it feeds.</constraint>
+    <constraint source="ADR-028">Rights are derived from the caller-scoped Dataverse answer (OBO), consistent with the task-004 model. Scope: the rights-derivation mechanism chosen here.</constraint>
+    <constraint source="project">The snapshot must never EXCEED the caller's actual Dataverse rights on the record. Scope: all mapping code added by this task.</constraint>
+    <constraint source="project">Spaarke.Dataverse is consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-003">BINDING: task 003 registered "entity.associate_document" requiring AccessRights.AppendTo -- the FIRST use of that flag in OperationAccessPolicy. When lifting the Read ceiling in DataverseAccessDataSource.QueryUserPermissionsAsync:305-379 you MUST map Dataverse AppendToAccess -> AccessRights.AppendTo (and AppendAccess -> AccessRights.Append). Mapping only Read/Write/Delete/Create/Share leaves POST /api/office/save permanently 403 while LOOKING fixed: the operation resolves, so the denial reads as a legitimate insufficient_rights rather than the loud unknown_operation it replaced -- a silent failure that is worse than the bug it succeeded. Add a test asserting a caller with AppendTo on the target entity is ALLOWED entity.associate_document. Rationale: notes/task-003-operation-rights-decisions.md section 2. Scope: the rights-mapping change.</constraint>
+    <constraint source="task-006">Task 006 made GET /api/documents/{id}/permissions caller-scoped, and its capability booleans are projected from the SAME snapshot this task widens. Until the ceiling lifts, ELEVEN of the fourteen capabilities (CanDownload, CanUpload, CanReplace, CanDelete, CanUpdateMetadata, CanShare, CanRestoreVersion, CanMove, CanCopy, CanCheckOut, CanCheckIn) are false for every caller in production -- only CanPreview, CanReadMetadata and CanViewVersions can be true. When this task lands, verify those flags actually light up for a caller holding the corresponding rights; a Read-ceiling fix that does not surface in the capabilities response means the snapshot widened somewhere the endpoint does not read. Mapping table: notes/task-006-capability-rights-mapping.md section 2. Scope: verification of this task's rights-mapping change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse principal rights mapping</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-obo" location=".claude/patterns/auth/dataverse-obo.md">OBO access to Dataverse Web API</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm task 004 is merged.</step>
+    <step order="1">Read QueryUserPermissionsAsync:305-379 and GetUserAccessAsync:159-227; identify where the Read cap is applied in both SP and OBO modes.</step>
+    <step order="2">Implement caller-scoped rights derivation: query Dataverse for the caller's actual AccessRights on the record (RetrievePrincipalAccess or equivalent) and map the full flag set into the snapshot. Preserve the OBO/SP mode split from task 004.</step>
+    <step order="3">Verify the app-only mode does NOT gain rights above what it had — app visibility must not imply Write.</step>
+    <step order="4">Flip characterization tests; add positive tests (Write-holder passes upload_file / create_container policy evaluation) and negative tests (Read-only holder denied).</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the rights-mapping table (Dataverse right → AccessRights flag) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If deriving real rights adds Dataverse round trips beyond the existing per-request budget (NFR-02 spirit), STOP and escalate with measurements before adding a per-operation query.</trigger>
+    <trigger>If any existing consumer DEPENDS on the Read ceiling (i.e., would newly grant Write somewhere unaudited), STOP and list those consumers for review before merging.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</output>
+    <output type="test">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A caller holding Write/Create on the record passes canwritefiles (upload_file = Write|Create) and canmanagecontainers (create_container = Create|Write) policy evaluation (FR-04 acceptance).</criterion>
+    <criterion testable="true">Negative: a caller holding only Read is denied upload_file and create_container.</criterion>
+    <criterion testable="true">Negative: a caller with NO access to the record receives an empty/deny snapshot (no rights).</criterion>
+    <criterion testable="true">Negative: an error during rights resolution denies — no default rights are granted.</criterion>
+    <criterion testable="true">The snapshot never exceeds the caller's actual Dataverse rights (asserted by test with a mocked Dataverse answer).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; finding A-20 Read-ceiling half (policy keys are task 003). File-disjoint from task 006 (PermissionsEndpoints) but conservatively parallel-safe:false because the rights read may extend DataverseWebApiService.cs.
+
+COMPLETED 2026-08-21. The Read ceiling is gone. DataverseWebApiService.cs was NOT touched — the change stayed inside DataverseAccessDataSource.cs plus one extracted mapper.
+
+KEY DISCOVERY — the fix was mostly RECONNECTION, not new code. MapDataverseAccessRights (all seven flags, AppendToAccess included) and PrincipalAccessResponse already existed in the file as DEAD CODE: the orphaned wiring of a RetrievePrincipalAccess implementation that was replaced long ago by a "can I retrieve the record -> therefore Read" probe. Confirmed repo-wide that RetrievePrincipalAccess had ZERO live call sites; every remaining reference is a doc comment. .claude/constraints/auth.md already carried the 2026-08-20 correction recording this.
+
+DESIGN: RetrievePrincipalAccess is called first and its full flag set mapped. The original probe SURVIVES AS A FALLBACK because the deleted comment's claim that RPA "may not be available" under OBO is unverified (nothing ever exercised it) and unverifiable offline. The composition cannot regress -- worst case is exactly today's behaviour -- and any failure logs the RPA-FALLBACK marker so a silent re-cap at Read is visible rather than invisible. null vs AccessRights.None carries the distinction between "no answer, fall back" and an authoritative "no rights".
+
+APP-ONLY PATH (step 3): satisfied, and it TIGHTENS. RetrievePrincipalAccess names the principal in the URL, so nothing is inferred from app visibility. The old probe read the document AS THE APP, granting the user Read whenever the app could see the record -- finding A-2's defect, now gone on this path too. Theoretical in practice: after task 004 the app-only branch is unreachable from all three consumers.
+
+BOTH ESCALATION TRIGGERS EVALUATED, NEITHER FIRED. (1) Round trips: RPA REPLACES the probe's GET -- success path is 1 call, unchanged; only the fallback path costs 2. (2) Consumers: all six readers of AccessSnapshot.AccessRights enumerated -- AiAuthorizationService checks HasFlag(Read) ONLY so wider rights cannot change its decisions; OperationAccessRule and PermissionsEndpoints are the intended beneficiaries; ExternalProjectDataEndpoints and PlaybookSharingService read a DIFFERENT rights model (external-access grant levels / POA), not AccessSnapshot.
+
+CORRECTED A MIS-FRAMED TASK-001 TEST: Characterization_WritePlusOperation_DeniedUnderReadCeiling was doc-commented "CURRENT (BROKEN) BEHAVIOR ... FLIPPED BY: task 005". Following that instruction would have been a SECURITY REGRESSION -- the test hands the rule a Read-only snapshot, and denying Write+ to a read-only caller is permanently correct. Task 005 changed what the DATA SOURCE produces, not what the RULE decides; the ceiling was never observable at that layer. Renamed to WritePlusOperation_WithReadOnlyRights_DeniedForInsufficientRights and re-documented as a permanent negative. Also fixed two "all rights" constants in that file that omitted AppendTo.
+
+SEAM CREATED (required by acceptance criterion 5, not scope creep): criterion 5 asks for the no-over-grant property "asserted by test with a mocked Dataverse answer", which was impossible -- the mapping was private (reflection = ADR-038 ban B8) behind an HTTP call (transport mock = ban B1). The pure function moved to internal static DataverseAccessRightsMapper + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the convention already used across Sprk.Bff.Api. Pure logic, no I/O -> tests/unit/domain/** (KEEP path).
+
+OBLIGATIONS DISCHARGED: task 003's AppendTo mapping (+ the required allow test, plus a non-vacuous "every right EXCEPT AppendTo is denied" companion) and task 006's "verify the eleven capabilities light up".
+
+TESTS: 15 mapper tests (incl. a property test over all 128 subsets of the seven rights) + 3 endpoint + 2 policy. Non-vacuity verified EMPIRICALLY: transposing "AppendToAccess" => AccessRights.Append -- precisely the failure task 003 predicted -- fails 4 of 15.
+
+UNTESTED BOUNDARY, stated rather than implied away: no test exercises the RetrievePrincipalAccess HTTP call itself. Its URL form and OBO availability need a live tenant -> folded into task 034 / Phase 4 acceptance.
+
+Gates: BFF 10,657 passed / 0 failed - ArchTests 36/36 - Core 45/45 - publish 43.65 MB compressed incl. PDBs, 0.00 MB delta, no packages added. NOTE: the first full run reported 1 failure; three subsequent runs were clean and 6/6 on the touched suites. Identity not captured (-v q suppresses it); matches the pre-existing unreproducible flake -- NOT attributed to this change and not exonerated. One latent race WAS found and fixed while investigating (unlocked enumeration of the test double's Calls list).
+
+Rationale: notes/task-005-rights-mapping.md</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

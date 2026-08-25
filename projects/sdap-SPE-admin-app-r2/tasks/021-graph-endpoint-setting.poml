@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Graph Endpoint setting — wire it or delete it (no third option)</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <!-- 2026-08-23: DELETE. See notes/graph-endpoint-decision.md. AC-4 partial - the Dataverse
+         column sprk_graphendpoint and its stored rows remain; schema deletion is an operator action. -->
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (config model + client construction) and .tsx (settings screen); tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified either/or with a closed decision rule.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs (CreateGraphClient). One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, api, config, frontend, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The Settings screen shows a Graph Endpoint field populated with https://graph.microsoft.com/v1.0 that nothing reads. ContainerTypeConfig carries no endpoint field and CreateGraphClient hardcodes the base address. Either make the field take effect or remove it — an admin troubleshooting via a dead setting chases their tail indefinitely.</prompt>
+
+  <role>SPAARKE platform developer. Expert in configuration binding, Graph client construction, and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>The Graph Endpoint field either changes the endpoint actually called, or no longer exists in the UI or its storage.</goal>
+
+  <context>
+    <background>Spec FR-C02 / §3.4 — dead configuration, a direct instance of the §2.4 systemic defect. Recommended default is DELETE: after task 020 the base address is correct and centrally controlled, and a per-config endpoint override is a support liability (it lets an admin point production at beta). WIRE only if a concrete operational need for per-config override is identified.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ConfigDtos.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/settings</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The v1.0 migration — the correct base address must be settled before deciding whether an override is needed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this field. Exactly two outcomes are acceptable — fully wired (the value changes the endpoint called) or fully removed (UI, DTO, and storage). Leaving it displayed-but-inert is the defect and is not an acceptable outcome.</constraint>
+    <constraint source="project">Scope: if WIRING. The value MUST be validated against an allow-list of known Graph hosts. An unvalidated endpoint field is an SSRF vector — never accept arbitrary URLs.</constraint>
+    <constraint source="project">Scope: if DELETING. Remove the UI field, the DTO property if present, and any stored value. Do not leave orphaned data that a future reader mistakes for live config.</constraint>
+    <constraint source="ADR-021">Scope: the settings screen. Fluent v9 semantic tokens; dark-mode correct; no hex literals.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Configuration binding + Graph client construction</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Client base-address construction.</pattern>
+      <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">Options binding.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §3.4.</step>
+    <step order="1">Confirm the current state: the field renders, ContainerTypeConfig has no endpoint property, CreateGraphClient hardcodes the base address.</step>
+    <step order="2">Decide WIRE or DELETE against the constraint rule. Record the decision and its reason in task notes. Default to DELETE absent a concrete operational need.</step>
+    <step order="3a">If DELETE: remove the field from the settings UI, remove any DTO property, and remove stored values.</step>
+    <step order="3b">If WIRE: add the endpoint to ContainerTypeConfig, validate against an allow-list of known Graph hosts, and thread it through CreateGraphClient.</step>
+    <step order="4">Add WireMock coverage on the task-040 fixture proving the outcome — either the field changes the request host (WIRE) or the base address is centrally fixed (DELETE).</step>
+    <step order="5">Build BFF and code page; run tests.</step>
+    <step order="6">Verify against Spaarke Dev.</step>
+    <step order="7">Measure publish size; record. Update TASK-INDEX.md: task 021 → ✅. Document the decision in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a real operational need for a per-config endpoint override is discovered (e.g. a sovereign-cloud customer requiring a different Graph host), STOP and escalate — that changes this from a cleanup task into a multi-cloud configuration feature with its own scope.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Field is honest">
+      <steps>
+        <step>Open the SPE Admin Settings screen</step>
+        <step>Locate the Graph Endpoint field</step>
+      </steps>
+      <expected>Either the field is absent (DELETE outcome), or changing it demonstrably changes the endpoint called (WIRE outcome). It is never present-but-inert.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Inspect the Settings screen in both themes</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals; legible contrast.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/settings</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/graph-endpoint-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Graph Endpoint field either takes effect or no longer exists — verified by changing it and observing, or by confirming absence in UI and storage.</criterion>
+    <criterion testable="true">The WIRE-or-DELETE decision and its reason are recorded in notes/graph-endpoint-decision.md.</criterion>
+    <criterion testable="true">Negative (if WIRED): an endpoint value outside the allow-list is rejected with a validation error — arbitrary hosts are not accepted.</criterion>
+    <criterion testable="true">Negative (if DELETED): no orphaned endpoint value remains in stored config.</criterion>
+    <criterion testable="true">Settings screen uses Fluent v9 semantic tokens and is dark-mode correct.</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C02. Satisfies spec success criterion 4. "No third option" is the point — the current displayed-but-inert state is precisely the defect.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

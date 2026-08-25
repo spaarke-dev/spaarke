@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-10 (A-17): FetchXML guard must reject same-entity self-joins</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path — a caller-controlled data-exfiltration hole (High) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The exploit and the guard's exact blind spot are precisely characterized in A-17; the fix is a targeted change to one guard's link-entity analysis. Well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/ExternalAccess/ExternalModuleDataEndpoints.cs — a known-contended directory (Api/ExternalAccess/**). Merge serially with /conflict-check even though its specific file is disjoint from siblings.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-17 (spec FR-10, High): the FetchXML guard on the external module read seam rejects references to OTHER entities but permits same-entity self-joins, so a caller-controlled fetch with a self-join can pull aliased columns from OUT-OF-SCOPE rows of the same entity — real cross-matter/cross-tenant document-field disclosure. Make the guard reject self-joins (or scope-check the joined rows), so a self-join projecting aliased columns of out-of-scope rows is rejected, not scoped.</prompt>
+  <role>SPAARKE platform developer. Expert in FetchXML structure, link-entity semantics, and the external-module Tier-2 scoping model. Follow ADRs strictly.</role>
+  <goal>A caller-submitted fetch that self-joins the module's own entity to leak aliased out-of-scope columns is rejected by the guard; legitimate single-entity fetches still pass; the exploit test fails to exfiltrate.</goal>
+
+  <context>
+    <background>Finding A-17 (10-finding-confirmations.md, ranked #2 High): ExternalModuleDataEndpoints.ExecuteScopedFetchAsync:160-172 rejects the fetch iff referenced.Count==0 || referenced.Any(e => e != module.RecordEntity) — a &lt;link-entity name='{module.RecordEntity}'&gt; self-join adds only module.RecordEntity to the referenced set, so the guard passes. FetchXmlEntityExtractor.ExtractEntities:94-110 collects all link-entity names via Descendants; a self-join surfaces as a single {module.RecordEntity} element, so the guard cannot distinguish a self-join from a plain single-entity query. Tier2ScopeFilterInjector.Inject scopes only PRIMARY rows (in-filter on the entity's own scope attribute); ExternalModuleDescriptor.ScopeRows:153-187 keeps a primary row when its own attribute ∈ accessible set — aliased columns pulled from a self-joined link-entity are additional attributes on in-scope primary rows and are never scope-checked; FetchService.ProjectEntity:136 serializes AliasedValue to the client. Exploit: fetch sprk_document with self-join &lt;link-entity name='sprk_document' from='statecode' to='statecode' alias='x'&gt; selecting sensitive columns → each in-scope primary row carries aliased columns sourced from out-of-scope sprk_document rows. FR-10 acceptance: a self-join projecting aliased columns of out-of-scope rows is rejected, not scoped.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchXml/FetchXmlEntityExtractor.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/FetchXmlGuardSelfJoinTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the self-join-passes-guard behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: any fetch the guard cannot prove safe (including link-entities it cannot fully analyze) is REJECTED, not scoped-and-hoped. Scope: the guard predicate.</constraint>
+    <constraint source="project">Default posture: reject same-entity self-joins outright on the caller-submitted external read seam (simplest safe fix per FR-10 wording "rejected, not scoped"). Only if a legitimate consumer requires a self-join, escalate the scope-the-join alternative rather than shipping it silently. Scope: ExecuteScopedFetchAsync guard.</constraint>
+    <constraint source="project">The guard change must not weaken the existing other-entity rejection. Scope: the referenced-entity analysis.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>FetchXML guard hardening</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Test the guard with crafted FetchXML strings, no live Dataverse</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Read ExecuteScopedFetchAsync:160-172 and FetchXmlEntityExtractor.ExtractEntities:94-110; confirm how a self-join collapses to a single referenced-entity name.</step>
+    <step order="2">Extend the guard to DETECT link-entities (count/inspect &lt;link-entity&gt; nodes), not just the set of distinct entity names — reject when any link-entity is present on the caller-submitted external read seam (self-join or otherwise, unless the descriptor explicitly whitelists a scoped join).</step>
+    <step order="3">Author FetchXmlGuardSelfJoinTests: the A-17 exploit fetch is rejected; a plain single-entity fetch passes; an other-entity link is still rejected.</step>
+    <step order="4">Flip the task-001 characterization test.</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the chosen posture (reject-all-joins vs scope-the-join) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an existing legitimate external consumer submits self-joins (grep the SPA/Teams clients for module-fetch calls with link-entity), STOP and escalate: rejecting outright would break them; scoping the join is materially more complex and must be a deliberate decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test exercises the external-module FetchXML guard against a crafted self-join (A-17 was found by manual code read).</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without an exploit test, the A-17 self-join exfiltration path can silently regress (the guard already looked correct); the test pins the exploit as rejected (FR-10).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/FetchXmlGuardSelfJoinTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The A-17 exploit fetch (self-join on module.RecordEntity projecting aliased columns) is REJECTED by the guard (FR-10 acceptance) — asserted with the crafted FetchXML.</criterion>
+    <criterion testable="true">A legitimate single-entity fetch for an accessible scope still passes the guard.</criterion>
+    <criterion testable="true">Negative: an other-entity link-entity reference is still rejected (no regression of the existing guard).</criterion>
+    <criterion testable="true">Negative: a malformed fetch the guard cannot parse is rejected (fail closed), not passed through.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10; finding A-17 (register §A.2 rank 2). Do NOT modify Tier2ScopeFilterInjector here (that is the A-16 bound, task 018).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

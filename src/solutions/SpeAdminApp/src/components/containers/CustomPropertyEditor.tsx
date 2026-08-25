@@ -53,7 +53,7 @@ import {
   Tag20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { ContainerCustomProperty } from "../../types/spe";
 import { AddEditPropertyDialog } from "./AddEditPropertyDialog";
 
@@ -259,7 +259,7 @@ export const CustomPropertyEditor: React.FC<CustomPropertyEditorProps> = ({
       setLoaded(true);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to load custom properties.";
+        describeApiError(err, "Failed to load custom properties.");
       setLoadError(message);
     } finally {
       setLoading(false);
@@ -348,7 +348,7 @@ export const CustomPropertyEditor: React.FC<CustomPropertyEditorProps> = ({
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to save custom properties.";
+        describeApiError(err, "Failed to save custom properties.");
       setSaveError(message);
     } finally {
       setSaving(false);

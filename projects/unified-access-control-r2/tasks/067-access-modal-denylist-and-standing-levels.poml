@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="unified-access-control-r2">
+  <metadata>
+    <title>AccessGrantModal: deny-list (ethical wall) management + level-bearing standing grants (FR-23 UI, FR-25 UI, design §6)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 064 (deny endpoints) + 066 (report-based rows) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend writing authorization vetoes (ethical walls); tags pcf/frontend + auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI over frozen 064 endpoints; interaction patterns mirror the modal's existing sections.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same component files as 065/066 (AccessGrantModal.tsx/types.ts) — solo wave.</parallel-reason>
+    <deps>064, 066</deps>
+    <tags>pcf, frontend, fluent-ui, auth</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Complete the design §6 Manage Access target state in the modal: (a) a No Access / deny-list section to add and remove ethical-wall entries keyed (contact | organization) x (record | record's organization) via the 064 endpoints, with denied principals visibly vetoed in Current Access; (b) standing grants become level-bearing for contacts AND organizations (FR-25 baselines View Only / Collaborate / Full Access) displayed and, where the Phase-2 write surface allows, settable.</prompt>
+  <role>SPAARKE platform developer. Fluent v9, destructive-action confirmation patterns. Follow ADRs strictly.</role>
+  <goal>Deny-list section (list, add via existing contact/organization pickers, remove with confirm); Current Access rows for denied principals show a 'No Access (veto)' state overriding their level; standing-grant rows display the subject's baseline level; org standing grant visible on org rows; all writes via authenticatedFetch; delegation 403 handled as the established deny state.</goal>
+
+  <context>
+    <background>spec.md FR-23 ("No Access is a veto, never a level" — the UI must render it as an override, not as a level option in the dropdown) + FR-25 (standing grant contributes at the subject's sprk_accesspermissiongrant baseline); design.md §6 rows "Deny list — add/remove ethical-wall entries" and "Standing grant — level-bearing, contact and organization". The veto semantics are Phase 1; Phase 2 wired org-level standing columns; this task is exclusively the management surface.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase4-access-report-contract.md</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">Deny-list add/remove endpoints + report rows carrying deny/veto state.</dependency>
+      <dependency task="066" status="pending">Report-based Current Access rendering this section composes with.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-MUST">"No Access" NEVER appears as an option in any level dropdown — it exists only as the deny-list veto section. Scope: every level selector in the modal.</constraint>
+    <constraint source="project">Deny-list add requires explicit confirmation naming the blast radius ("X will be denied on this record / on every record referencing organization Y, overriding all grants"); scope: the add flow for both key shapes.</constraint>
+    <constraint source="ADR-021">Semantic tokens; veto state styling distinct from suppression styling (different reasons, different visuals) and dark-mode correct. Scope: new styles.</constraint>
+    <constraint source="ADR-028">authenticatedFetch only. Scope: all calls.</constraint>
+    <constraint source="project">Standing-grant level EDITS only if the Phase-2 server surface exposes a write; otherwise display-only with a tooltip naming where the baseline is administered — never a client-side write to Dataverse columns from this modal. Scope: standing rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ethical-wall management UI</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="modal-shell" location=".claude/patterns/ui/modal-shell.md">Confirmation patterns (ConfirmModal) for destructive adds/removes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify what standing-level write surface Phase 2 actually shipped; record display-only vs editable decision.</step>
+    <step order="1">Add the deny-list section: load entries for the record (+ its organization key) from 064; add flows via existing pickers with the blast-radius confirm; remove with confirm.</step>
+    <step order="2">Compose with Current Access: a denied principal's row shows the veto override state (level visually overridden, 'No Access' badge).</step>
+    <step order="3">Standing rows: show baseline level (contact + organization); wire edit only if the server surface exists.</step>
+    <step order="4">Component tests: add/remove deny entry round-trips; denied row renders veto override; no level dropdown contains a 'No Access' option (explicit assertion); 403 deny state; org-key deny confirm names the org-wide blast radius.</step>
+    <step order="5">Builds + jest green; version bump if PCF bundle affected. Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Phase 2 shipped no server write for standing-grant levels and the owner expects editability here, STOP and escalate the gap (server task needed) rather than writing Dataverse columns directly from the modal.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Ethical wall add and veto rendering">
+      <steps>
+        <step>Open https://{org}.crm.dynamics.com; open a record where contact C holds Full Access; open Manage Access.</step>
+        <step>Add C to the No Access list (record key); confirm the blast-radius dialog.</step>
+      </steps>
+      <expected>C's Current Access row shows the No Access veto override; the SPA denies C on the record (spot-check); removing the entry restores the level.</expected>
+    </test>
+    <test name="No Access is not a level">
+      <steps>
+        <step>Open every level dropdown in the modal (grant flows, user share flow, standing rows if editable).</step>
+      </steps>
+      <expected>No dropdown offers "No Access"; the only path to a veto is the deny-list section.</expected>
+    </test>
+    <test name="ADR-021 dark mode">
+      <steps>
+        <step>Dark theme; inspect the deny section, veto badges, confirm dialogs.</step>
+      </steps>
+      <expected>Semantic tokens; veto styling distinct from suppressed styling and legible in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deny-list add for (contact, record) and (contact, organization) both round-trip through 064 and render in the section; remove restores.</criterion>
+    <criterion testable="true">A denied principal's Current Access row renders the veto override state distinct from suppression.</criterion>
+    <criterion testable="true">Standing-grant rows display the FR-25 baseline level for contacts and organizations.</criterion>
+    <criterion testable="true">Negative: no level selector anywhere offers "No Access" (test-asserted).</criterion>
+    <criterion testable="true">Negative: 403 (no Write) disables deny-list mutation with the needs-Write state; endpoint failure never removes an entry optimistically.</criterion>
+    <criterion testable="true">Jest + builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-23/FR-25; design.md §6. Completes the Manage Access target table with 065/066.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

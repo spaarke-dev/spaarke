@@ -27,10 +27,7 @@
  */
 
 import { test, expect, Page, BrowserContext } from '@playwright/test';
-import {
-  OutlookTaskPanePage,
-  type OutlookTaskPaneConfig,
-} from '../../pages/addins/OutlookTaskPanePage';
+import { OutlookTaskPanePage, type OutlookTaskPaneConfig } from '../../pages/addins/OutlookTaskPanePage';
 
 // Test configuration
 const testConfig: OutlookTaskPaneConfig = {
@@ -333,10 +330,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Wait for job status stage update
    */
   async waitForStageStatus(stageName: string, status: string, timeout = 10000): Promise<void> {
-    await this.page.waitForSelector(
-      `[data-testid="stage-${stageName}"][data-status="${status}"]`,
-      { timeout }
-    );
+    await this.page.waitForSelector(`[data-testid="stage-${stageName}"][data-status="${status}"]`, { timeout });
   }
 
   /**
@@ -345,7 +339,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
   async getJobStages(): Promise<{ name: string; status: string }[]> {
     const stages = await this.page.locator('[data-testid="stage-item"]').all();
     return Promise.all(
-      stages.map(async (stage) => ({
+      stages.map(async stage => ({
         name: (await stage.getAttribute('data-stage-name')) || '',
         status: (await stage.getAttribute('data-status')) || '',
       }))
@@ -364,83 +358,77 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock Office.js read mode with email data
    */
   async mockOfficeReadMode(attachments: EmailAttachment[] = mockAttachments): Promise<void> {
-    await this.page.addInitScript(
-      (attachmentData) => {
-        (window as any).Office = {
-          context: {
-            mailbox: {
-              item: {
-                itemType: 'message',
-                itemId: 'msg-001',
-                subject: 'RE: Contract Review Request',
-                from: { emailAddress: 'sender@example.com', displayName: 'John Sender' },
-                to: [{ emailAddress: 'recipient@example.com', displayName: 'Jane Recipient' }],
-                dateTimeCreated: new Date('2026-01-20T10:00:00Z'),
-                attachments: attachmentData,
-                body: {
-                  getAsync: (coercionType: any, callback: (result: any) => void) => {
-                    callback({
-                      status: 'succeeded',
-                      value: '<html><body><p>Please review the attached contract.</p></body></html>',
-                    });
-                  },
-                },
-                getAttachmentContentAsync: (
-                  attachmentId: string,
-                  callback: (result: any) => void
-                ) => {
-                  // Mock base64 content
-                  const mockContent = btoa('Mock attachment content for ' + attachmentId);
+    await this.page.addInitScript(attachmentData => {
+      (window as any).Office = {
+        context: {
+          mailbox: {
+            item: {
+              itemType: 'message',
+              itemId: 'msg-001',
+              subject: 'RE: Contract Review Request',
+              from: { emailAddress: 'sender@example.com', displayName: 'John Sender' },
+              to: [{ emailAddress: 'recipient@example.com', displayName: 'Jane Recipient' }],
+              dateTimeCreated: new Date('2026-01-20T10:00:00Z'),
+              attachments: attachmentData,
+              body: {
+                getAsync: (coercionType: any, callback: (result: any) => void) => {
                   callback({
                     status: 'succeeded',
-                    value: {
-                      content: mockContent,
-                      format: 'base64',
-                    },
+                    value: '<html><body><p>Please review the attached contract.</p></body></html>',
                   });
                 },
               },
-            },
-            diagnostics: {
-              hostName: 'OutlookWebApp',
-              hostVersion: '16.0.0.0',
-            },
-            requirements: {
-              isSetSupported: (name: string, version: string) => {
-                if (name === 'Mailbox') return parseFloat(version) <= 1.8;
-                return true;
+              getAttachmentContentAsync: (attachmentId: string, callback: (result: any) => void) => {
+                // Mock base64 content
+                const mockContent = btoa('Mock attachment content for ' + attachmentId);
+                callback({
+                  status: 'succeeded',
+                  value: {
+                    content: mockContent,
+                    format: 'base64',
+                  },
+                });
               },
             },
           },
-          CoercionType: {
-            Html: 'html',
-            Text: 'text',
+          diagnostics: {
+            hostName: 'OutlookWebApp',
+            hostVersion: '16.0.0.0',
           },
-          AsyncResultStatus: {
-            Succeeded: 'succeeded',
-            Failed: 'failed',
-          },
-          MailboxEnums: {
-            AttachmentContentFormat: {
-              Base64: 'base64',
+          requirements: {
+            isSetSupported: (name: string, version: string) => {
+              if (name === 'Mailbox') return parseFloat(version) <= 1.8;
+              return true;
             },
           },
-        };
-      },
-      attachments
-    );
+        },
+        CoercionType: {
+          Html: 'html',
+          Text: 'text',
+        },
+        AsyncResultStatus: {
+          Succeeded: 'succeeded',
+          Failed: 'failed',
+        },
+        MailboxEnums: {
+          AttachmentContentFormat: {
+            Base64: 'base64',
+          },
+        },
+      };
+    }, attachments);
   }
 
   /**
    * Mock entity search API
    */
   async mockEntitySearchApi(results: EntitySearchResult[] = mockEntities): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/search/entities*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/search/entities*`, route => {
       const url = new URL(route.request().url());
       const query = url.searchParams.get('q')?.toLowerCase() || '';
 
       const filtered = results.filter(
-        (e) => e.name.toLowerCase().includes(query) || e.displayInfo.toLowerCase().includes(query)
+        e => e.name.toLowerCase().includes(query) || e.displayInfo.toLowerCase().includes(query)
       );
 
       route.fulfill({
@@ -459,7 +447,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock save endpoint
    */
   async mockSaveApi(response: SaveJobResponse = mockSaveResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/save`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: response.duplicate ? 200 : 202,
         contentType: 'application/json',
@@ -472,7 +460,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock job status polling endpoint
    */
   async mockJobStatusApi(response: JobStatusResponse = mockJobStatusCompleted): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*`, route => {
       if (!route.request().url().includes('/stream')) {
         route.fulfill({
           status: 200,
@@ -489,7 +477,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock SSE job status stream
    */
   async mockSSEStream(stages: JobStatusResponse['stages']): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*/stream`, async (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/*/stream`, async route => {
       // Create SSE response with staged updates
       let sseBody = '';
 
@@ -528,12 +516,12 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock recent items API
    */
   async mockRecentApi(recentEntities: EntitySearchResult[] = mockEntities.slice(0, 3)): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          recentAssociations: recentEntities.map((e) => ({
+          recentAssociations: recentEntities.map(e => ({
             id: e.id,
             entityType: e.entityType,
             name: e.name,
@@ -550,7 +538,7 @@ class OutlookSaveFlowPage extends OutlookTaskPanePage {
    * Mock Quick Create API
    */
   async mockQuickCreateApi(entityType: string, newEntityId: string): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/quickcreate/${entityType}`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/quickcreate/${entityType}`, route => {
       const body = route.request().postDataJSON();
       route.fulfill({
         status: 201,
@@ -731,9 +719,7 @@ test.describe('Save Flow - Email With Attachments @e2e @outlook', () => {
       const checkboxes = page.locator(
         '[data-testid="attachment-item"]:not([data-inline="true"]) input[type="checkbox"]'
       );
-      const allUnchecked = await checkboxes.evaluateAll((cbs) =>
-        (cbs as HTMLInputElement[]).every((cb) => !cb.checked)
-      );
+      const allUnchecked = await checkboxes.evaluateAll(cbs => (cbs as HTMLInputElement[]).every(cb => !cb.checked));
       expect(allUnchecked).toBe(true);
 
       // Select all again
@@ -760,7 +746,7 @@ test.describe('Save Flow - Attachment Size Limits @e2e @outlook', () => {
     await saveFlowPage.mockRecentApi();
 
     // Mock API to return error for large file
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 400,
         contentType: 'application/json',
@@ -822,7 +808,7 @@ test.describe('Save Flow - Attachment Size Limits @e2e @outlook', () => {
     await saveFlowPage.mockRecentApi();
 
     // Mock API to return error for total size
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 400,
         contentType: 'application/json',
@@ -906,8 +892,8 @@ test.describe('Save Flow - Entity Picker @e2e @outlook', () => {
 
       // Should only show matters
       const options = page.locator('[data-testid="entity-option"]');
-      const allMatters = await options.evaluateAll((opts) =>
-        opts.every((o) => o.getAttribute('data-entity-type') === 'Matter')
+      const allMatters = await options.evaluateAll(opts =>
+        opts.every(o => o.getAttribute('data-entity-type') === 'Matter')
       );
 
       expect(allMatters).toBe(true);
@@ -916,7 +902,7 @@ test.describe('Save Flow - Entity Picker @e2e @outlook', () => {
 
   test('should show "no results" for empty search', async ({ page }) => {
     // Mock empty results
-    await page.route(`${testConfig.apiBaseUrl}/office/search/entities*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/search/entities*`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1114,17 +1100,16 @@ test.describe('Save Flow - Polling Fallback @e2e @outlook', () => {
 
   test('should fall back to polling when SSE fails', async ({ page }) => {
     // Mock SSE to fail
-    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, route => {
       route.abort('failed');
     });
 
     // Mock polling endpoint with progressive status
     let pollCount = 0;
-    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, route => {
       if (!route.request().url().includes('/stream')) {
         pollCount++;
-        const status =
-          pollCount < 3 ? mockJobStatusRunning : mockJobStatusCompleted;
+        const status = pollCount < 3 ? mockJobStatusRunning : mockJobStatusCompleted;
         route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -1150,22 +1135,20 @@ test.describe('Save Flow - Polling Fallback @e2e @outlook', () => {
 
   test('should poll at 3-second intervals', async ({ page }) => {
     // Mock SSE to fail
-    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*/stream`, route => {
       route.abort('failed');
     });
 
     const pollTimestamps: number[] = [];
 
     // Mock polling endpoint
-    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/*`, route => {
       if (!route.request().url().includes('/stream')) {
         pollTimestamps.push(Date.now());
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(
-            pollTimestamps.length < 4 ? mockJobStatusRunning : mockJobStatusCompleted
-          ),
+          body: JSON.stringify(pollTimestamps.length < 4 ? mockJobStatusRunning : mockJobStatusCompleted),
         });
       } else {
         route.continue();
@@ -1206,7 +1189,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
   });
 
   test('should handle authorization error (OFFICE_009)', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 403,
         contentType: 'application/json',
@@ -1230,7 +1213,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
   });
 
   test('should handle entity not found error (OFFICE_007)', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -1254,7 +1237,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
   });
 
   test('should handle server error gracefully', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -1277,7 +1260,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
   });
 
   test('should handle network error gracefully', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.abort('failed');
     });
 
@@ -1292,7 +1275,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
 
   test('should allow retry after error', async ({ page }) => {
     let attempts = 0;
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       attempts++;
       if (attempts === 1) {
         route.fulfill({
@@ -1337,7 +1320,7 @@ test.describe('Save Flow - Error Handling @e2e @outlook', () => {
   });
 
   test('should display correlation ID for support', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -1460,13 +1443,15 @@ test.describe('Save Flow - Mandatory Association @e2e @outlook', () => {
 
   test('should show "required" indicator on entity picker', async ({ page }) => {
     // Entity picker should show required indicator
-    const requiredIndicator = page.locator('[data-testid="entity-picker"]').locator('[aria-required="true"], .required, *:has-text("*")');
-    const isRequired = await requiredIndicator.count() > 0 || await page.getByText(/required/i).isVisible();
+    const requiredIndicator = page
+      .locator('[data-testid="entity-picker"]')
+      .locator('[aria-required="true"], .required, *:has-text("*")');
+    const isRequired = (await requiredIndicator.count()) > 0 || (await page.getByText(/required/i).isVisible());
     expect(isRequired).toBe(true);
   });
 
   test('should return OFFICE_003 error without association', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: 400,
         contentType: 'application/json',

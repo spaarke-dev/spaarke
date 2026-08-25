@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-06: Enforce external grant expiry on every grant read path</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (grant read filter) — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Add an expiry predicate to enumerated read paths; the minimum fix is explicitly specified by the spec and D-1.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/ExternalParticipationService.cs — known contended path (Infrastructure/ExternalAccess/**; task 015 modifies AccessibleRecordSetService.cs in the same directory and both feed the same read pipeline).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-5 (spec FR-06, High): external grant expiry must be enforced. sprk_expiresdate is written at grant time but never read — it appears in no $filter and no $select on any read path, and there is no sweep job. A grant with an expiry date in the past currently confers full access forever, while the UI presents expiry as a working control (a promise-shaped no-op).</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse Web API OData filtering and the external-access read pipeline (ExternalParticipationService / AccessibleRecordSetService). Follow ADRs strictly.</role>
+  <goal>Every read path that materializes external grants excludes rows whose sprk_expiresdate is in the past. A grant with past expiry confers no access anywhere: participation queries, accessible-set composition, and effective-access views all treat it as inactive.</goal>
+
+  <context>
+    <background>Finding A-5 (design-register §A.1): "sprk_expiresdate written, never read — absent from $filter and $select" — evidence ExternalParticipationService.cs:405-407 (the grant query filters `_sprk_contact_value eq {contactId}` + statecode only); only write-side refs exist repo-wide; no sweep job. Spec FR-06 acceptance: a grant with sprk_expiresdate in the past confers no access; if deferred, the expiry input must be removed from the UI — this task takes the ENFORCE branch (register D-1: "small — add to the read filter"). Enumerate ALL grant read paths: ExternalParticipationService.QueryGrantSetAsync and every sibling query in that service that materializes sprk_externalrecordaccess rows (grep for the entity set name across src/server). Evaluate expiry against UTC now, server-side in the OData $filter (expiresdate null OR &gt; utcNow), not client-side after materialization.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning expired-grant-still-active behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: a grant row whose expiry cannot be evaluated (query error) is NOT granted; malformed expiry data excludes the row. Scope: the expiry predicate added by this task.</constraint>
+    <constraint source="project">The expiry predicate must be applied in the Dataverse $filter on EVERY read path that materializes grants — a single missed path silently re-opens the finding. The task is complete only when a grep for the sprk_externalrecordaccess entity set shows every read query carries the predicate (or is documented as non-access-conferring). Scope: all of src/server.</constraint>
+    <constraint source="project">No sweep/deactivation job in this task — expiry is read-side enforcement only (register D-1 minimum; row cleanup is out of Phase 0 scope). Scope: this task adds no background work.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-5: Extract the grant-query builder from ExternalParticipationService.QueryGrantSetAsync (inline at :405-407, immediately before _httpClient.SendAsync) into an internal PURE member reachable via InternalsVisibleTo("Sprk.Bff.Api.Tests"). Task 001 could not pin A-5 because the query string is built and sent in one method; this task owns that coverage. Assert the built $filter/$select includes sprk_expiresdate AND that an expired grant confers no access. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external grant read pipeline</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">OData query conventions in BFF services</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Grep src/server for every read query against the sprk_externalrecordaccess entity set; produce the closed list of read paths (expect: ExternalParticipationService grant-set + participation queries; note ProjectClosureEndpoint reads are a revocation sweep, not access-conferring — leave to task 016).</step>
+    <step order="2">Add `sprk_expiresdate` to $select and the predicate `(sprk_expiresdate eq null or sprk_expiresdate gt {utcNow})` to $filter on each access-conferring read path.</step>
+    <step order="3">Verify the field's logical name against live Dataverse metadata before trusting docs (schema docs in this area are stale per design-register §G).</step>
+    <step order="4">Flip the task-001 characterization test: expired grant now confers no access; add boundary tests (expiry exactly now / null expiry / future expiry).</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Record the closed read-path list + predicate placement in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live logical name of the expiry field differs from sprk_expiresdate, STOP, verify against dev Dataverse metadata, and record the discrepancy — do not guess a column name into a security filter.</trigger>
+    <trigger>If any read path cannot take a server-side predicate (e.g. FetchXML composed elsewhere), STOP and escalate the design rather than filtering client-side silently.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A grant with sprk_expiresdate in the past confers no access: the record is absent from the caller's participation/grant set (FR-06 acceptance).</criterion>
+    <criterion testable="true">A grant with null expiry or future expiry confers access unchanged.</criterion>
+    <criterion testable="true">Negative: a contact whose ONLY grant on a record is expired is denied on that record (accessible-set + IsRecordAccessible seam).</criterion>
+    <criterion testable="true">The predicate is server-side ($filter), verified by inspecting the built query in tests.</criterion>
+    <criterion testable="true">Closed list of sprk_externalrecordaccess read paths documented; each carries the predicate or a written non-access-conferring rationale.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06; finding A-5; register D-1 (enforce branch chosen — UI input stays because it now works). No sweep job: expired rows remain in the table as inactive-by-read; Phase 5 attestation will see them.
+
+COMPLETED 2026-08-23. A-5 closed; FR-06 enforced server-side on every conferring read path.
+
+CLOSED READ-PATH LIST (acceptance criterion 5). Predicate ADDED: ExternalParticipationService
+.QueryGrantSetAsync (per-contact), .QueryOrganizationGrantRowsAsync (org grants -- omitting it would let
+any contact keep expired access via their firm), ExternalDataService.GetProjectContactIdsAsync (display
+list whose contract says "active access"; a participant list disagreeing with enforcement is its own
+hazard). Predicate DELIBERATELY OMITTED: ExternalGrantLifecycle.QueryActiveRowsAsync/RetrieveRowAsync
+(grant upsert + revoke sweep) and ProjectClosureEndpoint.BuildActiveProjectGrantsFilter (cascade revoke)
+-- filtering expiry there would make EXPIRED GRANTS UNREVOKABLE, skipping exactly the rows an operator is
+cleaning up. AccessibleRecordSetService holds no query of its own and inherits the fix.
+
+THE PREDICATE: (sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})
+
+DEVIATION FROM THIS TASK'S PRESCRIBED STEP 2, on new evidence. Step 2 specifies
+"(sprk_expiresdate eq null or sprk_expiresdate gt {utcNow})". Live Dataverse metadata shows
+sprk_expiresdate is DATE ONLY, which the task author did not know. (a) {utcNow} as a timestamp against a
+Date Only column risks a 400 -- and a 400 on this query returns an EMPTY grant set, i.e. a silent total
+access outage rather than a visible error; the literal must be a bare yyyy-MM-dd. (b) gt kills a grant at
+00:00 ON its own expiry date, silently shortening every dated grant in the system by one day; "access
+until 30 June" means 30 June works. ge still satisfies FR-06, whose acceptance is an expiry IN THE PAST.
+Pinned by ExpiryPredicate_OnTheExpiryDateItself_StillConfersAccess.
+
+THE eq null BRANCH IS LOAD-BEARING: OData "ge" excludes nulls and most grants have no expiry, so without
+it the predicate would revoke every open-ended grant -- an outage, not an expiry bug.
+
+ESCALATION TRIGGERS -- both evaluated, NEITHER fired. (1) Live logical name verified via Dataverse
+metadata; sprk_expiresdate is correct. The TYPE differed from the assumption and is handled above.
+(2) All three paths build OData $filter strings directly -- no FetchXML composed elsewhere, nothing
+filtered client-side.
+
+TASK-001 OBLIGATION HONORED: BuildContactGrantFilter / BuildOrganizationGrantFilter / ExpiryPredicate /
+GrantRowSelect extracted as pure internal static members BEFORE the predicate was added (task 001 could
+not pin A-5 because the queries were inline immediately before _httpClient.SendAsync, and observing the
+emitted $filter required a transport mock -- ban B1). No reflection (ban B8).
+
+TESTS: tests/integration/auth/UnifiedAccessControl/GrantExpiryCharacterizationTests.cs (11). NOTE the
+test path named in this file (tests/unit/.../AccessControl/) is NOT a KEEP path and does not exist -- the
+fifth POML in this project with a wrong test path. Perturbations: drop predicate 2/11 fail; drop eq null
+1/11; ge->gt 1/11; ungroup org disjunction 1/11.
+
+HONEST LIMIT: these assert the QUERY, not Dataverse's evaluation of it. End-to-end verification needs a
+live tenant and is filed on task 034.
+
+Full suite 10,726 passed / 0 failed; ArchTests 36/36; Core 45/45; publish 43.69 MB compressed
+(unchanged, ceiling 60); no vulnerable packages.
+
+Rationale: notes/task-007-grant-expiry.md</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

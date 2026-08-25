@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="unified-access-control-r2">
+  <metadata>
+    <title>ADR-034 amendment (path B) — the access-conferring allow-list becomes first-class and per-surface; org-typed columns join it</title>
+    <phase>2 One definition of member</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architecture change on the membership ADR that authorization consumes; tags auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration work per CLAUDE.md §8.5; the amendment defines the policy boundary tasks 041/043 implement.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>MAIN-SESSION-ONLY: edits .claude/adr/** which sub-agents cannot write (CLAUDE.md §3). Must merge before task 041 (the registry it sanctions).</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <deps>none</deps>
+    <tags>adr, auth, documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-034 (CLAUDE.md §6.5 path B): discovery over the 6 identity tables remains correct for AI SCOPING but is over-inclusive for AUTHORIZATION — the access-conferring allow-list becomes a first-class, per-surface concept, applies to contact-typed AND organization-typed lookups, and is defined by an EXPLICIT column registry rather than the sprk_assigned* prefix convention. Also fix the documented staleness: the concise ADR omits ResolveByContactAsync and MembershipResponse.RelatedByRole, and documents only the AAD-oid contact cross-ref while code prefers systemuser.sprk_primarycontact. The 1-hop cap needs NO amendment — FR-26 makes every chain one hop by construction.</prompt>
+  <role>SPAARKE platform developer with membership-spine expertise. Follow ADRs strictly; this task exercises the §6.5 path-B protocol.</role>
+  <goal>Amended .claude/adr/ADR-034-user-record-membership.md (+ docs/adr/ADR-034-user-record-membership.md full version) carrying a dated amendment: registry-based allow-list (contact + org typed), per-surface policy statement (scoping = all descriptors; authorization = registry only), corrected Key Types + identity-contract staleness, unchanged 1-hop cap, and a note that a record→members inverse read is a sanctioned future extension of the canonical mechanism.</goal>
+
+  <context>
+    <background>Spec ADR Tensions row 2 / design §9. Investigation 02 §8: M1 makes the resolver canonical — a registry inside the resolver is an extension (path B), a parallel mechanism would be a violation; §4.2: the systemuser plane today confers membership on EVERY descriptor (adverse contact lookups via linked contact, sprk_regarding*, account-typed, BU-typed) — the asymmetry is in-code; §10.4 lists the concise-ADR staleness items verbatim. Design §4.5: "a naming convention silently admits sprk_assignedmonitor and silently denies sprk_leadcontact" — the registry replaces the convention. ADR-034 M4 already resolves sprk_assignedlawfirm1/2 to Organization — the org-typed conferring precedent.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-034-user-record-membership.md</file>
+      <file role="modify">docs/adr/ADR-034-user-record-membership.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/investigation/02-membership-spine.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Scope: this whole task. Path-B amendment merged BEFORE the dependent code (task 041); §6.5 output format in the PR description.</constraint>
+    <constraint source="CLAUDE.md §3">Scope: file writes. .claude/** is main-session-only.</constraint>
+    <constraint source="ADR-034">Scope: what stays. M1 (canonical resolver), M7/N4 (1-hop cap, unamended — state explicitly WHY: FR-26 denormalizes the core ancestor so chains are one hop by construction), M8/M9 (event semantics), N2 (non-existent-entity ban, with the §10.4 precision that real teammembership IS legitimately used). Do not weaken any of these.</constraint>
+    <constraint source="project">Scope: amendment content. MUST state: (a) two consumption surfaces — AI scoping (all discovered descriptors) vs authorization (registry-listed columns only); (b) the registry covers contact-typed AND organization-typed lookups, replacing the prefix convention; (c) adding a conferring column is a registry edit, not a rename (FR-24 acceptance); (d) the record→members inverse read is a future extension of the canonical mechanism, not a new resolver (investigation 02 §8 direction note).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>membership spine, allow-list policy, ADR amendment protocol</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/02-membership-spine.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="dated-amendment" location=".claude/adr/ADR-028-spaarke-auth-architecture.md">House style for dated amendments on a living ADR.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read both ADR-034 versions, investigation 02 §3/§4.2/§8/§10.4, design §4.5.</step>
+    <step order="1">Draft the dated amendment per the project constraint (a)-(d) into the full ADR; carry the MUST/MUST-NOT deltas into the concise ADR (registry MUST; per-surface policy MUST; prefix-convention retirement).</step>
+    <step order="2">Fix the concise-ADR staleness from investigation 02 §10.4: add ResolveByContactAsync + RelatedByRole to Key Types; correct the identity-contract table to sprk_primarycontact-first with AAD-oid fallback.</step>
+    <step order="3">Verify the untouched-rules constraint by diff (1-hop, event semantics, canonical-mechanism intact).</step>
+    <step order="4">Add a .claude/CHANGELOG.md entry.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If codifying the per-surface split reveals a LIVE consumer that depends on unfiltered systemuser-plane descriptors as an access answer (beyond AccessibleRecordSetService, which Phase 1 already rehomes), STOP and escalate with the consumer list — the amendment must not silently change another surface's behavior contract.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-034-user-record-membership.md</output>
+    <output type="docs">docs/adr/ADR-034-user-record-membership.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-034 versions carry a dated amendment naming unified-access-control-r2 with the per-surface policy, the registry (contact + org typed) replacing the prefix convention, and the registry-edit-not-rename rule.</criterion>
+    <criterion testable="true">The 1-hop cap text is unchanged and the amendment states why no exception is needed (FR-26 denormalization).</criterion>
+    <criterion testable="true">Concise-ADR staleness fixed: ResolveByContactAsync + RelatedByRole present; sprk_primarycontact-first contact resolution documented.</criterion>
+    <criterion testable="true">Negative: M1/M7/M8/M9/N2/N4 not weakened (diff review); no parallel membership mechanism sanctioned.</criterion>
+    <criterion testable="true">.claude/CHANGELOG.md carries an entry.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ADR Tensions row 2; investigation 02 §8 + §10.4; register B-12/H-5. Sequence 040 → 041 is mandatory (registry code lands under the amended ADR).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

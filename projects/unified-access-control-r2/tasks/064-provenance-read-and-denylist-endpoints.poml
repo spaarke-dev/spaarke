@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="unified-access-control-r2">
+  <metadata>
+    <title>BFF: record-access provenance read + deny-list management endpoints (FR-30 server half, FR-23 UI closure)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 032 (FR-19 evaluator), 038 (FR-23 deny store), 041 (FR-24 allow-list), 042 (FR-25 standing levels) + 060 merged; 063 precedes it in the exclusive zone</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs: the provenance read is the attestation-bearing inverse of the evaluator; deny-list writes are ethical-wall mutations.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Inverse-read composition over already-built terms; the term list and suppression semantics are fully enumerated by design §4.5/§6.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** and Infrastructure/ExternalAccess/** — exclusive zone; must not run concurrently with 063.</parallel-reason>
+    <deps>063, 060, 032, 038, 041, 042</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the server surface that lets the Manage Access modal answer "who can see this record, and why": a provenance read endpoint enumerating every principal with access to a record — each row carrying provenance (share | explicit grant | organization grant | standing grant | derived-from-field), level, and suppression state (suppressed-by-Secure / suppressed-by-Restricted with reason) — plus deny-list add/remove endpoints for ethical-wall and per-child revocation entries (FR-23's store, managed from the UI).</prompt>
+  <role>SPAARKE platform developer. Access evaluator internals, record-to-members inverse reads, Minimal API. Follow ADRs strictly.</role>
+  <goal>GET record-access-report endpoint (record -> rows: principal kind+id+name, provenance, level, suppressed+reason) composing POA shares (via 060 seam read), sprk_externalrecordaccess grants, org expansion, standing grants, and allow-listed derived-from-field members (FR-24 registry as the term source); POST/DELETE deny-list entry endpoints keyed (contact|organization) x (record|record's organization); all delegation-gated (read: Write-or-Read decision stated; writes: Write required per FR-07).</goal>
+
+  <context>
+    <background>spec.md FR-30 ("the modal answers 'who can see this record and why' without leaving the form") and FR-23 (deny veto, managed from the Manage Access surface per design §6 table "Deny list — add/remove ethical-wall entries"). Provenance is what makes the modal double as the attestation surface (§7). The report is DERIVED at read time from the same terms the evaluator uses — it must not materialize anything (the FR-32 no-materialization rule applies to reads too: compute, don't store).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordAccessReportEndpoint.cs (name per suite convention)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DenyListEndpoints.cs (if Phase 1 did not already create management routes — VERIFY first; extend if they exist)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (a report composer beside the evaluator — reuse its term functions; no duplicate term logic)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (report + deny endpoints)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md (§4.5 terms, §6 provenance table)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">FR-19 evaluator terms the report inverts.</dependency>
+      <dependency task="038" status="pending">FR-23 deny-list store.</dependency>
+      <dependency task="041" status="pending">FR-24 explicit column allow-list — the ONLY source for derived-from-field rows.</dependency>
+      <dependency task="042" status="pending">FR-25 standing-grant baseline levels shown per row.</dependency>
+      <dependency task="063" status="pending">Exclusive-zone ordering + shared route-group conventions.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The report REUSES the evaluator's term implementations (or a shared term module) — duplicated term logic is the two-evaluators disease this project exists to kill. Scope: report composer.</constraint>
+    <constraint source="spec-MUST">Do not materialize derived access into rows anywhere in this surface (compute per request). Scope: report + any caching (per-request only).</constraint>
+    <constraint source="ADR-008">Delegation/authorization via endpoint filters; deny-list WRITES require Write on the record (FR-07 rule); state and justify the read-side requirement in the PR. Scope: all routes.</constraint>
+    <constraint source="NFR-01">Any term-composition error yields an explicit report error (5xx/partial-marked), never a silently shorter row set — a missing row here is a false attestation. Scope: report composer.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification citing .claude/constraints/bff-extensions.md; publish size ≤ 60 MB reported. Scope: PR.</constraint>
+    <constraint source="ADR-019">ProblemDetails with stable codes on every error. Scope: all routes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>access provenance + deny management</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Seam map.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Endpoint conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. VERIFY whether Phase 1 shipped deny-list management routes; record the finding.</step>
+    <step order="1">Design the report DTO (closed provenance enum matching design §6: share, explicit-grant, organization-grant, standing-grant, derived-from-field; suppression reason enum: secure, restricted). Freeze it in the PR for 066 to consume.</step>
+    <step order="2">Implement the report composer beside the evaluator, reusing term functions; include POA shares via the 060 seam's read; mark suppressed rows rather than omitting them (Secure/Restricted states render rows AS suppressed).</step>
+    <step order="3">Implement/extend deny-list add + remove endpoints with the FR-23 key shape; cache invalidation consistent with the evaluator's deny reads.</step>
+    <step order="4">Tests: one fixture per provenance kind produces exactly its row; secure record shows org/standing rows suppressed-with-reason; restricted record shows all contact rows suppressed; deny add/remove round-trips and the evaluator honors it; delegation negatives (403 without Write on writes); composition-error path yields explicit error.</step>
+    <step order="5">Build + tests green; publish size reported.</step>
+    <step order="6">Update TASK-INDEX.md; freeze the DTO contract in notes/phase4-access-report-contract.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If enumerating derived-from-field members inverse (record -> members) requires a query shape ADR-034's resolver cannot answer without new per-request round trips beyond NFR-02's budget, STOP and escalate the read-cost decision rather than adding unbounded queries.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The evaluator (Phase 1) computes principal -> records; no record -> principals surface exists (the modal today lists only sprk_externalrecordaccess rows + standing union client-side — AccessGrantModal.tsx:286-303). Grep Api/ for an access-report endpoint: none.</existing>
+    <extension>Yes for terms (reuse evaluator term functions); No for the endpoint (new inverse surface — listed in spec Affected Areas and design §6 as the target capability).</extension>
+    <cost-of-doing-nothing>FR-30 acceptance fails: the modal cannot show WHY a principal has access (share vs derived vs org), cannot show suppressed rows on Secure/Restricted records, and the deny-list has no management surface — ethical walls remain un-administrable.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordAccessReportEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DenyListEndpoints.cs (new or extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (report + deny tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase4-access-report-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For a record with one POA share, one explicit grant, one org-derived contact, one standing-grant holder and one allow-listed derived-from-field contact, the report returns exactly five rows with correct provenance + level each.</criterion>
+    <criterion testable="true">For a Secure record, org-expansion and standing rows appear WITH suppressed=true and reason=secure (present, not omitted); explicit grant + share rows remain active.</criterion>
+    <criterion testable="true">For a Restricted record, every contact-principal row is suppressed with reason=restricted.</criterion>
+    <criterion testable="true">Deny-list add for (contact, record) makes the evaluator deny that contact on that record; remove restores; both reflected in the report.</criterion>
+    <criterion testable="true">Negative: deny-list write without Write on the record -> 403; unauthenticated -> 401; unknown record -> 404 ProblemDetails.</criterion>
+    <criterion testable="true">Negative: a term-composition failure returns an explicit error — never a 200 with silently missing rows.</criterion>
+    <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported; DTO contract note written.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-30/FR-23; design.md §4.5/§6/§7. Consumed by 066/067. The FR-32 event log (Phase 5) will hook the deny-list writes — keep them behind the seam so 081 can wrap one choke point.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

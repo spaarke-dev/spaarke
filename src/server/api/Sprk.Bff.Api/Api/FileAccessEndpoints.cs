@@ -30,7 +30,31 @@ public static class FileAccessEndpoints
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
 
         // Register endpoints using method groups (fixes CS1593 compilation error)
+        // The URL-MINTING reads (task-022 inventory): preview-url, preview, office, open-links,
+        // view-url. Each returns a url that OUTLIVES the request, and none carried a per-document
+        // filter.
+        //
+        // ⚠️ These are NOT the same shape as /content and /download, and the difference was verified
+        // rather than assumed: all five reach SPE through *AsUserAsync → IGraphClientFactory
+        // .ForUserAsync, i.e. genuine OBO. Graph therefore already enforces the caller's own SPE
+        // access, so — unlike the bulk-download route, whose identical-sounding claim turned out to
+        // be false because its lookup was app-only — there WAS real enforcement here. Checking that
+        // before writing this comment is the whole lesson of finding C1.
+        //
+        // The gate is still correct, and it NARROWS behaviour deliberately: SPE permission is
+        // container-scoped and coarser than per-document Dataverse rights, so a caller with
+        // container access but no Read on the sprk_document row previously succeeded and now gets
+        // 403. That caller seeing another client's document is precisely the disclosure this project
+        // exists to close (spec FR-01), so the narrowing is the point, not a side effect.
+        //
+        // Operation is `read`, not a new mint-specific key. A separate key would carry the SAME
+        // required right and therefore change no decision — CLAUDE.md §11 asks for a concrete
+        // behaviour that fails without the new surface, and there is none. What IS different about
+        // these routes is url LIFETIME, not authorization: revoking a caller's access later does not
+        // invalidate a url already minted. That is a real gap, deliberately NOT solved by an
+        // operation key because no key can. It belongs with task 012's link-lifecycle work.
         docs.MapGet("/{documentId}/preview-url", GetPreviewUrl)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentPreviewUrl")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -42,6 +66,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/preview", GetPreview)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentPreview")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -49,15 +74,24 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // A-1 applies here identically (unified-access-control-r2 task 002, spec FR-01). GetContent
+        // streams the document's bytes (`TypedResults.Stream`) from the same app-only SPE path as
+        // /download, and had the same missing gate. Closing /download alone would have left the attack
+        // scenario fully intact behind a different URL — the finding is the missing per-document
+        // authorization, not the route name.
         docs.MapGet("/{documentId}/content", GetContent)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentContent")
             .WithTags("File Access")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/office", GetOffice)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentOfficeViewer")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -66,6 +100,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         docs.MapGet("/{documentId}/open-links", GetOpenLinks)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentOpenLinks")
             .WithTags("File Access")
             .Produces<OpenLinksResponse>(StatusCodes.Status200OK)
@@ -90,6 +125,7 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status502BadGateway);
 
         docs.MapGet("/{documentId}/view-url", GetViewUrl)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentViewUrl")
             .WithTags("File Access")
             .Produces<object>(StatusCodes.Status200OK)
@@ -98,13 +134,32 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // Per-document authorization (unified-access-control-r2 task 002, spec FR-01, finding A-1).
+        //
+        // This route had NO per-document filter: the group's RequireAuthorization() asked only "are you
+        // anyone?", and the handler then streamed app-only from SPE — so any authenticated caller could
+        // download any document by GUID. That is R1's January-2026 attack scenario.
+        //
+        // The app-only SPE stream is NOT the defect and is deliberately unchanged: files written by the
+        // managed identity can only be read back by it (auth constraints, Pattern 4 — Writer-Identity
+        // Matching). What was missing is the Dataverse-level answer to "may THIS caller have this
+        // document?", which the filter now supplies before any SPE call is made.
+        //
+        // Operation "read" matches the two routes that already do this correctly — the sibling
+        // DataverseDocumentsEndpoints.cs `GET /api/v1/documents/{id}/download` and the eml-render route
+        // below. Both download routes must reach the SAME decision for the same caller on the same
+        // document; task 001 pinned their disagreement as the finding.
         docs.MapGet("/{documentId}/download", GetDownload)
+            .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentDownload")
             .WithTags("File Access")
-            .WithDescription("Download document file using app-only authentication. " +
-                "Proxies SPE file downloads for files uploaded by background processing.")
+            .WithDescription("Download document file. The caller is authorized against the document " +
+                "first; the SPE stream itself is app-only because background-written files are only " +
+                "readable by the identity that wrote them.")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 

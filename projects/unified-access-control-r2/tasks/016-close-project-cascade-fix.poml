@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-15 (A-12): Close-project cascade deactivates contact AND organization grants</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (revocation cascade) where the current bug retains privilege after project close — FULL per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two concrete defects (stale $select column → 400/500; org rows excluded by a null-contact Where) with exact evidence in A-12; the fix is a corrected column name + broadened sweep.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/ExternalAccess/ProjectClosureEndpoint.cs — a known-contended directory (Api/ExternalAccess/**). Merge serially with /conflict-check.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-12 (spec FR-15, Medium): the close-project cascade $selects a stale column (_sprk_contactid_value) that no longer exists → Dataverse 400 → unhandled 500 → the cascade deactivates nothing and every external participant retains access post-closure; and even if the query succeeded, a null-contact Where clause excludes organization grants from the sweep. Fix the column to the live FK and broaden the sweep to deactivate contact AND organization grant rows.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse Web API $select/$filter, the external-access grant schema, and revocation cascades. Follow ADRs strictly.</role>
+  <goal>Closing a project returns 200 and deactivates ALL active grants for the project — contact grants and organization grants alike; the cascade no longer 500s, and no participant retains access post-closure.</goal>
+
+  <context>
+    <background>Finding A-12 (10-finding-confirmations.md): ProjectClosureEndpoint.cs:181 $select="sprk_externalrecordaccessid,_sprk_contactid_value" — the live contact FK is _sprk_contact_value (runtime read path ExternalParticipationService.cs:406,:403 explicitly verified against live Dataverse; task-070 already fixed the sibling project field _sprk_projectid_value → _sprk_project_value at :158-162 but left the contact field stale). A $select on a nonexistent column returns Dataverse 400. QueryActiveAccessRecordsAsync catches and RETHROWS (:198-204); Handle calls it at :95 with no try/catch → unhandled 500 → cascade deactivates nothing. Org rows excluded: .Where(r => r.sprk_externalrecordaccessid.HasValue && r._sprk_contactid_value.HasValue) (:190) drops rows with null contact (i.e., organization grants). Caveat: schema docs (views-schema.md) reference sprk_contactid but the AUTHORITATIVE signal is the runtime code using _sprk_contact_value — verify against live metadata. FR-15 acceptance: closure returns 200 and all active grants for the project are deactivated.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ProjectClosureCascadeTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization test pinning the 500-and-deactivates-nothing behavior, flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed but LOUD-safe: if the active-grant enumeration fails, the closure MUST NOT report success with grants still active — surface the failure so closure is retried, not silently marked complete. Scope: Handle + QueryActiveAccessRecordsAsync.</constraint>
+    <constraint source="project">The sweep MUST include organization grant rows (null contact) — remove the null-contact filter at :190 and select on the correct discriminator so contact AND org grants are deactivated. Scope: the query + Where.</constraint>
+    <constraint source="project">Verify the live logical name of the contact FK against dev Dataverse metadata before committing the $select (schema docs are stale, design-register §G) — the runtime read path uses _sprk_contact_value. Scope: the $select column.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-12: Extract the closure-cascade query builder (ProjectClosureEndpoint.cs:181) and assert it selects _sprk_contact_value and does NOT exclude organization rows. Task 001 could not pin A-12; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>closure cascade</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Mock IDataverseClient to assert deactivation calls per row</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Verify the live contact FK logical name against dev Dataverse metadata; confirm _sprk_contact_value.</step>
+    <step order="2">Fix the $select at :181 to the live column; remove the null-contact exclusion at :190 so org grants (null contact) are included; adjust the projection/model so both row kinds flow to deactivation.</step>
+    <step order="3">Make Handle robust: on enumeration failure, return a non-success result (not an unhandled 500) so closure is not falsely reported complete; keep Steps 2/3 (SPE removal) reachable only after Step 1 succeeds.</step>
+    <step order="4">Author ProjectClosureCascadeTests: closure with contact+org grants deactivates ALL; closure returns 200; an enumeration error yields a non-success result, not a false 200.</step>
+    <step order="5">Flip the task-001 characterization test.</step>
+    <step order="6">Run full test suite; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the verified column name in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If live metadata shows the contact FK is neither _sprk_contact_value nor _sprk_contactid_value, STOP and record the actual name before writing it into a revocation query — a wrong column silently reverts to deactivating nothing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — existing BFF test project; no test covers the close-project revocation cascade (A-12 was found by manual code read).</existing>
+    <extension>Yes — a new test file inside the existing project; test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without the cascade test, the 500-and-deactivate-nothing failure and the org-grant exclusion can regress, leaving participants with access post-closure (FR-15).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ProjectClosureCascadeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Closing a project returns 200 and all active grants for the project are deactivated (FR-15 acceptance).</criterion>
+    <criterion testable="true">Organization grant rows (null contact) are deactivated by the cascade, not skipped.</criterion>
+    <criterion testable="true">Negative: when the active-grant enumeration fails, closure does NOT return a success that leaves grants active — it surfaces the failure.</criterion>
+    <criterion testable="true">Negative: a project with zero grants closes cleanly (no error).</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-08-23">
+    Both halves of A-12 fixed. Step 1 verified against LIVE metadata: the lookup is sprk_contact ->
+    _sprk_contact_value; there is NO sprk_contactid attribute on the table, so the escalation trigger did
+    not fire. Deviations, both surfaced rather than silent: (a) tests landed at
+    tests/integration/auth/UnifiedAccessControl/ProjectClosureCascadeTests.cs, not the unit path named in
+    &lt;outputs&gt; -- the task-001 constraint is explicit that tests go to the ADR-038 KEEP path, and that
+    path is deletion-protected while the unit path is not; (b) step 5 had no task-001 characterization test
+    to flip because task 001 could not pin A-12 (its own constraint says so), so the vacuous
+    CloseProject_DataverseQueryThrows_PropagatesException -- which asserted Guid.Empty == Guid.Empty and
+    documented that the private row type blocked real coverage -- was replaced by a pointer to the new
+    suite. In-scope extension beyond A-12: partial deactivation failure was reported as 200; it now returns
+    a typed incomplete response. New finding filed onto task 017: SpeContainerMembershipService cannot
+    report a clearing failure at all. 20 tests; five perturbations all caught; 11,357 green across seven
+    projects; publish 43.69 MB compressed, unchanged.
+  </completion>
+
+  <notes>Spec FR-15; finding A-12; register D-2 (broader closure semantics remain out of scope — this fixes only the broken cascade). Close-project is also gated by the delegation rule (task 008) — coordinate if both touch the endpoint's registration, but the cascade body is disjoint from the filter.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

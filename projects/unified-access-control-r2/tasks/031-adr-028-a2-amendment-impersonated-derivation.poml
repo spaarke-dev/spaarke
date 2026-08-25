@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="unified-access-control-r2">
+  <metadata>
+    <title>ADR-028 A2 narrow amendment (path B) — workforce systemuser root sets derive from Dataverse's impersonated answer</title>
+    <phase>1 One evaluator</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architecture change on the auth architecture ADR; tags include auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration / security-architecture work per CLAUDE.md §8.5; the broker-only reading it records governs the FR-20 fail-OPEN surface.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>MAIN-SESSION-ONLY: edits .claude/adr/** which sub-agents cannot write (CLAUDE.md §3). Must merge before or alongside task 036 (the FR-20 swap it sanctions).</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <deps>none</deps>
+    <tags>adr, auth, documentation, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a NARROW amendment to ADR-028 Amendment A2 (CLAUDE.md §6.5 path B): the workforce token model is unchanged, but the DERIVATION POLICY for a workforce systemuser's SPA record scope changes from ADR-034 membership pattern-matching to Dataverse's own answer via app-only impersonated read (MSCRMCallerID). Record explicitly that impersonation SATISFIES broker-only (no caller-token exchange, no OBO) — citing A2/A3 — so the FR-20 code lands sanctioned, not as a silent A2 exception.</prompt>
+  <role>SPAARKE platform developer with auth-architecture expertise. Follow ADRs strictly; this task exercises the §6.5 path-B protocol.</role>
+  <goal>Amended .claude/adr/ADR-028-spaarke-auth-architecture.md (and the full docs/adr counterpart if one exists) carrying a dated A2 amendment: derivation policy = impersonated Dataverse answer ∪ contact grants for WorkforcePrincipalKind.SystemUser; broker-only compliance reading recorded; contact/CIAM plane explicitly unchanged.</goal>
+
+  <context>
+    <background>spec.md ADR Tensions row 3 / design.md §9: A2 mandates workforce callers resolve to systemuser → ADR-034 membership. FR-20 replaces that derivation with Dataverse's real answer via the already-live RetrieveMultipleImpersonatedAsync. Investigation 08 §5 establishes the physics/policy split: OBO remains forbidden on this plane (A2:72, A3:114) and impossible for CIAM contacts; impersonation is NOT OBO — the BFF acts as itself and asks Dataverse to scope one query, matching AccessibleRecordSetService.cs:22-24's own broker-only definition ("no caller-token exchange"). Investigation 08 §6 condition 6 requires this reading recorded in the ADR, not just project notes.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Scope: this whole task. Path-B amendment: merge before or alongside the dependent code (task 036). Use the §6.5 required output format in the PR description (ADR, rule, conflict, path, rationale, impact, alternative considered).</constraint>
+    <constraint source="CLAUDE.md §3">Scope: file writes. .claude/** is main-session-only; a sub-agent must return the edits as text, not attempt them.</constraint>
+    <constraint source="ADR-028 A2/A3">Scope: the amendment's breadth. NARROW only: the workforce token model, CIAM plane, broker-only prohibition on caller-token exchange, and the contact-grant composition all remain as written. The ONLY change is the systemuser-plane root-set derivation policy. Do NOT sanction OBO on this plane — investigation 08 §6 ranks and rejects it.</constraint>
+    <constraint source="project">Scope: amendment content. MUST state: (a) impersonation = app-only credential + MSCRMCallerID header = broker-only compliant (no token exchange); (b) applies ONLY to WorkforcePrincipalKind.SystemUser; (c) the contact-grants union term survives because sprk_externalrecordaccess is a Spaarke table Dataverse cannot see (register B-17); (d) prvActOnBehalfOfAnotherUser + Org-scoped BFF app user are deployment prerequisites (register E-2/E-3).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth architecture, Dataverse impersonation, broker-only model</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="dated-amendment" location=".claude/adr/ADR-028-spaarke-auth-architecture.md">A2 (2026-08-03) itself is the house style: a dated amendment section with scope, rules, and prerequisites — append the new amendment the same way.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read ADR-028 in full (locate A2 at the "## Amendment A2" heading and A3), investigation 08 §5-§6, design.md §4.4.</step>
+    <step order="1">Check whether a full-history counterpart exists under docs/adr/ for ADR-028; if yes, amend both, if no, amend the concise only and note it.</step>
+    <step order="2">Draft the dated amendment section per the project constraint (a)-(d), citing DataverseImpersonation.cs and RetrieveMultipleImpersonatedAsync (fail-closed on Guid.Empty) as the mechanism, and naming the negative canary (NFR-04, task 034) as the standing guard.</step>
+    <step order="3">Verify the amendment does NOT touch A2's token rules, the CIAM plane, or the OBO prohibitions — diff review against the narrow-scope constraint.</step>
+    <step order="4">Add a .claude/CHANGELOG.md entry.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ADR-028's current text contains a rule that would ALSO have to change to sanction impersonated root sets (beyond the A2 derivation sentence and A3's plane description) — i.e. the amendment cannot stay narrow — STOP and escalate per CLAUDE.md §6.5 rather than widening it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-028-spaarke-auth-architecture.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADR-028 carries a dated amendment naming unified-access-control-r2 that changes ONLY the systemuser-plane root-set derivation policy and records the impersonation-satisfies-broker-only reading with A2/A3 citations.</criterion>
+    <criterion testable="true">The amendment names the contact-grants union as retained, and prvActOnBehalfOfAnotherUser + Org-scoped app user as prerequisites.</criterion>
+    <criterion testable="true">Negative: the OBO prohibition (A2/A3) is textually unchanged; no wording permits caller-token exchange on the SPA/collaboration plane.</criterion>
+    <criterion testable="true">Negative: the CIAM/contact plane derivation text is unchanged.</criterion>
+    <criterion testable="true">.claude/CHANGELOG.md carries an entry for this amendment.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ADR Tensions row 3; investigation 08 §6 conditions 1 and 6. Task 036 (the swap) lists this task as a dependency; task 035 (the source) should also cite it in its PR.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

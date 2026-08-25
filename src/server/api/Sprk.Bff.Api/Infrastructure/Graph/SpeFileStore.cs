@@ -36,7 +36,22 @@ public class SpeFileStore : ISpeFileOperations
     }
 
     // Container Operations - delegate to ContainerOperations
-    public Task<ContainerDto?> CreateContainerAsync(
+
+    /// <summary>
+    /// Creates an SPE container.
+    /// </summary>
+    /// <remarks>
+    /// <c>virtual</c> so a test host can substitute container creation at this facade — the seam
+    /// ADR-007 already designates for SPE access. The alternative is faking
+    /// <c>IGraphClientFactory</c>, which means standing up Graph SDK internals: transport-shaped
+    /// mocking, banned by ADR-038 B1. Same reasoning and same precedent as
+    /// <c>DocumentCheckoutService.DeleteAsync</c> (task 022). No behaviour change.
+    ///
+    /// Substituting it is what lets a provisioning test assert the SUCCESS path at all: before this,
+    /// the only available assertion was that provisioning reached business-unit creation and then
+    /// failed on the unavailable test-host Graph services — and business-unit creation no longer exists.
+    /// </remarks>
+    public virtual Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
         string? description = null,
