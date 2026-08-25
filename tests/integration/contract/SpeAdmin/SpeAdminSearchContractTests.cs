@@ -256,7 +256,15 @@ public class SpeAdminSearchContractTests
         return new SpeAdminGraphService(
             httpClientFactory: new UnusedHttpClientFactory(),
             secretClient: new SecretClient(new Uri("https://unused.invalid/"), new UnusableCredential()),
-            dataverseClient: new DataverseWebApiClient(configuration, NullLogger<DataverseWebApiClient>.Instance),
+            // auth-v4 (merged from master 2026-08-25) made DataverseWebApiClient select a credential in
+            // its ctor: with Managed Identity disabled it now REQUIRES TENANT_ID + API_APP_ID + an
+            // IConfidentialClientProvider, and threw before any test body ran. Passing the credential
+            // explicitly takes the "selection bypassed" branch — and UnusableCredential throws if
+            // anything ever actually asks it for a token, so a test that starts reaching Dataverse
+            // fails loudly instead of quietly acquiring one. These contract tests supply the Graph
+            // client directly and never touch Dataverse; this dependency exists only to construct.
+            dataverseClient: new DataverseWebApiClient(
+                configuration, NullLogger<DataverseWebApiClient>.Instance, new UnusableCredential()),
             configuration: configuration,
             logger: NullLogger<SpeAdminGraphService>.Instance,
             tokenProvider: null);
