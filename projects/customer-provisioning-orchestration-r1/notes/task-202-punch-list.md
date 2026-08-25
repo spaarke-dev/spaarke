@@ -2,24 +2,40 @@
 
 > **Task**: 202
 > **Author**: 2026-08-24 (SESSION 6)
-> **Output-for**: task 203 (executes CLASS-A rows) + separate BFF-owning tasks (CLASS-B rows)
+> **Amended**: 2026-08-24 SESSION 7 — verification pass + Class-B re-scope (see amendment below)
+> **Output-for**: task 203 (executes CLASS-A rows) + task 204 (executes CLASS-B verified-open rows IN THIS PROJECT — routing amendment)
 > **Blocks**: task 186 (E2E live-fire) per owner directive 2026-08-24 SESSION 5
 
-## Header summary
+## AMENDMENT — 2026-08-24 SESSION 7 (verification + re-scope)
+
+**Two changes to original punch list:**
+
+### Change 1: Class-B routing (BINDING per owner 2026-08-24 SESSION 7)
+
+Original: Class-B rows route OUT to `code-quality-and-assurance-r3`.
+Amended: `code-quality-and-assurance-r3` **CLOSED 2026-08-16/17/20** (35/35 tasks + follow-on merged to master; worktree repurposed to `work/dataverse-access-hardening`). Since that project is not active and cannot absorb new tasks, Class-B verified-open rows are **absorbed into THIS project** as task 204, particularly those that block task 186 E2E.
+
+### Change 2: Verification pass (2026-08-24 SESSION 7) — 8 of 22 Class-B rows are ALREADY APPLIED
+
+Grep-verified per row against live repo state. Results below in "Class-B verification matrix". **Task 204 scope is the remaining 14 rows, NOT the original 22.**
+
+## Header summary (post-amendment 2026-08-24 SESSION 7)
 
 | Metric | Count |
 |---|---|
 | **Total unique lessons** (after dedup across 6 agents / 108 source files) | 62 |
 | **Class A (provisioning-owned — task 203 scope)** | 34 |
-| **Class B (BFF-owned — routes OUT to `code-quality-and-assurance-r3` or new BFF-quality worktree)** | 22 |
+| **Class B ORIGINAL (BFF-owned — was OUT-routed)** | 22 |
+| **Class B VERIFIED APPLIED** (Wave G-7/G-8 landed already) | 8 (B03, B05, B06, B08, B09, B12, B13, B19) |
+| **Class B VERIFIED OPEN or PARTIAL — task 204 scope** | 14 (B01, B02, B04, B07 [with 10 sub-tasks], B10, B11, B14, B15, B16, B17, B18, B20, B21, B22) |
 | **Class C (shared/coordination — both projects)** | 6 |
-| **Blocks E2E `yes`** | 41 (26 class-A + 12 class-B + 3 class-C) |
+| **Blocks E2E `yes` (post-amendment)** | 33 (26 class-A + 4 class-B still-blocking + 3 class-C) |
 | **Blocks E2E `maybe`** | 8 |
 | **Blocks E2E `no`** | 13 |
 
-**Verification prerequisite** for task 203: every row below carries a `last_known_status` field from its source document. Task 203 MUST `grep`-verify actual repo state BEFORE applying — many rows may have LANDED via Wave G-8 batch (155–198+) since the source doc was written. Do not double-fix.
+**Verification prerequisite** for tasks 203 + 204: every row carries a `last_known_status` field. Executor MUST `grep`-verify actual repo state BEFORE applying — many rows may have LANDED via Wave G-8 batch (155–198+). Do not double-fix.
 
-**Class distribution rationale**: Class B tasks route to BFF-owning worktrees because provisioning-surfaced BFF bugs (per owner directive 2026-08-24 SESSION 5 BINDING) MUST NOT be fixed on this project's branch. This constraint prevents the "provisioning project doubles as BFF hero-fix branch" anti-pattern. See CLASS-B routing decisions in the "Class B — target-project detail" section below.
+**Class distribution rationale (amended)**: Class B originally targeted `code-quality-and-assurance-r3` per BINDING owner directive 2026-08-24 SESSION 5, but that project **CLOSED**. The re-scope keeps the BFF/provisioning-boundary principle (BFF-owned lessons handled with BFF-quality rigor) while pragmatically absorbing them into task 204 in THIS project since no alternate BFF worktree is active. Task 204 executor MUST follow `.claude/constraints/bff-extensions.md` for any BFF-touching change.
 
 ---
 
@@ -118,12 +134,49 @@ Sorted by `blocks-e2e DESC`, then `effort ASC` within each group.
 
 ---
 
-## Punch list — CLASS B (BFF-owned — route OUT of task 203)
+## Class-B verification matrix (2026-08-24 SESSION 7 grep-verify)
 
-**Routing target**: `code-quality-and-assurance-r3` (active BFF-decomposition worktree) OR new dedicated BFF-quality worktree if class-B count exceeds `code-quality-and-assurance-r3`'s scope.
+**Verification method**: For each B-row, grep the current worktree for the specific file / class / string named in the row's title. Cross-reference with Wave G-7/G-8 task landing notes (Program.cs comments, module file headers).
 
-Per constraint from task 202 POML (BINDING per owner 2026-08-24):
+| # | Row | Grep evidence | Verified status |
+|---|---|---|---|
+| B01 | asymmetric-registration ArchTest | No `AsymmetricRegistrationTests` / `UnconditionalConsumerMustHaveUnconditionalDependency` in `tests/` | **OPEN — task 204 scope** |
+| B02 | IOptions inventory-drift ArchTest | No matches for `IOptions inventory drift` in `tests/` | **OPEN — task 204 scope** |
+| B03 | dispatcher-does-not-exist | `Worker/Dispatch/ProvisioningHandlerDispatcher.cs` + `HandlerRegistrationCompletenessTests` + `ProvisioningDispatchSpineSeamTests` + `DispatchIdempotencyService` + `DispatchModule` + `StateReconcilerService` + `HandlerOutcomeApplier` | **✅ APPLIED (Wave G — dispatcher live)** |
+| B04 | multi-tenant DV routing gap | `DataverseServiceClientImpl.cs:37-39` STILL reads single `Dataverse:ServiceUrl` from config | **OPEN — task 204 (with ADR tension escalation FIRST)** |
+| B05 | h4 literal placeholder values | `AzCliKvSecretsWriter` retired (grep confirms zero `interim-placeholder` occurrences); `KvSecretValueResolverTests.cs` for real resolver | **✅ APPLIED (Wave G-6)** |
+| B06 | H1 null-probe fakes ARM check | `ArmSubscriptionReadinessProbe.cs` real impl + `H1SubscriptionReadinessHandler` + `ArmSubscriptionReadinessProbeTests` + `H1SubscriptionReadinessHandlerTests` | **✅ APPLIED** |
+| B07 | H13 all-placeholders (T1-T6 + I1-I5 + setup-status) | I1 REAL (`PackagedScriptTenantLiteralInvariantVerifier`, task 170); `DataverseRegistrySetupStatusUpdater` REAL (task 184, real PATCH via `IDataverseEnvironmentRegistryClient.UpdateSetupStatusAsync`); **I2-I5 deferred to tasks 173/174/176/179** (per PlaceholderInvariantVerifier retirement banner); **T1-T6 deferred to tasks 171/172/175/177/178/180** (per Worker Program.cs:847 comment). Composite verifiers wired but sub-tasks pending. | **PARTIAL — 10 sub-tasks OPEN (task 204c scope)** |
+| B08 | NullDataverseEnvironmentRegistryClient | Real `DataverseEnvironmentRegistryModule` swapped in Worker/Program.cs line 108 (Wave G-2 task 122); Null impl kept on-disk unregistered per Wave G-6 convention | **✅ APPLIED** |
+| B09 | H12b DeferredAppConfigSeeder | `AppConfigSeedModule.cs` file header: "Task 152 (Wave G-5 Batch G-5B) authored the remaining two as GREENFIELD C# seeders... FR-16's 4-scope delivery is now complete; zero DeferredAppConfigSeeder registrations remain in this module" | **✅ APPLIED** |
+| B10 | H6/H7 credential config never provisioned | `SolutionImport/CanonicalSolutionCatalog.cs` + `SolutionImportRejectionCodes.cs` exist; KV binding provisioning status requires executor-time verification | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+| B11 | staging-slot shadow-worker defect | `Sprk.Provisioning.ControlPlane.Core` + `Sprk.Provisioning.ControlPlane.Worker` are separate projects (split happened); `.Api` project split status unverified | **PARTIAL — needs Api-split verify (task 204)** |
+| B12 | H9 Deploy-BffApi scope refactor | `H9BffDeployHandler.cs` file header explicitly: "RE-SCOPED (task 132): consumes the CI-published artifact... ZERO dotnet-publish build step, ZERO repo checkout, ZERO dotnet SDK dependency at provision time — DeployBffApiScriptRunner and DotnetR3GateVerifier's shell-outs are RETIRED" | **✅ APPLIED (task 132)** |
+| B13 | RecordMatchServiceTests compile | Test file compiles cleanly; uses `new ConfigurationBuilder().Build()` for `IConfiguration` ctor (task 065 signature) | **✅ APPLIED** |
+| B14 | ManagedIdentityCredentialFactory TenantId gap | File exists at `Infrastructure/Auth/ManagedIdentityCredentialFactory.cs`; TenantId-scope-gap behavior requires executor-time inspection | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+| B15 | Tier-1-IOptions deploy checklist | Not found in `.claude/constraints/bff-extensions.md` | **OPEN — task 204 scope** |
+| B16 | H2b reject retired lineage | `H2bAiSearchIndexHandler` + `CanonicalIndexCatalog` exist; retired-lineage reject logic requires executor-time inspection | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+| B17 | appsettings.tokens.md drift | `PLAYBOOK_EMBEDDINGS_INDEX_NAME` still referenced in `src/server/api/Sprk.Bff.Api/appsettings.tokens.md` | **OPEN — task 204 scope** |
+| B18 | EnvVarValuesOptions ClientSecret → KeyVaultSecretRef refactor | Not verified this pass | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+| B19 | ArmDeploymentRunner comment drift | New task-123 file-header supersedes original BLOCKING DISCOVERY comment; comment now correct | **✅ APPLIED (task 123)** |
+| B20 | Worker Program.cs:784-795 comment drift | Line-specific content not verified this pass | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+| B21 | Retired shell-out class sweep (AzCli*/PacAdmin*/PowerShellAppConfigSeeder/DeployBffApiScriptRunner) | Retired-on-disk with banner per Wave G-6 convention (SC #2 grep-verify literal fails — DESIGN CONFLICT: SC #2 says grep should return zero; Wave G-6 accepts on-disk-with-banner for audit trail) | **DOWNGRADE — spec-amendment task (task 204g: amend SC #2 to allow retired-on-disk convention)** |
+| B22 | 429 wireup at ~30 AI endpoints | Not verified this pass | **NEEDS ROW-LEVEL VERIFY (task 204)** |
+
+**Verification-pass conclusion**: Task 204's real scope is **14 rows** (5 confirmed open + 2 partial + 6 verify-then-decide + 1 spec-amendment), not the original 22. 8 rows were LANDED by Wave G-7/G-8 tasks 122/132/151/152/170/184 and require ZERO further action.
+
+**Blockers for task 186 E2E** (per amendment): B04 (only if H5 creates per-tenant DVs; ADR-tension escalation resolves), B07's 10 sub-tasks (H13 real probes — hard-required for SetupStatus=Ready), and B10 (if H6/H7 need creds — verify-then-decide). Everything else can safely land post-186.
+
+---
+
+## Punch list — CLASS B ORIGINAL (frozen for audit — see verification matrix above for current state)
+
+**⚠️ Historical scope**: Original routing was OUT to `code-quality-and-assurance-r3` per BINDING owner directive 2026-08-24 SESSION 5. Per SESSION 7 amendment above, this routing changed because `code-quality-and-assurance-r3` closed. See verification matrix for post-verification actionable status.
+
+Per constraint from task 202 POML (SUPERSEDED by SESSION 7 amendment 2026-08-24):
 > When task 202's audit surfaces a lesson that requires editing `src/server/api/Sprk.Bff.Api/**` (or `src/server/shared/Spaarke.*/**`), it does NOT go into task 203's scope. Instead: (a) file the bug as a separate task in `code-quality-and-assurance-r3` … (b) require accompanying ArchTest that prevents the class-of-bug at build time; (c) coordinate merge sequencing so the BFF fix lands BEFORE task 186 E2E live-fire.
+
+**SESSION 7 note**: `code-quality-and-assurance-r3` project CLOSED 2026-08-16/17/20 (35/35 complete + follow-on merged to master; worktree repurposed to `work/dataverse-access-hardening`). Class-B verified-open rows absorbed into task 204 (this project) with BFF-quality rigor enforced via `.claude/constraints/bff-extensions.md` compliance.
 
 ### B-blocks-E2E YES (12 rows)
 
@@ -177,36 +230,68 @@ Per constraint from task 202 POML (BINDING per owner 2026-08-24):
 
 ---
 
-## Task 203 scope brief
+## Task 203 scope brief (Class-A — 34 rows unchanged)
 
-**IN SCOPE for task 203**:
+**IN SCOPE for task 203** (unchanged from original):
 - All **Class A** rows (34 total). Sub-phase by dependency chain:
-  - 203a (foundation): A05, A06, A07, A08, A09, A10, A11, A12, A24 (10-15h)
-  - 203b (bicep hardening): A13, A14, A17, A18, A19, A20, A21, A22, A23, A25, A26, A27 (30-40h)
-  - 203c (skill wiring): A02, A03, A04, A15, A16 (15-20h)
-  - 203d (nice-to-have post-186): A32, A33, A34 (5h)
+  - **203a (foundation, ~15h)**: A05, A06, A07, A08, A09, A10, A11, A12, A24 — provisioning-runs root + INDEX + templates + patterns fill + skill profile enum fix + skill environmentId intake + skill registry prereq + jwtAudience fix + healthCheckPath fix
+  - **203b (bicep hardening, ~30-40h)**: A13, A14, A17, A18, A19, A20, A21, A22, A23, A25, A26, A27 — SB Data Receiver RBAC + config-key aliases + artifacts storage + ACR + L2 UAMI RBAC × 6 + FromBicepOutput wire-up + kv-secrets clobber fix + Model 1 sharedBffUami KV grant + queue recreate ceremony + CustomerRunGuard config
+  - **203c (skill wiring, ~15-20h)**: A02, A03, A04, A15, A16 — Step 0.5 external prereqs + `--batch` flag + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs
+  - **203d (nice-to-have post-186, ~5h)**: A32, A33, A34 — skill Step 6 read-verify + h9-workflow cadence runbook + SC #11 env-var checks
 - **Class C** rows requiring provisioning-project decision: C01, C04, C06 (design.md amendments + I6 ArchTest — Class C not Class B because they are project-owned deliverables per task 202 POML §c-c1 constraint).
 
-**OUT OF SCOPE for task 203** (route OUT):
-- All **Class B** rows (22 total). Each becomes a separate task in `code-quality-and-assurance-r3` (or new BFF-quality worktree if count exceeds capacity per POML escalation trigger).
-- **Class C** rows C02, C03, C05 (auth-v4-owned coordination items — file in auth-v4 project).
+---
 
-**Merge sequencing** (per POML BINDING constraint on Class B routing):
-1. Class-A + Class-C-owned work lands on `work/customer-provisioning-orchestration-r1` (task 203).
-2. Class-B tasks land on `code-quality-and-assurance-r3` (or new BFF-quality worktree). Coordinate via `/conflict-check`.
-3. **Task 186 E2E live-fire prerequisite gate**: All Class-A `blocks_e2e=yes` (A02-A26) applied + all Class-B `blocks_e2e=yes` (B01-B12) applied (via routed tasks) + `RecordMatchServiceTests` (B13) passes so CI signal is trustworthy.
-4. Sequence: 203 landing → BFF-worktree class-B PRs merged → this project's branch pulls master (picks up Class-B fixes) → task 186 invokes `/provision-environment` against sub `cd95fcec-6b89-49ea-8339-c2b579b12587`.
+## Task 204 scope brief (Class-B verified-open — 14 rows, NEW POST-AMENDMENT)
 
-**Escalation triggers for task 203** (per task 202 POML §escalation):
-- If Class-B lesson count exceeds `code-quality-and-assurance-r3` capacity: initiate new BFF-quality worktree.
-- If Class-A lesson count exceeds ~20h for a sub-phase: split into 203a/203b/203c/203d (as tabled above).
-- If SESSION 5 Lesson 3 (B04 multi-tenant DV routing) requires path B (ADR amendment): file the tension row in `spec.md` §ADR Tensions FIRST — this is currently missing (per Agent 6 spec+design audit: "the tension row that SESSION 5 Lesson 3 asks about does not currently exist").
+**IN SCOPE for task 204** (all in THIS project per 2026-08-24 SESSION 7 amendment):
 
-**Verification obligation for task 203 execution** (added by task 202 to prevent double-fixing):
-- Every row above carries a `last_known_status` from its source doc.
-- Task 203 MUST `grep`-verify actual repo state BEFORE applying each row.
-- If a row was landed by Wave G-8 batch (tasks ~155-198+), mark row as `already-applied` in the punch-list executed-state annotation + skip apply.
-- Recommended verification queries per row (task 203 authors runbook per row).
+Sub-phase by dependency + E2E-blocking status:
+
+- **204a (verify-first, ~15-25h — MAY REDUCE)**: B10, B14, B16, B18, B20, B22 — executor MUST grep-verify current state per row BEFORE applying; may find more already-landed. Per row: (i) grep for the specific code path named in verification matrix, (ii) if code shows fixed state, mark `already-applied` in row annotation + skip, (iii) if open, apply per row title + effort estimate.
+- **204b (foundational — ADR tension resolution, ~16-40h)**: **B04 multi-tenant DV routing gap**. FIRST STEP: file ADR tension row in `spec.md` §ADR Tensions per CLAUDE.md §6.5 protocol (three-path template). Owner picks Path A (documented exception — Model 1 shared BFF serves ONE Dataverse per tier), Path B (ADR amendment — extend `DataverseServiceClientImpl` for runtime multi-tenant routing) or Path C (comply — refactor Model 1 architecture). Only Path B fires the ~16-40h refactor; Path A is ~1h doc; Path C is scope-uncertain.
+- **204c (H13 real probes — 10 sub-tasks, ~40-80h — HARD-BLOCKS TASK 186)**: **B07** — the 10 sub-tasks currently deferred: T1 (task 171 — KV `keyVaultReferenceIdentity` real probe), T2 (task 172), T3 (task 175), T4 (task 177), T5 (task 178), T6 (task 180), I2 (task 173 — Cosmos partition-key), I3 (task 174), I4 (task 176 — SPE container ID derivation), I5 (task 179 — Graph per-tenant token). May sub-sub-phase 204c-1 through 204c-10 if each grows beyond ~8h. Wire in DI at `E2EAcceptanceModule` per existing swap protocol (task 170's `PackagedScriptTenantLiteralInvariantVerifier` pattern).
+- **204d (staging-slot topology, ~16h)**: B11 — verify `.Api` project split status FIRST (grep for `Sprk.Provisioning.ControlPlane.Api`); if `.Api` not split, complete the `.Core+.Api+.Worker` split OR add three permanent slot-sticky `Enabled` flags per DS-3 §5 alternative.
+- **204e (regression-prevention ArchTests, ~11h)**: B01 (asymmetric-registration ArchTest — IActionSeam case study) + B02 (IOptions inventory-drift nightly ArchTest) + B15 (Tier-1-IOptions deploy checklist in `.claude/constraints/bff-extensions.md`).
+- **204f (docs drift fixes, ~2h)**: B17 (appsettings.tokens.md `PLAYBOOK_EMBEDDINGS_INDEX_NAME` removal).
+- **204g (spec amendment, ~2h)**: B21 — amend `spec.md` SC #2 to allow retired-on-disk-with-banner convention (per Wave G-6 pattern already accepted for AzCli*/PacAdmin*/PowerShellAppConfigSeeder classes).
+
+**Total task 204 estimated effort**: 62-160h (wide range due to B04 path-dependence + B07 sub-task depth).
+
+**Task 186 E2E dependency gate (amended)**:
+- **HARD-BLOCKS** — must land BEFORE task 186 fires: 204c (B07 H13 real probes — SetupStatus never reaches Ready without them).
+- **CONDITIONALLY BLOCKS**: 204a's B10 (if H6/H7 need creds), 204b's B04 (only if Path B/C chosen).
+- **POST-186 SAFE**: 204d (staging-slot), 204e (ArchTests), 204f (docs), 204g (spec).
+
+---
+
+## Sequencing (post-amendment)
+
+1. **In parallel** (safe): 203a + 203b + 203c + 204a + 204e + 204f + 204g land on `work/customer-provisioning-orchestration-r1`.
+2. **Then serial**: 204b (ADR tension → owner decision → apply chosen path).
+3. **Then serial**: 204c (H13 10 real probes — hard-blocks 186).
+4. **Task 186 gate check**: `grep -c "last_known_status: applied" notes/task-202-punch-list.md` should match count of `blocks_e2e: yes` rows (Class-A `blocks_e2e=yes` (26) + Class-B `blocks_e2e=yes` verified-open (per verification matrix: B04 conditional + B07 sub-tasks (10) + B10 if verify-open = ~11-12)) all `applied` OR `already-applied`.
+5. **Task 186 fires**: invokes `/provision-environment` against sub `cd95fcec-6b89-49ea-8339-c2b579b12587`.
+6. **Post-186 mop-up (optional wave)**: 203d + 204d + any 204a rows deferred + regression follow-ups.
+
+---
+
+## Escalation triggers (post-amendment)
+
+- **204b ADR tension**: if owner picks Path B (ADR amendment), the amendment must merge (or land in same PR) BEFORE dependent code changes per CLAUDE.md §6.5.
+- **204c sub-task depth**: if any single T{N} or I{N} probe exceeds ~10h, sub-sub-phase 204c into 204c-{index}. Do NOT bundle 10 handlers into one megatask.
+- **BFF publish size** (NFR-01 ceiling ≤60 MB): task 204 changes to `src/server/api/Sprk.Bff.Api/**` MUST report publish size + delta in PR per CLAUDE.md §10. Current baseline: 44.96 MB incl. PDBs (2026-08-13 net10 framework-dependent linux-x64).
+- **Test update obligation** (`bff-extensions.md` § F): any BFF-touching change MUST have accompanying test additions/updates.
+
+---
+
+## Verification obligation for tasks 203 + 204 execution (added by task 202 to prevent double-fixing)
+
+- Every row carries a `last_known_status` from its source doc + updated status from the verification matrix above.
+- Task 203/204 executor MUST `grep`-verify actual repo state BEFORE applying each row.
+- If a row was landed by Wave G-8 batch (tasks ~155-198+) or by any post-verification-matrix work, mark row as `already-applied` in the punch-list executed-state annotation + skip apply.
+- For 204a's 6 "NEEDS ROW-LEVEL VERIFY" rows: this is the primary work (verify → apply-or-skip).
+- Recommended verification queries per row (task 203/204 authors row-level runbook).
 
 ---
 
