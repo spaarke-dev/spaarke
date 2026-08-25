@@ -1,22 +1,47 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-24 SESSION 7 END — **🎯 SESSION 7 accomplishments: (1) Verified all 22 Class-B rows against live repo state — 8 ALREADY APPLIED via Wave G-7/G-8; (2) Amended punch list with Class-B verification matrix + re-scoped Class-B to task 204 IN THIS PROJECT (`code-quality-and-assurance-r3` closed); (3) Authored 11 POML files (203a/b/c/d + 204a/b/c/d/e/f/g); (4) Updated TASK-INDEX with new sub-phase rows.** Task 203a is next actionable. Task 186 E2E live-fire remains blocked until 203a-c + 204a/b/c + verified Class-B blockers all land (203d + 204d deferred-post-186).
+> **Last Updated**: 2026-08-24 SESSION 7 END — **🎯 SESSION 7 accomplishments (all pushed to origin, HEAD `6d20e2108`)**:
+> 1. **Task 202 amendment** (`fad6c1c01`): Verified all 22 Class-B rows against live repo — 8 ALREADY APPLIED via Wave G-7/G-8 (B03/B05/B06/B08/B09/B12/B13/B19); amended punch list with Class-B verification matrix + re-scoped remaining 14 rows to task 204 IN THIS PROJECT (`code-quality-and-assurance-r3` closed).
+> 2. **POML authoring** (`5ac07c4af`): 11 POML files (203a/b/c/d Class-A + 204a/b/c/d/e/f/g Class-B) authored via 2 parallel sub-agents. TASK-INDEX updated (152 tasks total; Phase Pre-Live-Fire grew 2→12).
+> 3. **Parallel-safe wave** (6 commits `0d3ae5c39` → `9e72825d7`): 203b bicep hardening + 204a verify-first + 204f docs drift + 204g spec amendment all landed. **20 rows resolved: 7 applied + 10 verified already-applied + 2 deferred + 1 escalated (B22)**. Effort actual ~1h wall-clock vs 60-70h serialized estimate — verify-first strategy massively vindicated.
+> 4. **Punch list integration** (`6d20e2108`): Master punch list amended with per-wave results table pointing to 4 per-task execution-results files.
+>
+> **Serial wave BLOCKED on fresh session**: Task 203a next actionable but requires main-session-only execution (touches `.claude/**` per Sub-Agent Write Boundary root CLAUDE.md §3) + FULL rigor with 14 steps + Quality Gates. Context in SESSION 7 exhausted after 2 rounds of parallel-agent work. Serial wave must fire in a fresh session.
 
 ## 🎯 QUICK RECOVERY — 2026-08-24 SESSION 7 END (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task (next actionable)** | **203a** — Apply Class-A punch list sub-phase foundation (provisioning-runs root + templates + 9 patterns fill + constraint file + skill Step 1 + 2 bicep fixes) |
+| **Task (next actionable)** | **203a** — Apply Class-A punch list sub-phase foundation |
 | **Task file** | [`projects/customer-provisioning-orchestration-r1/tasks/203a-apply-classA-punchlist-foundation.poml`](tasks/203a-apply-classA-punchlist-foundation.poml) |
 | **Status** | not-started (blocked-only-by-202-which-is-complete → ready to dispatch) |
-| **Rigor** | FULL (per POML `<rigor>` + reason: touches `.claude/skills/**` + `.claude/patterns/**` + `.claude/constraints/**` + `infrastructure/bicep/**`) |
-| **Model / Effort** | sonnet / high (per POML `<model-tier>` + reason: predominantly file authoring + small skill edits + mechanical bicep fixes) |
-| **Parallel-safe** | false — touches `.claude/**` (Sub-Agent Write Boundary per root CLAUDE.md §3) → MAIN SESSION ONLY |
-| **Estimated effort** | 15h |
+| **Rigor** | FULL (per POML `<rigor>`) |
+| **Model / Effort** | sonnet / high |
+| **Parallel-safe** | false — MAIN SESSION ONLY per root CLAUDE.md §3 Sub-Agent Write Boundary |
+| **Estimated effort** | 15h (but may drop dramatically per verify-first pattern from parallel wave) |
 | **Branch** | `work/customer-provisioning-orchestration-r1` |
-| **HEAD after SESSION 7 commit** | (updated on commit — see git log) |
-| **Working tree** | Should be CLEAN post-commit |
-| **Next action for a fresh session** | `task-execute projects/customer-provisioning-orchestration-r1/tasks/203a-apply-classA-punchlist-foundation.poml` (main session only — cannot dispatch to sub-agent) |
+| **HEAD after SESSION 7** | `6d20e2108` (pushed) |
+| **Working tree** | CLEAN |
+| **Next action for a fresh session** | `task-execute projects/customer-provisioning-orchestration-r1/tasks/203a-apply-classA-punchlist-foundation.poml` |
+
+### Row-by-row prep verified (partial — do full verify in Step 1)
+
+Confirmed during SESSION 7 (before context ran short):
+- **A05**: `provisioning-runs/` does NOT exist → CREATE (root + INDEX + `_archive/`)
+- **A24**: verified ALREADY-APPLIED in 203b parallel wave — SKIP
+- **A07**: 9 skeleton pattern files EXIST at `.claude/patterns/provisioning/**` (from task 202) → FILL CONTENT per structure design § "`.claude/patterns/provisioning/` proposal"
+- **A09/A10/A11**: `.claude/skills/provision-environment/SKILL.md` EXISTS (author 075/076); needs Step 1 edits for profile enum + environmentId intake + registry placeholder create per DS-5 c6-1/c6-2/c6-3
+- **A06/A08/A12**: NOT VERIFIED this session — Step 1 grep-verify FIRST
+
+### Serial wave sequencing (from punch list §Sequencing)
+
+1. **203a** (main session, ~15h): foundation
+2. **203c** (main session, ~15-20h): skill wiring — depends on 203a's constraint file existing
+3. **204e** (main session, ~11h): ArchTests + IOptions checklist (B15 touches `.claude/constraints/`)
+4. **204b** (Opus/xhigh; PAUSES for owner decision, ~1h authoring + wait): ADR tension per CLAUDE.md §6.5
+5. **204c** (~40-80h; MAY sub-sub-phase 204c-1..204c-10): H13 10 real probes — HARD BLOCKS 186
+6. **186** (E2E live-fire against sub `cd95fcec-6b89-49ea-8339-c2b579b12587`)
+7. **203d + 204d + 090** (post-186)
 
 ### Full 12-task Phase Pre-Live-Fire runway (from TASK-INDEX)
 
