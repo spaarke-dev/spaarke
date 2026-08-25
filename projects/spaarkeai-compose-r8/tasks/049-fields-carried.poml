@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 residual — carry Word FIELDS through an edited paragraph (`Field{Instruction,CachedResult}` marker run); retire the `field-flattened-to-text` row</title>
+    <phase>4 Track A — Fidelity</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the content model and the save renderer — the write path ADR-049 governs. A field re-emitted wrongly is a document-correctness defect, not a cosmetic one.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the judgment is WHICH half of a field to carry. Carrying the cached RESULT reproduces what the user saw but freezes it; carrying the INSTRUCTION restores live behaviour but re-evaluates on open — and for a `REF` whose target bookmark did not survive, re-evaluation yields Word's broken-reference text where the user previously saw resolved prose. Choosing per field class, and deciding which classes are safe to carry at all, is the work. Emitting a `w:fldSimple` once decided is not.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `ComposeContentModel` + `ComposeDocumentRenderer` — the same save spine Track C and Track D edit.</parallel-reason>
+    <deps>040, 048</deps>
+    <tags>bff-api, compose, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Owner decision 2026-08-25: the residual-loss list is NOT signed off as-is. Fields and embedded objects
+    are to be CARRIED, not accepted as losses. There is no compose-r9 — this lands in R8.
+
+    Today a field (`w:fldSimple`, or a `w:fldChar` begin/instrText/separate/end run sequence) sitting in a
+    paragraph the user edits is flattened to the text it was displaying and stops updating
+    (`field-flattened-to-text`). The projection ALREADY models it — `ComposeDocxProjectionBuilder` emits an
+    inline opaque atom (`data-atom-kind="field"`) carrying the field's cached display text, and
+    `opaqueAtomNode.ts` renders it as a non-editable leaf. **The read half exists; the write half does
+    not.** `ComposeInlineRun` has no field member, so the model cannot carry one back and the renderer
+    writes the cached string as literal text.
+
+    **Follow task 048's pattern exactly** — it is the proven precedent, twice over. `Symbol` carries the
+    construct's SEMANTIC IDENTITY (`font` + `charCode`), never the glyph the reader resolved for display,
+    precisely because re-authoring the resolved look-alike silently changes what the document contains. A
+    field is the same shape: the instruction is the identity; the cached result is the display.
+
+    **The scope decision this task owns.** Not every field is safe to carry live.
+
+      - `PAGE`, `NUMPAGES`, `DATE`, `TIME` — re-evaluate harmlessly; carrying the instruction restores the
+        behaviour the user expects.
+      - `REF`, `PAGEREF`, `TOC`, `HYPERLINK \l` — target a bookmark. If the target did not survive, Word
+        shows its broken-reference text where the user previously saw resolved prose. `ComposeDocumentRenderer`
+        already records exactly this hazard for preserved headers/footers (review 011-P4/P9). Bookmarks ARE
+        carried now (task 041, residual list §3) — so verify that comment is stale rather than assuming it,
+        and decide per class on evidence.
+      - Unknown/vendor instructions — decide deliberately: carry opaquely, or keep flattening and say so.
+
+    Carrying an instruction that re-evaluates to something WORSE than the frozen text is a regression, not
+    a fix. State the per-class decision and its evidence in the task notes.
+
+    **Correct the published wording while you are here.** The residual list's field row reads "page numbers,
+    cross-references, TOC entries", which implies page numbers are at risk. They are not, in the common
+    case: page numbers live in headers/footers, and the save does not re-author those — the renderer
+    detaches the trailing `sectPr` and re-attaches it around the body swap, so header/footer parts stay
+    referenced. The row only ever bit a field in a BODY paragraph. Fix the row to say so.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in `ComposeContentModel`'s marker-run contract, `ComposeDocumentRenderer`'s block dispatch, and `ComposeDocxProjectionBuilder`'s atom emission.</role>
+
+  <goal>
+    A Word field in a paragraph the user edits survives the save as a field, not as frozen text, for every
+    field class the task determines is safe to carry. Classes determined UNSAFE keep flattening and are
+    named as such in the residual list — the list and the code agree in both directions, enforced by the
+    parity test.
+  </goal>
+
+  <context>
+    <background>
+      Task 046 (`IsLineBreak`) and task 048 (`IsTab`, `Symbol`) each retired a row from the residual list
+      using the same three-part move: add a marker-run member to `ComposeInlineRun`, emit it from the
+      projection, re-emit it from the renderer, and move the row from §2 to §3 of
+      `COMPOSE-WRITE-RESIDUAL-LOSS.md`. `ComposeResidualLossParityTests` then enforces the new state in
+      BOTH directions — it fails if the document claims a loss the gate preserves, AND if the gate loses
+      something the document does not name.
+
+      The marker-run contract is uniform and documented on `ComposeInlineRun`: when the marker is set,
+      every other content field is ignored, but run PROPERTIES still apply (see `IsTab`'s remarks — it
+      differs from the break markers in exactly that way, and a field behaves the same).
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="primary-edit">docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeResidualLossParityTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task 048 precedent">Carry the SEMANTIC IDENTITY (the instruction), never only the resolved display — the `Symbol` rule. A carry that re-authors the look-alike is the defect, not the fix.</constraint>
+    <constraint source="ADR-049 I-5">ONE body author. The re-emit belongs inside `ComposeDocumentRenderer`; do NOT introduce a second renderer or a per-construct preservation pass.</constraint>
+    <constraint source="ADR-049">No per-construct preservation logic in the CLONE path — untouched blocks are already preserved by not being re-authored. This task changes only what an EDITED paragraph can carry.</constraint>
+    <constraint source="FR-A10">The residual list and the code MUST agree in both directions. Move the row only when the parity test proves the carry.</constraint>
+    <constraint source="project">MUST NOT weaken ADR-049 invariants (1) every-save-terminates-in-a-defined-outcome and (2) untouched-blocks-are-preserved. A field that cannot be parsed degrades to today's flatten + warning — never a refusal.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size report vs the 44.96 MB baseline; no new NuGet; no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Seam test over a REAL corpus document containing the field class, through the real renderer — not a hand-built XML fragment standing in for one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Marker-run carry, field OOXML, residual-list parity</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/edited-block-loss.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read task 048's implementation FIRST — it is the template, and reading it is cheaper than re-deriving the contract.</step>
+    <step order="1">Inventory the field classes present in the corpus. Do not design against hypothetical fields.</step>
+    <step order="2">DECIDE per class: carry-live, carry-frozen, or keep flattening. Record the evidence — especially whether the renderer's "the model does not carry bookmarks" comment is stale now that task 041 carries them.</step>
+    <step order="3">Add the `ComposeInlineRun` member following the `Symbol` shape; emit from the projection; re-emit from the renderer.</step>
+    <step order="4">Write the failing parity/seam test FIRST, observe it fail, then implement.</step>
+    <step order="5">Move the row in `COMPOSE-WRITE-RESIDUAL-LOSS.md` §2 → §3 for carried classes; correct the page-numbers-in-headers wording; leave any uncarried class named in §2.</step>
+    <step order="6">Publish-size + CVE report; `.claude/CHANGELOG.md` entry.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a field class can only be carried by re-evaluating to something the user did not see (a `REF` whose bookmark did not survive, resolving to Word's broken-reference text where resolved prose stood), STOP and surface it. Freezing that class is the better outcome and the list should say so — do not carry it to shorten the list.</trigger>
+    <trigger>If the projection does not preserve the field INSTRUCTION (only the cached result reaches the model), STOP: the carry cannot be built on the display string alone, and the projection half must be fixed first.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</output>
+    <output type="doc">docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A field of each carried class, in a paragraph edited by the save, round-trips as a field — asserted through the REAL renderer over a REAL corpus document.</criterion>
+    <criterion>The per-class carry decision is documented with its evidence, including any class deliberately left flattened.</criterion>
+    <criterion>`COMPOSE-WRITE-RESIDUAL-LOSS.md` moves carried classes §2 → §3 and the parity test enforces the new state in BOTH directions.</criterion>
+    <criterion>The field row's wording no longer implies header/footer page numbers are at risk.</criterion>
+    <criterion>An unparseable field degrades to today's flatten + named warning — never a refusal (ADR-049 invariant 1).</criterion>
+    <criterion>NEGATIVE: no second body author; no per-construct logic in the clone path.</criterion>
+    <criterion>NEGATIVE: untouched blocks still clone byte-for-byte (invariant 2 unaffected).</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

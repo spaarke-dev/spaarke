@@ -39,8 +39,10 @@ silent.
 
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
-| Field (`w:fldSimple`, `w:fldChar`) — page numbers, cross-references, TOC entries | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
+| Field (`w:fldSimple`, `w:fldChar`) — **body** cross-references, TOC entries. **Not** header/footer page numbers: those live in parts the save does not re-author (the trailing `sectPr` is detached and re-attached around the body swap, so header/footer parts stay referenced) | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
 | Embedded object / image / chart (`w:drawing`, `w:object`, `w:pict`) | Removed from the paragraph. The underlying part stays in the file | `complex-object-dropped` |
+
+> **⚠️ Two of these rows are scheduled for removal, not sign-off.** Owner decision 2026-08-25: fields and embedded objects are to be **carried**, not accepted as losses — task **049** (fields) and task **056** (objects). Both follow the same move that already retired line breaks (task 046) and tabs + symbols (task 048): add a marker run / opaque carry, and let the parity test prove it before the row moves. This list is **not signed off** until they land; the sign-off below then covers the three remaining rows.
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
@@ -141,7 +143,7 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 |---|---|
 | Version | 2026-08-23 (first publication) |
 | Measured against | `spaarkeai-compose-r8` @ task 045, corpus of 23 documents |
-| Signed off by | ⏳ *pending* |
+| Signed off by | ⏳ *pending* — **blocked on tasks 049 + 056** (owner declined the field + object rows 2026-08-25) |
 | Date | ⏳ *pending* |
 
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the

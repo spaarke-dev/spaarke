@@ -188,10 +188,12 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 042 | **Comment anchors + revision-id seeding under cloning** (dup-paraId consume-in-order, cross-boundary ranges) | FR-A11 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 043 | **Capability gate** → read-only + "Edit a copy" — **SUPERSEDED** (owner 2026-08-23): no construct family needs a gate; corpus gap closed, 4 fixtures, all 100% strict + named warnings | FR-A07 | FULL | opus/xhigh | ❌ | 040 | ⊘ |
 | 044 | **Two document classes** (Authored/Imported; warnings suppressed for Authored) + PDF version-coordinate tracking | FR-A08/09 | FULL | opus/xhigh | ❌ | 040 | ✅ |
-| 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044 | 🔲 |
+| 045 | **Residual loss list published + owner sign-off** + **ADR-049 third amendment merged** (7 invariants) — main-session only¹ | FR-A10 | FULL | opus/xhigh | ❌ | 040–044, **049, 056** | 🔲 |
 | 046 | **Soft line breaks carried** — `IsLineBreak` marker run (first row retired from the residual list) | FR-A10 residual | FULL | opus/xhigh | ❌ | 045 | ✅ |
 | 047 | **Editor node-inventory survey** — found a SECOND loss direction (editor-native content the model cannot name) + the opaque-atom pipeline already exists | — | STANDARD | opus/xhigh | ❌ | 046 | ✅ |
 | 048 | **Tabs + symbols carried** — `IsTab` / `Symbol{Font,CharCode}` marker runs on the existing atom node; two more rows retired | FR-A10 residual | FULL | opus/xhigh | ❌ | 047 | ✅ |
+| 049 | **Fields carried** — `Field{Instruction,CachedResult}` marker run; per-class carry decision (PAGE/DATE live vs REF/TOC bookmark-dependent); corrects the field row's misleading page-numbers wording | FR-A10 residual | FULL | opus/xhigh | ❌ | 040, 048 | 🔲 |
+| 056 | **Objects carried** — opaque `OuterXml` carry on `ComposeFormatChange`'s SDK-parse-gated contract; **relationship survival must be proven empirically** (a carried drawing with a dead `r:embed` = a package Word calls corrupt, worse than today's drop); place-indicator is the evidence-gated fallback | FR-A10 residual | FULL | opus/xhigh | ❌ | 040, 048, 049 | 🔲 |
 
 ¹ `.claude/` write — sub-agents cannot write these paths (root §3). Main session executes.
 

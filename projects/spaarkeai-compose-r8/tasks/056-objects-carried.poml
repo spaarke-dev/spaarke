@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 residual — carry EMBEDDED OBJECTS / images / charts through an edited paragraph (opaque OuterXml carry, SDK-parse-gated); retire the `complex-object-dropped` row</title>
+    <phase>4 Track A — Fidelity</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Round-trips raw OOXML into the saved package. A carried drawing whose relationship id no longer resolves produces a document Word reports as corrupt — strictly worse than today's honest drop.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the hard part is not emitting a `w:drawing` — it is proving the relationship it points at survives the body swap. `r:embed="rId7"` is resolved against the MAIN DOCUMENT PART's relationships, and this save replaces that part's body while the renderer's own remarks call the image parts "orphaned… inert weight". Whether "orphaned" means the part survives WITH its relationship, or survives as an unreferenced part whose relationship was pruned, is the whole task — and the two outcomes differ by document corruption.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same save spine as 049 / Track C / Track D.</parallel-reason>
+    <deps>040, 048, 049</deps>
+    <tags>bff-api, compose, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Owner decision 2026-08-25: embedded objects are to be CARRIED — "if we can carry them that's the better
+    solution" — not reduced to a place-indicator, and not deferred. There is no compose-r9.
+
+    Today a `w:drawing` (image/shape/chart) or `w:object` (OLE embed) in a paragraph the user edits is
+    removed from that paragraph (`complex-object-dropped`). The underlying part is NOT deleted — the
+    renderer's remarks record that "orphaned parts (images/footnotes referenced only by the replaced body)
+    remain in the package as inert weight". The editor already shows a visible non-editable placeholder for
+    the construct (`opaqueAtomNode.ts`, `data-atom-kind="object"`). So the read half exists and the bytes
+    survive; what is missing is the write half.
+
+    **The precedent to follow is `ComposeFormatChange.PreviousPropertiesXml`** — the shipped opaque-carry
+    pattern in the SAME model file. It carries raw `OuterXml` through the JSON content model, and the
+    renderer NEVER string-injects it: the XML is parsed through the typed OpenXML SDK class, validated for
+    element name + namespace, and the whole record is dropped when parsing fails, so client junk cannot
+    reach the package. Clients preserve it untouched on re-post. Reuse that contract verbatim; do not
+    invent a second opaque-carry shape (CLAUDE.md §11).
+
+    **The load-bearing question this task must answer with evidence, not reasoning.** A `w:drawing` refers
+    to its image by relationship id (`r:embed="rId7"`), resolved against the MAIN DOCUMENT PART's
+    relationships. This save replaces that part's body. If the relationship survives, carrying the subtree
+    verbatim works. If it was pruned, the carried drawing points at nothing and Word reports the file as
+    corrupt — **worse than today's honest drop, and exactly the kind of silent-damage regression R8 exists
+    to end.**
+
+    Prove it on a REAL corpus document with a real image, by opening the SAVED package and resolving the
+    relationship — not by reading the renderer's comment and believing it. The comment says "orphaned",
+    which is ambiguous between "unreferenced but present with its relationship" and "relationship pruned".
+
+    **If the relationship does NOT survive**, do not ship a corrupt-document risk to shorten the list. Two
+    honest outcomes, in preference order: (a) re-register the relationship on the rendered part as part of
+    the carry, if that can be done inside the one body author; (b) fall back to the PLACE-INDICATOR the
+    owner named as acceptable — carry the atom marker so the user sees the object's position and a named
+    warning, rather than silent removal. Surface the choice per §6.5 rather than deciding it silently.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in OOXML package relationships, `ComposeDocumentRenderer`'s carrier/body-swap mechanics, and the `ComposeFormatChange` opaque-carry contract.</role>
+
+  <goal>
+    An embedded object in a paragraph the user edits survives the save intact and the saved package opens
+    clean in Word — or, if relationship integrity cannot be guaranteed, the object's POSITION survives as a
+    named place-indicator. Either way the residual list states what actually happens, enforced by the
+    parity test, and no save produces a package Word reports as damaged.
+  </goal>
+
+  <context>
+    <background>
+      This is the second half of the owner's 2026-08-25 decision on the residual list (task 049 is the
+      first). The list is not signed off until both land; task 045 then signs a list whose remaining rows
+      are footnote references, endnote references, and content controls — the three the owner called not
+      important.
+
+      `ComposeResidualLossParityTests` enforces the list in BOTH directions, so the row cannot be moved
+      until the carry is real, and cannot be left in §2 once it is.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="primary-edit">docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeResidualLossParityTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeOoxmlPackagePartComparer.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">REUSE `ComposeFormatChange.PreviousPropertiesXml`'s opaque-carry contract — SDK-parse-gated, element+namespace validated, dropped whole on failure. MUST NOT introduce a second opaque-carry mechanism.</constraint>
+    <constraint source="ADR-049 I-5">ONE body author. The carry and any relationship handling live inside `ComposeDocumentRenderer`.</constraint>
+    <constraint source="project invariant 1">A carry that cannot be validated degrades to a named warning — never a refusal, and never a package Word reports as damaged.</constraint>
+    <constraint source="security">Raw XML from a client MUST NOT reach the package unparsed. The SDK-parse gate is the boundary, exactly as `PreviousPropertiesXml` documents it.</constraint>
+    <constraint source="FR-A10">Move the row only when the parity test proves the carry; if the outcome is a place-indicator, the row moves to a place-indicator row, not to §3 "carried".</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size report vs the 44.96 MB baseline; no new NuGet; no new HIGH CVE. Watch payload growth — a carried drawing subtree is large, and ADR-040 caps inline payloads at 128 KB.</constraint>
+    <constraint source="ADR-038">Seam test that OPENS the saved package and resolves the relationship. A round-trip assertion over the content model alone does not prove the document opens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Opaque OOXML carry, package relationships, residual-list parity</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/edited-block-loss.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/merge-mechanism-results.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read `ComposeFormatChange`'s carry contract and task 048's marker-run move FIRST.</step>
+    <step order="1">PROVE the relationship question empirically: save a corpus document with an image in an EDITED paragraph, open the saved package, resolve `r:embed`. Record the answer before designing anything.</step>
+    <step order="2">If relationships survive → implement the opaque carry on the `PreviousPropertiesXml` contract. If not → §6.5-surface the choice between re-registering the relationship and the place-indicator fallback.</step>
+    <step order="3">Measure payload growth for a realistic image-bearing document against the ADR-040 128 KB inline cap; report headroom or the degradation.</step>
+    <step order="4">Write the failing package-opening seam test FIRST, observe it fail, then implement.</step>
+    <step order="5">Update `COMPOSE-WRITE-RESIDUAL-LOSS.md` to state what actually happens; parity test enforces it both directions.</step>
+    <step order="6">Publish-size + CVE report; `.claude/CHANGELOG.md` entry; confirm task 045's remaining list is down to the three the owner accepted.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the carried object's relationship does not resolve in the saved package, STOP. Do NOT ship it — a document Word reports as damaged is worse than the honest drop it replaces. Surface the re-register vs place-indicator choice per §6.5.</trigger>
+    <trigger>If carrying drawing subtrees pushes a realistic whole-document payload past the ADR-040 128 KB inline cap, STOP: `ProjectComposeOutputs` SKIPS truncated entries, so the save would vanish from the read projection rather than degrade.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</output>
+    <output type="doc">docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>An image/drawing in an EDITED paragraph survives the save, and the SAVED PACKAGE OPENS CLEAN — asserted by opening the package and resolving the relationship, not by a content-model round-trip.</criterion>
+    <criterion>The relationship-survival question is answered with recorded empirical evidence, not by reading a code comment.</criterion>
+    <criterion>The opaque carry reuses `ComposeFormatChange`'s SDK-parse-gated contract; client XML never reaches the package unparsed.</criterion>
+    <criterion>If full carry proved unsafe: the place-indicator fallback is implemented, the §6.5 choice is recorded, and the residual list says exactly that.</criterion>
+    <criterion>Payload growth measured against the ADR-040 128 KB cap; headroom or degradation stated.</criterion>
+    <criterion>`COMPOSE-WRITE-RESIDUAL-LOSS.md` matches the code, enforced both directions by the parity test.</criterion>
+    <criterion>NEGATIVE: no second opaque-carry mechanism; no second body author.</criterion>
+    <criterion>NEGATIVE: no save produces a package Word reports as damaged — the whole point of the gate.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>
