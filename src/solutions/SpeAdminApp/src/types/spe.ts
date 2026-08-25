@@ -844,20 +844,38 @@ export interface SearchRequest {
 }
 
 /** Search result item for container search */
+/**
+ * A container that matched a search.
+ *
+ * Corrected 2026-08-25. `container` used to be typed as a full `Container`, which was never true:
+ * Graph Search returns a projection, and the endpoint's `SearchContainerDto` carries only id,
+ * displayName, description and containerTypeId. `status`, `createdDateTime` and
+ * `storageUsedInBytes` are NOT available on a search result — the grid renders them as "—" rather
+ * than inventing an "active"/epoch default, because a fabricated status on a security-admin screen
+ * is worse than a visible blank.
+ */
 export interface ContainerSearchResult {
-  /** Container that matched the search */
-  container: Container;
-  /** Relevance score */
+  /** Container that matched the search — a PROJECTION, not a full container record. */
+  container: Partial<Container> & Pick<Container, "id" | "displayName">;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
 }
 
-/** Search result item for drive item search */
+/**
+ * A drive item that matched a search.
+ *
+ * Same correction as {@link ContainerSearchResult}: the endpoint's `SearchItemDto` returns id, name,
+ * size, lastModifiedDateTime, containerId, containerName, webUrl and mimeType — so `createdDateTime`
+ * and `lastModifiedBy` are absent here even though a fully-read `DriveItem` has them.
+ */
 export interface DriveItemSearchResult {
-  /** Drive item that matched */
-  item: DriveItem;
+  /** Drive item that matched — a PROJECTION, not a full drive item. */
+  item: Partial<DriveItem> & Pick<DriveItem, "id" | "name">;
   /** Container the item belongs to */
   containerId: string;
-  /** Relevance score */
+  /** Display name of the owning container, when search reported one. */
+  containerName?: string;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
   /** Search result hit highlights */
   hitHighlightedSummary?: string;
@@ -961,16 +979,21 @@ export interface BulkPermissionsRequest {
 
 /** Secure score from GET /api/spe/security/score */
 export interface SecureScore {
-  /** Score ID */
-  id: string;
+  /** Score ID. NOT returned by GET /api/spe/security/score. */
+  id?: string;
   /** Current score */
   currentScore: number;
   /** Maximum possible score */
   maxScore: number;
-  /** Percentage (currentScore / maxScore * 100) */
-  percentage: number;
-  /** Date of this score snapshot */
-  createdDateTime: string;
+  /**
+   * Percentage (currentScore / maxScore * 100).
+   * NOT returned by the endpoint — `SecureScoreDto` carries only currentScore, maxScore and
+   * averageComparativeScores. Marked optional 2026-08-25 after the card rendered "NaN%" for reading
+   * a field that was never on the wire; the card now derives it from the two scores.
+   */
+  percentage?: number;
+  /** Date of this score snapshot. NOT returned by the endpoint. */
+  createdDateTime?: string;
   /** Individual control scores */
   controlScores?: Array<{
     controlName: string;
