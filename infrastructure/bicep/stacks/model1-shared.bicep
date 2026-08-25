@@ -137,6 +137,9 @@ param sharedTags object = {
   managedBy: 'bicep'
 }
 
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the following RBAC grants (customer-provisioning-orchestration-r1 task 203b, punch list rows A20 + A21): (1) H4-shared handler needs six data-plane roles on the shared SOURCE services (Cognitive Services User on OpenAI + DocIntel; Search Service Contributor on AI Search; Azure Service Bus Data Owner on the shared SB namespace; Storage Account Contributor on the shared SA; Redis Cache Contributor on the shared Redis) to read current API keys/connection strings and mirror them into per-tenant KVs; (2) H4b + H9 handlers need Website Contributor on the shared BFF App Service (Kudu docker-log fetch + zip-deploy). Empty default skips ALL grants -- an operator MUST supply the L2 UAMI principalId for Model 1 live provisioning to succeed.')
+param controlPlaneUamiPrincipalId string = ''
+
 // ============================================================================
 // PARAMETERS — PER-TENANT DEDICATED GROUP
 // (created NEW for each Model 1 tenant onboarding; §7.2 🔴 always-dedicated row.)
@@ -251,6 +254,18 @@ module sharedKeyVault '../modules/key-vault.bicep' = {
     keyVaultName: sharedKeyVaultName
     location: location
     sku: 'standard'
+    // A25 fix (customer-provisioning-orchestration-r1 task 203b, punch list
+    // row A25 / wave-4-drift-5): grant the sharedBffUami "Key Vault Secrets
+    // User" on the shared platform KV so the shared multi-tenant BFF can
+    // resolve @Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=...) refs
+    // at boot (Redis-ConnectionString, ServiceBus-ConnectionString,
+    // Storage-ConnectionString, AzureOpenAI-ApiKey, AiSearch--AdminKey,
+    // DocumentIntelligence-ApiKey emitted by the sharedBffApi module below).
+    // Uses userAssignedIdentityPrincipalId (canonical Phase-C UAMI param per
+    // key-vault.bicep task 030); Bicep resolves the topological dependency on
+    // sharedBffUami (declared below) via output-ref graph -- no circular dep
+    // because uami.bicep has no dependency on this KV.
+    userAssignedIdentityPrincipalId: sharedBffUami.outputs.principalId
     tags: sharedTags
   }
 }
@@ -491,10 +506,10 @@ module sharedBffApi '../modules/app-service.bicep' = {
     location: location
     // T5 structural fix (task 029): UAMI-only, no SA-MI. keyVaultName +
     // enableManagedIdentity params were removed from app-service.bicep.
-    // KV Secrets User grant to the shared BFF UAMI is a follow-on concern
-    // (parallel to the per-tenant Data-plane RBAC deferral noted below); the
-    // shared KV was previously granted to the removed SA-MI, which is why the
-    // legacy `keyVaultName` param was here.
+    // KV Secrets User grant to the shared BFF UAMI landed in the sharedKeyVault
+    // module invocation above (customer-provisioning-orchestration-r1 task 203b,
+    // punch list row A25 / wave-4-drift-5) via userAssignedIdentityPrincipalId
+    // -- the shared BFF now resolves @Microsoft.KeyVault(...) refs at boot.
     userAssignedIdentityResourceId: sharedBffUami.outputs.id
     appSettings: {
       // Multi-tenant mode marker consumed by BFF at boot for per-request
@@ -652,6 +667,51 @@ module perTenantMonitoring '../modules/monitoring.bicep' = {
 // This stack echoes the pass-through references as OUTPUTS so H4 can consume
 // them from the deployment output when invoked by the L2 control-plane.
 // ============================================================================
+
+// ============================================================================
+// L2 CONTROL-PLANE UAMI -- RBAC ON SHARED SOURCE SERVICES + BFF APP SERVICE
+// (customer-provisioning-orchestration-r1 task 203b, punch list rows A20 + A21)
+//
+// A20: H4-shared handler (task 200) reads current API keys / connection strings
+//      from the shared source services (OpenAI + DocIntel + AI Search + SB +
+//      Storage + Redis) via SDK calls; each branch requires a matching data-
+//      plane role on the source resource. Task 200 "Deferred #1" -- landed here.
+// A21: H4b (task 201) fetches Kudu docker logs from the shared BFF App Service;
+//      H9 (task 132) zip-deploys to the same site. Website Contributor covers
+//      both. Task 201 "Deferred #1" -- landed here.
+//
+// Split into modules/model1-shared-l2-rbac.bicep -- BCP139 forces this stack
+// (targetScope='subscription') to declare RG-nested role assignments via a
+// module invoked with `scope: sharedRg`. Same mechanism-forced pattern as
+// modules/controlplane-sb-rbac.bicep (that one is BCP165 cross-RG; this one is
+// BCP139 sub -> RG).
+// ============================================================================
+
+module model1SharedL2Rbac '../modules/model1-shared-l2-rbac.bicep' = {
+  scope: sharedRg
+  name: 'l2-rbac-shared-${environment}'
+  params: {
+    controlPlaneUamiPrincipalId: controlPlaneUamiPrincipalId
+    sharedOpenAiName: sharedOpenAiName
+    sharedDocIntelligenceName: sharedDocIntelligenceName
+    sharedAiSearchName: sharedAiSearchName
+    sharedServiceBusName: sharedServiceBusName
+    sharedStorageAccountName: sharedStorageAccountName
+    sharedRedisName: sharedRedisName
+    sharedBffAppServiceName: sharedBffAppServiceName
+  }
+  dependsOn: [
+    // Ensure the source resources exist before RBAC binds. Module invocation
+    // depends-on aggregates each shared resource's parent module.
+    sharedOpenAi
+    sharedDocIntelligence
+    sharedAiSearch
+    sharedServiceBus
+    sharedStorage
+    sharedRedis
+    sharedBffApi
+  ]
+}
 
 // ============================================================================
 // OUTPUTS — SHARED PLATFORM
