@@ -48,7 +48,7 @@ blocks 011 and requires re-running the CLAUDE.md §6.5 block — not a silent fa
 | 050 | [Container archival](050-container-archival.poml) | 5 E | E01 | FULL | sonnet | high | W15 | ❌ | 020, 040 | 🔲 |
 | 051 | [Per-container quota ceiling](051-quota-ceiling.poml) | 5 E | E02 | FULL | sonnet | high | W16 | ❌ | 023, 024, 040 | 🔲 |
 | 052 | [Item recycle bin (207 handled)](052-item-recycle-bin.poml) | 5 E | E03 | FULL | sonnet | high | W17 | ❌ | 022, 040, 041 | 🔲 |
-| 060 | [Hygiene — dead stub + misfiled file](060-hygiene-stub-and-misfiled.poml) | 6 | F01, F02 | STANDARD | sonnet | low | W18 | ✅ | — | 🔲 |
+| 060 | [Hygiene — dead stub + misfiled file](060-hygiene-stub-and-misfiled.poml) | 6 | F01, F02 | STANDARD | sonnet | low | W18 | ✅ | — | ✅ **done 2026-08-24.** Stub was comment-only (declared no namespace, so unreferenceable) — the `Services.SpeAdmin` namespace is provided by 5 other files, so deleting it left every `using` resolving. `ContainerItemEndpoints.cs` moved via `git mv` (history preserved) + namespace aligned to its new directory; the one call site needed a `using`. **9 route strings diffed byte-identical.** Publish +0.00 MB |
 | 061 | [Refresh SPE knowledge corpus](061-knowledge-corpus-refresh.poml) | 6 | X01 | MINIMAL | sonnet | medium | W18 | ✅ | 025 | 🔲 |
 | 062 | [Billing-attach cross-project handoff](062-billing-attach-handoff.poml) | 6 | X02 | MINIMAL | sonnet | low | W18 | ✅ | 029 | 🔲 |
 | 090 | [Project wrap-up + `/test-diet` gate](090-project-wrap-up.poml) | 7 | — | STANDARD | sonnet | high | none | ❌ | all | 🔲 |

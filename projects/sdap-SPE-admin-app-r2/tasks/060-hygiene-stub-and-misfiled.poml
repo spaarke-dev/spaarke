@@ -4,7 +4,7 @@
     <title>Hygiene — delete the dead stub and relocate the misfiled endpoints file</title>
     <phase>6 Hygiene + cross-cutting</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>File deletion and relocation with no behavioural surface. Modifies .cs only by moving it; no logic change.</rigor-reason>
     <model-tier>sonnet</model-tier>
