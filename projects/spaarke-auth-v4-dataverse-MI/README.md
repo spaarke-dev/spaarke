@@ -1,10 +1,41 @@
 # Spaarke Auth v4 — Zero-Secret BFF Confidential Credential (OBO → MI Federated Credentials)
 
 > **Portfolio**: [Project #800](https://github.com/spaarke-dev/spaarke/issues/800) · Parent Epic [#426 — AUTH & SSO](https://github.com/spaarke-dev/spaarke/issues/426) · [Board](https://github.com/users/spaarke-dev/projects/2)
-> Registered 2026-08-19 · Type Infrastructure · Status Active (Planning) · Start 2026-08-17 · 0/29 tasks
-> Related backlog: [#791](https://github.com/spaarke-dev/spaarke/issues/791) — items 1–2 are now in scope as FR-A1/FR-A2 (tasks 010/011)
+> Registered 2026-08-19 · Type Infrastructure · Status **Completed** · Start 2026-08-17 · Closed 2026-08-24 · **26/26 active tasks** (3 deferred: Power BI 040–042, DEF-001)
+> Related backlog: [#791](https://github.com/spaarke-dev/spaarke/issues/791) — items 1–2 were in scope as FR-A1/FR-A2 (tasks 010/011)
 
-> **Status**: **SPEC COMPLETE** — `spec.md` generated + ADR-checked 2026-08-19 · **ready for `/project-pipeline`** · **Epic**: AUTH & SSO (#426)
+> **Status**: ✅ **COMPLETE 2026-08-24** — merged to master (PR [#814](https://github.com/spaarke-dev/spaarke/pull/814) + [#816](https://github.com/spaarke-dev/spaarke/pull/816)) · deployed + **UAT PASSED** on `spaarkedev1` · **Epic**: AUTH & SSO (#426)
+
+### Outcome
+
+`BFF-API-ClientSecret` is **gone** — from app settings *and* Key Vault (soft-deleted, **not** purged; recoverable
+to 2026-11-22). Every BFF-identity confidential client, **including OBO**, now authenticates via a Managed-Identity
+federated credential. Service Bus SAS and the AI Search admin key went the same way (tasks 051/053); their Key
+Vault rollback copies were deleted at wrap-up (recoverable to 2026-11-23).
+
+**It is in live use, not merely configured** — and that distinction is evidenced, not asserted:
+
+- **Dataverse's own audit field**: every `sprk_document` / `sprk_communication` row created during UAT is stamped
+  `# mi-bff-api-dev`. The app registration `SDAP-BFF-SPE-API` has not written since 2026-08-13.
+- **Entra sign-in logs**: the MI authenticates to Dataverse *and* to `AAD Token Exchange Endpoint: Public` (the
+  MI-FIC assertion exchange), while the app registration's secret-based sign-ins **stop at the cutover window**.
+
+Full three-layer proof + re-run recipe: [`notes/decisions/mi-proof-dataverse-side.md`](notes/decisions/mi-proof-dataverse-side.md).
+
+**Why this project existed at all**: three prior audits inventoried the secret correctly and concluded
+"NEVER-REMOVE". They were defeated by **one sentence** — `constraints/auth.md:108`, *"OAuth spec requires
+confidential client + secret."* OAuth requires a confidential **credential**; a secret is one of three ways to
+satisfy it, and Microsoft ranks it last. See [`notes/lessons-learned.md`](notes/lessons-learned.md) §1.
+
+**Anti-recurrence, exercised rather than claimed**: a deliberate ninth secret-bearing client was seeded on a
+scratch branch and **FR-F1 + FR-F2 both fired**, naming the exact `file:line`. Those forcing functions live in
+`tests/Spaarke.ArchTests/**`, which this project made the **eighth KEEP path** via **ADR-038 Amendment A1** —
+closing a gap where the mandatory close-gate `/test-diet` would have recommended deleting them.
+
+**Two success criteria are NOT met and are carried forward with owners, not quietly closed**: local `dotnet run`
+has no OBO credential path for a fresh setup (#9), and the provisioning app-registration shape is an open owner
+decision (#15 → [#779](https://github.com/spaarke-dev/spaarke/pull/779)). Neither blocks the secret-removal
+objective. Full walk with evidence: [`spec.md` § Success Criteria](spec.md#success-criteria).
 > **Origin**: surfaced during `code-quality-and-assurance-r3` task 011 / #3b (app-only Dataverse → MI, done + live)
 > **Type**: auth architecture (**ADR-028 amendment — §6.5 path B**) · **Surface**: BFF confidential clients + `Spaarke.Dataverse`
 > **Risk**: HIGH (OBO = all delegated user auth; fails closed)
