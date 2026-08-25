@@ -636,9 +636,7 @@ export function useComposeSaveCompleted(): ComposeSaveCompleted | null {
  * blocks and returns the text with each paragraph's `w14:paraId` prefixed. Effect-scoped: re-registers
  * on identity change, clears on unmount. No-op outside a {@link ComposeActionBridgeProvider}.
  */
-export function useRegisterComposeAnchoredDocumentTextProvider(
-  provider: ComposeAnchoredDocumentTextProvider
-): void {
+export function useRegisterComposeAnchoredDocumentTextProvider(provider: ComposeAnchoredDocumentTextProvider): void {
   const bridge = useComposeActionBridge();
   const setProvider = bridge?.setComposeAnchoredDocumentTextProvider;
   React.useEffect(() => {
@@ -657,7 +655,5 @@ export function useRegisterComposeAnchoredDocumentTextProvider(
  */
 export function useComposeAnchoredDocumentText(): ComposeAnchoredDocumentTextProvider | null {
   const bridge = useComposeActionBridge();
-  return bridge && bridge.hasComposeAnchoredDocumentTextProvider
-    ? bridge.readComposeAnchoredDocumentText
-    : null;
+  return bridge && bridge.hasComposeAnchoredDocumentTextProvider ? bridge.readComposeAnchoredDocumentText : null;
 }

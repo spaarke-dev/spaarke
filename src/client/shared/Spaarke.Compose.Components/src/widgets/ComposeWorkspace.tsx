@@ -3472,9 +3472,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   } | null => {
     if (isActiveTabRef.current === false) return null;
     const anchored = editorRef.current?.getAnchoredDocumentText?.();
-    return anchored && anchored.paraIds.length > 0
-      ? { text: anchored.text, paraIds: anchored.paraIds }
-      : null;
+    return anchored && anchored.paraIds.length > 0 ? { text: anchored.text, paraIds: anchored.paraIds } : null;
   }, []);
   useRegisterComposeAnchoredDocumentTextProvider(handleReadAnchoredDocumentText);
 

@@ -65,9 +65,7 @@ jest.mock('../context/composeActionBridge', () => ({
     capturedSave = h;
   },
   useComposeSaveCompleted: () => null,
-  useRegisterComposeAnchoredDocumentTextProvider: (
-    p: () => { text: string; paraIds: readonly string[] } | null
-  ) => {
+  useRegisterComposeAnchoredDocumentTextProvider: (p: () => { text: string; paraIds: readonly string[] } | null) => {
     capturedAnchoredDocText = p;
   },
 }));
