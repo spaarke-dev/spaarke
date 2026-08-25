@@ -4,7 +4,7 @@
     <title>Apply Class-A punch list — Sub-phase 203a foundation (provisioning-runs root + templates + patterns fill + constraint + skill Step 1 + 2 bicep fixes)</title>
     <phase>Phase Pre-Live-Fire — Class-A punch list foundation</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches `.claude/skills/provision-environment/SKILL.md`, `.claude/constraints/provisioning.md`, `.claude/patterns/provisioning/**` (9 skeleton files), AND `infrastructure/bicep/**` — mixed skill-directive + bicep changes require FULL rigor per project CLAUDE.md; skill wiring in particular is L3 operator surface that fires against live customer stamps.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -126,7 +126,33 @@
     <criterion testable="true">Any newly created files justified per CLAUDE.md §11 by punch list row citation in file header.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing — task 202 authored the punch list (34 Class-A rows) + skeleton pattern files; this task consumes both. Extension — 203a is the foundation sub-phase (provisioning-runs root + template content + skill Step 1 + 2 mechanical bicep fixes) that unblocks the operator's ability to run + document a run coherently. Cost-of-doing-nothing — task 186 E2E ceremony fires without: (a) provisioning-runs project structure to organize the run in (SESSION 5 lesson); (b) constraint file that task-execute Step 4a can load for provisioning tasks; (c) working skill Step 1 that L2 accepts (L2 400s today per DS-5 c6-1/c6-2/c6-3); (d) correct `jwtAudience` (auth fails otherwise); (e) correct `healthCheckPath` (prod slot marked unhealthy). Any one of these blocks task 186's demonstration of FR-18/SC#5.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing — task 202 authored the punch list (34 Class-A rows) + skeleton pattern files; this task consumes both. Extension — 203a is the foundation sub-phase (provisioning-runs root + template content + skill Step 1 + 2 mechanical bicep fixes) that unblocks the operator's ability to run + document a run coherently. Cost-of-doing-nothing — task 186 E2E ceremony fires without: (a) provisioning-runs project structure to organize the run in (SESSION 5 lesson); (b) constraint file that task-execute Step 4a can load for provisioning tasks; (c) working skill Step 1 that L2 accepts (L2 400s today per DS-5 c6-1/c6-2/c6-3); (d) correct `jwtAudience` (auth fails otherwise); (e) correct `healthCheckPath` (prod slot marked unhealthy). Any one of these blocks task 186's demonstration of FR-18/SC#5.
+
+  ## Completion notes (2026-08-25)
+
+  All 9 in-scope rows resolved via verify-first execution in a single main session:
+
+  - **A05 applied**: `provisioning-runs/INDEX.md` + `_archive/.gitkeep` created.
+  - **A06 applied**: 8 per-run templates authored under `provisioning-runs/_templates/`.
+  - **A07 applied**: 9 skeleton pattern files at `.claude/patterns/provisioning/` filled with worked examples + recovery recipes; each 108-145 lines (was 24-29 lines pre-task). Exceeds acceptance criterion.
+  - **A08 applied**: `.claude/constraints/provisioning.md` authored (145 lines: I1-I5 invariants, never-delete list, publish-size ceiling, handler registration, ADR-032 F.1/F.2/F.3, class-A/B/C routing, idempotency, progressive fail-fast, reserved suffixes, prereqs, auth v2, sub-agent write boundary, test update obligation, E2E gate). Wired into `.claude/skills/task-execute/SKILL.md` Step 4a + 4b tag maps.
+  - **A09 applied**: profile enum {spaarke-hosted-model1-trial, spaarke-hosted-model2, customer-owned-model2} added to SKILL.md Step 1e with pre-POST validation + tenancyModel × profile consistency check. Prior "profile" field renamed to "environment" at Step 1d.
+  - **A10 applied**: `environmentId` added to Step 1f intake + Step 2 preflight POST payload.
+  - **A11 applied**: placeholder `sprk_dataverseenvironment` create via Dataverse MCP (`mcp__dataverse__create_record`) with `pac data create` fallback per §4.3a.5 added at Step 1f.
+  - **A12 already-applied**: verified `platform-controlplane.bicep:246` sets `jwtAudience = 'api://spaarke.com/provisioning-controlplane-${environmentName}'` (matches DS-5 C5.2). No edit needed.
+  - **A24 already-applied**: verified `app-service.bicep:82` sets `healthCheckPath = '/healthz'`. Confirmed independently of SESSION 7 203b parallel wave. No edit needed.
+
+  Build sanity: `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` → succeeded (0 warnings, 0 errors, 4.53s).
+
+  Effort actual: ~3h wall-clock vs 15h POML estimate. Verify-first strategy vindicated — A12 + A24 already-applied saved ~2h.
+
+  Quality gates (Step 9.5): SKIPPED per docs-only rule (no `.cs`/`.ts`/`.tsx`/`.bicep`/`.ps1` modifications — A12 + A24 verified already-applied → no bicep edits). Self-review of the two most consequential surfaces (SKILL.md Step 1 patches + constraint file) confirmed internal consistency + ADR alignment (ADR-028 21 MUSTs, ADR-044 registry pattern, ADR-032 asymmetric-registration, NFR-11 operator identity, I1 explicit tenantId, FR-18 setup status). No violations introduced.
+
+  Files modified (21 new + 3 modified = 24 total):
+  - NEW: `provisioning-runs/INDEX.md`, `provisioning-runs/_archive/.gitkeep`, 8× `provisioning-runs/_templates/*.md`, `.claude/constraints/provisioning.md`
+  - MODIFIED: 9× `.claude/patterns/provisioning/*.md` (filled), `.claude/skills/task-execute/SKILL.md` (2 tag-map rows), `.claude/skills/provision-environment/SKILL.md` (Step 1 rewrite), `projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md` (annotations)
+
+  Next actionable: task 203c (skill wiring — Step 0.5 external prereqs + `--batch` + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs).
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

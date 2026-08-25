@@ -196,19 +196,84 @@ Choice:
 
 Explain the trade-off to the operator if they ask.
 
-#### 1d. `profile` (required)
+#### 1d. `environment` (required)
 
-Choice: `dev` / `demo` / `prod` — determines which L2 API base + which Bicep parameter file is used.
+Choice: `dev` / `demo` / `prod` — determines which L2 API base + which Bicep parameter file is used (session-level; NOT the L2 `profile` enum below).
 
-#### 1e. Show intake summary
+#### 1e. `profile` (required — L2 API enum, per punch list row A09 / DS-5 c6-1)
+
+Choice — MUST match one of these three literal strings exactly (any drift triggers an L2 400 response):
+
+- `spaarke-hosted-model1-trial` — shared trial / SMB (Model 1 shared BFF; per-customer container in SPE; shared Dataverse or per-tenant Dataverse depending on config).
+- `spaarke-hosted-model2` — dedicated stamp hosted in Spaarke's subscription (Model 2 with Spaarke as the cloud landlord).
+- `customer-owned-model2` — dedicated stamp in the customer's own Azure subscription (Model 2 with customer as landlord + admin-consent flow).
+
+**Reject any other value BEFORE POST /api/runs**. Do not silently substitute or ask the operator to "just try one" — surface the failure with the exact enum choices.
+
+```powershell
+$validProfiles = @('spaarke-hosted-model1-trial', 'spaarke-hosted-model2', 'customer-owned-model2')
+if ($profile -notin $validProfiles) {
+  Write-Error "❌ Invalid profile '$profile'. Must be one of: $($validProfiles -join ', '). Per DS-5 c6-1: L2 API rejects any other value with 400."
+  # HARD STOP — do not proceed to Step 2
+  exit 1
+}
+```
+
+Cross-check: `tenancyModel` × `profile` MUST be consistent — `Model1Shared` pairs only with `spaarke-hosted-model1-trial`; `Model2Dedicated` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`. Mismatch → reject before POST.
+
+#### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
+
+The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
+
+Preferred path — Dataverse MCP (`mcp__dataverse__create_record`):
+
+```powershell
+# Assumes MCP connected to the registry env (spaarkedev1 for dev; spaarke-demo for demo; production registry for prod)
+$placeholderPayload = @{
+  entityName = 'sprk_dataverseenvironment'
+  attributes = @{
+    sprk_customerid    = $customerId
+    sprk_tenantid      = $tenantId
+    sprk_tenancymodel  = $tenancyModel
+    sprk_profile       = $profile
+    sprk_setupstatus   = 'Provisioning'  # per FR-18 initial state
+    sprk_upgrademode   = 'Auto'
+  }
+}
+$mcpResponse = mcp__dataverse__create_record @placeholderPayload
+$environmentId = $mcpResponse.sprk_dataverseenvironmentid
+```
+
+Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
+
+```powershell
+$environmentId = pac data create --entity sprk_dataverseenvironment `
+  --attributes "sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModel;sprk_profile=$profile;sprk_setupstatus=Provisioning;sprk_upgrademode=Auto" `
+  --query 'sprk_dataverseenvironmentid' -o tsv
+```
+
+Verify `$environmentId` is a valid GUID before continuing:
+
+```powershell
+if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {
+  Write-Error "❌ Placeholder create failed — no valid GUID returned. Cannot proceed to POST /api/runs without environmentId. Check registry-env MCP connection or pac data auth."
+  exit 1
+}
+```
+
+The placeholder is later promoted to real state by H10 (setup registry update) when the run reaches `Ready`. This creates the audit trail from "run enqueued" → "run complete" in a single sprk_dataverseenvironment lifecycle.
+
+#### 1g. Show intake summary
 
 ```
 INTAKE SUMMARY
-  customerId:    trial-acme-2026-08-18
-  tenantId:      12345678-...-...-...  (customer tenant)
-  tenancyModel:  Model1Shared
-  profile:       dev
-  L2 API:        https://spaarke-provisioning-controlplane-dev.azurewebsites.net
+  customerId:      trial-acme-2026-08-18
+  tenantId:        12345678-...-...-...  (customer tenant)
+  tenancyModel:    Model1Shared
+  environment:     dev
+  profile:         spaarke-hosted-model1-trial
+  environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=Provisioning)
+  L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)
 ```
@@ -231,11 +296,12 @@ Invocation:
 
 ```powershell
 $body = @{
-  customerId    = $customerId
-  tenantId      = $tenantId
-  tenancyModel  = $tenancyModel
-  profile       = $profile
-  mode          = "preflight"    # H0-only run; does NOT enqueue H1-H14
+  customerId     = $customerId
+  tenantId       = $tenantId
+  environmentId  = $environmentId  # REQUIRED per punch list A10 / DS-5 c6-2 — L2 400s without this
+  tenancyModel   = $tenancyModel
+  profile        = $profile         # MUST be one of the 3 enum values validated at Step 1e (per A09 / DS-5 c6-1)
+  mode           = "preflight"      # H0-only run; does NOT enqueue H1-H14
 } | ConvertTo-Json
 
 $response = Invoke-RestMethod `

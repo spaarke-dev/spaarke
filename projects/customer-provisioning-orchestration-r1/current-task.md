@@ -1,5 +1,63 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-25 SESSION 8 END — **🎯 SESSION 8 accomplishments**: Task **203a COMPLETE** in a single main session (~3h actual vs 15h estimate). All 9 in-scope Class-A rows resolved via verify-first pattern (7 applied + 2 already-applied). Sub-Agent Write Boundary honored: all `.claude/**` writes from main session. Build sanity: ControlPlane.Core succeeded 0 warnings / 0 errors. See "SESSION 8 Quick Recovery" block below. Prior session block (SESSION 7) retained below for reference.
+
+## 🎯 SESSION 8 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | **203a** (Class-A punch list foundation) — 9 rows: 7 applied + 2 already-applied |
+| **Next actionable** | **203c** (skill wiring — A02/A03/A04/A15/A16) |
+| **Task file** | [`projects/customer-provisioning-orchestration-r1/tasks/203c-apply-classA-punchlist-skill-wiring.poml`](tasks/203c-apply-classA-punchlist-skill-wiring.poml) |
+| **Rigor** | FULL (per POML) |
+| **Model / Effort** | sonnet / xhigh |
+| **Parallel-safe** | false — MAIN SESSION ONLY (touches `.claude/**` + BFF; publish-size verification REQUIRED per CLAUDE.md §10) |
+| **Estimated effort** | 15-20h (may drop via verify-first) |
+| **Branch** | `work/customer-provisioning-orchestration-r1` |
+| **Working tree at handoff** | dirty — 203a completion changes ready to commit |
+| **Next action for a fresh session** | `task-execute projects/customer-provisioning-orchestration-r1/tasks/203c-apply-classA-punchlist-skill-wiring.poml` |
+
+### SESSION 8 Files Modified (24 files — pending commit)
+
+**NEW (21)**:
+- `provisioning-runs/INDEX.md` — cross-run registry (row A05)
+- `provisioning-runs/_archive/.gitkeep`
+- `provisioning-runs/_templates/{CLAUDE,intake,prerequisites-check,preflight-report,handler-log,manual-gates,handoff-report,lessons-learned}.md` — 8 per-run templates (row A06)
+- `.claude/constraints/provisioning.md` — 145-line cross-cutting constraint doc (row A08)
+
+**MODIFIED (3)**:
+- `.claude/patterns/provisioning/{9 files}.md` — filled 9 skeleton pattern files with worked examples + recovery recipes; 108-145 lines each (row A07)
+- `.claude/skills/task-execute/SKILL.md` — added `provisioning` to Step 4a constraint tag map + Step 4b pattern tag map (row A08)
+- `.claude/skills/provision-environment/SKILL.md` — Step 1 rewritten: 1d (`environment` — renamed from prior "profile"), 1e (`profile` enum with 3 L2 values + pre-POST validation + tenancyModel × profile consistency check), 1f (`environmentId` + placeholder create via Dataverse MCP with `pac data` fallback), 1g (intake summary updated); Step 2 POST payload includes `environmentId` (rows A09/A10/A11)
+- `projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md` — added §203a EXECUTION RESULTS section with per-row annotations
+- `projects/customer-provisioning-orchestration-r1/tasks/203a-*.poml` — status→completed + completion notes
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — 203a 🔲→✅ + progress summary 80→79 not-started
+
+### Serial wave sequencing (from prior session; 203a now DONE)
+
+1. ✅ **203a** (SESSION 8, ~3h actual): foundation — DONE
+2. 🔲 **203c** (main session, ~15-20h): skill wiring — depends on 203a's constraint file existing (203a ✓ so ready)
+3. 🔲 **204e** (main session, ~11h): ArchTests + IOptions checklist (B15 touches `.claude/constraints/`)
+4. ⏸ **204b** (Opus/xhigh; PAUSES for owner decision, ~1h authoring + wait): ADR tension per CLAUDE.md §6.5
+5. 🔲 **204c** (~40-80h; MAY sub-sub-phase 204c-1..204c-10): H13 10 real probes — HARD BLOCKS 186
+6. 🔲 **186** (E2E live-fire against sub `cd95fcec-6b89-49ea-8339-c2b579b12587`)
+7. 🔲 **203d + 204d + 090** (post-186)
+
+### Critical context (1-3 sentences)
+
+**Task 203a shipped the customer-provisioning foundation: run-project structure (mirrors coding-project pattern per SESSION 5 owner directive), pattern-content fill (9 files 108-145 lines with worked examples), constraint doc + tag-map wire-up, and L3 skill Step 1 profile-enum + environmentId + placeholder-create fixes (unblocks L2 400 responses per DS-5 c6-1/c6-2/c6-3).** Grep-verify Step 1 saved ~2h by catching A12 + A24 already-applied. Serial wave now unblocked; next is 203c (skill wiring). Task 186 E2E still blocked by 204c H13 real probes.
+
+### To resume next session — say ONE of these
+
+- **"execute task 203c"** — invokes task-execute for the skill wiring sub-phase (~15-20h; MAIN SESSION ONLY; touches `.claude/**` + BFF)
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context, points at 203c
+- **"execute 204e"** — regression prevention ArchTests (also main-session-only; 11h)
+- Do NOT invoke task 186 yet — blocked by 204c H13 real probes
+
+---
+
+## 🎯 SESSION 7 QUICK RECOVERY — 2026-08-24 END (retained below for reference)
+
 > **Last Updated**: 2026-08-24 SESSION 7 END — **🎯 SESSION 7 accomplishments (all pushed to origin, HEAD `6d20e2108`)**:
 > 1. **Task 202 amendment** (`fad6c1c01`): Verified all 22 Class-B rows against live repo — 8 ALREADY APPLIED via Wave G-7/G-8 (B03/B05/B06/B08/B09/B12/B13/B19); amended punch list with Class-B verification matrix + re-scoped remaining 14 rows to task 204 IN THIS PROJECT (`code-quality-and-assurance-r3` closed).
 > 2. **POML authoring** (`5ac07c4af`): 11 POML files (203a/b/c/d Class-A + 204a/b/c/d/e/f/g Class-B) authored via 2 parallel sub-agents. TASK-INDEX updated (152 tasks total; Phase Pre-Live-Fire grew 2→12).

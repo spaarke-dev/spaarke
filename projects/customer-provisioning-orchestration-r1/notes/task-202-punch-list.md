@@ -68,6 +68,41 @@
 
 ---
 
+## 203a EXECUTION RESULTS — 2026-08-25 (foundation sub-phase)
+
+Task 203a executed the foundation Class-A rows (A05, A06, A07, A08, A09, A10, A11, A12, A24). Grep-verify Step 1 revealed 2 of 9 rows already landed via prior work; 7 applied fresh this session.
+
+### Per-row `last_known_status_after_execution` annotations
+
+| Row | Status | Evidence | Effort actual |
+|---|---|---|---|
+| **A05** | `applied` | Created `provisioning-runs/INDEX.md` (cross-run registry per structure design) + `provisioning-runs/_archive/.gitkeep`. | ~5 min |
+| **A06** | `applied` | Authored 8 per-run templates under `provisioning-runs/_templates/` (CLAUDE.md, intake.md, prerequisites-check.md, preflight-report.md, handler-log.md, manual-gates.md, handoff-report.md, lessons-learned.md). Each has row A06 citation in header. | ~20 min |
+| **A07** | `applied` | Filled all 9 skeleton pattern files under `.claude/patterns/provisioning/` (skeletons were 24-29 lines pre-task; now 93-145 lines each with worked examples + recovery recipes). Line counts: bff-vs-provisioning-boundary=112, handler-registration-completeness=114, keyvault-reference-identity-invariant=142, manifest-driven-secret-catalog=108, null-object-kill-switch-anti-pattern=133, openai-quota-region-composition=145, operator-rbac-bootstrap=116, progressive-fail-fast-recovery=112, resource-name-availability-precheck=127. All exceed acceptance criterion (>100). | ~90 min |
+| **A08** | `applied` | Created `.claude/constraints/provisioning.md` (145 lines: I1-I5 invariants, never-delete list, publish-size ceiling, handler registration, ADR-032 F.1/F.2/F.3, class-A/B/C routing, idempotency, progressive fail-fast, reserved suffixes, prereqs, auth v2 21 MUSTs, sub-agent write boundary, test update obligation, E2E gate). Wired into `.claude/skills/task-execute/SKILL.md` Step 4a (constraint tag map) + Step 4b (pattern tag map). | ~30 min |
+| **A09** | `applied` | Patched `.claude/skills/provision-environment/SKILL.md` Step 1e — added profile enum {spaarke-hosted-model1-trial, spaarke-hosted-model2, customer-owned-model2} with pre-POST validation + tenancyModel × profile consistency check. Renamed prior "profile" field to "environment" (dev/demo/prod L2 base selector) at Step 1d to disambiguate. Grep verify: 4× "spaarke-hosted-model1-trial", 3× "spaarke-hosted-model2", 3× "customer-owned-model2". | ~10 min |
+| **A10** | `applied` | Added `environmentId` to Step 1f intake + Step 2 preflight POST payload. Grep verify: 9× "environmentId" in SKILL.md (was 0 pre-task). | ~5 min (batched with A11) |
+| **A11** | `applied` | Added Step 1f placeholder `sprk_dataverseenvironment` create via Dataverse MCP (`mcp__dataverse__create_record`) with `pac data create` fallback per §4.3a.5. Placeholder is later promoted to real state by H10 at run completion. | ~10 min (batched with A10) |
+| **A12** | `already-applied` | Verified `infrastructure/bicep/platform-controlplane.bicep` line 246: `var jwtAudience = 'api://spaarke.com/provisioning-controlplane-${environmentName}'` matches DS-5 C5.2 tenant-policy verifier-domain form. Comments at lines 14, 228, 240 cite DS-5 C5.2 + FR-20 acceptance. NO EDIT NEEDED. | 0 (verified only) |
+| **A24** | `already-applied` | Verified `infrastructure/bicep/modules/app-service.bicep` line 82: `param healthCheckPath string = '/healthz'` matches BFF `/healthz` endpoint. Line 122 emits the same value. NO EDIT NEEDED (per SESSION 7 203b parallel wave, which the current session confirmed independently). | 0 (verified only) |
+
+### Build sanity + acceptance criteria
+
+- `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` → **succeeded**, 0 warnings, 0 errors (4.53s).
+- Line-count verification for A07: all 9 files ≥100 lines (min 108, max 145). ✅ Acceptance criterion met.
+- Line-count verification for A08: `.claude/constraints/provisioning.md` = 145 lines. Task-execute Step 4a tag-map row added. ✅
+- Grep verification for A09/A10/A11: profile enum × 3 present, environmentId present 9×, sprk_dataverseenvironment placeholder create present 5×. ✅
+- Grep verification for A12/A24: pre-existing correct state confirmed. ✅
+- **Sub-Agent Write Boundary**: all `.claude/**` writes executed from main session (per root CLAUDE.md §3). No sub-agent Edit denies observed. ✅
+
+### Follow-on (post-task)
+
+- **Nothing deferred from 203a scope** — all 9 rows resolved.
+- **203c continuation queued**: A02/A03/A04/A15/A16 (skill Step 0.5 external prereqs + `--batch` + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs).
+- **Effort actual**: ~3h wall-clock (single main session) vs 15h POML estimate. Verify-first strategy again vindicated (A12 + A24 were already applied — saved ~2h).
+
+---
+
 ## AMENDMENT — 2026-08-24 SESSION 7 (verification + re-scope)
 
 **Two changes to original punch list:**
