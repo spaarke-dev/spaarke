@@ -69,6 +69,9 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId.')
+param controlPlaneUamiPrincipalId string = ''
+
 // --- Optional SignalR (per ADR-032 Null-Object Kill-Switch pattern; ADR-034 realtime spine) ---
 
 @description('Deploy the per-customer Azure SignalR Service resource for the notifications spine (ADR-034). Default false — no resource + downstream BFF resolves the Null-Object variant per ADR-032. Set true to provision the resource; requires the BFF Notifications:SignalRSpine:Enabled flag to be true in the same environment for end-to-end enablement.')
@@ -602,6 +605,27 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
     appServicePlanId: appServicePlan.outputs.planId
     userAssignedIdentityResourceId: uami.outputs.id
     tags: tags
+  }
+}
+
+// ============================================================================
+// L2 CONTROL-PLANE UAMI -- Website Contributor on the per-customer BFF App
+// Service (customer-provisioning-orchestration-r1 task 203b, punch list row A21
+// / task 201 "Deferred #1"). Enables H4b Kudu docker-log fetch + H9 zip-deploy
+// from the L2 Worker. Split into modules/customer-l2-bff-rbac.bicep because
+// this stack (targetScope='subscription') cannot inline RG-scoped role
+// assignments (BCP139) -- same pattern as modules/model1-shared-l2-rbac.bicep
+// for the Model 1 tier.
+// ============================================================================
+
+module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {
+  scope: rg
+  name: 'l2-bff-rbac-${baseName}'
+  params: {
+    controlPlaneUamiPrincipalId: controlPlaneUamiPrincipalId
+    // Implicit dependency on bffApi via bffApi.outputs.appServiceName -- no
+    // explicit dependsOn needed (BCP linter rule no-unnecessary-dependson).
+    bffAppServiceName: bffApi.outputs.appServiceName
   }
 }
 

@@ -180,6 +180,12 @@ param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? '
 @description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default \'\' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: "all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding.')
 param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
 
+@description('BFF Entra app-registration client (application) ID used by the CustomerRunGuard concurrency guard to auth against the admin Dataverse env (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__ClientId. SAME app-reg H6/H7 use (bffApiClientSecretName above provides the client-secret side). Empty default keeps CustomerRunGuard__Enabled=false safe -- supply when flipping the guard on.')
+param customerRunGuardClientId string = ''
+
+@description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardClientId + the platform-KV BFF-API-ClientSecret are in place; then CustomerRunGuardOptions.Validate() fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production.')
+param customerRunGuardEnabled bool = false
+
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
 
@@ -471,6 +477,15 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // fail-fast (exit 1) → App Service killed whole site startup. See top-level
     // exchangeConnectAppId param description for full rationale.
     exchangeConnectAppId: exchangeConnectAppId
+    // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
+    // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
+    // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
+    // adminDataverseEnvironmentUrl (target) + bffApiClientSecretName (secret);
+    // adds tenantId + clientId + kill-switch here. Enabled=false by default
+    // per ADR-032 null-object kill-switch (see worker module param docstring).
+    customerRunGuardTenantId: effectiveJwtTenantId
+    customerRunGuardClientId: customerRunGuardClientId
+    customerRunGuardEnabled: customerRunGuardEnabled
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
     // worker module emits it as the three

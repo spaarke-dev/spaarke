@@ -147,6 +147,15 @@ param exchangeCertKvSecretName string = 'Exchange-Connect-Cert'
 @description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding.')
 param exchangeConnectAppId string = ''
 
+@description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6).')
+param customerRunGuardTenantId string = ''
+
+@description('BFF Entra app-registration client (application) ID used by the CustomerRunGuard to authenticate to the admin Dataverse env via confidential-client credentials (SAME app-reg H6/H7 use for solution-import + env-var writes; multitenant BFF app-reg registered as a Dataverse Application User on the admin env). Emitted as the CustomerRunGuard__ClientId app-setting. Consumed only when customerRunGuardEnabled=true (customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
+param customerRunGuardClientId string = ''
+
+@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the admin-env credentials are seeded on the platform KV AND the customerRunGuardTenantId + customerRunGuardClientId params are supplied. Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
+param customerRunGuardEnabled bool = false
+
 @description('Tags for the resource.')
 param tags object = {}
 
@@ -318,6 +327,37 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
         { name: 'BffDeployOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
         { name: 'SolutionImportOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
+
+        // ---------------------------------------------------------------
+        // CustomerRunGuard (task 203b, punch list row A27 / r1-gap-analysis
+        // c5-6): I5 same-customer serialization guard (spec.md §4D I5 /
+        // FR-32). Bound from IConfiguration section "CustomerRunGuard" via
+        // AddCustomerRunGuard() in Worker/Program.cs (Sprk.Provisioning.
+        // ControlPlane.Core/Concurrency/CustomerRunGuardModule.cs +
+        // CustomerRunGuardOptions.cs). Uses the ADMIN Dataverse env
+        // (adminDataverseEnvironmentUrl above -- SAME registry env the
+        // DataverseEnvironmentRegistry client talks to) with confidential-
+        // client credentials against the SHARED BFF app-reg (SAME app-reg
+        // H6/H7 use for solution-import + env-var writes). ClientSecret
+        // sources from the same BFF-API-ClientSecret KV secret (BINDING
+        // never-delete).
+        //
+        // Enabled=false by default per null-object kill-switch pattern
+        // (ADR-032): a fresh L2 deployment without the admin-env credentials
+        // wired stays boot-safe (the null-object returns Success
+        // unconditionally, WARN-log on each acquire). Flip to true once
+        // customerRunGuardTenantId + customerRunGuardClientId + the KV
+        // secret are all in place -- CustomerRunGuardOptions.Validate()
+        // fails fast at boot on missing fields when Enabled=true.
+        // ---------------------------------------------------------------
+        { name: 'CustomerRunGuard__TargetDataverseUrl', value: adminDataverseEnvironmentUrl }
+        { name: 'CustomerRunGuard__TenantId', value: customerRunGuardTenantId }
+        { name: 'CustomerRunGuard__ClientId', value: customerRunGuardClientId }
+        {
+          name: 'CustomerRunGuard__ClientSecret'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+        }
+        { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
 
         // ---------------------------------------------------------------
         // Managed-identity discovery (pin DefaultAzureCredential to bound
