@@ -4,7 +4,23 @@
 > **Deliverable**: 2 of 4 (auth-v4 integration response) — formal root CLAUDE.md §6.5 conflict-resolution record
 > **Source docs**: auth-v4 canonical `PROVISIONING-CHANGE-REQUEST.md` (626-line, auth-v4 worktree — §1 TL;DR, §9.1, §10 addendum + 2026-08-25 CORRECTION); `origin/master` ADR-028 (Amendment A4 + E-3 CLOSED banner, commits `dee3df03c` + `39b2bda38`)
 > **Companions**: [`../auth-v4-integration-remediation-plan.md`](../auth-v4-integration-remediation-plan.md) §2 · [`../auth-v4-integration-draft-punch-rows.md`](../auth-v4-integration-draft-punch-rows.md) (rows A35, A38, A44) · [`../auth-v4-integration-open-questions.md`](../auth-v4-integration-open-questions.md) (Q3, Q6, Q7)
-> **Status**: PROPOSED — awaiting owner sign-off per root CLAUDE.md §6.5 ("the human reviewer chooses or refines the path")
+> **Status**: ✅ **APPROVED 2026-08-25 (owner)** — Q3 signed as proposed; sunset date **2026-11-23** (aligns with auth-v4 obligation 051-E, outer bound governs; auth-v4 to receive one-line confirmation via commit-message reference since discharge reply skipped per Q1). Owner-narrowed disposition to prong 3 per Q7 recorded in §"Owner refinements 2026-08-25" below. EDITs 1-4 unblocked; fire post-A35 merge.
+
+## Owner refinements 2026-08-25 (post-approval)
+
+Owner accepted the hybrid resolution as written with three narrowings:
+
+1. **Q3 sunset date**: **2026-11-23** governs (outer bound; matches auth-v4 obligation 051-E). Soft-delete recovery to 2026-11-22 is a coincidence; the outer date is authoritative for the constraint file's language.
+2. **Q7 prong-3 scope narrowing**: no live production environment currently exists. The only live environment is `spaarkedev1` (dev). Prong 3 ("unmigrated environments may still resolve `Dataverse-ClientSecret`") therefore applies to: (a) `spaarkedev1` today, (b) any greenfield Model 2 stamp provisioned during the transition window BEFORE A36-A42 land — but per Q6 disposition, **no such stamp will be provisioned before A36-A42**, so prong 3 collapses to `spaarkedev1` only. `Seed-ProductionKeyVault.ps1` + `Configure-ProductionAppSettings.ps1` are aspirational-not-active until a real prod exists; sweep concerns around them reduce accordingly. Update the constraint-file replacement text (§EDITs below) to say "prong 3 applies to `spaarkedev1` and any as-yet-unprovisioned Model 2 stamp; H4 executor MUST NOT provision new Model 2 stamps under this prong until A36-A42 land per Q6."
+3. **Q1 discharge reply skipped**: no reply to auth-v4 required. Their §10.6 "still open" internal drift stays as their historical artifact. The commit landing this resolution will suffice as record for cross-worktree audit.
+
+## Owner sign-off record
+
+- **Date**: 2026-08-25
+- **Owner**: ralph.schroeder@hotmail.com (session-verified per `userEmail` context)
+- **Path chosen**: Hybrid — Path C for `BFF-API-ClientSecret` (pivot to comply with ADR-028 A4-as-amended) + narrow Path A rider on prong 2 (purge-protection of soft-deleted rollback copies through 2026-11-23) + time-boxed Path A for `Dataverse-ClientSecret` (sunset 2026-11-23, prong-3-scoped to `spaarkedev1` per Q7)
+- **Concurrence trail**: `auth-v4-integration-open-questions.md` resolution table Q3 disposition
+- **Application gates**: EDITs 1-4 + companion sweep fire post-A35 master merge (they cite the ADR-028 A4 amendment which is absent from this worktree pre-merge); main-session-only per Sub-Agent Write Boundary (root §3)
 
 ## Executive summary
 

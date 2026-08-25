@@ -760,6 +760,64 @@ Record in `projects/{active-project}/runs/{runId}.md`:
 - BFF publish-size delta vs baseline
 - Any manual gate + operator decision + timestamp
 
+### 12.5 T1 trap: exit-134 (SIGABRT) on first startup after provisioning
+
+> Added 2026-08-25 by `customer-provisioning-orchestration-r1` task 202 A40 (auth-v4 §10.1 Δ4 + FR-37). Governs recovery when H4's T1 PATCH silently regressed after provisioning claimed success.
+
+**Symptom**: BFF container exits with code 134 (SIGABRT) at startup. Kudu docker-log shows an unhandled exception referencing an `IOptions<T>` module whose values source from a `@Microsoft.KeyVault(SecretUri=...)` app setting — but the app-setting value in the App Service configuration LOOKS correct in the portal.
+
+**Root cause**: `keyVaultReferenceIdentity` on the App Service is either unset OR set to `'SystemAssigned'` while the actual identity attached is user-assigned (UAMI). App Service resolves `@Microsoft.KeyVault(...)` references against the identity named in that site property; when it names a non-existent identity, the resolved setting value is `null` at runtime → downstream `IOptions.ValidateOnStart` throws → SIGABRT.
+
+Provisioning should have set this via `ArmAppServiceIdentityPatcher.cs` at H4 (task 125 SDK-native impl; `WebSiteResource.UpdateAsync` / `WebSiteSlotResource.UpdateAsync` on both slots, verified post-PATCH by the H4 handler via `IArmKeyVaultRefProbe`, task 044/123). If you're hitting SIGABRT, either H4 didn't run, H4 ran against the wrong identity, or a later slot ceremony (H9 deploy, rollback per obligation 051-E — see §12.6 below) created a new slot without re-asserting the site property.
+
+**Recovery** (per pattern `.claude/patterns/provisioning/keyvault-reference-identity-invariant.md` — F16.5 workaround kept operator-runnable even though production H4 uses the SDK directly):
+
+```bash
+sub="{subscription-id}"
+rg="{resource-group}"
+app="{app-service-name}"
+uamiId="/subscriptions/$sub/resourceGroups/{uami-rg}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{uami-name}"
+
+# Production slot
+az rest --method patch \
+  --url "https://management.azure.com/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.Web/sites/$app?api-version=2022-03-01" \
+  --body "{\"properties\":{\"keyVaultReferenceIdentity\":\"$uamiId\"}}"
+
+# Staging slot (T5 slot-parity — required, not optional)
+az rest --method patch \
+  --url "https://management.azure.com/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.Web/sites/$app/slots/staging?api-version=2022-03-01" \
+  --body "{\"properties\":{\"keyVaultReferenceIdentity\":\"$uamiId\"}}"
+
+# Restart both slots so the runtime picks up the corrected reference identity
+az webapp restart --name "$app" --resource-group "$rg"
+az webapp restart --name "$app" --resource-group "$rg" --slot staging
+
+# VERIFY (read-back — do NOT trust the PATCH response alone)
+az webapp show --name "$app" --resource-group "$rg" --query "keyVaultReferenceIdentity" -o tsv
+az webapp show --name "$app" --resource-group "$rg" --slot staging --query "keyVaultReferenceIdentity" -o tsv
+# Both MUST print $uamiId verbatim. Anything else = re-run this recipe.
+```
+
+If PATCH landed but startup still fails: RBAC hasn't propagated — check that the UAMI has `Key Vault Secrets User` on the target KV (`az role assignment list --assignee <uami-principal-id> --scope <kv-resource-id>`) and give AAD RBAC up to ~5 min.
+
+### 12.6 Slot persistence: `keyVaultReferenceIdentity` is NOT copied by `az webapp deployment slot create --configuration-source`
+
+> Added 2026-08-25 by `customer-provisioning-orchestration-r1` task 202 A40 (auth-v4 §10.2 CORRECTION). Governs any slot create / swap ceremony downstream of H4.
+
+**BINDING (auth-v4 change request §10.2)**: `keyVaultReferenceIdentity` is a **SITE property, not an app setting**. When creating a new deployment slot with `--configuration-source`, app settings ARE copied but this site property is NOT. Every slot create / swap ceremony MUST re-assert the property on the new slot BEFORE its first startup, or the new slot will SIGABRT with exit 134 (§12.5 above).
+
+**Live counter-example** (do NOT copy this pattern):
+
+- `projects/dotnet-10-upgrade-r1/notes/deploy-net10-slot-phase1.ps1:40` — a slot-create script that assumes `--configuration-source` copies everything. Under that assumption the new slot has empty `keyVaultReferenceIdentity` at first-startup time and would immediately SIGABRT once any `@Microsoft.KeyVault(...)` app setting resolves.
+
+**Recovery paths that MUST re-assert the property** (before starting or swapping the affected slot):
+
+- **H9 BFF deploy** — if it creates a new slot (rather than deploying into an existing one), re-run the PATCH recipe from §12.5 against the new slot immediately after create + before any warmup.
+- **Rollback ceremony** — per auth-v4 obligation 051-E (live to 2026-11-23), any rollback that resurrects an older slot MUST re-assert the property against the resurrected slot's current site-property state (which may be stale from a prior rollback point).
+- **Any operator-initiated slot manipulation** — `az webapp deployment slot create`, `az webapp deployment slot swap` (safe for the property because swap is metadata-preserving), or portal-driven slot operations.
+
+**Enforcement**: task 186 (Phase F E2E acceptance) asserts `keyVaultReferenceIdentity == {UAMI RID}` on BOTH slots AFTER H9 deploys — see `projects/customer-provisioning-orchestration-r1/tasks/186-real-phase-f-e2e-acceptance-rerun-task-089-for-real-this-time.poml` acceptance-criterion added 2026-08-25. If that criterion fails for a real customer run, it means either H9 (or a rollback since) created a slot without re-asserting the property — apply §12.5 recovery THEN escalate per Human Escalation Triggers to determine which downstream ceremony broke the invariant.
+
 ---
 
 ## 13. Troubleshooting
@@ -845,6 +903,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | Date | Change | Source |
 |---|---|---|
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
+| 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
 
 ---
 

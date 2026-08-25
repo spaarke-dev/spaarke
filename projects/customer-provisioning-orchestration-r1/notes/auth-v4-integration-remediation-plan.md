@@ -1,14 +1,15 @@
 # Auth-v4 Integration Remediation Plan — customer-provisioning-orchestration-r1
 
 > **Date**: 2026-08-25
+> **Status**: ✅ **ALL 11 OWNER DECISIONS RESOLVED 2026-08-25** — see [`auth-v4-integration-open-questions.md`](auth-v4-integration-open-questions.md) resolution table. Plan updates below reflect the dispositions.
 > **Deliverable**: 1 of 4 (auth-v4 change-request response, with 2026-08-25 addendum)
 > **Source doc**: auth-v4 canonical `PROVISIONING-CHANGE-REQUEST.md` (626-line copy in the `spaarke-auth-v4-dataverse-MI` worktree — incl. §5.1 DECIDED block, §9 replies, §10 addendum Δ1-Δ5, §10 DELIVERED, §11 live invariants, 2026-08-25 CORRECTION). r1's local mirror (280-line) is STALE and superseded per §6.
 > **Companions**:
-> - [`decisions/adr-028-a4-integration-conflict-resolution.md`](decisions/adr-028-a4-integration-conflict-resolution.md) — formal §6.5 record (never-delete BINDING)
-> - [`auth-v4-integration-draft-punch-rows.md`](auth-v4-integration-draft-punch-rows.md) — punch rows A35-A44, copy-paste-ready
-> - [`auth-v4-integration-open-questions.md`](auth-v4-integration-open-questions.md) — Q1-Q11 in §6 escalation format
+> - [`decisions/adr-028-a4-integration-conflict-resolution.md`](decisions/adr-028-a4-integration-conflict-resolution.md) — formal §6.5 record (never-delete BINDING) — **APPROVED owner 2026-08-25**
+> - [`auth-v4-integration-draft-punch-rows.md`](auth-v4-integration-draft-punch-rows.md) — punch rows A35-A44, copy-paste-ready (A41 scope extended per Q8)
+> - [`auth-v4-integration-open-questions.md`](auth-v4-integration-open-questions.md) — Q1-Q11 all RESOLVED 2026-08-25
 > **Depends on**: `notes/task-202-punch-list.md` · `spec.md` v3.6 · `design.md` v3.6 · `notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md` (2026-08-19)
-> **Verified against live state 2026-08-25**: HEAD `45e14556a` (281 behind / 273 ahead of `origin/master`); auth-v4 tip `ef61a5f5a` (1 commit unmerged); direct reads of `GraphAppRegistrationProvisioner.cs`, `DataverseServiceClientImpl.cs` (both branches), `origin/master:scripts/Register-EntraAppRegistrations.ps1`, `.claude/constraints/provisioning.md:27-36`, `spec.md:259/:275`, `task-202-punch-list.md`.
+> **Verified against live state 2026-08-25**: HEAD `45e14556a` (281 behind / 273 ahead of `origin/master`); auth-v4 tip `ef61a5f5a` (1 commit unmerged); direct reads of `GraphAppRegistrationProvisioner.cs`, `DataverseServiceClientImpl.cs` (both branches), `origin/master:scripts/Register-EntraAppRegistrations.ps1`, `.claude/constraints/provisioning.md:27-36`, `spec.md:259/:275`, `task-202-punch-list.md`. **Q9 verified 2026-08-25**: task 186 targets "dev Model-2-**Spaarke-hosted** stamp" (POML line 20 + 60) → profile `spaarke-hosted-model2` → intra-tenant → §9.2 does NOT affect 186.
 
 ---
 
@@ -22,20 +23,21 @@ Auth-v4 is **COMPLETE and merged to master** (PRs #814/#816/#817/#818; sole unme
 4. A **silent-failure surface catalog** — the change request's own traps plus newly-found surfaces, provenance-marked (§5).
 5. A **merge-shaped coordination protocol** — everything auth-v4 shipped reaches r1 through ONE event, the A35 master merge, and r1 is the resolver for every conflict (§6).
 
-**Recommended sequence** (detail in §7):
+**Recommended sequence** (detail in §7) — updated 2026-08-25 post-owner-decisions:
 
-| Step | What | Gate |
+| Step | What | Status / Gate |
 |---|---|---|
-| S0 | Owner decisions: **Q2** (§9.2 = reading (a)) + **Q3** (§6.5 sign-off + sunset date) + **Q9** (186 stamp shape) | none — do first |
-| S1 | **A35 master merge** (FULL rigor, prescriptive, main session; freeze broadcast per Q10 first) | gates all `.claude/` + script + handler work |
-| S1∥ | **203b-2 mini-wave**: A36, A37, A40 (parallel-safe bicep/verify; no merge dependency) | none — dispatch now |
-| S2 | **Task 205**: A38 ∥ A42 → A39; A41/A43/A44 parallel after A35 | A35 |
-| S3 | Main-session doc/constraint edits: §6.5 EDIT package + topology cascade + mirror refresh | A35 + Q3 sign-off |
-| S4 | Discharge reply to auth-v4 (via `auth-v4-coord-response`) | S0, S3 |
-| S5 | Task 186 E2E live-fire | A35-A42 landed + Q9 confirmed |
+| ~~S0~~ | ~~Owner decisions Q2/Q3/Q9~~ | ✅ **RESOLVED 2026-08-25**: Q2 = reading (a); Q3 signed at 2026-11-23; Q9 verified `spaarke-hosted-model2` |
+| **S1∥** | **203b-2 mini-wave**: A36 + A37 + A40 (parallel-safe bicep/verify) | 🔄 **DISPATCHED 2026-08-25** as 3 parallel background agents; awaiting completion notifications |
+| S1 | **A35 master merge** (FULL rigor, prescriptive, main session) | needs owner active presence; Q10 owner-managed (no formal freeze broadcast — owner pauses 3-4 active projects manually if needed) |
+| S2 | **Task 205** (auth-v4 runtime-contract integration): A38 ∥ A42 → A39; A41 (scope EXTENDED per Q8 to include D3 wording fix + Naming Standards row for Model 1 UAMI, +30min); A43/A44 parallel after A35 | gated on A35 |
+| S3 | Main-session doc/constraint edits: §6.5 EDIT package (prong 3 narrowed per Q7) + topology cascade + stale-mirror deletion | gated on A35; §6.5 approval already recorded |
+| ~~S4~~ | ~~Discharge reply to auth-v4~~ | ⏭️ **SKIPPED per Q1 owner disposition** — auth-v4 project complete/merged; §10.6 drift stays as their historical artifact; commit landing the resolution suffices as record |
+| S5 | Task 186 E2E live-fire | gated on: A35-A42 landed (all 8 blocks-186 rows) + Q9 confirmed ✅ + Q6 default confirmed ✅ (secret-free-by-default; no Model 2 provisioning before A36-A42) |
+| S6 (new, Phase F planning) | **Q11 obligation**: BFF startup credential self-proof — r1 owns; H9 gate change + BFF warmup log/exchange addition. **BFF-touching** → §10 obligations apply: Placement Justification, publish-size measurement + delta report (baseline 44.96 MB), test update in `tests/unit/Sprk.Bff.Api.Tests/`. Not 186-blocking. | queued for post-186 Phase-F |
 
-**Decision list (owner)**: Q2 (critical) · Q3, Q6, Q9 (high) · Q4, Q5, Q10, Q11 (medium) · Q1, Q7, Q8 (low/verify).
-**Estimated effort**: ~28h agent + 5-6h main session/owner; critical path to 186 = **11h serial** (§8).
+**Decision list**: ✅ ALL 11 RESOLVED 2026-08-25 (owner). See [`auth-v4-integration-open-questions.md`](auth-v4-integration-open-questions.md) resolution table.
+**Estimated effort**: ~28h agent + 5-6h main session (unchanged); critical path to 186 = **11h serial** (§8), unblocked pending A35 merge.
 
 ---
 

@@ -1,11 +1,37 @@
 # Open Questions — auth-v4 change-request integration (2026-08-25)
 
 > **Date**: 2026-08-25
+> **Status**: ✅ **ALL 11 RESOLVED 2026-08-25 (owner)** — see disposition table below. Individual Q sections retained for reasoning trail.
 > **Deliverable**: 4 of 4 (auth-v4 integration response) — every open question in root CLAUDE.md §6 escalation format
 > **Source**: auth-v4 canonical `PROVISIONING-CHANGE-REQUEST.md` (§5.1 DECIDED block, §9.2, §10 addendum + CORRECTION, §10.6) + adversarial verification of the 5 dimensional analyses + fresh git/code verification 2026-08-25
 > **Companions**: [`auth-v4-integration-remediation-plan.md`](auth-v4-integration-remediation-plan.md) §9 · [`decisions/adr-028-a4-integration-conflict-resolution.md`](decisions/adr-028-a4-integration-conflict-resolution.md) · [`auth-v4-integration-draft-punch-rows.md`](auth-v4-integration-draft-punch-rows.md)
 
-## Executive summary
+## ✅ Resolution table (owner 2026-08-25)
+
+| # | Priority | Disposition | Downstream impact |
+|---|---|---|---|
+| Q1 | LOW | **SKIP** discharge reply — auth-v4 project complete/merged; §10.6 drift stays as their historical artifact | Removes S4 from sequencing. `auth-v4-coord-response` file not created. |
+| Q2 | CRITICAL | **RATIFY reading (a)** — stamp's own UAMI as FIC issuer for customer-tenant Model 2 | A42 ports tenancy guard per §9.2 either way; `GraphAppRegistrationProvisioner.cs:547-557` already reading-(a)-consistent; formal §6 escalation doc filed in this resolution |
+| Q3 | HIGH | **SIGN as proposed at 2026-11-23** — §6.5 hybrid (Path C for BFF-API-ClientSecret + time-boxed Path A for Dataverse-ClientSecret) | `decisions/adr-028-a4-integration-conflict-resolution.md` marked APPROVED; EDITs 1-4 unblocked (fire post-A35) |
+| Q4 | MEDIUM | **PORT master's MI environment contract into `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`** during A35 conflict resolution; keep `auth-deployment-setup.md` stub | A35 conflict handling shape confirmed |
+| Q5 | MEDIUM | **CONTRACT-PARITY** — C# provisioner + `-FicOnly` script both under one contract, parity tests pin (issuer,subject,audience) semantics + AADSTS70025 + exit-2 reporting | A42 scope confirmed |
+| Q6 | HIGH | **SECRET-FREE-BY-DEFAULT** once A36-A42 land; **NO Model 2 customer provisioning** until A36-A42 land | H4 default set; task 186 gate confirmed |
+| Q7 | LOW-MED | **No live prod exists** — only spaarkedev1 is live; prong 3 of §6.5 narrows to spaarkedev1 + hypothetical greenfield stamps | §6.5 resolution prong 3 narrowed (see decision doc); `Seed-ProductionKeyVault.ps1` + `Configure-ProductionAppSettings.ps1` reduced to aspirational-not-active |
+| Q8 | LOW | **WORDING DRIFT confirmed** — Model 1 uses ONE shared BFF UAMI per environment (`sprk-{env}-shared-bff-uami`); fix design.md D3 alongside A41; add Model 1 UAMI naming row to Naming Standards table (§9.2 in design.md, line ~658) | A41 scope +30 min: D3 wording fix + Naming Standards row |
+| Q9 | HIGH | **CONFIRMED**: task 186 targets "dev Model-2-**Spaarke-hosted** stamp" (POML line 20 + 60) → profile `spaarke-hosted-model2` → intra-tenant → §9.2 (Q2) does NOT affect task 186 | Task 186 unaffected by §9.2; can proceed after A35-A42 land |
+| Q10 | MEDIUM | **OWNER manages freeze manually** — 3-4 active projects; owner pauses if necessary; skip broadcast; rely on `/conflict-check` per-PR + owner judgment | Coordination doc will note freeze-broadcast skipped by owner directive |
+| Q11 | MEDIUM | **r1 owns BFF startup credential self-proof** — H9 gate + BFF warmup change tracked as BFF-touching task with §10 obligations: Placement Justification + publish-size measurement + `tests/unit/Sprk.Bff.Api.Tests/` update | Not 186-blocking; queued for post-186 Phase-F planning |
+
+**Net effect**:
+- One CRITICAL escalation now formally answered (Q2 = reading (a); guard-port in A42 either way).
+- Two owner sign-offs recorded (Q3, Q4).
+- Two verifications performed + confirmed (Q7 = no live prod; Q9 = 186 is Spaarke-hosted).
+- One scope adjustment (Q8 → A41 +30min).
+- One process choice (Q10 — owner-manages).
+- One BFF-touch obligation tracked (Q11 → future task with §10 checklist).
+- One action removed (Q1 discharge reply skipped).
+
+## Executive summary (original — retained for context)
 
 11 open questions. **One is critical-path and genuinely undecided (Q2 — §9.2 Model 2 customer-tenant FIC issuer)**; one is a decided item needing only discharge + drift cleanup (Q1); the rest are sign-offs, date confirmations, and verification items surfaced by the adversarial verifiers. Priority order: Q2 → Q3 → Q9 → Q6 → Q5 → Q4 → Q1 → Q7 → Q10 → Q8 → Q11.
 
