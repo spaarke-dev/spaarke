@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="unified-access-control-r2">
+  <metadata>
+    <title>Create the Secure Project Owner security role, assign it to the Secure Project owner team, and REMOVE System Administrator from that team</title>
+    <phase>0b Review remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse security-role configuration on the business unit that the entire Secure Project isolation model depends on. Getting the depth wrong either breaks ownership assignment (provisioning fails closed) or over-grants on the BU whose reachability NFR-05 exists to guard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Dataverse privilege-depth semantics for TEAM principals are subtle and are the exact thing this project has repeatedly got wrong by assumption; the failure mode is silent over-grant.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Requires empirical determination against live Dataverse (which privileges an assignment target actually needs, at which depth) rather than implementing a documented answer -- the documented answer is what needs testing.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live Dataverse security configuration; must not run concurrently with anything that provisions or reads secure projects.</parallel-reason>
+    <deps>021</deps>
+    <tags>dataverse, auth, security</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Filed 2026-08-25 by owner decision, from task 021's live-environment finding: the `Secure Project` default owner team exists and is correctly memberless, but the ONLY role on it is System Administrator, and no role matching `Secure%` exists in the environment. Review §D says of this exact question: "None -- and definitely NOT System Administrator."</origin>
+  </metadata>
+
+  <prompt>The Secure Project owner team currently holds System Administrator. Create a dedicated `Secure Project Owner` role carrying the minimum privileges Dataverse actually requires for that team to own secure records, assign it to that team only, remove System Administrator, and prove by experiment that ownership assignment still succeeds and that no human principal gains anything.</prompt>
+
+  <role>SPAARKE Dataverse security administrator. Expert in security roles, privilege depths, owner teams, and the difference between what a principal needs to OWN a record and what it needs to ACT on one.</role>
+
+  <goal>A `Secure Project Owner` role exists, holds the least privilege that empirically works, is assigned to the `Secure Project` default owner team and to nothing else; System Administrator is removed from that team; the team remains memberless; provisioning's ownership assignment still succeeds; and NFR-05's assertion can be stated truthfully.</goal>
+
+  <context>
+    <background>LIVE STATE, verified 2026-08-25 (task 021):
+
+| Fact | Value |
+|---|---|
+| BU | `Secure Project` — `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, parented to root `Spaarke`, created 2026-08-25 08:28 |
+| Default owner team | `Secure Project` — `daec0b6f-80a0-f111-aaac-000d3a99d1d7`, teamtype=0 (Owner), isdefault=Yes |
+| Team members | ZERO (correct per design 5.1a) |
+| Team roles | EXACTLY ONE: `System Administrator` (roleid 3980a53d-b0cf-3ded-37c8-4d4f9b94acef) |
+| Roles named `Secure%` | NONE EXIST |
+| Secure projects in the environment | ZERO — none has ever been provisioned |
+
+Nothing is exposed today because the team has no members. But the posture is ONE membership row away from granting a human full administrative rights, on the business unit whose reachability NFR-05 exists to guard. That is the inverse of the intent.
+
+WHY THIS BLOCKS TRUSTING PROVISIONING. Task 021 assigns each secure project to this team, and it carries an escalation trigger for "assignment failed because the team lacks entity privileges". That trigger CANNOT FIRE while the team is System Administrator — assignment succeeds because the team is omnipotent, not because it is correctly scoped. So a green provisioning run in dev currently proves nothing about the role. This task is what makes that signal meaningful.
+
+THE PRIVILEGE QUESTION IS OPEN, NOT SETTLED. design 5.1a specifies "Create / Read / Write / Delete / Append / AppendTo / Share on sprk_project and its child entities, at Business Unit depth." Treat that as a HYPOTHESIS to test, not a spec to implement. Two things in it deserve challenge:
+
+(1) DEPTH. For a TEAM principal, User/Basic depth means "records the team owns". Since this team owns exactly the secure projects, USER depth may be sufficient — and it is strictly tighter than Business Unit depth. BU depth is also precisely what made NFR-05's original assertion false by construction. START AT USER DEPTH and escalate only where something empirically fails. If User depth works, say so and amend design 5.1a and spec NFR-05 accordingly — the amendment becomes narrower, which is a better outcome than the one currently written down.
+
+(2) WHICH PRIVILEGES. Dataverse requires an assignment TARGET to hold the privileges needed to own the record — in practice Read and Write; Create is arguably not needed because the team never creates (the BFF app user creates, then assigns). Determine this EMPIRICALLY: grant the minimum, attempt an assignment, add only what Dataverse actually refuses without. Do not grant a privilege because a doc listed it.
+
+CHILD ENTITIES — SCOPE THIS DELIBERATELY, DO NOT ASSUME. Task 021 assigns ONLY the sprk_project record. Whether child records (documents, invoices, work assignments, communications, events, to-dos, analyses) should ALSO be team-owned is a genuine design question with a security consequence: a document on a secure project that is owned in the Operations BU is readable there. Known child entities that roll up to a project, per `ExternalModuleRegistry`: `sprk_document` (via sprk_document.sprk_project), `sprk_invoice` (sprk_invoice.sprk_project), `sprk_workassignment` (sprk_regardingproject). Determine the full set by querying which entities carry a lookup to sprk_project. If the answer is "children should be team-owned too", that is a change to task 021's behaviour and belongs in its own task — surface it, do not implement it here.
+
+WHAT MUST REMAIN TRUE AFTERWARDS:
+- The team has NO human members. The role's whole safety argument rests on this.
+- The role is assigned to that ONE team and to no user and no other team.
+- Ordinary user roles KEEP Read on sprk_project at Basic/User depth. A POA share is only effective if the user also holds the entity privilege at some depth — stripping it in the name of "securing" the entity silently disables sharing altogether (design 5.1a).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
+      <file role="modify">projects/unified-access-control-r2/spec.md</file>
+      <file role="modify">projects/unified-access-control-r2/design.md</file>
+      <file role="new">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file role="reference">projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">LEAST PRIVILEGE, DETERMINED EMPIRICALLY. Start from the smallest plausible grant and add only what Dataverse demonstrably refuses without. Record each addition WITH the error that forced it. A role built by copying a list from a document is exactly how this project accumulated eight stale-metadata findings.</constraint>
+    <constraint source="design 5.1a">The team MUST remain free of human members, and this must be re-verified after the change. The role's BU/User depth is only safe because nobody holds it through membership.</constraint>
+    <constraint source="design 5.1a">DO NOT strip `sprk_project` Read from ordinary user roles. A share confers nothing unless the user also holds the entity privilege at some depth; removing it would silently disable all sharing, including FR-28's.</constraint>
+    <constraint source="project">VERIFY AGAINST LIVE METADATA, not schema docs. Eight stale-doc instances have been found in this project; the eighth was the `Secure Project` business unit name itself, which every doc had as plural. Read the environment.</constraint>
+    <constraint source="project">This is environment configuration, and dev is the only live environment. Every change must be reproducible on a fresh environment — capture it as a runbook, not as a sequence of clicks somebody performed once.</constraint>
+    <constraint source="ADR-003">If the role turns out to be insufficient for provisioning, provisioning must FAIL CLOSED (it does — task 021 returns a non-2xx with `sdap.provision.owner_assignment_failed`). Do not widen the role to make a failure disappear without understanding what it was telling you.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-read the live state (BU, team, team roles, team members) and confirm it still matches the table above. Enumerate the entities carrying a lookup to `sprk_project` so the child-entity question is answered from metadata rather than memory.</step>
+    <step order="1">Create the `Secure Project Owner` role in the `Secure Project` business unit. Start with Read + Write on `sprk_project` at USER depth and nothing else.</step>
+    <step order="2">Assign the role to the `Secure Project` default owner team. Do NOT yet remove System Administrator — keep the working configuration until the new one is proven.</step>
+    <step order="3">EXPERIMENT: create a test `sprk_project` with `sprk_issecure = true` and attempt to assign its owner to the team. Record exactly what Dataverse does. Add one privilege at a time ONLY when an operation fails, recording the error that forced each addition.</step>
+    <step order="4">Once assignment succeeds on the minimum set, REMOVE System Administrator from the team and re-run the experiment. This is the step that proves the new role — not the previous one.</step>
+    <step order="5">Verify no human reachability: the team still has zero members; the role is on no user and no other team; and an ordinary non-admin user still cannot read the test secure project.</step>
+    <step order="6">Verify ordinary sharing still works: share the test project with a non-admin user and confirm they can read it — this is what proves Basic/User Read was not stripped, and it is FR-28's prerequisite.</step>
+    <step order="7">Answer the child-entity question from step 0's metadata and state a recommendation. If children should be team-owned, file it as a separate task against task 021's assignment behaviour rather than implementing it here.</step>
+    <step order="8">Write the runbook: `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` — the exact reproducible steps for a new environment (BU, owner team, this role, what must NOT be granted, and the verification checks). Record the final privilege set WITH the reason each entry survived.</step>
+    <step order="9">Amend design 5.1a and spec NFR-05 to the depth that actually proved necessary. If User depth sufficed, NFR-05's exemption narrows — say so explicitly, since the current amendment was written assuming BU depth.</step>
+    <step order="10">Delete the test project and any test artifacts. Update notes, TASK-INDEX, current-task.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ownership assignment requires a privilege that would make the team able to read records OUTSIDE the Secure Project business unit, STOP and escalate. That would mean the ownership model itself needs revisiting, not that the role needs widening.</trigger>
+    <trigger>If removing System Administrator breaks something other than the assignment (e.g. an unrelated integration was silently relying on that team's rights), STOP and report what depended on it — a memberless team should have no dependents, and one appearing is a finding.</trigger>
+    <trigger>If the child-entity analysis shows that documents on a secure project are currently owned in a business unit ordinary users can reach, STOP and escalate immediately — that is a live disclosure, not a configuration preference, and it outranks this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The `Secure Project` business unit and its default owner team already exist. No new team, and no service account (design 5.1a establishes none is needed).</existing>
+    <extension>One new security role — which cannot be an extension of an existing one: every existing role is either System Administrator (far too broad) or a general user role that must NOT reach this business unit.</extension>
+    <cost-of-doing-nothing>The team that owns every secure project holds System Administrator, so adding one member would grant that person full administrative rights over the whole organisation — and the team is the ownership anchor of the entire isolation model. Separately, task 021's escalation trigger for "the team lacks privileges" cannot fire while the team is omnipotent, so provisioning cannot be meaningfully verified in dev at all.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="config">Dataverse: `Secure Project Owner` security role, assigned to the Secure Project default owner team</output>
+    <output type="doc">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</output>
+    <output type="spec">projects/unified-access-control-r2/spec.md</output>
+    <output type="doc">projects/unified-access-control-r2/design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A `Secure Project Owner` role exists in the `Secure Project` business unit and is assigned to that BU's default owner team.</criterion>
+    <criterion>`System Administrator` is NO LONGER on that team, and assignment still succeeds afterwards — proven by re-running the experiment after removal, not before.</criterion>
+    <criterion>Every privilege in the role is justified by a recorded failure that occurred without it.</criterion>
+    <criterion>The team has zero human members; the role is held by no user and no other team.</criterion>
+    <criterion>A non-admin user cannot read a secure project by any path other than an explicit share.</criterion>
+    <criterion>A shared non-admin user CAN read it — proving Basic/User Read was not stripped.</criterion>
+    <criterion>The runbook reproduces the whole configuration on a fresh environment.</criterion>
+    <criterion>design 5.1a and spec NFR-05 state the depth that was actually required.</criterion>
+    <criterion>The child-entity ownership question is answered from live metadata, with a recommendation.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design 5.1a's privilege list is a hypothesis to test, not a spec to implement — in particular USER depth may suffice for a team that owns the records, which would be tighter than the Business Unit depth currently written down and would narrow NFR-05's exemption. The task's value is the empirical answer plus the runbook, not the clicks.</notes>
+</task>

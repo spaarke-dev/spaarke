@@ -94,7 +94,15 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 >   *unreachable* code rather than missing coverage (14 → 17 failure delta proves the guard is
 >   covered once reachable).
 
-**Recommended order**: ~~022~~ ✅ → ~~021~~ ✅ → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
+
+### 🔴 Phase 0b — two tasks added 2026-08-25 by owner decision
+
+| Status | Task | Why | Sev | Deps | ∥-safe | Tier | Effort | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 🔲 **045** | **auth-v4 integration / CI unblock** — merge master, migrate `CallerRecordAccessProbe` off its client secret, repair 5 Moq ctor sites | **BLOCKER** | 021 | ❌ | **opus** | **xhigh** | **MUST RUN FIRST — nothing on this branch can be CI-verified until it lands.** PR #812 is `CONFLICTING`, and a conflicted PR dispatches **NO** workflows (not a red gate — *no* gate). Trial merge produced 22 failures: master's auth-v4 forcing functions FR-F1/FR-F2 fail on `CallerRecordAccessProbe.cs:134,137` (**D1 with its premise expired** — auth-v4 closed E-3 on 2026-08-24 without seeing an unmerged site), and master widened `DataverseWebApiClient`'s ctor so Moq class proxies throw. Fix for the former is a **faithful port of master's `DataverseUserClient`**, not new auth design. See [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](../notes/ci-dark-and-authv4-integration-2026-08-25.md) |
+| 🔲 **046** | **`Secure Project Owner` role** — create it, assign to the owner team, **remove System Administrator** | High | 021 | ❌ | **opus** | **xhigh** | The owner team currently holds **System Administrator** and no `Secure%` role exists (task 021 live finding). Memberless, so nothing is exposed — but one membership row from full admin rights on the BU NFR-05 guards. ⚠️ **design §5.1a's privilege list is a HYPOTHESIS, not a spec**: for a team that owns the records, **User depth may suffice** and is tighter than the Business-Unit depth written down — which would *narrow* NFR-05's exemption. Determine empirically; also answers the open child-entity ownership question. Delivers `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` |
+
+**Recommended order**: ~~022~~ ✅ → ~~021~~ ✅ → **045 (BLOCKER — CI is dark until this lands)** → 046 → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
 in parallel at any time (both `parallel-safe: true`, no deps, no contended code).
 
 **029 before 028**: 029 closes a live incoherence on the shipped surface (writable-but-not-listable
