@@ -1,7 +1,17 @@
 # Task 021 — provisioning stamping PATCH (C4/C5)
 
-> **STATUS: ESCALATED at step 0, 2026-08-24.** The mandatory first step could not be completed with
-> the tooling available, and the POML forbids guessing. Verification work IS done and is below.
+> **STATUS: ESCALATED — and RE-SCOPED, 2026-08-24.** Two escalations, and the second one supersedes
+> the first. Owner review of the mechanism (not the bug) found that **two of the three things
+> provisioning stamps should probably not exist at all**, and that fixing the names as written would
+> *activate* a data-corruption bug rather than close a gap.
+
+---
+
+## 🛑 STOP — do NOT "just fix the names"
+
+Repairing this PATCH as specified would turn a dormant defect into a live one. The write has been
+failing since 2026-03, and **that failure is the only reason project client data has not been
+corrupted.** Details in "Second escalation" below. Task 021 must be re-scoped before any code change.
 
 ---
 
@@ -77,7 +87,98 @@ Option **C** is worth genuine consideration rather than a footnote: it is the on
 recurring. Every `@odata.bind` in the codebase carries the same silent-failure risk, and this project
 has now hit it twice (021 here, and the same caution deferred the fix in task 009's sibling).
 
-## What is ready to land the moment a name arrives
+---
+
+# Second escalation (2026-08-24) — the mechanism contradicts design §5.1
+
+Raised by the owner: *"we discussed that we would have one Secure Project business unit, not a
+business unit for every secure project"* and *"the firm already has a record — we use
+`sprk_organization`"*. Both challenges are correct, and checking them found a third problem neither
+of us had in view.
+
+## (a) BU-per-project directly contradicts the design
+
+[`design.md` §5.1](../design.md) — operator decision 2026-08-21, **five months after this code shipped**:
+
+> - One **`Secure Projects` business unit**; secure records live there.
+> - A **service account in that BU owns the records**, so they stay there naturally — no
+>   matrix-data-access dependency, **no BU-per-project proliferation**.
+> - **All human access is by explicit Dataverse share**, including the creating attorney's.
+
+The phrase "no BU-per-project proliferation" is a verbatim rejection of what the code does. The
+topology diagram lists `(future per-project secure BUs)` under `Secure Projects` — explicitly
+parenthesised as a *future* option, not the current model.
+
+The code (`ProvisionProjectEndpoint` Step 2) creates a **new BU per project**, named `SP-{ProjectRef}`,
+described as *"Secure Project isolation BU for project: {projectName}"*.
+
+**And it parents that BU to the ROOT business unit** (`ResolveRootBusinessUnitIdAsync` →
+`parentbusinessunitid@odata.bind`). Not to `Secure Projects`. That has a sharp consequence:
+
+> **NFR-05's standing assertion — "no security role may reach the `Secure Projects` BU" — would not
+> cover these BUs at all**, because they are not underneath `Secure Projects`. The guardrail this
+> project is building to protect secure records would silently not protect the ones provisioning
+> creates.
+
+## (b) The account is not just redundant — the column means something else entirely
+
+`sprk_externalaccount` on `sprk_project` (and `sprk_matter`) has a **real, live consumer**, and it is
+not external access:
+
+```
+ProjectLiveFactResolver.cs:33  ·  MatterLiveFactResolver.cs:35
+    <item><c>client</c> → <c>sprk_externalaccount</c> (LOOKUP → account)</item>
+```
+
+**That column is the CLIENT** — the customer the project is for. The Insights engine reads it to
+answer "who is the client on this matter?".
+
+Provisioning creates a synthetic account named `External Access — {projectName}` and, in the broken
+PATCH, stamps it over that column. **If the names were simply corrected, provisioning a secure project
+would overwrite the project's client with a junk record.** The five-month failure is the only thing
+that has prevented it.
+
+The owner's point stands independently and is confirmed by live metadata — Spaarke already models
+firms as `sprk_organization`:
+
+| Concept | Column on `sprk_project` | Target table |
+|---|---|---|
+| Law firm | `sprk_assignedlawfirm1` / `sprk_assignedlawfirm2` | **`sprk_organization`** |
+| Client | `sprk_externalaccount` | `account` |
+| External grants | `_sprk_organization_value` on the grant row | **`sprk_organization`** |
+
+`ExternalGrantLifecycle` and `ExternalParticipationService` — the actual external-access model — use
+`sprk_organization`. Nothing in the external-access plane reads an `account`. So the provisioning
+account is a **fourth concept** invented per project, consumed by nothing, written onto a column that
+means something else.
+
+## What this means for task 021
+
+The task as written ("fix 3 wrong names + the swallow") is **repairing a mechanism the design
+superseded**. Re-scope required:
+
+| Step | Current behaviour | Assessment |
+|---|---|---|
+| Create BU per project | new BU under **root** | ❌ contradicts §5.1; also escapes NFR-05's guard. Design says use the ONE `Secure Projects` BU + service-account owner |
+| Create SPE container | per-project container → `sprk_containerid` | ✅ **legitimate, keep**. Column verified `NVARCHAR(100)`, in active use on real rows |
+| Create external account | synthetic `account`, stamped on `sprk_externalaccount` | ❌ redundant (firms are `sprk_organization`) **and destructive** (that column is the client) |
+| Swallow the failure | catch + `LogWarning` + return 200 | ❌ fix regardless — this is what let all of the above stay invisible |
+
+**Recommended re-scope**: the only stamp that survives review is the container. The BU and account
+steps need an owner decision before any repair, because "fix the names" on either one makes things
+worse. The fail-loud change is safe and valuable on its own **once the payload is reduced to fields
+that should actually be written**.
+
+## Why the original nav-property blocker now barely matters
+
+`sprk_containerid` is a plain `NVARCHAR(100)` — **no navigation property needed**. If the BU and
+account stamps are dropped per the above, the two blocked lookup names are no longer required at all,
+and the first escalation dissolves. That is the cheapest path to a correct fix, and it is a
+consequence of the design question, not a workaround for it.
+
+---
+
+## What is ready to land the moment the re-scope is decided
 
 1. `sprk_specontainerid` → `sprk_containerid` (plain string; no bind) — **verified**.
 2. Both lookup binds, once named.
