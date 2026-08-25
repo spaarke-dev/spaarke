@@ -9,10 +9,45 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — W1–W10 done + **011 ✅** + **028 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
+| **Task** | W1–W10 + **011 ✅ · 027 🔄(built) · 028 ✅ · 060 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
 | **Step** | Between tasks. |
 | **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
-| **Next Action** | **027 BUILT** (AC-1 needs operator device-code). Next: **(2) resolve the PATCH-400 escalation**, then **(3) deploy to dev**. Operator chose this order 2026-08-24. |
+| **Next Action** | 🔔 **BLOCKED ON THE OPERATOR — one device-code sign-in.** Re-run `python delegated-diagnostics.py` (see below), relay the code, wait. Then **(3) deploy to dev**. |
+
+### 🔔 BLOCKED — the PATCH-400 escalation needs ONE delegated sign-in
+
+Operator chose the order **(1) build 027 → (2) resolve PATCH-400 → (3) deploy to dev** (2026-08-24).
+(1) and (3)-readiness are done. (2) cannot proceed without them.
+
+**Two device codes were issued and both expired unused** (15-min window each) — the operator was away.
+Do NOT keep re-issuing blind; ask first, then issue.
+
+**The script is written and ready**, and deliberately resolves BOTH open items in one sign-in:
+```
+python "<scratchpad>/delegated-diagnostics.py"          # read-only + no-op PATCH probes
+python "<scratchpad>/delegated-diagnostics.py" --allow-writes   # adds owner then REVERTS it
+```
+It is also reproduced at `notes/delegated-diagnostics.py` so it survives the scratchpad.
+
+What it settles:
+- **The escalation** — captures the FULL 400 body incl. `innerError` (previously recorded only as
+  "invalidRequest / badArgument"; Graph's outer message is usually generic, the inner one names the
+  cause). Then the decisive ownership test: a **no-op** PATCH (writing the current value back, so the
+  payload cannot be the variable) against a SPA-owned type vs a CLI-owned one.
+  **2xx on CLI-owned + 400 on SPA-owned ⇒ ownership IS the rule.** 400 on both ⇒ it is not; look elsewhere.
+- **Task 027 AC-1** — live owner list (and add/remove under `--allow-writes`).
+
+**Two options were ruled out first, read-only, so no side effect is spent needlessly:**
+- `170c98e1` has `allowPublicClient: null` → the "enable public-client flows" option really does
+  modify the production SPA registration. Not free.
+- Neither CSDL carries `UpdateRestrictions` on `containerTypes`, so metadata cannot settle
+  updatability the way it settled 025 / 026 / 028.
+
+⚠️ **Worth re-costing option 1.** The escalation note assumed deleting `Spaarke DMS-SPE Trial` is
+expensive. That trial **expired 2025-10-10 — eleven months ago** and a trial "simply stops working"
+after expiry. If it holds no containers, deleting it is cheap, and it is the cleanest route to a
+CLI-owned type to PATCH. The script's enumeration answers this. **Do not delete anything without
+asking.**
 
 ### 🔴 Task 027 — THREE premise errors found before writing a line of feature code
 
