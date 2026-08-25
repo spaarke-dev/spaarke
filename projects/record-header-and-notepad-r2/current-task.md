@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-25 (by `context-handoff` — end of planning session)
+> **Last Updated**: 2026-08-25 (task 040 in progress)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,11 +9,29 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none in progress — planning complete, implementation not started |
-| **Phase** | 2 → 3 boundary. 30 tasks generated and validated. |
-| **Status** | ready to execute |
-| **Next Action** | **`work on task 040`** → invokes `task-execute` on [`tasks/040-fix-rs1-matter-summary-select.poml`](tasks/040-fix-rs1-matter-summary-select.poml). Fixes live production breakage; no dependencies. Then 001 + 002. |
-| **Blocked by** | Nothing. |
+| **Task** | **040** — RS-1: fix live Matter header HTTP 400 (`sprk_mattersummary` → `RECORDSUMMARY_FIELD`) |
+| **Rigor** | FULL · opus @ high · steps `directional` |
+| **Phase** | 4 — Schema-drift remediation |
+| **Status** | in-progress |
+| **Next Action** | ⏸ **BLOCKED on owner decision** — hotfix v1.0.21 now vs wait for R2. See [`notes/rs1-hotfix-decision.md`](notes/rs1-hotfix-decision.md). Steps 1–6 + quality gates done; Steps 7–8 (deploy/annotate, TASK-INDEX ✅) gated on the answer. |
+| **Blocked by** | Owner release decision (POML `<escalation>` trigger fired by design). |
+
+### Steps 1–6 complete (code work is final either way)
+
+| File | Change |
+|---|---|
+| `control/MatterHeaderView.tsx` | `$select` + summary read now use `RECORDSUMMARY_FIELD`; stale v1.0.20 header comment rewritten |
+| `control/ControlManifest.Input.xml` | description-key stripped of the `sprk_mattersummary` clause (no apostrophes) |
+| `__tests__/MatterHeaderView.test.tsx` | fixture, `$select` assertion, popover tests, header comment retargeted; hooks mock now exports `RECORDSUMMARY_FIELD` |
+| `tsconfig.json` | **pre-existing build break** — added `exclude` for `__tests__` (mirrors RegardingResolver/VisualHost) |
+| `package-lock.json` | byproduct of `npm install` in a fresh worktree; resyncs shared-lib metadata 2.3.0 → 2.4.0 |
+
+**Verified**: 7/7 tests green · `build:prod` exits 0 · bundle 62.5 KiB (ceiling 250 KB) · zero
+`sprk_mattersummary` in `control/` + `__tests__/` · no hand-edit under `Solution/`.
+
+**Step 9.5 gates**: `code-review` → 0 Critical, 1 Warning (tsconfig scope, justified below), 2 Suggestions;
+0 AI code smells; ESLint clean. `adr-check` → **0 violations, 0 warnings** across ADR-006/012/020/021/022/028/038.
+§10 BFF hygiene and §11 component justification both N/A (no server files; modification-only).
 
 ### Critical context (3 sentences)
 

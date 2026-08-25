@@ -4,7 +4,7 @@
     <title>RS-1 — Fix live Matter header HTTP 400: retarget $select from deleted sprk_mattersummary to RECORDSUMMARY_FIELD</title>
     <phase>4 Schema-drift remediation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies code files (.tsx) and tests; tags include pcf. TEST-MODIFYING override also applies (tags include testing) — code-review + adr-check at Step 9.5 run unconditionally.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -147,6 +147,30 @@
     <criterion testable="true">Hotfix path only: version reads 1.0.21 in all 5 ADR-020 locations, the control is deployed, and the "Matter header loads" ui-test passes. Wait path only: no version bump and no deployment occurred; repo changes are code/test/manifest-source only.</criterion>
     <criterion testable="true">Negative: no change under src/client/pcf/MatterHeader/Solution/ was hand-authored (any diff there is build output from an approved hotfix pack only).</criterion>
   </acceptance-criteria>
+
+  <completion>
+    Completed 2026-08-25. Owner chose **Option A (ship v1.0.21)** at the escalation — recorded in
+    notes/rs1-hotfix-decision.md with rationale. Source, tests, and manifest now reference the summary field
+    only via RECORDSUMMARY_FIELD. Version bumped in all 5 ADR-020 locations; solution packed to
+    Solution/bin/MatterHeaderPcf_v1.0.21.0.zip (18,179 bytes; bundle 64,422 bytes) and handed to the owner,
+    who imports manually — so the two ui-tests are the OWNER's post-import verification, not run here.
+
+    Two out-of-scope items surfaced and are flagged rather than absorbed silently:
+    (1) `npm run build:prod` was ALREADY RED at HEAD, unrelated to RS-1 — the PCF build type-checked
+        __tests__/ and hit TS2347 on the jest.mock factories' untyped `require('react')`. Verified
+        empirically by rebuilding with the original test file restored. Fixed via a tsconfig `exclude`,
+        mirroring RegardingResolver + VisualHost (the two sibling PCFs with the same __tests__ layout).
+        ts-jest uses its own tsconfig.test.json, so tests still type-check.
+    (2) package-lock.json resynced (shared-lib metadata 2.3.0 → 2.4.0) as a byproduct of `npm install`
+        in a fresh worktree. No behavioural effect.
+
+    Non-obvious detail for anyone touching this test file later: MatterHeaderView now IMPORTS
+    RECORDSUMMARY_FIELD from the mocked '@spaarke/ui-components/dist/hooks' subpath, so the jest.mock
+    factory must export it. Without that the $select silently carries `undefined` — green tests, dead control.
+
+    Quality gates: code-review 0 Critical / 0 AI code smells / ESLint clean; adr-check 0 violations across
+    ADR-006/012/020/021/022/028/038.
+  </completion>
 
   <notes>
     Spec refs: FR-22, FR-23/RS-1; design.md §9 "Two live breakages". The deployed control keeps 400ing until a

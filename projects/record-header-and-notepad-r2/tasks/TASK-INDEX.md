@@ -53,7 +53,7 @@
 
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [040](040-fix-rs1-matter-summary-select.poml) | 🔴 **RS-1** — Matter header 400s in production | FULL | opus | ❌ | — | 🔲 |
+| [040](040-fix-rs1-matter-summary-select.poml) | 🔴 **RS-1** — Matter header 400s in production | FULL | opus | ❌ | — | ✅ |
 | [041](041-fix-rs2-topic-registry-target.poml) | 🔴 **RS-2** — topic-registry target field | STANDARD | sonnet | ❌ | — | 🔲 |
 
 ### Phase 5 — Rollout (operator / maker tasks)

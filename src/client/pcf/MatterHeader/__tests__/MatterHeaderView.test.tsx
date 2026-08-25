@@ -6,10 +6,11 @@
  *  - 5 field labels render after retrieveRecord resolves
  *  - 2 toolbar slots (checkmark / annotation) + the AI Summary sparkle trigger render
  *  - Version footer rendered
- *  - Sparkle click invokes `aiSummary.onFetchSummary` and renders the `sprk_mattersummary`
- *    body (regression coverage for the v1.0.20 field-wiring fix — the popover
- *    previously read the never-populated `sprk_recordsummary` field)
- *  - Sparkle click renders the empty state when `sprk_mattersummary` is null
+ *  - Sparkle click invokes `aiSummary.onFetchSummary` and renders the
+ *    `sprk_recordsummary` body (regression coverage for RS-1 — the popover AND
+ *    the `$select` previously named a Matter-specific summary column that was
+ *    deleted in the 2026-08-25 standardization, which 400'd the whole header)
+ *  - Sparkle click renders the empty state when `sprk_recordsummary` is null
  *  - `useRecordFieldValues` is called with the exact 6-field FR-12 REVISED payload
  *
  * Strategy: `@spaarke/ui-components` is jest-mocked via PER-SUBPATH `jest.mock()`
@@ -164,6 +165,11 @@ jest.mock('@spaarke/ui-components/dist/components/LookupField/LookupField', () =
 
 jest.mock('@spaarke/ui-components/dist/hooks', () => ({
   __esModule: true,
+  // Mirrors the real constant (toolbarLaunchDefaults.ts). The view imports this
+  // rather than a literal, so the mock must supply it — otherwise the $select
+  // silently carries `undefined`. The assertions below check the RESOLVED value,
+  // which is what keeps the RS-1 regression guard honest rather than tautological.
+  RECORDSUMMARY_FIELD: 'sprk_recordsummary',
   useRecordFieldValues: (...args: unknown[]) => mockUseRecordFieldValues(...args),
   useRecordHeaderToolbarActions: (...args: unknown[]) => mockUseRecordHeaderToolbarActions(...args),
 }));
@@ -187,7 +193,7 @@ const MATTER_RECORD = {
   sprk_matternumber: 'M-2026-001',
   sprk_mattername: 'Acme Litigation Matter',
   sprk_matterdescription: 'A moderately long matter description.',
-  sprk_mattersummary: 'AI-generated summary body rendered inside the sparkle popover.',
+  sprk_recordsummary: 'AI-generated summary body rendered inside the sparkle popover.',
   _sprk_mattertype_value: 'mt-1',
   '_sprk_mattertype_value@OData.Community.Display.V1.FormattedValue': 'Litigation',
   _sprk_practicearea_value: 'pa-1',
@@ -244,7 +250,7 @@ describe('MatterHeaderView', () => {
       '_sprk_mattertype_value',
       '_sprk_practicearea_value',
       'sprk_matterdescription',
-      'sprk_mattersummary',
+      'sprk_recordsummary',
     ]);
   });
 
@@ -295,7 +301,7 @@ describe('MatterHeaderView', () => {
     expect(footer).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('sparkle click fetches and renders the sprk_mattersummary body (v1.0.20 field-wiring regression guard)', async () => {
+  it('sparkle click fetches and renders the sprk_recordsummary body (RS-1 field-wiring regression guard)', async () => {
     mockUseRecordFieldValues.mockReturnValue({ values: MATTER_RECORD, loading: false, error: null });
 
     renderView();
@@ -305,12 +311,12 @@ describe('MatterHeaderView', () => {
     // Popover resolves asynchronously (matches real AiSummaryPopover's
     // lazy-fetch-on-open contract) — findBy* waits for the state update.
     const summaryEl = await screen.findByTestId('stub-popover-summary');
-    expect(summaryEl).toHaveTextContent(MATTER_RECORD.sprk_mattersummary);
+    expect(summaryEl).toHaveTextContent(MATTER_RECORD.sprk_recordsummary);
     expect(screen.queryByTestId('stub-popover-empty')).toBeNull();
   });
 
-  it('renders the empty-state popover body when sprk_mattersummary is null', async () => {
-    const recordNoSummary = { ...MATTER_RECORD, sprk_mattersummary: null };
+  it('renders the empty-state popover body when sprk_recordsummary is null', async () => {
+    const recordNoSummary = { ...MATTER_RECORD, sprk_recordsummary: null };
     mockUseRecordFieldValues.mockReturnValue({ values: recordNoSummary, loading: false, error: null });
 
     renderView();
