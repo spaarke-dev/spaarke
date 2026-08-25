@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="205f" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Auth-v4 runtime-contract integration — row A44 (appsettings.template.json guard + Section 6.5 EDIT package + doc sweep)</title>
+    <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205)</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Row A44 touches (a) BFF-consumed shared server code paths (H4b + H9 consumer path for `appsettings.template.json` `ServiceBus-ConnectionString` KV ref) → tag `bff-api` → FULL per project CLAUDE.md §Rigor level defaults; and (b) `.claude/constraints/provisioning.md` + root `CLAUDE.md` §17 + `spec.md` (Section 6.5 EDIT package) → auth-adjacent doc mutation → auth-tagged. Under project CLAUDE.md §8 TEST-MODIFYING override AND root §Rigor level tag `auth` → code-review + adr-check unconditional at Step 9.5. Non-negotiable given the security-sensitive nature of the credential-lifecycle rewrite and the silent-fail history of the template `ServiceBus-ConnectionString` KV ref (auth-v4 obligation 051-E).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Row A44 is a mechanical apply of well-specified deltas per remediation plan §10 confidence assessment and §6.5 decision doc EDITs 1-4 (exact verbatim before/after text drafted, verified 2026-08-25). Consumer guard (H4b/H9) reuses the A38/A43 secret-free detection convention (single source of truth) — no new credential logic authored. Sonnet-5 @ high per project CLAUDE.md §8.5 default; not credential-logic-authoring (that was A38/A42 = Fable/Opus). The FULL rigor gate (code-review + adr-check unconditional) provides the quality guard, not the model tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Section 6.5 EDIT package touches `.claude/constraints/provisioning.md` + root `CLAUDE.md` §17. Sub-Agent Write Boundary (root CLAUDE.md §3) forbids sub-agents from Edit/Write on `.claude/**`; MUST run in MAIN SESSION. The consumer-guard (H4b/H9 code) portion could parallel in isolation, but the doc/constraint work forces main-session-only for the whole task per §3.</parallel-reason>
+    <deps>A35 (master merge landed — brings ADR-028 A4 + E-3 closure banner into this worktree); Section 6.5 owner sign-off (Q3 signed 2026-08-25 per `notes/decisions/adr-028-a4-integration-conflict-resolution.md` **APPROVED**); A38 (secret-free detection convention — single source of truth); A43 (Deploy-AllIndexes gate — same secret-free marker convention)</deps>
+    <tags>provisioning, auth, code, docs, skill-directive, root-claude, sec-6.5-edit-package, template-guard, adr-028-a4</tags>
+    <estimated-effort>2.5h (per punch row A44 — 1h consumer guard + 1h Section 6.5 EDIT package + 0.5h doc sweep)</estimated-effort>
+  </metadata>
+
+  <prompt>Apply auth-v4 §10.5 trap 1 + §10.6 doc-align — punch row A44. Three sub-scopes, main-session-only: (a) **CONSUMER GUARD** — H4b/H9 deploy paths that iterate `appsettings.template.json` entries MUST skip the `ServiceBus-ConnectionString` KV ref entry on secret-free envs (template fix itself is auth-v4 obligation 051-E, deferred to 2026-11-23 — ours is only the guard). Detection: same secret-free marker as A38/A43 (KV tag OR env config); consistency across A38/A43/A44 is a quality gate. (b) **SECTION 6.5 EDIT PACKAGE APPLICATION** (Q3 signed 2026-08-25 owner APPROVED) — apply drafted verbatim text from `notes/decisions/adr-028-a4-integration-conflict-resolution.md` EDITs 1-4 + companion sweep: EDIT 1 = `.claude/constraints/provisioning.md` lines 27-36 REPLACE with rewritten `## KV credential lifecycle` section (`BFF-API-ClientSecret` → Path C rewrite; `Dataverse-ClientSecret` → Path A time-boxed sunset 2026-11-23; narrow rider on prong 2 purge-protection); EDIT 2 = root `CLAUDE.md` §17 replace never-delete fragment; EDIT 3 = `spec.md:259` (verify verbatim before-text); EDIT 4 = `spec.md:275` tail clause (verify verbatim before-text); companion sweep = 7 additional inheritor files per decision doc "Companion edits" table; post-merge grep-confirm `oauth-obo-patterns.md` + BFF `CLAUDE.md` corrections arrived from master (already verified present 2026-08-25 per remediation plan §6 — re-confirm at execution). (c) **DOC SWEEP** — replace r1's stale 280-line `PROVISIONING-CHANGE-REQUEST.md` mirror with the 626-line canonical + header naming the canonical path (canonical at `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/...` per canonical-copy rule in remediation plan §6); delete `projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST copy.md`; fix stale rotation-cadence line in `.claude/constraints/provisioning.md:~112` (if still present after EDIT 1); fix name-based UAMI resolution in 2 script help-texts (per §5 SF-1 residual — `az identity show --name` teaches decoy resolution). Amend punch list row A44 annotation. Do NOT commit — main session handles commit after review.</prompt>
+
+  <role>SPAARKE provisioning + auth-lifecycle doc author + main-session `.claude/` edit specialist. Expert in: root CLAUDE.md §6.5 conflict-resolution mechanics (Path A / B / C classification, time-boxed exceptions, cross-inheritor sweep discipline); the `.claude/constraints/provisioning.md` KV never-delete BINDING history (r3 handoff → auth-v4 A4 supersession — pre-authorized by r1 spec FR-39 → E-3 closure 2026-08-24 → prong 1/2/3/4 rewrite); the H4b `FilePerEnvSettingsManifest` + H9 deploy-time appsettings apply seam (per remediation plan §5 silent-failure item 3 migration-undo vectors); auth-v4 obligation 051-E boundary (template file itself is theirs, deferred to 2026-11-23; ours is only the consumer guard); the canonical-copy rule (mirror refresh discipline — the 280-vs-626-line PROVISIONING-CHANGE-REQUEST mirror is the proven failure pattern); Sub-Agent Write Boundary enforcement (root CLAUDE.md §3 — `.claude/**` + root `CLAUDE.md` main-session-only).</role>
+
+  <goal>Row A44 fully landed with annotated status in `notes/task-202-punch-list.md` (or a §205 execution results subsection). Specifically:
+- **H4b + H9 consumer paths skip `appsettings.template.json` `ServiceBus-ConnectionString` KV ref on secret-free envs** (grep-verify guard sites; unit test asserts skip; same secret-free detection as A38/A43 — single source of truth).
+- **Section 6.5 EDIT package fully applied**: `.claude/constraints/provisioning.md` lines 27-36 REPLACED with the rewritten `## KV credential lifecycle` section (prongs 1-4 per Q7 owner narrowing to `spaarkedev1` only); root `CLAUDE.md` §17 `/provision-environment` row never-delete fragment replaced per EDIT 2; `spec.md:259` replaced per EDIT 3; `spec.md:275` tail clause replaced per EDIT 4 — all verbatim before/after per decision doc `notes/decisions/adr-028-a4-integration-conflict-resolution.md`.
+- **Companion sweep** (7 additional inheritors) applied: `.claude/skills/provision-environment/SKILL.md:63`+`:1068`; `.claude/patterns/provisioning/manifest-driven-secret-catalog.md:27`+`:48`; `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md:391`; `.claude/skills/azure-deploy/SKILL.md:100`; `scripts/canonical-secret-catalog/manifest.yaml` (~:106-109 + ~:130-133 + `Invoke-CatalogGenerator.ps1 -Verify` → exit 0); `design.md:804`+`:860`+`:1232` (annotate, do NOT rewrite history); `oauth-obo-patterns.md` + BFF `CLAUDE.md` post-merge grep-confirm.
+- **Stale 280-line mirror replaced with 626-line canonical** + header naming canonical path (`c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/.../PROVISIONING-CHANGE-REQUEST.md`).
+- **`PROVISIONING-CHANGE-REQUEST copy.md` deleted** (AFTER mirror replacement — 2-step atomic to avoid orphan reference).
+- **Stale rotation-cadence line at `.claude/constraints/provisioning.md:~112`** fixed (post-A4 the BFF-identity rotation lifecycle is retired).
+- **Name-based UAMI resolution in 2 script help-texts fixed** (per §5 SF-1 residual — `az identity show --name` teaches decoy `spaarke-bff-identity` resolution; must be ARM resource IDs only).
+- **Post-merge grep-confirm**: `oauth-obo-patterns.md` + BFF `CLAUDE.md` corrections present (verified present 2026-08-25 per remediation plan §6; if NOT present → STOP, master merge integrity issue).
+- **Consumer-guard consistency**: same detection logic as A38 + A43 (secret-free marker convention — single source of truth). If A38 has not yet defined the marker key/value convention, coordinate before authoring the guard.
+- **Adr-check + code-review** run clean at Step 9.5 against the newly-rewritten constraint file (which now cites the A4 amendment merged via A35).</goal>
+
+  <context>
+    <background>Row A44 is auth-v4 §10.5 trap 1 (`appsettings.template.json` `ServiceBus-ConnectionString` KV ref applied on secret-free envs → boot-abort, exit-134 class) + §10.6 doc drift + §6.5 EDIT package application (drafted 2026-08-25; owner-approved 2026-08-25 per Q3 disposition in `notes/decisions/adr-028-a4-integration-conflict-resolution.md`). Three interlocking sub-scopes: (a) code guard preventing the migration-undo vector documented at remediation plan §5 item 3 (H4b/H9 re-apply of template `ServiceBus-ConnectionString` KV ref quietly undoes Δ1 while run reports green); (b) rewriting the never-delete BINDING that half-protects a nonexistent secret (E-3 closed 2026-08-24; `BFF-API-ClientSecret` deleted; FR-39 sunset clause fired) — enforcing the rule as written now misdirects H4/Rotate-Secrets/Seed-ProductionKeyVault into re-seeding the secret into fresh secret-free envs (`RequireSecretFreeIdentity=true` fails fast → boot-abort; or worse, silent-FIC-mask if the ordering is loosened); (c) doc-hygiene sweep replacing the 280-line stale PROVISIONING-CHANGE-REQUEST mirror with the 626-line canonical (the SF-21 meta-surface — this worktree's governing docs re-teach the retired secret contract; the "survived 3 prior audits" failure pattern auth-v4 documented). All three sub-scopes are main-session-only per root §3 (Sub-Agent Write Boundary on `.claude/**` + root `CLAUDE.md`). A35 (master merge) is prerequisite — brings ADR-028 A4 + E-3 closure banner into this worktree; the replacement text cites A4 which is absent pre-merge. Q3 sunset date 2026-11-23 (outer bound; auth-v4 obligation 051-E). Q7 owner narrowing: prong 3 (unmigrated envs) applies to `spaarkedev1` only — no live production exists; no Model 2 stamp provisioned before A36-A42 per Q6.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-draft-punch-rows.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-remediation-plan.md</file>
+      <file role="canonical-reference-decision-doc">projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-open-questions.md</file>
+      <file role="target-modify-constraint-EDIT1">.claude/constraints/provisioning.md</file>
+      <file role="target-modify-root-EDIT2">CLAUDE.md</file>
+      <file role="target-modify-spec-EDIT3-EDIT4">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="target-modify-companion-skill">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="target-modify-companion-pattern">.claude/patterns/provisioning/manifest-driven-secret-catalog.md</file>
+      <file role="target-modify-companion-guide">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file role="target-modify-companion-skill-azure-deploy">.claude/skills/azure-deploy/SKILL.md</file>
+      <file role="target-modify-companion-manifest">scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file role="target-annotate-design">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="target-code-modify-h4b">src/server/api/Sprk.Bff.Api/Services/Registration/Handlers/H4bBulkAppSettingsHandler.cs</file>
+      <file role="target-code-modify-h9">src/server/api/Sprk.Bff.Api/Services/Registration/Handlers/H9BffDeployHandler.cs</file>
+      <file role="target-code-appsettings-template">src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file role="target-doc-canonical-source">c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/projects/spaarke-auth-v4-dataverse-MI/notes/PROVISIONING-CHANGE-REQUEST.md</file>
+      <file role="target-doc-replace-stale-mirror">projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST.md</file>
+      <file role="target-doc-delete">projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST copy.md</file>
+      <file role="target-modify-post-merge-verify">docs/standards/oauth-obo-patterns.md</file>
+      <file role="target-modify-post-merge-verify">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="A35" status="required-landed">Master merge landed — brings ADR-028 A4 + E-3 closure banner into this worktree. EDITs cite A4; without A35, adr-check runs against a pre-A4 constraint file (BINDING conflict blocks A38 omit contract).</dependency>
+      <dependency task="section-6.5-owner-signoff" status="signed-2026-08-25">Q3 signed 2026-08-25 per `notes/decisions/adr-028-a4-integration-conflict-resolution.md` **APPROVED**. Sunset date 2026-11-23 governs (outer bound; auth-v4 obligation 051-E). Q7 owner narrowing: prong 3 applies to `spaarkedev1` only.</dependency>
+      <dependency task="A38" status="required-for-guard-consistency">Consumer guard MUST use A38 secret-free marker convention (KV tag key + value — single source of truth). If A38 has not yet defined the convention, coordinate before authoring the guard.</dependency>
+      <dependency task="A43" status="required-for-guard-consistency">Same secret-free detection convention across A38/A43/A44 (`Deploy-AllIndexes.ps1` gate uses the same marker). Consistency is a quality gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary (BINDING)">MUST run in MAIN SESSION. Edits to `.claude/constraints/provisioning.md`, root `CLAUDE.md`, `.claude/skills/**`, `.claude/patterns/**` MUST occur in the main session. Sub-agents cannot Write/Edit these paths.</constraint>
+    <constraint source="A38/A43 secret-free marker convention">Consumer guard MUST use same secret-free detection as A38/A43 (KV tag OR env config). Consistency across A38/A43/A44 is a quality gate — single source of truth per remediation plan §5 item 3. If A38 has not yet defined the marker (KV tag key + value), coordinate BEFORE authoring the guard.</constraint>
+    <constraint source="auth-v4 obligation 051-E boundary">MUST NOT modify `src/server/api/Sprk.Bff.Api/appsettings.template.json` itself — the template fix is auth-v4 obligation 051-E, deferred to 2026-11-23 (their retirement runbook owns it). Row A44 authors ONLY the consumer guard in H4b/H9 code paths.</constraint>
+    <constraint source="decision doc EDIT 3/4 verbatim">Section 6.5 EDIT 3/4 verbatim before-texts MUST be re-verified at `spec.md:259` + `spec.md:275` BEFORE applying edits (per remediation plan §2 — verified 2026-08-25; re-confirm at execution time in case of drift). If before-text has drifted → STOP + reconcile with owner; the decision doc's exact before-text is load-bearing for the after-text.</constraint>
+    <constraint source="canonical-copy rule (remediation plan §6)">Mirror deletion order: (1) replace `notes/PROVISIONING-CHANGE-REQUEST.md` with 626-line canonical + header, THEN (2) delete `notes/PROVISIONING-CHANGE-REQUEST copy.md`. 2-step atomic to avoid orphan reference. Do NOT delete `copy.md` first.</constraint>
+    <constraint source="remediation plan §6 post-merge grep-confirm">Post-merge grep-confirm `docs/standards/oauth-obo-patterns.md` + `src/server/api/Sprk.Bff.Api/CLAUDE.md` corrections arrived from master (verified present 2026-08-25 per remediation plan §6). If NOT present → STOP — master merge integrity issue; do NOT paper over with local edits.</constraint>
+    <constraint source="Q3 signed 2026-08-25">Owner sign-off IS RECORDED at `notes/decisions/adr-028-a4-integration-conflict-resolution.md` **APPROVED** owner 2026-08-25. If decision doc has been amended post-2026-08-25 (check §"Owner refinements" section for post-approval refinements), re-read BEFORE applying EDITs.</constraint>
+    <constraint source="Q7 owner narrowing 2026-08-25">Prong 3 (unmigrated envs) scope collapses to `spaarkedev1` only per owner disposition — no live production exists; no Model 2 stamp provisioned before A36-A42 per Q6 disposition. EDIT 1 replacement text MUST reflect Q7 narrowing: "prong 3 applies to `spaarkedev1` and any as-yet-unprovisioned Model 2 stamp; H4 executor MUST NOT provision new Model 2 stamps under this prong until A36-A42 land per Q6."</constraint>
+    <constraint source="decision doc companion sweep discipline">The 7 companion-sweep files (skill, pattern, guide, azure-deploy skill, canonical secret catalog manifest + `Invoke-CatalogGenerator.ps1 -Verify`, design.md 3 annotations) MUST be swept per the decision doc "Companion edits" table exactly — no free interpretation. `design.md:804/:860/:1232` are ANNOTATE-ONLY ("superseded 2026-08-25 per §6.5 resolution — see spec.md MUST + constraint file"); do NOT rewrite design history.</constraint>
+    <constraint source="root CLAUDE.md §11 component justification">This task does NOT create new files; it modifies existing surface. §11 three-question template still applies to justification (see `<notes>` section).</constraint>
+    <constraint source="project CLAUDE.md §Rigor / TEST-MODIFYING override">FULL rigor + code-review + adr-check unconditional at Step 9.5 per auth tag + BFF-consumed shared code path modification.</constraint>
+    <constraint source="§5 SF-1 residual (remediation plan)">Name-based UAMI resolution in 2 script help-texts (`az identity show --name`) teaches decoy `spaarke-bff-identity` resolution — 5 UAMIs exist in dev subscription; `spaarke-bff-identity` is NOT attached to BFF. Fix MUST use ARM resource IDs end-to-end.</constraint>
+    <constraint source="A44 scope boundary">Row A44 does NOT include A38's H4 omit contract (that is A38's scope); does NOT include A43's Deploy-AllIndexes gate (that is A43's scope). Guard scope is strictly H4b/H9 iteration of `appsettings.template.json` entries.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Auth-v4 §10.5 trap 1 (template `ServiceBus-ConnectionString` KV ref consumer guard) + §10.6 doc-align + §6.5 EDIT package application</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-draft-punch-rows.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-open-questions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/patterns/provisioning/manifest-driven-secret-catalog.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/standards/oauth-obo-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/Handlers/H4bBulkAppSettingsHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/Handlers/H9BffDeployHandler.cs</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load + gates">Emit RIGOR LEVEL block (FULL, sonnet @ high, main-session-only). Read `notes/auth-v4-integration-draft-punch-rows.md` (row A44 line + §10.5 trap-1 source). Read `notes/auth-v4-integration-remediation-plan.md` §5 (silent-failure catalog SF-1 name-based UAMI + item 3 migration-undo vectors), §6 (post-merge grep-confirm targets, canonical-copy rule, resolution rules for `Register-EntraAppRegistrations.ps1` class), §7 (sequencing — A44 fires after A35), §8 (effort — 2.5h). Read decision doc `notes/decisions/adr-028-a4-integration-conflict-resolution.md` end-to-end (verify APPROVED status + Q7 narrowing + Owner refinements section). Verify A35 landed (grep for A4 amendment presence in `.claude/adr/ADR-028-spaarke-auth-architecture.md` — MUST find MUST NOT `.WithClientSecret(...)` clause). Verify A38 secret-free marker convention exists (check A38 landing notes or coordinate).</step>
+    <step order="1" name="Grep-verify current state BEFORE applying (EDIT 3/4 verbatims + companion sweep sites + guard sites)">
+      For each target: run row-specific grep against target files. Record verified status in scratchpad table BEFORE any edit.
+      - EDIT 3 verbatim: `spec.md:259` — grep for `**MUST NOT** delete \`Dataverse-ClientSecret\` / \`BFF-API-ClientSecret\` (BINDING pre-check per r3 handoff — OBO + shared-lib Dataverse still depend)`.
+      - EDIT 4 verbatim: `spec.md:275` — grep for `but **MUST NOT** delete the \`Dataverse-ClientSecret\` KV secret itself (the BFF shared-lib path still consumes it until NG1 #3b; BINDING never-delete)`.
+      - EDIT 1 target: `.claude/constraints/provisioning.md:27-36` — confirm current text matches decision doc "Specific rule being challenged" §1.
+      - EDIT 2 target: root `CLAUDE.md` §17 — grep for `BINDING: never delete \`Dataverse-ClientSecret\` / \`BFF-API-ClientSecret\`.`
+      - Companion sites: enumerate all 7 per decision doc "Companion edits" table (lines 63/1068 in provision-environment SKILL; 27/48 in manifest-driven-secret-catalog pattern; :391 in SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE; :100 in azure-deploy SKILL; ~:106-109 + ~:130-133 in canonical-secret-catalog manifest.yaml; :804/:860/:1232 in design.md).
+      - Post-merge cured (grep-confirm): `docs/standards/oauth-obo-patterns.md` + `src/server/api/Sprk.Bff.Api/CLAUDE.md` — MUST confirm corrections present (per remediation plan §6). If NOT present → STOP.
+      - Guard sites: grep `H4bBulkAppSettingsHandler.cs` + `H9BffDeployHandler.cs` for `appsettings.template.json` iteration + `ServiceBus-ConnectionString` handling.
+      - Rotation-cadence line: grep `.claude/constraints/provisioning.md:~112` for "Client-cred rotation cadence: ≤ once per 90 days".
+      - Name-based UAMI (SF-1): grep repo for `az identity show --name` in script help-texts (expected 2 sites).
+      - Mirror: grep line counts of `notes/PROVISIONING-CHANGE-REQUEST.md` (expected ~280) and `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/.../PROVISIONING-CHANGE-REQUEST.md` (expected ~626).
+      - `copy.md`: verify `notes/PROVISIONING-CHANGE-REQUEST copy.md` exists.
+
+      **If ANY verbatim EDIT 3/4 before-text has drifted → STOP + escalate + reconcile with owner (do NOT free-interpret).** **If post-merge cured files are NOT present → STOP — master merge integrity issue.**
+    </step>
+    <step order="2" name="Consumer guard: author H4b + H9 skip logic for template `ServiceBus-ConnectionString` KV ref on secret-free envs">
+      Author guard in H4b consumer path (`H4bBulkAppSettingsHandler.cs`) + H9 consumer path (`H9BffDeployHandler.cs`) that iterates `appsettings.template.json` entries and MUST skip the `ServiceBus-ConnectionString` KV ref entry when the env is secret-free. Detection: identical to A38/A43 (KV tag OR env config — single source of truth). Log the skip explicitly at INFO level with the marker value that triggered it (so run logs distinguish "skipped as designed" from "silently missing"). Do NOT modify `appsettings.template.json` itself (auth-v4 051-E boundary).
+    </step>
+    <step order="3" name="Checkpoint (after guard authoring)">Run `context-handoff`.</step>
+    <step order="4" name="EDIT 1 apply — `.claude/constraints/provisioning.md` lines 27-36 REPLACE with rewritten KV credential lifecycle section (Q7-narrowed)">
+      EDIT the file per decision doc verbatim after-text (prongs 1-4). Apply Q7 owner narrowing to prong 3: "prong 3 applies to `spaarkedev1` and any as-yet-unprovisioned Model 2 stamp; H4 executor MUST NOT provision new Model 2 stamps under this prong until A36-A42 land per Q6." Preserve the `§7.9 pre-check gate` block unchanged. Preserve the "Additionally, any secret with `never_delete: true`..." paragraph with the re-annotation note pointing to prongs 1-3.
+    </step>
+    <step order="5" name="EDIT 2 apply — root `CLAUDE.md` §17 replace never-delete fragment">
+      EDIT the `/provision-environment` skill pointer row's never-delete fragment per decision doc verbatim after-text. Fragment sits at the end of that row's description.
+    </step>
+    <step order="6" name="EDIT 3 + EDIT 4 apply — `spec.md:259` and `spec.md:275`">
+      Apply EDIT 3 + EDIT 4 per decision doc verbatim (re-verify before-text at execution — Step 1 verification is authoritative; if drift discovered here → STOP). EDIT 3 replaces MUST NOT delete line; EDIT 4 replaces tail clause.
+    </step>
+    <step order="7" name="Checkpoint (after EDITs 1-4)">Run `context-handoff`.</step>
+    <step order="8" name="Companion sweep — 7 inheritor files per decision doc `Companion edits` table">
+      Apply each in order:
+      - `.claude/skills/provision-environment/SKILL.md:63` + `:1068` — replace with pointer to constraint §KV credential lifecycle (the "still consumed by OBO" rationale is false since 2026-08-24).
+      - `.claude/patterns/provisioning/manifest-driven-secret-catalog.md:27` + `:48` — replace blanket never-delete with 4-prong summary + pointer.
+      - `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md:391` — replace rationale + pointer.
+      - `.claude/skills/azure-deploy/SKILL.md:100` — mark deleted 2026-08-24 (E-3 closed); soft-delete recoverable to 2026-11-22.
+      - `scripts/canonical-secret-catalog/manifest.yaml` (~:106-109 + ~:130-133) — KEEP `never_delete: true` on both; rewrite `exception_notes` per decision doc. Then run `scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 -Verify` → exit 0.
+      - `design.md:804`, `:860`, `:1232` — ANNOTATE each with "superseded 2026-08-25 per §6.5 resolution — see spec.md MUST + constraint file"; do NOT rewrite design history.
+      - `oauth-obo-patterns.md` + BFF `CLAUDE.md` — grep-confirm (NO local edit; master's copies carry the correction; A35 merge cured both). If NOT confirmed → STOP.
+    </step>
+    <step order="9" name="Doc sweep — mirror replacement + copy.md deletion + rotation-cadence fix + SF-1 UAMI help-text fix">
+      2-step atomic mirror handling:
+      - Step (1): READ the 626-line canonical at `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/projects/spaarke-auth-v4-dataverse-MI/notes/PROVISIONING-CHANGE-REQUEST.md`; overwrite `projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST.md` with the canonical content + prepend a header block naming the canonical path (`&gt; **Canonical source**: c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/.../PROVISIONING-CHANGE-REQUEST.md — this file is a mirror per remediation plan §6 canonical-copy rule; refresh before reading.`).
+      - Step (2): DELETE `projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST copy.md`.
+      Then:
+      - Fix stale rotation-cadence line at `.claude/constraints/provisioning.md:~112` (if still present after EDIT 1 — the "Client-cred rotation cadence: ≤ once per 90 days" language is stale post-A4 for the BFF identity; annotate as retired for BFF identity, retained for E-1 SpeAdmin scope only).
+      - Fix name-based UAMI resolution in 2 script help-texts (per §5 SF-1 — grep `az identity show --name` in script help-texts; replace with ARM resource ID resolution guidance + the decoy warning: 5 UAMIs exist in dev subscription; `spaarke-bff-identity` is NOT the BFF's UAMI).
+    </step>
+    <step order="10" name="Checkpoint (after companion sweep + doc sweep)">Run `context-handoff`.</step>
+    <step order="11" name="Build + test">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed. Run unit tests covering H4b + H9 template-iteration guard (author minimal xUnit test if none exists — asserts guard skips `ServiceBus-ConnectionString` entry when secret-free marker is present). Run any existing tests over `H4bBulkAppSettingsHandler` + `H9BffDeployHandler`. Report BFF publish size + delta per NFR-01 (expected delta ≈0 MB — guard is a branch, not a new dependency).</step>
+    <step order="12" name="Amend punch list annotations">EDIT `notes/task-202-punch-list.md` — add `last_known_status_after_execution: applied 2026-08-25 (task 205f)` for row A44. Append §205 execution results subsection with: guard sites landed, EDIT 1-4 verbatim applied, companion-sweep 7 files applied, mirror replaced + copy.md deleted, rotation-cadence + SF-1 UAMI help-text fixed, post-merge grep-confirm results (`oauth-obo-patterns.md` + BFF `CLAUDE.md`), unit-test outcomes, BFF publish-size delta.</step>
+    <step order="13" name="Report">Emit concise summary: guard sites landed (H4b + H9); EDITs 1-4 applied (verbatim per decision doc); companion sweep 7 files applied; mirror replaced (280 → 626 lines) + `copy.md` deleted; rotation-cadence + SF-1 UAMI help-text fixed; post-merge cured docs confirmed present; unit tests + build passed; BFF publish-size delta; A44 annotation landed. Do NOT commit — main session handles commit after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger name="edit-3-4-verbatim-drift" source="decision doc load-bearing before-text">If Section 6.5 EDIT 3/4 before-texts have drifted at `spec.md:259` or `spec.md:275` (re-verify at Step 1), STOP and reconcile with owner — the decision doc's exact before-text is load-bearing for the after-text; a drifted before-text means the surrounding spec context may have changed the semantic and a fresh EDIT authoring is required (not a free interpretation).</trigger>
+    <trigger name="post-merge-cured-docs-missing" source="remediation plan §6">If `oauth-obo-patterns.md` + BFF `CLAUDE.md` corrections are NOT present post-merge (grep-confirm fails at Step 1 or Step 8), STOP — this is a master merge integrity issue; do NOT paper over with local edits (A35's scope was to bring the master corrections; local re-authoring forks authority).</trigger>
+    <trigger name="sub-agent-write-attempt" source="root CLAUDE.md §3">If a sub-agent Write to `.claude/**` or root `CLAUDE.md` is attempted (should be impossible in main-session-only execution), STOP — parallel-safe flag violated.</trigger>
+    <trigger name="a38-marker-not-defined" source="consumer-guard consistency quality gate">If A38 has not yet defined the secret-free marker convention (KV tag key + value), coordinate — consumer guard MUST use A38 convention (single source of truth). Do NOT author a divergent marker.</trigger>
+    <trigger name="q3-decision-amended" source="decision doc APPROVED 2026-08-25">If the Q3 decision doc `notes/decisions/adr-028-a4-integration-conflict-resolution.md` has been amended after 2026-08-25 owner approval (check §"Owner refinements" for post-approval additions beyond the 3 already recorded), re-read + reconcile with the amendment BEFORE applying EDITs.</trigger>
+    <trigger name="canonical-source-unreachable" source="canonical-copy rule">If the 626-line canonical at `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/projects/spaarke-auth-v4-dataverse-MI/notes/PROVISIONING-CHANGE-REQUEST.md` is unreachable (worktree deleted, path moved), STOP — do NOT invent replacement content. Coordinate with owner for canonical source location.</trigger>
+    <trigger name="a35-not-landed" source="deps chain">If A35 master merge has NOT landed (grep `.claude/adr/ADR-028-spaarke-auth-architecture.md` for A4 amendment fails), STOP — EDITs cite A4 which is absent pre-merge; adr-check will run against stale ADR.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">H4b + H9 consumer paths skip `appsettings.template.json` `ServiceBus-ConnectionString` KV ref on secret-free envs (grep-verify guard sites in `H4bBulkAppSettingsHandler.cs` + `H9BffDeployHandler.cs`; unit test asserts skip when secret-free marker present).</criterion>
+    <criterion testable="true">Consumer guard uses same secret-free detection convention as A38 + A43 (single source of truth; grep confirms identical marker read pattern).</criterion>
+    <criterion testable="true">`appsettings.template.json` itself is UNMODIFIED (auth-v4 obligation 051-E boundary — grep-confirm no diff in this file).</criterion>
+    <criterion testable="true">EDIT 1 applied: `.claude/constraints/provisioning.md` lines 27-36 REPLACED with rewritten `## KV credential lifecycle` section (prongs 1-4; Q7-narrowed prong 3 language present; verbatim per decision doc + Q7 refinement).</criterion>
+    <criterion testable="true">EDIT 2 applied: root `CLAUDE.md` §17 `/provision-environment` never-delete fragment replaced verbatim per decision doc.</criterion>
+    <criterion testable="true">EDIT 3 + EDIT 4 applied: `spec.md:259` + `spec.md:275` replaced verbatim per decision doc (before-text was re-verified at Step 1).</criterion>
+    <criterion testable="true">Companion sweep (7 files) applied per decision doc `Companion edits` table: SKILL provision-environment (:63 + :1068), pattern manifest-driven-secret-catalog (:27 + :48), guide SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE (:391), SKILL azure-deploy (:100), canonical-secret-catalog manifest.yaml (~:106-109 + ~:130-133 + `Invoke-CatalogGenerator.ps1 -Verify` exit 0), design.md (:804 + :860 + :1232 annotated only — history preserved).</criterion>
+    <criterion testable="true">Post-merge grep-confirm: `docs/standards/oauth-obo-patterns.md` + `src/server/api/Sprk.Bff.Api/CLAUDE.md` corrections present (NO local edits applied — master corrections cure both per remediation plan §6).</criterion>
+    <criterion testable="true">Mirror replaced: `projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST.md` is 626 lines (matches canonical) with prepended header naming the canonical path.</criterion>
+    <criterion testable="true">`projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST copy.md` DELETED (executed AFTER mirror replacement per 2-step atomic).</criterion>
+    <criterion testable="true">Stale rotation-cadence line at `.claude/constraints/provisioning.md:~112` fixed (annotated as retired for BFF identity, retained for E-1 SpeAdmin scope only) OR confirmed absent post-EDIT 1.</criterion>
+    <criterion testable="true">Name-based UAMI resolution in 2 script help-texts fixed (per §5 SF-1; grep confirms `az identity show --name` in script help-texts replaced with ARM resource ID guidance + decoy warning).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds; unit tests over H4b + H9 template-iteration guard pass; BFF publish-size delta ≤+1 MB (expected ≈0 MB — guard is a branch, not a new dependency).</criterion>
+    <criterion testable="true">Punch list row A44 annotated with `last_known_status_after_execution: applied 2026-08-25 (task 205f)` in `notes/task-202-punch-list.md` + §205 execution results subsection appended.</criterion>
+    <criterion testable="true">Code-review + adr-check run clean at Step 9.5 against the newly-rewritten constraint file (which now cites the A4 amendment merged via A35).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (root CLAUDE.md §11): **Existing** — `.claude/constraints/provisioning.md` KV never-delete section, root `CLAUDE.md` §17 pointer row, `spec.md:259/:275`, 7 companion-sweep inheritors, `H4bBulkAppSettingsHandler.cs`, `H9BffDeployHandler.cs`, the 280-line stale mirror, `PROVISIONING-CHANGE-REQUEST copy.md` — ALL EXIST. Row A44 modifies existing surface + deletes one existing file; no NEW component. §11 three-question template applies to modification because the constraint-file rewrite substantively changes its BINDING contract (retiring the blanket never-delete for `BFF-API-ClientSecret`). **Extension** — extending existing constraint text (EDIT 1) + extending existing consumer-guard pattern from A38/A43 (single source of truth for secret-free marker) rather than authoring a new marker convention. **Cost-of-doing-nothing** — three concrete failure modes: (1) H4b/H9 apply `appsettings.template.json` `ServiceBus-ConnectionString` KV ref on fresh Model 2 stamp → KV ref unresolvable when secret is omitted per A38 → boot-abort (exit-134 class per addendum Δ4); (2) Section 6.5 EDIT package unapplied → adr-check runs against a pre-A4 constraint file → never-delete BINDING blocks A38 omit contract from being applied → BINDING conflict prevents any subsequent auth-v4 §10 addendum work (blocks A38/A39/A42 downstream); (3) mirror + doc sweep unaddressed → next agent working here reads stale 280-line change-request text (the "survived 3 prior audits" failure pattern auth-v4 documented as SF-21 meta-surface); the exact wrong-end-reasoning class the resolution is designed to end. Row A44 is a Section 10.5 trap 1 quality gate (pre-Phase-F, NOT pre-186 hard-blocker BUT Section 6.5 EDIT package is time-sensitive per Q3 signed 2026-08-25 — the BINDING conflict prevents A38 downstream).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
