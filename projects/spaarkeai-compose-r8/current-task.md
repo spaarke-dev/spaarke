@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-24 · **Branch**: `work/spaarkeai-compose-r8`
+> **Last Updated**: 2026-08-24 · **Branch**: `work/spaarkeai-compose-r8` · **Pushed through**: `ed0ebc1f9`
 
 ---
 
@@ -8,49 +8,78 @@
 
 | Field | Value |
 |-------|-------|
-| **Last task** | **054** — whole-document closed-set supply — ✅ **COMPLETE** |
-| **Next task** | **055** — `tasks/055-whole-document-anchored-placement.poml` (not started) · FULL · **opus @ xhigh** |
-| **Status** | 054 committed. Track C: 051 ✅ · 054 ✅ · 055 → 052 → 053 remain. |
-| **Next Action** | Start 055 via `task-execute`. Its step 2 owns the real decision: does `comments[]` converge onto `ComposeEditor.placeAdvisoryComments`' existing deterministic `sectionRef` resolution, or stay separate (justify per CLAUDE.md §11)? Read `notes/054-closed-set-supply-decision.md` §6 FIRST — L-1/L-2/L-3 are live constraints on 055. |
+| **Task** | **055** — whole-document anchored placement — 🔄 **IN PROGRESS** (step 2 of 6 done: the design decision is MADE and recorded) |
+| **Rigor / tier** | FULL · **opus @ xhigh** — do not run on a lower tier |
+| **Next Action** | Implement the 4 changes in [`notes/055-review-flag-placement-decision.md`](notes/055-review-flag-placement-decision.md) §5, in that order. Start with the `ComposeDraftComment` field addition + the **filter defect** in §5's sub-section — that one silently drops the best-anchored flags. |
 
-### What 054 established (do not re-litigate)
+### The decision (MADE — do not re-litigate)
 
-**The closed set is the document text itself, annotated `[PARAID] text`, supplied by the Compose editor.**
+**Converge the RESOLUTION; keep the two SINKS separate.** Full reasoning + the §11 three-question
+answers + why both escalation triggers did NOT fire: `notes/055-review-flag-placement-decision.md`.
 
-- **Not a side list** — a side list forces the model to match paragraph→entry by number/first-words, which
-  is prose matching moved rather than removed. Measured: a side list costs **9.5× more per paragraph** and
-  at 800 paragraphs (84,000 chars) **exceeds `MaxDeclaredCompanionChars` (32,768)**, where oversize is
-  *skipped and logged* — it would silently have produced an incomplete "closed" set.
-- **Editor, not server** — only the live editor holds the COMPLETE current set; `ChatSession.ReferenceMap`
-  is a Load-time snapshot with no text to annotate, so a server build means re-projecting (invariant 7).
-- **Supplying `documentText` also fixed `revisionIntent`**, which reached the model *not at all* before:
-  the file-operand path passes NO args/schema to `ContextBinder`. **055 depends on this** — `flag-risks`
-  (comments-only, empty `edits`) was previously indistinguishable from `improve-clarity`.
-- **Zero server code changed.** Rides ADR-043 Amendment 1 unchanged. Path C, no escalation.
+The task asked "does `comments[]` converge onto `placeAdvisoryComments`?" The trace says **no** — they are
+not near-duplicates. Each has a property the other lacks:
 
-### Live constraints carried into 055
+| | `placeAdvisoryComments` | `registerAiReviewComments` (DEF-11 `comments[]`) |
+|---|---|---|
+| Word `w:comment` on Save | ✅ (task 040) | ❌ out of scope, follow-on |
+| Idempotent | ❌ (`ComposeWorkspace.tsx:711`) | ✅ dedup by `ai-review:{ledgerRef}#{i}` |
+| Survives reopen | thread state | ✅ FR-29 server-persisted |
+| Deterministic anchor | `sectionRef` → CitationResolver → text | ❌ **`textPattern` ONLY** |
 
-| # | Constraint |
-|---|---|
-| **L-1** | Hard breaks COLLAPSE in `collectBlocks().text` (`node.textContent` drops leaf nodes; `docxBridge.ts:498` maps them to `
-` in its own walk). Model may quote a `target_text` that exists nowhere. Placement unaffected — the anchor is primary. Fixing it inside the module = a second walk = invariant-3 breach. |
-| **L-2** | The provider-registration race is *argued, not proven*. Degrades safely to the pre-054 dispatch. |
-| **C-4** | Anchors add 3.50% at realistic payload size (40.4 KB, under the 128 KB cap). The over-cap case at the schema's declared maxima is **pre-existing**; anchors are 0.09% of it. Still unmeasured against a real model response. |
+Collapsing either into the other destroys a shipped property. The genuine overlap is *resolution*, and
+that is what converges.
 
-### Verification standard held
+### 🔑 The finding that resolves it — the SIXTH dark-machinery instance
 
-Tests were **observed to fail first**: 4 catalog-contract tests, and the client supply (neutralised the
-supply line, watched it fail printing the exact pre-054 wire body `args:{"revisionIntent":"flag-risks"}`).
-BFF **11,179 passed / 0 failed** · Compose components **95 suites / 1,162** · SpaarkeAi conversation
-**75 suites / 720**. Publish **43.72 MB** compressed incl. PDBs; no new NuGet; no vulnerable packages.
+**`AnchoredAnnotationAnchor.paraId` already exists** (R3 FR-11 / compose-r3 task 012), documented as
+*"PRIMARY anchor… resolution order is paraId-FIRST"*, and the **consumer is live** — the return-from-Word
+re-anchor path (`PriorAnchorInput` → `AnnotationReanchorService`) sends it to the BFF, which resolves by
+it first and only then falls back to the fuzzy scorer.
 
-### ⚠️ Deploy prerequisite (unchanged, now doubly binding)
+**The producer is dark.** `registerAiReviewComments` (`ComposeWorkspace.tsx` ~2842) writes
+`{ textPattern, paragraphHint: -1, spanId }` — no `paraId`. So every DEF-11 review flag re-anchors by
+fuzzy scorer even when the model named its paragraph exactly.
 
-`Deploy-AnalysisAction.ps1` MUST run before any of Track C is observable. Dev currently stores the WHOLE
-mirror file in `sprk_inputschema` for `compose-draft-alternative` / `compose-compare-to-playbook`, so
-`GetDeclaredProperties` returns null and **051's `targetParaId` would not render either**. The 051
-deploy-script fix resolves it — but only when the deploy actually runs. Deploy BFF + `sprk_spaarkeai`
-together (NFR-05).
+### The 4 changes (see note §5)
+
+1. `ComposeDraftComment` (+`target_para_id`, `+target_ref`) — mirrors `ComposeDraftEdit`; task 054 already
+   put both on the Action's `comments[]` output schema, so the model can supply them.
+2. `registerAiReviewComments` — resolve paraId → citation → text, and **populate `anchor.paraId`**.
+3. `placeAdvisoryComments` — accept `paraId`, checked ABOVE `sectionRef` (additive; no current caller sets
+   it, so NDA-REVIEW is byte-identical).
+4. One shared resolver for both, so the precedence cannot drift.
+
+### ⚠️ Defect to fix WITH change 1
+
+`registerAiReviewComments` filters `c.target.length > 0 && c.body.length > 0`. After 054 a flag may carry
+a deterministic `target_para_id` and weak/absent `target_text` — this **silently drops exactly the
+best-anchored flags**. Gate must become "resolvable anchor OR non-empty target_text".
+
+### Still to do on 055 (steps 1, 3–6)
+
+- Step 1 — verify `materializeMany`'s anchor branch against a REAL multi-change payload (mixed
+  anchored/legacy, per-item isolation, banner counts). NOT yet done; do not assume 051's single-edit
+  tests generalize.
+- Step 4 — prove ZERO text matching structurally via the throwing-collaborator tripwire (the pattern in
+  `ComposeEditAnchorPassSeamTests`), not by inspecting output.
+- Step 5 — per-item failure isolation + honest N-of-M reporting under a partially-anchored batch.
+- Step 6 — confirm nothing retired; 052's remaining scope now unreachable-in-practice for the AI flow.
+- Then Step 9.5 gates (code-review + adr-check) + publish-size report.
+
+### Constraints carried from 054 (`notes/054-…` §6)
+
+**L-1** hard breaks collapse in `collectBlocks().text` — a model-quoted `target_text` may not exist
+verbatim, which RAISES the value of anchoring flags by paraId · **L-2** the provider-registration race is
+argued not proven · **UAT-21** an unresolved anchor REFUSES, never falls back to a search, never reports
+`applied` · **C-4** anchors add 3.50% at realistic size (40.4 KB, under the 128 KB cap).
+
+### ⚠️ Deploy prerequisite (unchanged)
+
+`Deploy-AnalysisAction.ps1` MUST run before ANY of Track C is observable. Dev stores the WHOLE mirror file
+in `sprk_inputschema` for `compose-draft-alternative` / `compose-compare-to-playbook`, so
+`GetDeclaredProperties` returns null and **051's `targetParaId` would not render either**. Deploy BFF +
+`sprk_spaarkeai` together (NFR-05).
 
 ---
 
