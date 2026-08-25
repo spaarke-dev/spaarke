@@ -57,22 +57,46 @@ deployed environments instead — which is also what keeps local development pos
 
 ---
 
-## Carried forward — NOT this project's to close
+## Carried forward — updated 2026-08-25
+
+> The original list had **10 items**. The operator challenged it — *"we generally do not defer work to other
+> projects unless it cannot be handled in this project"* — and **6 were closed** rather than deferred.
+
+### ✅ Closed since (6)
+
+| # | Item | How |
+|---|---|---|
+| 1 | Local-dev OBO (criterion #9) | [`docs/guides/local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md). **Residual**: create the option-D local-dev app registration — one Azure action, commands in the guide |
+| 2 | Provisioning §5.1 (criterion #15) | Owner decided **Reading 1** — one shared multitenant app registration for Model 1 |
+| 5 | `AZURE_CLIENT_ID` | Deleted; MI sign-ins verified `errorCode=0` afterwards. This was task 031's own unfinished job |
+| 6 | `/api/containers` | **6** endpoints deleted (031 booked "two"), plus the orphaned `canmanagecontainers` policy and a skipped test for a deleted route |
+| 8 | `OfficeEndpoints` identity precedence | All 9 handlers aligned to `Items[UserIdKey]`-first |
+| 9a | Stale CORS origin | `agreeable-hill-…-preview` removed; verified it no longer receives ACAO |
+
+### 📅 Dated — one reminder, not two issues
+
+Both keyed to the Key Vault recovery window lapsing. **Until then, doing either converts a 2-minute config
+rollback into a redeploy on a fail-closed surface** — which is why they wait.
+
+| # | Item | Trigger |
+|---|---|---|
+| 3 | Rotate `Dataverse-Checkout-20251218` (partial value in git history since 2026-03-09) | **2026-11-22** |
+| 4 | 051-E code half — drop the SAS branch + `PostConfigure` back-fill, updating `ServiceBusClientGuardTests` in the same commit. Includes `appsettings.template.json`'s stale `ServiceBus-ConnectionString` reference | **2026-11-23** |
+
+### 🔧 Genuinely open, with a real recipient
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | **Local `dotnet run` has no OBO credential path for a fresh setup** (criterion #9). Needs a deliberate replacement — a dev-only FIC or a documented `az login` path — **not** restoring the secret | next auth touch |
-| 2 | **Provisioning §5.1** — which app registration the shared Model 1 BFF acts as. MI-FIC works either way; it decides whether onboarding gains a per-customer FIC step (criterion #15) | `customer-provisioning-orchestration-r1` ([#779](https://github.com/spaarke-dev/spaarke/pull/779)) |
-| 3 | **Rotate `Dataverse-Checkout-20251218`** — partial values (7 and 12 chars) committed in `c1803e99a` (2026-03-09) under a *"First 5 chars"* caption. Redacted in the working tree; **history untouched**. Valid to 2027-12-18. Cheap **because nothing reads it any more** | security |
-| 4 | **051-E code half** — remove the Service Bus SAS branch + `PostConfigure` back-fill, updating `ServiceBusClientGuardTests` in the same commit. Deferred deliberately: the credential is unreachable either way; only recovery cost differs | next Service Bus touch |
-| 5 | **`AZURE_CLIENT_ID` logs an ERROR every boot** — not bundled into the secret removal because the Azure Identity SDK reads that variable itself | BFF hygiene |
-| 6 | **`/api/containers`** — two endpoints that 403 every caller, always. Pre-existing | API owner |
-| 7 | **`/healthz/catalog` Unhealthy** — 12 residual findings: 8 binding rows owned by other in-flight projects (agreements, nda, compose, smart-todo) + 4 legacy description-parity rows with no authored JSON. Carries a **design question**: the check treats *row-without-constant* as Unhealthy but *constant-without-row* as Degraded — in a shared dev env with ~17 worktrees the former is the normal steady state, making the gate un-greenable, and a permanently-red gate stops being read | AI-catalog owner |
-| 8 | **5 `OfficeEndpoints` handlers still use the raw `NameIdentifier`-first pattern.** None stamps `CreatedBy`, so none is reachable by the 403 fixed in `77f61574b` | Office add-in owner |
-| 9 | **CORS config drift has no forcing function** — origins live only in App Service settings; nothing fails in CI when a deployed env omits a live SWA. This caused the UAT blocker. Also remove the **stale** `Cors__AllowedOrigins__2` (`agreeable-hill-…-preview`, HTTP 404): a dead `azurestaticapps.net` host in a **credentialed** allow-list is the exact attacker-registrable risk `66a45cf6a` set out to close | platform |
-| 10 | **Word "no extractable content due to unsupported file type"** — the authenticated write completed (record + file profile created); this is content extraction, not auth | owner-routed to a focused project |
+| 9b | **CORS config drift has no forcing function** — the only item that *has already bitten us* (it caused the UAT blocker). Nothing fails in CI when a deployed environment's allow-list omits a live SWA | platform / CI |
+| 7 | `/healthz/catalog` — **self-shrinking**: 8 of 12 findings resolve as agreements / nda / compose / smart-todo merge their constants. Residue is 4 legacy description rows + the Unhealthy-vs-Degraded asymmetry (an ADR-039 question) | AI-catalog |
+| — | `Deploy-AllIndexes.ps1 -CutoverBffSettings` writes `AzureAISearchApiKey` + `AiSearch__AdminKey` onto the BFF as KV refs to the **deleted** `AiSearch--AdminKey`, re-introducing the key config task 053 removed. Warned in `auth-deployment-setup.md` §4; **not yet gated in the script**. *(An earlier note here said the script "silently re-mints a key" — wrong: it `show`s, not `renew`s, and index management legitimately uses an admin key.)* | AI-search / provisioning |
+| — | `Configure-ProductionAppSettings.ps1` + `Provision-Customer.ps1` still write `ServiceBus-ConnectionString` | provisioning (#779) |
+| — | Scope `spec.md:236` / `design.md:57` to Model 2; §5.2 `design.md:1006` fix; §9.2 Model-2 FIC issuer question | provisioning (#779) |
+| 10 | Word "no extractable content" — the authenticated write completed; this is content extraction | owner-routed to a focused project |
 
----
+**The MI environment contract is no longer in this list** — it was promoted into
+[`auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md) **§5.1**, where someone provisioning
+will actually find it.
 
 ## Where the reasoning lives
 
