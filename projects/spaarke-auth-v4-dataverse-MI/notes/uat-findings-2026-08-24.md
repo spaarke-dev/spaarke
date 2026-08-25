@@ -176,3 +176,113 @@ pwsh -File scripts/Seed-TypedHandlers.ps1          # restores grid_overview + da
 ```
 
 Remaining 12 findings should be booked to the AI-catalog owner, not to this project.
+
+---
+
+# UAT round 2 — the add-in save flow itself
+
+With CORS unblocked, `POST /api/office/save` succeeded and created job
+`82d09a70-…`. Three further defects then surfaced. **All three are pre-existing, and none is an auth-v4
+regression** — every one is inbound claim reading or a route string; no OBO or credential path participates.
+
+Fixed together in `77f61574b` and deployed, because all three needed the same redeploy.
+
+## 3. ✅ FIXED (BLOCKER) — 403 `OFFICE_009` on every job poll, for every user
+
+```
+GET /api/office/jobs/82d09a70-… → 403
+{ "errorCode": "OFFICE_009", "detail": "You do not have access to this job" }
+```
+
+**Inverted claim precedence on the same identity.**
+
+| Path | Resolves userId as | Role |
+|---|---|---|
+| `OfficeEndpoints.SaveAsync` (was line 214) | `NameIdentifier` (**`sub`**) → `oid` | **stamps** the job's `CreatedBy` |
+| `OfficeAuthFilter.ExtractUserId` | **`oid`** → `NameIdentifier` → `sub` | what `JobOwnershipFilter` **compares** |
+
+`sub` and `oid` are different values in every Entra user token (`sub` is pairwise per-application; `oid` is
+the tenant-wide object id). The save stamped one and the filter checked the other, so
+`CreatedBy != userId` **always** → permanent 403 for every user.
+
+**Established by elimination, not by pattern-matching** — worth recording, because a 403 is
+[shape #1 in the lessons-learned](lessons-learned.md) (*fail-closed: a broken lookup and a legitimate
+denial look identical*):
+
+1. A 403 requires `CreatedBy` non-empty **and** `!= userId` (`JobOwnershipFilter`).
+2. The Dataverse fallback in `GetJobStatusAsync` **never sets `CreatedBy`** → it can only yield 200 or 404,
+   never 403. So the job was served from the in-memory `_jobStore`.
+3. The plan is **capacity 1** with **1 live instance**, so POST and GET hit the same process — a
+   cross-instance in-memory miss is excluded.
+4. `CreatedBy` is stamped in exactly one place (`OfficeService.cs:216`), fed from `SaveAsync`.
+
+⇒ The precedence divergence is the only reachable cause.
+
+**Fix**: `SaveAsync` now reads `Items[OfficeAuthFilter.UserIdKey]` first — which is what the sibling
+`GetJobStatusAsync` and `StreamJobAsync` handlers **already did**. The correct pattern existed 300 lines
+away in the same file.
+
+> **Deliberately NOT fixed**: five other `OfficeEndpoints` handlers still use the raw
+> `NameIdentifier`-first pattern. **None of them stamps `CreatedBy`**, so none is reachable by this bug.
+> Changing identity-resolution semantics blind across five untested endpoints on a fail-closed surface is a
+> worse trade than leaving a latent inconsistency that is now documented. Flagged for the owning project.
+
+**Verification**: requires a real user token, so this one is **yours to confirm in UAT** — it cannot be
+proven from the server side without impersonating a user.
+
+## 4. ✅ FIXED — SSE preflight rejected `Cache-Control`
+
+`SseClient.ts:136` sends `Cache-Control: no-cache` on every stream open, and `Last-Event-ID` on reconnect.
+Neither is a CORS-safelisted request header, and neither was in `CorsModule`'s `WithHeaders(...)`.
+
+Both added. `Last-Event-ID` matters independently: sent only on **reconnect**, so omitting it fails later
+and far more confusingly than `Cache-Control` does.
+
+```
+OPTIONS /api/office/jobs/{id}/stream  →  204
+Access-Control-Allow-Headers: …,Cache-Control,Last-Event-ID
+Access-Control-Allow-Origin:  https://icy-desert-0bfdbb61e.6.azurestaticapps.net
+```
+
+## 5. ✅ FIXED — server emitted `StatusUrl`/`StreamUrl` without the `/api` prefix
+
+`OfficeService.cs` (6 sites) returned `/office/jobs/{id}` and `/office/jobs/{id}/stream`. The client builds
+the SSE URL as `` `${apiBaseUrl}${streamUrl}` `` → a path that does not exist. Polling was unaffected only
+because the client **hardcodes** `/api/office/jobs/${jobId}` — which is why the symptom looked
+SSE-specific.
+
+Proven after deploy:
+
+```
+/api/office/jobs/{id}/stream → 401   (route exists, auth required)
+/office/jobs/{id}/stream     → 404   (route never existed)
+```
+
+### The forcing-function failure worth keeping
+
+`OfficeEndpointsContractTests.cs:77` **already asserted the correct contract**:
+
+```csharp
+result.StatusUrl.Should().Contain("/api/office/jobs/");
+```
+
+…but it carries `[Fact(Skip = "Requires fully mocked Office services - ContainerId not configured in test")]`.
+The contract was written correctly, then disabled, and the implementation drifted away from it unopposed.
+This is the same lesson as the OBO harness in [lessons-learned.md §6](lessons-learned.md): **a skipped check
+reads exactly like a passing one.** The skip was not un-skipped here — its stated blocker (unmocked Office
+services) is real and unrelated to the assertion — but a test whose only *live* purpose is to hold a
+contract, while skipped, is holding nothing.
+
+---
+
+## Deploy record (`77f61574b`)
+
+| | |
+|---|---|
+| Package | **45.04 MB** vs 44.96 MB baseline (**+0.08 MB**) — NFR-01 ceiling 60 MB ✅ |
+| Hash-verify | 4/4 critical files SHA-256 matched |
+| Health | 3 consecutive `/healthz` 200s |
+| Tests | Office/Cors/Duplicate/Idempotency **300 passed, 0 failed**, 13 skipped · `Spaarke.ArchTests` **56/56** |
+| Secret-free posture | unchanged — no credential, DI, or config surface touched |
+
+**Still open**: retest Outlook + Word save. Finding 3 is the one that needs a human with a real token.
