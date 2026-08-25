@@ -46,7 +46,7 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 |---|---|---|
 | Azure subscription with Contributor access | — | For App Service + Key Vault management |
 | Azure AD tenant GUID | `{tenant-guid}` | The customer's home tenant |
-| BFF Azure AD app registration | App ID `{bff-app-id}` | One client secret in Key Vault (still required for OBO; MI replaces the rest) |
+| BFF Azure AD app registration | App ID `{bff-app-id}` | **No client secret.** A *federated identity credential* whose subject is the UAMI's **principalId** (see the UAMI row) — created by `scripts/Register-EntraAppRegistrations.ps1 -CreateFederatedCredential`. ADR-028 A4 |
 | App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 10) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
 | App Service managed identity (UAMI) | `clientId: {uami-client-id}`, `principalId: {uami-principal-id}` | Set `Graph__ManagedIdentity__ClientId` AND `ManagedIdentity__ClientId` App Settings to the UAMI's clientId; `DefaultAzureCredential` uses these to target the UAMI. The UAMI's principalId is what gets registered in Dataverse Application User (§6) and granted Graph app roles (§5) and Exchange ApplicationAccessPolicy (§7). |
 | Key Vault | `{kv-name}.vault.azure.net` | UAMI principal must have **Key Vault Secrets User** role at the vault scope (RBAC mode) |
@@ -136,7 +136,9 @@ Set on the BFF App Service via *Configuration → Application settings* in the p
 | `Communication__WebhookSigningKey` | Key Vault reference (preferred) or 48-byte base64 secret | HMAC-SHA256 key for `/api/communications/incoming-webhook`. Generate: `openssl rand -base64 48`. **Generate per env; never commit.** |
 | `EmailProcessing__WebhookSigningKey` | Key Vault reference (preferred) or 48-byte base64 secret | HMAC-SHA256 key for `/api/v1/emails/webhook-trigger`. Generate: `openssl rand -base64 48`. **Generate per env; never commit.** |
 | `AgentToken__CopilotAudience` | `api://{copilot-sso-provider-app-id}/{bff-app-id}` | Token audience for Copilot Studio SSO. The `{copilot-sso-provider-app-id}` comes from the Copilot Studio agent registration. |
-| `AzureAd__ClientSecret` | Key Vault reference: `@Microsoft.KeyVault(SecretUri=https://{kv-name}.vault.azure.net/secrets/BFF-API-ClientSecret/)` | Still required for OBO (OAuth spec mandates middle-tier confidential credential). Other server flows (Graph app-only, Dataverse, Cosmos, AI) now use MI and don't read this. |
+| `Graph__Credentials__Order__0` | `ManagedIdentityFederated` | The credential the BFF identity uses, **including on OBO**. Single entry: with nothing beneath it to fall through to, a broken MI-FIC fails loudly instead of silently reverting to a secret while every health signal stays green. |
+| `Graph__Credentials__RequireSecretFreeIdentity` | `true` | Refuses startup outside Development if `ClientSecret` returns to the order. Development is exempt — a workstation has no route to IMDS. |
+| ~~`AzureAd__ClientSecret`~~ | **DO NOT SET** | 🔴 **Removed 2026-08-24 (task 033).** This row previously read *"Still required for OBO (OAuth spec mandates middle-tier confidential credential)"* — **false**. OAuth requires a confidential *credential*; a secret is one of three ways to satisfy it. Setting this re-introduces exactly the fall-through hazard the migration removed. `API_CLIENT_SECRET`, `Dataverse__ClientSecret` and `AgentToken__ClientSecret` are likewise gone. |
 
 **Plus the standard template tokens** (substituted by the deployment script from `appsettings.template.json`): `Dataverse__ServiceUrl`, `ConnectionStrings__ServiceBus`, `ConnectionStrings__Redis`, `ApplicationInsights__ConnectionString`, `AzureOpenAI__Endpoint`, and other infrastructure connection settings. See [`appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) — every `#{TOKEN}#` placeholder must be substituted at deploy time.
 
@@ -387,7 +389,7 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 
 | Secret name | Purpose | Rotation |
 |---|---|---|
-| `BFF-API-ClientSecret` | BFF app registration client secret. Still required for OBO. | Per [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md) |
+| ~~`BFF-API-ClientSecret`~~ | **DELETED 2026-08-24** (task 033, ADR-028 A4) along with its lowercase duplicate `bff-api-client-secret`. The BFF identity is secret-free — it authenticates with a managed-identity federated credential. **Do not re-create it.** | **n/a — nothing to rotate.** A federated assertion is minted per exchange and has no expiry to roll |
 | `Dataverse-ServiceUrl` | Dataverse env URL (`https://{org}.crm.dynamics.com`). | Static per env (immutable) |
 | `ServiceBus-ConnectionString` | Service Bus namespace connection string. | Rotated with namespace key rotation |
 | `Redis-ConnectionString` | Azure Cache for Redis primary access key. | Rotated with Redis key rotation |
@@ -398,7 +400,7 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 
 **All values are generated per environment. Never commit. Use Key Vault as the single source of truth.**
 
-> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: as of Phase C, server-side Dataverse access uses the App Service MI via `DefaultAzureCredential` (see §6). The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths. `Dataverse-ClientSecret` can be removed from Key Vault after the deploy is verified.
+> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: server-side Dataverse app-only access uses the App Service MI via `DefaultAzureCredential` (see §6). 🔴 **Corrected 2026-08-24 (task 033):** this note used to end *"The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths."* **That is no longer true** — OBO runs on the managed-identity federated credential and `BFF-API-ClientSecret` was deleted from Key Vault. Neither key should be set.
 
 ---
 
@@ -775,7 +777,7 @@ curl -i -H "Authorization: Bearer $USER_TOKEN" \
 # Expect: HTTP/1.1 200 OK + JSON body
 ```
 
-A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) OBO token exchange to Graph works (`BFF-API-ClientSecret` valid).
+A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) the OBO token exchange to Graph works. ⚠️ It does **not** tell you *which credential* performed the exchange — while anything sits beneath `ManagedIdentityFederated` in `Graph:Credentials:Order`, a broken federated credential still returns 200 off the fallback. For that, read the startup line `Ordered credential selection active: ...` (emitted on cache miss).
 
 ### 9c. MI → Dataverse — managed identity path exercised
 
@@ -830,7 +832,7 @@ Spaarke's per-tenant deployment model puts certain controls firmly in the custom
 |---|---|---|
 | **Conditional Access policies** | Customer | Apply CA policies to the BFF app registration and any user-facing apps per the customer's security baseline. Spaarke is CAE-aware (Phase D) and will honor revocation events. |
 | **Multi-factor authentication (MFA)** | Customer | Enforce via CA. Spaarke does not impose its own MFA layer. |
-| **Secret rotation cadence** | Customer | `BFF-API-ClientSecret`: 90 days or per customer policy. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
+| **Secret rotation cadence** | Customer | ~~`BFF-API-ClientSecret`: 90 days~~ — **n/a since 2026-08-24**: the BFF identity is secret-free and a federated assertion has no expiry to roll. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
 | **Identity governance / lifecycle** | Customer | User provisioning, access reviews, and offboarding flow through the customer's existing IGA. |
 | **Audit log retention + SIEM integration** | Customer | Spaarke emits structured audit logs (Phase C task 048). Pipe to the customer's Sentinel / Monitor workspace via App Service *Diagnostic Settings* — no code change per customer. |
 | **Network egress / private endpoints** | Customer | If the customer requires private network paths to Dataverse, Graph, or Key Vault, configure via VNet integration / Private Endpoints on the App Service. |
@@ -872,7 +874,8 @@ Graph__ManagedIdentity__Enabled      = true
 Communication__WebhookSigningKey     = @Microsoft.KeyVault(...)   # generated per env
 EmailProcessing__WebhookSigningKey   = @Microsoft.KeyVault(...)   # generated per env
 AgentToken__CopilotAudience          = api://{copilot-sso-provider-app-id}/{bff-app-id}
-AzureAd__ClientSecret                = @Microsoft.KeyVault(SecretUri=.../BFF-API-ClientSecret/)
+Graph__Credentials__Order__0                  = ManagedIdentityFederated   # replaces AzureAd__ClientSecret (2026-08-24)
+Graph__Credentials__RequireSecretFreeIdentity = true
 
 # Graph permissions granted to MI (§5) — record the count + the list
 Permissions granted (count): __________

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Verify Power BI service-principal profiles work under a managed identity</title>
+    <phase>4 Power BI</phase>
+    <gate>020 complete</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag; gates the whole of Phase 4 and its answer changes the task set.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Undocumented platform capability question whose answer determines whether Phase 4 is viable at all.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>auth,powerbi,spike,verification</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ReportingProfileManager uses Power BI service principal PROFILES. Whether profiles are supported when the principal is a managed identity is unverified and it is the single unknown gating Phase 4. Determine the answer empirically before any code changes.</prompt>
+  <role>SPAARKE platform developer with Power BI embedded and service-principal-profile experience.</role>
+  <goal>A definitive, evidenced answer on profile support under a managed-identity principal, plus a recommended path for tasks 041 and 042.</goal>
+
+  <context>
+    <background>The owner chose UAMI-as-principal (Microsoft's documented recommendation) over MI-FIC on the existing service principal. Microsoft states "we recommend that you use a user-assigned managed identity" for Power BI, but the profiles feature is documented against service principals specifically. If profiles are unsupported, Phase 4 must fall back to MI-FIC on the existing SP, or retain the Power BI secret under a documented ADR-028 exception.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="020" status="pending">Provider seam exists if the MI-FIC-on-SP fallback is chosen</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: VERIFY ONLY. Do not modify ReportingEmbedService or ReportingProfileManager in this task; that is 041.</constraint>
+    <constraint source="project">Scope: consult Microsoft Learn first. If documentation is silent, prototype against a non-production workspace — do not infer from absence.</constraint>
+    <constraint source="ADR-028">Scope: if neither UAMI-as-principal nor MI-FIC-on-SP supports profiles, the outcome is a DOCUMENTED exception, not a silently retained secret.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Power BI service principals, profiles, managed identity</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Establish exactly how ReportingProfileManager uses profiles today and what breaks without them.</step>
+    <step>Research Microsoft Learn for profile support under a managed-identity principal.</step>
+    <step>If inconclusive, prototype against a non-production workspace.</step>
+    <step>Recommend a path: UAMI-as-principal, MI-FIC-on-SP, or documented exception.</step>
+    <step>Record the answer with evidence; re-size tasks 041 and 042 accordingly.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Profiles are unsupported under BOTH secret-free options — STOP and escalate. Retaining the Power BI secret requires an explicit ADR-028 exception and is the owner's call.</trigger>
+    <trigger>Verification would require changing production Power BI tenant settings — STOP; that is task 041 and needs a Power BI admin.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/040-powerbi-profiles-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A definitive yes or no on profile support under a managed-identity principal, with cited evidence.</criterion>
+    <criterion>A recommended path for 041/042, with the rejected alternatives stated.</criterion>
+    <criterion>Negative case: if the answer is "unsupported", the fallback is a DOCUMENTED ADR-028 exception, never an undocumented retained secret — the exact failure mode this project exists to fix.</criterion>
+    <criterion>No production Power BI configuration was changed.</criterion>
+    <criterion>Tasks 041 and 042 are re-sized or re-scoped based on the answer.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <deferred date="2026-08-19" by="owner">
+      Power BI is NOT yet in use at Spaarke. The owner deferred Workstream D out of this project on 2026-08-19:
+      "we can ignore Power BI if it is not readily available and defined -- we are not yet using Power BI
+      (it will be in the future but we can address the MI at that time)."
+      Consequence: PowerBi:ClientSecret REMAINS in place. It is a genuinely separate secret from
+      BFF-API-ClientSecret, so it does not block FR-C3 (task 033) and does not weaken the OBO migration.
+      Re-open this task when Power BI is actually adopted. Unresolved question #1 (do Power BI
+      service-principal PROFILES work under a managed-identity principal?) travels with it and MUST be
+      answered before 041/042 are attempted.
+      NOTE: the Phase 6 forcing functions (tasks 060/061) must therefore carry Power BI as an explicit,
+      named allowlist entry with this deferral as the reason -- not as an unexplained exemption.
+    </deferred>
+  </notes>
+</task>

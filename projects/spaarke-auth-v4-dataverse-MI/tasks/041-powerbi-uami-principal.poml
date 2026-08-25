@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Migrate Power BI to a user-assigned managed identity principal (FR-D1, FR-D2)</title>
+    <phase>4 Power BI</phase>
+    <gate>040 answered</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs, changes a live reporting surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified once 040 settles the approach.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>auth,bff-api,powerbi</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Enable the managed identity as a Power BI principal and rework both reporting services off the CCA + client secret, per the path chosen in 040.</prompt>
+  <role>SPAARKE platform developer with Power BI embedded experience.</role>
+  <goal>ReportingEmbedService and ReportingProfileManager authenticate as the managed identity, with embed tokens still issuing and endpoint payloads unchanged.</goal>
+
+  <context>
+    <background>Owner decision: adopt Microsoft's documented UAMI-as-principal model rather than MI-FIC on the existing service principal. This replaces the principal outright, so Power BI does NOT consume the task-020 provider seam. Requires a Power BI admin for the tenant setting and workspace grants.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ReportingModule.cs</file>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/040-powerbi-profiles-verification.md</file>
+    </relevant-files>
+    <dependencies><dependency task="040" status="pending">Profile support answer and chosen path</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: follow the path 040 chose. Do not re-open the decision.</constraint>
+    <constraint source="project">Scope: the tenant setting and workspace grants require a Power BI admin. Do not attempt to work around missing permissions.</constraint>
+    <constraint source="project">Scope: do NOT remove PowerBi:ClientSecret in this task — that is 042, after this is verified working.</constraint>
+    <constraint source="ADR-038">Scope: coverage to tests/integration/seam/** or contract tests; endpoint payloads must be proven unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Power BI embedded, managed identity principals</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>With a Power BI admin, enable service principals / managed identities for the Power BI APIs.</step>
+    <step>Grant the UAMI access to the workspaces the BFF serves.</step>
+    <step>Rework ReportingEmbedService off the CCA + secret.</step>
+    <step>Rework ReportingProfileManager per the 040 path.</step>
+    <step>Verify embed tokens issue and endpoint payloads are byte-identical.</step>
+    <step>Publish size + CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The tenant setting cannot be enabled, or workspace grants are refused — STOP; this is an admin/governance decision, not an implementation problem.</trigger>
+    <trigger>Endpoint payloads change shape — STOP; reporting consumers are outside this project's blast-radius analysis.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</output>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Both services authenticate as the managed identity.</criterion>
+    <criterion>Embed tokens issue successfully.</criterion>
+    <criterion>Reporting endpoint payloads are unchanged.</criterion>
+    <criterion>Negative case: a user without report access is still denied — no privilege widening from the principal change.</criterion>
+    <criterion>PowerBi:ClientSecret is still configured (removal is 042).</criterion>
+    <criterion>Publish size reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <deferred date="2026-08-19" by="owner">
+      Power BI is NOT yet in use at Spaarke. The owner deferred Workstream D out of this project on 2026-08-19:
+      "we can ignore Power BI if it is not readily available and defined -- we are not yet using Power BI
+      (it will be in the future but we can address the MI at that time)."
+      Consequence: PowerBi:ClientSecret REMAINS in place. It is a genuinely separate secret from
+      BFF-API-ClientSecret, so it does not block FR-C3 (task 033) and does not weaken the OBO migration.
+      Re-open this task when Power BI is actually adopted. Unresolved question #1 (do Power BI
+      service-principal PROFILES work under a managed-identity principal?) travels with it and MUST be
+      answered before 041/042 are attempted.
+      NOTE: the Phase 6 forcing functions (tasks 060/061) must therefore carry Power BI as an explicit,
+      named allowlist entry with this deferral as the reason -- not as an unexplained exemption.
+    </deferred>
+  </notes>
+</task>

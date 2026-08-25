@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>9 Wrap-up</phase>
+    <gate>all tasks complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation, reporting and gate execution; no production code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist execution and synthesis.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/ and projects/INDEX.md; main-session only.</parallel-reason>
+    <deps>033,050,051,052,053,054,055,056,060,061,062,063,030</deps>
+    <tags>documentation,wrapup,test-diet</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: run the mandatory /test-diet gate, report publish size against the baseline, verify the graduation criteria, write lessons-learned, and update the portfolio and registries.</prompt>
+  <role>SPAARKE platform developer closing a project per root CLAUDE.md §7.</role>
+  <goal>Every graduation criterion in spec.md verified or explicitly waived, with the project's records left accurate for the next reader.</goal>
+
+  <context>
+    <background>Root CLAUDE.md §7 makes /test-diet a mandatory gate at 090. The distinguishing graduation criterion is #12: introduce a deliberate ninth secret-bearing confidential client on a scratch branch and confirm the build FAILS. Everything else is table stakes; that one is what makes this project different from the three that preceded it.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-auth-v4-dataverse-MI/README.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="new">projects/spaarke-auth-v4-dataverse-MI/notes/lessons-learned.md</file>
+    </relevant-files>
+    <dependencies><dependency task="all" status="pending">All workstreams complete</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: /test-diet is MANDATORY and read-only — it emits git rm / git mv commands for the reviewer, it does not auto-execute.</constraint>
+    <constraint source="project">Scope: graduation criterion 12 must be EXERCISED, not asserted. Seed a violation on a scratch branch and confirm the build fails.</constraint>
+    <constraint source="project">Scope: report publish size against the 44.96 MB incl. PDBs net10 baseline, stating the PDB convention.</constraint>
+    <constraint source="project">Scope: close out the cross-project items — confirm task 030 landed for provisioning, and record whether the Model 2 tenancy question was answered.</constraint>
+    <constraint source="project">Scope: .claude/ and projects/INDEX.md edits are main-session only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project closure, test diet, portfolio</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/context-handoff/SKILL.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/spec.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Run /test-diet; produce notes/test-diet-report.md.</step>
+    <step>Exercise graduation criterion 12 on a scratch branch; record the build failure as evidence.</step>
+    <step>Measure and report publish size + delta vs 44.96 MB; run the CVE scan.</step>
+    <step>Walk every graduation criterion in spec.md; mark verified or explicitly waived with a reason.</step>
+    <step>Write lessons-learned, centring the false-premise root cause and whether the forcing functions actually hold.</step>
+    <step>Update README status, projects/INDEX.md, and the portfolio Issue #800 (Status, Tasks Completed, Closed Date).</step>
+    <step>Confirm cross-project close-out with both sibling projects.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Graduation criterion 12 does NOT fail the build — STOP. The project's central deliverable has not been achieved and the wrap-up cannot proceed.</trigger>
+    <trigger>/test-diet proposes deleting the forcing functions despite task 063 — STOP and resolve; that is the exact regression 063 exists to prevent.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="new">projects/spaarke-auth-v4-dataverse-MI/notes/lessons-learned.md</output>
+    <output type="new">projects/spaarke-auth-v4-dataverse-MI/notes/test-diet-report.md</output>
+    <output type="modify">projects/spaarke-auth-v4-dataverse-MI/README.md</output>
+    <output type="modify">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>/test-diet run; report committed; the forcing functions classified MAINTAIN.</criterion>
+    <criterion>Graduation criterion 12 EXERCISED — a seeded ninth secret-bearing client fails the build, with evidence.</criterion>
+    <criterion>Publish size + delta reported against 44.96 MB with the PDB convention stated; no new HIGH CVE.</criterion>
+    <criterion>Every spec.md graduation criterion is marked verified or explicitly waived with a reason.</criterion>
+    <criterion>lessons-learned.md written.</criterion>
+    <criterion>README, projects/INDEX.md and portfolio Issue #800 updated.</criterion>
+    <criterion>Negative case: no graduation criterion is marked complete without evidence.</criterion>
+    <criterion>Cross-project close-out confirmed with customer-provisioning-orchestration-r1 and dataverse-access-unification-r1.</criterion>
+      <!-- Booked 2026-08-21 by task 020 (code review W-8). -->
+    <criterion>/test-diet explicitly adjudicates the three auth files now living under tests/integration/seam/Auth/ (CredentialSelectionSeamTests, ConfidentialClientSharingSeamTests, ClientAssertionProviderSeamTests). ADR-038 defines seam/** as the AI convergence spine (dispatch -&gt; executor -&gt; ledger -&gt; disposition); these are credential-seam tests placed there because tests/integration/auth/** is EMPTY and NOT COMPILED into any csproj -- a test authored there would run never. Resolve deliberately: broaden the seam README with an auth/credential sub-category, or wire auth/** into the csproj and relocate. Either way do not let three files inherit deletion protection by accident.</criterion>
+</acceptance-criteria>
+
+  <booked-obligations>
+    <!-- BOOKED BY TASK 031 (2026-08-24) — record: notes/decisions/031-obo-verification-dev.md §5.3 -->
+    <obligation source="031" id="031-A">
+      DECISION NEEDED (not a silent deferral): DELETE or RE-GUARD two superseded endpoints in
+      DocumentsEndpoints.cs that return 403 to EVERY caller.
+
+      Affected — exactly two, both lacking a resource id:
+        POST /api/containers            (DocumentsEndpoints.cs:16, policy at :61)   create container
+        GET  /api/containers            (DocumentsEndpoints.cs:64, policy at :106)  list containers
+
+      Mechanism: both carry .RequireAuthorization("canmanagecontainers") ->
+      ResourceAccessRequirement("create_container"), but ResourceAccessHandler is PER-RESOURCE. It
+      reads route values containerId/driveId/documentId/resourceId/id, then falls back to query
+      containerId/driveId/documentId/resourceId (ResourceAccessHandler.cs:139-159). A collection
+      route supplies none of them — and note the near-miss: GET /api/containers takes
+      containerTypeId, which the fallback does not match. So Fail() is called and the request 403s
+      in ~2.7ms, before any Graph/Dataverse call. The other four endpoints on the same policy
+      (/api/containers/{containerId}/drive and the three /api/drives/{driveId}/... routes) DO carry a
+      resource id and work correctly.
+
+      THE CAPABILITY IS NOT MISSING — verified 2026-08-24. Container create and list both work via
+      the SpeAdmin group at /api/spe/containers (Api/SpeAdmin/ContainerEndpoints.cs:67), and
+      provisioning creates containers directly via SpeFileStore.CreateContainerAsync
+      (ExternalAccess/ProvisionProjectEndpoint.cs:390). No client code calls /api/containers at all
+      (repo-wide grep: only docs, API baselines, and one CORS OPTIONS test). These two are
+      superseded duplicates, not a broken required capability.
+
+      PRE-EXISTING, not caused by auth-v4: git diff origin/master...HEAD touches neither
+      ResourceAccessHandler.cs nor DocumentsEndpoints.cs.
+
+      Docs were the real damage and are ALREADY FIXED by task 031 (2026-08-24):
+        docs/guides/INCIDENT-RESPONSE.md      told operators to health-probe /api/containers during
+                                              an SPE incident — a permanent 403 that would send them
+                                              chasing a non-existent auth fault
+        docs/architecture/sdap-overview.md    advertised it as the container CRUD path
+        docs/standards/INTEGRATION-CONTRACTS.md  listed it as the container-management contract
+
+      What remains for the owner of the documents surface: delete the two dead endpoints, or re-guard
+      them with an app-role/admin policy instead of a per-resource one. Do NOT fix this inside a
+      credential-migration project.
+    </obligation>
+
+    <!-- BOOKED BY TASK 031 (2026-08-24) - record: notes/decisions/031-obo-verification-dev.md sections 5.5, 5.9, 6.2, 6.3 -->
+    <obligation source="031" id="031-B">
+      DOCUMENTS / SPE SURFACE - three PRE-EXISTING defects found while verifying SPE over OBO. None is
+      caused by this project: every one was reproduced identically against the DEFAULT slot, which runs
+      the pre-migration build on the client secret (empirical-reproduction-first, CLAUDE.md section 10 F.3).
+
+      (1) STALE DATA. The only sprk_container row in dev holds SPE container id
+          b!21yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50, which returns 404 from
+          GET https://graph.microsoft.com/v1.0/storage/fileStorage/containers/{id}/drive. The real
+          container behind the same display name ("Full Flow Test 2025-09-30 14:51:26") is
+          b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy, resolvable via
+          GET /api/spe/containers?configId=c3a25b9a-e81f-f111-88b2-7c1e525abd8b.
+
+      (2) ERROR-OPEN ENDPOINT. GET /api/obo/containers/{id}/children converts a Graph 404 into
+          HTTP 200 {"items":[],"nextLink":null}. Measured live: Graph 404 at 13:59:22.915, endpoint
+          returned 200 at 13:59:22.917. A missing container is therefore indistinguishable from an empty
+          one. This is the same failure shape as the /api/containers runbook probe corrected under 031-A:
+          an endpoint a reader would reach for as an SPE health signal returns 200 whether or not SPE
+          works. It also caused a WRONG conclusion to be written into this project's own 031 record
+          (retracted in section 5.5) - so it has already cost real diagnostic time once.
+
+      (3) BROKEN QUERY. obo.children.list sends $skip to Graph. Against a REAL container it returns
+          HTTP 400 invalidRequest "Query option 'Skip' is not allowed. To allow it, set the
+          'AllowedQueryOptions' property on EnableQueryAttribute or QueryValidationSettings." SPE drives
+          do not accept $skip; use $top + @odata.nextLink paging.
+
+      Defect 2 masked defect 3, and defect 1 masked both. Fixing 3 without fixing 2 leaves the masking in
+      place. Do NOT fix inside a credential-migration project.
+
+      What DOES work, verified 2026-08-24 over OBO under MI-FIC against the real container:
+        PUT    /api/obo/containers/{id}/files/{path}          -> 200, real driveItem
+        GET    /api/obo/drives/{driveId}/items/{itemId}/content -> 200, byte-identical round-trip
+        DELETE /api/obo/drives/{driveId}/items/{itemId}       -> 204
+        GET    /api/spe/containers/{id}/items/{itemId}/preview?configId={guid} -> 200 (app-only SpeAdmin
+               path under owning app 170c98e1-..., ADR-028 E-1 - not the BFF identity)
+    </obligation>
+
+    <obligation source="031" id="031-C">
+      DECISION NEEDED: AgentTokenService is DEAD CODE - wire it up or delete it.
+
+      It is registered as a singleton (Infrastructure/DI/AgentModule.cs:31) and was fully migrated to the
+      ordered credential provider by task 022 (GetConfidentialClientAsync -> _confidentialClients
+      .GetClientAsync, throwing if the provider is absent). But NO production code path reaches it. A
+      repo-wide search finds its only mention inside a handler is a TODO comment at
+      Api/Agent/SpaarkeAgentHandler.cs:25 ("Inject AgentTokenService when MCI-014 is implemented").
+      AcquireGraphTokenAsync / AcquireDataverseTokenAsync are invoked from exactly one place in the repo:
+      tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs:123.
+
+      Consequence recorded honestly in 031: FR-B3 site 4 CANNOT be verified over HTTP, because no HTTP
+      path reaches it. Its migration is proven at the seam-test level only. /api/agent/message returns 200
+      with real data, but it does so through the chat pipeline's DataverseUserClient - that 200 is NOT
+      evidence about AgentTokenService.
+
+      SCOPE NOTE - corrected 2026-08-24 after checking the census rather than assuming.
+      An earlier draft of this obligation claimed that leaving AgentTokenService registered-but-unreachable
+      "makes the census number true but meaningless". That is WRONG and is retracted. CredentialCensusTests
+      counts confidential-client CONSTRUCTION sites per file, and after task 022 AgentTokenService no longer
+      constructs one - it delegates to OrderedCredentialClientProvider.GetClientAsync. It is correctly ABSENT
+      from the census, and the census is honest by its own definition. Success criteria 4 and 12 are
+      unaffected by this item.
+
+      So this is ordinary code hygiene on the agent surface, NOT an unfinished auth-v4 deliverable, and it is
+      booked here for visibility rather than because this project owes it. The only auth-v4-relevant
+      consequence is already recorded in the 031 record section 5.9: FR-B3 site 4 is verified at seam-test
+      level rather than over HTTP, because no HTTP path reaches it. That is a stated limitation of the
+      verification, not an outstanding task.
+    </obligation>
+  </booked-obligations>
+  <execution-log>
+    <!-- 090 EXECUTION LOG — 2026-08-24. PROJECT DELIBERATELY NOT CLOSED (owner direction):
+         build / deploy / UAT still remain. Steps executed up to, but excluding, close-out. -->
+    <step-status id="1" state="DONE">/test-diet run -> notes/test-diet-report.md. 73 methods added;
+      0 SCAFFOLDING; 8 PATH-VIOLATION-PROTECTED; 1 AMBIGUOUS. Zero deletions recommended — and the report
+      says why that reflects TIMING (tests authored after task 063 audited the classifier), not virtue.</step-status>
+    <step-status id="2" state="DONE">Graduation criterion 12 EXERCISED on scratch branch
+      scratch/criterion-12-negative-control: a deliberate 9th secret-bearing client made FR-F1 and FR-F2
+      FAIL, naming file:line. Branch deleted; 56/56 ArchTests green again. NOTE the precise claim:
+      dotnet build SUCCEEDS, the ArchTests fail — the CI gate is what fails, not the compiler.</step-status>
+    <step-status id="3" state="DONE">Publish 44.99 MB compressed incl. PDBs vs the 44.96 MB net10
+      baseline = +0.03 MB, despite Microsoft.Identity.Web.Certificateless being a NEW reference. Ceiling
+      60 MB: PASS. CVE scan (NFR-02): no vulnerable packages.</step-status>
+    <step-status id="5" state="DONE">notes/lessons-learned.md written — centres the false-premise root
+      cause, the 8 shapes of "a status code proves nothing", and an honest answer on whether the forcing
+      functions hold (yes, demonstrated; ONE gap — the ADR-038 amendment is unratified).</step-status>
+    <step-status id="4" state="DEFERRED">Graduation criteria walk — deferred to close-out; several
+      criteria are UAT-dependent by nature.</step-status>
+    <step-status id="6" state="DEFERRED-BY-DESIGN">README / projects/INDEX.md / portfolio #800 must NOT
+      be marked complete. Owner direction 2026-08-24: do not close the project.</step-status>
+    <step-status id="7" state="PARTIAL">Task 030 landed for provisioning; PR #812 coordination closed out
+      (clean merge verified + content issue raised on the PR). Model 2 tenancy question still open.</step-status>
+  </execution-log>
+</task>

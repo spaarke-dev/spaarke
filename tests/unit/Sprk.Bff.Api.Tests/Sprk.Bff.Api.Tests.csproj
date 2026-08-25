@@ -11,6 +11,9 @@
     <!-- Cosmos DB SDK — required to mock CosmosClient in SessionPersistenceService tests (AIPU2-030) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <!-- auth-v4 task 021: deterministic clock for the credential negative-cache TTL tests.
+         tests/CLAUDE.md mandates FakeTimeProvider over Stopwatch/DateTime.UtcNow/Task.Delay. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
     <!-- MimeKit 4.17.0: aligned with Sprk.Bff.Api (task 004/005) to avoid NU1605; retains the
          CVE-2026-30227 fix (CRLF injection in SMTP envelope address, fixed 4.15.1). -->
     <PackageReference Include="MimeKit" Version="4.17.0" />

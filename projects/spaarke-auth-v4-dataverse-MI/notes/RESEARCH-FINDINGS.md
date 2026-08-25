@@ -246,10 +246,22 @@ The decision should still gate on the §5 spike, because the one thing documenta
 ## 6. Sequencing and coordination
 
 1. **Now (zero conflict)**: research spike + ADR-028 amendment decision — read-only.
-2. **Let `dataverse-access-unification-r1` land first** where possible: it **deletes** `DataverseWebApiService` +
-   `DataverseWebApiClient` (a secret consumer) for free and collapses the Dataverse stacks auth-v4 would otherwise
-   touch twice. It does not touch `GraphClientFactory`. If it stalls, auth-v4 can proceed — serialize PRs and run
-   `/conflict-check` on each.
+2. ~~**Let `dataverse-access-unification-r1` land first**~~ — ⛔ **RETRACTED TWICE. Read this before citing it.**
+
+   **(a) The reasoning was wrong** (corrected 2026-08-19, PR #801). That project deletes `DataverseWebApiService` +
+   `DataverseWebApiClient`, both of which read the secret — but **both already degrade to Managed Identity when the
+   secret is absent** (`DataverseWebApiService` is flag-gated and never reads it with MI on; `DataverseWebApiClient`
+   falls through to `DefaultAzureCredential` at `:50-52`). **Neither ever blocked removal of
+   `BFF-API-ClientSecret`.** The real blockers are the no-fallback paths in §5/§0: `DataverseOptions`
+   (`[Required]` startup crash), `GraphClientFactory`, `DataverseAccessDataSource`, `DataverseUserClient`,
+   `AgentTokenService`. The genuine sequencing reasons were narrower — contention on `Spaarke.Dataverse` and
+   avoiding churn on classes about to be deleted — a convenience argument, not a dependency.
+
+   **(b) The project is now INACTIVE / NOT SCHEDULED** (owner, 2026-08-20 — investigation determined it was not
+   valuable to do). So there is no sequencing question at all. The two classes **stay**, which makes task 010's
+   `DataverseWebApiClient` gating fix permanent value rather than churn.
+
+   Full analysis: [`projects/dataverse-access-unification-r1/notes/auth-v4-coordination-memo.md`](../../dataverse-access-unification-r1/notes/auth-v4-coordination-memo.md) §4.
 3. **Coordinate with `customer-provisioning-orchestration-r1` immediately, not later** — H3/H4 are shipped on
    PR #779. Minimum ask: keep the "configure BFF confidential credential" step **pluggable**, and pull provisioning's
    Model-1/Model-2 constraints and risk R23 into the spike as first-class input.

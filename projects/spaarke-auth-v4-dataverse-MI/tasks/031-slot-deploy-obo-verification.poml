@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Deploy to slot and run the full OBO verification checklist (FR-C1)</title>
+    <phase>3 Rollout</phase>
+    <gate>022 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, deployment; the gate before touching a live environment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive checklist execution against a running deployment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment verification; must be operator-observed.</parallel-reason>
+    <deps>022</deps>
+    <tags>auth,deploy,obo,verification</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the migrated build to the dev slot and run every item of the OBO verification checklist, plus the inbound-validation regression. Nothing flips until this is fully green.</prompt>
+  <role>SPAARKE platform developer. Treat every checklist item as blocking.</role>
+  <goal>A completed, recorded checklist proving every OBO-dependent surface works under MI-FIC on the slot, and that inbound token validation is unaffected.</goal>
+
+  <context>
+    <background>spec §FR-C1 and design §6.1 define the checklist. OBO fails CLOSED: a miss here means an immediate total lockout after the swap, not a degraded experience. NFR-05 adds inbound validation because AddMicrosoftIdentityWebApi binds the same AzureAd config section that carries AzureAd:ClientSecret.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/spec.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="022" status="pending">Migrated confidential clients</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: SLOT ONLY. Do not swap in this task — that is 032.</constraint>
+    <constraint source="project">Scope: BEFORE running the checklist, verify the slot's keyVaultReferenceIdentity is the mi-bff-api-dev resource ID. Task 001 found this is a SITE property that --configuration-source does NOT copy; the slot defaulted to SystemAssigned (which the slot does not have) and every Key Vault reference failed, aborting startup with exit code 134 (SIGABRT). A slot that cannot resolve KV references fails in ways that LOOK like credential failures -- the worst possible misdiagnosis while testing a credential change. See notes/decisions/001-slot-creation.md Finding A.</constraint>
+    <constraint source="project">Scope: do NOT use Deploy-BffApi.ps1 -UseSlotDeploy. It deploys AND SWAPS in one flow with no -SkipSwap option (scripts/Deploy-BffApi.ps1:86-115). Task 032 owns the swap. Use the explicit az webapp deploy recipe in notes/decisions/001-slot-creation.md Finding C, or add a -SkipSwap switch to the script first.</constraint>
+    <constraint source="project">Scope: every checklist item is blocking. A partial pass is a FAIL; do not proceed to 032 on "mostly green".</constraint>
+    <constraint source="project">Scope: verify with the MI-FIC credential FIRST in the order, and then re-verify with the secret first, proving rollback works before it is needed.</constraint>
+    <constraint source="project">Scope: CLEAR AZURE_CLIENT_ID ON BOTH SLOTS, or record why not. Booked by task 023 (verified live 2026-08-21). AZURE_CLIENT_ID on spaarke-bff-dev holds the UAMI clientId 5967251e-..., while the app registration is 1e40baad-... . GraphClientFactory.cs:54 reads AZURE_CLIENT_ID ?? API_APP_ID as the APP-ONLY clientId, so that resolution yields a managed identity where an app registration is required. It is inert ONLY because Graph:ManagedIdentity:Enabled is true, which makes the consuming branch dead code; set that flag false -- plausible during an incident -- and the BFF builds a ClientSecretCredential from a managed identity and fails with an opaque AADSTS error naming neither identity. The single consumer falls back to API_APP_ID, which is the correct value, so clearing the setting REMOVES the trap rather than guarding it. Task 023 added a startup guard (fatal when MI is disabled, LogError when enabled) but deliberately did NOT touch live app settings -- that is this task's territory. Check the staging slot AND production. See notes/decisions/023-identity-conflation.md section 3.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OBO verification, SPE, Office add-ins, Copilot agent</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Deploy the migrated build to the slot with MI-FIC first in the credential order.</step>
+    <step>SPE: document upload, download and preview.</step>
+    <step>AI chat: dataverse.* tool calls over /api/ai/chat SSE.</step>
+    <step>Office add-ins: Outlook and Word save flows.</step>
+    <step>M365 Copilot agent: /api/agent.</step>
+    <step>Dataverse row-level authorization: PermissionsEndpoints.cs:56,116 and the AI authorization filters.</step>
+    <step>Send-as-user email via /api/communications.</step>
+    <step>Long-running OBO.</step>
+    <step>Inbound validation regression: workforce JWT, the Ciam scheme, and the RagApiKey scheme all still validate.</step>
+    <step>Reorder to secret-first and re-run an abbreviated pass to prove rollback.</step>
+    <step>Record every result.</step>
+  </steps>
+
+  <escalation>
+    <trigger>ANY checklist item fails — STOP. Do not proceed to 032 and do not "fix forward" on a live path.</trigger>
+    <trigger>Inbound validation changes behaviour in any way — STOP; NFR-05 exists because the AzureAd section is shared between inbound and outbound.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/031-obo-verification-dev.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pre-check: the slot's keyVaultReferenceIdentity resolves to mi-bff-api-dev and the slot boots cleanly (no exit-134 SIGABRT), BEFORE any OBO conclusion is drawn.</criterion>
+    <criterion>All eight OBO surfaces pass under MI-FIC on the slot.</criterion>
+    <criterion>Inbound token validation is unchanged for all three schemes.</criterion>
+    <criterion>The secret-first ordering also passes, proving rollback before it is needed.</criterion>
+    <criterion>Negative case: an unauthorised user is denied on every surface — fail-closed confirmed, never error-open.</criterion>
+    <criterion>Negative case: an expired or malformed user token is rejected at the inbound layer, not at the OBO exchange.</criterion>
+    <criterion>The production slot was not deployed to and not swapped.</criterion>
+    <criterion>Task 030 carry-forward (MEASURED 2026-08-21): after a FIC is created or changed, Entra
+      token acquisition FLAPS for roughly two minutes — 8 failures interleaved with successes over
+      ~130s as replicas converge, returning AADSTS70025 (NOT 70021, which was never observed). A single
+      green check within that window therefore proves nothing. Any verification here must either wait
+      out the window or sample repeatedly before declaring the credential good.</criterion>
+    <criterion>Task 030 carry-forward (ADR-check W-7): re-exercise task 030 acceptance criteria 3 and 4 here,
+      where a real managed-identity assertion IS mintable. (3) a FIC whose subject is the UAMI's clientId is
+      rejected at exchange, and (4) AADSTS70021 immediately after creation is retried, not surfaced as failure.
+      Both were proven at task 030 by one-time runs — the conflation case only structurally, because a
+      workstation cannot mint an assertion at all. There is no Pester harness in the repo to catch a
+      regression, and PR #779 is actively rewriting the same script, so closing the loop here (where it is
+      nearly free) is the only repeatable protection these two invariants get. Use
+      `Register-EntraAppRegistrations.ps1 -FicOnly -AssertionToken &lt;token&gt;`.
+
+      RESOLVED 2026-08-24 (owner decision, Option B). The premise "where a real managed-identity assertion
+      IS mintable" turned out to be FALSE, measured not assumed: Kudu /api/command executes shell fine on
+      the slot, but IDENTITY_ENDPOINT / IDENTITY_HEADER are ABSENT from the Kudu sidecar and no visible
+      /proc/*/environ exposes them. Only the app container can mint, and the only code there is the BFF,
+      which has no endpoint that emits its assertion and must never have one. Extracting an assertion to a
+      workstation was refused - it is a live credential capable of authenticating as the BFF app.
+
+      Criteria 3 and 4 are therefore recorded as VERIFIED STRUCTURALLY AT TASK 030, live platform
+      confirmation not performed. This is a stated limitation with its reason, NOT a deferral to 090.
+      The split that makes it acceptable: the half Spaarke can regress (does the script DETECT a
+      wrong-subject FIC / DOES it retry on 70021) is proven; the half not confirmed live (Entra rejecting
+      a sub/subject mismatch) is Microsoft-documented and not regressable by this codebase.
+
+      MITIGATION, and the reason this is not left to "UAT will catch it": auth-v4 has NO remaining task
+      that creates or changes a FIC (032, 033, 090 all checked), so this project's UAT would never
+      exercise the path. It was handed instead to the first real consumer - customer-provisioning-
+      orchestration-r1 Wave G-3 task 130 - whose first -FicOnly run against a new environment IS the live
+      test, for free, in the environment that actually matters. Written up as section 11 of
+      notes/PROVISIONING-CHANGE-REQUEST.md. See notes/decisions/031-obo-verification-dev.md section 6.1.
+    </criterion>
+  </acceptance-criteria>
+
+  <booked-obligations>
+    <!-- BOOKED BY TASK 051 (2026-08-23) — record: notes/decisions/051-sas-rotation.md -->
+    <obligation source="051" id="051-A">
+      The `staging` slot ALREADY EXISTS and is Running with its own app settings. This project's
+      notes previously said "0 exist" — that was false and caused a ~40-minute dev outage during
+      051. Do NOT assume the slot must be created. Verify its existing settings and
+      keyVaultReferenceIdentity before deploying to it, and establish who created it.
+    </obligation>
+    <obligation source="051" id="051-B">
+      Service Bus cutover. Set on BOTH SLOTS of the dev app spaarke-bff-dev (the default slot,
+      which Azure calls "production", and the slot named "staging"):
+        ServiceBus__FullyQualifiedNamespace = spaarke-servicebus-dev.servicebus.windows.net
+      Namespace wins over the still-present SAS string, so this single setting IS the cutover and
+      removing it IS the rollback (NFR-06). RBAC is already granted: mi-bff-api-dev
+      (principal 9fd47efb-...) holds Azure Service Bus Data Sender + Data Receiver at NAMESPACE
+      scope. Leave BOTH SAS keys in place until 033.
+    </obligation>
+    <obligation source="051" id="051-C">
+      Verification for 051-B: /healthz must report the new `servicebus-job-processing` check
+      Healthy (it reports Degraded after one auth failure, Unhealthy after three), and sdap-jobs
+      must be observed draining. A 200 from /healthz alone is NOT sufficient evidence — during the
+      051 outage both slots returned 200 while processing zero messages, which is exactly why that
+      check now exists.
+    </obligation>
+    <obligation source="051" id="051-D">
+      Every az command in this project must carry an explicit --subscription. The dev subscription
+      is 484bc857-3802-427f-9ea5-ca47b43db0f0; the CLI default drifted to "Spaarke Model 1
+      Production" during 051, which briefly made verified-correct RBAC look absent.
+    </obligation>
+  </booked-obligations>
+</task>

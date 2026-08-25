@@ -64,10 +64,15 @@ on:
         required: false
         type: string
         default: 'true'
-  pull_request:
-    paths-ignore:
-      - 'projects/_backlog/**'
-      - 'projects/x-*/**'
+  # NOTE (2026-08-24, unified-access-control-r2): the standalone `pull_request:` trigger was REMOVED.
+  # `workflow_call` is now the ONLY entry point. Rationale: under `workflow_call` a reusable workflow
+  # evaluates `github.ref` / `github.sha` from the CALLER, so the standalone PR run and ci-router.yml's
+  # tier2 call computed the IDENTICAL concurrency group below and cancelled each other. Empirically the
+  # standalone died 1s after the Router's `classify` dispatched tier2 (15:25:00 → 15:25:01 on run
+  # 32744675143), giving a `CI Tier 2 (Advisory)` check that was `cancelled` at 100% of SHAs on every PR
+  # in the repo. The jobs still run — as `CI / Tier 2 (Advisory) / *` under the Router. Verified safe at
+  # removal time: all open PRs target master (so the Router always fires), branch protection is disabled
+  # (no required-check name depended on the standalone), and tier2-pr-comment already runs in the call.
 
 permissions:
   contents: read
@@ -80,6 +85,12 @@ concurrency:
   # a hard fail (allowed-failures covers failure, not cancellation) → spurious red `CI / Router`. Per-SHA
   # groups keep cancel-in-progress a literal boolean (avoids the ci-router.yml startup_failure class) while
   # letting each commit's advisory tier run to completion.
+  #
+  # ⚠️ 2026-08-24 (unified-access-control-r2): per-SHA grouping fixed only the CROSS-COMMIT cause. It could
+  # not fix same-SHA self-collision between the standalone `pull_request` trigger and the Router's
+  # `workflow_call` — both computed this identical group. That trigger is now removed (see `on:` above), and
+  # ci-router.yml no longer lets a cancelled tier2 redden the gate at all. Two independent fixes, because a
+  # cancelled advisory tier must be survivable even if a future cancellation source appears.
   group: ci-tier2-advisory-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
@@ -194,14 +205,42 @@ jobs:
 
   # ============================================================================
   # Job 3 — full-unit-tests (Debug only — spec MUST §125 forbids Release until
-  # after 7-day soak per CICD-075). Budget: <3 min.
+  # after 7-day soak per CICD-075).
+  #
+  # TIMEOUT: 30 min (was 6, raised 2026-08-24 by unified-access-control-r2).
+  # The old 6 was authored against a "<3 min" budget the suite has long outgrown
+  # and was structurally unreachable: on windows-latest the overhead BEFORE a
+  # single test runs is ~4m23s (measured, run 32744675143 → Checkout w/
+  # fetch-depth:0 + LFS 28s, Cache NuGet 1m27s, Restore 29s, Build 1m56s), so
+  # `dotnet test` got ~1m35s of budget. It ran 2m49s and was killed at the wall.
+  #
+  # A `timeout-minutes` kill reports conclusion=CANCELLED, NOT failure — which
+  # silently defeats the `continue-on-error: true` below and (until the paired
+  # ci-router.yml fix) hard-failed `CI / Router` via alls-green. Net effect: the
+  # Router was red on EVERY branch — and this job had NEVER COMPLETED ONCE: 20 of
+  # the last 20 runs across all branches were cancelled, so there was no observed
+  # duration to size against.
+  #
+  # How 30 was chosen: the plain suite (`dotnet test -c Debug --no-build`) takes
+  # ~4m03s on a fast local dev box (10,762 tests, measured 2026-08-24). A 2-core
+  # windows-latest runner is typically 2-4x slower → ~8-16 min, plus the 4m23s
+  # overhead above = ~13-21 min. 20 would have sat right at the edge of that
+  # range, which is precisely how the original 6 became unreachable. Corroborating
+  # ceiling: the sibling `sdap-ci.yml` build-test job runs substantially the same
+  # build+test on the same runner class with NO timeout-minutes at all, and its
+  # coverage-instrumented test step was still running past 28 min on this SHA.
+  #
+  # This value is a RUNAWAY GUARD, not a performance budget — tier2 can no longer
+  # redden `CI / Router` (see ci-router.yml router-result), so headroom is free
+  # while a too-tight value costs the signal entirely. Re-tune from observed p95
+  # once green runs accumulate.
   # ============================================================================
   full-unit-tests:
     name: Full Unit Tests (Debug)
     runs-on: windows-latest
     if: ${{ inputs.run-unit-tests != 'false' }}
     continue-on-error: true
-    timeout-minutes: 6
+    timeout-minutes: 30
     outputs:
       result: ${{ steps.report.outputs.result }}
     strategy:

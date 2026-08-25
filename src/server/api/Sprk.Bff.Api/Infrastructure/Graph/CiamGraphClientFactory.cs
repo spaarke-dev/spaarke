@@ -150,29 +150,13 @@ public sealed class CiamGraphClientFactory
     /// retrieving it via <see cref="SecretClient"/> yields base64-encoded PFX bytes. The private key is
     /// materialized only in-process (<see cref="X509KeyStorageFlags.EphemeralKeySet"/> — never written to
     /// disk) and is never exported to source or config.
+    ///
+    /// <para><b>Body extracted to <see cref="Auth.KeyVaultCertificateLoader"/> at auth-v4 task 021</b>,
+    /// so the ordered credential selector's certificate branch reuses this exact load rather than
+    /// forking a second one. Behaviour here is unchanged — the shared helper is this method's body,
+    /// moved verbatim, including <c>EphemeralKeySet</c> and the <see cref="FormatException"/>
+    /// diagnostic.</para>
     /// </summary>
-    private async Task<X509Certificate2> LoadCertificateAsync(CancellationToken ct)
-    {
-        try
-        {
-            KeyVaultSecret secret = await _secretClient
-                .GetSecretAsync(_certificateName, version: null, ct)
-                .ConfigureAwait(false);
-
-            var pfxBytes = Convert.FromBase64String(secret.Value);
-
-            // EphemeralKeySet: keep the private key in memory only (no on-disk key persistence).
-            // Target runtime is Linux App Service; ephemeral RSA signing is supported there and on
-            // modern Windows for local dev.
-            // X509CertificateLoader.LoadPkcs12 replaces the obsolete X509Certificate2(byte[], string?,
-            // X509KeyStorageFlags) constructor (SYSLIB0057, .NET 9+); semantics/flags unchanged.
-            return X509CertificateLoader.LoadPkcs12(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet);
-        }
-        catch (FormatException ex)
-        {
-            throw new InvalidOperationException(
-                $"Key Vault secret '{_certificateName}' is not a base64-encoded PFX. " +
-                "Verify it is a Key Vault certificate (not a plain secret) with an exportable private key.", ex);
-        }
-    }
+    private Task<X509Certificate2> LoadCertificateAsync(CancellationToken ct)
+        => Auth.KeyVaultCertificateLoader.LoadAsync(_secretClient, _certificateName, ct);
 }

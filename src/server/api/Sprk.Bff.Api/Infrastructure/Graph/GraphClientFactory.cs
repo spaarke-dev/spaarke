@@ -4,6 +4,7 @@ using Microsoft.Graph;
 using Microsoft.Identity.Client;
 using Microsoft.Kiota.Abstractions.Authentication;
 using Microsoft.Kiota.Authentication.Azure;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services;
 
@@ -16,11 +17,22 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 ///       - Production / Azure-hosted: <c>DefaultAzureCredential</c> when <c>Graph:ManagedIdentity:Enabled = true</c>
 ///         (chains EnvironmentCredential → WorkloadIdentityCredential → ManagedIdentityCredential →
 ///         VisualStudioCredential → AzureCliCredential, so devs running locally via <c>az login</c>
-///         authenticate without code changes).
-///       - Fallback: <c>ClientSecretCredential</c> when MI is disabled (legacy local-dev mode).
-///   * On-Behalf-Of (per-request, user context): always uses <see cref="IConfidentialClientApplication"/>
-///     with the BFF's client secret — OBO cannot be done with managed identity (Task 041 scope: only
-///     app-only flow changes; OBO stays).
+///         authenticate without code changes). This authenticates as the managed identity's OWN principal.
+///       - Otherwise: the BFF app registration's app-only token, with the credential chosen by ordered
+///         selection (<see cref="ConfidentialClientTokenCredential"/>). Was an inline
+///         <c>ClientSecretCredential</c> until auth-v4 task 022.
+///   * On-Behalf-Of (per-request, user context): an <see cref="IConfidentialClientApplication"/> obtained
+///     from <see cref="OrderedCredentialClientProvider"/> per exchange.
+///
+/// <para><b>Correction (auth-v4, 2026-08).</b> This comment used to assert "OBO cannot be done with
+/// managed identity". That is the false premise three prior audits concluded the client secret could
+/// never be removed from — and it conflates two different things. A raw managed-identity token indeed
+/// cannot perform an OBO exchange. But a managed identity CAN mint a federated client assertion which
+/// the app registration presents as its confidential credential, and the OBO exchange then proceeds
+/// normally. That was proven on the wire against this tenant at task 002, with the user's <c>upn</c>
+/// preserved so Dataverse row-level authorization still evaluates as the user. Do not re-derive the old
+/// claim from any stale doc — ADR-028 Amendment A4 is canonical.</para>
+///
 /// Updated for Task 4.1: Uses IHttpClientFactory for centralized resilience via GraphHttpMessageHandler.
 /// Updated for Phase 4: Caches OBO tokens in Redis, reducing Azure AD load by 97% (ADR-009).
 /// Updated for Task 041 (Phase C): App-only Graph auth migrated to DefaultAzureCredential (managed identity)
@@ -31,63 +43,76 @@ public sealed class GraphClientFactory : IGraphClientFactory
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GraphClientFactory> _logger;
     private readonly GraphTokenCache _tokenCache;
-    private readonly string? _tenantId;
-    private readonly string? _clientId;
-    private readonly string? _clientSecret;
     private readonly bool _managedIdentityEnabled;
     private readonly string? _managedIdentityClientId;
-    private readonly IConfidentialClientApplication _cca;
+
+    /// <summary>Directory (tenant) id both flows authenticate against.</summary>
+    private readonly string _tenantId;
+
+    /// <summary>
+    /// The BFF app registration — resolved from <c>API_APP_ID</c> ONLY.
+    ///
+    /// <para><b>Task 022 removed the <c>AZURE_CLIENT_ID ?? API_APP_ID</c> fallback that used to sit
+    /// here</b>, and that is a fix rather than a tidy-up. <c>AZURE_CLIENT_ID</c> is ambiguous by
+    /// convention: the Azure SDK reads it as a <i>managed identity's</i> clientId, and on
+    /// <c>spaarke-bff-dev</c> it is set to the UAMI's — while this field is used as the <i>app
+    /// registration's</i>. Task 023 found and guarded that (it was inert only because
+    /// <c>Graph:ManagedIdentity:Enabled=true</c> made the consumer dead code) and left the fix to a task
+    /// that owned the app-only branch. This is that task: with the fallback gone,
+    /// <c>AZURE_CLIENT_ID</c> has no consumer anywhere in <c>src/</c> and the trap is removed rather
+    /// than guarded. See notes/decisions/023-identity-conflation.md §3.</para>
+    /// </summary>
+    private readonly string _apiAppId;
+
+    /// <summary>
+    /// Ordered credential provider (task 021), concrete per ADR-010. Supplies BOTH the OBO confidential
+    /// client and — via <see cref="ConfidentialClientTokenCredential"/> — the app-only credential that
+    /// used to be an inline <c>ClientSecretCredential</c>.
+    /// </summary>
+    private readonly OrderedCredentialClientProvider? _confidentialClients;
+
     private readonly Lazy<GraphServiceClient> _appOnlyClient;
 
     public GraphClientFactory(
         IHttpClientFactory httpClientFactory,
         ILogger<GraphClientFactory> logger,
         GraphTokenCache tokenCache,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        OrderedCredentialClientProvider? confidentialClients = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
-
-        // For local dev: read from user secrets or environment variables
-        _tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
-        _clientId = configuration["AZURE_CLIENT_ID"] ?? configuration["API_APP_ID"];
-        _clientSecret = configuration["AZURE_CLIENT_SECRET"] ?? configuration["API_CLIENT_SECRET"];
+        _confidentialClients = confidentialClients;
 
         // Task 041: Managed Identity flag for app-only Graph auth.
-        // Sensible default: false (preserves legacy ClientSecretCredential behavior for local dev /
-        // environments that haven't opted in). Production deployments set
-        // Graph__ManagedIdentity__Enabled=true and Graph__ManagedIdentity__ClientId (UAMI) if not
-        // using system-assigned MI.
+        // Sensible default: false (preserves the legacy local-dev path for environments that haven't
+        // opted in). Production deployments set Graph__ManagedIdentity__Enabled=true and
+        // Graph__ManagedIdentity__ClientId (UAMI) if not using system-assigned MI.
         _managedIdentityEnabled = bool.TryParse(
             configuration["Graph:ManagedIdentity:Enabled"], out var miEnabled) && miEnabled;
         _managedIdentityClientId = configuration["Graph:ManagedIdentity:ClientId"];
 
-        var tenantId = configuration["TENANT_ID"] ??
+        _tenantId = configuration["TENANT_ID"] ??
             throw new InvalidOperationException("TENANT_ID not configured");
-        var apiAppId = configuration["API_APP_ID"] ??
+        _apiAppId = configuration["API_APP_ID"] ??
             throw new InvalidOperationException("API_APP_ID not configured");
-        var clientSecret = configuration["API_CLIENT_SECRET"]; // Optional if no OBO endpoints yet
 
-        _logger.LogInformation("Configuring ConfidentialClientApplication with API_APP_ID length: {AppIdLength}",
-            apiAppId?.Length ?? 0);
-        _logger.LogInformation("Using TENANT_ID length: {TenantIdLength}",
-            tenantId?.Length ?? 0);
-        _logger.LogInformation("Client secret configured: {HasSecret}", !string.IsNullOrWhiteSpace(clientSecret));
+        _logger.LogInformation("Configuring Graph auth with API_APP_ID length: {AppIdLength}", _apiAppId.Length);
+        _logger.LogInformation("Using TENANT_ID length: {TenantIdLength}", _tenantId.Length);
         _logger.LogInformation(
             "Graph app-only auth mode: {Mode} (Graph:ManagedIdentity:Enabled={Enabled}, UAMI clientId set: {HasUami})",
-            _managedIdentityEnabled ? "ManagedIdentity (DefaultAzureCredential)" : "ClientSecret (legacy)",
+            _managedIdentityEnabled ? "ManagedIdentity (DefaultAzureCredential)" : "OrderedCredentialProvider",
             _managedIdentityEnabled,
             !string.IsNullOrWhiteSpace(_managedIdentityClientId));
 
-        var builder = ConfidentialClientApplicationBuilder
-            .Create(apiAppId)
-            .WithAuthority($"https://login.microsoftonline.com/{tenantId}");
-
-        if (!string.IsNullOrWhiteSpace(clientSecret))
-            builder = builder.WithClientSecret(clientSecret);
-
-        _cca = builder.Build();
+        // No confidential client is built here any more (task 022, FR-B3). The provider's contract is
+        // async because selection PROVES a credential before binding it, and a constructor cannot
+        // await; the client is fetched per OBO exchange, where the provider's cache makes it a lookup.
+        //
+        // This also removes a quiet hazard: the old constructor called Build() even when NO credential
+        // was configured, producing a client that looked healthy and failed only at the first OBO
+        // exchange — for every user at once.
 
         // PPI-014: Cache app-only GraphServiceClient as a singleton.
         // The credential and auth provider are stateless and thread-safe,
@@ -133,19 +158,22 @@ public sealed class GraphClientFactory : IGraphClientFactory
         }
         else
         {
-            // Legacy path: ClientSecretCredential. Required when MI is not available (older local-dev
-            // workflows that don't have `az login`). Production should set Graph:ManagedIdentity:Enabled=true.
-            if (string.IsNullOrWhiteSpace(_clientSecret) ||
-                string.IsNullOrWhiteSpace(_tenantId) ||
-                string.IsNullOrWhiteSpace(_clientId))
+            // Task 022: the app registration's own app-only credential, chosen by ordered selection
+            // (MI-FIC → certificate → transitional secret) instead of an inline ClientSecretCredential.
+            // The IDENTITY is unchanged — this still authenticates as the BFF app registration, which
+            // is what the previous ClientSecretCredential did; only the proof of it moved.
+            if (_confidentialClients is null)
             {
                 throw new InvalidOperationException(
-                    "ClientSecretCredential mode requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET to be configured. " +
-                    "To use managed identity instead, set Graph:ManagedIdentity:Enabled=true (recommended for Azure-hosted environments).");
+                    "App-only Graph auth requires an OrderedCredentialClientProvider when " +
+                    "Graph:ManagedIdentity:Enabled is not true. Inside the BFF it is registered by " +
+                    "AuthorizationModule.AddCredentialSelection. To use the managed identity's own " +
+                    "principal instead, set Graph:ManagedIdentity:Enabled=true (recommended for " +
+                    "Azure-hosted environments).");
             }
 
-            credential = new ClientSecretCredential(_tenantId, _clientId, _clientSecret);
-            _logger.LogDebug("Creating app-only Graph client with ClientSecretCredential (legacy mode)");
+            credential = new ConfidentialClientTokenCredential(_confidentialClients, _tenantId, _apiAppId);
+            _logger.LogDebug("Creating app-only Graph client with the ordered credential provider (ADR-028 A4)");
         }
 
         var authProvider = new AzureIdentityAuthenticationProvider(
@@ -230,7 +258,24 @@ public sealed class GraphClientFactory : IGraphClientFactory
             // - Files.ReadWrite.All
             // - FileStorageContainer.Selected (SharePoint Embedded)
             // Per OAUTH-OBO-IMPLEMENTATION.md: Using individual scopes causes AADSTS70011 errors
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            //
+            // The confidential client is fetched per exchange (task 022). The provider owns the ONE
+            // process-wide client cache, so this is a dictionary lookup on the hot path — and asking it
+            // every time is what lets the credential recover to a higher-priority one after a transient
+            // failure. A client held in a field would pin every OBO exchange in the process to whatever
+            // credential won at startup.
+            if (_confidentialClients is null)
+            {
+                throw new InvalidOperationException(
+                    "OBO requires an OrderedCredentialClientProvider. Inside the BFF it is registered " +
+                    "by AuthorizationModule.AddCredentialSelection.");
+            }
+
+            var cca = await _confidentialClients
+                .GetClientAsync(_tenantId, _apiAppId)
+                .ConfigureAwait(false);
+
+            var result = await cca.AcquireTokenOnBehalfOf(
                 new[] { "https://graph.microsoft.com/.default" },
                 new UserAssertion(userAccessToken)
             ).ExecuteAsync();

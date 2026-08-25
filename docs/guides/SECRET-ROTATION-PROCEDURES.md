@@ -24,7 +24,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 | Secret Name | Type | Source Resource | Rotation Method |
 |-------------|------|-----------------|-----------------|
-| `BFF-API-ClientSecret` | Entra ID client secret | Entra ID app registration | Automated (`Rotate-Secrets.ps1 -SecretType EntraId`). **Auth v2**: retained for OBO only — Graph + Dataverse app-only use MI per ADR-028. |
+| ~~`BFF-API-ClientSecret`~~ | ~~Entra ID client secret~~ | **DELETED 2026-08-24** | 🔴 **NOTHING TO ROTATE.** Removed by `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**, exception **E-3 closed**) together with its lowercase duplicate `bff-api-client-secret`. The BFF identity — **including OBO** — authenticates with a *federated credential* issued to its user-assigned managed identity; the assertion is minted per token exchange and has **no expiry for an operator to roll**. `Rotate-Secrets.ps1 -SecretType EntraId` is now an audited no-op. **Do not re-create this secret**: `Graph:Credentials:RequireSecretFreeIdentity=true` makes the BFF refuse to start outside Development if `ClientSecret` returns to the credential order. |
 | `Communication-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Sender (Graph subscription) must be re-registered with the new key. |
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Dataverse Service Endpoint must be re-registered with the new key. |
 | `Communication-WebhookClientState` | Graph subscription validation secret | Generated random string | Manual (every 90 days or on Graph subscription renewal) |
@@ -317,7 +317,10 @@ curl https://api.spaarke.com/healthz/dataverse
 Confirm the secret was updated (newest version should be recent):
 
 ```powershell
-az keyvault secret show --vault-name sprk-platform-prod-kv --name "BFF-API-ClientSecret" --query "attributes.updated" -o tsv
+# BFF-API-ClientSecret no longer exists (deleted 2026-08-24, task 033) — this command returns SecretNotFound.
+# The BFF identity is secret-free. To check its credential instead, verify the federated credential exists
+# and that its subject is the UAMI's principalId (NOT its clientId):
+az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table
 ```
 
 ### 3. Audit Log Review

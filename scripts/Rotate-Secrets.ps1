@@ -601,22 +601,21 @@ function Rotate-PlatformSecrets {
             -ResourceGroup $resourceGroup
     }
 
-    # Entra ID: BFF API client secret
+    # Entra ID: BFF API client secret — RETIRED 2026-08-24 (spaarke-auth-v4 task 033, ADR-028 A4).
+    #
+    # There is no longer a BFF-identity client secret to rotate. The BFF authenticates as a confidential
+    # client using a federated credential issued to its user-assigned managed identity; the token is
+    # minted per-exchange by the platform and there is nothing with an expiry date for this script to
+    # roll. `BFF-API-ClientSecret` was deleted from Key Vault on 2026-08-24.
+    #
+    # This branch is kept as an explicit no-op rather than deleted, because -SecretType EntraId / All is
+    # a documented entry point: silently dropping it would make `-SecretType All` quietly narrower than
+    # its name while still reporting success.
     if ($SecretType -eq "EntraId" -or $SecretType -eq "All") {
-        # Retrieve the app ID from Key Vault (or use known value)
-        $appId = $null
-        if (-not $DryRun) {
-            $appId = az keyvault secret show `
-                --vault-name $vaultName `
-                --name "BFF-API-ClientId" `
-                --query "value" -o tsv 2>$null
-        }
-
-        Rotate-EntraIdSecret `
-            -AppDisplayName "Spaarke BFF API ($Environment)" `
-            -AppId ($appId ?? "<BFF-API-ClientId>") `
-            -VaultName $vaultName `
-            -SecretName "BFF-API-ClientSecret"
+        Write-AuditLog -Level "INFO" -SecretName "BFF-API-ClientSecret" -VaultName $vaultName `
+            -Action "Rotate-EntraIdSecret" -Result "Skipped" `
+            -Detail "Retired by spaarke-auth-v4 (ADR-028 A4). The BFF identity is secret-free — it uses a managed-identity federated credential, which has no rotatable secret. Nothing to do."
+        Write-Host "  [EntraId] BFF API client secret: retired — the BFF identity is secret-free (ADR-028 A4). Nothing to rotate." -ForegroundColor DarkGray
     }
 
     # Storage keys are customer-level, not platform-level
