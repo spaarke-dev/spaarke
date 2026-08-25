@@ -543,3 +543,125 @@ export function assessBilling(ct: {
       "there.",
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trial expiry (spec FR-C13)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How a trial container type stands relative to its expiry date.
+ *
+ * `unknown` is a first-class state and must never collapse to `live`. Graph does not always return
+ * `expirationDateTime`, and a trial whose date we cannot read is not a trial we know is healthy.
+ */
+export type TrialExpiryState = "not-a-trial" | "unknown" | "live" | "expiring" | "expired";
+
+export interface TrialExpiryAssessment {
+  readonly state: TrialExpiryState;
+  /** Whole days until expiry; negative once past. Null when there is no readable date. */
+  readonly daysRemaining: number | null;
+  /** Short badge/label text, or null when there is nothing to say (not a trial, or unknown). */
+  readonly label: string | null;
+  readonly tone: "success" | "warning" | "danger" | "informative";
+  /** True when an administrator needs to act or at least know now. */
+  readonly needsAttention: boolean;
+  /** What has happened or is about to, in operational terms. Null when nothing to say. */
+  readonly consequence: string | null;
+}
+
+/** Within this many days of expiry, a trial is called out as expiring. Mirrors task 030's dialog. */
+export const TRIAL_EXPIRY_WARNING_DAYS = 30;
+
+/**
+ * Assess a container type's trial expiry.
+ *
+ * WHY THIS EXISTS (task 028 follow-up, 2026-08-24). The live tenant's trial container type expired
+ * **2025-10-10 — eleven months ago** — and the app said nothing anywhere. `expiryDateTime` was
+ * rendered in exactly one place, the detail panel, as a plain date with no indication it was in the
+ * past. Task 030 added the 30-day warning to the **create** dialog only, which warns the one
+ * audience that cannot yet be affected by it.
+ *
+ * That matters because of what expiry does: per
+ * `knowledge/sharepoint-embedded/docs/learn-containertypes.md`, a trial container type is valid for
+ * {@link TRIAL_VALIDITY_DAYS} days, is **not renewable**, and simply stops working afterwards. An
+ * admin looking at a grid of container types had no way to tell a working type from a dead one.
+ *
+ * @param now Injected so this is deterministic and testable — never reads the clock itself.
+ */
+export function assessTrialExpiry(
+  ct: { billingClassification?: string | null; expiryDateTime?: string | null },
+  now: Date,
+): TrialExpiryAssessment {
+  const classification = (ct.billingClassification ?? "").trim().toLowerCase();
+
+  // A non-trial type has no expiry, and an UNKNOWN classification is not evidence of one either.
+  // Only assert "not a trial" when the classification actually says so.
+  if (classification !== "trial") {
+    return {
+      state: "not-a-trial",
+      daysRemaining: null,
+      label: null,
+      tone: "informative",
+      needsAttention: false,
+      consequence: null,
+    };
+  }
+
+  const raw = (ct.expiryDateTime ?? "").trim();
+  const expiry = raw ? new Date(raw) : null;
+  if (!expiry || Number.isNaN(expiry.getTime())) {
+    return {
+      state: "unknown",
+      daysRemaining: null,
+      label: "Expiry unknown",
+      tone: "informative",
+      needsAttention: false,
+      consequence:
+        `This is a trial container type, which is valid for ${TRIAL_VALIDITY_DAYS} days and is not ` +
+        "renewable, but Microsoft Graph did not report its expiry date. Treat its remaining life as " +
+        "unknown rather than assuming it is current.",
+    };
+  }
+
+  // Whole days, rounded toward the future so a type expiring later today reads as 0, not -1.
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const daysRemaining = Math.ceil((expiry.getTime() - now.getTime()) / msPerDay);
+
+  if (daysRemaining < 0) {
+    const daysPast = Math.abs(daysRemaining);
+    return {
+      state: "expired",
+      daysRemaining,
+      label: "Trial expired",
+      tone: "danger",
+      needsAttention: true,
+      consequence:
+        `This trial container type expired ${daysPast} day${daysPast === 1 ? "" : "s"} ago. A trial ` +
+        "is not renewable — it stops working after expiry, and its containers are no longer usable. " +
+        "Create a standard container type to replace it.",
+    };
+  }
+
+  if (daysRemaining <= TRIAL_EXPIRY_WARNING_DAYS) {
+    return {
+      state: "expiring",
+      daysRemaining,
+      label: daysRemaining === 0 ? "Expires today" : `Expires in ${daysRemaining}d`,
+      tone: "warning",
+      needsAttention: true,
+      consequence:
+        `This trial container type expires in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} ` +
+        "and cannot be renewed. Plan a replacement standard container type before then — after " +
+        "expiry it stops working.",
+    };
+  }
+
+  return {
+    state: "live",
+    daysRemaining,
+    label: `Expires in ${daysRemaining}d`,
+    tone: "success",
+    needsAttention: false,
+    consequence: null,
+  };
+}

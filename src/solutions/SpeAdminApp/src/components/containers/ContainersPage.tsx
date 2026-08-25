@@ -571,9 +571,20 @@ const CreateContainerDialog: React.FC<CreateContainerDialogProps> = ({
  */
 interface ContainersPageProps {
   onOpenContainer?: (containerId: string, containerName?: string) => void;
+  /**
+   * Container whose detail panel should be open on first render, from a deep link
+   * (`?page=containers&containerId=…` — Search's "Manage Permissions" builds exactly this).
+   *
+   * Applied once, as the initial state, deliberately: making it a controlled prop would re-open the
+   * panel every time the user closed it, because the URL still names the container.
+   */
+  initialDetailContainerId?: string | null;
 }
 
-export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer }) => {
+export const ContainersPage: React.FC<ContainersPageProps> = ({
+  onOpenContainer,
+  initialDetailContainerId,
+}) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
 
@@ -586,7 +597,9 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
   // ── Detail Panel State ──────────────────────────────────────────────────────
 
   /** ID of the container whose detail panel is open, or null when closed. */
-  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(null);
+  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(
+    initialDetailContainerId ?? null,
+  );
 
   // ── Action State ────────────────────────────────────────────────────────────
 

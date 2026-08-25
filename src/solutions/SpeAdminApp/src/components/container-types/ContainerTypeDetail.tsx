@@ -74,6 +74,7 @@ import {
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
 import {
   assessBilling,
+  assessTrialExpiry,
   labelForSetting,
   parseConsumingTenantOverridables,
   SAVE_ACCEPTED_DETAIL,
@@ -401,6 +402,18 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
    */
   const billingAssessment = React.useMemo(
     () => assessBilling(containerType ?? {}),
+    [containerType]
+  );
+
+  /**
+   * Trial expiry standing (spec FR-C13).
+   *
+   * The panel previously rendered `expiryDateTime` as a plain red date, which cannot say whether the
+   * date has PASSED — so the live tenant's trial, expired 2025-10-10, looked the same as one
+   * expiring next year. `now` is captured per loaded container type, not per render.
+   */
+  const trialExpiry = React.useMemo(
+    () => assessTrialExpiry(containerType ?? {}, new Date()),
     [containerType]
   );
 
@@ -863,12 +876,35 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                         {containerType.expiryDateTime && (
                           <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Trial Expiry</Text>
-                            <Text
-                              className={styles.fieldValue}
-                              style={{ color: tokens.colorPaletteRedForeground1 }}
-                            >
-                              {formatDate(containerType.expiryDateTime)}
-                            </Text>
+                            {/*
+                              A date alone does not say whether it has PASSED. This rendered as plain
+                              red text, so the live tenant's trial — expired 2025-10-10 — looked
+                              identical to one expiring next year (spec FR-C13).
+                            */}
+                            <div className={styles.fieldValue}>
+                              <Text>{formatDate(containerType.expiryDateTime)}</Text>
+                              {trialExpiry.label && (
+                                <Badge
+                                  color={trialExpiry.tone}
+                                  appearance={
+                                    trialExpiry.state === "unknown" ? "outline" : "filled"
+                                  }
+                                  size="small"
+                                  style={{ marginLeft: tokens.spacingHorizontalXS }}
+                                >
+                                  {trialExpiry.label}
+                                </Badge>
+                              )}
+                              {trialExpiry.consequence && (
+                                <Text
+                                  size={200}
+                                  block
+                                  style={{ color: tokens.colorNeutralForeground3 }}
+                                >
+                                  {trialExpiry.consequence}
+                                </Text>
+                              )}
+                            </div>
                           </div>
                         )}
                         <div className={styles.fieldRow}>

@@ -53,7 +53,7 @@ import {
 } from "../../services/speApiClient";
 import type { PermissionPrerequisite } from "../../services/speApiClient";
 import type { ContainerType } from "../../types/spe";
-import { assessBilling } from "./containerTypeLifecycle";
+import { assessBilling, assessTrialExpiry } from "./containerTypeLifecycle";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
 
@@ -104,10 +104,16 @@ function capitalize(s: string): string {
  * for every row, so no row could be selected, `hasSelectedType` was permanently false, and the
  * Register wizard always opened with no type. Selecting a row appeared to do nothing.
  *
- * Normalising here keeps the fix inside this screen. It does NOT recover `owningAppId`,
- * `azureTenantId`, or `expiryDateTime` — the BFF never sends those (they are absent from both
- * `SpeContainerTypeSummary` and `ContainerTypeDto`), which is a server-side gap recorded in
- * `notes/task-030-findings.md`.
+ * Normalising here keeps the fix inside this screen.
+ *
+ * ⚠️ This comment used to end by asserting the BFF "never sends" `owningAppId`, `azureTenantId`, or
+ * `expiryDateTime`. That was true when written and **task 030 made two thirds of it false the same
+ * day** — `owningAppId` and `expiryDateTime` now flow Graph → summary → DTO → client. The stale half
+ * mattered: it read as documentation that the trial-expiry data was unavailable, which is part of
+ * why an expired trial went unsurfaced for eleven months. Only `azureTenantId` is still absent.
+ *
+ * (A comment asserting what another layer does is a claim with an expiry date — the same lesson as
+ * the `Graph SDK 5.101.0` comment that kept `billingClassification` null for ten days.)
  */
 function normalizeContainerType(raw: ContainerType & { id?: string }): ContainerType {
   return {
@@ -274,8 +280,13 @@ const useStyles = makeStyles({
 // Column Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Build typed Fluent DataGrid column definitions for ContainerType rows. */
-function buildColumns(): TableColumnDefinition<ContainerType>[] {
+/**
+ * Build typed Fluent DataGrid column definitions for ContainerType rows.
+ *
+ * @param now Evaluation instant for trial expiry, passed in rather than read from the clock so the
+ *            column is deterministic and the grid does not re-render on every tick.
+ */
+function buildColumns(now: Date): TableColumnDefinition<ContainerType>[] {
   return [
     createTableColumn<ContainerType>({
       columnId: "displayName",
@@ -344,6 +355,46 @@ function buildColumns(): TableColumnDefinition<ContainerType>[] {
           .join(" ");
         return tip ? (
           <Tooltip content={tip} relationship="label">
+            {badge}
+          </Tooltip>
+        ) : (
+          badge
+        );
+      },
+    }),
+    createTableColumn<ContainerType>({
+      columnId: "trialExpiry",
+      renderHeaderCell: () => "Trial Expiry",
+      /*
+       * Spec FR-C13. The live tenant's trial expired 2025-10-10 — eleven months ago — and the app
+       * said so NOWHERE. `expiryDateTime` was rendered in exactly one place (the detail panel) as a
+       * plain date with no indication it was in the past, and task 030's 30-day warning went to the
+       * CREATE dialog, which warns the only audience that cannot yet be affected.
+       *
+       * A trial is not renewable and simply stops working at expiry, so an expired type is dead
+       * weight an admin must be able to see at a glance. Non-trial rows render an em-dash: they have
+       * no expiry, and that IS the fact, unlike the absent states elsewhere on this grid.
+       */
+      renderCell: (ct) => {
+        const expiry = assessTrialExpiry(ct, now);
+        if (expiry.state === "not-a-trial") {
+          return (
+            <Text style={{ color: tokens.colorNeutralForeground3 }} aria-label="Not a trial">
+              —
+            </Text>
+          );
+        }
+        const badge = (
+          <Badge
+            color={expiry.tone}
+            appearance={expiry.state === "unknown" ? "outline" : "filled"}
+            size="small"
+          >
+            {expiry.label}
+          </Badge>
+        );
+        return expiry.consequence ? (
+          <Tooltip content={expiry.consequence} relationship="label">
             {badge}
           </Tooltip>
         ) : (
@@ -468,7 +519,13 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
 
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
-  const columns = React.useMemo(() => buildColumns(), []);
+  /*
+   * One evaluation instant for the whole render, captured on mount. Calling `new Date()` inside
+   * renderCell would make every row's expiry read at a slightly different moment and re-render the
+   * grid needlessly; `assessTrialExpiry` takes `now` for exactly this reason.
+   */
+  const now = React.useMemo(() => new Date(), []);
+  const columns = React.useMemo(() => buildColumns(now), [now]);
 
   /*
    * Container types whose billing Graph reports as INVALID (task 029 / spec FR-C12).
@@ -495,6 +552,25 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
 
     return { rows, remediations };
   }, [containerTypes]);
+
+  /**
+   * Trial container types that have expired or are about to (spec FR-C13).
+   *
+   * A column alone is not enough here. An expired trial is not a per-row curiosity — it means those
+   * containers have stopped working — and the live tenant sat with one expired for eleven months
+   * without anything ever saying so. Surfaced at page level for the same reason invalid billing is.
+   */
+  const trialExpiry = React.useMemo(() => {
+    const rows = containerTypes
+      .map((ct) => ({ ct, expiry: assessTrialExpiry(ct, now) }))
+      .filter((r) => r.expiry.needsAttention);
+
+    return {
+      rows,
+      // Expired outranks expiring: one is a live outage, the other is a deadline.
+      hasExpired: rows.some((r) => r.expiry.state === "expired"),
+    };
+  }, [containerTypes, now]);
 
   // ── Data Loading ────────────────────────────────────────────────────────────
 
@@ -754,6 +830,33 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
                 {invalidBilling.remediations.map((text) => (
                   <Text key={text} size={200} weight="semibold">
                     {text}
+                  </Text>
+                ))}
+              </div>
+            </MessageBarBody>
+          </MessageBar>
+        </div>
+      )}
+
+      {/*
+        ── Trial expiry warning (spec FR-C13) ──
+        A trial container type is valid for 30 days, is NOT renewable, and stops working afterwards.
+        The live tenant's trial expired 2025-10-10 and this app said nothing anywhere for eleven
+        months. `error` intent when one has already expired — that is a live outage, not a deadline.
+      */}
+      {trialExpiry.rows.length > 0 && (
+        <div className={styles.messageBarWrapper}>
+          <MessageBar intent={trialExpiry.hasExpired ? "error" : "warning"}>
+            <MessageBarBody>
+              <MessageBarTitle>
+                {trialExpiry.hasExpired
+                  ? "A trial container type has expired"
+                  : "A trial container type is expiring"}
+              </MessageBarTitle>
+              <div className={styles.billingWarningBody}>
+                {trialExpiry.rows.map((r) => (
+                  <Text key={`t-${r.ct.containerTypeId}`} size={200}>
+                    {r.ct.displayName || r.ct.containerTypeId}: {r.expiry.consequence}
                   </Text>
                 ))}
               </div>
