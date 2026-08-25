@@ -685,34 +685,49 @@ export type AuditCategory =
 
 /**
  * Audit log entry from the sprk_speauditlog Dataverse table.
- * Returned by GET /api/spe/audit.
+ * Returned inside the `items` array of GET /api/spe/audit.
+ *
+ * Corrected 2026-08-25. This interface used to declare thirteen required fields, seven of which the
+ * endpoint has never sent — it described the Dataverse table rather than the response. The required
+ * markers were doing real harm: they told every reader that `businessUnitId` would be there, so a
+ * consumer could reach for it and get `undefined` with no type error anywhere. Optional now means
+ * "this endpoint does not return it", which is a fact about the wire, not a wish about the schema.
  */
 export interface AuditLogEntry {
   /** Primary key GUID (sprk_speauditlogid) */
   id: string;
   /** Operation name, e.g. "CreateContainer" (sprk_operation) */
   operation: string;
-  /** Category of the operation (sprk_category) */
-  category: AuditCategory;
+  /**
+   * Human-readable category LABEL resolved server-side from the `sprk_category` option set —
+   * e.g. "Container type", not the `AuditCategory` filter value "ContainerType". The two are
+   * deliberately different: this one is for display, `AuditCategory` is what the filter sends.
+   */
+  category: string;
   /** ID of the affected resource (sprk_targetresourceid) */
   targetResourceId: string;
   /** Name of the affected resource (sprk_targetresourcename) */
   targetResourceName: string;
   /** HTTP status code of the operation response (sprk_responsestatus) */
   responseStatus: number;
-  /** Response summary or error message (sprk_responsesummary) */
-  responseSummary: string;
-  /** Environment context ID (sprk_environmentid) */
-  environmentId: string;
-  /** Environment display name (denormalized) */
+  /**
+   * Response summary or error message (sprk_responsesummary).
+   * NOT currently returned — the column is absent from the endpoint's `$select` because it has not
+   * been verified against the live Dataverse schema, and naming a column that does not exist 400s
+   * the entire query (task 005 found exactly that with `sprk_targetresource`).
+   */
+  responseSummary?: string;
+  /** Environment context ID (sprk_environmentid). Not returned by GET /api/spe/audit. */
+  environmentId?: string;
+  /** Environment display name (denormalized). Not returned by GET /api/spe/audit. */
   environmentName?: string;
-  /** Container type config context ID (sprk_containertypeconfigid) */
-  containerTypeConfigId: string;
-  /** Config display name (denormalized) */
+  /** Container type config context ID. Not returned — it is the query's input, not its output. */
+  containerTypeConfigId?: string;
+  /** Config display name (denormalized). Not returned by GET /api/spe/audit. */
   containerTypeConfigName?: string;
-  /** Business Unit context ID (sprk_businessunitid) */
-  businessUnitId: string;
-  /** Business Unit display name (denormalized) */
+  /** Business Unit context ID (sprk_businessunitid). Not returned by GET /api/spe/audit. */
+  businessUnitId?: string;
+  /** Business Unit display name (denormalized). Not returned by GET /api/spe/audit. */
   businessUnitName?: string;
   /** User who performed the operation (sprk_performedby) */
   performedBy: string;

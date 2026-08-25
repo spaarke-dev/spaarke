@@ -1029,8 +1029,15 @@ export const speApiClient = {
     /**
      * GET /api/spe/audit?configId={id}&from={date}&to={date}&category={cat}
      * Query the audit log with optional date/category filters.
+     *
+     * The endpoint answers with a paged ENVELOPE — `{ items, count, top, skip }` — not a bare array.
+     * This call previously declared `Promise<AuditLogEntry[]>` and handed the envelope object straight
+     * to the page, which stored it in an array-typed state and then called `.slice()` on it. That threw
+     * `TypeError: entries.slice is not a function` during render, and with no error boundary above it
+     * the whole app unmounted — the white screen reported in UAT on 2026-08-25. TypeScript could not
+     * catch it: the declared return type was simply an assertion about JSON that nothing verified.
      */
-    query(options: {
+    async query(options: {
       configId: string;
       from?: string;
       to?: string;
@@ -1038,7 +1045,7 @@ export const speApiClient = {
       top?: number;
       skip?: number;
     }): Promise<AuditLogEntry[]> {
-      return get<AuditLogEntry[]>(
+      const page = await get<{ items?: AuditLogEntry[] }>(
         "/spe/audit" + qs({
           configId: options.configId,
           from: options.from,
@@ -1048,6 +1055,18 @@ export const speApiClient = {
           skip: options.skip,
         }),
       );
+
+      // Verify the shape rather than trusting the type parameter. An unexpected body must surface as a
+      // visible error, NOT as an empty array — "no audit entries" is a claim about the tenant's history
+      // that this client is in no position to make just because it failed to understand the response.
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The audit log service returned an unrecognized response shape (expected an object with an " +
+            "'items' array). The entries could not be read, and this is not the same as there being none.",
+        );
+      }
+
+      return page.items;
     },
   },
 
