@@ -269,3 +269,21 @@ The durable write precedes the manifest write. If the manifest write fails (it i
 ### 7. Test-path placement (38-A)
 
 `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionFileBlobStoreConfigurationTests.cs` is not one of ADR-038's KEEP paths (the only unit KEEP path is `tests/unit/domain/**`). The two behaviour-defining cases were moved to where they belong — the 500 contract is now a seam test (`Upload_WhenTheDurableWriteFails_Returns500_NotAFalse202`) and the isolation cases live in `tests/integration/tenant/**`. What remains is configuration-guard behaviour (secret rejection, non-https rejection, container-name rejection, enabled/disabled outcome). Flagging for `/test-diet` at project close: these are MAINTAIN-class in substance; if a KEEP home is wanted, the credential-guard theory is a natural fit for `tests/Spaarke.ArchTests/CredentialGuardTests.cs`. Note the same "non-KEEP path" observation applies to essentially the whole existing unit assembly, so this is a repo-wide reconciliation item rather than something peculiar to this task.
+
+
+---
+
+## Owner resolutions — 2026-08-25
+
+**Container: a DEDICATED `session-files` container is the target; the default stays `ai-chunks` until
+bicep declares it.** `ai-chunks` is provisioned in all three stacks with zero consumers, so it works
+today — but it is an AI-chunk container by name and purpose, and task 062 gives session files a
+retention rule that follows the SESSION TTL (including `-1` filed = indefinite). Mixing two different
+lifecycles in one container makes 062 harder than it needs to be. The store never creates a container,
+so the switch is: add `session-files` to `storage-account.bicep` (one line, three stacks), then set
+`SessionFileStore:ContainerName`. Deliberately NOT done here — it pairs with the role-assignment fix
+(§5), which is blocked on the owner confirming which stack the live environments use.
+
+**ADR-015 records: DONE.** The governed-stores table now carries a Tier-3 row for this store, with
+retention and erasure marked NOT YET IMPLEMENTED and the mechanical gate (empty `BlobEndpoint`) named
+as the reason the non-compliant state is unreachable. Recorded as a §6.5 Path-B amendment.
