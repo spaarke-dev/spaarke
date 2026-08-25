@@ -12,7 +12,67 @@
 | **Task** | **none in progress** — W1–W10 done + **011 ✅** + **028 ✅**; 023 🔄 · 025 🔄 · 026 🔄 · 029 🔄 (all partial for one shared reason: the PATCH 400) |
 | **Step** | Between tasks. |
 | **Operator goal (stated 2026-08-24)** | **Get the app showing LIVE data and DEPLOY it.** Sequence work against that, not against task order. |
-| **Next Action** | The two unowned defects below (**Manage Permissions** → Dashboard; **expired trial invisible**), then **027** container-type owner management. |
+| **Next Action** | **Task 027 IN PROGRESS** — delegated-beta client done + building. Next: untyped `permissions` list/add/remove in `SpeAdminGraphService`. Then **PATCH-400 escalation**, then **deploy to dev**. Operator chose this order 2026-08-24. |
+
+### 🔴 Task 027 — THREE premise errors found before writing a line of feature code
+
+**1. "This supersedes part of the current ContainerTypePermissions screen" is FALSE.** The two are
+orthogonal, not overlapping:
+
+| Surface | Graph resource | What it governs |
+|---|---|---|
+| **Existing** `/containertypes/{id}/permissions` | `applicationPermissions` | which **applications** may access containers, and with what scopes |
+| **New** `fileStorageContainerType.permissions` | `Collection(graph.permission)` (`grantedToV2`, `roles`) | which **people** own/administer the container type |
+
+→ **Retire NOTHING.** AC-4's "the superseded portion of the old screen is retired" has no referent.
+The POML's escalation trigger ("if retiring would remove a capability the new relationship does not
+provide") is *exactly* this case — retiring any of it would delete application-permission management
+outright. Resolution is non-destructive and obvious (don't retire), so it was recorded rather than
+escalated for adjudication. AC-4 is met vacuously: only one OWNER surface will exist.
+
+**2. `permissions` is beta-ONLY, and container types are delegated-ONLY. Those axes had never crossed.**
+
+| | v1.0 | beta |
+|---|---|---|
+| **delegated** (required — app-only is 403 on container types) | ✅ `ForUserAsync` — but **no** `permissions` | 🔴 **did not exist** — the only cell that works |
+| **app-only** | exists | `ForApp()` — 403 on container types |
+
+Proven live 2026-08-24, and the failure modes are decisive: v1.0 `/permissions` → **400 "Resource not
+found for the segment 'permissions'"** (routing fails *before* auth), while beta `/permissions` → 403,
+identical to the control GET on the same token (route exists, only auth stops it). CSDL agrees: v1.0
+`fileStorageContainerType` has **no navigation properties at all**.
+
+→ **`GraphClientFactory.ForUserBetaAsync` added** (builds clean). NOT an auth change: same OBO
+exchange, same Redis-cached token, same version-agnostic `.default` scope — only the base address
+differs. No new credential, no new `.WithClientSecret`, so **no ADR-028 A4/E-3 surface**. `baseUrl` is
+threaded through `CreateOnBehalfOfClientAsync` so the cache is shared both ways.
+
+**3. The SDK has no `.Permissions` builder** — `FileStorageContainerTypeItemRequestBuilder` does not
+define it (compiler-verified), because Graph 6.5.0 models v1.0. So list/add/remove must go through an
+untyped Kiota `RequestInformation` path. There is **no** precedent for that in this file — the nearest
+(`ApplicationPermissionGrants`) is a *typed* builder on `containerTypeRegistrations`, which IS in v1.0.
+
+**4. The "up to three owners" limit is UNSOURCED.** Zero occurrences of "owner" in
+`knowledge/sharepoint-embedded/docs/learn-containertypes.md`, and nothing in either CSDL constrains
+the collection. It is a SharePoint-admin-center UX claim per the POML. → State it as *"the SharePoint
+admin center allows up to three"*, never as a Graph-enforced fact, and still handle the API error
+rather than trusting the client-side guard.
+
+### ✅ Both unowned UI-review defects fixed (`bbdab7b32`) — see `notes/ui-review-defects-2026-08-24.md`
+
+1. **Manage Permissions → Dashboard.** `?page=…&containerId=…` was written by Search and read by
+   nobody; `activePage` was hard-initialised to `"dashboard"`. Params now read **top-level query
+   string first, then the `data` bag** (reading only `data` is exactly why in-app deep links died).
+2. **Expired trial invisible.** `assessTrialExpiry(ct, now)` added to `containerTypeLifecycle.ts` —
+   5 states, `unknown` never collapses to `live`, `now` injected. Surfaced on the grid, a page-level
+   MessageBar (`error` once expired), and the detail panel. Also corrected the **stale comment**
+   claiming the BFF never sends `expiryDateTime` — task 030 falsified that the same day it was
+   written. Third instance in this project of a confident comment outliving its truth.
+
+⚠️ **NEW measurement gap: SpeAdminApp has NO test runner** (no vitest/jest), and its `lint` script
+invokes an ESLint that is not installed. The client's entire logic surface — every lifecycle/billing
+assessment, the overridables parser, the compliance module — is verified by **nothing but `tsc`**.
+Standing up vitest is its own task; deliberately not done inside a defect fix.
 
 ### ✅ Task 028 done — and Graph itself committed this project's signature defect
 

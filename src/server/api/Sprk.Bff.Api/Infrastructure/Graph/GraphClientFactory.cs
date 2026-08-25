@@ -171,7 +171,15 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
     /// Phase 4: Caches OBO tokens (55-min TTL) to reduce Azure AD load by 97%.
     /// </summary>
-    private async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
+    /// <param name="baseUrl">
+    /// Graph base address for the resulting client. Defaults to v1.0. Threading it through here
+    /// rather than duplicating the exchange means the beta variant reuses the SAME on-behalf-of call
+    /// AND the same Redis token cache — the token is version-agnostic, so a cache hit acquired for a
+    /// v1.0 call serves a beta call and vice versa.
+    /// </param>
+    private async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(
+        string userAccessToken,
+        string baseUrl = GraphV1BaseUrl)
     {
         // Log configuration for debugging OBO issues
         _logger.LogInformation("OBO Token Exchange - CCA configured with ClientId from API_APP_ID");
@@ -207,7 +215,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
         {
             // Cache HIT - use cached token (~5ms vs ~200ms for OBO)
             _logger.LogInformation("Using cached Graph token (cache hit)");
-            return CreateGraphClientFromToken(cachedGraphToken);
+            return CreateGraphClientFromToken(cachedGraphToken, baseUrl);
         }
 
         // Cache MISS - perform OBO exchange
@@ -233,7 +241,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
             // Cache the token for 55 minutes (5-minute buffer before 60-minute expiration)
             await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, TimeSpan.FromMinutes(55));
 
-            return CreateGraphClientFromToken(result.AccessToken);
+            return CreateGraphClientFromToken(result.AccessToken, baseUrl);
         }
         catch (MsalUiRequiredException ex)
         {
@@ -307,23 +315,84 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// </summary>
     /// <param name="accessToken">Graph API access token (from cache or OBO exchange)</param>
     /// <returns>Configured GraphServiceClient with resilience handlers</returns>
-    private GraphServiceClient CreateGraphClientFromToken(string accessToken)
+    private GraphServiceClient CreateGraphClientFromToken(string accessToken) =>
+        CreateGraphClientFromToken(accessToken, GraphV1BaseUrl);
+
+    /// <summary>Graph v1.0 base address — the default for every delegated call.</summary>
+    internal const string GraphV1BaseUrl = "https://graph.microsoft.com/v1.0";
+
+    /// <summary>
+    /// Graph beta base address, for the narrow set of SPE surfaces v1.0 does not expose.
+    /// </summary>
+    internal const string GraphBetaBaseUrl = "https://graph.microsoft.com/beta";
+
+    /// <summary>
+    /// Creates a delegated (on-behalf-of) Graph client pointed at the <b>beta</b> endpoint.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Use this only where v1.0 genuinely cannot serve the request.</b> Today that is exactly one
+    /// surface: <c>fileStorageContainerType/{id}/permissions</c> — container-type owners.
+    /// </para>
+    /// <para>
+    /// <b>Why it has to exist</b> (task 027, measured 2026-08-24). Two facts cross:
+    /// container types reject application permissions outright (<b>403</b> app-only on both versions,
+    /// task 010/020), so they can only be read or written <i>delegated</i>; and the
+    /// <c>permissions</c> navigation property exists on <b>beta only</b> — absent from the v1.0 CSDL,
+    /// and a live v1.0 call returns
+    /// <c>400 "Resource not found for the segment 'permissions'"</c> while the identical beta call
+    /// returns 403 (i.e. the route exists and only auth stops it). Delegated-v1.0 and app-only-beta
+    /// both existed; delegated-beta, the only combination that can serve this, did not.
+    /// </para>
+    /// <para>
+    /// <b>This is not an auth change.</b> It reuses the SAME on-behalf-of exchange, the same cached
+    /// token, and the same <c>https://graph.microsoft.com/.default</c> scope — which is
+    /// version-agnostic, so one token addresses both endpoints. Only the base address differs. No new
+    /// credential, no new <c>.WithClientSecret</c> site, and therefore no ADR-028 A4/E-3 surface.
+    /// </para>
+    /// <para>
+    /// It does reintroduce a deliberate version split on container types (list/get/create/settings on
+    /// v1.0, owners on beta), mirroring the documented precedent task 020 set for containers. The
+    /// split is narrow and is stated at each call site rather than left for a reader to discover.
+    /// </para>
+    /// </remarks>
+    public async Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default)
+    {
+        var userAccessToken = TokenHelper.ExtractBearerToken(ctx);
+
+        _logger.LogDebug(
+            "ForUserBetaAsync called (beta endpoint — SPE container-type owners) | TraceId: {TraceId}",
+            ctx.TraceIdentifier);
+
+        return await CreateOnBehalfOfClientAsync(userAccessToken, GraphBetaBaseUrl).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates a GraphServiceClient from an access token (cached or freshly acquired).
+    /// Helper method to reduce duplication between cache hit and cache miss paths.
+    /// </summary>
+    /// <param name="accessToken">Graph API access token (from cache or OBO exchange)</param>
+    /// <param name="baseUrl">Graph base address — v1.0 by default; beta only where v1.0 cannot serve.</param>
+    /// <returns>Configured GraphServiceClient with resilience handlers</returns>
+    private GraphServiceClient CreateGraphClientFromToken(string accessToken, string baseUrl)
     {
         // Create a simple token credential that returns the provided access token
         var tokenCredential = new SimpleTokenCredential(accessToken);
 
         var authProvider = new AzureIdentityAuthenticationProvider(
             tokenCredential,
+            // Version-agnostic: one .default token addresses both v1.0 and beta.
             scopes: new[] { "https://graph.microsoft.com/.default" }
         );
 
         // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
         var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
 
-        _logger.LogDebug("Created Graph client with centralized resilience handler");
+        _logger.LogDebug("Created Graph client with centralized resilience handler | Base: {BaseUrl}", baseUrl);
 
-        // Use v1.0 endpoint - SharePoint Embedded containers work with v1.0 drives endpoint
-        // Container ID can be used directly as Drive ID in: /v1.0/drives/{containerId}/root:/path:/content
-        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/v1.0");
+        // v1.0 by default — SharePoint Embedded containers work with the v1.0 drives endpoint, and a
+        // container ID is usable directly as a Drive ID in
+        // /v1.0/drives/{containerId}/root:/path:/content
+        return new GraphServiceClient(httpClient, authProvider, baseUrl);
     }
 }
