@@ -137,6 +137,183 @@ None of design §5.1 is built. This is not part of 021 and should not be smuggle
 - NFR-05 standing role-depth assertion — task **034** family
 - BU restructure itself is **UAT/environment work**, per spec § UAT & Environment Setup
 
+---
+
+# Addendum — investigations requested 2026-08-25
+
+## A. 🚨 How SPE actually resolves a container — the answer is neither of the two options
+
+The question was "does it read the container id on the record, or the associated business unit's?"
+**It does a third thing, and that third thing breaks the per-project model.**
+
+**The CLIENT resolves the container from the *acting user's* business unit and passes it to the BFF.**
+The BFF deliberately does not resolve it at all. From `IComposeService.cs:743-751`:
+
+> *CLIENT-SUPPLIED SPE container (or drive) id … The client resolves this via the existing wizard
+> cascade (`resolveBusinessUnitContainerId` → `businessunit.sprk_containerid`) and passes it in.
+> Required when `DocumentSpeId` is absent; **the BFF does NOT resolve a business-unit → container
+> mapping server-side** (multi-container INV-7 — the resolver stays in the wizards).*
+
+The canonical client resolver, `getSpeContainerIdFromBusinessUnit` (`xrmProvider.ts:97`), is
+explicitly `userId → systemuser.businessunitid → businessunit.sprk_containerid`. The same
+user-BU→container chain is repeated in at least seven places: `CreateMatterWizard/main.tsx:101`,
+`sprk_wizard_commands.js:115`, `useWizardPageBootstrap.ts:184`, `WorkspaceGrid.tsx:535`,
+`SemanticSearchControl/NavigationService.ts:361`, `EntityCreationService.applyUserBuDefaults`, and the
+five `*WizardDialog.tsx` callers.
+
+**Zero server-side paths read `sprk_containerid` off a `sprk_project` row** other than provisioning's
+own idempotency check. The field is written by the cascade and read by essentially nobody.
+
+### Why this breaks secure projects three ways
+
+1. **A per-project container stamped on the project would not be used.** Uploads resolve from the
+   acting user's BU, so documents land wherever that user's BU points — not in the project's container.
+2. **Users stay in the Operations subtree** (design §5.2) while secure records are owned in
+   `Secure Projects`. So the acting user's BU is an *Operations* BU, and secure-project documents
+   would be written into the **general Operations container**, reachable by anyone with access to it.
+3. **The single `Secure Projects` BU has one container id**, so a BU-based resolution cannot give
+   per-project isolation even if the user were somehow in that BU.
+
+### What this implies
+
+Per-project containers require the container to be resolved **from the record** (the project or matter
+the document belongs to), not from the acting user. That contradicts the documented invariant INV-7
+("the resolver stays in the wizards") and touches every upload path — Office save, email attachment
+ingest, Compose create-on-save, wizard document add. **This is the largest single piece of work the
+secure-project model needs, and it is not in any current task.** It is also not
+unified-access-control-r2 scope as written; it needs its own project or a spec amendment.
+
+## B. Business unit resolution must be by NAME, not GUID — confirmed, and it is a small change
+
+Current code resolves the **root** BU via `parentbusinessunitid eq null`
+(`ResolveRootBusinessUnitIdAsync`). Replacing that with a name lookup is straightforward:
+
+```
+GET businessunits?$filter=name eq '{configuredName}'&$select=businessunitid&$top=2
+```
+
+Notes for implementation:
+- **Business unit names are unique per organisation in Dataverse**, so a name lookup is deterministic.
+  Select `$top=2` and fail if more than one comes back rather than silently taking the first.
+- Put the name in configuration (e.g. `SecureProjects:BusinessUnitName`, default `"Secure Projects"`)
+  rather than hard-coding it, so a customer rename does not require a deploy.
+- **Fail closed and loudly** if the BU is not found — provisioning must not fall back to the root BU
+  or the caller's BU. A missing `Secure Projects` BU is an environment-setup error.
+
+## C. Owner = team. A service account is NOT necessary — the owner's instinct is right
+
+Dataverse facts that settle this:
+
+- **Every business unit automatically gets a default owner team on creation**, named after the BU. So
+  "the team that corresponds to the Secure Projects business unit" **already exists** and needs no
+  provisioning.
+- `sprk_project` is user-or-team owned (`ownerid` is an `OWNER` field, confirmed in live metadata), so
+  a team is a valid owner.
+- **Ownership is independent of privileges.** A team can own records with no security roles at all.
+
+So team ownership parks the record in `Secure Projects` with **no licence cost, no credential to
+manage, and no service-account identity to audit**. It is strictly better than a service account here.
+The only requirement is that the BFF application user holds `Assign` + `Write` on `sprk_project` to
+set the owner.
+
+**Recommendation: use the BU's default owner team. Do not introduce a service account.**
+
+## D. What security role does the secure-project team need? **None — and definitely NOT System Administrator**
+
+This is the most important thing to get right, because the intuitive answer is dangerous.
+
+- A team's security roles determine what **team members** can do. They do **not** grant or restrict the
+  team's ability to *own* records.
+- **System Administrator on that team would be catastrophic**: every member would gain org-wide admin,
+  and it would nullify NFR-05 completely — sysadmin reaches every business unit by definition.
+- Any role granting Read on `sprk_project` at Business-Unit depth would also break §5.1, because team
+  members would then read **every** secure project by membership rather than by explicit share.
+
+**Recommendation: the owner team carries no security roles, and ideally no members.** It exists solely
+to hold ownership so records sit in the `Secure Projects` BU. All human access then comes from the
+explicit share, exactly as §5.1 specifies.
+
+⚠️ **One mechanism detail that must not be missed.** A POA share is only effective if the user also
+holds the entity-level privilege at *some* depth. A user with **zero** Read privilege on
+`sprk_project` cannot see a shared secure project. So the normal user roles must retain Read on
+`sprk_project` at **Basic/User depth** — which is harmless (it grants nothing without ownership or a
+share) and is what makes sharing work. If roles were stripped of `sprk_project` Read entirely to
+"secure" things, sharing would silently stop working.
+
+## E. Licensed-user access: named shares vs a per-record access team
+
+Both satisfy §5.1's "explicit Dataverse share". The trade:
+
+| | Direct POA share per user | **Access team per record** |
+|---|---|---|
+| POA rows | N per record | **1** per record |
+| Add/remove a person | write/delete a POA row | `AddUserToRecordTeam` / `RemoveUserFromRecordTeam` |
+| Dataverse guidance | fine at low volume | **the purpose-built mechanism** for per-record sharing at scale |
+| Extra dependency | none | a team template |
+
+**Recommendation: access teams**, for three reasons — Dataverse's own recommended pattern for exactly
+this shape; revocation becomes one membership delete instead of hunting POA rows; and the codebase
+**already has POA-with-teams** in `PlaybookSharingService.cs:302-350`. Per project CLAUDE.md that code
+is to be *consolidated* with `IDataverseAccessGrantService`, **not forked a third time** — so building
+this on access teams reuses an existing seam rather than adding one.
+
+Do **not** create a static per-project owner team; that is BU-per-project proliferation wearing a
+different hat.
+
+## F. External (non-licensed) contact access — needs live verification, not code review
+
+The mechanism exists and has been worked on across tasks 007/010/016/017: `CallerPrincipalResolver` →
+`AccessibleRecordSetService` → `sprk_externalrecordaccess` grants, with expiry (007), idempotent
+upsert + full-key revoke (010), and closure cascade (016/017). What is **not** verified is any of it
+against a live tenant — that is task **034**, which already owns RPA live verification.
+
+Specific cases to test, which existing notes flag as unproven:
+- Expiry: past-expiry gone, today's expiry still works, **null expiry unaffected** — test null FIRST,
+  because if that predicate is wrong external access is down for nearly everyone (task 007 note)
+- A contact grant on a secure project confers access on the SPA and **not** on the MDA
+- Closure revokes both the Dataverse rows and the SPE container membership (016/017)
+- The §4.5 Secure veto suppresses derived + org terms — **unbuilt**, task 037
+
+## G. Create Project Wizard — promote Secure Project to its own step (owner request, 2026-08-25)
+
+Today it is a **section inside** the single form step: `CreateProjectStep.tsx:402` renders
+`<SecureProjectSection>` beneath the ordinary fields, driven by one toggle
+(`SecureProjectSection.tsx`), and the wizard branches on `formValues.isSecure` in three places
+(`CreateProjectWizard.tsx:453, 686, 805-814`).
+
+Making it a discrete step is worth doing for reasons beyond layout:
+
+- **The decision is irreversible.** `projectService.ts:280-284` notes `sprk_issecure` is only ever set
+  to `true` — "once a project is secure, the designation is irreversible". A one-way choice buried
+  under a form is the wrong weight of UI for the consequence.
+- **A dedicated step is where the access model gets captured.** Once §5.1 is implemented, creating a
+  secure project needs *who gets the initial explicit share* — the creating attorney is not enough,
+  because ownership no longer grants them anything. That input has nowhere to live in the current
+  layout, and it is precisely what the FR-28 task will need to collect.
+- **It gives the container decision a home.** Per §A, a secure project needs its own SPE container
+  rather than the cascade from the creator's BU. A step can state that explicitly instead of the
+  cascade silently applying.
+- **It separates provisioning failure from field validation.** `ProvisioningProgressStep` already
+  exists as its own step; a secure-project step in front of it makes the sequence legible
+  (choose secure → confirm access → provision).
+
+Sequencing note: the step should be authored **with** the FR-28 access-model work, not before it.
+Shipping an empty step that only relocates one toggle adds a click and no value; shipping it as the
+place where initial shares and the container are declared is the version that earns its place. Filed
+accordingly in §H.
+
+## H. Summary of what the secure-project model still needs
+
+| Gap | Owner |
+|---|---|
+| Stop creating BUs; resolve `Secure Projects` **by name**; own via its default team | **re-scoped 021** |
+| Per-project SPE container **provisioned and actually used** | ⚠️ **new project/spec amendment** — the resolver is client-side and user-BU-based (§A) |
+| Explicit share to the creating attorney; access-team mechanism | **new task** (FR-28) |
+| Owner-team role posture (none) + keep Basic Read on `sprk_project` in user roles | environment setup + NFR-05 assertion |
+| Secure veto on derived/org terms | task **037** |
+| Live verification of external contact access | task **034** |
+| Create Project Wizard: Secure Project as its own step | **with the FR-28 task**, not before it (§G) |
+
 ## 7. What this review did NOT cover
 
 Closure (`ProjectClosureEndpoint`) was reviewed in tasks 016/017 and is not re-examined here. The
