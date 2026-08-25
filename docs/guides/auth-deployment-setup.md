@@ -29,6 +29,7 @@ Spaarke is deployed **per-customer-tenant**. Each customer has their own App Ser
 3. [App Service configuration (server side — 8 settings)](#3-app-service-configuration-server-side--8-settings)
 4. [Key Vault secrets](#4-key-vault-secrets)
 5. [Azure AD permissions for BFF managed identity (replicate from app reg)](#5-azure-ad-permissions-for-bff-managed-identity-replicate-from-app-reg)
+   - [5.1 Azure data-plane RBAC for the UAMI (non-Graph)](#51-azure-data-plane-rbac-for-the-uami-non-graph)
 6. [Dataverse Application User for BFF managed identity](#6-dataverse-application-user-for-bff-managed-identity)
 7. [Exchange Online — ApplicationAccessPolicy for mailbox access](#7-exchange-online--applicationaccesspolicy-for-mailbox-access)
 8. [Deploy + restart](#8-deploy--restart)
@@ -391,7 +392,8 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 |---|---|---|
 | ~~`BFF-API-ClientSecret`~~ | **DELETED 2026-08-24** (task 033, ADR-028 A4) along with its lowercase duplicate `bff-api-client-secret`. The BFF identity is secret-free — it authenticates with a managed-identity federated credential. **Do not re-create it.** | **n/a — nothing to rotate.** A federated assertion is minted per exchange and has no expiry to roll |
 | `Dataverse-ServiceUrl` | Dataverse env URL (`https://{org}.crm.dynamics.com`). | Static per env (immutable) |
-| `ServiceBus-ConnectionString` | Service Bus namespace connection string. | Rotated with namespace key rotation |
+| ~~`ServiceBus-ConnectionString`~~ | **RETIRED 2026-08-24** (task 051). The BFF authenticates to Service Bus with the **UAMI**, not a SAS. Set the `ServiceBus__FullyQualifiedNamespace` App Setting and grant the data-plane roles in **§5.1** instead. Deleted from `spaarke-spekvcert` 2026-08-25. **Do not re-create it** — `Configure-ProductionAppSettings.ps1` and `Provision-Customer.ps1` still write it and are pending update. | **n/a — nothing to rotate.** |
+| ~~`AiSearch--AdminKey`~~ | **RETIRED 2026-08-24** (task 053). AI Search uses the UAMI. Set `AiSearch__ManagedIdentity__Enabled=true` and grant the roles in **§5.1**. Deleted 2026-08-25. ⚠️ `scripts/ai-search/Deploy-AllIndexes.ps1` **silently re-mints an admin key** if this secret is absent — gate that before running it against a secret-free environment. | **n/a — nothing to rotate.** |
 | `Redis-ConnectionString` | Azure Cache for Redis primary access key. | Rotated with Redis key rotation |
 | `communication-webhook-signing-key` | HMAC key for Microsoft Graph subscription webhooks (Communication module). | Every 90 days or on incident |
 | `Email-WebhookSigningKey` | HMAC key for Dataverse Service Endpoint webhooks (Email module). | Every 90 days or on incident |
@@ -481,6 +483,59 @@ az rest --method GET \
 ```
 
 Output should match Step 5a one-for-one. If counts differ, the MI will fail at Graph with `403 Insufficient Privileges` on first call.
+
+---
+
+### 5.1 Azure data-plane RBAC for the UAMI (non-Graph)
+
+> **Added 2026-08-25** by `spaarke-auth-v4-dataverse-MI` task 090, promoting the standing contract out of
+> that project's `notes/PROVISIONING-CHANGE-REQUEST.md` §10 — a change request is a point-in-time record,
+> but this is needed **every time an environment is stood up**.
+
+§5 grants the UAMI its **Graph** app roles. These are the **Azure data-plane** roles that used to be carried
+by a SAS token or an API key, and are now the UAMI's job. Miss one and the symptom is a runtime 401/403 from
+that service only — the BFF still boots and `/healthz` still returns 200.
+
+| Resource | Role | Replaces |
+|---|---|---|
+| Service Bus namespace | `Azure Service Bus Data Sender` **+** `Azure Service Bus Data Receiver` | the SAS connection string (task 051) |
+| Azure AI Search | `Search Index Data Contributor` **+** `Search Service Contributor` | `AiSearch--AdminKey` (task 053) |
+| Key Vault | `Key Vault Secrets User` | — required for `keyVaultReferenceIdentity` (§1) to resolve at all |
+| Azure OpenAI / Content Safety | `Cognitive Services User` | the API key (ADR-028 E-2) |
+| Cosmos DB | `Cosmos DB Built-in Data Contributor` (data-plane, see §3) | — |
+
+```bash
+UAMI_PRINCIPAL_ID=<uami principalId>   # principalId, NOT clientId — the commonest silent error
+SUB=<subscription-id>; RG=<resource-group>
+
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Azure Service Bus Data Sender" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.ServiceBus/namespaces/<ns>"
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Azure Service Bus Data Receiver" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.ServiceBus/namespaces/<ns>"
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Search Index Data Contributor" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Search/searchServices/<svc>"
+```
+
+And the matching App Settings — **namespace, not connection string**:
+
+```bash
+ServiceBus__FullyQualifiedNamespace               = <ns>.servicebus.windows.net
+Membership__EventPublisher__ServiceBusNamespace   = <ns>.servicebus.windows.net
+Membership__JunctionUpdater__ServiceBusNamespace  = <ns>.servicebus.windows.net
+AiSearch__ManagedIdentity__Enabled                = true
+AiSafety__ContentSafety__ManagedIdentity__Enabled = true
+```
+
+⚠️ **Order matters.** `Graph__Credentials__RequireSecretFreeIdentity=true` (§3) is **fail-fast by design** —
+an environment that sets it before the UAMI and its federated credential exist **will not start**. Provision
+the identity first, then the setting. Never the reverse.
+
+> **Why these are easy to miss**: the SAS and the admin key were *secrets*, so they appeared in the Key Vault
+> checklist (§4) where an operator would look. Their replacements are **role assignments on other resources**,
+> which appear nowhere unless written down. That asymmetry is the whole reason this section exists.
 
 ---
 

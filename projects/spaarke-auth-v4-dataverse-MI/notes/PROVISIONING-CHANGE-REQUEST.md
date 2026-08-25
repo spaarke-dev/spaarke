@@ -533,6 +533,25 @@ Full reasoning: [`notes/decisions/031-obo-verification-dev.md`](decisions/031-ob
 >
 > **Short answer to "does provisioning need to change what it packages?" — yes, in five places.**
 
+> ### ✏️ CORRECTION (2026-08-25, same day) — two of the five were already handled
+>
+> After writing §10 we checked [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md)
+> rather than assuming. Task 033's doc sweep had **already** folded in two of the five:
+>
+> - **Delta 4 (`keyVaultReferenceIdentity`)** — covered in §1 Prerequisites.
+> - **Delta 5 (Dataverse application user for the UAMI)** — covered by its own §6, including the exact
+>   403 / `0x80072560` symptom.
+> - Deltas **1–3** (Service Bus, AI Search, the credential app settings) were the genuine gaps. The
+>   credential settings were partly covered; the **Group-2 RBAC was not covered at all**.
+>
+> **Genuinely new work is therefore 2 of 5, not 5 of 5.** Overstating the delta is its own failure — it
+> invites a reader to discount the whole list.
+>
+> **This contract has since been PROMOTED** into `auth-deployment-setup.md` **§5.1 — Azure data-plane RBAC
+> for the UAMI**, and the retired Key Vault secrets are struck through in its §4 table with the
+> `Deploy-AllIndexes.ps1` silent-re-mint warning attached. **Use the guide as the operational source.**
+> §10 below stays as the origin/reasoning record.
+
 ## 10.1 The five deltas
 
 | # | What provisioning does today | What the BFF now needs | Where |
