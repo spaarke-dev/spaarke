@@ -1,7 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-25 · **Branch**: `work/spaarkeai-compose-r8` · **Pushed through**: `ab7451e33`
-> **Mode**: AUTONOMOUS — parallel sub-agent execution, operator asked for no per-task confirmation.
+> **Last Updated**: 2026-08-25 · **Branch**: `work/spaarkeai-compose-r8`
+> **Mode**: AUTONOMOUS parallel sub-agent execution.
 
 ---
 
@@ -9,38 +9,53 @@
 
 | Field | Value |
 |-------|-------|
-| **Wave in flight** | **055** (client) + **049** (server) — two opus sub-agents, dispatched 2026-08-25 |
-| **Status** | 🔄 both in progress. Main session owns bookkeeping + commits; agents own code. |
-| **Next Action** | Await both agent reports → verify their claims (do NOT take them at face value) → run the full suites myself → commit → dispatch wave 2. |
+| **Done this wave** | **055** ✅ `452f55a73` · **049** ✅ `7a0f9ab29` · **057** ✅ `1f62af7fd` |
+| **In flight** | **056** (objects carried) — main tree, mid-edit |
+| **⚠️ UNVERIFIED ON BRANCH** | **060** cherry-picked as `3cb96d974` + `79884ed53`, **suite NOT yet run against the R8 branch** |
+| **Next Action** | When 056 lands: `dotnet build` + FULL `dotnet test tests/unit/Sprk.Bff.Api.Tests/` to verify 056 AND 060 together, then push. Then dispatch **052**. |
 
-### Why these two run in parallel despite `parallel-safe: false`
+### ⚠️ Why 060 is not yet verified
 
-The project sets a BLANKET `parallel-safe: false` on the whole Compose spine. Verified disjoint here:
+Its agent worked in an isolated worktree branched from **master @ `845b4cdc9`**, not from this branch — so its
+"10,665 passed" is against a **master baseline of 10,615**, not this branch's ~11,192. The cherry-picks
+applied cleanly and the new code compiles, but **the suite has never been run with 060's code against this
+branch's own tests.** Do that before pushing.
 
-| Task | Files | Toolchain |
-|---|---|---|
-| **055** | `src/client/shared/Spaarke.Compose.Components/**` | jest |
-| **049** | `src/server/api/Sprk.Bff.Api/Services/Compose/*.cs`, `tests/**`, residual-loss doc | dotnet |
+A `dotnet build` right now fails on `TryCarryEmbeddedObjects` in `ComposeDocxProjectionBuilder.cs` — that is
+**056 mid-edit**, not 060. Do not diagnose it as a cherry-pick problem.
 
-No shared file, no shared build output. Two hazards were reserved to the MAIN SESSION and both agents were
-told explicitly not to touch them: `TASK-INDEX.md` / `current-task.md`, and `.claude/**` (sub-agents cannot
-write those paths — root §3; they report proposed CHANGELOG text instead). Agents also must not
-commit/push.
+### 🔔 Task 060 — FIVE items needing OWNER decision (do not decide these autonomously)
 
-### Wave 2 (ready, NOT yet dispatched)
+1. **The POML's premises were partly wrong, and the agent could only verify the code side.** "Blob infra
+   provisioned with managed-identity RBAC" is **false for two of three bicep stacks** — `customer.bicep`
+   and `stacks/model1-shared.bicep` never pass `appServicePrincipalId`, so no role assignment is created.
+   Where `model2-full` does pass it, it grants the **system-assigned** identity while the BFF pins a
+   **UAMI** when `Graph:ManagedIdentity:ClientId` is set. **Nobody has checked which stack the live
+   environments actually use.** Until this is resolved the store cannot authenticate in production.
+2. **Container choice** — `ai-chunks` was used (provisioned everywhere, AI-domain, zero consumers). A
+   dedicated `session-files` container is a one-line bicep change, deliberately left as the owner's call.
+3. **ADR-015 retention/erasure is undefined for this store** — taken as §6.5 **Path A**, bounded by a
+   mechanical gate: `SessionFileStore:BlobEndpoint` ships EMPTY, so the non-compliant state is
+   unreachable until tasks 062/063 land. Needs owner confirmation in `design.md` ADR Tensions.
+4. **ADR-015's governed-stores table needs a row** — §6.5 **Path B**; text drafted, `.claude/` is
+   main-session-only.
+5. **`X-Tenant-Id` header fallback — the highest-severity thing this surfaced.** Pre-existing and
+   repo-wide, but this task promotes it from a 4-hour cache key to a **durable 90-day partition key**.
+   Not changed (four handlers + the auth path); both write sites now log a Warning naming the
+   header-derived tenant.
 
-- **060** — Track B durable byte store. Genuinely independent (`Services/Ai/Sessions/**`, no Compose
-  files), deps none, the only `parallel-safe: ✅` family in the project. Held back from wave 1 ONLY
-  because it is dotnet and would contend with 049 on `bin`/`obj` locks — dispatch it once 049 lands, or
-  give it worktree isolation.
-- **056** — objects carried; deps 040, 048, **049**.
-- **052** — demote text-search; deps 051, 054, **055**.
+Also: 060 shipped **disabled** by design (`BlobEndpoint` empty), and **nothing was executed against real
+Azure** — no storage account, no MI, no RBAC. Every blob assertion is against an in-memory gateway.
 
-### On agent reports
+### Wave discipline that is working — keep it
 
-Treat them as claims, not results. This project's recurring failure is a green suite over a dark link —
-task 054 alone found six. Before marking anything complete: re-run the suites in the main session, and
-spot-check that each test the agent says it "observed to fail first" actually asserts what it claims.
+- Verify agent reports, do not accept them. Caught so far: a suite failure the agent did not have (an SSE
+  flake under concurrent-agent CPU load), a publish-size number that differed from mine by 1.3 MB, and a
+  doc claim ("bold/italic/underline survive") that was true of the server path only.
+- Main session owns `TASK-INDEX.md`, `current-task.md`, `.claude/**` and ALL git operations. Agents own
+  code only. This has prevented every collision so far.
+- **Do not run `dotnet build`/`test` while an agent is mid-edit in the same tree** — you will read its
+  half-finished work as a regression.
 
 ---
 
