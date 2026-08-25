@@ -1,8 +1,8 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-25 (**021 COMPLETE** — live 409 regression closed; 2 owner findings)
-> **Recovery**: read "Quick Recovery" first. History lives in
-> [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
+> **Last Updated**: 2026-08-25 (by context-handoff) — **021 + 045 complete; MERGED TO MASTER**
+> **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
+> the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
 ---
 
@@ -10,223 +10,126 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **045 COMPLETE — CI IS UNBLOCKED** · ✅ 021 · ✅ 022 |
-| **Step** | **`Router = SUCCESS` at `c5edf2448`** — the first CI-adjudicated state of this branch since `ffc2cb1de`. 22 checks pass, 0 failures |
-| **Status** | clean + pushed. PR #812 is **MERGEABLE** (was CONFLICTING) |
-| **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 3 of 12** (**021 ✅ 022 ✅ 045 ✅** · remaining: **046** 047 023 024 025 026 027 028 029) |
-| **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft |
-| **Next Action** | **Task 046 — create the `Secure Project Owner` role and REMOVE System Administrator from the owner team** (owner-approved 2026-08-25). Then **047** (live provisioning validation, needs a deploy). After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
+| **Task** | ✅ **021 + 045 COMPLETE and MERGED TO MASTER** (`290d9ab79`) |
+| **Step** | Between tasks. Nothing in flight, nothing uncommitted |
+| **Status** | clean · `Router = SUCCESS` · **PR #812 is MERGED** — continued work needs a NEW PR |
+| **Phase** | **Phase 0 — 14 of 20** (001–010, 014, 016, 017, 019 ✅ · remaining **011 012 013 015 018 020**) · **Phase 0b — 3 of 12** (**021 ✅ 022 ✅ 045 ✅** · remaining **046 047** 023 024 025 026 027 028 029) |
+| **Next Action** | **Run task 046** — [`tasks/046-secure-project-owner-role.poml`](tasks/046-secure-project-owner-role.poml). Live Dataverse config; no deploy needed; can start immediately. **Then the operator deploys the BFF to dev, then task 047.** |
 
-### ✅ RESOLVED — the CI blocker (task 045)
+### The one thing that needs the OPERATOR, not the agent
 
-Full diagnosis: [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
+**Task 047 (live provisioning validation) needs the BFF deployed to dev.** The `Deploy BFF API`
+workflow is **`disabled_manually`**, so that deploy is operator-driven. Sequence:
+**046 (agent) → deploy (operator) → 047 (agent).**
 
-**FIXED. `Router = SUCCESS` at `c5edf2448`; PR #812 is `MERGEABLE`.** The cause: a conflicted PR produces **NO gate rather than a red one** —
-GitHub cannot compute `refs/pull/812/merge`, so it dispatched **zero workflows** for `2035b1d16`
-(last session) and `99408eee5` (task 021). Not queued, not failed — no `github-actions` check suite
-at all. ⚠️ Last session I said `2035b1d16`'s run was "starting now"; that was an assumption and it
-was **wrong**.
+### Live Dataverse facts task 046 needs (verified 2026-08-25 — do NOT re-derive from docs)
 
-The conflict is trivial — **one hunk in `projects/INDEX.md`** (master inserted the auth-v4 row where
-this branch holds its own row; keep both). But resolving it pulls master in, and a **trial merge
-(aborted, not committed) produced 22 failures** from two independent causes:
+| Fact | Value |
+|---|---|
+| Secure BU | **`Secure Project`** — SINGULAR — `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, parent = root `Spaarke`, created 2026-08-25 08:28 |
+| Its default owner team | `Secure Project` — `daec0b6f-80a0-f111-aaac-000d3a99d1d7`, `teamtype=0` (Owner), `isdefault=Yes` |
+| Team members | **ZERO** ✅ (design §5.1a requires this) |
+| Team roles | **ONLY `System Administrator`** (`3980a53d-b0cf-3ded-37c8-4d4f9b94acef`) — 🔴 task 046 removes this |
+| Roles matching `Secure%` | **NONE EXIST** — `Secure Project Owner` has never been created |
+| Secure projects in dev | **ZERO — none has ever been provisioned** |
+| `SP-*` per-project BUs | **NONE** — the retired mechanism never succeeded, so there is no legacy debris |
+| Root BU `Spaarke`.`sprk_containerid` | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` |
+| `Secure Project` BU.`sprk_containerid` | **`null`** ✅ correct by design |
+| Dev BFF app service | **`spaarke-bff-dev`** in `rg-spaarke-dev` (the e2e spec's `spe-api-dev-67e2xz` default is STALE) |
+| `SharePointEmbedded__ContainerTypeId` | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` ✅ configured |
+| `SecureProject__BusinessUnitName` | **NOT SET** → the endpoint uses the code default, which is why the singular/plural fix was load-bearing |
 
-| Cause | What | Fix |
-|---|---|---|
-| **A** 🔔 | `CallerRecordAccessProbe.cs:134,137` (**task 008's**) calls `.WithClientSecret` → master's auth-v4 forcing functions **FR-F1 + FR-F2** both fail | Inject `IConfidentialClientProvider`, construct no credential. **Security path → owner decision (CLAUDE.md §6)** |
-| **B** | Master widened `DataverseWebApiClient`'s ctor to 4 params; Moq needs an exact match, so `Mock<DataverseWebApiClient>(config, logger)` throws in **5 fixtures** | One line per fixture |
+⚠️ **Three projects share that root-BU container id** (`Intellectual Asset Management System Patent`,
+`Clarivate Plc Q3 2025 Earnings Disclosure`, `Test New Matter via Workspace`). That is the wizard's BU
+cascade stamping SHARED storage onto projects — the mechanism behind both the 409 regression and design
+§5.1c's isolation gap. **For task 047: assert INEQUALITY against every BU container, never presence of
+a value** — a populated field is exactly the false positive.
 
-**Cause A is item D1 with its premise expired.** D1 was accepted 2026-08-23 as an ADR-028 A4 path-A
-exception *"to be handled in the broader MI migration"* — auth-v4 **completed 2026-08-24 and closed
-E-3**, and could not have handled a site living on an unmerged branch. The guard's own message says
-*"A failure here is NOT a prompt to update the number"*, so allowlisting is explicitly the wrong move.
+### 🔴 Task 046's headline finding, restated so it is not lost
 
-**Consequence to be clear about: nothing on this branch can be CI-verified until this is done.**
-Task 021's own verification is local-only (all 7 projects 11,443/0, NetArchTest 36/36, publish
-43.70 MB, both gates clean) — but that is *not* the Router, by this project's own standing lesson.
+The owner team holds **`System Administrator`**. It is memberless so nothing is exposed *today*, but it
+is one membership row from full admin rights on the BU that NFR-05 exists to guard, and review §D says
+of this exact question *"None — and definitely NOT System Administrator."*
 
-**Recommended**: one new task, ordered AHEAD of the remaining Phase 0/0b work — (1) migrate
-`CallerRecordAccessProbe` per the owner's ruling, (2) fix the 5 mock ctors, (3) merge master keeping
-both INDEX rows, then **confirm a check suite actually exists** before claiming green. Fold in the
-auth-v4 PR comment's two `DATAVERSE-ACCESS-LAYER-ROUTING.md` corrections while there.
+**Consequence**: task 021's escalation trigger for "the team lacks entity privileges" **cannot fire in
+dev** — assignment succeeds because the team is omnipotent, not because it is correctly scoped. **A
+green provisioning run in dev is NOT evidence the role is configured.**
 
-### ✅ Task 021 — what shipped
+⚠️ **046 treats design §5.1a's privilege list as a HYPOTHESIS, not a spec.** For a team that owns the
+records, **User depth may suffice** and is tighter than the Business-Unit depth currently written down —
+which would *narrow* NFR-05's exemption. Determine empirically; record the error that forced each
+privilege you add.
 
-Full record: [`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md) § "What shipped".
+---
 
-Provisioning now: resolves the canonical BU **by name** from `SecureProject:BusinessUnitName`
-(`$top=2`, fails closed on absent AND ambiguous, **never** falls back) → resolves that BU's **default
-owner team** by `_businessunitid_value + isdefault + teamtype=0` → assigns `ownerid` and **reads the
-owner back to verify** → creates the project's own SPE container → records it on `sprk_containerid`,
-**failing loudly with the container id** if that write cannot land (ADR-003).
+## What 021 and 045 shipped (both on master)
 
-**Deleted**: BU creation, account creation, both rollbacks, `ResolveRootBusinessUnitIdAsync`,
-`ResolveAccountForBuAsync`, `AttemptRollbackBuAsync`, the umbrella branch, `UmbrellaBuId`, and three
-response members. `sprk_externalaccount` — the project's **CLIENT** lookup — is now never written, and
-a test fails if it reappears in any payload.
+**021 — provisioning matches design §5.1.** Resolves the ONE canonical BU **by name** from
+`SecureProject:BusinessUnitName` (`$top=2`, fails closed on absent AND ambiguous, never falls back) →
+assigns the project to that BU's **default owner team** and **reads the owner back to verify** →
+creates the project's own SPE container → records it on `sprk_containerid`, **failing loudly with the
+container id** if that write cannot land (ADR-003). Deleted: BU creation, account creation, both
+rollbacks, three resolvers, the umbrella branch, and three response members. `sprk_externalaccount` —
+the project's **CLIENT** lookup — is never written, pinned by a test.
 
-**The live 409 regression is closed.** The marker is now **ownership**, which only provisioning
-writes; `sprk_containerid` was shared state (the wizard's BU cascade writes it at create time), which
-was the whole bug. `_sprk_securitybu_value` is still read as a *legacy* marker so retired-mechanism
-projects are refused rather than silently migrated.
+**The live 409 regression is CLOSED.** The marker is now **ownership**, which only provisioning writes;
+`sprk_containerid` was shared state, which was the whole bug.
 
-**Ordering is load-bearing**: ownership is assigned BEFORE the container, because ownership is the
-*security* step. A container failure then leaves the record correctly owned inside the Secure Project
-BU; reversed, it would leave a secure project owned by its creator in an Operations BU. There is
-deliberately **no rollback** of the assignment — rolling it back would turn a storage failure into a
-disclosure.
+**045 — auth-v4 integration.** `CallerRecordAccessProbe` ported off its own client secret onto
+`OrderedCredentialClientProvider` (ADR-028 A4; FR-F1/FR-F2 pass with **no** allowlist or census entry).
+Plus 5 Moq ctor sites, 6 fixtures needing `Graph:ManagedIdentity:Enabled`, and master's own 6 stale
+tests. Full write-ups: [`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md)
+and [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
 
-### 🔔 TWO OWNER FINDINGS from 021 — read these
+### ⚠️ What is NOT achieved yet — do not overstate this on master
 
-**1. The BU name in every doc was WRONG — it is `Secure Project`, SINGULAR.** design §5.1, spec
-FR-28/NFR-05 and 021's own POML all said `Secure Projects`. Live metadata:
-`d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, name **`Secure Project`**, parented to root `Spaarke`.
-Shipping the plural as the config default would have failed closed on *every* call — right direction,
-fabricated reason, and it would have read as a missing environment rather than a wrong string.
-Corrected in design.md + spec.md; pinned by a test. **Eighth "docs lose to live metadata" instance.**
-
-**2. 🔴 The `Secure Project` owner team holds `System Administrator`.** The team exists and is
-correctly **memberless** (✅ §5.1a), but the only role on it is System Administrator — and review §D
-says of this exact question *"None — and definitely NOT System Administrator."* No role matching
-`Secure%` exists in the environment, so **the `Secure Project Owner` role has never been created.**
-
-Nothing is exposed today (no members), but the posture is one membership row from full admin rights
-for a human. It is environment setup, so 021 did not change it. **The consequence to understand**:
-021's escalation trigger for *"the team lacks entity privileges"* **cannot fire in dev** — assignment
-succeeds because the team is omnipotent, not because it is correctly scoped. **A green provisioning
-run in dev is NOT evidence that the role is configured.** Recorded in design §5.1a + spec FR-28.
-
-### ⚠️ What 021 did NOT achieve — state this plainly
-
-- **No document isolation.** Nothing reads the project's `sprk_containerid` yet. That needs the three
-  container-resolution strategies special-cased → `spaarke-secure-project-r1`.
+- **No document isolation.** Nothing READS the project's `sprk_containerid` yet; that needs the three
+  container-resolution strategies special-cased → project **`spaarke-secure-project-r1`** (design.md
+  drafted, 4 open questions awaiting the owner).
 - **No human can reach a secure project.** FR-28's explicit share (access teams, design §5.1b) is
-  still outstanding, so the record is isolated but **unshared**. Needs its own task — the obvious
-  next candidate after the remaining Phase 0 work.
+  outstanding. The record is isolated but **unshared**. Still needs its own task.
+- **OBO correctness is unproven.** No test performs a real exchange (P5 unreachable offline —
+  `OrderedCredentialClientProvider` is `sealed`). Task **034** owns live verification.
+- **Provisioning has never run successfully in ANY environment.** Task **047**.
 
-### 🧪 The perturbation lesson from 021 — generalise this
+---
 
-9 perturbations, 9 bit. But **P2 and P8 first returned ZERO**, and the cause was **neither** of the
-two task 022 taught us to distinguish (wrong test level / unreachable code). It was a third: the
-fixture's Dataverse double **ignored `$top` and ignored the discriminating `$filter` predicates**.
+## Three lessons that keep paying off — apply to every remaining task
 
-- `$top` ignored → the double returned 2 BUs regardless, so the ambiguity guard was covered *by
-  accident*, while real Dataverse at `$top=1` makes ambiguity undetectable.
-- team-filter predicates ignored → answered on the BU id alone. Real BUs carry several teams (the live
-  root BU has **4 owner teams + 3 access teams**), so that query returns the WRONG team.
+**1. A zero-failure perturbation now has THREE causes, not two.** (a) test at the wrong level,
+(b) perturbed code unreachable, and — added by task 021 — **(c) a FAKE that ignores part of the
+contract.** Task 021's fixture ignored `$top` and the discriminating `$filter` predicates, so two
+perturbations looked "covered" by accident. *A fake is evidence only to the extent it refuses what
+Dataverse would refuse.* Third instance of task 016's class.
 
-Fixed the **fake**, not the tests: honour `$top`, apply only the predicates asked for, and seed
-**decoy teams** so "took an arbitrary team" is visible. **Third instance of task 016's class.**
-> **A fake is evidence only to the extent it refuses what Dataverse would refuse.** Any part of a
-> query the double discards is a part production code can build wrongly for free.
+**2. Read the GATE, not a substitute — and check the gate EXISTS.** A conflicted PR produces **NO
+gate, not a red one**: GitHub cannot compute `refs/pull/N/merge` and dispatches zero workflows. Two
+pushes went unadjudicated while a local suite was green. **Verify a `github-actions` check suite exists
+for the SHA** (`gh api repos/{owner}/{repo}/commits/{sha}/check-suites`) before claiming anything.
+Related: master's Router can be green while a whole test project fails, because tier1 runs a
+**changed-surface filtered subset** and tier2 (which runs everything) is **advisory**.
 
-### 🆕 New project filed: `spaarke-secure-project-r1`
+**3. A merge conflict is not the only way two branches collide.** Task 045 hit the same invisibility
+pattern three times — a duplicated credential site, a duplicated stale-test repair, and a duplicated
+`.csproj` glob that merged **textually clean and semantically broken** (`NETSDK1022`, whole test
+project fails to build, no conflict to warn you). When merging a long-lived branch, check for
+*semantic* duplicates, not just textual ones.
 
-[`projects/spaarke-secure-project-r1/design.md`](../spaarke-secure-project-r1/design.md) — DRAFT for
-owner review, 4 open questions.
+**4. Mocking at a seam proves the CALLER, never the CALLEE.** 045 found `CallerRecordAccessProbe` had
+**zero** test coverage because every fixture substituted it — its precondition logic could be inverted,
+opening the whole delegation gate, with the suite green.
 
-**Why split**: container routing is document-storage plumbing with a security consequence, not
-evaluator work. It spans 7 client call sites, a server ingest path, invariant INV-7, and wizard UX.
+---
 
-**The finding it is built on** — there are **THREE** container-resolution strategies, and the answer to
-"record or BU?" was *neither*: (1) the **acting user's BU**, client-side, 7 sites, BFF deliberately not
-involved (INV-7); (2) a single global `ArchiveContainerId` in **server-side** communication ingest —
-easiest to miss, no client, no wizard; (3) the document's own `GraphDriveId` — already correct.
+## Verified baselines (as of `290d9ab79`, on master)
 
-⚠️ **Sequencing gap to state plainly**: 021 stamps a container that **nothing reads yet**. 021 is still
-right to ship first (it closes the live 409 and is the prerequisite), but **document isolation is not
-achieved until `spaarke-secure-project-r1` lands.**
+- **All 7 test projects: 11,715 passed / 0 failed** — `Sprk.Bff.Api.Tests` 11,075 ·
+  `Spe.Integration.Tests` 372 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.ArchTests` **69** ·
+  `Spaarke.Scheduling.Tests` 46 · `Spaarke.Core.Tests` 45 · `RecordSyncJob.IsolatedTests` 12
+- **Publish 43.75 MB** compressed incl. PDBs (ceiling 60). `--vulnerable` clean. BFF build 0 errors.
+- **`Router = SUCCESS`**; main repo local master synced and rebuilt clean from that checkout.
 
-### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
-
-On `/grant`, `/revoke` and `/close-project`, a body carrying an **empty identifier** now returns
-**403** (`sdap.access.deny.delegation_target_unresolved`) where it previously returned **400**. The
-delegation rule runs before the handler and must first work out WHICH record — an empty id resolves
-nothing, and task 008's ADR-003 constraint says deny rather than fall through. Still RFC 7807, and the
-reason code distinguishes "your request named no record" from "you lack permission".
-
-Low practical impact — `AccessGrantModal` and the external SPA send well-formed bodies — but it is a
-real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
-flipped to match, with the rationale in their doc comments.
-
-### ✅ Task 022 — what shipped
-
-Full inventory + reasoning: [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md).
-The class was **22 routes across 4 files**, not the "~15" the review estimated. **19 gated.**
-
-| Landed | Detail |
-|---|---|
-| **2 operation keys** (`write`, `delete`) | The filter's own `<param>` doc had always advertised `"read", "write", "delete"` while two thirds could not be honoured. Verified reachable in the snapshot before adding |
-| **C2, C3** | Two app-only destroy paths, one reachable from a shipped client hook |
-| **H2** | `PUT` tamper-by-GUID + the `GET` that discloses `GraphDriveId`/`GraphItemId` — the pointers the destroy and bulk paths consume |
-| **H3** | checkout · checkin · discard · checkout-status · **`analyze` → `write`** (owner decision) |
-| **C1** | Bulk download: per-document authorization **plus** collapsing the `_FAILED.txt` denial reason. Fixing only the first would have created a 500×-amplified enumeration oracle that did not exist before |
-| **5 URL-minting reads** | `read`; a mint-specific key was rejected — it would change no decision. Url **lifetime** is the real gap and belongs to task 012 |
-| **H5** | Sixth stale-column instance — `$orderby sprk_name` on `sprk_project` |
-
-**New defect found by writing the first ever test for bulk download**: `ZipArchive` is synchronous,
-Kestrel disallows sync IO, and `AllowSynchronousIO` appears nowhere in the repo — so the endpoint
-threw on its happy path. Fixed per-request via `IHttpBodyControlFeature`. Honest reading: C1 was a
-**working enumeration** primitive and a **broken exfiltration** one.
-
-⚠️ **`write`/`delete` gates depend on RPA being live.** The fallback probe caps rights at Read *by
-construction*, so on an RPA outage they deny — correct fail-closed direction, same trade as task 008,
-but those routes go **unavailable, not degraded**. Task 034 owns live verification (`RPA-FALLBACK`).
-
-⚠️ **The 5 OBO routes narrowed behaviour deliberately.** They already had real Graph-level OBO
-enforcement; the gate adds the per-document Dataverse answer. A caller with SPE *container* access but
-no `Read` on the row now gets 403 — which is precisely FR-01's intent, not a regression.
-
-**Still open on this surface**: the 3 collection-shaped routes (no caller-supplied id → Phase 1
-evaluator work, tasks 032/054) and `share-link` (task 012 — its OBO enforcement is real, so it is a
-*policy* question, not an open disclosure).
-
-### Phase 0b — the 9 review tasks are FILED (owner-approved 2026-08-24)
-
-`021`–`029` exist as POMLs and are registered in [`TASK-INDEX.md`](tasks/TASK-INDEX.md).
-Order: ~~022~~ ✅ → **021** → 025 → 023 → 029 → 028 → 024, with **026 and 027 parallel-safe**
-(no deps, no contended code — runnable any time, by anyone).
-
-- **021** ⚠️ the three `@odata.bind` names MUST come from `$metadata`. Escalate rather than guess —
-  a wrong nav-prop is silently accepted as an unknown property and the write does not happen.
-- **025** is why the rest could hide: the central gate (`CallerRecordAccessProbe.GetCallerRightsAsync`)
-  can be replaced with "return all rights" and the whole suite stays green.
-- **028** (new, from the task-009 To Do discussion): service request is one of the FOUR core types
-  in the project model but has no accessible set — only project/matter/WA exist.
-
-### Owner decisions recorded 2026-08-24
-
-| Decision | Effect |
-|---|---|
-| **To Do: matter + work assignment get the same functionality as project** | Implemented in `9294f0182`. ⚠️ TWO consequences: matter/WA sets carry NO access level, so membership implies WRITE there (more permissive than project, which requires the `Write` right); and the READ path is still project-only, so PATCH is WIDER than list. ✅ **Read/create parity FILED as task 029** (`290fcbf52`) — grounded on the `documents` module's existing OR'd `ScopeDimension` list and the already-entity-generic `ApplyResolverFieldsAsync`, so it is a third instance of an existing pattern, not new machinery. |
-| **CI: rely on `CI / Router`; do not chase `SDAP CI`** | Router is green (twice; tier2 ran 24m and 23m32s against the new 30m timeout). SDAP CI stays red on pre-existing latent flakes. **Do NOT register flakes reactively one per ~30-min cycle** — that is the widen-the-tolerance pattern. |
-
-### Last verified state
-
-**ALL SEVEN test projects — 11,431 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,819 ·
-`Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
-`Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
-Publish **43.70 MB** compressed incl. PDBs (unchanged by tasks 009 + 022 — no packages added; ceiling 60) · `--vulnerable` clean.
-
-⚠️ **`dotnet build --warnaserror` is clean for the BFF project, NOT for the whole solution.**
-`dotnet build -c Debug --warnaserror` at the root fails with **5 pre-existing CA2024** errors
-(`reader.EndOfStream` in an async method) in `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs`.
-Verified present on a stashed clean tree, so not ours — but earlier checkpoints said
-"`--warnaserror` clean" without that qualifier. Scope the claim to the project you built.
-Frontend: **26** `AccessGrantModal` tests pass — but `node_modules` is **absent in a fresh worktree**, so
-`npm install --legacy-peer-deps --no-audit --no-fund` under
-`src/client/shared/Spaarke.UI.Components` is required before any frontend test edit can be verified.
-
-⚠️ **Measure the publish COMPRESSED.** Raw bytes on disk are ~137 MB; the §10 ceiling is on the
-compressed artifact (43.69 MB). Zip `deploy/api-publish/` before reporting a number.
-
-### 🚨 Process failure found 2026-08-23 — READ THIS BEFORE CLAIMING A GREEN SUITE
-
-**There are SEVEN test projects. Tasks 002–008 were verified against THREE.** CI went red on task
-008's commit (`SDAP CI` → genuine `failure`, not a supersession cancel) with 9 failures in
-`Spe.Integration.Tests`, a project no local run had touched. Repaired in `3e5b9d373`.
-
-**The gate is `dotnet test` at the repo root, plus the three projects it does NOT pick up:**
+**The suite gate is `dotnet test` at the root PLUS three projects it does not pick up:**
 
 ```
 dotnet test -c Debug                                              # 4 projects
@@ -235,7 +138,21 @@ dotnet test tests/unit/Spaarke.Core.Tests/Spaarke.Core.Tests.csproj
 dotnet test tests/unit/RecordSyncJob.IsolatedTests/RecordSyncJob.IsolatedTests.csproj
 ```
 
-Running one project and reporting "full suite green" is how this was missed for six tasks.
+Running one project and reporting "full suite green" is how six tasks' worth of breakage was missed.
+
+⚠️ `Sprk.Bff.Api.Tests` **silently vanishes from a root `dotnet test`** when it fails to BUILD (exit 1,
+no `Failed!` line). If it is absent from the output, build it explicitly before believing anything.
+
+---
+
+## Recommended order
+
+**046 → [operator deploy] → 047 → 025 → 023 → 029 → 028 → 024**, with **026 and 027 runnable any
+time**. **026 is higher value than its position suggests** — it repairs
+`secure-project-fields-schema.md`, the stale doc that CAUSED Critical findings C4/C5.
+
+Also open: **Phase 0's 011, 012, 013, 015, 018, 020**, and a task still needed for **FR-28's access
+teams** (design §5.1b).
 
 ---
 
