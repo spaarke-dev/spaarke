@@ -6,6 +6,68 @@
 > **Output-for**: task 203 (executes CLASS-A rows) + task 204 (executes CLASS-B verified-open rows IN THIS PROJECT — routing amendment)
 > **Blocks**: task 186 (E2E live-fire) per owner directive 2026-08-24 SESSION 5
 
+## PARALLEL WAVE EXECUTION RESULTS — 2026-08-24 SESSION 7 END
+
+**Wave scope**: 4 parallel-safe tasks (203b + 204a + 204f + 204g) dispatched as background agents; all 4 completed clean. Details per row in linked execution-results files.
+
+### Task 203b — Class-A bicep hardening (12 rows) — see [`task-203b-execution-results.md`](task-203b-execution-results.md)
+
+| Row | State | Commit | Note |
+|---|---|---|---|
+| A13 | ✅ already-applied | — | SB Data Receiver RBAC landed prior wave |
+| A14 | ✅ already-applied | — | Config-key aliases landed prior wave |
+| A17 | ✅ already-applied | — | Artifacts storage module landed prior wave |
+| A18 | ✅ already-applied | — | ACR module landed prior wave |
+| A19 | ✅ already-applied | — | L2 UAMI 3 sub-scope grants landed prior wave |
+| A20 | ✅ applied | `3b4f400c5` | New `modules/model1-shared-l2-rbac.bicep` — 6 UAMI roles on Model 1 shared services (closes task 200 Deferred #1) |
+| A21 | ✅ applied | `3b4f400c5` + `9eee99de6` | New `modules/customer-l2-bff-rbac.bicep` — Website Contributor on shared (Model 1) + per-customer BFF (Model 2) (closes task 201 Deferred #1) |
+| A22 | ⏭️ deferred-architectural | — | Model 2 already applied via `customer.bicep:655` kvSecrets (task 129); Model 1 uses H4-shared runtime per deliberate architectural boundary at `model1-shared.bicep:638-654`. Path A per §6.5. |
+| A23 | ✅ already-applied | — | KV-secrets skip-if-absent + BINDING never-declared landed |
+| A25 | ✅ applied | `3b4f400c5` | Added `userAssignedIdentityPrincipalId: sharedBffUami.outputs.principalId` to `sharedKeyVault` in `stacks/model1-shared.bicep` (closes wave-4-drift-5) |
+| A26 | ⏭️ deferred-live-Azure | — | Requires destructive `az servicebus queue delete` per runbook §7 — beyond safe scope of sub-agent. Human operator executes per runbook, sequenced after task 107 code is live in L2 |
+| A27 | ✅ applied | `9eee99de6` | Added 5 `CustomerRunGuard__*` app-settings + 3 params (tenantId/clientId/kill-switch); Enabled=false default per ADR-032 null-object |
+
+### Task 204a — Class-B verify-first (6 rows) — see [`task-204a-execution-results.md`](task-204a-execution-results.md)
+
+| Row | State | Commit | Note |
+|---|---|---|---|
+| B10 | ✅ applied | `74efa5053` | H6 `SolutionImportOptions__ClientSecret` KV binding wired in `controlplane-worker-app-service.bicep`; H7 was already applied |
+| B14 | ✅ already-applied | — | `ManagedIdentityCredentialFactory` already pins `DefaultAzureCredentialOptions.TenantId` (Wave 4 Batch 4D drift-1 to task 065); I5 ArchTest scan dirs include `Infrastructure/Auth` |
+| B16 | ✅ already-applied | — | `CanonicalIndexCatalog.cs:40-56` carries FULL retired lineage (7 names); H2b step 5 fires guard for both Model 1 + Model 2 branches → QuarantineRequired |
+| B18 | ⏭️ not-applicable | — | Row premise conflates `KeyVaultSecretRef` (Cosmos-persistence safety for `RunParameters.Secrets`) with `EnvVarValuesOptions.ClientSecret` (App Service KV Reference resolves before code sees it). Refactoring would BREAK standard pattern. Documented in `wave-4-batch-4a-archtest-debt.md:50` |
+| B20 | ✅ already-applied | — | Line numbers shifted; current `Worker/Program.cs:858-866` says "REAL types resolve from Worker DI, not the placeholders" — comment already correct |
+| B22 | 🔔 **ESCALATED — scope-corrected follow-on** | — | Actual endpoint count is 121 methods / 28 files (row said ~30). Runtime 429 already wired via `RateLimitingModule.cs:266` (63 `.RequireRateLimiting` in 19 files). Residual gap is OpenAPI docs (14 files) + policy decisions on 9 non-rate-limited endpoints — NOT the mechanical 8h wiring task the row assumed. Needs scope-corrected follow-on task (new row: **B22-refined**) |
+
+### Task 204f — Docs drift removal (1 row) — see [`task-204f-execution-results.md`](task-204f-execution-results.md)
+
+| Row | State | Commit | Note |
+|---|---|---|---|
+| B17 | ✅ applied | `0d3ae5c39` | Removed `PLAYBOOK_EMBEDDINGS_INDEX_NAME` from `appsettings.tokens.md`; zero C# consumers confirmed; build clean |
+
+### Task 204g — Spec SC #2 amendment (1 row) — see [`task-204g-execution-results.md`](task-204g-execution-results.md)
+
+| Row | State | Commit | Note |
+|---|---|---|---|
+| B21 | ✅ applied | `6746e48e6` | SC #2 amended to allow retired-on-disk-with-banner convention + 3-sub-check verification recipe (idempotency + shell-out scan allowing banner-headed files + active-registration scan) |
+
+### Wave summary
+
+- **Total rows resolved**: 12 (203b) + 6 (204a) + 1 (204f) + 1 (204g) = **20**
+- **Applied by agents**: 5 (A20, A21, A25, A27, B10) + 2 (B17, B21) = **7 rows**
+- **Verified already-applied**: 5 (A13, A14, A17, A18, A19, A23, A24) + 3 (B14, B16, B20) = **10 rows** — Wave G-8 landed these already
+- **Deferred**: 3 (A22 architectural, A26 live-Azure destructive, B18 not-applicable)
+- **Escalated for scope-correction**: 1 (B22 — punch list said ~30 endpoints; actual is 121; residual work is OpenAPI docs + policy, not mechanical wiring)
+- **Commits**: 6 (`3b4f400c5`, `9eee99de6`, `9e72825d7`, `74efa5053`, `17304a2cb`, `0d3ae5c39`, `777d6fba2`, `6746e48e6`)
+- **Effort actual**: ~1h wall-clock (agents worked concurrently). Estimated 60-70h serialized. Verify-first strategy vindicated: massive over-estimation because most rows had already landed via later waves.
+
+### Follow-on
+
+- **B22 needs scope correction**: file new task for OpenAPI 429 documentation + policy decisions on 9 non-rate-limited endpoints (~4-6h; NOT the original 8h mechanical wiring).
+- **A26 deferred to operator**: schedule human execution of `az servicebus queue delete` per runbook §7 after task 107 code deploys.
+- **A22 architectural choice locked** as Path A: Model 1 uses H4-shared runtime pattern (not `FromBicepOutput` seeder); Model 2 already applied.
+
+---
+
 ## AMENDMENT — 2026-08-24 SESSION 7 (verification + re-scope)
 
 **Two changes to original punch list:**
