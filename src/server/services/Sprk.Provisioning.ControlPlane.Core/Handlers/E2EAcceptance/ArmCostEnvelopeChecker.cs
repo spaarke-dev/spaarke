@@ -263,8 +263,8 @@ public sealed class ArmCostEnvelopeChecker : ICostEnvelopeChecker
     internal decimal SelectExpectedEnvelope(string tenancyModel) => tenancyModel switch
     {
         "Model2Dedicated" => _options.Model2EmptyEnvelopeUsd,
-        "Model1Shared"    => _options.Model1MarginalEnvelopeUsd,
-        _                 => _options.Model1SharedFloorEnvelopeUsd,
+        "Model1Shared" => _options.Model1MarginalEnvelopeUsd,
+        _ => _options.Model1SharedFloorEnvelopeUsd,
     };
 
     /// <summary>

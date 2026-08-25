@@ -111,7 +111,11 @@ public sealed class H14cDataverseWebhookSubHandlerTests
         var handler = BuildHandler(FakeReader.Success(SigningKey), FakeRegistrar.Created("se-1"));
         var wrongEnvelope = new HandlerEnvelope
         {
-            HandlerId = "H0", RunId = RunId, CustomerId = CustomerId, ParametersJson = "{}", EnqueuedAt = DateTimeOffset.UtcNow,
+            HandlerId = "H0",
+            RunId = RunId,
+            CustomerId = CustomerId,
+            ParametersJson = "{}",
+            EnqueuedAt = DateTimeOffset.UtcNow,
         };
 
         var act = async () => await handler.HandleAsync(wrongEnvelope, CancellationToken.None);

@@ -62,9 +62,9 @@ public static class RollbackTransitions
     public static RunStatus MapToRunStatus(FailureClass failureClass) =>
         failureClass switch
         {
-            FailureClass.Resumable            => RunStatus.Failed,
+            FailureClass.Resumable => RunStatus.Failed,
             FailureClass.RetryableWithCleanup => RunStatus.Failed,
-            FailureClass.QuarantineRequired   => RunStatus.Quarantined,
+            FailureClass.QuarantineRequired => RunStatus.Quarantined,
             FailureClass.SuccessfulButDrifted => RunStatus.Completed,
             _ => throw new UnreachableException(
                 $"FailureClass.{failureClass} not handled in RollbackTransitions.MapToRunStatus — " +
@@ -85,9 +85,9 @@ public static class RollbackTransitions
     public static bool ShouldReEnqueue(FailureClass failureClass) =>
         failureClass switch
         {
-            FailureClass.Resumable            => false,
+            FailureClass.Resumable => false,
             FailureClass.RetryableWithCleanup => true,
-            FailureClass.QuarantineRequired   => false,
+            FailureClass.QuarantineRequired => false,
             FailureClass.SuccessfulButDrifted => false,
             _ => throw new UnreachableException(
                 $"FailureClass.{failureClass} not handled in RollbackTransitions.ShouldReEnqueue — " +
@@ -110,9 +110,9 @@ public static class RollbackTransitions
     public static bool ShouldReleaseCustomerGuard(FailureClass failureClass) =>
         failureClass switch
         {
-            FailureClass.Resumable            => false, // Operator may still resume; keep guard held.
+            FailureClass.Resumable => false, // Operator may still resume; keep guard held.
             FailureClass.RetryableWithCleanup => false, // Auto-retry is in-flight; keep guard held.
-            FailureClass.QuarantineRequired   => false, // BLOCKS new runs per spec FR-24 SCOPE.
+            FailureClass.QuarantineRequired => false, // BLOCKS new runs per spec FR-24 SCOPE.
             FailureClass.SuccessfulButDrifted => true,  // Run is Completed; customer may start a new run (or repair phase).
             _ => throw new UnreachableException(
                 $"FailureClass.{failureClass} not handled in RollbackTransitions.ShouldReleaseCustomerGuard — " +

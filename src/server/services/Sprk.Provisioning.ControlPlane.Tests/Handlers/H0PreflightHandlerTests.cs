@@ -175,10 +175,10 @@ public sealed class H0PreflightHandlerTests
     // ---------- T4-T7 per-probe failure paths → distinct rejection codes ----------
 
     [Theory]
-    [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom,    "quota-openai-tpm")]
-    [InlineData(PreflightCheckNames.DataverseEnvCreationRate,  "quota-dataverse-env-rate")]
-    [InlineData(PreflightCheckNames.SubscriptionVCpuQuota,     "quota-subscription-vcpu")]
-    [InlineData(PreflightCheckNames.SpeCertBootstrap,          "spe-cert-bootstrap-missing")]
+    [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
+    [InlineData(PreflightCheckNames.DataverseEnvCreationRate, "quota-dataverse-env-rate")]
+    [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
+    [InlineData(PreflightCheckNames.SpeCertBootstrap, "spe-cert-bootstrap-missing")]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
         string failingCheck,
         string expectedRejectionCode)
