@@ -28,20 +28,21 @@ public class AnalysisOptions
     public bool MultiDocumentEnabled { get; set; } = false;
 
     // === Azure AI Foundry / Prompt Flow ===
-
-    /// <summary>
-    /// Azure AI Foundry Prompt Flow endpoint URL.
-    /// Example: https://{project}.{region}.inference.ml.azure.com/score
-    /// Optional: When empty, uses direct Azure OpenAI calls instead.
-    /// Maps to Dataverse Environment Variable: sprk_PromptFlowEndpoint
-    /// </summary>
-    public string? PromptFlowEndpoint { get; set; }
-
-    /// <summary>
-    /// API key for Prompt Flow endpoint authentication.
-    /// Store in Key Vault (production) or user-secrets (development).
-    /// </summary>
-    public string? PromptFlowKey { get; set; }
+    //
+    // REMOVED 2026-08-21 by spaarke-auth-v4-dataverse-MI task 055 (FR-E6): PromptFlowEndpoint and
+    // PromptFlowKey. Both were bound from configuration and read by NOTHING — verified by grep across
+    // src/: zero readers, no Prompt Flow HTTP client, and no reader of the sprk_PromptFlowEndpoint
+    // Dataverse environment variable the doc comment claimed to map to. Neither key was deployed
+    // (Analysis__PromptFlowKey is absent from spaarke-bff-dev's app settings) and both Key Vault
+    // entries were seeded as PLACEHOLDERS that were never updated.
+    //
+    // An unexplained credential in configuration is the pattern this project exists to eliminate: it
+    // costs a Key Vault entry, a deployment setting, a line in two provisioning scripts, and — most
+    // expensively — it tells every future reader that Prompt Flow is wired when it is not.
+    //
+    // ExecuteFlowName / ContinueFlowName below are equally unread, but they are NOT credentials and
+    // carry safe defaults, so they are left in place rather than widening a credential task into a
+    // general dead-configuration sweep. Noted for task 090.
 
     /// <summary>
     /// Prompt Flow deployment name for analysis-execute flow.

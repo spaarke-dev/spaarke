@@ -81,19 +81,14 @@ public static class OfficeWorkersModule
         services.Configure<ServiceBusOptions>(
             configuration.GetSection("ServiceBus"));
 
-        // Register Service Bus client as singleton
-        services.AddSingleton<ServiceBusClient>(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>();
-
-            if (string.IsNullOrEmpty(options.Value.ConnectionString))
-            {
-                throw new InvalidOperationException(
-                    "ServiceBus:ConnectionString is required for Office workers");
-            }
-
-            return new ServiceBusClient(options.Value.ConnectionString);
-        });
+        // ServiceBusClient is NOT registered here (auth-v4 task 051 / FR-E2).
+        //
+        // This registration was shadowed: JobProcessingModule registers the same singleton later
+        // in Program.cs (:196 vs :124) and last-registration-wins, so Office workers already
+        // received that client, not this one. Its "ConnectionString is required for Office
+        // workers" guard therefore never fired, and would have blocked the managed-identity
+        // cutover if it had. The single canonical registration lives in JobProcessingModule and
+        // routes through ServiceBusClientFactory, which accepts namespace + managed identity.
 
         return services;
     }

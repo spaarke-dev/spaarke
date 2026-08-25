@@ -122,7 +122,6 @@ public sealed class SessionFileRetrievalBindingGuardTests
         var aiSearchOptions = Options.Create(new AiSearchOptions
         {
             Endpoint = "https://test-search.search.windows.net",
-            ApiKeySecretName = "test-api-key",
             KnowledgeIndexName = "spaarke-knowledge-index-v2",
             DiscoveryIndexName = "discovery-index",
             SessionFilesIndexName = sessionFilesIndexName,

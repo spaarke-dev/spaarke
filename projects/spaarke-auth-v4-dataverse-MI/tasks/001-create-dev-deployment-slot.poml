@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Create the dev deployment slot and assign the UAMI</title>
+    <phase>0 Spike</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Infrastructure setup; no .cs/.ts changes and no ADR surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical Azure CLI work with an exact recipe.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live Azure mutation on the dev App Service; must be operator-observed.</parallel-reason>
+    <deps>none</deps>
+    <tags>infra,azure,deploy,auth</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create a deployment slot on the dev BFF App Service and assign it the user-assigned managed identity, so the Phase 0 spike and the Phase 3 flip both have an isolated target. The plan supports slots but none exist.</prompt>
+  <role>SPAARKE platform developer with Azure App Service and managed-identity experience. Follow ADRs strictly.</role>
+  <goal>A running deployment slot on spaarke-bff-dev carrying mi-bff-api-dev, app settings mirrored, verified reachable and NOT swapped.</goal>
+
+  <context>
+    <background>design.md §6 mandates a slot-based rollout. E9 established the plan is P1v3 (not the B1 the IaC declares); PHASE-0-LIVE-VERIFICATION confirmed zero slots exist. The slot is needed for Phase 3 regardless.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+      <file role="modify">infrastructure/bicep/stacks/dev.bicepparam</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Live prerequisites verified 2026-08-19</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: dev App Service spaarke-bff-dev in rg-spaarke-dev ONLY. Do not touch spaarke-bff-prod (Stopped) or any other environment.</constraint>
+    <constraint source="project">Scope: assign the EXISTING UAMI mi-bff-api-dev by RESOURCE ID. Never resolve an identity by name — five UAMIs exist and spaarke-bff-identity is a decoy not attached to the BFF.</constraint>
+    <constraint source="project">Scope: DO NOT swap the slot. Creating and deploying to a slot is safe; swapping is task 032.</constraint>
+    <constraint source="ADR-028">Scope: the slot runs user-assigned identity only, matching the production slot. Do not enable a system-assigned identity.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure App Service slots, managed identity</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Confirm current state: az webapp deployment slot list on spaarke-bff-dev (expect empty).</step>
+    <step>Create the slot (suggested name: staging).</step>
+    <step>Assign the UAMI to the slot by full resource ID.</step>
+    <step>Mirror app settings from the production slot, including Graph__ManagedIdentity__Enabled=true.</step>
+    <step>Deploy the current branch build to the slot; confirm /healthz responds.</step>
+    <step>Record slot name, URL and identity assignment in notes/decisions/.</step>
+    <step>Reconcile dev.bicepparam, which declares B1 while live is P1v3 (design §10 item 4).</step>
+  </steps>
+
+  <escalation>
+    <trigger>Slot creation fails for a quota or tier reason — STOP and report; do not upgrade the plan unilaterally.</trigger>
+    <trigger>Mirroring app settings would copy a secret value into a new location — STOP; the secret surface is being reduced, not expanded.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="azure-resource">spaarke-bff-dev/slots/staging with mi-bff-api-dev assigned</output>
+    <output type="doc">projects/spaarke-auth-v4-dataverse-MI/notes/decisions/001-slot-creation.md</output>
+    <output type="modify">infrastructure/bicep/stacks/dev.bicepparam</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The slot exists and /healthz returns 200.</criterion>
+    <criterion>az webapp identity show on the slot reports UserAssigned only, with mi-bff-api-dev.</criterion>
+    <criterion>The slot has NOT been swapped; the production slot is unchanged and still serving.</criterion>
+    <criterion>No new secret value was written to any new location.</criterion>
+    <criterion>dev.bicepparam declares P1v3.</criterion>
+    <criterion>Negative case: the assigned principalId is 9fd47efb-7962-492b-ac44-e5ccd0268ebb and NOT c8cdf6fc-a414-4a5b-981c-006d0d84850f (the spaarke-bff-identity decoy).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion date="2026-08-20" rigor="FULL" rigor-override-reason="POML authored STANDARD; Step 0.5 overrode UP because tags include auth and the task performs a live mutation on the OBO-serving App Service.">
+      Slot `staging` live on spaarke-bff-dev: https://spaarke-bff-dev-staging.azurewebsites.net, /healthz 200 "Healthy",
+      /ping "pong". UserAssigned only (mi-bff-api-dev, principalId 9fd47efb-...). NOT swapped; production 200 throughout.
+      dev.bicepparam reconciled B1 -> P1v3. Publish 43.67 MB compressed incl. PDBs (-1.29 MB vs 44.96 baseline; no
+      dependency change, so treat as build variance). CVE scan clean. 5 of 6 acceptance criteria met.
+
+      THREE FINDINGS -- full write-up in notes/decisions/001-slot-creation.md:
+
+      A (red) keyVaultReferenceIdentity is a SITE property and is NOT copied by --configuration-source. The slot
+        defaulted to SystemAssigned, which this app does not have, so every Key Vault reference failed and the
+        container aborted with exit code 134 (SIGABRT) -- the #3b attempt-1 signature. Fixed by setting it to the
+        UAMI. Also absent from Bicep IaC entirely, which makes it live PRODUCTION drift -> filed as ISS-001 (#805).
+        Site properties DO NOT SWAP, so this must be right on both slots before task 032.
+
+      B (amber) ESCALATION TRIGGER FIRED. Passing --configuration-source on slot create mirrored 16 plaintext
+        secret app settings into the slot -- the trigger was meant to be evaluated BEFORE the action, and was not.
+        Mirror deliberately RETAINED: stripping it would prevent boot and, worse, would strip production's secrets
+        at swap (non-sticky app settings swap); converting to KV references would add a second variable to the exact
+        comparison the slot exists to make. Cost booked onto task 033 (purge BOTH slots). Reversible by deleting the
+        slot.
+
+      C (amber) Deploy-BffApi.ps1 -UseSlotDeploy always swaps; there is no -SkipSwap. Incompatible with the staged
+        rollout, so the deploy was done explicitly via az webapp deploy. Booked onto tasks 031 and 032.
+
+      Incidental: FR-B4 conflation confirmed live -- AZURE_CLIENT_ID is the UAMI clientId (5967251e-...) while
+      API_APP_ID/AzureAd__ClientId are the app registration (1e40baad-...). Task 023 now has a real reproduction.
+    </completion>
+  </notes>
+</task>

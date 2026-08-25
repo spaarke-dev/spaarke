@@ -36,10 +36,17 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY in the
+    /// managed-identity-disabled branch, where it replaces an inline <c>ClientSecretCredential</c>.
+    /// Nullable with a null default so existing fixtures constructing this type directly keep
+    /// compiling (NFR-04); a null provider is fatal only if that branch is actually taken.
+    /// </param>
     public DataverseWebApiService(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<DataverseWebApiService> logger)
+        ILogger<DataverseWebApiService> logger,
+        IConfidentialClientProvider? confidentialClients = null)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -50,8 +57,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; ClientSecret is the local-dev fallback.
-        // The secret path is retained (do NOT remove Dataverse:ClientSecret) until MI attribution is proven live.
+        // ADR-028 §24 (#3b): prefer Managed Identity when enabled. Task 022: the non-MI branch is no
+        // longer "the ClientSecret fallback" — it is ordered credential selection, which reaches the
+        // secret only as its last option.
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
@@ -71,18 +79,26 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             var tenantId = configuration["TENANT_ID"];
             var clientId = configuration["API_APP_ID"];
-            var clientSecret = configuration["Dataverse:ClientSecret"];
 
             if (string.IsNullOrEmpty(tenantId))
                 throw new InvalidOperationException("TENANT_ID configuration is required (Managed Identity disabled)");
             if (string.IsNullOrEmpty(clientId))
                 throw new InvalidOperationException("API_APP_ID configuration is required (Managed Identity disabled)");
-            if (string.IsNullOrEmpty(clientSecret))
-                throw new InvalidOperationException("Dataverse:ClientSecret configuration is required (Managed Identity disabled)");
 
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            // auth-v4 task 022 (FR-B3): the app registration's app-only token, credential chosen by
+            // ordered selection instead of an inline ClientSecretCredential built from
+            // Dataverse:ClientSecret. Same identity, same client-credentials grant; only the proof
+            // changes. Dataverse:ClientSecret now has NO consumer in src/ — booked for deletion at
+            // task 033 alongside Graph:ClientSecret (see notes/decisions/024-relax-config-validators.md).
+            if (confidentialClients is null)
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required when Managed Identity is disabled "
+                    + "(Graph:ManagedIdentity:Enabled is not true). Inside the BFF it is registered by "
+                    + "AuthorizationModule.AddCredentialSelection.");
+
+            _credential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
             _logger.LogInformation(
-                "DataverseWebApiService using ClientSecret credential (local-dev fallback) for {ApiUrl}", _apiUrl);
+                "DataverseWebApiService using the ordered credential provider (ADR-028 A4) for {ApiUrl}", _apiUrl);
         }
 
         // BaseAddress MUST end with a trailing slash: with a relative request URI (e.g.

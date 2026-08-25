@@ -11,8 +11,38 @@
 
 | Impl | Mechanism | Auth (today) | Role |
 |---|---|---|---|
-| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | **MI-first** (ADR-028 §24): `Graph:ManagedIdentity:Enabled=true` → `DefaultAzureCredential` pinned to the UAMI (`DataverseServiceClientImpl.cs:54-73`); `ClientSecret` (`API_CLIENT_SECRET`) retained as local-dev fallback only | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
-| `DataverseWebApiService` | REST / `HttpClient` | **MI-first** (ADR-028 §24): same flag → `DefaultAzureCredential` (`DataverseWebApiService.cs:53-65`); `ClientSecret` (`Dataverse:ClientSecret`) retained as local-dev fallback only | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
+| `DataverseServiceClientImpl` | SDK `ServiceClient` (+ raw OData via `ExecuteWebRequest`, impersonation via `Clone()`+`CallerId`) | **MI-first** (ADR-028 §24): `Graph:ManagedIdentity:Enabled=true` → `DefaultAzureCredential` pinned to the UAMI (`DataverseServiceClientImpl.cs:54-73`); **no client secret** — `API_CLIENT_SECRET` was DELETED from app settings and Key Vault 2026-08-24 (auth-v4 task 033, ADR-028 A4 / E-3 closed) | **Primary** `IDataverseService` for documents / analysis / generic-entity / jobs / KPI / communication / health |
+| `DataverseWebApiService` | REST / `HttpClient` | **MI-first** (ADR-028 §24): same flag → `DefaultAzureCredential` (`DataverseWebApiService.cs:53-65`); **no client secret** — `Dataverse:ClientSecret` was DELETED from app settings and Key Vault 2026-08-24 (auth-v4 task 033, ADR-028 A4 / E-3 closed) | The **real impl** for events · field-mapping · impersonated reads (`RetrieveMultipleImpersonatedAsync`) · POA grants |
+
+<!-- Placed here rather than at the top of the file deliberately (auth-v4 task 033): PR #812
+     (unified-access-control-r2) edits the header block and the '## Auth (#3b)' section, and a
+     banner adjacent to either produced a merge conflict for no benefit. Verified conflict-free
+     against origin/work/unified-access-control-r2 with `git merge-tree`. -->
+
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md)
 
 ## Routing table (`Infrastructure/DI/GraphModule.cs:44-82`)
 
@@ -90,11 +120,24 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    (all event callers inject `IEventDataverseService`, all field-mapping callers inject
    `IFieldMappingDataverseService`); full BFF suite 10,427 pass.
 
-## Auth (#3b) — ✅ LANDED 2026-08-17
+## Auth (#3b → auth-v4) — ✅ MI-first landed 2026-08-17; secret **REMOVED** 2026-08-24
 
-Both impls are now **MI-first** per ADR-028 §24 (commit `a76e7e714`, "proven live on dev"): when
-`Graph:ManagedIdentity:Enabled=true`, each constructor builds a `DefaultAzureCredential` pinned to the UAMI
-(`ManagedIdentity:ClientId`); the client-secret path is the local-dev fallback and is retained (do NOT remove
-`Dataverse:ClientSecret` / `API_CLIENT_SECRET`) per the migration's own guard comments. Original plan:
-task 011/NG1 (`notes/task-011-ng1-3b-mi-migration.md`). `prvActOnBehalfOfAnotherUser` must be granted to the
-MI app-user for the impersonated write path.
+Both impls are MI-first per ADR-028 §24. As of auth-v4 task 033 the client-secret
+fallback is gone entirely, not merely deprioritised: `Dataverse:ClientSecret` and
+`API_CLIENT_SECRET` are deleted from app settings and Key Vault, and the credential
+order is `[ManagedIdentityFederated]` with nothing beneath it. Do NOT re-add them —
+`Graph:Credentials:RequireSecretFreeIdentity=true` makes the BFF refuse to start
+outside Development if `ClientSecret` returns to the order.
+`prvActOnBehalfOfAnotherUser` must still be granted to the MI app-user for the
+impersonated write path.
+
+> **Corrected 2026-08-25 by `unified-access-control-r2` task 045**, at the request of
+> `spaarke-auth-v4-dataverse-MI` (PR #812 comment, 2026-08-24). This section previously said the
+> client-secret path "is the local-dev fallback and is retained (do NOT remove `Dataverse:ClientSecret`
+> / `API_CLIENT_SECRET`) **per the migration's own guard comments**." That attribution was accurate
+> about where the claim came from — and those guard comments were **already stale when they were
+> read**. `DataverseServiceClientImpl.cs` asserted the secret "MUST NOT be removed until MI attribution
+> is proven live per env"; true when written 2026-08-13, invalidated by auth-v4 task 022 (which moved
+> every call site onto `OrderedCredentialClientProvider`) and task 024, and never refreshed. This is the
+> same propagation this document exists to stop: a stale sentence moving from a code comment into an
+> architecture doc, where the next reader treats it as settled.

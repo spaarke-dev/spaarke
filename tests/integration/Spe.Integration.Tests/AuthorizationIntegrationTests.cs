@@ -56,7 +56,13 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
             "requests without authentication should return 401");
     }
 
-    [Fact]
+    // RETIRED ROUTE (master, DocumentsEndpoints.cs): GET /api/containers and
+    // GET /api/drives/{id}/children were deleted with a documented zero-caller sweep; the live
+    // surfaces are /api/spe/containers/* and /api/obo/containers/*. This test therefore asserted
+    // an authorization outcome on a route that no longer exists and got 404 instead of 403.
+    // SKIPPED rather than retargeted: pointing it at a different endpoint would silently change
+    // WHICH policy is under test, and that is a decision for the owner of the deletion.
+    [Fact(Skip = "Route retired on master: GET /api/containers no longer exists (zero-caller sweep).")]
     [Trait("status", "repaired")]
     public async Task Authorized_Request_With_NoAccess_Returns_403()
     {
@@ -133,7 +139,13 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
     }
 
-    [Fact]
+        // RETIRED ROUTE (master, DocumentsEndpoints.cs): GET /api/containers and
+    // GET /api/drives/{id}/children were deleted with a documented zero-caller sweep; the live
+    // surfaces are /api/spe/containers/* and /api/obo/containers/*. This test therefore asserted
+    // an authorization outcome on a route that no longer exists and got 404 instead of 403.
+    // SKIPPED rather than retargeted: pointing it at a different endpoint would silently change
+    // WHICH policy is under test, and that is a decision for the owner of the deletion.
+[Fact(Skip = "Route retired on master: GET /api/containers no longer exists (zero-caller sweep).")]
     [Trait("status", "repaired")]
     public async Task Authorization_NoAccessRights_Returns_403()
     {
@@ -167,7 +179,13 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
     }
 
-    [Theory]
+    // RETIRED ROUTE (master, DocumentsEndpoints.cs): GET /api/containers and
+    // GET /api/drives/{id}/children were deleted with a documented zero-caller sweep; the live
+    // surfaces are /api/spe/containers/* and /api/obo/containers/*. This test therefore asserted
+    // an authorization outcome on a route that no longer exists and got 404 instead of 403.
+    // SKIPPED rather than retargeted: pointing it at a different endpoint would silently change
+    // WHICH policy is under test, and that is a decision for the owner of the deletion.
+    [Theory(Skip = "Both routes retired on master: /api/containers and /api/drives/{id}/children.")]
     [Trait("status", "repaired")]
     [InlineData("/api/containers")]
     [InlineData("/api/drives/test/children")]

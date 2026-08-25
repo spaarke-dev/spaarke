@@ -126,7 +126,13 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Scopes exposed:
   - [ ] `SDAP.Access`
   - [ ] `user_impersonation`
-- [ ] Client secret stored in Key Vault
+- [ ] **Federated identity credential (MI-FIC) configured** — *replaces the client secret, 2026-08-24, ADR-028 A4*
+  - subject = the BFF UAMI's **principalId**, NOT its clientId (the commonest silent failure)
+  - issuer = `https://login.microsoftonline.com/{tenantId}/v2.0`, audience = `api://AzureADTokenExchange`
+  - create with `scripts/Register-EntraAppRegistrations.ps1 -CreateFederatedCredential -UamiResourceId <id>`
+  - ~~Client secret stored in Key Vault~~ — **no longer required and no longer present.** `BFF-API-ClientSecret`
+    was deleted 2026-08-24. Do **not** re-create it; `Graph__Credentials__RequireSecretFreeIdentity=true` makes
+    the BFF refuse to start outside Development if a secret returns to the credential order.
 
 #### ⚠️ Authorized Client Applications (CRITICAL)
 
@@ -154,7 +160,18 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 - [ ] Environment set to `Production`
 - [ ] `TENANT_ID` configured
 - [ ] `API_APP_ID` configured
-- [ ] `API_CLIENT_SECRET` references Key Vault
+- [ ] `Graph__Credentials__Order__0` = `ManagedIdentityFederated` *(replaces `API_CLIENT_SECRET`, 2026-08-24)*
+- [ ] `Graph__Credentials__RequireSecretFreeIdentity` = `true`
+- [ ] **NOT set**: `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret`
+      — all four were deleted 2026-08-24 (ADR-028 A4). Their presence is now a defect, not a requirement.
+
+> **Correction (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).** Several documents — including the
+> project spec that produced this migration — stated that the lowercase Key Vault alias
+> `bff-api-client-secret` was *"used by the Office add-in deploy"*. **That was false.**
+> `deploy-office-addins.yml` uses `BFF_API_CLIENT_ID` (a client **id**) plus SWA/GitHub tokens, and
+> `Deploy-OfficeAddins.ps1` contains no client-secret reference at all. The add-ins depend on the BFF's
+> *runtime* auth (inbound token validation + OBO), never on a secret at deploy time. The alias's only real
+> consumer was `scripts/Sync-LocalConfig.ps1` → local development.
 - [ ] Redis connection string configured
 - [ ] Service Bus connection string configured
 - [ ] Application Insights connection string configured

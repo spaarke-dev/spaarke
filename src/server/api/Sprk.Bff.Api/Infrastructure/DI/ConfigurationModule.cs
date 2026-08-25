@@ -36,6 +36,26 @@ public static class ConfigurationModule
         services
             .AddOptions<ServiceBusOptions>()
             .Bind(configuration.GetSection(ServiceBusOptions.SectionName))
+            // auth-v4 task 051 (FR-E2): reconcile the two config keys that both carried the SAS
+            // credential. The section binds ServiceBus:ConnectionString, but the deployed estate
+            // sets the connection string under ConnectionStrings:ServiceBus — that is what the
+            // Bicep stacks emit (model1-shared.bicep:187, model2-full.bicep:199, both as
+            // ConnectionStrings__ServiceBus) and it is the key live on spaarke-bff-dev today.
+            // Meanwhile scripts/Configure-ProductionAppSettings.ps1:85 sets the OTHER key,
+            // ServiceBus__ConnectionString. Both spellings were live simultaneously.
+            //
+            // Until task 033 removes the SAS path outright, back-fill from the legacy key so the
+            // options object is the single source of truth for every consumer. Without this,
+            // moving client construction onto ServiceBusOptions would read an EMPTY connection
+            // string on the deployed app and take background job processing down — the namespace
+            // is not configured yet, so there would be no credential at all.
+            .PostConfigure<IConfiguration>((options, config) =>
+            {
+                if (string.IsNullOrWhiteSpace(options.ConnectionString))
+                {
+                    options.ConnectionString = config.GetConnectionString("ServiceBus") ?? string.Empty;
+                }
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

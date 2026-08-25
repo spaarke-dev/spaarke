@@ -19,6 +19,13 @@
       R2  casing-drift         The SAME logical secret appears under >1 casing across
                                the scanned files (e.g. `BFF-API-ClientSecret` vs
                                `bff-api-client-secret`) — a rotation hazard.
+                               NOTE (2026-08-24, spaarke-auth-v4 task 033): that specific
+                               pair is RESOLVED — both were deleted from Key Vault when the
+                               BFF identity became secret-free (ADR-028 A4). It survives here
+                               only as the R2 example and in this script's synthetic self-test
+                               fixtures below, which exercise the RULE and are deliberately
+                               not tied to the live estate. R2 itself is unchanged and still
+                               applies to every other secret.
       R3  vault-name-drift     A vault name other than the canonical `sprk-{env}-kv`
                                form appears, EXCEPT the codified legacy dev exception
                                `spaarke-spekvcert` (DO-NOT-RENAME).

@@ -30,7 +30,15 @@ public class ImpersonationFailClosedTests
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
                 ["TENANT_ID"] = "00000000-0000-0000-0000-0000000000bb",
                 ["API_APP_ID"] = "00000000-0000-0000-0000-0000000000aa",
-                ["Dataverse:ClientSecret"] = "test-secret"
+                // auth-v4 (master) made this ctor select its credential from THIS FLAG rather than from
+                // the presence of a client secret, and it now THROWS when Managed Identity is disabled
+                // and no IConfidentialClientProvider is supplied. `Dataverse:ClientSecret` is gone from
+                // app settings AND Key Vault as of 2026-08-24, so a test that still leaned on it was
+                // asserting against a credential path that no longer exists anywhere.
+                //
+                // These tests never make a network call — they assert argument validation throws BEFORE
+                // any request — so the MI branch's lazily-constructed DefaultAzureCredential is never used.
+                ["Graph:ManagedIdentity:Enabled"] = "true"
             }).Build(),
             NullLogger<DataverseWebApiService>.Instance);
 

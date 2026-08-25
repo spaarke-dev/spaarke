@@ -70,22 +70,28 @@ public sealed class InternalIndexProvider : IVerificationProvider
     /// <see cref="Lazy{T}"/> so DI startup doesn't crash when these config keys are
     /// missing (matches the BingGroundingOptions B-G8 + AgentServiceOptions B-G11 pattern).
     /// </summary>
-    public InternalIndexProvider(IConfiguration configuration, ILogger<InternalIndexProvider> logger)
+    public InternalIndexProvider(
+        IConfiguration configuration,
+        Azure.Core.TokenCredential credential,
+        ILogger<InternalIndexProvider> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        if (credential is null) throw new ArgumentNullException(nameof(credential));
+
         _searchClientLazy = new Lazy<SearchClient>(() =>
         {
             var endpoint = configuration["AiSearch:ReferencesEndpoint"]
                 ?? throw new InvalidOperationException("AiSearch:ReferencesEndpoint is not configured.");
-            var apiKey = configuration["AiSearch:ReferencesApiKey"]
-                ?? throw new InvalidOperationException("AiSearch:ReferencesApiKey is not configured.");
             var indexName = configuration["AiSearch:ReferencesIndexName"]
                 ?? "spaarke-rag-references";
 
-            return new SearchClient(
-                new Uri(endpoint),
-                indexName,
-                new AzureKeyCredential(apiKey));
+            // auth-v4 task 053 (FR-E4): AiSearch:ReferencesApiKey is no longer REQUIRED - an absent
+            // key now selects Entra rather than throwing. The old throw made the admin key mandatory
+            // for citation verification, so removing the key would have broken this provider.
+            var apiKey = configuration["AiSearch:ReferencesApiKey"];
+
+            return Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateSearchClient(
+                new Uri(endpoint), indexName, apiKey, configuration, credential);
         }, isThreadSafe: true);
     }
 

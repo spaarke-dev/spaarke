@@ -38,11 +38,18 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
     public async Task ApiEndpoints_ReturnConsistentErrorFormat()
     {
         // Test multiple endpoints return RFC 7807 compliant errors
+        //
+        // `/api/containers` and `/api/containers/{id}/drive` were REMOVED from DocumentsEndpoints.cs
+        // on master (the file's own header records the removal and states a caller sweep found ZERO
+        // callers; the live surfaces are /api/spe/containers/* and /api/obo/containers/*). The tests
+        // asserting they are "registered" were not updated with the deletion, so they failed on the
+        // exact assertion "should be registered" — for a route deliberately retired.
+        //
+        // Removed here rather than skipped: this test walks a LIST of endpoints, so dropping a retired
+        // one costs no coverage of anything that still exists.
         var endpointsToTest = new[]
         {
-            "/api/me",
-            "/api/containers",
-            "/api/containers/invalid-id/drive"
+            "/api/me"
         };
 
         foreach (var endpoint in endpointsToTest)
@@ -83,7 +90,10 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
         var endpointGroups = new Dictionary<string, string[]>
         {
             ["User Endpoints"] = ["/api/me", "/api/me/capabilities"],
-            ["Document Endpoints"] = ["/api/containers", "/api/drives/test/children"],
+            // "Document Endpoints" removed: both of its routes (/api/containers,
+            // /api/drives/{id}/children) were retired from DocumentsEndpoints.cs on master with a
+            // documented zero-caller sweep. An empty group would assert nothing; a group naming
+            // deleted routes asserts something false.
             ["OBO Endpoints"] = ["/api/obo/containers/test/children"]
         };
 

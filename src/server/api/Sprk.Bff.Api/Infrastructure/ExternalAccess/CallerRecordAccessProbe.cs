@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Identity.Client;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -98,57 +99,97 @@ public class CallerRecordAccessProbe
     };
 
     /// <summary>
-    /// Process-wide MSAL confidential-client cache keyed by (authority, clientId). This type is a
-    /// typed <see cref="HttpClient"/> (transient), so building a CCA per instance would discard
-    /// MSAL's user-token cache and force a network OBO exchange on every mutation. Same reasoning,
-    /// and same shape, as <c>DataverseUserClient</c>'s cache.
+    /// The BFF's confidential-client provider — the ONE binding point for the BFF identity's
+    /// credential (ADR-028 Amendment <b>A4</b>).
     /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IConfidentialClientApplication>
-        CcaCache = new();
+    /// <remarks>
+    /// <para><b>This replaced a self-built client secret (task 045, 2026-08-25).</b> The original
+    /// version of this class built its own MSAL client with <c>.WithClientSecret(...)</c>, cached
+    /// process-wide by (authority, clientId). That was accepted at the time as an ADR-028 A4
+    /// <i>path-A exception</i> (item D1) on the explicit understanding that it would be "handled in
+    /// the broader MI migration" — and `spaarke-auth-v4-dataverse-MI` WAS that migration. It completed
+    /// 2026-08-24, closed exception <b>E-3</b>, and deleted the secret from app settings AND Key Vault.
+    /// It could not have handled this site, because this site lived on an unmerged branch. So the
+    /// exception's stated home ceased to exist, and the credential it depended on no longer resolves in
+    /// any deployed environment: this class would have denied every mutation in production, silently.</para>
+    ///
+    /// <para><b>The concrete type, not the interface</b> — deliberately. <c>AuthorizationModule</c>
+    /// registers the provider against both, resolving to the same singleton, and documents that only
+    /// <c>DataverseAccessDataSource</c> needs the interface (it lives in the base layer and can receive
+    /// the provider only by dependency inversion). BFF-side consumers inject the concrete per ADR-010;
+    /// this is the fourth.</para>
+    ///
+    /// <para><b>Its cache replaces the one deleted here.</b> This type is a typed
+    /// <see cref="HttpClient"/> and therefore transient, so a per-instance MSAL client would discard
+    /// the OBO user-token cache and force a network exchange on every mutation. The provider owns a
+    /// single shared cache serving every consumer — the same purpose, one layer up.</para>
+    ///
+    /// <para><b>Optional, and unconditionally registered.</b> The parameter is optional so the type
+    /// stays constructible in tests, but the registration in <c>AuthorizationModule</c> is NOT behind
+    /// a feature flag. That matters: six unconditionally-mapped routes depend on this probe, and a
+    /// conditionally-registered dependency would be the §10 F.1 asymmetric-registration anti-pattern
+    /// this class's own remarks warn about.</para>
+    /// </remarks>
+    private readonly OrderedCredentialClientProvider? _confidentialClients;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<CallerRecordAccessProbe> _logger;
     private readonly string? _environmentUrl;
-    private readonly IConfidentialClientApplication? _cca;
+    private readonly string? _tenantId;
+    private readonly string? _clientId;
 
     public CallerRecordAccessProbe(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<CallerRecordAccessProbe> logger)
+        ILogger<CallerRecordAccessProbe> logger,
+        OrderedCredentialClientProvider? confidentialClients = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confidentialClients = confidentialClients;
 
         _environmentUrl = configuration["Dataverse:ServiceUrl"]?.TrimEnd('/');
 
-        // AzureAd:* is the canonical OBO configuration (module CLAUDE.md); TENANT_ID / API_APP_ID /
-        // API_CLIENT_SECRET are the legacy keys DataverseAccessDataSource uses. The audience of the
-        // inbound token is the BFF's own registration, so it must be the BFF's client id.
-        var tenantId = FirstNonEmpty(configuration["AzureAd:TenantId"], configuration["TENANT_ID"]);
-        var clientId = FirstNonEmpty(configuration["AzureAd:ClientId"], configuration["API_APP_ID"]);
-        var clientSecret = FirstNonEmpty(configuration["AzureAd:ClientSecret"], configuration["API_CLIENT_SECRET"]);
+        // AzureAd:* is the canonical OBO configuration (module CLAUDE.md); TENANT_ID / API_APP_ID are
+        // the legacy keys DataverseAccessDataSource uses. The audience of the inbound token is the
+        // BFF's own registration, so it must be the BFF's client id.
+        //
+        // The client SECRET is deliberately not read here at all any more. Whether the BFF identity is
+        // proven by an MI-issued federated assertion, a Key Vault certificate, or anything else is the
+        // provider's ordered decision — not this class's business, and not something to re-derive at a
+        // fourth call site.
+        _tenantId = FirstNonEmpty(configuration["AzureAd:TenantId"], configuration["TENANT_ID"]);
+        _clientId = FirstNonEmpty(configuration["AzureAd:ClientId"], configuration["API_APP_ID"]);
 
-        if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret))
-        {
-            _cca = CcaCache.GetOrAdd($"{tenantId}|{clientId}", _ =>
-                ConfidentialClientApplicationBuilder
-                    .Create(clientId)
-                    .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
-                    .WithClientSecret(clientSecret)
-                    .Build());
-        }
-        else
+        if (!OboAvailable)
         {
             // No app-only fallback by design — see the class remarks. Without OBO configuration every
             // delegation check denies, which is the correct direction for a missing credential.
-            _cca = null;
             _logger.LogWarning(
-                "[{Marker}] CallerRecordAccessProbe has no OBO configuration (AzureAd:TenantId/ClientId/" +
-                "ClientSecret or TENANT_ID/API_APP_ID/API_CLIENT_SECRET). Every external-access mutation " +
+                "[{Marker}] CallerRecordAccessProbe cannot perform OBO (hasProvider={HasProvider}, " +
+                "hasTenantId={HasTenantId}, hasClientId={HasClientId}). Every external-access mutation " +
                 "will be denied. There is deliberately no app-only fallback: an app-only Write probe would " +
-                "answer for the application, not the caller.", FallbackMarker);
+                "answer for the application, not the caller.",
+                FallbackMarker,
+                _confidentialClients is not null,
+                !string.IsNullOrEmpty(_tenantId),
+                !string.IsNullOrEmpty(_clientId));
         }
     }
+
+    /// <summary>
+    /// Whether an OBO exchange can be attempted at all.
+    /// </summary>
+    /// <remarks>
+    /// Requires an identity and a credential <i>provider</i> — deliberately NOT a client secret, which
+    /// was the precondition before task 045. Note what this does and does not promise: it says a
+    /// credential can be <i>asked for</i>, not that one will be <i>produced</i>. Exhaustion of every
+    /// configured credential surfaces at exchange time, and is handled there.
+    /// </remarks>
+    private bool OboAvailable =>
+        _confidentialClients is not null
+        && !string.IsNullOrEmpty(_tenantId)
+        && !string.IsNullOrEmpty(_clientId);
 
     /// <summary>
     /// The caller's rights on one record, as Dataverse itself reports them.
@@ -167,14 +208,14 @@ public class CallerRecordAccessProbe
         Guid recordId,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(callerBearerToken) || _cca is null || string.IsNullOrEmpty(_environmentUrl))
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
         {
             _logger.LogWarning(
                 "[{Marker}] Delegation check cannot run for {EntitySet}({RecordId}): " +
-                "hasToken={HasToken}, hasOboClient={HasOboClient}, hasEnvironmentUrl={HasEnvironmentUrl}. " +
+                "hasToken={HasToken}, canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}. " +
                 "Denying (fail closed).",
                 FallbackMarker, entitySet, recordId,
-                !string.IsNullOrWhiteSpace(callerBearerToken), _cca is not null, !string.IsNullOrEmpty(_environmentUrl));
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
 
             return AccessRights.None;
         }
@@ -182,7 +223,14 @@ public class CallerRecordAccessProbe
         string dataverseToken;
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            // Asked PER EXCHANGE rather than held in a field. The provider owns the one client cache
+            // and re-evaluates the credential order when a suppressed higher-priority credential
+            // recovers; caching the client here would pin this path to a fallback after a single blip.
+            var cca = await _confidentialClients!
+                .GetClientAsync(_tenantId!, _clientId!, ct)
+                .ConfigureAwait(false);
+
+            var result = await cca.AcquireTokenOnBehalfOf(
                     new[] { $"{_environmentUrl}/.default" },
                     new UserAssertion(callerBearerToken))
                 .ExecuteAsync(ct)
@@ -196,6 +244,20 @@ public class CallerRecordAccessProbe
             _logger.LogWarning(
                 "[{Marker}] OBO exchange for the delegation check failed ({ErrorCode}) on {EntitySet}({RecordId}). Denying.",
                 FallbackMarker, ex.ErrorCode, entitySet, recordId);
+
+            return AccessRights.None;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // IConfidentialClientProvider's contract: every configured credential was exhausted. That
+            // is a CONFIGURATION fault, not an exchange fault, and it is caught separately so the log
+            // distinguishes "the credential order produced nothing" from "Entra rejected the
+            // assertion" — the two need different operator responses, and the generic catch below
+            // would flatten them into one message.
+            _logger.LogWarning(
+                "[{Marker}] No usable confidential credential for the delegation check on " +
+                "{EntitySet}({RecordId}): {Message}. Denying.",
+                FallbackMarker, entitySet, recordId, ex.Message);
 
             return AccessRights.None;
         }

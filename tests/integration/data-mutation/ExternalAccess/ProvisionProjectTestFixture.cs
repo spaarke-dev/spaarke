@@ -160,7 +160,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             services.AddSingleton<CallerRecordAccessProbe>(new WritableCallerRecordAccessProbe());
 
             var client = new Mock<DataverseWebApiClient>(
-                ClientConfig(), NullLogger<DataverseWebApiClient>.Instance);
+                ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
+                // Moq matches a class-proxy constructor EXACTLY; master's auth-v4 widened this
+                // ctor with two OPTIONAL params (TokenCredential, IConfidentialClientProvider)
+                // and optional args do not participate in proxy ctor selection. Passed
+                // explicitly as null: this double never authenticates.
+                // Positional and null-forgiving, both deliberately. Mock<T> takes `params object[]`
+                // for the proxied type's ctor args, so (a) NAMED arguments bind to Mock's own ctor
+                // and fail CS1739, and (b) a bare null literal fails CS8625 against the
+                // non-nullable element type. This double never authenticates, so both credential
+                // slots are genuinely unused.
+                null!, null!);
 
             // The handler reads every row through its OWN private DTOs, which this assembly cannot
             // name. So the double answers in Dataverse's WIRE shape (JSON) and lets the handler's own
@@ -453,6 +463,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+            // auth-v4 (master) made DataverseWebApiClient select its credential from THIS FLAG
+            // rather than from the presence of a client secret, and it now THROWS when Managed
+            // Identity is disabled and neither a TokenCredential nor an IConfidentialClientProvider
+            // is supplied. Enabling it takes the MI branch, whose DefaultAzureCredential is
+            // constructed lazily and never authenticates — this client is fully stubbed.
+            ["Graph:ManagedIdentity:Enabled"] = "true",
             ["API_APP_ID"] = "00000000-0000-0000-0000-0000000000aa",
             ["API_CLIENT_SECRET"] = "test-secret",
             ["TENANT_ID"] = "00000000-0000-0000-0000-0000000000bb"
