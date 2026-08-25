@@ -1,6 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-24 · **Branch**: `work/spaarkeai-compose-r8` · **Pushed through**: `ed0ebc1f9`
+> **Last Updated**: 2026-08-25 · **Branch**: `work/spaarkeai-compose-r8` · **Pushed through**: `ab7451e33`
+> **Mode**: AUTONOMOUS — parallel sub-agent execution, operator asked for no per-task confirmation.
 
 ---
 
@@ -8,78 +9,38 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **055** — whole-document anchored placement — 🔄 **IN PROGRESS** (step 2 of 6 done: the design decision is MADE and recorded) |
-| **Rigor / tier** | FULL · **opus @ xhigh** — do not run on a lower tier |
-| **Next Action** | Implement the 4 changes in [`notes/055-review-flag-placement-decision.md`](notes/055-review-flag-placement-decision.md) §5, in that order. Start with the `ComposeDraftComment` field addition + the **filter defect** in §5's sub-section — that one silently drops the best-anchored flags. |
+| **Wave in flight** | **055** (client) + **049** (server) — two opus sub-agents, dispatched 2026-08-25 |
+| **Status** | 🔄 both in progress. Main session owns bookkeeping + commits; agents own code. |
+| **Next Action** | Await both agent reports → verify their claims (do NOT take them at face value) → run the full suites myself → commit → dispatch wave 2. |
 
-### The decision (MADE — do not re-litigate)
+### Why these two run in parallel despite `parallel-safe: false`
 
-**Converge the RESOLUTION; keep the two SINKS separate.** Full reasoning + the §11 three-question
-answers + why both escalation triggers did NOT fire: `notes/055-review-flag-placement-decision.md`.
+The project sets a BLANKET `parallel-safe: false` on the whole Compose spine. Verified disjoint here:
 
-The task asked "does `comments[]` converge onto `placeAdvisoryComments`?" The trace says **no** — they are
-not near-duplicates. Each has a property the other lacks:
-
-| | `placeAdvisoryComments` | `registerAiReviewComments` (DEF-11 `comments[]`) |
+| Task | Files | Toolchain |
 |---|---|---|
-| Word `w:comment` on Save | ✅ (task 040) | ❌ out of scope, follow-on |
-| Idempotent | ❌ (`ComposeWorkspace.tsx:711`) | ✅ dedup by `ai-review:{ledgerRef}#{i}` |
-| Survives reopen | thread state | ✅ FR-29 server-persisted |
-| Deterministic anchor | `sectionRef` → CitationResolver → text | ❌ **`textPattern` ONLY** |
+| **055** | `src/client/shared/Spaarke.Compose.Components/**` | jest |
+| **049** | `src/server/api/Sprk.Bff.Api/Services/Compose/*.cs`, `tests/**`, residual-loss doc | dotnet |
 
-Collapsing either into the other destroys a shipped property. The genuine overlap is *resolution*, and
-that is what converges.
+No shared file, no shared build output. Two hazards were reserved to the MAIN SESSION and both agents were
+told explicitly not to touch them: `TASK-INDEX.md` / `current-task.md`, and `.claude/**` (sub-agents cannot
+write those paths — root §3; they report proposed CHANGELOG text instead). Agents also must not
+commit/push.
 
-### 🔑 The finding that resolves it — the SIXTH dark-machinery instance
+### Wave 2 (ready, NOT yet dispatched)
 
-**`AnchoredAnnotationAnchor.paraId` already exists** (R3 FR-11 / compose-r3 task 012), documented as
-*"PRIMARY anchor… resolution order is paraId-FIRST"*, and the **consumer is live** — the return-from-Word
-re-anchor path (`PriorAnchorInput` → `AnnotationReanchorService`) sends it to the BFF, which resolves by
-it first and only then falls back to the fuzzy scorer.
+- **060** — Track B durable byte store. Genuinely independent (`Services/Ai/Sessions/**`, no Compose
+  files), deps none, the only `parallel-safe: ✅` family in the project. Held back from wave 1 ONLY
+  because it is dotnet and would contend with 049 on `bin`/`obj` locks — dispatch it once 049 lands, or
+  give it worktree isolation.
+- **056** — objects carried; deps 040, 048, **049**.
+- **052** — demote text-search; deps 051, 054, **055**.
 
-**The producer is dark.** `registerAiReviewComments` (`ComposeWorkspace.tsx` ~2842) writes
-`{ textPattern, paragraphHint: -1, spanId }` — no `paraId`. So every DEF-11 review flag re-anchors by
-fuzzy scorer even when the model named its paragraph exactly.
+### On agent reports
 
-### The 4 changes (see note §5)
-
-1. `ComposeDraftComment` (+`target_para_id`, `+target_ref`) — mirrors `ComposeDraftEdit`; task 054 already
-   put both on the Action's `comments[]` output schema, so the model can supply them.
-2. `registerAiReviewComments` — resolve paraId → citation → text, and **populate `anchor.paraId`**.
-3. `placeAdvisoryComments` — accept `paraId`, checked ABOVE `sectionRef` (additive; no current caller sets
-   it, so NDA-REVIEW is byte-identical).
-4. One shared resolver for both, so the precedence cannot drift.
-
-### ⚠️ Defect to fix WITH change 1
-
-`registerAiReviewComments` filters `c.target.length > 0 && c.body.length > 0`. After 054 a flag may carry
-a deterministic `target_para_id` and weak/absent `target_text` — this **silently drops exactly the
-best-anchored flags**. Gate must become "resolvable anchor OR non-empty target_text".
-
-### Still to do on 055 (steps 1, 3–6)
-
-- Step 1 — verify `materializeMany`'s anchor branch against a REAL multi-change payload (mixed
-  anchored/legacy, per-item isolation, banner counts). NOT yet done; do not assume 051's single-edit
-  tests generalize.
-- Step 4 — prove ZERO text matching structurally via the throwing-collaborator tripwire (the pattern in
-  `ComposeEditAnchorPassSeamTests`), not by inspecting output.
-- Step 5 — per-item failure isolation + honest N-of-M reporting under a partially-anchored batch.
-- Step 6 — confirm nothing retired; 052's remaining scope now unreachable-in-practice for the AI flow.
-- Then Step 9.5 gates (code-review + adr-check) + publish-size report.
-
-### Constraints carried from 054 (`notes/054-…` §6)
-
-**L-1** hard breaks collapse in `collectBlocks().text` — a model-quoted `target_text` may not exist
-verbatim, which RAISES the value of anchoring flags by paraId · **L-2** the provider-registration race is
-argued not proven · **UAT-21** an unresolved anchor REFUSES, never falls back to a search, never reports
-`applied` · **C-4** anchors add 3.50% at realistic size (40.4 KB, under the 128 KB cap).
-
-### ⚠️ Deploy prerequisite (unchanged)
-
-`Deploy-AnalysisAction.ps1` MUST run before ANY of Track C is observable. Dev stores the WHOLE mirror file
-in `sprk_inputschema` for `compose-draft-alternative` / `compose-compare-to-playbook`, so
-`GetDeclaredProperties` returns null and **051's `targetParaId` would not render either**. Deploy BFF +
-`sprk_spaarkeai` together (NFR-05).
+Treat them as claims, not results. This project's recurring failure is a green suite over a dark link —
+task 054 alone found six. Before marking anything complete: re-run the suites in the main session, and
+spot-check that each test the agent says it "observed to fail first" actually asserts what it claims.
 
 ---
 
