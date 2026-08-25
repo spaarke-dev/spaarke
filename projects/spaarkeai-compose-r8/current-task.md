@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-24 (by `context-handoff`) · **Pushed through**: `5ea76633d`
+> **Last Updated**: 2026-08-24 (by `context-handoff`) · **Pushed through**: `64548f227`
 > **Recovery**: read "Quick Recovery" first. Everything below is recoverable from files alone.
 
 ---
@@ -9,95 +9,124 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **051** — FR-C01/C02/C03 anchor supply (`tasks/051-anchor-supply.poml`), Phase 5 Track C |
-| **Step** | **6 of 7 done** (0 rigor · 1 trace · 2–3 envelope+thread · 4 rebasing · 5 CitationResolver · 7 tests). Remaining: **the SUPPLY half of step 6 only** |
-| **Status** | **in-progress — one open decision.** FR-C01 complete (five dispatch sites). FR-C02 complete server + client, live and tested. FR-C03's *validate* half complete; its *supply* half needs an owner decision — see 🔔 ESCALATION. |
-| **Rigor / tier** | FULL · opus @ max (session model must be Opus — do not run this on a lower tier) |
-| **Next Action** | **Answer the escalation below**, then implement the chosen supply channel and land the `compose-revise-document` catalog-DATA change WITH it — never before it (see the sequencing rule). |
+| **Last task** | **051** — anchor supply (`tasks/051-anchor-supply.poml`) — ✅ **COMPLETE** |
+| **Next task** | **054** — `tasks/054-whole-document-closed-set-supply.poml` (not started) |
+| **Status** | Branch clean, synced with master (**0 behind, 78 ahead**), all pushed. No task in progress. |
+| **Rigor / tier** | 054 is FULL · **opus @ xhigh** — do not run it on a lower tier |
+| **Next Action** | Start task 054 via the `task-execute` skill. Its step 2 owns the one real decision: enumerate the whole-document paragraph set **server-side** from `ChatSession.ReferenceMap`, or **client-side** in SpaarkeAi's `ConversationPane.tsx`. Read `notes/adr-043-041-assessment.md` C-1-as-amended and C-7 FIRST. |
+
+### Project status: 26 of 42 tasks complete, 15 open (1 dropped)
+
+| Track | Open |
+|---|---|
+| **C — AI edit placement** | **054** supply · **055** placement · **052** demote text-search *(gated on 051+054+055)* · **053** bounded fallback |
+| **B — durable session files** | 060 blob store · 061 lazy re-index · 062 retention/TTL · 063 erasure — *not started, genuinely parallel* |
+| **D — decomposition** | 070–073 decompose 4 files · **074 ⛔ BLOCKED** (retire `ComposeShadowPatchEngine` — gate-confirm first; it still serves the op-log path) |
+| **Wrap-up** | **045** — residual-loss list ⏳ **awaiting OWNER sign-off** (not an agent task) · 090 wrap-up |
 
 ---
 
-## 🔔 ESCALATION — FR-C03 supply channel (the one open decision)
+## What task 051 delivered (all committed + pushed)
 
-**Situation.** FR-C03 has two halves. The *validate* half is DONE: a model-returned paraId is checked for
-membership in the closed set and refused loudly on a miss (`ComposeAnchorResolver` →
-`EditErrorKind.UnknownParaId`; client `resolveAnchoredSpans` refuses an id absent from the live document).
-The *supply* half — "supply the model an ENUMERATED CLOSED SET of paraIds" — has no home inside this task's
-declared boundary.
+Prose matching is no longer the targeting channel for any **selection, caret, note, or citation** edit. The
+chain is verified end to end, link by link, by tests:
 
-**Why it is not just more typing.** The whole-document review pass is the `compose-revise-document` Action. Its
-dispatch builds `args.slots` in **`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`**
-(~1669) and sends only `{ revisionIntent, instruction? }` — the document text reaches the model through the
-grounding layer, not through a slot. The paraId map lives in the **Compose** pane. So the closed set has to cross
-a pane and a package boundary. Every candidate home is fenced:
+**capture → send → reach the model → model echoes the id → deterministic placement**
 
-| Candidate | Blocked by |
+| Link | Where |
 |---|---|
-| Inject server-side at dispatch admission | **C-7** — "not as a new admission gate in `SessionDispatchOrchestrator`" |
-| A fourth operand-vocabulary entry | **C-1** — closed, hardcoded three-name vocabulary; adding one converts Path C → Path B (a spine change) |
-| Build the set in `ConversationPane.tsx` | **SpaarkeAi is a hot path** (CLAUDE.md §17) — needs `/conflict-check` and NFR-05 co-deploy, and is outside task 051's declared `<outputs>` (CLAUDE.md §6 "scope expansion beyond task boundaries") |
-| Toolbar-only supply — thread `paraIdMap` into `ComposeAiToolbar`, add `paragraphs` to slots when `revisionScope === 'whole-document'` | Feasible and Compose-owned (~1 prop + ~10 lines), but covers only the toolbar entry, NOT the ConversationPane "Revise document" entry that the code comments call the primary one |
+| Capture the paraId | 5 dispatch sites (2 toolbar mounts, note single + batch, caret) |
+| Carry it to the model | **ADR-043 Amendment 1** — declared companion inputs render into `## Input` |
+| Model can answer with it | `target_para_id` on 3 selection-scoped Action output schemas |
+| Resolve it deterministically | `ComposeAnchorResolver` + `ComposeEditAnchorPass` (server), `resolveAnchoredSpans` (client) |
 
-**Recommendation — toolbar supply here, ConversationPane supply as a scoped follow-on.** Do the Compose-owned
-toolbar half inside task 051 (small, inside the boundary); file the ConversationPane half as its own task with a
-`/conflict-check` + co-deploy gate. That keeps 051 inside its outputs and still moves FR-C03 forward.
+`CitationResolver` now has its first real BFF consumer (`ComposeAnchorResolver.cs:60,74`).
 
-**⚠️ Sequencing rule that must not be broken.** The catalog-DATA change to
-`infra/dataverse/actions/compose-revise-document.action.json` (require `target_para_id` on `edits[]` /
-`comments[]`; rewrite the INPUT + OUTPUT CONTRACT sections of the systemPrompt) is **deliberately NOT made yet**.
-C-7 sanctions it as catalog DATA, but landing it before the supply exists asks the model for a paraId it was
-never given — every edit would then be refused, which is **worse than today**. Catalog change and supply must
-land together, covering every entry path that dispatches this Action.
+### Commits (this session, newest first)
+
+```
+64548f227 Merge origin/master (91 commits; CHANGELOG conflict resolved by keeping BOTH sides)
+29f11f7ec docs(incident): dev BFF Service Bus config/code mismatch + stale net8 template
+be9cae9e3 docs: define tasks 054/055; 051 complete; 052 reframed and re-gated
+67689b3ad fix(ai-spine): declared inputs reach the model (ADR-043 Amendment 1)
+aa7445a20 feat: task 051 FR-C03 — let the model ANSWER with an anchor (3 Actions)
+f3ab59a95 feat: close the fifth dispatch site (caret path)
+52c7f57f8 feat: task 051 FR-C02 — CitationResolver gets its first consumer
+```
 
 ---
 
-### Files Modified This Session (all COMMITTED + PUSHED — clean tree)
+## Critical context for whoever picks this up
 
-| File | Purpose |
-|---|---|
-| `Services/Compose/ComposeAnchorResolver.cs` | **NEW** — the ONE place an edit's target becomes a paraId. Membership-validates `target_para_id` (FR-C03); resolves `target_ref` through `CitationResolver` (FR-C02). No text-search branch exists to fall into. |
-| `Services/Compose/ComposeEditAnchorPass.cs` | **NEW** — anchor-first batch ordering. Anchored edits are kept OUT of the text validator's *input*, because it indexes verdicts by position — ignoring its output would still run `FindAll` over the whole document. |
-| `Services/Compose/ComposeEditModels.cs` | `ProposedEdit.target_para_id` + `.target_ref`; `EditVerdict.resolvedParaId`; request `referenceMap`; five anchor `EditErrorKind` values |
-| `Api/ComposeEndpoints.cs` | `ValidateEditBatch` now calls the anchor pass |
-| `tests/integration/seam/Compose/ComposeEditAnchorPassSeamTests.cs` | **NEW** — 13 seam tests: real corpus → projection → anchor → verdict |
-| `.../hooks/usePendingRedline.ts` | `resolveAnchoredSpans` + anchor-first ordering on BOTH the single-edit and change-list legs; banner names the anchor when there is no `target_text` to quote |
-| `.../hooks/usePendingRedline.anchor.test.tsx` | **NEW** — 14 client tests |
-| `.../widgets/ComposeEditor.tsx` | `ComposeDraftPayload`/`ComposeDraftEdit` anchor fields; `usePendingRedline(editor, paraIdMap)`; caret path (5th dispatch site) wired |
+**⚠️ THE RECURRING TRAP — check for a DARK implementation before building anything.** Five instances now:
+046 (hardBreak), 048 (atoms), 051 FR-C01 (bookmark controllers), 051 FR-C02 (`CitationResolver`), and the
+whole ADR-043 Amendment 1 chain. In every case the machinery existed, was tested, and had **no production
+consumer**. Grep for the thing before you write it.
 
-### Commits this session
+**⚠️ AND THE HARDER VERSION — verify the PRODUCER before building the CONSUMER.** This session built the
+anchor consumer (server + client, green tests) before checking whether anything could emit a
+`target_para_id`. Nothing could: the Action schemas didn't declare it, no Action declared an `inputSchema`
+at all, and `Deploy-AnalysisAction.ps1` never wrote `sprk_inputschema`. Three dead links behind a green
+test suite. **Write the failing test first and watch it fail** — that is how all three were found.
 
-```
-5ea76633d task 051 — close the fifth dispatch site (caret path) on the FR-C01 anchor
-6e663be1c task 051 FR-C02 — a citation now resolves an edit's target; CitationResolver gets its first consumer
-```
+**ADR-043 Amendment 1 is a spine change; know why it exists.** The operand channel is **single-valued** —
+`TryFindDeclaredOperandField` returns on the first vocabulary match and builds a one-key object. So it can
+say *what content* a completion runs over but never *where it came from*. Adding a 4th vocabulary entry
+would make the anchor **compete** with `selectionText` (first match wins → one silently vanishes, breaking
+every selection dispatch); nesting it in the operand value is a type pun (Tier-3 content vs Tier-1 id).
+The fix: **declaration is the contract** — an Action's declared inputs render alongside the operand.
+Bounded: never the operand field, never another vocabulary name, never `ledger_resolution`, count/size
+capped, oversize **skipped and logged, never truncated**. Both ADR versions amended; C-1 superseded in part.
 
-### Critical Context
+**052's scope changed — re-read the POML before executing it.** It **demotes** text matching; it does not
+eliminate the capability. Three roles legitimately survive: return-from-Word re-anchor
+(`AnnotationReanchorService`, KEEP), 053's bounded confirmable fallback for anchorless input, and
+user-invoked find/replace where matching text IS the semantics. Also: **`match_mode: 'all'` must be decided
+explicitly**, not dropped as a side effect.
 
-**The same shape has now appeared four times in a row: 046 (hardBreak), 048 (atoms), 051 FR-C01 (bookmark),
-051 FR-C02 (`CitationResolver`).** In each case the machinery existed, was tested, and had no production
-consumer. **Look for a dark implementation BEFORE building** — it has been the answer every time.
+**Sequencing rule for 054 — do not break it.** The `compose-revise-document` catalog change lands **with**
+the supply, never before. Requiring an id the model was never given refuses every whole-document edit —
+strictly worse than today's prose matching.
 
-**`CitationResolver` now has a real consumer** (acceptance criterion, verified):
-`grep -rn "CitationResolver" src --include=*.cs` → `ComposeAnchorResolver.cs:60` and `:74` are call sites, not
-doc comments.
-
-**The negative is enforced structurally, not by inspecting output.** The seam test hands the anchor pass a
-validator that THROWS if called, and a companion test proves that same validator IS still reached for
-un-anchored edits — so the tripwire is a real constraint, not an unreachable branch.
-
-**A `BlockInfo`'s `from`/`to` are NODE boundaries, not content.** A redline needs `from+1 .. to-1`, or the
-replacement lands *after* the paragraph instead of within it. Cost one debugging cycle; commented at `spanOf`.
-
-**`usePendingRedline.ts` contains a literal NUL byte** (its text-index sentinel), so `grep` treats the file as
+**`usePendingRedline.ts` contains a literal NUL byte** (its text-index sentinel), so `grep` treats it as
 binary — use `grep -a`.
 
-**Nothing has been deleted or retired.** `target_text`, `match_mode`, `ComposeEditValidator`, `FindAll` and the
-client `resolveTargetSpans` are all still present and still the fallback for un-anchored edits. Task 052 owns
-retirement and MUST NOT run until FR-C03's supply half lands — the escalation above is its gate.
+**A `BlockInfo`'s `from`/`to` are NODE boundaries.** A redline needs `from+1 .. to-1`, or the replacement
+lands *after* the paragraph. Commented at `spanOf`.
 
-**C-4 is still unchecked** (carried forward): ADR-040 caps inline payloads at 128 KB and
-`ChatEndpoints.ProjectComposeOutputs` SKIPS truncated entries. Anchors now ride every edit entry, and FR-C03's
-closed set would ride every review request. Measure the whole-document worst case or state the degradation.
+---
+
+## Environment + deployment state
+
+- **`spaarke-bff-dev` is HEALTHY (HTTP 200).** It was down 18:38–~19:5x UTC 2026-08-24 after a deploy from
+  this branch; **fixed by `spaarke-auth-v4-dataverse-MI`**, and both fixes are now IN this tree via the
+  merge: `JobProcessingModule` no longer throws on a missing connection string (MI path via
+  `ServiceBusClientFactory.Create`), and `runtimeconfig.template.json` no longer injects a `net8` block.
+  Incident write-up: [`notes/incident-2026-08-24-servicebus-config-mismatch.md`](notes/incident-2026-08-24-servicebus-config-mismatch.md)
+  (both defects it names are now RESOLVED upstream — keep it for the process gaps).
+- **⚠️ Azure CLI default subscription was `Spaarke Model 1 Production`; this session set it to
+  `Spaarke Devlopment Environment`.** `spaarke-bff-dev` lives in the dev subscription — a `az webapp show`
+  against the prod default returns `ResourceGroupNotFound` and looks like a missing resource.
+- **NOTHING from Phase 3 onward is deployed.** Track S shipped; Tracks A and C are merged to the branch and
+  unshipped. Deploy BFF + `sprk_spaarkeai` **together** (NFR-05).
+- **The 3 Action seed changes need `Deploy-AnalysisAction.ps1` run** — and that now depends on this
+  session's `sprk_inputschema` mapping fix in that script. Until it runs, the anchor work is **not
+  observable in the product**. This is a prerequisite, not a follow-up.
+- **CI note:** `Compose Client Gate (Save-Contract Suite)` is RED and was already failing at `7069717bd`,
+  before any Track C work. Cause is per-test 5s **timeouts** (the suite takes ~90s locally for 16 tests);
+  all 16 **pass** locally. Pre-existing hygiene debt, not a product defect. PR **#806** is open.
+
+---
+
+## Still open, not on the task index
+
+- **C-4 is UNMEASURED.** ADR-040 caps inline payloads at 128 KB and `ChatEndpoints.ProjectComposeOutputs`
+  **skips** truncated entries — a whole-document revise could vanish from the read projection rather than
+  degrade. Now a constraint on both 054 and 055; still nobody has measured it.
+- **045 needs OWNER sign-off** on the published residual-loss list. Not an agent task.
+- **Process gaps from the outage** (in the incident note): no config pre-flight in `bff-deploy`;
+  `/conflict-check` + `projects/INDEX.md` track file overlap but have **no notion of shared environment
+  config**; fail-fast guards that encode a single auth model.
 
 ---
 
@@ -133,7 +162,10 @@ was behind `useBookmark` and never shipped**. Now fixed. Cite the corrected vers
 **Task 052 may now retire the search path only after FR-C02/C03 also land** — a citation-driven or
 review-pass edit with no anchor would still depend on it.
 
-## Task 051 — remaining work, with its binding constraints
+## Task 051 — HISTORICAL: what remained mid-task (all resolved; kept for the constraint list)
+
+> ⚠️ Task 051 is COMPLETE. This section is the mid-task snapshot — read it ONLY for the C-1…C-7
+> constraint text at the end, which still binds tasks 052/053/054/055.
 
 - ~~**FR-C02**~~ — ✅ DONE (`6e663be1c`). `ComposeAnchorResolver` is the consumer; server + client both resolve a
   citation deterministically, and both refuse rather than degrade to a search.
