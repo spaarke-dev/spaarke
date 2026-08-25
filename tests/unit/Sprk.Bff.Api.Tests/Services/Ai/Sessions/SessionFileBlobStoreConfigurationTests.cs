@@ -47,6 +47,40 @@ public sealed class SessionFileBlobStoreConfigurationTests
             .WithMessage("*absolute URI*");
     }
 
+    [Theory]
+    [InlineData("http://sprk.blob.core.windows.net")]
+    [InlineData("HTTP://sprk.blob.core.windows.net")]
+    [InlineData("ftp://sprk.blob.core.windows.net")]
+    public void Constructor_RefusesANonHttpsEndpoint(string insecureEndpoint)
+    {
+        // A managed-identity bearer token is sent on this connection. An http endpoint would put it on
+        // the wire in cleartext, so the scheme is a security decision rather than a formatting one.
+        var construct = () => new SessionFileBlobStore(
+            insecureEndpoint, containerName: null, Credential, NullLogger<SessionFileBlobStore>.Instance);
+
+        construct.Should().Throw<InvalidOperationException>()
+            .WithMessage("*https*");
+    }
+
+    [Theory]
+    [InlineData("has/slash")]      // would move the tenant out of first position in the blob path
+    [InlineData("UPPERCASE")]
+    [InlineData("ab")]             // < 3 chars
+    [InlineData("-leading-hyphen")]
+    [InlineData("trailing-hyphen-")]
+    [InlineData("double--hyphen")]
+    public void Constructor_RefusesAnInvalidContainerName(string containerName)
+    {
+        // The container name is the ONE name component that does not go through the per-segment
+        // validator, so it gets its own. A value containing '/' would silently reshape the blob path.
+        var construct = () => new SessionFileBlobStore(
+            "https://sprk.blob.core.windows.net", containerName, Credential,
+            NullLogger<SessionFileBlobStore>.Instance);
+
+        construct.Should().Throw<InvalidOperationException>()
+            .WithMessage("*container name*");
+    }
+
     // NOTE (ADR-038 §7 ban B4 — constructor null-check tests): a
     // `Constructor_RequiresACredential` test was written here and then DELETED. The production code
     // keeps `ArgumentNullException.ThrowIfNull(credential)`; B4's ruling is "delete the test; trust the

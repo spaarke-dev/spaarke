@@ -54,10 +54,27 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
     public void Seed(string blobName, BinaryData content, string? contentType = null)
         => _blobs[blobName] = new StoredBlob(content, contentType);
 
-    public void Clear() => _blobs.Clear();
+    /// <summary>
+    /// When set, the next <see cref="UploadAsync"/> throws instead of storing. Lets a seam test drive
+    /// the endpoint's enabled-but-write-failed branch (which must be a 500, never a lying 202) through
+    /// the real wire, rather than asserting it at the store's own API.
+    /// </summary>
+    public bool FailNextWrite { get; set; }
+
+    public void Clear()
+    {
+        _blobs.Clear();
+        FailNextWrite = false;
+    }
 
     public override Task UploadAsync(string blobName, BinaryData content, string? contentType, CancellationToken cancellationToken)
     {
+        if (FailNextWrite)
+        {
+            FailNextWrite = false;
+            throw new InvalidOperationException("simulated durable-store write failure");
+        }
+
         _blobs[blobName] = new StoredBlob(content, contentType);
         return Task.CompletedTask;
     }

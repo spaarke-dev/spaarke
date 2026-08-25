@@ -186,11 +186,13 @@ public static class AiPersistenceModule
         //
         // UNCONDITIONAL by design (ADR-032 P1 "promote-to-unconditional"): the store is injected into
         // ChatDocumentEndpoints handlers, and MapChatDocumentEndpoints() is mapped unconditionally
-        // (EndpointMappingExtensions.cs:228). A feature-gated registration here would abort minimal-API
-        // endpoint metadata generation at host startup whenever the gate was off — the exact
-        // asymmetric-registration failure ADR-032 exists to prevent. There is therefore NO `if (flag)`
-        // block and NO null-object peer: the store has zero feature-gated transitive deps
-        // (TokenCredential + ILogger + two config strings), so P1 is the correct pattern, not P2/P3.
+        // (EndpointMappingExtensions.cs:228). A feature-gated registration here would break that
+        // mapping whenever the gate was off — the asymmetric-registration failure ADR-032 exists to
+        // prevent. (Blast radius, stated precisely: that Map call is wrapped in a try/catch at
+        // EndpointMappingExtensions.cs:228-233, so the symptom would be a SILENTLY UNAVAILABLE upload
+        // surface plus one logged error, not a host-down.) There is therefore NO `if (flag)` block and
+        // NO null-object peer: the store has zero feature-gated transitive deps (TokenCredential +
+        // ILogger + two config strings), so P1 is the correct pattern, not P2/P3.
         //
         // The "no blob endpoint configured" case is a RUNTIME state inside the store (writes return
         // SessionFileStoreOutcome.StoreDisabled and log a warning), not a DI state — so local dev and
@@ -199,9 +201,22 @@ public static class AiPersistenceModule
         // Singleton: BlobServiceClient/BlobContainerClient are thread-safe and designed for long-lived
         // reuse (same rationale as the CosmosClient singleton above). Managed identity only — the
         // shared TokenCredential; no connection string, no account key (root CLAUDE.md §9).
+        var sessionFileBlobEndpoint = configuration[SessionFileBlobStore.BlobEndpointConfigKey];
+        var sessionFileContainer = configuration[SessionFileBlobStore.ContainerNameConfigKey];
+
+        // Validate HERE, not only in the ctor. The registration below is a factory lambda, so the ctor
+        // does not run until the first upload request — a secret-bearing, non-https or malformed endpoint
+        // would otherwise surface as a 500 on a user request (and on every request after, since the
+        // container does not cache a failed singleton) with no startup signal at all. This call runs
+        // during composition, so a misconfiguration stops the host instead.
+        if (!string.IsNullOrWhiteSpace(sessionFileBlobEndpoint))
+        {
+            SessionFileBlobStore.ValidateConfiguration(sessionFileBlobEndpoint, sessionFileContainer, out _);
+        }
+
         services.AddSingleton(sp => new SessionFileBlobStore(
-            blobEndpoint: configuration[SessionFileBlobStore.BlobEndpointConfigKey],
-            containerName: configuration[SessionFileBlobStore.ContainerNameConfigKey],
+            blobEndpoint: sessionFileBlobEndpoint,
+            containerName: sessionFileContainer,
             credential: sp.GetRequiredService<TokenCredential>(),
             logger: sp.GetRequiredService<ILogger<SessionFileBlobStore>>()));
 

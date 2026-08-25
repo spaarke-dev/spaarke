@@ -30,11 +30,15 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// <para>
 /// <b>Observed to fail before it passed.</b> With step 9c removed from
 /// <c>ChatDocumentEndpoints.UploadDocumentAsync</c> (i.e. the upload still 202s, still writes Redis,
-/// still indexes, still updates the manifest — the pre-task-060 world),
-/// <see cref="Upload_WritesADurableByteCopyAtUploadTime"/>,
-/// <see cref="Upload_DurableCopyIsReadableByTheUploadingTenant"/> and
-/// <see cref="Upload_DurableCopy_IsNotReadableByAnotherTenant"/> all fail. Recorded in
-/// <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §6.
+/// still indexes, still updates the manifest — the pre-task-060 world), FOUR of the five tests here
+/// failed: <see cref="Upload_WritesADurableByteCopyAtUploadTime"/>,
+/// <see cref="Upload_DurableCopyIsReadableByTheUploadingTenant"/>,
+/// <see cref="TwoTenantsUploadingToTheSameSessionId_ProduceSeparateDurableCopies"/> and
+/// <see cref="Upload_StillWritesTheSessionCacheAndManifest_AlongsideTheDurableCopy"/>.
+/// <see cref="Upload_DurableCopy_IsNotReadableByAnotherTenant"/> did NOT — it passed vacuously,
+/// because a null read is indistinguishable from a blob that was never written. It has since been
+/// given explicit positive controls so it cannot pass that way again. Recorded, including that
+/// admission, in <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §6.
 /// </para>
 /// </remarks>
 public sealed class SessionDurableFileStoreSeamTests : IClassFixture<ChatDocumentEndpointsTestFixture>
@@ -107,10 +111,19 @@ public sealed class SessionDurableFileStoreSeamTests : IClassFixture<ChatDocumen
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(SessionId);
 
-        await UploadAsync("privileged.pdf", "Tenant A privileged content.");
+        var response = await UploadAsync("privileged.pdf", "Tenant A privileged content.");
         var fileId = _fx.Sessions.PersistedSession!.UploadedFiles!.Single().FileId;
 
-        // Another tenant, holding the leaked session id + file id, attempts the same read.
+        // POSITIVE CONTROLS FIRST. Without these this test passes when the durable write is removed
+        // entirely — a null read is indistinguishable from a never-written blob, and a cross-tenant
+        // assertion that cannot tell those apart proves nothing. (Observed: it was the ONE test in this
+        // file that stayed green under the step-9c break; see the note's §6b.)
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _fx.DurableBlobs.Count.Should().Be(1, "positive control: the durable write must have happened");
+        (await _fx.DurableFileStore.ReadAsync(TenantA, SessionId, fileId))
+            .Should().NotBeNull("positive control: the bytes must be readable by their own tenant");
+
+        // Only now is the negative meaningful: another tenant, holding the leaked session id + file id.
         var crossTenant = await _fx.DurableFileStore.ReadAsync(TenantB, SessionId, fileId);
 
         crossTenant.Should().BeNull(
@@ -149,6 +162,38 @@ public sealed class SessionDurableFileStoreSeamTests : IClassFixture<ChatDocumen
         // The decisive direction: tenant A must not reach tenant B's file id and vice versa.
         (await _fx.DurableFileStore.ReadAsync(TenantA, SessionId, fileIdB)).Should().BeNull();
         (await _fx.DurableFileStore.ReadAsync(TenantB, SessionId, fileIdA)).Should().BeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The failure policy, driven through the wire.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Upload_WhenTheDurableWriteFails_Returns500_NotAFalse202()
+    {
+        // The whole point of FR-B01 is that "uploaded" means "will still be here on day 60". A 202 for
+        // a file whose durable write failed re-creates the exact defect this task closes — the user is
+        // told it is stored, and it dies at the session-cache TTL. So an ENABLED store that fails must
+        // fail the request. (A store that is not configured at all is the separate, deliberate
+        // fail-soft case — see SessionFileBlobStoreConfigurationTests.)
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(SessionId);
+        _fx.DurableBlobs.FailNextWrite = true;
+
+        var response = await UploadAsync("doomed.pdf", "These bytes will not be stored.");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
+            "an enabled durable store that fails must fail the upload rather than report success");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("session.durable-store-failed",
+            "ADR-019: a stable errorCode is what lets a client tell this 500 from any other 500 on " +
+            "this route, and know that a retry is meaningful");
+
+        _fx.DurableBlobs.Count.Should().Be(0);
+        _fx.Sessions.PersistedSession.Should().BeNull(
+            "the session manifest must NOT gain an entry for a file that was not durably stored — that " +
+            "is precisely the manifest-points-at-missing-content state this project exists to remove");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

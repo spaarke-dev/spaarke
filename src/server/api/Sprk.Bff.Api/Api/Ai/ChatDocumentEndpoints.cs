@@ -86,6 +86,49 @@ public static class ChatDocumentEndpoints
     private const string DocPersistResource = "doc-upload-persist";
     private const int CacheVersion = 1;
 
+    /// <summary>
+    /// ADR-019 stable errorCode for "the durable byte copy could not be written" (compose-r8 FR-B01).
+    /// Distinguishes this 500 from every other 500 on the upload routes — a client seeing this knows the
+    /// file was NOT stored and a retry is meaningful, and an operator knows to check
+    /// <c>SessionFileStore:BlobEndpoint</c> + the Storage Blob Data Contributor assignment.
+    /// </summary>
+    private const string DurableStoreFailedErrorCode = "session.durable-store-failed";
+
+    /// <summary>
+    /// The single content-type resolver for a session upload (compose-r8 task 060). Used by the
+    /// upload-started telemetry event, the durable blob's <c>Content-Type</c>, and the
+    /// <see cref="ChatSessionFile"/> manifest entry — so those three can never disagree about what a
+    /// file is. Falls back to the client-declared type, then to <c>application/octet-stream</c>.
+    /// </summary>
+    private static string ResolveContentType(string extension, IFormFile file) => extension switch
+    {
+        ".pdf" => "application/pdf",
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".txt" => "text/plain",
+        ".md" => "text/markdown",
+        _ => file.ContentType ?? "application/octet-stream"
+    };
+
+    /// <summary>
+    /// True when the request carried NO tenant claim and the tenant was taken from the spoofable
+    /// <c>X-Tenant-Id</c> header instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three-tier resolution (<c>tid</c> claim → schema-URI claim → <c>X-Tenant-Id</c> header) is
+    /// pre-existing and repo-wide, and this task does not change it. But compose-r8 task 060 makes that
+    /// header the partition key of a DURABLE store, not just a 4h cache key — so a spoofed value now
+    /// places bytes permanently in another tenant's prefix rather than poisoning a cache for an
+    /// afternoon. That blast-radius change deserves a signal an operator can alert on, which is the
+    /// most a store-scoped task can responsibly do. Removing the fallback is a security-sensitive
+    /// change across four handlers and is escalated separately;
+    /// <c>SummarizeSessionEndpoint.cs:215-216</c> is the shape to converge on.
+    /// </para>
+    /// </remarks>
+    private static bool TenantCameFromSpoofableHeader(HttpContext httpContext)
+        => httpContext.User.FindFirst("tid") is null
+           && httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid") is null;
+
     private static string DocCacheId(string sessionId, string documentId) => $"{sessionId}:{documentId}";
 
     /// <summary>
@@ -380,20 +423,18 @@ public static class ChatDocumentEndpoints
 
         // chat-routing-redesign-r1 task 074 — emit context.upload_started.
         // ADR-015 Tier 1 SAFE: deterministic IDs + contentType + numeric size only.
-        // Resolve contentType from extension (mirrors the switch later in step 10a) so the
-        // started-event carries the same MIME enum string as downstream events.
-        var startedContentType = extension switch
-        {
-            ".pdf" => "application/pdf",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".txt" => "text/plain",
-            ".md" => "text/markdown",
-            _ => file.ContentType ?? "application/octet-stream"
-        };
+        //
+        // ONE resolver for the whole handler (compose-r8 task 060): this value, the durable blob's
+        // Content-Type at step 9c, and the ChatSessionFile manifest entry at step 10a are the SAME
+        // string by construction. There used to be two identical copies of this switch ~140 lines
+        // apart, which is a drift waiting to happen — the telemetry, the stored blob and the manifest
+        // must not be able to disagree about what a file is.
+        var sessionFileContentType = ResolveContentType(extension, file);
+
         contextEventEmitter.UploadStarted(
             sessionId: sessionGuidForEmit,
             fileId: documentId,
-            contentType: startedContentType,
+            contentType: sessionFileContentType,
             fileSizeBytes: file.Length,
             tenantId: tenantId);
 
@@ -514,18 +555,6 @@ public static class ChatDocumentEndpoints
                 docCacheId, documentId);
         }
 
-        // Determine content type from filename extension. Hoisted here (spaarkeai-compose-r8 task 060)
-        // so BOTH the durable byte copy below and the ChatSessionFile manifest entry further down
-        // record the SAME content type — they used to be able to drift.
-        var sessionFileContentType = extension switch
-        {
-            ".pdf" => "application/pdf",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".txt" => "text/plain",
-            ".md" => "text/markdown",
-            _ => file.ContentType ?? "application/octet-stream"
-        };
-
         // 9c. spaarkeai-compose-r8 FR-B01 — durable, tenant-partitioned byte copy.
         //
         // WHY this is here and not later: the session's manifest (Cosmos, 90 days) and the AI-Search
@@ -539,6 +568,15 @@ public static class ChatDocumentEndpoints
         //   - store ENABLED but the write FAILS → 500. Returning 202 here would hand the user a
         //     "stored" file that quietly dies at the Redis TTL — silently reintroducing the very
         //     defect this task closes. The Azure SDK has already exhausted its retries by this point.
+        if (TenantCameFromSpoofableHeader(httpContext))
+        {
+            logger.LogWarning(
+                "Durable session-file write is using a tenant taken from the X-Tenant-Id HEADER, not a token " +
+                "claim. The header is spoofable unless stripped at the edge, and it is the partition key of a " +
+                "durable store. TenantId={TenantId}, DocumentId={DocumentId}, SessionId={SessionId}",
+                tenantId, documentId, sessionId);
+        }
+
         try
         {
             var durableOutcome = await durableFileStore.WriteAsync(
@@ -567,10 +605,17 @@ public static class ChatDocumentEndpoints
                 "Upload rejected rather than reporting success for a file that would not survive.",
                 documentId, sessionId);
 
+            // ADR-019: stable errorCode + correlationId so a client can tell THIS 500 from any other
+            // 500 on this route, and so the log line and the response can be joined.
             return Results.Problem(
                 statusCode: 500,
                 title: "Internal Server Error",
-                detail: "Failed to store the document durably. Please try again.");
+                detail: "Failed to store the document durably. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableStoreFailedErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
         }
 
         // 10. Also store document metadata for retrieval (filename, etc.)
@@ -1024,6 +1069,14 @@ public static class ChatDocumentEndpoints
         // spaarkeai-compose-r8 FR-B01 — this path appends a ChatSessionFile to the SAME manifest the
         // multipart upload does, so its bytes have the same 90-day obligation and get the same durable
         // copy. Same failure policy as UploadDocumentAsync step 9c: disabled → proceed, enabled-but-failed → 500.
+        if (TenantCameFromSpoofableHeader(httpContext))
+        {
+            logger.LogWarning(
+                "Durable session-file write is using a tenant taken from the X-Tenant-Id HEADER, not a token " +
+                "claim. TenantId={TenantId}, FileId={FileId}, SessionId={SessionId}",
+                tenantId, fileId, sessionId);
+        }
+
         try
         {
             var durableOutcome = await durableFileStore.WriteAsync(
@@ -1046,7 +1099,15 @@ public static class ChatDocumentEndpoints
             logger.LogError(ex,
                 "Durable byte-store write FAILED for ingested archive FileId={FileId}, SessionId={SessionId}.",
                 fileId, sessionId);
-            return Results.Problem(statusCode: 500, title: "Internal Server Error", detail: "Failed to store the email archive durably. Please try again.");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to store the email archive durably. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableStoreFailedErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
         }
 
         var metadata = new UploadedDocumentMetadata(fileId, fileName, 0, false);

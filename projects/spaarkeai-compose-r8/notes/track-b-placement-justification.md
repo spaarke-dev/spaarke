@@ -152,19 +152,44 @@ Fixed by anchoring `\A…\z` (the true end-of-string anchor). The trailing-`\n` 
 | Gate | Result |
 |---|---|
 | Baseline suite (before any change, this worktree) | **10,615 passed / 0 failed / 97 skipped** (`master @ 845b4cdc9`) |
-| Suite after change | **10,653 passed / 0 failed / 97 skipped** — +38 tests, zero regressions |
+| Suite after change | **10,665 passed / 0 failed / 97 skipped** — +50 tests, zero regressions |
 | New DI registrations | **+1** (`SessionFileBlobStore`), unconditional. Repeatable metric `grep -rEn "services\.(AddSingleton\|AddScoped\|AddTransient\|AddHostedService)" src/server/api/Sprk.Bff.Api/ --include=*.cs \| wc -l`: **568 → 569**. (This counts every branch of every feature gate, so it is not the same instrument as ADR-010's "265 at Phase-3 baseline" — it is used here only for the before/after delta.) ADR-010's "≤15 non-framework lines" principle is a long-standing, documented, accepted violation (ADR-010 "Phase 5 baseline (2026-05-26)"); this task adds exactly the one registration the spec §11 table budgets for. |
 | ArchTests (`tests/Spaarke.ArchTests/`, incl. `ADR010_DITests`, `ADR013_AiBoundaryTests`, `ADR007_GraphIsolationTests`) | **56 passed / 0 failed** |
 | Full solution build | succeeded; zero warnings attributable to the new/changed files |
 | New NuGet packages | **0** |
 | New Azure resources | **0** |
 | New secrets in configuration | **0** — the endpoint is a bare URI and a secret-bearing value is refused at construction |
-| Publish size (compressed, incl. PDBs, `Compress-Archive -CompressionLevel Optimal`) | **44.99 MB** — 215 files, 4 `.pdb`, framework-dependent; **+0.03 MB vs the 44.96 MB baseline**; 15.01 MB under the 60 MB ceiling; far below the +5 MB escalation threshold |
+| Publish size (compressed, incl. PDBs, `Compress-Archive -CompressionLevel Optimal`) | **45.00 MB** — 215 files, 4 `.pdb`, framework-dependent; **+0.04 MB vs the 44.96 MB baseline**; 15.00 MB under the 60 MB ceiling; far below the +5 MB escalation threshold. Zero `.csproj` delta, so the change is code only. |
 | `dotnet list package --vulnerable --include-transitive` | **no vulnerable packages** |
 
 > **Note on the suite baseline**: the task brief cited 11,179 passing. That is the count on `work/spaarkeai-compose-r8`. This worktree was created from **master @ `845b4cdc9`**, where the count is 10,615 — the difference is the R8 branch's own added tests, not a regression. The delta that matters here is 10,615 → 10,653 with 0 failures.
 
 ---
+
+## 7a. Step 9.5 quality gates — findings and what was done
+
+`code-review` and `adr-check` were run as independent Opus reviewers over the change set. Both maximised recall. Verdicts: tenant partitioning **held under every attack constructed** (Unicode/homoglyph, case-folding, traversal, separator injection, encoded forms, length, whitespace); ADR-001/007/008/009/010/013/014/032 + §F.1 (incl. transitive) + root §9/§11 all COMPLIANT.
+
+### Fixed in this task (path C — pivot to comply)
+
+| Finding | Fix |
+|---|---|
+| **C1 — deployment landmine.** `appsettings.template.json` shipped a POPULATED `BlobEndpoint`, so any rendered environment would have the store ENABLED while 2 of 3 bicep stacks create no role assignment → 403 → **500 on every chat upload**. Documenting the break is not mitigating it. | `BlobEndpoint` now ships **empty**. Disabled is the default; enabling is an explicit opt-in with both prerequisites stated inline. |
+| **C2 — vacuous test.** `Upload_DurableCopy_IsNotReadableByAnotherTenant` asserted only `BeNull()`, so it passed when nothing was written — and the class docstring falsely claimed it among the tests observed failing. | Positive controls added (202 + `Count == 1` + owning-tenant read succeeds) BEFORE the negative. Docstring corrected to state which test passed vacuously and why. Re-observed under the step-9c break: **6 of 6 now fail**, no vacuous pass remains. |
+| **ADR-019 violation.** Both new 500s omitted the mandated stable `errorCode` and `correlationId`. | Added `errorCode = "session.durable-store-failed"` + `correlationId = TraceIdentifier` at both sites, and a seam test that drives a failing write through the wire and asserts 500 + the code + **no manifest entry**. Observed failing under a fail-soft policy (`found HttpStatusCode.Accepted`). |
+| **W1 — "fails fast at construction" was false.** The DI registration is a factory lambda, so a bad endpoint would first throw on a user request, and on every request after. | Validation extracted to `SessionFileBlobStore.ValidateConfiguration`, called from `AddAiPersistenceModule` at **composition** time as well as from the ctor. A misconfiguration now stops the host. Doc claims corrected. |
+| **W2 — no 403/404 diagnostics**, i.e. the most likely production failure produced the least actionable log. | `Actionable()` translates 403 → "needs Storage Blob Data Contributor on the account behind `SessionFileStore:BlobEndpoint`; note storage-account.bicep only creates it when appServicePrincipalId is passed", and 404 → names `SessionFileStore:ContainerName` and states that this store never creates containers. Also narrowed the read-path 404 swallow to `BlobErrorCode.BlobNotFound`, so a **missing container** no longer masquerades as "no such file". |
+| **W5 — the hoist left TWO identical content-type switches** (`startedContentType` ~140 lines earlier). | Replaced both with one `ResolveContentType(extension, file)`. Telemetry, the durable blob's `Content-Type`, and the manifest entry are now the same string by construction. |
+| **S3 — container name was the one unvalidated name component**; a `/` would have reshaped the blob path and moved the tenant out of first position. | Azure container-name rule enforced in `ValidateConfiguration`, with theory cases incl. `has/slash`. |
+| **S4 — trailing-dot segments accepted.** | Rejected; `[InlineData]` case added. |
+| **S5 — `AssertTenantPartitioned` was an untested tripwire** that a future refactor could delete silently. | `BuildBlobName_PutsTheTenantFirst_SoTheAssertTripwireCannotBeSilentlyRemoved` pins the property directly. |
+| **https not enforced** — `Uri.TryCreate(Absolute)` accepted `http://`, which would put the MI bearer token on the wire in cleartext. | Scheme check + theory cases. |
+| **S2 / docstring accuracy** — `ai-chunks` DOES have a lifecycle rule (`tier-ai-chunks-to-cool-after-30d`), and the tenant suite's "never assert on a path shape" claim was contradicted by two of its own tests. | Both corrected in the XML docs. |
+| **W3 (bounded part)** — the `X-Tenant-Id` header fallback is now the partition key of a *durable* store. | Cannot responsibly remove it under a store-scoped task (see §9), but both durable-write sites now log a **Warning** naming the tenant when it came from the header rather than a claim. Escalated below. |
+
+### NOT fixed — escalated (see §10)
+
+15-A (retention/deletion undefined), 15-B (ADR-015 governed-stores table row), 10-A (`design.md` Placement Justification + `<hot-path-declaration>`), W3-full (remove the header fallback), W4 (same-tenant cross-user overwrite), S1 (orphan blobs), 38-A (test-path placement).
 
 ## 8. Deliberate non-goals (owned by later Track B tasks)
 
@@ -172,6 +197,75 @@ Fixed by anchoring `\A…\z` (the true end-of-string anchor). The trailing-`\n` 
 - **No lazy re-index.** Task 061. `ReadAsync` is the seam it will consume.
 - **No retention/lifecycle policy, no `contentAvailable` signal.** Task 062 (90-day default for unfiled, indefinite for filed `StoredSession.Ttl == -1`).
 
+## 8a. The binding deployment gate (this is the mechanism, not a promise)
+
+**`SessionFileStore:BlobEndpoint` MUST remain empty in every deployed environment until tasks 062 (retention) and 063 (GDPR erasure) have merged.**
+
+This is not a note-to-self. ADR-015 requires retention and deletion behaviour to be **defined** for any persisted AI artifact, and this task deliberately ships a store with no delete surface (so that task 061's cleanup sweep has no reachable path to durable bytes — FR-B03). The honest consequence is that between 060 and 063 there is a window in which enabling the store would accumulate user document bytes with no defined deletion path. The gate closes that window mechanically rather than by discipline:
+
+- `appsettings.template.json` ships `"BlobEndpoint": ""` → `IsEnabled == false` → nothing is written anywhere.
+- The requirement is stated in the template itself (`_DISABLED_BY_DEFAULT`), in the `SessionFileBlobStore` class remarks, and here.
+
+This is the CLAUDE.md §6.5 **path A** exception for ADR-015 15-A: the ADR rule is correct as written, path C (implement delete now) would undo FR-B03's safety property, and "we'll fix it later" is explicitly forbidden — so the deviation is bounded by a gate that makes the non-compliant state unreachable.
+
 ## 9. Known weakness noted, not fixed here
 
 `ChatDocumentEndpoints` resolves the tenant as `tid` claim → schema-URI claim → **`X-Tenant-Id` request header** (`:274-276`, `:744-746`, `:833-835`, `:1043-1045`). The header fallback is spoofable unless stripped at the edge, and it is the input to the durable store's partition key exactly as it already is to the Redis key and the AI-Search filter. This is **pre-existing** and affects three stores equally, so it was not changed under a task scoped to adding one. `SummarizeSessionEndpoint.cs:215-216` deliberately omits the header fallback and is the better shape. Worth a follow-up issue.
+
+---
+
+## 10. 🔔 Open items requiring an owner decision (escalated, not silently deferred)
+
+Ordered by severity. Items 1 and 2 are ADR-015 MUST rules; the rest are recommendations.
+
+### 1. ADR-015 15-A — retention and deletion are undefined for a store this task creates
+
+- **Rules**: *"MUST define retention and deletion behavior for stored outputs"*, *"MUST support user-initiated deletion in Tier 3 (GDPR right to erasure)"*, *"MUST NOT exempt Tier 3 from GDPR deletion requirements"*.
+- **State**: no delete API (deliberate, FR-B03); no lifecycle delete rule (`storage-account.bicep`'s only `ai-chunks` rule is tier-to-Cool, and the whole policy is gated `false` in `customer.bicep:153`).
+- **Proposed path**: **A — project-scoped exception, bounded by the §8a gate.** Owner to confirm the gate and record it in the R8 `spec.md` / `design.md` **ADR Tensions** section, and in the PR description.
+
+### 2. ADR-015 15-B — the Governed Data Stores table omits this store
+
+The 2026-05-17 amendment enumerates governed stores by physical location. Session-file **bytes** are Tier-3-class content now living in a fourth physical store the ADR does not name. **Proposed path: B — amendment, one table row** (I cannot edit `.claude/`):
+
+| Tier | Store | Content Allowed | Retention | Access | GDPR Erasure |
+|---|---|---|---|---|---|
+| **Tier 3: Work History** | Azure Blob — `{tenantId}/session-files/**` | Original uploaded bytes of chat-session files | 90 days default; indefinite when `StoredSession.Ttl == -1` (task 062) | Owning user + admin | Yes (Art. 17) — task 063 |
+
+Merge alongside 062/063.
+
+### 3. Root CLAUDE.md §10 — no `design.md` Placement Justification section, no `<hot-path-declaration>`
+
+`projects/spaarkeai-compose-r8/design.md` exists on `work/spaarkeai-compose-r8` but not in this worktree (branched from master), and the main session owns it. This note is the content; it needs to be *referenced from* `design.md`, which also needs the §G block. Proposed text for the main session:
+
+```xml
+<hot-path-declaration>
+  <bff-api>Y</bff-api>              <!-- Services/Ai/Sessions/SessionFileBlobStore.cs, AiPersistenceModule.cs, Api/Ai/ChatDocumentEndpoints.cs -->
+  <spaarke-ai>N</spaarke-ai>
+  <ci-workflows>N</ci-workflows>
+  <skill-directives>N</skill-directives>
+  <root-claude-md>N</root-claude-md>
+</hot-path-declaration>
+```
+
+`AiPersistenceModule.cs` and `ChatDocumentEndpoints.cs` are high-collision files — 13 of 17 active worktrees touch the BFF — so `projects/INDEX.md` should carry the row.
+
+### 4. The `X-Tenant-Id` header fallback (highest-severity thing this work surfaced)
+
+`ChatDocumentEndpoints.cs:301, :816, :906, :1152` resolve tenant as `tid` claim → schema-URI claim → **request header**. Any authenticated principal without a `tid` claim can name its own tenant. That header is now the partition key of a **durable 90-day** store, not just a 4h cache key — the blast radius moved from "poisons a cache for an afternoon" to "places bytes permanently in another tenant's prefix".
+
+- **Not changed here**: removing the fallback touches four handlers on an auth path and is security-sensitive (root §6 requires human sign-off), and it may break server-to-server callers that legitimately depend on it.
+- **Done here**: both durable-write sites log a Warning naming the tenant when it came from the header, so the condition is alertable.
+- **Recommended**: file a tracked issue and converge on `SummarizeSessionEndpoint.cs:215-216` (claims only, hard 401, stable `auth.tid-missing`). Confirm first that no registered auth scheme yields a `tid`-less principal.
+
+### 5. Same-tenant, cross-user overwrite (W4)
+
+`ChatSessionManager.GetSessionAsync` is tenant-scoped only — there is no per-user session-ownership check on the upload path — and the durable write intentionally overwrites (retry idempotency). So a user in tenant A who knows another user's `(sessionId, fileId)` can overwrite that user's durable copy. Exploitability is low (`fileId` is a 128-bit GUID) and the gap is inherited from the Redis/manifest layers, but durability changes the consequence from "poisons a 4h cache" to "poisons the 90-day record". Recorded so it is not mistaken for closed.
+
+### 6. Orphan blobs have no reaper (S1)
+
+The durable write precedes the manifest write. If the manifest write fails (it is non-fatal by design) the blob is unreferenced — and with no delete API and no lifecycle delete rule, permanently so. **Task 063 must enumerate for erasure BY TENANT PREFIX, not by walking the manifest**, or orphans survive a GDPR delete. Prefix enumeration reaches them; manifest enumeration does not.
+
+### 7. Test-path placement (38-A)
+
+`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionFileBlobStoreConfigurationTests.cs` is not one of ADR-038's KEEP paths (the only unit KEEP path is `tests/unit/domain/**`). The two behaviour-defining cases were moved to where they belong — the 500 contract is now a seam test (`Upload_WhenTheDurableWriteFails_Returns500_NotAFalse202`) and the isolation cases live in `tests/integration/tenant/**`. What remains is configuration-guard behaviour (secret rejection, non-https rejection, container-name rejection, enabled/disabled outcome). Flagging for `/test-diet` at project close: these are MAINTAIN-class in substance; if a KEEP home is wanted, the credential-guard theory is a natural fit for `tests/Spaarke.ArchTests/CredentialGuardTests.cs`. Note the same "non-KEEP path" observation applies to essentially the whole existing unit assembly, so this is a repo-wide reconciliation item rather than something peculiar to this task.

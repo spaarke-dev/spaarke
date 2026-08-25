@@ -71,8 +71,19 @@ public sealed record SessionFileBytes(BinaryData Content, string? ContentType);
 /// <b>Authentication.</b> Managed identity only. The constructor takes a <see cref="TokenCredential"/>
 /// (the DI singleton pinned to the UAMI clientId — see <c>ManagedIdentityCredentialFactory</c>) and a
 /// bare blob endpoint URI. It is structurally impossible to pass an account key or connection string,
-/// and <see cref="RejectSecretBearingEndpoint"/> fails fast at construction if someone configures one
-/// anyway (root CLAUDE.md §9).
+/// and <see cref="ValidateConfiguration"/> — called from <c>AiPersistenceModule</c> at composition time
+/// as well as from the constructor, so it is a real STARTUP failure and not a first-request one —
+/// refuses a connection string, account key, SAS or non-https endpoint outright (root CLAUDE.md §9).
+/// </para>
+/// <para>
+/// <b>Retention is NOT defined by this type, and that is a deliberate, gated deferral.</b> ADR-015
+/// requires retention and deletion behaviour to be defined for any persisted AI artifact. Task 062
+/// (retention: 90-day default for unfiled, indefinite for filed) and task 063 (GDPR erasure) own that,
+/// and this type exposes no delete precisely so the 24h cleanup sweep cannot reach durable bytes
+/// (FR-B03). Until those land, the store is inert by construction:
+/// <c>SessionFileStore:BlobEndpoint</c> ships EMPTY, so no bytes accumulate anywhere. Do not set that
+/// key in a deployed environment before 062/063 merge — see
+/// <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §5/§8.
 /// </para>
 /// <para>
 /// <b>Not in scope here.</b> Lazy re-index on recall and the cleanup-job scope change are task 061;
@@ -93,6 +104,15 @@ public sealed class SessionFileBlobStore
     /// A dedicated <c>session-files</c> container would read better, but adding one is a bicep change
     /// (an owner decision, per the task's "no new Azure resource" constraint) — hence the override.
     /// This store NEVER creates a container.
+    /// <para>
+    /// It is not lifecycle-free, though: <c>storage-account.bicep:119-137</c> attaches
+    /// <c>tier-ai-chunks-to-cool-after-30d</c> (<c>prefixMatch: ['ai-chunks/']</c>). That is
+    /// tier-to-Cool, NOT delete, so 90-day availability holds — but session files silently move to the
+    /// Cool tier at day 30, which carries higher read latency and an early-deletion charge. Task 062
+    /// (retention) should decide whether that is wanted. The whole policy is gated on
+    /// <c>enableTestDocumentLifecycle</c>, which <c>customer.bicep:153</c> passes as <c>false</c>, so
+    /// customer deployments have no lifecycle rule at all today.
+    /// </para>
     /// </remarks>
     public const string DefaultContainerName = "ai-chunks";
 
@@ -155,18 +175,7 @@ public sealed class SessionFileBlobStore
             return;
         }
 
-        RejectSecretBearingEndpoint(blobEndpoint);
-
-        if (!Uri.TryCreate(blobEndpoint.Trim(), UriKind.Absolute, out var endpointUri))
-        {
-            throw new InvalidOperationException(
-                $"'{BlobEndpointConfigKey}' is not an absolute URI. Expected the storage account's blob " +
-                "endpoint, e.g. https://<account>.blob.core.windows.net");
-        }
-
-        var resolvedContainer = string.IsNullOrWhiteSpace(containerName)
-            ? DefaultContainerName
-            : containerName.Trim();
+        var endpointUri = ValidateConfiguration(blobEndpoint, containerName, out var resolvedContainer);
 
         var serviceClient = new BlobServiceClient(endpointUri, credential);
         _gateway = new AzureBlobSessionFileGateway(serviceClient.GetBlobContainerClient(resolvedContainer));
@@ -218,7 +227,14 @@ public sealed class SessionFileBlobStore
             return SessionFileStoreOutcome.StoreDisabled;
         }
 
-        await _gateway.UploadAsync(blobName, content, contentType, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _gateway.UploadAsync(blobName, content, contentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex)
+        {
+            throw Actionable(ex, "write");
+        }
 
         // ADR-015: identifiers + size only. Never the file name, never the bytes.
         _logger.LogInformation(
@@ -249,8 +265,42 @@ public sealed class SessionFileBlobStore
             return null;
         }
 
-        return await _gateway.DownloadAsync(blobName, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await _gateway.DownloadAsync(blobName, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex)
+        {
+            throw Actionable(ex, "read");
+        }
     }
+
+    /// <summary>
+    /// Translates an Azure failure into an exception whose MESSAGE names the thing an operator has to
+    /// change. The two overwhelmingly likely production failures are both configuration, not transient:
+    /// a missing role assignment (403) and a container that was never provisioned (404). Left as a raw
+    /// <see cref="RequestFailedException"/> they surface as an opaque 500 on every upload — see
+    /// <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §5, which records
+    /// that two of the three bicep stacks do not create the role assignment at all.
+    /// </summary>
+    /// <remarks>ADR-015: identifiers and configuration KEY NAMES only — never a file name, never content.</remarks>
+    private static Exception Actionable(RequestFailedException ex, string operation) => ex.Status switch
+    {
+        403 => new InvalidOperationException(
+            $"Durable session-file {operation} was DENIED (403). The identity the BFF resolves " +
+            $"('Graph:ManagedIdentity:ClientId' when set, otherwise the App Service system-assigned identity) " +
+            $"needs the 'Storage Blob Data Contributor' role on the storage account behind " +
+            $"'{BlobEndpointConfigKey}'. Note that storage-account.bicep only creates that assignment when " +
+            "'appServicePrincipalId' is passed to the module.", ex),
+
+        404 => new InvalidOperationException(
+            $"Durable session-file {operation} failed (404). The container named by '{ContainerNameConfigKey}' " +
+            $"(default '{DefaultContainerName}') does not exist on the account behind '{BlobEndpointConfigKey}'. " +
+            "This store never creates containers — the container must be provisioned in bicep.", ex),
+
+        _ => new InvalidOperationException(
+            $"Durable session-file {operation} failed with status {ex.Status} ({ex.ErrorCode}).", ex)
+    };
 
     /// <summary>
     /// Builds the tenant-partitioned blob name: <c>{tenantId}/session-files/{sessionId}/{fileId}</c>.
@@ -276,12 +326,15 @@ public sealed class SessionFileBlobStore
                 parameterName);
         }
 
-        if (value.Length > MaxSegmentLength || !SafeSegment.IsMatch(value) || value.Contains("..", StringComparison.Ordinal))
+        if (value.Length > MaxSegmentLength
+            || !SafeSegment.IsMatch(value)
+            || value.Contains("..", StringComparison.Ordinal)
+            || value.EndsWith('.'))
         {
             // The rejected value is attacker-influenceable, so it is NOT echoed into the log/message.
             throw new ArgumentException(
                 $"'{parameterName}' is not a safe blob-name segment. Session-file identifiers must match " +
-                "[A-Za-z0-9][A-Za-z0-9._-]* and must not contain path separators or '..'.",
+                "[A-Za-z0-9][A-Za-z0-9._-]*, must not end in '.', and must not contain path separators or '..'.",
                 parameterName);
         }
 
@@ -316,9 +369,64 @@ public sealed class SessionFileBlobStore
     }
 
     /// <summary>
+    /// Validates the two configuration values and returns the parsed endpoint. Call this at COMPOSITION
+    /// time (see <c>AiPersistenceModule</c>) as well as from the constructor.
+    /// </summary>
+    /// <remarks>
+    /// The constructor alone is not enough. The DI registration is a factory lambda, so a bad value would
+    /// not surface until the first upload request — and then on every request after, since the container
+    /// does not cache a failed singleton. Calling this from the module turns a misconfiguration into a
+    /// real startup failure, which is what an operator can act on. Validating twice is cheap and keeps
+    /// the type correct on its own terms for any future caller.
+    /// </remarks>
+    /// <returns>The parsed blob endpoint URI.</returns>
+    /// <exception cref="InvalidOperationException">The endpoint or container name is unusable.</exception>
+    internal static Uri ValidateConfiguration(string blobEndpoint, string? containerName, out string resolvedContainer)
+    {
+        RejectSecretBearingEndpoint(blobEndpoint);
+
+        if (!Uri.TryCreate(blobEndpoint.Trim(), UriKind.Absolute, out var endpointUri))
+        {
+            throw new InvalidOperationException(
+                $"'{BlobEndpointConfigKey}' is not an absolute URI. Expected the storage account's blob " +
+                "endpoint, e.g. https://<account>.blob.core.windows.net");
+        }
+
+        // The managed-identity bearer token goes on this connection. Plain http would put it on the wire
+        // in cleartext, so the scheme is a security decision, not a formatting preference.
+        if (!string.Equals(endpointUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"'{BlobEndpointConfigKey}' must use https. A managed-identity access token is sent on this " +
+                $"connection; '{endpointUri.Scheme}' would transmit it in cleartext.");
+        }
+
+        resolvedContainer = string.IsNullOrWhiteSpace(containerName)
+            ? DefaultContainerName
+            : containerName.Trim();
+
+        // The container name is the ONE name component that does not go through RequireSafeSegment, and a
+        // value containing '/' would silently reshape the blob path (moving the tenant out of first
+        // position). Azure's own rule: 3-63 chars, lowercase alphanumeric and single non-leading/trailing
+        // hyphens.
+        if (!ContainerNamePattern.IsMatch(resolvedContainer))
+        {
+            throw new InvalidOperationException(
+                $"'{ContainerNameConfigKey}' value '{resolvedContainer}' is not a valid Azure Blob container " +
+                "name (3-63 chars, lowercase letters/digits, single interior hyphens).");
+        }
+
+        return endpointUri;
+    }
+
+    /// <summary>Azure Blob container-name rule. See <see cref="ValidateConfiguration"/> for why this is validated.</summary>
+    private static readonly Regex ContainerNamePattern = new(
+        @"\A[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,61}[a-z0-9]\z",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
     /// Root CLAUDE.md §9 — a storage secret must never reach configuration. The endpoint setting is a
-    /// bare URI; anything shaped like a connection string, account key or SAS is refused at startup
-    /// rather than used.
+    /// bare URI; anything shaped like a connection string, account key or SAS is refused rather than used.
     /// </summary>
     private static void RejectSecretBearingEndpoint(string blobEndpoint)
     {
@@ -388,10 +496,12 @@ internal sealed class AzureBlobSessionFileGateway : SessionFileBlobGateway
             var response = await blob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
             return new SessionFileBytes(response.Value.Content, response.Value.Details?.ContentType);
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
+        catch (RequestFailedException ex) when (ex.ErrorCode == BlobErrorCode.BlobNotFound)
         {
-            // Missing blob AND missing container both surface as 404. Both mean "this tenant has no
-            // durable copy of that file", which is exactly what the caller needs to know.
+            // "This tenant has no durable copy of that file" — the expected miss, and the same answer
+            // a cross-tenant read gets. Deliberately narrowed to BlobNotFound: a missing CONTAINER also
+            // returns 404, and swallowing that would report an unprovisioned deployment as "no such
+            // file" on every read. ContainerNotFound propagates to SessionFileBlobStore.Actionable.
             return null;
         }
     }

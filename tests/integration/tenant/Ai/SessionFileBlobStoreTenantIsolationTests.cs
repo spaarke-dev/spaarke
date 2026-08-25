@@ -20,12 +20,17 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
 /// would leak silently underneath three correct-looking layers.
 /// </para>
 /// <para>
-/// <b>Why these are reachability tests, not string tests.</b> The tests below never assert on the
-/// shape of a path. They write bytes through the production store as one tenant and then attempt to
-/// read them through the production store as another, against
-/// <see cref="InMemorySessionFileBlobGateway"/> — which resolves blob names the way Azure Blob does:
-/// opaque, ordinal, exact-match, no path semantics. Whether the read hits or misses is decided
-/// entirely by the name <see cref="SessionFileBlobStore.BuildBlobName"/> produced.
+/// <b>Why these are reachability tests, not string tests.</b> Every isolation claim here is settled by
+/// an actual read: bytes are written through the production store as one tenant, then read back through
+/// the production store as another, against <see cref="InMemorySessionFileBlobGateway"/> — which
+/// resolves blob names the way Azure Blob does: opaque, ordinal, exact-match, no path semantics.
+/// Whether the read hits or misses is decided entirely by the name
+/// <see cref="SessionFileBlobStore.BuildBlobName"/> produced. Two tests
+/// (<see cref="Write_PlacesTheBlobUnderTheCallingTenantsPrefix"/> and
+/// <see cref="BuildBlobName_PutsTheTenantFirst_SoTheAssertTripwireCannotBeSilentlyRemoved"/>) DO assert
+/// on the name — deliberately, because "the tenant is the first segment" is a structural property that
+/// a reachability test cannot express, and it is what makes every later prefix-scoped operation
+/// tenant-safe by construction.
 /// </para>
 /// <para>
 /// <b>Observed to fail before it passed.</b> With the tenant segment removed from
@@ -137,6 +142,20 @@ public sealed class SessionFileBlobStoreTenantIsolationTests
             "delete) is then tenant-scoped by construction rather than by remembering a filter");
     }
 
+    [Fact]
+    public void BuildBlobName_PutsTheTenantFirst_SoTheAssertTripwireCannotBeSilentlyRemoved()
+    {
+        // `SessionFileBlobStore.AssertTenantPartitioned` is unreachable in normal operation — it exists
+        // as a tripwire for a FUTURE edit to BuildBlobName that drops or reorders the tenant segment.
+        // An untested tripwire can itself be deleted silently, so this pins the property the tripwire
+        // guards, directly and independently of any read.
+        var name = SessionFileBlobStore.BuildBlobName(TenantA, SessionId, FileId);
+
+        name.Should().Be($"{TenantA}/session-files/{SessionId}/{FileId}");
+        name.Should().StartWith(TenantA + "/");
+        name.Should().NotContain("..");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Identifier injection: a caller must not be able to compose their way out of
     // their own prefix, whichever segment they control.
@@ -161,6 +180,9 @@ public sealed class SessionFileBlobStoreTenantIsolationTests
     // pattern is anchored `\A…\z` precisely so this is rejected — this case is the forcing function.
     [InlineData("11111111-2222-3333-4444-555555555555\n")]
     [InlineData("11111111-2222-3333-4444-555555555555\r\n")]
+    // Azure advises against blob names whose segments end in '.'; some clients and intermediaries
+    // normalise them away, which would silently change which blob a name addresses.
+    [InlineData("11111111-2222-3333-4444-555555555555.")]
     public async Task Write_RejectsSessionIdsThatCouldEscapeTheTenantPrefix(string craftedSessionId)
     {
         var (store, blobs) = BuildStore();
