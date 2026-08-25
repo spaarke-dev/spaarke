@@ -116,6 +116,30 @@ const FLAG_LEDGER_REF = `${FLAG_BINDING}@t1`;
 /** Every `compose-outputs` GET url, so we can assert it read the DOCUMENT session. */
 const composeOutputsReadUrls: string[] = [];
 
+// ---------------------------------------------------------------------------
+// r8 task 055 — the review-flag ANCHOR fixtures.
+//
+// `loadParaIdMap` overrides the Load response's reference map for the task-055 block only; every
+// other test in this file leaves it `[]`, which is exactly what the response carried before (the
+// field was absent, and `hydratedParaIdMap` defaults to `[]`) — so nothing else moves.
+//
+// `annotationPosts` captures the FR-29 session-annotations write bodies. That POST is the only
+// place a review flag's resolved `anchor.paraId` becomes observable: the annotation store is what
+// the return-from-Word re-anchor (`PriorAnchorInput` -> `AnnotationReanchorService`) later reads.
+// ---------------------------------------------------------------------------
+let loadParaIdMap: unknown[] = [];
+const annotationPosts: Array<{ anchoredAnnotations: Array<Record<string, unknown>> }> = [];
+
+/** The review-flag annotations from the most recent session-annotations write. */
+function latestReviewFlagAnnotations(): Array<Record<string, unknown>> {
+  const last = annotationPosts[annotationPosts.length - 1];
+  return (last?.anchoredAnnotations ?? []).filter(a => String(a.id ?? '').startsWith('ai-review:'));
+}
+
+function anchorOf(annotation: Record<string, unknown> | undefined): Record<string, unknown> {
+  return (annotation?.anchor ?? {}) as Record<string, unknown>;
+}
+
 function sessionFromUrl(url: string): string {
   return decodeURIComponent(url.match(/\/sessions\/([^/]+)\//)?.[1] ?? '');
 }
@@ -141,6 +165,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
         anchoredAnnotations: [],
         definedTermsTracking: [],
         actionHistory: [],
+        paraIdMap: loadParaIdMap,
         projection: {
           status: 'success',
           canEdit: true,
@@ -150,6 +175,16 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
         },
       }),
     } as unknown as Response;
+  }
+  // FR-29 session-annotations write (r8 task 055 observes the resolved anchors here). Checked BEFORE
+  // the generic 404 and AFTER `/compose-outputs` so the two session routes never shadow each other.
+  if (url.includes('/annotations')) {
+    try {
+      annotationPosts.push(JSON.parse(String(_init?.body ?? '{}')));
+    } catch {
+      /* a malformed body is a test-harness bug, not a product path — ignore */
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
   }
   // Session-ledger compose-outputs read (the DEF-09 read side).
   if (url.includes('/compose-outputs')) {
@@ -259,6 +294,8 @@ beforeEach(() => {
   composeOutputsReadUrls.length = 0;
   composeOutputsBySession[DOC_SESSION] = defaultComposeOutputs();
   bridgeRef.current = null;
+  loadParaIdMap = [];
+  annotationPosts.length = 0;
   // Task 032 — the 128KB-budget degraded-restore marker rides `window.sessionStorage`, keyed by
   // session id. DOC_SESSION is a shared constant across this whole file's tests, so clear it every
   // test to prevent cross-test leakage of a marker one test wrote.
@@ -467,6 +504,170 @@ describe('DEF-11: ComposeWorkspace materializes a flag-risks comments[] payload 
         ledgerRef: FLAG_LEDGER_REF,
         sessionId: DOC_SESSION,
         timestamp: '2026-07-11T00:05:00.000Z',
+      });
+    });
+    await waitFor(() => {
+      expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r8 task 055 (FR-C03) — whole-document review flags carry a DETERMINISTIC anchor.
+//
+// `AnchoredAnnotationAnchor.paraId` shipped in R3 FR-11 documented as the PRIMARY anchor
+// ("paraId-FIRST, then the textPattern/paragraphHint fuzzy fallback"), and its CONSUMER is live: the
+// return-from-Word re-anchor sends it to `AnnotationReanchorService`, which "resolves by this FIRST
+// and only falls back to the fuzzy scorer when it is absent". The PRODUCER was dark —
+// `registerAiReviewComments` wrote `{ textPattern, paragraphHint: -1, spanId }` and no paraId, so
+// EVERY `flag-risks` flag went through the fuzzy scorer even when the model named its paragraph
+// exactly. These tests close that, and fix the filter defect the same change surfaces.
+// ---------------------------------------------------------------------------
+const ANCHORED_FLAG_BINDING = 'binding-flag-risks-anchored-guid';
+const ANCHORED_FLAG_LEDGER_REF = `${ANCHORED_FLAG_BINDING}@t1`;
+
+/** The Load response's reference map for this block: clauses 4.1 / 4.2 under section 4. */
+const FLAG_PARA_ID_MAP = [
+  { index: 0, paraId: 'AAAA0041', isMinted: false, computedNumber: '4.1', listPath: [4, 1] },
+  { index: 1, paraId: 'AAAA0042', isMinted: false, computedNumber: '4.2', listPath: [4, 2] },
+];
+
+function seedFlags(comments: unknown[]): void {
+  loadParaIdMap = FLAG_PARA_ID_MAP;
+  composeOutputsBySession[DOC_SESSION] = [
+    {
+      key: ANCHORED_FLAG_LEDGER_REF,
+      bindingId: ANCHORED_FLAG_BINDING,
+      turn: 1,
+      disposition: 'compose',
+      payload: { comments },
+    },
+  ];
+}
+
+async function renderAndWaitForFlags(expectedCount: number): Promise<void> {
+  renderWorkspace(new PaneEventBus());
+  await screen.findByRole('textbox', undefined, { timeout: 5000 });
+  const workspaceRoot = await screen.findByTestId('compose-workspace');
+  await waitFor(() => {
+    expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe(String(expectedCount));
+  });
+  if (expectedCount > 0) {
+    await waitFor(() => expect(latestReviewFlagAnnotations()).toHaveLength(expectedCount));
+  }
+}
+
+describe('r8 task 055: a whole-document review flag resolves its anchor deterministically', () => {
+  it('a target_para_id flag carries that paraId onto the annotation anchor', async () => {
+    seedFlags([
+      { target_para_id: 'AAAA0042', target_text: 'liability cap', comment: 'Confirm the cap with the client.' },
+    ]);
+    await renderAndWaitForFlags(1);
+
+    const anchor = anchorOf(latestReviewFlagAnnotations()[0]);
+    expect(anchor.paraId).toBe('AAAA0042');
+    // The prose anchor is RETAINED, not replaced — it is the documented fuzzy fallback for a
+    // document Word has re-saved (which regenerates paraIds).
+    expect(anchor.textPattern).toBe('liability cap');
+  });
+
+  it('a target_ref flag resolves the citation through the reference map onto the anchor', async () => {
+    seedFlags([{ target_ref: 'clause 4.1', target_text: 'twelve months', comment: 'Cap is unusually short.' }]);
+    await renderAndWaitForFlags(1);
+
+    expect(anchorOf(latestReviewFlagAnnotations()[0]).paraId).toBe('AAAA0041');
+  });
+
+  it('DEFECT (task 055 §5): a flag with a deterministic anchor and NO target_text is KEPT, not dropped', async () => {
+    // Task 054 lets the model return `target_para_id` with weak or absent prose — L-1 (hard breaks
+    // collapse in `collectBlocks().text`) means a quoted excerpt may not even exist verbatim. The
+    // shipped `c.target.length > 0 && c.body.length > 0` gate would silently drop exactly the
+    // BEST-anchored flags. The gate must be "a resolvable anchor OR non-empty prose".
+    seedFlags([
+      { target_para_id: 'AAAA0042', comment: 'Indemnity is one-way; flag for negotiation.' },
+      { target_ref: '4.1', comment: 'Cap should be mutual.' },
+    ]);
+    await renderAndWaitForFlags(2);
+
+    const flags = latestReviewFlagAnnotations();
+    expect(flags.map(f => anchorOf(f).paraId)).toEqual(['AAAA0042', 'AAAA0041']);
+    expect(flags.map(f => f.body)).toEqual([
+      'Indemnity is one-way; flag for negotiation.',
+      'Cap should be mutual.',
+    ]);
+  });
+
+  it('a text-only flag still registers, with no fabricated paraId (the shipped path is unchanged)', async () => {
+    seedFlags([{ target_text: 'termination clause', comment: 'Consider adding a cure period.' }]);
+    await renderAndWaitForFlags(1);
+
+    const anchor = anchorOf(latestReviewFlagAnnotations()[0]);
+    expect(anchor.paraId).toBeUndefined();
+    expect(anchor.textPattern).toBe('termination clause');
+  });
+
+  it('two anchors that DISAGREE never fabricate a paraId — the flag survives on its prose alone', async () => {
+    seedFlags([
+      {
+        target_para_id: 'AAAA0041',
+        target_ref: '4.2',
+        target_text: 'liability cap',
+        comment: 'Ambiguously anchored.',
+      },
+    ]);
+    await renderAndWaitForFlags(1);
+
+    const anchor = anchorOf(latestReviewFlagAnnotations()[0]);
+    expect(anchor.paraId).toBeUndefined();
+    expect(anchor.textPattern).toBe('liability cap');
+  });
+
+  it('a flag with an unresolvable citation and no prose has nothing to anchor to and is skipped', async () => {
+    seedFlags([
+      { target_ref: 'clause 99.9', comment: 'Nothing to anchor this to.' },
+      { target_para_id: 'AAAA0042', comment: 'This one is anchorable.' },
+    ]);
+    await renderAndWaitForFlags(1);
+
+    expect(latestReviewFlagAnnotations().map(f => f.body)).toEqual(['This one is anchorable.']);
+  });
+
+  it('a flag with no BODY is still skipped whatever its anchor says (a comment with no text is not a flag)', async () => {
+    seedFlags([
+      { target_para_id: 'AAAA0041', comment: '   ' },
+      { target_para_id: 'AAAA0042', comment: 'Real finding.' },
+    ]);
+    await renderAndWaitForFlags(1);
+
+    expect(latestReviewFlagAnnotations().map(f => f.body)).toEqual(['Real finding.']);
+  });
+
+  it('the ledger-key dedup still holds: a duplicate Flow-5 signal never double-appends anchored flags', async () => {
+    seedFlags([
+      { target_para_id: 'AAAA0041', comment: 'One.' },
+      { target_para_id: 'AAAA0042', comment: 'Two.' },
+    ]);
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    const workspaceRoot = await screen.findByTestId('compose-workspace');
+    await waitFor(() => {
+      expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
+    });
+
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_assistant_insert',
+        documentRef: { speDriveItemId: SPE_ID },
+        sourceNodeId: ANCHORED_FLAG_BINDING,
+        sourcePlaybookId: '',
+        contentHtml: '',
+        format: 'html',
+        insertMode: 'insert-at-cursor',
+        requireUserConfirm: false,
+        ledgerRef: ANCHORED_FLAG_LEDGER_REF,
+        sessionId: DOC_SESSION,
+        timestamp: '2026-08-25T00:05:00.000Z',
       });
     });
     await waitFor(() => {

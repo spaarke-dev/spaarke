@@ -8,6 +8,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+### 2026-08-25 — `spaarkeai-compose-r8` task 055 (whole-document anchored placement)
+
+No procedure-surface change. Recorded for the ADR-049 evidence trail:
+
+- **ADR-049 I-7 strengthened on the client.** The whole-document review-flag channel (`comments[]` — the
+  `flag-risks` intent's ENTIRE output) now resolves deterministically and populates
+  `AnchoredAnnotationAnchor.paraId`, closing a **dark producer**: that field shipped in R3 FR-11 documented
+  as the PRIMARY anchor, with a live consumer (`AnnotationReanchorService` resolves by it first), and
+  nothing ever wrote it. Every whole-document review flag had been re-anchoring by fuzzy scorer even when
+  the model named its paragraph exactly.
+- **One anchor precedence, three consumers.** `widgets/composeAnchorResolution.ts` is now the single home
+  of paraId-vs-citation precedence, shared by the AI-edit path (`usePendingRedline`), the advisory-comment
+  path (`ComposeEditor.placeAdvisoryComments`) and the review-flag path
+  (`ComposeWorkspace.registerAiReviewComments`). Each keeps its own span policy. The two SINKS stay
+  separate deliberately — collapsing them would cost either Word `w:comment` export or ledger-key
+  idempotency; §11 reasoning in `projects/spaarkeai-compose-r8/notes/055-review-flag-placement-decision.md`.
+- **A silent-drop defect fixed.** `registerAiReviewComments` gated on `target_text` alone, so after task
+  054 a flag carrying a deterministic anchor with weak prose was dropped — precisely the BEST-anchored
+  ones. The gate is now "somewhere to hang it AND something to say".
+- **Client tripwire pattern established.** The prose-matching leg moved to `hooks/redlineTextSearch.ts` so
+  a test can REPLACE it — the client twin of `ThrowIfTextSearched` (`ComposeEditAnchorPassSeamTests.cs`).
+  ts-jest compiles to CommonJS, where a same-module call is un-interceptable, so a module boundary is the
+  only available client seam. Future "prove X was never called" client tests should follow this.
+
 ## How to maintain this
 
 **Every PR that touches** `.claude/skills/`, `.claude/agents/`, `.claude/settings.json`, `.claude/patterns/`, `.claude/constraints/`, `.claude/FAILURE-MODES.md`, or the root `CLAUDE.md` **MUST add an entry to the `[Unreleased]` section below** before merge.

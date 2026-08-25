@@ -225,7 +225,10 @@ import { applyImportedCommentAnchors, groupImportedComments } from './importedCo
 // ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the WS-4 CLIENT CITATION RESOLVER
 // mirroring `Services/Compose/CitationResolver.cs`. See that module's header for the reuse-first
 // justification (CLAUDE.md §11) for why this is a mirror, not a new BFF endpoint.
-import { resolveCitation } from './composeCitationResolver';
+// r8 task 055 — the paraId-vs-citation PRECEDENCE, shared with `usePendingRedline` (AI edits) and
+// `ComposeWorkspace.registerAiReviewComments` (whole-document review flags). It wraps
+// `resolveCitation` above, which is why this module no longer calls the resolver directly.
+import { resolveAnchorParaIds } from './composeAnchorResolution';
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
@@ -545,8 +548,21 @@ export interface ComposeDraftEdit {
 
 /** DEF-11: one anchored review flag in a whole-document revision (no rewrite). */
 export interface ComposeDraftComment {
-  /** Exact substring the flag is anchored to. */
-  target_text: string;
+  /**
+   * Exact substring the flag is anchored to. OPTIONAL since r8 task 055, mirroring
+   * {@link ComposeDraftEdit.target_text}: a flag that names its paragraph deterministically needs no
+   * prose to search for — and, per task 054's L-1 finding, may not be ABLE to quote any (hard breaks
+   * collapse in `collectBlocks().text`, so a model-quoted excerpt can fail to exist verbatim).
+   */
+  target_text?: string;
+  /**
+   * FR-C03 (r8 tasks 054/055) — the exact `w14:paraId` this flag targets, returned by the model from
+   * the enumerated closed set. Outranks {@link target_text}, which is then only the fuzzy fallback
+   * carried onto `AnchoredAnnotationAnchor.textPattern` for a Word-round-tripped document.
+   */
+  target_para_id?: string;
+  /** FR-C03 (r8 tasks 054/055) — this flag's target named as a legal citation. Also outranks prose. */
+  target_ref?: string;
   /** The reviewer flag / comment body. */
   comment: string;
 }
@@ -855,6 +871,20 @@ export interface AdvisoryCommentInput {
    * metadata parameter) so the right-rail gutter card can render a risk badge + citation. Structural
    * mirror of `ComposeAdvisoryCommentItem`'s own optional fields (`@spaarke/ai-widgets`).
    */
+  /**
+   * r8 task 055 (FR-C03) — the DETERMINISTIC anchor, checked ABOVE {@link sectionRef}: the exact
+   * `w14:paraId` this finding targets. It IS the address, so it needs no citation parse and no
+   * reference map. Additive: no caller supplies it today, so every shipped NDA-REVIEW placement is
+   * unchanged.
+   *
+   * UAT-21 applies to THIS field and not to `sectionRef`, and the asymmetry is deliberate. A
+   * `sectionRef` that fails to resolve falls through to the legacy text leg — that fixed
+   * deterministic-then-legacy ordering is shipped behaviour (agreements-r1 task 011) and stays. A
+   * `paraId` that fails to resolve REFUSES: it named a paragraph exactly, so searching for prose
+   * instead would re-introduce the wrong-occurrence risk for precisely the finding that had already
+   * removed it. Same rule as the AI-edit path's `resolveAnchoredSpans`.
+   */
+  paraId?: string;
   /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
   sectionRef?: string;
   /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
@@ -1893,6 +1923,25 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): Advisory
 }
 
 /**
+ * The outcome of the deterministic advisory-anchor leg.
+ *
+ * `null` means "no deterministic answer — use the legacy text leg", which covers BOTH "this finding
+ * carried no deterministic anchor at all" and the shipped `sectionRef` fall-through. A
+ * `{ span: null, kind }` is a REFUSAL, reachable only when the finding supplied an explicit `paraId`
+ * (UAT-21 — see {@link AdvisoryCommentInput.paraId} for why the two anchors differ here).
+ */
+type DeterministicAnchorOutcome =
+  | { span: { from: number; to: number }; kind?: undefined }
+  | { span: null; kind: 'not_found' | 'ambiguous' }
+  | null;
+
+/** Ordinal-insensitive paraId compare — the map and the document agree in practice, but producers
+ *  vary in casing and an exact compare would silently fail to match. */
+function sameBlockParaId(blockParaId: string | undefined, target: string): boolean {
+  return typeof blockParaId === 'string' && blockParaId.toUpperCase() === target.toUpperCase();
+}
+
+/**
  * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the DETERMINISTIC advisory-anchor
  * path. Resolves a finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7") against the
  * WS-4 `paraIdMap` (`computedNumber`/`listPath`, already on the Load response — see
@@ -1907,29 +1956,47 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): Advisory
  * `matches` and `collectBlocks`'s doc-order walk preserve document order, so `matches[0]`/`matches[length-1]`
  * are the range's true first/last clauses).
  *
- * Returns `null` — never a guess — when `sectionRef` is absent, the `paraIdMap` prop is missing/empty
- * (pre-WS-4 caller or a response predating the reference layer), the citation is unparseable, it
- * resolves to zero paragraphs, or a resolved paraId is no longer present in the live document (map/doc
- * drift). The caller falls through to {@link resolveAdvisoryAnchorSpan} (legacy text/position
- * resolution) in every one of those cases — the FIXED fallback order this task's constraints require
- * (deterministic first; legacy ONLY when sectionRef is absent/unresolvable; ADR-049 — no text-search
- * placement when a deterministic paraId resolution exists).
+ * Returns `null` — never a guess — when NEITHER anchor is present, or when a `sectionRef`-ONLY
+ * finding fails to resolve for any reason (the `paraIdMap` prop is missing/empty on a pre-WS-4
+ * caller, the citation is unparseable, it resolves to zero paragraphs, or a resolved paraId is no
+ * longer in the live document). The caller falls through to {@link resolveAdvisoryAnchorSpan}
+ * (legacy text/position resolution) in every one of those cases — the FIXED fallback order
+ * agreements-r1 task 011 established (deterministic first; legacy ONLY when the citation is
+ * absent/unresolvable; ADR-049 — no text-search placement when a deterministic paraId resolution
+ * exists).
+ *
+ * r8 task 055 — TWO changes, both additive:
+ *  - the paraId-vs-citation PRECEDENCE now comes from `resolveAnchorParaIds`, the module the AI-edit
+ *    path and the whole-document review-flag path also use, so it cannot drift between them;
+ *  - a finding carrying an explicit `paraId` REFUSES on failure instead of falling through
+ *    (`{ span: null, kind }`) — see {@link AdvisoryCommentInput.paraId} for the asymmetry rationale.
+ *    No caller supplies `paraId` today, so the shipped `sectionRef` behaviour is byte-identical.
  */
 function resolveDeterministicAnchorSpan(
   blocks: readonly BlockInfo[],
-  sectionRef: string | undefined,
+  anchor: { paraId?: string; sectionRef?: string },
   referenceMap: readonly ParaIdMapEntry[] | undefined
-): { from: number; to: number } | null {
-  if (!sectionRef || !referenceMap || referenceMap.length === 0) return null;
+): DeterministicAnchorOutcome {
+  // An explicit paraId is what makes a failure a REFUSAL rather than a fall-through.
+  const hasParaId = (anchor.paraId ?? '').trim().length > 0;
+  const resolution = resolveAnchorParaIds({ paraId: anchor.paraId, ref: anchor.sectionRef }, referenceMap);
 
-  const resolution = resolveCitation(sectionRef, referenceMap);
-  if (resolution.matches.length === 0) return null;
+  if (resolution.kind === 'none') return null;
+  if (resolution.kind !== 'resolved') {
+    return hasParaId ? { span: null, kind: resolution.kind } : null;
+  }
 
-  const firstBlock = blocks.find(b => b.paraId === resolution.matches[0].paraId);
-  const lastBlock = blocks.find(b => b.paraId === resolution.matches[resolution.matches.length - 1].paraId);
-  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) return null;
+  // A RANGE citation resolves to MULTIPLE paragraphs; anchor the single thread across the full span,
+  // from the FIRST matched paragraph's start to the LAST matched paragraph's end (both
+  // `resolveCitation` and `collectBlocks` walk in document order, so first/last are the true bounds).
+  const ids = resolution.paraIds;
+  const firstBlock = blocks.find(b => sameBlockParaId(b.paraId, ids[0]));
+  const lastBlock = blocks.find(b => sameBlockParaId(b.paraId, ids[ids.length - 1]));
+  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) {
+    return hasParaId ? { span: null, kind: 'not_found' } : null;
+  }
 
-  return { from: firstBlock.from, to: lastBlock.to };
+  return { span: { from: firstBlock.from, to: lastBlock.to } };
 }
 
 // ---------------------------------------------------------------------------
@@ -3348,11 +3415,18 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             // still highlights instead of being dropped — see resolveAdvisoryAnchorSpan. A target that
             // recurs at >1 location (exact OR prefix) is REPORTED ambiguous, never guessed via
             // first-occurrence — a wrong-clause anchor is a correctness defect, not a cosmetic one.
-            const deterministicSpan = resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap);
+            const deterministic = resolveDeterministicAnchorSpan(
+              blocks,
+              { paraId: item.paraId, sectionRef: item.sectionRef },
+              paraIdMap
+            );
             let span: { from: number; to: number } | null;
             let failureKind: AdvisoryCommentFailure['kind'] = 'not_found';
-            if (deterministicSpan) {
-              span = deterministicSpan;
+            if (deterministic) {
+              // Resolved, OR REFUSED (task 055 — an explicit paraId that did not resolve). A refusal
+              // does NOT fall through to the text leg: that is the whole point of naming the target.
+              span = deterministic.span;
+              if (deterministic.kind) failureKind = deterministic.kind;
             } else {
               const resolution = resolveAdvisoryAnchorSpan(editor, item.targetText);
               span = resolution.span;

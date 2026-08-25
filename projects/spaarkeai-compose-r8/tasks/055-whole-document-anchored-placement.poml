@@ -4,7 +4,7 @@
     <title>FR-C03 (whole-document half) — place a whole-document change list AND its review flags by anchor, end to end, with zero text matching</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>blocked-on-054</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes how whole-document revisions and review flags land in the editor — the surface where a mis-placed legal edit is most damaging (many changes at once, reviewed in bulk).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -123,4 +123,50 @@
     <criterion>NEGATIVE: nothing deleted or retired (`target_text`, `match_mode`, `resolveTargetSpans` all still present).</criterion>
     <criterion>Payload size under the ADR-040 128 KB cap for a realistic whole-document revision, or the degradation stated.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-08-25. Decision + full implementation record:
+    `projects/spaarkeai-compose-r8/notes/055-review-flag-placement-decision.md` (§7 is the execution record).
+
+    DECISION (step 2): converge the RESOLUTION, keep the two SINKS separate. `placeAdvisoryComments`
+    and `registerAiReviewComments` are not near-duplicates — one exports Word `w:comment`s and has no
+    idempotency, the other is idempotent + FR-29 server-persisted and does not export. Collapsing
+    either destroys a shipped property. What genuinely overlapped was the paraId-vs-citation
+    PRECEDENCE, which now lives once, in `composeAnchorResolution.resolveAnchorParaIds`, used by all
+    three consumers. Each keeps its own SPAN policy (edit = one paragraph, refuses ranges; advisory =
+    spans ranges; annotation = one paraId, range hangs at its first clause).
+
+    FILES: NEW `widgets/composeAnchorResolution.ts` (shared precedence) + `widgets/hooks/redlineTextSearch.ts`
+    (verbatim move of the prose-matching leg, so it becomes a replaceable collaborator — the only way to
+    build the `ThrowIfTextSearched` tripwire in CommonJS). MODIFIED `usePendingRedline.ts` (-209 lines,
+    routes through the shared resolver), `ComposeEditor.tsx` (`ComposeDraftComment` gains
+    `target_para_id`/`target_ref`; `AdvisoryCommentInput` gains `paraId` checked above `sectionRef`),
+    `ComposeWorkspace.tsx` (`registerAiReviewComments` resolves deterministically, POPULATES
+    `anchor.paraId`, and the silent-drop filter defect is fixed).
+
+    DARK PRODUCER CLOSED: `AnchoredAnnotationAnchor.paraId` (R3 FR-11) was documented as the PRIMARY
+    anchor with a LIVE consumer (`AnnotationReanchorService` resolves by it first) and no producer —
+    every `flag-risks` flag went through the fuzzy scorer even when the model named its paragraph
+    exactly. Sixth instance of this project's recurring trap.
+
+    VERIFICATION: 39 new tests across 3 files, all written before implementation and observed RED
+    (10 shared-resolver, 10 whole-document/tripwire, 11 advisory paraId, 8 review-flag anchor). The
+    zero-text-matching tripwire was MUTATION-VERIFIED: stubbing `resolveAnchoredSpans` to return null
+    makes both ARMED tests fail with the tripwire's own message. Full suite 98 suites / 1201 tests green
+    (baseline 95 / 1162). code-review + adr-check both clean, zero violations.
+
+    NOTHING RETIRED: `target_text`, `match_mode`/`RedlineMatchMode`, `resolveTargetSpans` all present
+    and exported through the unchanged public surface. Task 052's scope is intact.
+
+    ESCALATIONS: neither trigger fired. (1) The advisory path is not moved — it GAINS `paraId` above
+    `sectionRef`; its fixed deterministic-then-legacy ordering and range spanning are pinned by five
+    tests that were green before and after. (2) Task 055 adds ZERO payload bytes (`target_para_id` came
+    from 054); a realistic 30-flag `flag-risks` payload is ~18.8 KB, 15% of the 128 KB cap.
+
+    HONEST GAPS (notes §7.9): `target_ref` has no producer — the `compose-revise-document` output schema
+    is `additionalProperties: false` and declares only `target_para_id`, and no client capture path sets
+    it, so the citation branch is capability, not a live path (same status it has had on `edits[]` since
+    051). `registerAiReviewComments` still does not export a Word `w:comment` (unchanged, task 040's
+    follow-on). `target_para_id` is not validated against the reference map, by design. No live UAT.
+  </notes>
 </task>

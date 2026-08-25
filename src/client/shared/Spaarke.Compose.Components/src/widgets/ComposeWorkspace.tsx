@@ -84,8 +84,12 @@ import {
   type ComposeEditorHandle,
   type ComposeEditorDocumentRef,
   type ComposeDraftPayload,
+  type ComposeDraftComment,
   type AdvisoryCommentInput,
 } from './ComposeEditor';
+// r8 task 055 — the paraId-vs-citation precedence shared with the AI-edit path and the
+// advisory-comment path, so the whole-document review-flag path cannot drift from either.
+import { resolveAnchorParaIds } from './composeAnchorResolution';
 import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
@@ -2800,6 +2804,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `targetLedgerRef` selects a specific stored output ({bindingId}@t{n}); when omitted, the
   // CURRENT (highest-turn) compose output for the session is materialized — the refresh-durable
   // and supersession/undo-replace resolution (FR-17 foundation).
+  // r8 task 055 — the load-time reference map, read through a REF by `registerAiReviewComments`
+  // below. A ref (rather than a dependency) keeps that callback's identity stable, which matters:
+  // it feeds `materializeEditOutput`, which several materialize effects depend on, and a new
+  // identity on every reload would re-arm them. The map only ever changes on a document load, and
+  // flags are always registered after one.
+  const paraIdMapRef = React.useRef<readonly ParaIdMapEntry[]>(state.paraIdMap);
+  paraIdMapRef.current = state.paraIdMap;
+
   // DEF-13 — turn an AI edit's rationale into an anchored COMMENT annotation (see the call site in
   // materializeComposeDraftFromLedger for the full pipeline rationale). Pure state update; dedups by
   // the ledger key's derived annotation id so re-materialize (refresh/duplicate signal) is idempotent.
@@ -2840,14 +2852,46 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // (paraId+range-anchored `ComposeAnchoredComment`s) into the Save `comments` field; these
   // `textPattern`-anchored AI-review flags are a SEPARATE data source (the FR-29 AnchoredAnnotation
   // store) and are out of that task's scope — tracked as a follow-on, not fixed here.
+  //
+  // r8 task 055 (FR-C03) — THE DETERMINISTIC ANCHOR IS NOW PRODUCED HERE.
+  //
+  // `AnchoredAnnotationAnchor.paraId` shipped in R3 FR-11 as the documented PRIMARY anchor
+  // ("Resolution order is paraId-FIRST, then the textPattern/paragraphHint fuzzy fallback"), and its
+  // CONSUMER has been live ever since: the return-from-Word re-anchor path
+  // (`anchoredAnnotationsToPriorAnchors` -> `AnnotationReanchorService`) resolves by paraId first and
+  // only falls back to the fuzzy scorer when it is absent. This function was the missing PRODUCER —
+  // it wrote `paragraphHint: -1` (the "no structural hint" sentinel) and no paraId, so every
+  // `flag-risks` flag went through the fuzzy scorer even when the model had named its paragraph
+  // exactly. Precedence comes from `resolveAnchorParaIds`, the SAME module the AI-edit path
+  // (`usePendingRedline.resolveAnchoredSpans`) and the advisory-comment path
+  // (`ComposeEditor.placeAdvisoryComments`) use, so the three cannot drift.
+  //
+  // Never fabricates: an anchor that does not resolve — an unknown citation, or a paraId and a
+  // citation that disagree — leaves `paraId` unset and the flag keeps its prose fallback. That is
+  // the honest outcome here, and it is NOT the UAT-21 "refuse" case: nothing is being PLACED in the
+  // document at this moment, so there is no wrong position to land on. The anchor is a hint the
+  // re-anchor service resolves later, and it degrades to exactly the pre-055 behaviour.
   const registerAiReviewComments = React.useCallback(
-    (
-      comments: Array<{ target_text?: string; comment?: string }>,
-      provenance: { ledgerRef: string; bindingId: string }
-    ): void => {
+    (comments: readonly ComposeDraftComment[], provenance: { ledgerRef: string; bindingId: string }): void => {
       const flags = comments
-        .map((c, i) => ({ i, target: c?.target_text?.trim() ?? '', body: c?.comment?.trim() ?? '' }))
-        .filter(c => c.target.length > 0 && c.body.length > 0);
+        .map((c, i) => {
+          // A bare paraId needs no map: it IS the address (same contract as the server
+          // `ComposeAnchorResolver` and the edit path). A citation needs the load-time reference map.
+          const resolution = resolveAnchorParaIds(
+            { paraId: c?.target_para_id, ref: c?.target_ref },
+            paraIdMapRef.current
+          );
+          // A RANGE citation names several paragraphs; an annotation anchor holds ONE, so the range's
+          // FIRST clause is where the flag hangs (document order — `resolveCitation` sorts by index).
+          const paraId = resolution.kind === 'resolved' ? resolution.paraIds[0] : undefined;
+          return { i, target: c?.target_text?.trim() ?? '', body: c?.comment?.trim() ?? '', paraId };
+        })
+        // The gate is "somewhere to hang it AND something to say". Task 054 lets a flag carry a
+        // deterministic anchor with weak or absent prose (L-1: hard breaks collapse in
+        // `collectBlocks().text`, so a quoted excerpt may not exist verbatim), and the pre-055 gate
+        // — `target.length > 0 && body.length > 0` — silently dropped exactly those BEST-anchored
+        // flags. A flag with neither an anchor nor prose genuinely has nothing to attach to.
+        .filter(c => c.body.length > 0 && (c.paraId !== undefined || c.target.length > 0));
       if (flags.length === 0) return;
       setAnchoredAnnotations(prev => {
         const existing = new Set(prev.map(a => a.id));
@@ -2858,7 +2902,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           additions.push({
             id: annotationId,
             type: 'comment',
-            anchor: { textPattern: flag.target, paragraphHint: -1, spanId: provenance.ledgerRef },
+            anchor: {
+              textPattern: flag.target,
+              paragraphHint: -1,
+              spanId: provenance.ledgerRef,
+              // Omitted rather than set to undefined, so a flag with no resolvable anchor serializes
+              // to exactly the pre-055 shape on the FR-29 session-annotations write.
+              ...(flag.paraId ? { paraId: flag.paraId } : {}),
+            },
             body: flag.body,
             author: 'Spaarke Assistant',
             timestamp: new Date().toISOString(),

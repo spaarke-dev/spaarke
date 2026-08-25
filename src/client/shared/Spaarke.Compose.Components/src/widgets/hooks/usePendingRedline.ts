@@ -46,14 +46,22 @@ import type { Editor } from '@tiptap/core';
 import type { Mapping } from '@tiptap/pm/transform';
 import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEditor';
 // Task 051 (FR-C01/C02/C03) — the deterministic anchor branch. `collectBlocks` is the SAME paraId→live-span
-// primitive `applyImportedCommentAnchors`/`applyImportedRevisions` already use (no second paraId walk);
-// `resolveCitation` is the client `CitationResolver` mirror the advisory-comment path already consumes.
+// primitive `applyImportedCommentAnchors`/`applyImportedRevisions` already use (no second paraId walk).
+// Task 055 — the paraId-vs-citation PRECEDENCE moved to `resolveAnchorParaIds`, shared with
+// `ComposeEditor.placeAdvisoryComments` and `ComposeWorkspace.registerAiReviewComments` so all three
+// consumers of a deterministic anchor cannot drift apart. This module keeps only its SPAN policy.
 import { collectBlocks } from '../importedRevisions';
-import { resolveCitation } from '../composeCitationResolver';
+import { resolveAnchorParaIds } from '../composeAnchorResolution';
 import type { ParaIdMapEntry } from '../../types/compose-contracts';
+// Task 055 (FR-C03) — the prose-matching leg, MOVED (not changed, not retired) into its own module so
+// it is a REPLACEABLE collaborator. That is what lets a test assert STRUCTURALLY that an anchored edit
+// never reaches it — the client twin of the server's `ThrowIfTextSearched` `IComposeEditValidator`
+// double. Re-exported below so every existing importer of `resolveTargetSpans` is unaffected.
+import { resolveTargetSpans } from './redlineTextSearch';
+import type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineTextSearch';
 
-/** How the client resolves `target_text` in the document (adeu `match_mode`, Spike 2). */
-export type RedlineMatchMode = 'strict' | 'first' | 'all';
+export { resolveTargetSpans } from './redlineTextSearch';
+export type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineTextSearch';
 
 /**
  * FR-13 (spaarkeai-compose-r3 task 031, amendment 2026-07-18 §6.5 Path B) — coarse, qualitative
@@ -83,17 +91,6 @@ export function deriveConfidenceBand(hasSources: boolean, targetResolves: boolea
   if (hasSources || targetResolves) return 'medium';
   return 'low';
 }
-
-/** A resolved document range in ProseMirror positions. */
-export interface RedlineSpan {
-  from: number;
-  to: number;
-}
-
-/** Outcome of resolving a `target_text` against the current document. */
-export type ResolveResult =
-  | { ok: true; spans: RedlineSpan[] }
-  | { ok: false; kind: 'not_found' | 'ambiguous'; matchCount: number };
 
 /**
  * Status returned by {@link UsePendingRedlineResult.materialize}.
@@ -192,205 +189,12 @@ function normalizeMatchMode(mode: string | undefined): RedlineMatchMode {
   return mode === 'first' || mode === 'all' || mode === 'strict' ? mode : 'strict';
 }
 
-/**
- * STRICTLY 1:1 character fold for tolerant redline anchoring (round-3 UAT Test #4). Word/DOCX text
- * carries typographic characters — curly quotes, non-breaking / thin / figure spaces, en/em/figure/
- * non-breaking dashes — that the model routinely straightens when it echoes a clause back as
- * `target_text`. A raw substring match then misses. Folding BOTH the document index and the target
- * through the SAME per-character map closes that gap. It is deliberately 1:1 (one code unit in → one
- * out) so `buildCharIndex`'s char→ProseMirror-position map stays exactly aligned; non-1:1 folds
- * (whitespace collapse, ligature expansion, zero-width stripping) are NOT done here — they would
- * desynchronize positions and are Phase-2.
- */
-const MATCH_FOLD: Readonly<Record<string, string>> = {
-  // single quotes / apostrophes / prime → straight apostrophe
-  '‘': "'",
-  '’': "'",
-  '‚': "'",
-  '‛': "'",
-  '′': "'",
-  ʼ: "'",
-  '`': "'",
-  '´': "'",
-  // double quotes / double prime → straight quote
-  '“': '"',
-  '”': '"',
-  '„': '"',
-  '‟': '"',
-  '″': '"',
-  // non-breaking / thin / figure / narrow-no-break spaces → regular space
-  ' ': ' ',
-  ' ': ' ',
-  ' ': ' ',
-  ' ': ' ',
-  // hyphen / en / em / figure / horizontal-bar / non-breaking hyphen / minus → hyphen-minus
-  '‐': '-',
-  '‑': '-',
-  '‒': '-',
-  '–': '-',
-  '—': '-',
-  '―': '-',
-  '−': '-',
-};
-
-/**
- * Item 1 (UAT round-4): invisible / zero-width characters that carry NO visible glyph and are NEVER
- * present in a model-authored `target_text`, but DO leak into mammoth-flattened editor text (and into
- * some source docs — e.g. copy-pasted patent boilerplate). Stripped in the TOLERANT fallback pass only
- * (dropping them is non-1:1, so it stays out of the precise 1:1 pass). Zero-width space (U+200B),
- * zero-width no-break space / BOM (U+FEFF), soft hyphen (U+00AD), word joiner (U+2060), zero-width
- * non-joiner/joiner (U+200C/U+200D). A single such char on one side otherwise defeats an exact match.
- */
-const INVISIBLE_STRIP = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/g;
-
-/** Fold one character to its match-normal form (1:1). */
-function normalizeChar(ch: string): string {
-  return MATCH_FOLD[ch] ?? ch;
-}
-
-/** True for an invisible/zero-width char {@link INVISIBLE_STRIP} drops in the tolerant pass. */
-function isInvisibleStrip(ch: string): boolean {
-  const c = ch.charCodeAt(0);
-  return c === 0x200b || c === 0x200c || c === 0x200d || c === 0x2060 || c === 0xfeff || c === 0x00ad;
-}
-
-/** Fold a string per-code-unit with {@link normalizeChar} — same iteration granularity as buildCharIndex. */
-function normalizeForMatch(text: string): string {
-  let out = '';
-  for (let i = 0; i < text.length; i++) out += normalizeChar(text[i]);
-  return out;
-}
-
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/"/g, '&quot;');
-}
-
-/**
- * Build a flat character index of the document's text, mapping each character to its ProseMirror
- * position. A NUL sentinel (` `, position -1) separates text blocks so a `target_text` snippet
- * never false-matches across a paragraph boundary. Targets never contain NUL, so a match can never
- * include a sentinel — every matched position is a real, contiguous text position.
- */
-function buildCharIndex(editor: Editor): { text: string; positions: number[] } {
-  const chars: string[] = [];
-  const positions: number[] = [];
-  editor.state.doc.descendants((node, pos) => {
-    if (node.isTextblock) {
-      if (chars.length > 0) {
-        chars.push(' ');
-        positions.push(-1);
-      }
-      return true;
-    }
-    if (node.isText && typeof node.text === 'string') {
-      for (let i = 0; i < node.text.length; i++) {
-        // 1:1 fold (curly quotes / NBSP / typographic dashes → straight forms) so the target — which
-        // the model straightens — still matches. positions[] keeps the ORIGINAL PM position per char.
-        chars.push(normalizeChar(node.text[i]));
-        positions.push(pos + i);
-      }
-    }
-    return true;
-  });
-  return { text: chars.join(''), positions };
-}
-
-/**
- * Fix #4 (UAT 2026-07-20): derive a WHITESPACE-COLLAPSED view of a {@link buildCharIndex} result — each
- * run of whitespace becomes a single space mapped to the PM position of the run's FIRST char; the NUL
- * block sentinel is preserved verbatim (and breaks any run, so no cross-paragraph match). The model
- * authors `target_text` against the Document-Intelligence extraction while we match against mammoth's
- * flattened text; the two normalize spacing/tabs/line-breaks differently, so a byte-verbatim target
- * often differs from the editor text ONLY in whitespace. Every retained char keeps a real PM position,
- * so the matched span endpoints stay exact even though the collapse is non-1:1.
- */
-function collapseWhitespaceIndex(raw: { text: string; positions: number[] }): { text: string; positions: number[] } {
-  const chars: string[] = [];
-  const positions: number[] = [];
-  let inRun = false;
-  for (let i = 0; i < raw.text.length; i++) {
-    const c = raw.text[i];
-    if (c === ' ') {
-      // Block sentinel — preserved; it terminates any whitespace run so a needle can't span blocks.
-      chars.push(c);
-      positions.push(raw.positions[i]);
-      inRun = false;
-    } else if (isInvisibleStrip(c)) {
-      // Item 1 (UAT round-4): drop zero-width / soft-hyphen chars entirely (non-1:1, tolerant-pass
-      // only). They carry no glyph and are absent from model targets, but leak into flattened editor
-      // text — a single one otherwise defeats an exact match. Dropping keeps every RETAINED char's
-      // real PM position, so matched span endpoints stay exact. Does NOT touch `inRun` (an invisible
-      // between two spaces must not un-collapse the surrounding whitespace run).
-      continue;
-    } else if (/\s/.test(c)) {
-      if (inRun) continue;
-      chars.push(' ');
-      positions.push(raw.positions[i]);
-      inRun = true;
-    } else {
-      chars.push(c);
-      positions.push(raw.positions[i]);
-      inRun = false;
-    }
-  }
-  return { text: chars.join(''), positions };
-}
-
-/** Find every span of `targetText` in the doc — 1:1-folded (precise) or additionally whitespace-collapsed
- * (tolerant). Returns real, contiguous PM spans (see {@link buildCharIndex}). */
-function findTargetMatches(editor: Editor, targetText: string, collapseWhitespace: boolean): RedlineSpan[] {
-  const raw = buildCharIndex(editor);
-  const { text, positions } = collapseWhitespace ? collapseWhitespaceIndex(raw) : raw;
-  const needle = collapseWhitespace
-    ? // Item 1: mirror collapseWhitespaceIndex — strip invisibles, THEN collapse whitespace, so a
-      // target carrying (or missing) a zero-width/soft-hyphen char still matches the collapsed view.
-      normalizeForMatch(targetText).replace(INVISIBLE_STRIP, '').replace(/\s+/g, ' ').trim()
-    : normalizeForMatch(targetText);
-  if (!needle) return [];
-
-  const matches: RedlineSpan[] = [];
-  let idx = text.indexOf(needle);
-  while (idx !== -1) {
-    const from = positions[idx];
-    const to = positions[idx + needle.length - 1] + 1;
-    matches.push({ from, to });
-    idx = text.indexOf(needle, idx + needle.length);
-  }
-  return matches;
-}
-
-/**
- * Resolve a `target_text` snippet to document span(s) under the adeu `match_mode` contract:
- *  - `strict` — exactly one match required; 0 → not_found, >1 → ambiguous (do NOT guess);
- *  - `first`  — the first match (≥1 required);
- *  - `all`    — every match.
- * Exported for direct unit testing.
- */
-export function resolveTargetSpans(editor: Editor, targetText: string, matchMode: RedlineMatchMode): ResolveResult {
-  if (!targetText) return { ok: false, kind: 'not_found', matchCount: 0 };
-
-  // Pass 1 — PRECISE: the 1:1 fold (smart-quote / NBSP / typographic-dash), length-preserving.
-  let matches = findTargetMatches(editor, targetText, false);
-  // Pass 2 — TOLERANT FALLBACK (Fix #4): only when the precise pass found NOTHING, retry with whitespace
-  // collapsed so a spacing/tab/line-break divergence between the model's target_text and the
-  // mammoth-flattened editor text no longer defeats an otherwise-exact match. Because it runs only on a
-  // precise-miss, it never loosens an already-unambiguous match. A genuine paraphrase (a changed/dropped
-  // word) still finds nothing → the FR-19 "do not guess" refusal is preserved.
-  if (matches.length === 0) {
-    matches = findTargetMatches(editor, targetText, true);
-  }
-
-  if (matches.length === 0) return { ok: false, kind: 'not_found', matchCount: 0 };
-  if (matchMode === 'strict' && matches.length > 1) {
-    return { ok: false, kind: 'ambiguous', matchCount: matches.length };
-  }
-  if (matchMode === 'all') return { ok: true, spans: matches };
-  // strict-unique or first → the first (and, for strict, only) match.
-  return { ok: true, spans: [matches[0]] };
 }
 
 /**
@@ -409,6 +213,13 @@ export function resolveTargetSpans(editor: Editor, targetText: string, matchMode
  * Ordering matches the server: paraId first (it IS the address), then citation. Both present and
  * disagreeing is `ambiguous` — neither is preferred.
  *
+ * Task 055: the PRECEDENCE itself now lives in {@link resolveAnchorParaIds}, shared with the advisory
+ * comment path and the whole-document review-flag path so it cannot drift between the three. What
+ * stays HERE is this path's own SPAN POLICY, which the other two do not share: an edit addresses
+ * exactly ONE paragraph (a range citation is refused, never narrowed to its first clause), and the
+ * named paragraph must be present in the LIVE document — a stronger check than the reference map,
+ * because the map is the load-time projection and the document is what the user is looking at.
+ *
  * Exported for direct unit testing.
  */
 export function resolveAnchoredSpans(
@@ -416,11 +227,19 @@ export function resolveAnchoredSpans(
   anchor: { target_para_id?: string; target_ref?: string } | undefined,
   referenceMap: readonly ParaIdMapEntry[] | undefined
 ): ResolveResult | null {
-  const paraId = anchor?.target_para_id?.trim();
-  const ref = anchor?.target_ref?.trim();
-  if (!paraId && !ref) return null;
-
-  const blocks = collectBlocks(editor);
+  const resolution = resolveAnchorParaIds(
+    { paraId: anchor?.target_para_id, ref: anchor?.target_ref },
+    referenceMap
+  );
+  // No anchor at all — the ONLY route back to the text path.
+  if (resolution.kind === 'none') return null;
+  if (resolution.kind === 'not_found') return { ok: false, kind: 'not_found', matchCount: 0 };
+  if (resolution.kind === 'ambiguous') return { ok: false, kind: 'ambiguous', matchCount: resolution.matchCount };
+  // A single edit addresses ONE paragraph; a range ("Sections 4-7") is refused, not narrowed to the
+  // first — picking one would be the silently-wrong-target failure this task removes.
+  if (resolution.paraIds.length !== 1) {
+    return { ok: false, kind: 'ambiguous', matchCount: resolution.paraIds.length };
+  }
 
   /**
    * paraId → its LIVE span, via the same primitive imported comments/revisions anchor through.
@@ -428,41 +247,13 @@ export function resolveAnchoredSpans(
    * both need the block's CONTENT range, which is one position inside each boundary. Using the node
    * boundaries directly would insert the replacement AFTER the paragraph instead of within it.
    */
-  const spanOf = (id: string): RedlineSpan | null => {
-    const block = blocks.find(b => b.paraId?.toUpperCase() === id.toUpperCase());
-    return block ? { from: block.from + 1, to: block.to - 1 } : null;
-  };
+  const target = resolution.paraIds[0];
+  const block = collectBlocks(editor).find(b => b.paraId?.toUpperCase() === target.toUpperCase());
+  // The named paragraph is not in the live document (deleted, or the edit was built against another
+  // document state). Refuse — repairing it would be a guess.
+  if (!block) return { ok: false, kind: 'not_found', matchCount: 0 };
 
-  let fromParaId: RedlineSpan | null = null;
-  if (paraId) {
-    fromParaId = spanOf(paraId);
-    // The named paragraph is not in the live document (deleted, or the edit was built against another
-    // document state). Refuse — repairing it would be a guess.
-    if (!fromParaId) return { ok: false, kind: 'not_found', matchCount: 0 };
-  }
-
-  let fromRef: RedlineSpan | null = null;
-  if (ref) {
-    if (!referenceMap || referenceMap.length === 0) {
-      // An anchor with nothing to validate it against. Refusing beats silently text-searching.
-      return { ok: false, kind: 'not_found', matchCount: 0 };
-    }
-    const resolution = resolveCitation(ref, referenceMap);
-    if (resolution.matches.length === 0) return { ok: false, kind: 'not_found', matchCount: 0 };
-    // A single edit addresses ONE paragraph; a range ("Sections 4-7") is refused, not narrowed to the
-    // first — picking one would be the silently-wrong-target failure this task removes.
-    if (resolution.matches.length > 1) {
-      return { ok: false, kind: 'ambiguous', matchCount: resolution.matches.length };
-    }
-    fromRef = spanOf(resolution.matches[0].paraId);
-    if (!fromRef) return { ok: false, kind: 'not_found', matchCount: 0 };
-  }
-
-  if (fromParaId && fromRef && (fromParaId.from !== fromRef.from || fromParaId.to !== fromRef.to)) {
-    return { ok: false, kind: 'ambiguous', matchCount: 2 };
-  }
-
-  return { ok: true, spans: [(fromParaId ?? fromRef)!] };
+  return { ok: true, spans: [{ from: block.from + 1, to: block.to - 1 }] };
 }
 
 /**
