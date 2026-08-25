@@ -180,6 +180,31 @@ public static class AiPersistenceModule
         // The summary is written alongside verbatim messages — no messages are ever deleted.
         services.AddScoped<ISessionSummarizationService, SessionSummarizationService>();
 
+        // spaarkeai-compose-r8 FR-B01 (task 060): SessionFileBlobStore — the durable, tenant-partitioned
+        // byte copy of every chat session upload. THE ONE new DI registration this project adds
+        // (spec §11 table); ADR-010 budget delta is +1.
+        //
+        // UNCONDITIONAL by design (ADR-032 P1 "promote-to-unconditional"): the store is injected into
+        // ChatDocumentEndpoints handlers, and MapChatDocumentEndpoints() is mapped unconditionally
+        // (EndpointMappingExtensions.cs:228). A feature-gated registration here would abort minimal-API
+        // endpoint metadata generation at host startup whenever the gate was off — the exact
+        // asymmetric-registration failure ADR-032 exists to prevent. There is therefore NO `if (flag)`
+        // block and NO null-object peer: the store has zero feature-gated transitive deps
+        // (TokenCredential + ILogger + two config strings), so P1 is the correct pattern, not P2/P3.
+        //
+        // The "no blob endpoint configured" case is a RUNTIME state inside the store (writes return
+        // SessionFileStoreOutcome.StoreDisabled and log a warning), not a DI state — so local dev and
+        // every test host resolve the same concrete type that production does.
+        //
+        // Singleton: BlobServiceClient/BlobContainerClient are thread-safe and designed for long-lived
+        // reuse (same rationale as the CosmosClient singleton above). Managed identity only — the
+        // shared TokenCredential; no connection string, no account key (root CLAUDE.md §9).
+        services.AddSingleton(sp => new SessionFileBlobStore(
+            blobEndpoint: configuration[SessionFileBlobStore.BlobEndpointConfigKey],
+            containerName: configuration[SessionFileBlobStore.ContainerNameConfigKey],
+            credential: sp.GetRequiredService<TokenCredential>(),
+            logger: sp.GetRequiredService<ILogger<SessionFileBlobStore>>()));
+
         return services;
     }
 }

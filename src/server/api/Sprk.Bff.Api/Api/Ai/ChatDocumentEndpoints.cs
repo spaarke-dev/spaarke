@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.EventRules;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Spaarke.Dataverse;
@@ -255,6 +256,7 @@ public static class ChatDocumentEndpoints
         ITenantCache cache,
         ChatSessionManager sessionManager,
         IContextEventEmitter contextEventEmitter,
+        SessionFileBlobStore durableFileStore,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -512,6 +514,65 @@ public static class ChatDocumentEndpoints
                 docCacheId, documentId);
         }
 
+        // Determine content type from filename extension. Hoisted here (spaarkeai-compose-r8 task 060)
+        // so BOTH the durable byte copy below and the ChatSessionFile manifest entry further down
+        // record the SAME content type — they used to be able to drift.
+        var sessionFileContentType = extension switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            _ => file.ContentType ?? "application/octet-stream"
+        };
+
+        // 9c. spaarkeai-compose-r8 FR-B01 — durable, tenant-partitioned byte copy.
+        //
+        // WHY this is here and not later: the session's manifest (Cosmos, 90 days) and the AI-Search
+        // chunks (evicted with the 24h Redis key) already disagreed about how long a file lives. The
+        // durable copy is what closes that gap, so it is written at UPLOAD time, from the same bytes
+        // the Redis cache above received — not derived later from something that may already be gone.
+        //
+        // Failure policy, deliberately asymmetric:
+        //   - store DISABLED (no blob endpoint configured for this deployment) → proceed. Behaviour is
+        //     exactly the pre-FR-B01 world; a warning is logged by the store, once.
+        //   - store ENABLED but the write FAILS → 500. Returning 202 here would hand the user a
+        //     "stored" file that quietly dies at the Redis TTL — silently reintroducing the very
+        //     defect this task closes. The Azure SDK has already exhausted its retries by this point.
+        try
+        {
+            var durableOutcome = await durableFileStore.WriteAsync(
+                tenantId, sessionId, documentId,
+                BinaryData.FromBytes(originalBinary),
+                sessionFileContentType,
+                httpContext.RequestAborted);
+
+            if (durableOutcome == SessionFileStoreOutcome.StoreDisabled)
+            {
+                logger.LogWarning(
+                    "Durable byte store is not configured — uploaded file will not survive the session cache TTL. " +
+                    "DocumentId={DocumentId}, SessionId={SessionId}",
+                    documentId, sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // ADR-015: identifiers only — never the file name or the bytes.
+            logger.LogError(ex,
+                "Durable byte-store write FAILED for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                "Upload rejected rather than reporting success for a file that would not survive.",
+                documentId, sessionId);
+
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to store the document durably. Please try again.");
+        }
+
         // 10. Also store document metadata for retrieval (filename, etc.)
         var metadata = new UploadedDocumentMetadata(documentId, filename, tokenEstimate, wasTruncated);
         try
@@ -610,15 +671,8 @@ public static class ChatDocumentEndpoints
                     .ToArray();
                 var searchDocumentIdsCsv = string.Join(",", chunkIds);
 
-                // Determine content type from filename extension (mirrors PersistDocumentAsync §5).
-                var sessionFileContentType = extension switch
-                {
-                    ".pdf" => "application/pdf",
-                    ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    ".txt" => "text/plain",
-                    ".md" => "text/markdown",
-                    _ => file.ContentType ?? "application/octet-stream"
-                };
+                // Content type: computed once at step 9c above (hoisted by task 060) so the durable
+                // blob and this manifest entry can never record different types for the same file.
 
                 // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
                 //
@@ -824,6 +878,7 @@ public static class ChatDocumentEndpoints
         ITenantCache cache,
         ChatSessionManager sessionManager,
         IAuthorizationService authorizationService,
+        SessionFileBlobStore durableFileStore,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -964,6 +1019,34 @@ public static class ChatDocumentEndpoints
         {
             logger.LogError(ex, "Failed to store ingested archive binary in Redis: CacheId={CacheId}", docCacheId);
             return Results.Problem(statusCode: 500, title: "Internal Server Error", detail: "Failed to store the email archive. Please try again.");
+        }
+
+        // spaarkeai-compose-r8 FR-B01 — this path appends a ChatSessionFile to the SAME manifest the
+        // multipart upload does, so its bytes have the same 90-day obligation and get the same durable
+        // copy. Same failure policy as UploadDocumentAsync step 9c: disabled → proceed, enabled-but-failed → 500.
+        try
+        {
+            var durableOutcome = await durableFileStore.WriteAsync(
+                tenantId, sessionId, fileId, BinaryData.FromBytes(bytes), "message/rfc822", ct);
+
+            if (durableOutcome == SessionFileStoreOutcome.StoreDisabled)
+            {
+                logger.LogWarning(
+                    "Durable byte store is not configured — ingested archive will not survive the session cache TTL. " +
+                    "FileId={FileId}, SessionId={SessionId}",
+                    fileId, sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Durable byte-store write FAILED for ingested archive FileId={FileId}, SessionId={SessionId}.",
+                fileId, sessionId);
+            return Results.Problem(statusCode: 500, title: "Internal Server Error", detail: "Failed to store the email archive durably. Please try again.");
         }
 
         var metadata = new UploadedDocumentMetadata(fileId, fileName, 0, false);
