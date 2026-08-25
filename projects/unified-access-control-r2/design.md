@@ -22,7 +22,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 
 | In | Out |
 |---|---|
-| One access evaluator returning `(recordId → rights)` for both principal kinds | MDA authorization (Dataverse enforces natively — no code) |
+| One access evaluator returning `(recordId → rights)` for both principal kinds | MDA authorization **for native forms/grids/views only** (Dataverse enforces natively — no code). ⚠️ **NOT** MDA-hosted PCFs that read via the BFF — those are in scope; see §4.1 correction |
 | Phase 0 enforcement remediation (§8) | AI-plane security trimming for contacts (deferred, D-4) |
 | Core-vs-child inheritance | Field-level visibility (deferred, D-3) |
 | Secure Project rework | Expiry enforcement beyond the Phase 0 minimum (D-1) |
@@ -67,8 +67,26 @@ The axis that governs risk is **which system enforces**, not who the user is:
 
 | Surface | Enforced by | Consequence |
 |---|---|---|
-| **MDA** | Dataverse natively (role depth × owner/BU/team + sharing) | Nothing to build. Do not reimplement |
+| **MDA — native forms, grids, views** | Dataverse natively (role depth × owner/BU/team + sharing) | Nothing to build. Do not reimplement |
+| **MDA — embedded PCFs that read via the BFF** | ⚠️ **The BFF filter** — same as SPA. See correction below | The MDA is **not** uniformly Dataverse-enforced |
 | **SPA / Teams** | **The BFF filter, and nothing else** — all reads are app-only, so Dataverse row security is inert | A bug here is a disclosure, not a nuisance |
+
+> 🔴 **Correction, 2026-08-25 (task 046 follow-up).** The two-row version of this table said the MDA is
+> Dataverse-enforced, full stop, and the Scope table above still says *"MDA authorization (Dataverse
+> enforces natively — no code)"*. **That is false wherever an MDA form hosts a PCF that reads through
+> the BFF**, which the Matter form does today: `SemanticSearchControl` fetches its document grid from
+> `POST /api/ai/search`, never from `Xrm.WebApi`, so nothing on that path is security-trimmed.
+>
+> **Demonstrated, not theorised**: a non-admin who is denied Read on every one of a matter's documents
+> by Dataverse (verified by impersonation — 0 of 442 documents visible) nonetheless saw the full
+> document list in that PCF, and could open and download the files. Details, endpoint-level trace and
+> the three distinct defects: [`notes/task-046-secure-project-owner-role.md`](notes/task-046-secure-project-owner-role.md) §7b.
+>
+> **Why this matters beyond one control**: the "MDA is safe, only the SPA needs a filter" framing is
+> what made this surface invisible to the project's own threat model. The correct rule is **per read
+> path, not per surface**: *any* read that goes through the BFF is app-only and needs the evaluator,
+> regardless of which host the code sits in. Treat "is this MDA?" as irrelevant; ask "does this read
+> go through the BFF?"
 
 ### 4.2 User types
 
@@ -178,8 +196,12 @@ and `Write` on `sprk_project`.
 validates that an assignment target holds entity privileges; assigning a record to a team with no
 privileges on that entity fails. So:
 
-- Define a dedicated **`Secure Project Owner`** role holding **exactly one privilege**:
-  **`prvReadsprk_Project` at User (Basic) depth.** Nothing else.
+- Define a dedicated **`Secure Project Owner`** role holding **`Read` at User (`Basic`) depth on every
+  entity that carries an `sprk_issecure` column, and nothing else.** As of 2026-08-25 that is **three**
+  entities — `sprk_project`, `sprk_matter`, `sprk_workassignment` — confirmed from live attribute
+  metadata (`sprk_servicerequest` and `sprk_document` do **not** carry it). **Derive the list from
+  metadata, never from a written list**: if a fourth entity gains `sprk_issecure`, the role must gain
+  the matching `Read` or assignment for that type fails.
 - Assign it to the **`Secure Project` default owner team only**.
 - **Keep that team free of human members.** The team owns *every* secure project, so at User depth a
   member would read every one of them *by membership* — which is exactly the ownership-derived access
@@ -196,7 +218,19 @@ privileges on that entity fails. So:
   > |---|---|---|
   > | Privileges | Create, Read, Write, Delete, Append, AppendTo, Share | **Read only** |
   > | Depth | Business Unit (`Local`) | **User (`Basic`)** |
-  > | Child entities | included | **not required** (nothing assigns children — see §5.1c) |
+  > | Entity scope | `sprk_project` + "its child entities" | **the 3 entities carrying `sprk_issecure`** — `sprk_project`, `sprk_matter`, `sprk_workassignment` |
+  > | Child entities | included | **not required** (nothing assigns children — see §5.1d) |
+  >
+  > ⚠️ **The entity-scope row was found the hard way, by operator testing on 2026-08-25 — after the
+  > role had already been "completed".** The first cut covered `sprk_project` only, because this
+  > section and the task both talk about *projects*. Assigning a **Matter** to the owner team then
+  > failed, and the natural field fix was to pile broad roles onto the team
+  > (`Spaarke Basic User`, `Spaarke AI Analysis User`, `Spaarke Reporting Access Viewer` were all
+  > added) — **recreating the exact over-grant posture removing System Administrator was meant to
+  > end.** The lesson generalises: *when assignment fails, the cause is a missing `Read` on that one
+  > entity; add the privilege, never a role.* Corrected by granting `Read`@`Basic` on all three and
+  > re-proving assignment for each with the three workaround roles removed; the team is back to one
+  > role and zero members.
   >
   > **Evidence.** With the role reduced to `Write`-only, Dataverse refused the assignment and named
   > the missing privilege itself: *"Principal team (Id=daec0b6f-…, teamType=0, privilegeCount=5) is
@@ -309,6 +343,36 @@ stripping a privilege, and `Local` still lets ordinary users read the 18 root-BU
 
 Whichever is chosen, the guarantee should be **tested empirically** (impersonated read → expect
 denial), not asserted from the role configuration — see the NFR-05 note above.
+
+> ### ✅ Fix A is VALIDATED in dev (operator test, 2026-08-25)
+>
+> `Spaarke Business Unit 1` was created as a child of root, `testuser1@spaarke.com` moved into it, and
+> the user **kept `Deep` depth**. Because `Spaarke Business Unit 1` and `Secure Project` are **siblings**,
+> `Deep` covers the user's own subtree and cannot reach the secure BU:
+>
+> | Test | Result |
+> |---|---|
+> | Matter owned by `Spaarke Business Unit 1` | visible |
+> | Records in other BUs | not visible |
+> | Same Matter after reassignment to the `Secure Project` BU/team | **DENIED** ✅ |
+> | Same Matter after an explicit **share** | visible ✅ |
+>
+> **This is the entire intended model working end-to-end**, and it resolves two things this section
+> previously listed as blocked:
+>
+> - **Consequence 3 is discharged.** FR-28's share→read assertion is no longer untestable — it was
+>   tested, and it **passes**. The user regained access *only* via the explicit share.
+> - **Consequence 1 is fixable by configuration alone.** No code change was needed; the guarantee comes
+>   from where the user's BU sits relative to the secure BU.
+>
+> **The insight worth keeping**: the fix is not "reduce the depth", it is **"do not let ordinary users
+> sit at or above the secure BU in the tree"**. `Deep` is fine — it is `Deep` *held at an ancestor of
+> the secure BU* that is not.
+>
+> ⚠️ **Migration caveat — this is a data decision, not only a security one.** Existing records were left
+> in the root BU, so the relocated user can no longer see any of them. Rolling this out means either
+> reassigning existing records into the new BUs or placing users to match where their records already
+> live. In a populated environment that is the larger half of the work.
 
 **Consequences until it is applied:**
 

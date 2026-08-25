@@ -103,11 +103,30 @@ $teamId = $team[0].teamid
 
 ### 5.1 The privilege set, and why each entry survived
 
-**Exactly one privilege:**
+**`Read` at User (`Basic`) depth, on every entity that carries an `sprk_issecure` column — and nothing
+else.** As of 2026-08-25 that is **three** entities, confirmed from live attribute metadata:
 
 | Privilege | Depth | Why it is here |
 |---|---|---|
 | `prvReadsprk_Project` | **User (`Basic`)** | **Forced by a recorded failure.** With the role reduced to `Write`-only, Dataverse refused the assignment and named it: *"Principal team (Id=…, teamType=0, privilegeCount=5) is missing prvReadsprk_Project privilege"*. |
+| `prvReadsprk_Matter` | **User (`Basic`)** | Same rule, different entity. **Found the hard way**: a first cut of this role covered only `sprk_project`, and assigning a *Matter* to the team failed — the workaround was to pile broad roles (`Spaarke Basic User` etc.) onto the owner team, which is exactly the over-grant this role exists to eliminate. |
+| `prvReadsprk_WorkAssignment` | **User (`Basic`)** | Same rule. Included pre-emptively because `sprk_workassignment` also carries `sprk_issecure`; verified by assigning a probe record. |
+
+**Derive this list from metadata, not from this table** — if a fourth entity gains an `sprk_issecure`
+column, the role must gain the matching `Read`, or assignment for that type fails and someone will
+"fix" it by over-granting the team:
+
+```sql
+-- entities that can be secured => entities this role must cover
+SELECT LogicalName FROM EntityDefinitions WHERE Attributes ANY (LogicalName = 'sprk_issecure')
+```
+```powershell
+foreach ($e in @('sprk_project','sprk_matter','sprk_workassignment','sprk_servicerequest','sprk_document')) {
+  $has = (Invoke-RestMethod "$Api/EntityDefinitions(LogicalName='$e')/Attributes?`$select=LogicalName&`$filter=LogicalName eq 'sprk_issecure'" -Headers $H).value.Count -gt 0
+  "{0,-22} issecure={1}" -f $e, $has
+}
+# 2026-08-25: project=True  matter=True  workassignment=True  servicerequest=False  document=False
+```
 
 **Everything else was tested and is NOT required** — do not add any of it:
 
@@ -117,10 +136,11 @@ $teamId = $team[0].teamid
 | `Create` | The team never creates. The BFF app user creates, then assigns. |
 | `Delete`, `Append`, `AppendTo`, `Share`, `Assign` | Never exercised by the assignment path. |
 | Anything on **child** entities | Nothing assigns children to this team (see design §5.1d). Granting here would be privilege without a purpose. |
+| **Any broad role on the owner team** (`Spaarke Basic User`, `Spaarke AI Analysis User`, …) | If assignment fails, the cause is a **missing `Read` on that entity** — add the one privilege, never a whole role. A broad role on the owner team recreates the System-Administrator posture this runbook removes. |
 | **Business Unit / `Deep` / `Global` depth** | `User` depth suffices. Any wider depth lets a future team member read beyond what the team owns, and re-opens the exact hole §6 is about. |
 
 > **`User` depth is not a weaker version of `Business Unit` depth here — it is the correct one.** The
-> team owns exactly the secure projects, so "records this principal owns" already covers 100% of the
+> team owns exactly the secure records, so "records this principal owns" already covers 100% of the
 > intended scope. Wider depth adds reach without adding capability.
 
 ### 5.2 Create it
@@ -141,11 +161,19 @@ principals in that BU. That containment is a feature — keep it.
 
 ### 5.3 Grant the one privilege
 
+Resolve each entity's `Read` privilege from **entity metadata** rather than hard-coding names — the
+casing follows the schema name (`prvReadsprk_WorkAssignment`, not `prvReadsprk_workassignment`), which
+is easy to get wrong by hand:
+
 ```powershell
-$privId = (Invoke-RestMethod "$Api/privileges?`$select=privilegeid&`$filter=name eq 'prvReadsprk_Project'" -Headers $H).value[0].privilegeid
-$b = @{ Privileges = @(@{
-  '@odata.type'='Microsoft.Dynamics.CRM.RolePrivilege'
-  Depth='Basic'; PrivilegeId=$privId; PrivilegeName='prvReadsprk_Project'; BusinessUnitId=$buId }) } | ConvertTo-Json -Depth 10
+$securable = @('sprk_project','sprk_matter','sprk_workassignment')   # re-derive per §5.1
+$privList = foreach ($e in $securable) {
+    $read = (Invoke-RestMethod "$Api/EntityDefinitions(LogicalName='$e')/Privileges" -Headers $H).value |
+            Where-Object { $_.PrivilegeType -eq 'Read' }
+    @{ '@odata.type'='Microsoft.Dynamics.CRM.RolePrivilege'; Depth='Basic'
+       PrivilegeId=$read.PrivilegeId; PrivilegeName=$read.Name; BusinessUnitId=$buId }
+}
+$b = @{ Privileges = @($privList) } | ConvertTo-Json -Depth 10
 Invoke-RestMethod -Method Post "$Api/roles($roleId)/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($b))
 ```
 
@@ -166,7 +194,7 @@ Two behaviours to know, both verified:
 
 ```powershell
 # Run this AFTER every AddPrivilegesRole call.
-$keep = @('prvReadsprk_Project')
+$keep = @('prvReadsprk_Project','prvReadsprk_Matter','prvReadsprk_WorkAssignment')   # per §5.1
 foreach ($p in (Invoke-RestMethod "$Api/roles($roleId)/roleprivileges_association?`$select=privilegeid,name" -Headers $H).value) {
     if ($keep -contains $p.name) { continue }
     $rb = @{ Privilege = @{ '@odata.type'='Microsoft.Dynamics.CRM.privilege'; privilegeid=$p.privilegeid } } | ConvertTo-Json -Depth 5
@@ -222,14 +250,36 @@ ORDER BY roleprivileges.privilegedepthmask DESC
 service/application-user roles (`Service Reader`, `Service Writer`, `System Customizer`) is acceptable
 provided no human holds them — check with `systemuserroles`.
 
-**In `spaarkedev1` on 2026-08-25 this FAILS**: `Spaarke Basic User` holds `prvReadsprk_Project` at
-`Deep` and is held by `Test User 1`, an ordinary user. Two fixes, either of which closes it — see
-design §5.1a-2 for measured blast radius:
+**In `spaarkedev1` this FAILED while ordinary users sat in the root BU**: `Spaarke Basic User` holds
+`prvReadsprk_Project` at `Deep`, and `Test User 1` — an ordinary user then in root — read a real secure
+record. Two fixes, either of which closes it (design §5.1a-2 has measured blast radius):
 
-- **A — restructure the BU tree** (the decided direction, design §5.2): move users out of root into an
-  Operations BU and make the secure BU a **sibling**, not a descendant.
+- **A — get users out of the root BU** (the decided direction, design §5.2): put users in a BU that is a
+  **sibling** of the secure BU, not an ancestor of it. `Deep` then covers the user's own subtree and
+  cannot reach the secure BU.
 - **B — narrow the depth**: `Spaarke Basic User` `prvReadsprk_Project` `Deep` (4) → `Local` (2).
   Cheap and reversible, but a role guarantee, so a later role edit can silently undo it.
+
+> ✅ **Fix A is VALIDATED in `spaarkedev1` (operator test, 2026-08-25).** `Spaarke Business Unit 1` was
+> created as a child of root, `testuser1@spaarke.com` was moved into it, and the user **kept** `Deep`
+> depth. Observed:
+>
+> | Test | Result |
+> |---|---|
+> | Read a Matter owned by `Spaarke Business Unit 1` | ✅ visible |
+> | Read anything in **other** BUs | ✅ not visible |
+> | Read the same Matter after reassigning it to the `Secure Project` BU/team | ✅ **DENIED** |
+> | Read it after an explicit **share** | ✅ visible |
+>
+> That is the whole intended model working: `Deep` at a sibling BU cannot reach the secure BU, and
+> access returns only via explicit share. **It also makes FR-28's share→read assertion testable** —
+> previously impossible, because every human with `sprk_project` Read held `Deep` at the root.
+>
+> ⚠️ **Migration caveat, and it is not cosmetic.** Existing records (projects, matters, documents…)
+> were **left in the root BU**, so the relocated user can no longer see any of them. Moving users out of
+> root is therefore not a pure security change — it is a **data-migration** decision: either reassign
+> existing records into the new BUs, or place users to match where their records already live. Plan this
+> before doing it in a populated environment.
 
 **Do NOT "fix" this by removing `sprk_project` Read from ordinary roles.** A share confers nothing
 unless the user also holds the entity privilege at some depth — stripping it disables all sharing,
@@ -245,8 +295,9 @@ configuration is shaped correctly.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | Role privileges: `roles(<id>)/roleprivileges_association` | **exactly 1** — `prvReadsprk_Project`; depth mask `1` |
-| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Project Owner`. **No `System Administrator`** |
+| 1 | Role privileges: `roles(<id>)/roleprivileges_association` | **`Read` on every `sprk_issecure` entity and nothing else** — as of 2026-08-25 exactly 3 (`prvReadsprk_Project`, `prvReadsprk_Matter`, `prvReadsprk_WorkAssignment`), each at depth mask `1` |
+| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Project Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
+| 2b | Assignment works for **each** securable type, not just projects | assign a probe `sprk_project`, `sprk_matter` **and** `sprk_workassignment`. A role covering only one type fails silently on the others until someone over-grants the team |
 | 3 | Team members: `teams(<id>)/teammembership_association` | **0** |
 | 4 | Role holders: `roles(<id>)/systemuserroles_association` | **0 users** |
 | 5 | Role holders: `roles(<id>)/teamroles_association` | **exactly 1 team** — the secure BU's default owner team |
