@@ -630,6 +630,44 @@ module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {
 }
 
 // ============================================================================
+// BFF RUNTIME UAMI -- MI-ONLY RBAC on per-customer Service Bus + AI Search
+// (auth-v4 PROVISIONING-CHANGE-REQUEST §10.1 Δ1 + Δ2 + §10.3; punch rows
+//  A36 + A37)
+//
+// Grants the per-customer BFF runtime UAMI (uami) the four data-plane role
+// assignments required by the auth-v4 §10.2 live contract on the per-customer
+// stamp's Service Bus namespace + AI Search service:
+//   A36 Service Bus:  Data Sender + Data Receiver
+//   A37 AI Search:    Index Data Contributor + Service Contributor
+//
+// Same BCP139 forcing-function as customerL2BffRbac above; invoked with
+// `scope: rg`. Different principal from A20 (Model 1 L2 UAMI grants) --
+// this is the per-customer BFF's own runtime identity, not the L2 provisioning
+// UAMI.
+// ============================================================================
+
+module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
+  scope: rg
+  name: 'bff-runtime-rbac-${baseName}'
+  params: {
+    bffUamiPrincipalId: uami.outputs.principalId
+    serviceBusNamespaceName: serviceBus.outputs.serviceBusName
+    searchServiceName: aiSearch.outputs.searchServiceName
+  }
+}
+
+// NOTE (2026-08-25, A37 dispatch reconciling A36 concurrent-add):
+//   A36's agent landed after A37 and added a REDUNDANT second invocation of
+//   the SAME module here (`bffRuntimeSbRbac`) with the SAME deployment name
+//   (`bff-runtime-rbac-${baseName}`) as `bffRuntimeRbac` above -- would have
+//   ARM-errored at deploy time on duplicate deployment name + was also missing
+//   the required `searchServiceName` param. The single invocation above
+//   already binds A36 SB roles + A37 Search roles together
+//   (bff-runtime-rbac.bicep is comprehensive by design per the coordination
+//   instruction in the A37 dispatch). A36's block deleted here; A36 role
+//   coverage preserved unchanged.
+
+// ============================================================================
 // KEY VAULT SECRETS (canonical secret catalog) — Phase C — customer-provisioning-
 // orchestration-r1, task 129. Invokes scripts/canonical-secret-catalog/generated/
 // kv-secrets.generated.bicep (task 084 -- DO NOT EDIT BY HAND; generated from

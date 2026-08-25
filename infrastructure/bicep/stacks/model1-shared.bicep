@@ -714,6 +714,46 @@ module model1SharedL2Rbac '../modules/model1-shared-l2-rbac.bicep' = {
 }
 
 // ============================================================================
+// BFF RUNTIME UAMI -- MI-ONLY RBAC on Service Bus + AI Search
+// (auth-v4 PROVISIONING-CHANGE-REQUEST §10.1 Δ1 + Δ2 + §10.3; punch rows
+//  A36 + A37)
+//
+// Grants the SHARED BFF runtime UAMI (sharedBffUami) the four data-plane
+// role assignments required by the auth-v4 §10.2 live contract:
+//   A36 Service Bus:  Data Sender + Data Receiver
+//   A37 AI Search:    Index Data Contributor + Service Contributor
+//
+// Same BCP139 forcing-function as model1SharedL2Rbac above; invoked with
+// `scope: sharedRg`. Different principal from A20 (this stack's L2 UAMI
+// grants remain in model1SharedL2Rbac).
+// ============================================================================
+
+module sharedBffRuntimeRbac '../modules/bff-runtime-rbac.bicep' = {
+  scope: sharedRg
+  name: 'bff-runtime-rbac-shared-${environment}'
+  params: {
+    bffUamiPrincipalId: sharedBffUami.outputs.principalId
+    serviceBusNamespaceName: sharedServiceBusName
+    searchServiceName: sharedAiSearchName
+  }
+  dependsOn: [
+    // Ensure both target resources exist before RBAC binds.
+    sharedServiceBus
+    sharedAiSearch
+  ]
+}
+
+// NOTE (2026-08-25, A37 dispatch reconciling A36 concurrent-add):
+//   A36's agent landed after A37 and added a REDUNDANT second invocation of
+//   the SAME module here with the SAME symbol name (`sharedBffRuntimeRbac`) --
+//   would have hard-errored bicep build with BCP028 duplicate identifier +
+//   was also missing the required `searchServiceName` param. The single
+//   invocation above already binds A36 SB roles + A37 Search roles together
+//   (bff-runtime-rbac.bicep is comprehensive by design per the coordination
+//   instruction in the A37 dispatch). A36's block deleted here; A36 role
+//   coverage preserved unchanged.
+
+// ============================================================================
 // OUTPUTS — SHARED PLATFORM
 // ============================================================================
 

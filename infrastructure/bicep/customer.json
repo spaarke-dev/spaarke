@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "17329517737637201381"
+      "templateHash": "4283978128937208579"
     }
   },
   "parameters": {
@@ -106,6 +106,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually."
+      }
+    },
+    "controlPlaneUamiPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId."
       }
     },
     "signalrEnabled": {
@@ -1685,7 +1692,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "17774924923741831122"
+              "templateHash": "11129456632631642405"
             }
           },
           "parameters": {
@@ -1812,7 +1819,7 @@
               "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('openAiName'), parameters('deployments')[copyIndex()].name)]",
               "sku": {
-                "name": "Standard",
+                "name": "[coalesce(tryGet(parameters('deployments')[copyIndex()], 'sku'), 'Standard')]",
                 "capacity": "[parameters('deployments')[copyIndex()].capacity]"
               },
               "properties": {
@@ -3392,6 +3399,219 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "[format('l2-bff-rbac-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "controlPlaneUamiPrincipalId": {
+            "value": "[parameters('controlPlaneUamiPrincipalId')]"
+          },
+          "bffAppServiceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceName.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "5945159200447773141"
+            }
+          },
+          "parameters": {
+            "controlPlaneUamiPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Empty skips the grant (what-if isolation only -- a real per-customer deploy always needs it for H4b + H9 to function)."
+              }
+            },
+            "bffAppServiceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the per-customer BFF App Service (Microsoft.Web/sites) provisioned by the parent customer.bicep."
+              }
+            }
+          },
+          "variables": {
+            "websiteContributorRoleId": "de139f84-1756-47ae-9be6-808fbbe84772"
+          },
+          "resources": [
+            {
+              "condition": "[not(empty(parameters('controlPlaneUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Web/sites', parameters('bffAppServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Web/sites', parameters('bffAppServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('websiteContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('websiteContributorRoleId'))]",
+                "principalId": "[parameters('controlPlaneUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 UAMI -- H4b Kudu docker-log fetch + H9 BFF zip-deploy on per-customer BFF App Service (task 203b, punch list A21 / task 201 Deferred #1)"
+              }
+            }
+          ],
+          "outputs": {
+            "websiteContributorRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('controlPlaneUamiPrincipalId'))), guid(resourceId('Microsoft.Web/sites', parameters('bffAppServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('websiteContributorRoleId')), '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName')))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('bff-runtime-rbac-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "bffUamiPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
+          "serviceBusNamespaceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusName.value]"
+          },
+          "searchServiceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceName.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "7944878029499895893"
+            }
+          },
+          "parameters": {
+            "bffUamiPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the BFF RUNTIME UAMI (Model 1: sharedBffUami.outputs.principalId; Model 2: uami.outputs.principalId). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function)."
+              }
+            },
+            "serviceBusNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from. Model 1: sharedServiceBusName; Model 2: per-customer serviceBusName."
+              }
+            },
+            "searchServiceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to. Model 1: sharedAiSearchName; Model 2: per-customer searchServiceName."
+              }
+            }
+          },
+          "variables": {
+            "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
+            "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0",
+            "searchIndexDataContributorRoleId": "8ebe5a00-799e-43f5-93ac-243d3dce84a7",
+            "searchServiceContributorRoleId": "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
+          },
+          "resources": [
+            {
+              "condition": "[not(empty(parameters('bffUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('bffUamiPrincipalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('bffUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF runtime UAMI -- Service Bus Data Sender for MI-only enqueue (auth-v4 §10.1 Δ1 + §10.3; punch row A36)"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('bffUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('bffUamiPrincipalId'), variables('serviceBusDataReceiverRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataReceiverRoleId'))]",
+                "principalId": "[parameters('bffUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF runtime UAMI -- Service Bus Data Receiver for MI-only dequeue (auth-v4 §10.1 Δ1 + §10.3; punch row A36)"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('bffUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('bffUamiPrincipalId'), variables('searchIndexDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchIndexDataContributorRoleId'))]",
+                "principalId": "[parameters('bffUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF runtime UAMI -- Search Index Data Contributor for MI-only index doc CRUD (auth-v4 §10.1 Δ2 + §10.3; punch row A37)"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('bffUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('bffUamiPrincipalId'), variables('searchServiceContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchServiceContributorRoleId'))]",
+                "principalId": "[parameters('bffUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF runtime UAMI -- Search Service Contributor for MI-only index/indexer definitions + schema evolution (auth-v4 §10.1 Δ2 + §10.3; punch row A37). Different principal from A20 (L2 provisioning UAMI same role, different SP)."
+              }
+            }
+          ],
+          "outputs": {
+            "bffSbDataSenderRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('bffUamiPrincipalId'))), guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('bffUamiPrincipalId'), variables('serviceBusDataSenderRoleId')), '')]"
+            },
+            "bffSbDataReceiverRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('bffUamiPrincipalId'))), guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('bffUamiPrincipalId'), variables('serviceBusDataReceiverRoleId')), '')]"
+            },
+            "bffSearchIndexDataContributorRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('bffUamiPrincipalId'))), guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('bffUamiPrincipalId'), variables('searchIndexDataContributorRoleId')), '')]"
+            },
+            "bffSearchServiceContributorRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('bffUamiPrincipalId'))), guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('bffUamiPrincipalId'), variables('searchServiceContributorRoleId')), '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName')))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "[format('kvSecrets-{0}', variables('baseName'))]",
       "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
@@ -3425,7 +3645,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14320282680820496780"
+              "templateHash": "8185643840258927724"
             }
           },
           "parameters": {
@@ -3454,7 +3674,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "AiSearch--AdminKey",
@@ -3514,7 +3734,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "AzureOpenAI-ApiKey",
@@ -3774,7 +3994,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "DocumentIntelligence-ApiKey",
@@ -3914,7 +4134,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "Redis-ConnectionString",
@@ -3934,7 +4154,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "ServiceBus-ConnectionString",
@@ -4014,7 +4234,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-shared-service"
               },
               "tags": {
                 "canonicalName": "Storage-ConnectionString",
