@@ -239,6 +239,34 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
 
         // ---------------------------------------------------------------
+        // Task 204a (Wave G-8 Class-B follow-on to task 142): SolutionImport
+        // -- H6's Dataverse Web API solution importer (task 141,
+        // DataverseWebApiSolutionImporter.cs:93) authenticates via
+        // confidential-client credentials against the SAME shared multitenant
+        // BFF app-reg H7 uses for EnvVarValues writes (per SolutionImportOptions
+        // docstring and H6SolutionImportHandler.cs:278-291 which emits
+        // MissingClientSecret at runtime today when the option-bound value is
+        // unset). Sourced from the SAME canonical never-delete
+        // BFF-API-ClientSecret secret. Adds runtime-required wiring the
+        // original wave-C5 comment (SolutionImportOptions.cs:82-95) always
+        // called for -- H7 landed via task 142, H6 was deferred until this
+        // task 204a Class-B verify-first sweep found the gap.
+        //
+        // NOTE: unlike EnvVarValuesOptions.Validate() (which fails fast at
+        // boot on missing ClientSecret via ValidateOnStart), SolutionImportOptions
+        // .Validate() only asserts ProvisioningArtifactsContainerUri +
+        // SolutionArtifactManifestBlobName -- H6's ClientSecret is a runtime
+        // Resumable failure per §4C rollback classification (H6SolutionImportHandler
+        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret). We
+        // still wire it here so H6 succeeds on the happy path without
+        // per-customer operator intervention (parity with H7 lifecycle).
+        // ---------------------------------------------------------------
+        {
+          name: 'SolutionImportOptions__ClientSecret'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+        }
+
+        // ---------------------------------------------------------------
         // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
         // Azure OpenAI endpoint for Model1Shared customers. Sourced from the
         // SAME canonical "AzureOpenAI-Endpoint" KV secret the .Api site
