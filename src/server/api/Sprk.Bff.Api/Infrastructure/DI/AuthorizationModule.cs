@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.Routing;
@@ -9,7 +13,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
 /// DI registration module for authentication and authorization services (ADR-008, ADR-010).
-/// Registers Azure AD JWT bearer authentication, authorization handler, and all authorization policies.
+///
+/// <para><b>Inbound</b> — validating tokens presented TO the BFF: Azure AD JWT bearer (workforce),
+/// the CIAM scheme for external users, named API-key schemes, the authorization handler, and all
+/// authorization policies.</para>
+///
+/// <para><b>Outbound</b> — the credential the BFF presents when authenticating AS ITSELF to Entra:
+/// <c>IClientAssertionProvider</c> (ADR-028 Amendment A4, added by auth-v4 task 020). Kept in this
+/// module because it answers the same question as everything else here — how the BFF authenticates —
+/// and because it serves Graph, Dataverse and the Copilot agent alike rather than belonging to any one
+/// of them.</para>
 /// </summary>
 public static class AuthorizationModule
 {
@@ -156,6 +169,45 @@ public static class AuthorizationModule
         // Register authorization handler (Scoped to match AuthorizationService dependency)
         services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
 
+        // ─────────────────────────────────────────────────────────────────────────────────────
+        // OUTBOUND credential (auth-v4 task 020 · FR-B1 · ADR-028 A4)
+        //
+        // Everything above this line is INBOUND — validating tokens presented TO the BFF. This is
+        // the first outbound registration in this module: the credential the BFF presents when it
+        // authenticates as ITSELF to Entra (OBO exchanges and app-only confidential clients).
+        //
+        // Placed here rather than in SpaarkeCore because the provider is not a Dataverse concern —
+        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource, DataverseUserClient
+        // and AgentTokenService alike. This module is where a reader looks for "how does the BFF
+        // authenticate", and that question now has both an inbound and an outbound answer.
+        //
+        // NOT registered inline in Program.cs: ADR-010 forbids inline registrations, and the
+        // TokenCredential precedent at Program.cs:46 is itself the anti-pattern, not the model.
+        //
+        // SINGLETON per ADR-028 A4's "reuse the instance" rule. It avoids rebuilding the underlying
+        // managed-identity application and re-entering MSAL's cache per resolution.
+        // NOT because a per-request instance would cost an IMDS round trip — that claim was measured
+        // FALSE at this task's code-review gate (MSAL's managed-identity token cache is process-static
+        // and keyed by identity, so fresh assertion objects issue no extra IMDS traffic). The
+        // registration is right; the reason had to be corrected.
+        //
+        // Registered against the INTERFACE despite one implementation. ADR-010 prefers concrete
+        // registration, but the seam is genuine and structural: Spaarke.Dataverse is the base layer
+        // and cannot reference this assembly (LayerDependencyTests FR-14), so shared-library types
+        // can only receive this by dependency inversion. A4 also names a second implementation —
+        // a Key Vault certificate — as the sanctioned alternative where MI-FIC's same-tenant rule
+        // cannot hold.
+        //
+        // NOTE: ADR010_DITests does NOT see this pair, and its ceiling was NOT raised. That test
+        // scans typeof(Program).Assembly — the BFF only — and the interface is declared in
+        // Spaarke.Dataverse, so a cross-assembly 1:1 seam is invisible to it. Real count is 151
+        // against a ceiling of 153; raising it would have granted headroom for a future IN-assembly
+        // interface to land unreviewed. The blind spot is booked onto task 061.
+        // See ADR010_DITests.cs:164-173 for the verified numbers.
+        services.AddSingleton<IClientAssertionProvider, ManagedIdentityAssertionProvider>();
+
+        services.AddCredentialSelection(configuration);
+
         // BFF `tid`→environment routing (teams-app-r1 task 060 · ADR-028 A2 · spec FR-09).
         // Config-driven map (TenantRouting section; Key Vault refs in prod, mirroring AzureAd/Ciam)
         // routing an authenticated workforce `tid` to exactly ONE environment for the three
@@ -243,8 +295,12 @@ public static class AuthorizationModule
                 p.Requirements.Add(new ResourceAccessRequirement("preview_file")));
             options.AddPolicy("canwritefiles", p =>
                 p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
-            options.AddPolicy("canmanagecontainers", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("create_container")));
+            // "canmanagecontainers" REMOVED 2026-08-25 (spaarke-auth-v4-dataverse-MI task 090,
+            // obligation 031-A) together with its only six consumers in DocumentsEndpoints.
+            // It bound ResourceAccessRequirement("create_container") — a PER-RESOURCE requirement —
+            // onto COLLECTION endpoints that carry no resource, so it could never be satisfied and
+            // returned 403 to every caller. Leaving an unsatisfiable policy registered after its
+            // consumers are gone is a trap: the next endpoint to reference it inherits a permanent 403.
 
             // Named API key policies (task AUTHV2-045).
             // Each policy is bound to a single auth scheme so the matching ApiKey handler runs
@@ -305,6 +361,123 @@ public static class AuthorizationModule
             });
         });
 
+        return services;
+    }
+
+    /// <summary>
+    /// Ordered credential selection (auth-v4 task 021, FR-B2) — <b>the rollback mechanism</b>.
+    ///
+    /// <para>Called by <see cref="AddAuthorizationModule"/>, and kept in this file because it answers the
+    /// same question as everything else here: how the BFF authenticates. It is a separate public method
+    /// rather than an inline block for one reason — "an empty or invalid credential order fails fast
+    /// <i>at startup</i>" is an acceptance criterion, and proving it requires booting a host against
+    /// this exact registration. Asserting it against a re-declaration in a test would prove only that
+    /// the test can configure options.</para>
+    /// </summary>
+    public static IServiceCollection AddCredentialSelection(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        // Design §6 claims rollback at every phase is "a credential reorder or a slot swap back".
+        // That is true only because the order below is read from configuration at runtime. Without
+        // it, backing out of MI-FIC means a code change and a redeploy — during an incident, on the
+        // OBO path, which fails closed for every user simultaneously (NFR-03/NFR-06).
+        //
+        // The canonical default is applied HERE rather than as a property initializer on the options
+        // class, and only when the section is absent. Two reasons, both load-bearing:
+        //   1. The configuration binder MERGES into an existing collection. With a pre-populated
+        //      default, an operator narrowing the order to [ManagedIdentityFederated] — precisely the
+        //      edit that proves the secret is unused — would silently get the trailing ClientSecret
+        //      default back, and the secret they were eliminating would still be live.
+        //   2. An EXPLICITLY empty list must fail fast (FR-B2 acceptance criterion). Defaulting inside
+        //      the options class would make "empty" unreachable and quietly choose a credential for an
+        //      operator who deliberately blanked the list to force the decision.
+        // An ABSENT section still boots on the canonical order, so this is behavior-neutral for every
+        // existing environment and test fixture (FAILURE-MODES AP-7: converting a silent fallback into
+        // fail-fast has unbounded blast radius; the default is what bounds it).
+        var credentialOrderConfigured = configuration
+            .GetSection($"{CredentialSelectionOptions.SectionName}:Order").Exists();
+
+        services.AddOptions<CredentialSelectionOptions>()
+            .Bind(configuration.GetSection(CredentialSelectionOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (!credentialOrderConfigured)
+                {
+                    // ⚠️ ClientSecret STAYS IN THIS DEFAULT even though ADR-028 E-3 is CLOSED (task 033,
+                    // 2026-08-24). This looks like an oversight. It is not — it was tried and reverted,
+                    // and the reason is recorded here so it is not "fixed" again.
+                    //
+                    // Task 033 carried an obligation reading "also delete ClientSecret from the default
+                    // order in AddCredentialSelection". Executing it literally BREAKS EVERY UNCONFIGURED
+                    // ENVIRONMENT. CredentialSelectionOptionsValidator fails fast when
+                    // ManagedIdentityFederated is the ONLY credential and no UAMI clientId is set —
+                    // correctly, since there would be nothing to fall through to. But every test fixture
+                    // in this repo and every local `dotnet run` has NO Graph:Credentials section AND no
+                    // UAMI (a workstation has no route to IMDS), so a MI-FIC-only default makes all of
+                    // them refuse to start. Caught by CredentialOrderingSeamTests; task 010 shipped this
+                    // exact regression once already (FAILURE-MODES AP-7 — converting a silent fallback
+                    // into fail-fast has unbounded blast radius; the default is what bounds it).
+                    //
+                    // The secret-free guarantee is delivered where it actually matters, by CONFIGURATION
+                    // on the deployed environments: Graph:Credentials:Order = [ManagedIdentityFederated]
+                    // plus RequireSecretFreeIdentity = true. That is strictly better than a narrower
+                    // default, because it is explicit, auditable, per-environment, and it cannot silently
+                    // disable local development. And it is not weaker: the secret is deleted from app
+                    // settings AND Key Vault, so on a deployed environment this default has nothing left
+                    // to resolve even if it is reached.
+                    options.Order = new List<string>
+                    {
+                        nameof(CredentialKind.ManagedIdentityFederated),
+                        nameof(CredentialKind.ClientSecret),   // see the note above before removing
+                    };
+                }
+            })
+            .ValidateOnStart();
+
+        // Relational rules (unknown kind, duplicate, cert-without-name, single-failure suppression)
+        // cannot be expressed as data annotations — see the validator.
+        services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, CredentialSelectionOptionsValidator>();
+
+        // FR-B4 (task 023) — the UAMI / app-registration conflation guard. Registered against the same
+        // options type so it runs under the SAME ValidateOnStart above: the two identities are only
+        // meaningful together with the credential order (rule 3 fires only when MI-FIC has no fallback),
+        // so validating them separately would need the order duplicated in two places.
+        services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, IdentityConfigurationValidator>();
+
+        // SINGLETON, and it owns the ONE confidential-client cache. Task 022 collapses the three
+        // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient, AgentTokenService) onto
+        // it — which is what CLOSES task 011's time-boxed A4 exception. If this cache is not authored
+        // here, that exception becomes permanent.
+        //
+        // Constructed by factory rather than by convention so the two OPTIONAL dependencies stay
+        // optional: SecretClient is registered by SpeAdminModule (only when a Key Vault URI is
+        // configured) and TimeProvider is not registered at all in this app. GetService returns null
+        // for both, which the provider handles; constructor injection would instead fail to resolve.
+        services.AddSingleton(sp => new OrderedCredentialClientProvider(
+            sp.GetRequiredService<IOptions<CredentialSelectionOptions>>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<OrderedCredentialClientProvider>>(),
+            sp.GetService<IClientAssertionProvider>(),
+            sp.GetService<Azure.Security.KeyVault.Secrets.SecretClient>(),
+            sp.GetService<TimeProvider>()));
+
+        // Registered against the interface AND concretely, resolving to the SAME singleton.
+        // Only ONE consumer needs the interface: DataverseAccessDataSource lives in Spaarke.Dataverse,
+        // the base layer, which cannot reference this assembly (LayerDependencyTests, FR-14) and can
+        // therefore only receive the provider by dependency inversion. The three BFF-side consumers
+        // inject the concrete type, which ADR-010 prefers — do not add the interface to call sites that
+        // do not need it.
+        //
+        // ADR010_DITests is NOT affected and its ceiling is NOT raised, for the same verified reason as
+        // IClientAssertionProvider above: that test scans typeof(Program).Assembly, and
+        // IConfidentialClientProvider is declared in Spaarke.Dataverse, so a cross-assembly 1:1 seam is
+        // invisible to it. See ADR010_DITests.cs:164-173.
+        services.AddSingleton<IConfidentialClientProvider>(
+            sp => sp.GetRequiredService<OrderedCredentialClientProvider>());
         return services;
     }
 }

@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -67,7 +68,7 @@ public static class BusinessUnitEndpoints
             logger.LogError(ex, "Failed to query Dataverse business units");
             return Results.Problem(
                 title: "Failed to retrieve business units",
-                detail: "An error occurred querying Dataverse. See server logs for details.",
+                detail: ProblemDetailsHelper.Explain("An error occurred querying Dataverse. See server logs for details.", ex),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

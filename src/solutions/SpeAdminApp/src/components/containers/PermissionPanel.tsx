@@ -60,7 +60,7 @@ import {
   Delete20Regular,
   Person20Regular,
 } from "@fluentui/react-icons";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { ContainerPermission, ContainerRole } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -532,9 +532,7 @@ export const PermissionPanel: React.FC<PermissionPanelProps> = ({
       );
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load permissions.";
+        describeApiError(err, "Failed to load permissions.");
       setLoadError(message);
     } finally {
       setLoading(false);
@@ -562,9 +560,7 @@ export const PermissionPanel: React.FC<PermissionPanelProps> = ({
         setAddOpen(false);
       } catch (err) {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to add permission.";
+          describeApiError(err, "Failed to add permission.");
         setAddError(message);
       } finally {
         setAddSaving(false);
@@ -592,9 +588,7 @@ export const PermissionPanel: React.FC<PermissionPanelProps> = ({
         setEditOpen(false);
       } catch (err) {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to update permission.";
+          describeApiError(err, "Failed to update permission.");
         setEditError(message);
       } finally {
         setEditSaving(false);
@@ -616,9 +610,7 @@ export const PermissionPanel: React.FC<PermissionPanelProps> = ({
         setRemoveOpen(false);
       } catch (err) {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to remove permission.";
+          describeApiError(err, "Failed to remove permission.");
         setRemoveError(message);
       } finally {
         setRemoveSaving(false);

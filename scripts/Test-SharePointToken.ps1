@@ -2,7 +2,15 @@
 
 param(
     [string]$ClientId = $env:API_APP_ID,
-    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+    # NOTE (2026-08-24, spaarke-auth-v4 task 033): this is the SPE OWNING-APP credential, which is
+    # explicitly OUT OF SCOPE of the secret-free migration -- ADR-028 exception E-1 (per-customer
+    # owning apps). SharePoint Embedded container-type registration is a client-credentials call that
+    # a managed identity cannot make, so a secret remains correct here.
+    # BUT the old instruction 'retrieve it from Key Vault' NO LONGER WORKS for the shared dev estate:
+    # `BFF-API-ClientSecret` / `bff-api-client-secret` were deleted from `spaarke-spekvcert` on
+    # 2026-08-24 (soft-deleted, recoverable until 2026-11-22). In dev the owning app IS the BFF app
+    # registration, so its secret went with the migration. Pass -OwningAppSecret explicitly, or use a
+    # per-customer owning-app secret (`spe-owning-app-secret` is the E-1 entry and is untouched).
     [string]$ClientSecret = $env:API_CLIENT_SECRET,
     [string]$TenantId = $env:TENANT_ID,
     [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,

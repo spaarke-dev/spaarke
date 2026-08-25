@@ -41,9 +41,9 @@ public class UpdateContainerTypeSettingsTests
         var request = new UpdateContainerTypeSettingsRequest();
 
         request.SharingCapability.Should().BeNull("SharingCapability is optional");
-        request.IsVersioningEnabled.Should().BeNull("IsVersioningEnabled is optional");
-        request.MajorVersionLimit.Should().BeNull("MajorVersionLimit is optional");
-        request.StorageUsedInBytes.Should().BeNull("StorageUsedInBytes is optional");
+        request.IsItemVersioningEnabled.Should().BeNull("IsItemVersioningEnabled is optional");
+        request.ItemMajorVersionLimit.Should().BeNull("ItemMajorVersionLimit is optional");
+        request.MaxStoragePerContainerInBytes.Should().BeNull("StorageUsedInBytes is optional");
     }
 
     [Fact]
@@ -51,16 +51,16 @@ public class UpdateContainerTypeSettingsTests
     {
         var request = new UpdateContainerTypeSettingsRequest
         {
-            SharingCapability = "edit",
-            IsVersioningEnabled = true,
-            MajorVersionLimit = 50,
-            StorageUsedInBytes = 1_073_741_824L // 1 GB
+            SharingCapability = "externalUserSharingOnly",
+            IsItemVersioningEnabled = true,
+            ItemMajorVersionLimit = 50,
+            MaxStoragePerContainerInBytes = 1_073_741_824L // 1 GB
         };
 
-        request.SharingCapability.Should().Be("edit");
-        request.IsVersioningEnabled.Should().BeTrue();
-        request.MajorVersionLimit.Should().Be(50);
-        request.StorageUsedInBytes.Should().Be(1_073_741_824L);
+        request.SharingCapability.Should().Be("externalUserSharingOnly");
+        request.IsItemVersioningEnabled.Should().BeTrue();
+        request.ItemMajorVersionLimit.Should().Be(50);
+        request.MaxStoragePerContainerInBytes.Should().Be(1_073_741_824L);
     }
 
     [Fact]
@@ -73,9 +73,9 @@ public class UpdateContainerTypeSettingsTests
         };
 
         request.SharingCapability.Should().Be("disabled");
-        request.IsVersioningEnabled.Should().BeNull("not set");
-        request.MajorVersionLimit.Should().BeNull("not set");
-        request.StorageUsedInBytes.Should().BeNull("not set");
+        request.IsItemVersioningEnabled.Should().BeNull("not set");
+        request.ItemMajorVersionLimit.Should().BeNull("not set");
+        request.MaxStoragePerContainerInBytes.Should().BeNull("not set");
     }
 
     [Fact]
@@ -84,14 +84,14 @@ public class UpdateContainerTypeSettingsTests
         // Partial request — only versioning settings
         var request = new UpdateContainerTypeSettingsRequest
         {
-            IsVersioningEnabled = false,
-            MajorVersionLimit = 10
+            IsItemVersioningEnabled = false,
+            ItemMajorVersionLimit = 10
         };
 
         request.SharingCapability.Should().BeNull("not set");
-        request.IsVersioningEnabled.Should().BeFalse();
-        request.MajorVersionLimit.Should().Be(10);
-        request.StorageUsedInBytes.Should().BeNull("not set");
+        request.IsItemVersioningEnabled.Should().BeFalse();
+        request.ItemMajorVersionLimit.Should().Be(10);
+        request.MaxStoragePerContainerInBytes.Should().BeNull("not set");
     }
 
     #endregion
@@ -199,10 +199,17 @@ public class UpdateContainerTypeSettingsTests
     #region ValidSharingCapabilities Tests
 
     [Theory]
+    // 🔴 CORRECTED 2026-08-24 (task 023). This theory previously asserted that "view", "edit", and
+    // "full" were valid. None of them is a Graph value — the real set is the members of
+    // Microsoft.Graph.Models.SharingCapabilities, which is what the SPE Admin client has always sent.
+    // Because ValidSharingCapabilities IS the endpoint's validation allow-list, the effect was that
+    // every value the client could send except "disabled" was rejected with a 400 by our own
+    // validator. These tests are why it survived: correcting the list would have "broken tests", so
+    // the wrong values looked load-bearing.
     [InlineData("disabled")]
-    [InlineData("view")]
-    [InlineData("edit")]
-    [InlineData("full")]
+    [InlineData("externalUserSharingOnly")]
+    [InlineData("existingExternalUserSharingOnly")]
+    [InlineData("externalUserAndGuestSharing")]
     public void ValidSharingCapabilities_ContainsAllAllowedValues(string capability)
     {
         SpeAdminGraphService.ValidSharingCapabilities
@@ -211,9 +218,9 @@ public class UpdateContainerTypeSettingsTests
 
     [Theory]
     [InlineData("DISABLED")]
-    [InlineData("VIEW")]
-    [InlineData("EDIT")]
-    [InlineData("FULL")]
+    [InlineData("EXTERNALUSERSHARINGONLY")]
+    [InlineData("ExistingExternalUserSharingOnly")]
+    [InlineData("externalUserAndGuestSharing")]
     public void ValidSharingCapabilities_IsCaseInsensitive(string capability)
     {
         // HashSet uses OrdinalIgnoreCase comparer
@@ -268,11 +275,11 @@ public class UpdateContainerTypeSettingsTests
 
     [Theory]
     [InlineData("disabled")]
-    [InlineData("view")]
-    [InlineData("edit")]
-    [InlineData("full")]
-    [InlineData("Disabled")] // case-insensitive
-    [InlineData("VIEW")]     // uppercase
+    [InlineData("externalUserSharingOnly")]
+    [InlineData("existingExternalUserSharingOnly")]
+    [InlineData("externalUserAndGuestSharing")]
+    [InlineData("Disabled")]                   // case-insensitive
+    [InlineData("EXTERNALUSERSHARINGONLY")]    // uppercase
     public void SharingCapability_ValidValues_PassValidation(string capability)
     {
         var isValid = SpeAdminGraphService.ValidSharingCapabilities.Contains(capability);
@@ -286,6 +293,11 @@ public class UpdateContainerTypeSettingsTests
     [InlineData("admin")]
     [InlineData("restricted")]
     [InlineData("unknown")]
+    // The three names this allow-list wrongly accepted until 2026-08-24. Kept as explicit negatives
+    // so re-adding any of them fails here.
+    [InlineData("view")]
+    [InlineData("edit")]
+    [InlineData("full")]
     public void SharingCapability_InvalidValues_FailValidation(string capability)
     {
         var isValid = SpeAdminGraphService.ValidSharingCapabilities.Contains(capability);
@@ -299,7 +311,7 @@ public class UpdateContainerTypeSettingsTests
     [InlineData(-100)]
     public void MajorVersionLimit_ZeroOrNegative_IsInvalid(int limit)
     {
-        // Endpoint checks: if (request.MajorVersionLimit.HasValue && request.MajorVersionLimit.Value <= 0) → 400
+        // Endpoint checks: if (request.ItemMajorVersionLimit.HasValue && request.ItemMajorVersionLimit.Value <= 0) → 400
         var isInvalid = limit <= 0;
 
         isInvalid.Should().BeTrue($"majorVersionLimit '{limit}' must be rejected (not positive)");

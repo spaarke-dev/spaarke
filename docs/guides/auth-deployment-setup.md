@@ -29,6 +29,7 @@ Spaarke is deployed **per-customer-tenant**. Each customer has their own App Ser
 3. [App Service configuration (server side — 8 settings)](#3-app-service-configuration-server-side--8-settings)
 4. [Key Vault secrets](#4-key-vault-secrets)
 5. [Azure AD permissions for BFF managed identity (replicate from app reg)](#5-azure-ad-permissions-for-bff-managed-identity-replicate-from-app-reg)
+   - [5.1 Azure data-plane RBAC for the UAMI (non-Graph)](#51-azure-data-plane-rbac-for-the-uami-non-graph)
 6. [Dataverse Application User for BFF managed identity](#6-dataverse-application-user-for-bff-managed-identity)
 7. [Exchange Online — ApplicationAccessPolicy for mailbox access](#7-exchange-online--applicationaccesspolicy-for-mailbox-access)
 8. [Deploy + restart](#8-deploy--restart)
@@ -46,7 +47,7 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 |---|---|---|
 | Azure subscription with Contributor access | — | For App Service + Key Vault management |
 | Azure AD tenant GUID | `{tenant-guid}` | The customer's home tenant |
-| BFF Azure AD app registration | App ID `{bff-app-id}` | One client secret in Key Vault (still required for OBO; MI replaces the rest) |
+| BFF Azure AD app registration | App ID `{bff-app-id}` | **No client secret.** A *federated identity credential* whose subject is the UAMI's **principalId** (see the UAMI row) — created by `scripts/Register-EntraAppRegistrations.ps1 -CreateFederatedCredential`. ADR-028 A4 |
 | App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 10) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
 | App Service managed identity (UAMI) | `clientId: {uami-client-id}`, `principalId: {uami-principal-id}` | Set `Graph__ManagedIdentity__ClientId` AND `ManagedIdentity__ClientId` App Settings to the UAMI's clientId; `DefaultAzureCredential` uses these to target the UAMI. The UAMI's principalId is what gets registered in Dataverse Application User (§6) and granted Graph app roles (§5) and Exchange ApplicationAccessPolicy (§7). |
 | Key Vault | `{kv-name}.vault.azure.net` | UAMI principal must have **Key Vault Secrets User** role at the vault scope (RBAC mode) |
@@ -136,7 +137,9 @@ Set on the BFF App Service via *Configuration → Application settings* in the p
 | `Communication__WebhookSigningKey` | Key Vault reference (preferred) or 48-byte base64 secret | HMAC-SHA256 key for `/api/communications/incoming-webhook`. Generate: `openssl rand -base64 48`. **Generate per env; never commit.** |
 | `EmailProcessing__WebhookSigningKey` | Key Vault reference (preferred) or 48-byte base64 secret | HMAC-SHA256 key for `/api/v1/emails/webhook-trigger`. Generate: `openssl rand -base64 48`. **Generate per env; never commit.** |
 | `AgentToken__CopilotAudience` | `api://{copilot-sso-provider-app-id}/{bff-app-id}` | Token audience for Copilot Studio SSO. The `{copilot-sso-provider-app-id}` comes from the Copilot Studio agent registration. |
-| `AzureAd__ClientSecret` | Key Vault reference: `@Microsoft.KeyVault(SecretUri=https://{kv-name}.vault.azure.net/secrets/BFF-API-ClientSecret/)` | Still required for OBO (OAuth spec mandates middle-tier confidential credential). Other server flows (Graph app-only, Dataverse, Cosmos, AI) now use MI and don't read this. |
+| `Graph__Credentials__Order__0` | `ManagedIdentityFederated` | The credential the BFF identity uses, **including on OBO**. Single entry: with nothing beneath it to fall through to, a broken MI-FIC fails loudly instead of silently reverting to a secret while every health signal stays green. |
+| `Graph__Credentials__RequireSecretFreeIdentity` | `true` | Refuses startup outside Development if `ClientSecret` returns to the order. Development is exempt — a workstation has no route to IMDS. |
+| ~~`AzureAd__ClientSecret`~~ | **DO NOT SET** | 🔴 **Removed 2026-08-24 (task 033).** This row previously read *"Still required for OBO (OAuth spec mandates middle-tier confidential credential)"* — **false**. OAuth requires a confidential *credential*; a secret is one of three ways to satisfy it. Setting this re-introduces exactly the fall-through hazard the migration removed. `API_CLIENT_SECRET`, `Dataverse__ClientSecret` and `AgentToken__ClientSecret` are likewise gone. |
 
 **Plus the standard template tokens** (substituted by the deployment script from `appsettings.template.json`): `Dataverse__ServiceUrl`, `ConnectionStrings__ServiceBus`, `ConnectionStrings__Redis`, `ApplicationInsights__ConnectionString`, `AzureOpenAI__Endpoint`, and other infrastructure connection settings. See [`appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) — every `#{TOKEN}#` placeholder must be substituted at deploy time.
 
@@ -387,9 +390,10 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 
 | Secret name | Purpose | Rotation |
 |---|---|---|
-| `BFF-API-ClientSecret` | BFF app registration client secret. Still required for OBO. | Per [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md) |
+| ~~`BFF-API-ClientSecret`~~ | **DELETED 2026-08-24** (task 033, ADR-028 A4) along with its lowercase duplicate `bff-api-client-secret`. The BFF identity is secret-free — it authenticates with a managed-identity federated credential. **Do not re-create it.** | **n/a — nothing to rotate.** A federated assertion is minted per exchange and has no expiry to roll |
 | `Dataverse-ServiceUrl` | Dataverse env URL (`https://{org}.crm.dynamics.com`). | Static per env (immutable) |
-| `ServiceBus-ConnectionString` | Service Bus namespace connection string. | Rotated with namespace key rotation |
+| ~~`ServiceBus-ConnectionString`~~ | **RETIRED 2026-08-24** (task 051). The BFF authenticates to Service Bus with the **UAMI**, not a SAS. Set the `ServiceBus__FullyQualifiedNamespace` App Setting and grant the data-plane roles in **§5.1** instead. Deleted from `spaarke-spekvcert` 2026-08-25. **Do not re-create it** — `Configure-ProductionAppSettings.ps1` and `Provision-Customer.ps1` still write it and are pending update. | **n/a — nothing to rotate.** |
+| ~~`AiSearch--AdminKey`~~ | **RETIRED 2026-08-24** (task 053) for the **BFF runtime** — it authenticates to AI Search with the UAMI. Set `AiSearch__ManagedIdentity__Enabled=true` and grant the roles in **§5.1**. Secret deleted 2026-08-25. ⚠️ **Do NOT run `scripts/ai-search/Deploy-AllIndexes.ps1 -CutoverBffSettings`** against a migrated environment: it writes `AzureAISearchApiKey` and `AiSearch__AdminKey` onto the BFF as Key Vault references to this now-deleted secret, re-introducing the key-based config task 053 removed. The script's *other* paths are fine — index management legitimately uses an admin key, which it reads (not regenerates) from the search service. | **n/a — nothing to rotate.** |
 | `Redis-ConnectionString` | Azure Cache for Redis primary access key. | Rotated with Redis key rotation |
 | `communication-webhook-signing-key` | HMAC key for Microsoft Graph subscription webhooks (Communication module). | Every 90 days or on incident |
 | `Email-WebhookSigningKey` | HMAC key for Dataverse Service Endpoint webhooks (Email module). | Every 90 days or on incident |
@@ -398,7 +402,7 @@ The BFF reads the following secrets from Key Vault at startup or on first use. P
 
 **All values are generated per environment. Never commit. Use Key Vault as the single source of truth.**
 
-> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: as of Phase C, server-side Dataverse access uses the App Service MI via `DefaultAzureCredential` (see §6). The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths. `Dataverse-ClientSecret` can be removed from Key Vault after the deploy is verified.
+> **Note on `Dataverse-ClientSecret` and `AzureAd__ClientSecret`**: server-side Dataverse app-only access uses the App Service MI via `DefaultAzureCredential` (see §6). 🔴 **Corrected 2026-08-24 (task 033):** this note used to end *"The `BFF-API-ClientSecret` is still read by OBO and a handful of other code paths."* **That is no longer true** — OBO runs on the managed-identity federated credential and `BFF-API-ClientSecret` was deleted from Key Vault. Neither key should be set.
 
 ---
 
@@ -479,6 +483,122 @@ az rest --method GET \
 ```
 
 Output should match Step 5a one-for-one. If counts differ, the MI will fail at Graph with `403 Insufficient Privileges` on first call.
+
+### Step 5e — SPE **owning app** Graph permissions (a DIFFERENT identity — per customer tenant)
+
+> Added 2026-08-23 by `sdap-SPE-admin-app-r2` task 013 (spec FR-B04).
+
+Steps 5a–5d cover the **BFF managed identity**. The SPE Admin application also calls Graph as a second,
+unrelated identity: the **container-type owning app** named by
+`sprk_specontainertypeconfig.sprk_owningappid`. `SpeAdminGraphService.GetClientForConfigAsync` resolves
+the config → reads its Key Vault secret → authenticates app-only **in the tenant named by that config's
+`sprk_speenvironment.sprk_tenantid`**.
+
+**Because a Spaarke environment can manage container types living in customers' own Entra tenants, these
+grants are per customer tenant and are part of customer onboarding — not a one-time platform setup.**
+Missing them does not break SPE file operations; it breaks the SPE Admin screens that depend on them.
+
+| Graph application permission | App role id | Needed for | Consequence if absent |
+|---|---|---|---|
+| `FileStorageContainer.Selected` | `40dc41bc-0f7e-42ff-89bd-d9516947e474` | container CRUD | Containers screen fails |
+| `FileStorageContainerTypeReg.Selected` | `2dcc6599-bd30-442b-8f11-90f88ad441dc` | container-type registration | Register wizard fails |
+| `Files.ReadWrite.All` | `75359482-378d-4052-8f01-80520e7db3cd` | item operations | Files screen fails |
+| `Files.SelectedOperations.Selected` | `bd61925e-3bf4-4d62-bc0b-06b06c96d95c` | scoped item operations | item-level ops fail |
+| `Files.ReadWrite.AppFolder` | `b47b160b-1054-4efd-9ca0-e2f614696086` | app-folder access | app-folder ops fail |
+| **`SecurityEvents.Read.All`** | `bf394140-e372-4bf9-a898-299cfc7564e5` | **Security screen** — Secure Score + alerts | **Security screen returns 403** |
+
+Grant **`SecurityEvents.Read.All` only** — the screen is read-only. Do **not** grant
+`SecurityEvents.ReadWrite.All` (`d903a879-88e0-4c09-b0c9-82f6a1333f84`).
+
+```bash
+# Run against the CUSTOMER tenant. Requires tenant admin consent in that tenant.
+OWNING_APP={sprk_owningappid from the customer's sprk_specontainertypeconfig}
+
+OWNING_SP=$(az ad sp show --id $OWNING_APP --query id -o tsv)
+GRAPH_SP=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+
+# Declare in the manifest (documentation; grants nothing on its own)
+az ad app permission add --id $OWNING_APP \
+  --api 00000003-0000-0000-c000-000000000000 \
+  --api-permissions bf394140-e372-4bf9-a898-299cfc7564e5=Role
+
+# Grant admin consent for EXACTLY this one permission.
+# Prefer this over `az ad app permission admin-consent`, which consents everything
+# declared in the manifest — including anything requested but deliberately unconsented.
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/$OWNING_SP/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body "{\"principalId\":\"$OWNING_SP\",\"resourceId\":\"$GRAPH_SP\",\"appRoleId\":\"bf394140-e372-4bf9-a898-299cfc7564e5\"}"
+```
+
+**Verify** — a fresh app-only token must carry the role, and Secure Score must return 200:
+
+```bash
+# The token is issued for the CUSTOMER tenant id (sprk_speenvironment.sprk_tenantid)
+# Decode the token's `roles` claim and confirm SecurityEvents.Read.All is present, then:
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/security/secureScores?\$top=1"     # expect 200
+```
+
+> ⚠️ **`alerts_v2` needs more than this permission.** `GET /security/alerts_v2` also requires a
+> **Microsoft 365 Defender workload provisioned in the tenant**. Without it, Graph returns
+> `403 "Unauthorized request - Account is not provisioned."` — which is *not* a permissions failure and
+> **cannot be fixed by granting broader Graph permissions.** The legacy `GET /security/alerts` returns
+> `200` with an empty array in the same tenant, which is how to tell the two apart. Verified in Spaarke
+> Dev 2026-08-23; see `projects/sdap-SPE-admin-app-r2/notes/security-grant-record.md`.
+
+---
+
+### 5.1 Azure data-plane RBAC for the UAMI (non-Graph)
+
+> **Added 2026-08-25** by `spaarke-auth-v4-dataverse-MI` task 090, promoting the standing contract out of
+> that project's `notes/PROVISIONING-CHANGE-REQUEST.md` §10 — a change request is a point-in-time record,
+> but this is needed **every time an environment is stood up**.
+
+§5 grants the UAMI its **Graph** app roles. These are the **Azure data-plane** roles that used to be carried
+by a SAS token or an API key, and are now the UAMI's job. Miss one and the symptom is a runtime 401/403 from
+that service only — the BFF still boots and `/healthz` still returns 200.
+
+| Resource | Role | Replaces |
+|---|---|---|
+| Service Bus namespace | `Azure Service Bus Data Sender` **+** `Azure Service Bus Data Receiver` | the SAS connection string (task 051) |
+| Azure AI Search | `Search Index Data Contributor` **+** `Search Service Contributor` | `AiSearch--AdminKey` (task 053) |
+| Key Vault | `Key Vault Secrets User` | — required for `keyVaultReferenceIdentity` (§1) to resolve at all |
+| Azure OpenAI / Content Safety | `Cognitive Services User` | the API key (ADR-028 E-2) |
+| Cosmos DB | `Cosmos DB Built-in Data Contributor` (data-plane, see §3) | — |
+
+```bash
+UAMI_PRINCIPAL_ID=<uami principalId>   # principalId, NOT clientId — the commonest silent error
+SUB=<subscription-id>; RG=<resource-group>
+
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Azure Service Bus Data Sender" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.ServiceBus/namespaces/<ns>"
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Azure Service Bus Data Receiver" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.ServiceBus/namespaces/<ns>"
+az role assignment create --assignee-object-id "$UAMI_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+  --role "Search Index Data Contributor" \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Search/searchServices/<svc>"
+```
+
+And the matching App Settings — **namespace, not connection string**:
+
+```bash
+ServiceBus__FullyQualifiedNamespace               = <ns>.servicebus.windows.net
+Membership__EventPublisher__ServiceBusNamespace   = <ns>.servicebus.windows.net
+Membership__JunctionUpdater__ServiceBusNamespace  = <ns>.servicebus.windows.net
+AiSearch__ManagedIdentity__Enabled                = true
+AiSafety__ContentSafety__ManagedIdentity__Enabled = true
+```
+
+⚠️ **Order matters.** `Graph__Credentials__RequireSecretFreeIdentity=true` (§3) is **fail-fast by design** —
+an environment that sets it before the UAMI and its federated credential exist **will not start**. Provision
+the identity first, then the setting. Never the reverse.
+
+> **Why these are easy to miss**: the SAS and the admin key were *secrets*, so they appeared in the Key Vault
+> checklist (§4) where an operator would look. Their replacements are **role assignments on other resources**,
+> which appear nowhere unless written down. That asymmetry is the whole reason this section exists.
 
 ---
 
@@ -712,7 +832,7 @@ curl -i -H "Authorization: Bearer $USER_TOKEN" \
 # Expect: HTTP/1.1 200 OK + JSON body
 ```
 
-A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) OBO token exchange to Graph works (`BFF-API-ClientSecret` valid).
+A 200 confirms: (a) JWT validation works (`AzureAd__*` settings correct), (b) the OBO token exchange to Graph works. ⚠️ It does **not** tell you *which credential* performed the exchange — while anything sits beneath `ManagedIdentityFederated` in `Graph:Credentials:Order`, a broken federated credential still returns 200 off the fallback. For that, read the startup line `Ordered credential selection active: ...` (emitted on cache miss).
 
 ### 9c. MI → Dataverse — managed identity path exercised
 
@@ -767,7 +887,7 @@ Spaarke's per-tenant deployment model puts certain controls firmly in the custom
 |---|---|---|
 | **Conditional Access policies** | Customer | Apply CA policies to the BFF app registration and any user-facing apps per the customer's security baseline. Spaarke is CAE-aware (Phase D) and will honor revocation events. |
 | **Multi-factor authentication (MFA)** | Customer | Enforce via CA. Spaarke does not impose its own MFA layer. |
-| **Secret rotation cadence** | Customer | `BFF-API-ClientSecret`: 90 days or per customer policy. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
+| **Secret rotation cadence** | Customer | ~~`BFF-API-ClientSecret`: 90 days~~ — **n/a since 2026-08-24**: the BFF identity is secret-free and a federated assertion has no expiry to roll. Webhook signing keys: 90 days or on incident. See [`SECRET-ROTATION-PROCEDURES.md`](SECRET-ROTATION-PROCEDURES.md). |
 | **Identity governance / lifecycle** | Customer | User provisioning, access reviews, and offboarding flow through the customer's existing IGA. |
 | **Audit log retention + SIEM integration** | Customer | Spaarke emits structured audit logs (Phase C task 048). Pipe to the customer's Sentinel / Monitor workspace via App Service *Diagnostic Settings* — no code change per customer. |
 | **Network egress / private endpoints** | Customer | If the customer requires private network paths to Dataverse, Graph, or Key Vault, configure via VNet integration / Private Endpoints on the App Service. |
@@ -809,7 +929,8 @@ Graph__ManagedIdentity__Enabled      = true
 Communication__WebhookSigningKey     = @Microsoft.KeyVault(...)   # generated per env
 EmailProcessing__WebhookSigningKey   = @Microsoft.KeyVault(...)   # generated per env
 AgentToken__CopilotAudience          = api://{copilot-sso-provider-app-id}/{bff-app-id}
-AzureAd__ClientSecret                = @Microsoft.KeyVault(SecretUri=.../BFF-API-ClientSecret/)
+Graph__Credentials__Order__0                  = ManagedIdentityFederated   # replaces AzureAd__ClientSecret (2026-08-24)
+Graph__Credentials__RequireSecretFreeIdentity = true
 
 # Graph permissions granted to MI (§5) — record the count + the list
 Permissions granted (count): __________

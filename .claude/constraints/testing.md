@@ -24,9 +24,9 @@ Load when:
 
 ## MUST Rules
 
-### 1. Seven KEEP path categories (deletion-protected)
+### 1. Eight KEEP path categories (deletion-protected)
 
-Tests under these seven paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
+Tests under these eight paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
 
 | Path | Category | What lives here |
 |---|---|---|
@@ -37,6 +37,7 @@ Tests under these seven paths are **KEEP-protected**. Deleting a file under any 
 | `tests/integration/contract/**` | endpoint-contract | Route + status + ProblemDetails + payload shape. "Every new endpoint = ≥1 integration test." |
 | `tests/integration/seam/**` | vertical-slice-seam | **(Added 2026-07-09, E-40.)** End-to-end vertical slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render) using PRODUCTION types, only the LLM/catalog/transport boundaries doubled. A green router-unit / contract-shape test is NOT a substitute (that is how the compose 422 shipped "done"). Definition-of-done for any dispatch-spine change. |
 | `tests/unit/domain/**` | domain-logic | Pure domain logic: calculations, mappings, parsing, serialization, handler-internal orchestration |
+| `tests/Spaarke.ArchTests/**` | **structural-fitness-function** | **(Added 2026-08-24, ADR-038 Amendment A1.)** Invariants over source/assemblies, not runtime behavior — `LayerDependencyTests`, `ADR010_DITests`, `CredentialGuardTests`, `CredentialCensusTests`, `ServiceBusClientGuardTests`, `FabricatedResultGuardTests`. **This is what bans B1–B5 delegate to**, so it must be protected on the same footing. Do **not** apply the behavioral heuristics (naming B13, mock-shape, setup-ratio B15) to this category — a fitness function's name states the *invariant*, and its arrange section is a source scan. |
 
 ### 2. Authoring rules
 

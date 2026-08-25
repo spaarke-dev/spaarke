@@ -1,8 +1,52 @@
 # Local Development Secrets Setup
 
+> **🔴 REWRITTEN 2026-08-24 — `spaarke-auth-v4-dataverse-MI` task 033.**
+>
+> The previous version of this page was wrong in two independent ways, and following it produced a local
+> environment that **silently could not authenticate**:
+>
+> 1. It told you to set **`Graph:ClientSecret`** and **`Dataverse:ClientSecret`**. Since task 022 **neither
+>    key has any consumer in `src/`** — the credential provider resolves `AzureAd:ClientSecret` →
+>    `API_CLIENT_SECRET` → `AZURE_CLIENT_SECRET`. Setting them did nothing at all, and did it quietly.
+> 2. It assumed a BFF client secret exists. **It does not.** Per ADR-028 **A4** the BFF identity is
+>    secret-free in every deployed environment; `BFF-API-ClientSecret` and its lowercase duplicate were
+>    deleted from Key Vault on 2026-08-24.
+
+## How the BFF authenticates (read this before setting anything)
+
+| Environment | Credential |
+|---|---|
+| **Deployed** (dev / demo / prod) | A **federated credential** issued to the App Service's user-assigned managed identity. `Graph:Credentials:Order = [ManagedIdentityFederated]`, with `RequireSecretFreeIdentity=true` so the app refuses to start if a secret returns to the order. Nothing to configure locally, and nothing to rotate |
+| **Local workstation** | A workstation has **no route to IMDS**, so a managed-identity federated credential cannot be minted there. `Graph:Credentials:RequireSecretFreeIdentity` is **exempt in Development** for exactly this reason (`IdentityConfigurationValidator.IsDevelopment()`) |
+
+### ⚠️ Local OBO needs a client secret, and you can no longer fetch one from Key Vault
+
+If you need the **OBO** (delegated / act-as-the-user) paths locally — SPE file operations, `dataverse.*`
+chat tool calls, send-as-user email — you need a client secret, and the shared copy is gone.
+
+`az keyvault secret show --vault-name spaarke-spekvcert --name bff-api-client-secret` **no longer works.**
+Entra will not disclose a secret value after creation, so there is no other read path. Options:
+
+1. **You already have it in user-secrets** → nothing to do. The app-registration secret itself remains
+   valid until **2027-12-19**; only the Key Vault *copies* were removed.
+2. **Recover the Key Vault copy** — it was soft-deleted, not purged, and is recoverable until
+   **2026-11-22**:
+   `az keyvault secret recover --vault-name spaarke-spekvcert --name bff-api-client-secret`
+3. **Use the deployed dev BFF** (`https://spaarke-bff-dev.azurewebsites.net`) instead of running OBO
+   locally. This is the recommended default — it exercises the real credential path.
+4. **Mint a dev-only secret** on a **separate** app registration. Do **not** add one to
+   `SDAP-BFF-SPE-API`: ADR-028 E-3 is transitional and *does not license expansion*.
+
+> A **long-term replacement for the local-dev inner loop is an open owner decision** (booked to task 090).
+> Do not solve it ad hoc by re-creating the shared secret.
+
+**Everything that is not OBO works locally with no secret at all** — app-only Dataverse and Graph go
+through `DefaultAzureCredential`, which chains to your `az login` session. For most local work, `az login`
+is the whole setup.
+
 ## Initialize User Secrets
 
-Run from the `src/api/Spe.Bff.Api` directory:
+Run from the BFF project directory (`src/server/api/Sprk.Bff.Api`):
 
 ```bash
 dotnet user-secrets init
@@ -10,14 +54,13 @@ dotnet user-secrets init
 
 ## Set Required Secrets
 
-### Graph API
-```bash
-dotnet user-secrets set "Graph:ClientSecret" "your-app-client-secret"
-```
+### Client secret — ONLY if you need local OBO (see above)
 
-### Dataverse
+Use the key the credential provider actually reads. `Graph:ClientSecret` and `Dataverse:ClientSecret`
+are **dead keys** — setting them has no effect.
+
 ```bash
-dotnet user-secrets set "Dataverse:ClientSecret" "your-dataverse-client-secret"
+dotnet user-secrets set "AzureAd:ClientSecret" "your-app-client-secret"
 ```
 
 ### Service Bus
@@ -41,12 +84,19 @@ dotnet user-secrets list
 You can also set these via environment variables (useful for Docker):
 
 ```bash
-export Graph__ClientSecret="your-secret"
-export Dataverse__ClientSecret="your-secret"
+export AzureAd__ClientSecret="your-secret"          # only if you need local OBO — see the top of this page
 export ServiceBus__ConnectionString="your-connection-string"
 ```
 
 **Note**: Use double underscores `__` for nested configuration in env vars.
+
+> `Graph__ClientSecret` and `Dataverse__ClientSecret` were listed here until 2026-08-24 and are **dead keys** —
+> nothing in `src/` reads either one. Exporting them has no effect.
+
+> ⚠️ Do **not** set `AZURE_CLIENT_ID` on a workstation to "help" managed identity. It is read by the Azure
+> Identity SDK itself (`EnvironmentCredential` / `ManagedIdentityCredential`), and pointing it at an app
+> registration id while a managed identity is expected is the FR-B4 identity-conflation failure — it produces
+> an opaque `AADSTS` error rather than a clear one.
 
 ## Required Secrets for Spaarke Development
 

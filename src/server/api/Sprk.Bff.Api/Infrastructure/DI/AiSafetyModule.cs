@@ -63,12 +63,23 @@ public static class AiSafetyModule
         // Applies to BOTH consumers of this named client (PromptShieldService + GroundednessCheckService).
         services.AddTransient<ContentSafetyAuthHandler>();
 
+        // auth-v4 task 050 (FR-E1): the outer HttpClient timeout must stay ABOVE the PromptShieldService
+        // deadline, or it — not the service — becomes the effective limit and the service's fail-open
+        // classification (timeout vs error) is decided by the wrong layer. Both were previously pinned
+        // at 100/120ms, a budget the Content Safety API cannot meet (measured 2026-08-23: p50 ~272ms,
+        // 122 of 122 scans failed open over 90 days). Tracks the configured deadline + 50ms headroom.
+        var shieldTimeoutMs = configuration.GetValue<int?>(PromptShieldService.TimeoutMsConfigKey)
+            ?? PromptShieldService.DefaultTimeoutMs;
+        if (shieldTimeoutMs <= 0)
+        {
+            shieldTimeoutMs = PromptShieldService.DefaultTimeoutMs;
+        }
+
         services.AddHttpClient(PromptShieldService.HttpClientName, client =>
         {
             client.BaseAddress = new Uri(endpoint.TrimEnd('/') + "/");
             client.DefaultRequestHeaders.Add("Accept", "application/json");
-            // Outer timeout is generous; PromptShieldService applies its own 100ms CancellationToken.
-            client.Timeout = TimeSpan.FromMilliseconds(120);
+            client.Timeout = TimeSpan.FromMilliseconds(shieldTimeoutMs + 50);
         })
         .AddHttpMessageHandler<ContentSafetyAuthHandler>();
 
@@ -111,6 +122,7 @@ public static class AiSafetyModule
         services.AddSingleton<IVerificationProvider>(sp =>
             new InternalIndexProvider(
                 sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Azure.Core.TokenCredential>(),
                 sp.GetRequiredService<ILogger<InternalIndexProvider>>()));
 
 

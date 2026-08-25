@@ -248,19 +248,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # ----------------------------------------------------------------------
+      # tier2 is ADVISORY per FR-A03 — it must never be able to fail this gate.
+      # It is therefore excluded from adjudication BY CONSTRUCTION rather than
+      # by allow-list, because the allow-list did not hold:
+      #
+      #   `allowed-failures: tier2` covers conclusion=FAILURE only. A tier2 job
+      #   killed by `timeout-minutes` reports conclusion=CANCELLED, which
+      #   neither allowed-failures nor allowed-skips covers. alls-green then
+      #   counted it against the gate:
+      #       tier2 → ⬜ cancelled [allowed to fail]
+      #       ❌ Some of the required to succeed jobs failed
+      #       Process completed with exit code 1
+      #   → `CI / Router` = failure while tier1 = success.
+      #
+      # Observed 2026-08-24: 17/17 runs red on work/unified-access-control-r2
+      # (never once green), and work/spaarkeai-compose-r8 failing identically —
+      # i.e. repo-wide. Root cause was tier2's 6-minute unit-test budget (raised
+      # to 30 in ci-tier2-advisory.yml in the same change), but the gate must
+      # survive ANY future tier2 cancellation source, not just that one.
+      #
+      # tier2 stays in `needs:` so the Router still sequences after it and the
+      # decision summary below still reports its real result.
+      # ----------------------------------------------------------------------
+      - name: Build adjudication set (tier2 excluded — advisory per FR-A03)
+        id: adjudicate
+        shell: bash
+        run: |
+          # Shape mirrors `toJSON(needs)` exactly — including the empty `outputs`
+          # object — so alls-green sees the structure it would normally receive.
+          # Only `result` participates in adjudication.
+          printf 'json={"classify":{"result":"%s","outputs":{}},"tier1":{"result":"%s","outputs":{}}}\n' \
+            '${{ needs.classify.result }}' '${{ needs.tier1.result }}' >> "$GITHUB_OUTPUT"
+          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }} tier2=${{ needs.tier2.result }} (tier2 not adjudicated)"
+
       - name: Aggregate tier results
         # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
         # If this action is ever deprecated, fallback is inline bash gate
         # documented in notes/router-signal-model-decision.md §5.
         uses: re-actors/alls-green@v1.2.2
         with:
-          jobs: ${{ toJSON(needs) }}
-          # tier2 is advisory per FR-A03 — its failure must not block merge.
-          # NOTE: allowed-failures would allow tier2 to fail; allowed-skips
-          # treats a skipped result as success. We use allowed-failures here
-          # so tier2 failures also don't block (advisory semantics).
-          allowed-failures: tier2
-          allowed-skips: tier1,tier2
+          jobs: ${{ steps.adjudicate.outputs.json }}
+          # tier1 may legitimately be skipped when classify finds no Tier-1
+          # surface in the diff; a skipped job counts as success.
+          allowed-skips: tier1
 
       - name: Router decision summary
         if: always()

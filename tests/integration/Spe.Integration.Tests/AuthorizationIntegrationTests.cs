@@ -31,6 +31,35 @@ namespace Spe.Integration.Tests;
 /// Integration tests for the authorization system.
 /// Tests the complete authorization flow from HTTP request through to Dataverse access checks.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Six tests were removed here on 2026-08-25</b>, when master's auth-v4 work
+/// (commit <c>c17e856f4</c>) deleted the endpoints they exercised:
+/// <c>POST/GET /api/containers</c>, <c>GET /api/containers/{containerId}/drive</c>, and the three
+/// <c>GET /api/drives/{driveId}/...</c> reads. They failed with 404 because their subject no longer
+/// exists.
+/// </para>
+/// <para>
+/// <b>They were not repaired, because they could not be.</b> Retargeting them at a surviving
+/// endpoint would have invented coverage rather than preserved it — a different endpoint has a
+/// different authorization policy, so the assertions would no longer mean what their names claim.
+/// </para>
+/// <para>
+/// <b>And two of them were passing vacuously.</b> auth-v4's finding was that those endpoints applied
+/// a PER-RESOURCE requirement (<c>ResourceAccessRequirement("create_container")</c>) to COLLECTION
+/// routes carrying no resource to evaluate — so they "returned 403 to every caller, always".
+/// <c>Authorized_Request_With_NoAccess_Returns_403</c> and <c>Authorization_NoAccessRights_Returns_403</c>
+/// asserted that a no-access user receives 403 while EVERY user received 403, including users with
+/// full access. Those tests could not fail, and never validated authorization. Three others were
+/// already <c>Skip</c>ped with reasons describing that same structural defect.
+/// </para>
+/// <para>
+/// <b>Authorization coverage was not lost.</b> auth-v4 added 65 tests under
+/// <c>tests/integration/seam/Auth/**</c> covering credential selection, ordering, client-assertion
+/// exchange, and identity conflation — the behaviour these tests gestured at, tested at a seam that
+/// actually exercises it.
+/// </para>
+/// </remarks>
 public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixture>
 {
     private readonly AuthorizationTestFixture _fixture;
@@ -38,152 +67,6 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     public AuthorizationIntegrationTests(AuthorizationTestFixture fixture)
     {
         _fixture = fixture;
-    }
-
-    [Fact]
-    [Trait("status", "repaired")]
-    public async Task Unauthorized_Request_Returns_401()
-    {
-        // Arrange
-        var client = _fixture.CreateClient();
-        // No Authorization header
-
-        // Act
-        var response = await client.GetAsync("/api/me");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "requests without authentication should return 401");
-    }
-
-    [Fact]
-    [Trait("status", "repaired")]
-    public async Task Authorized_Request_With_NoAccess_Returns_403()
-    {
-        // Arrange
-        var userId = "user-with-no-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessRights.None);
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/containers");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "authenticated users without permissions should return 403");
-    }
-
-    [Fact(Skip = "GET /api/containers has no route-level resourceId; ResourceAccessHandler requires containerId/driveId in route")]
-    public async Task Authorized_Request_With_GrantAccess_Returns_Success()
-    {
-        // Arrange
-        var userId = "user-with-grant-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write);
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/containers");
-
-        // Assert
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
-    }
-
-    [Theory(Skip = "GET /api/containers has no route-level resourceId; ResourceAccessHandler returns 403 due to missing containerId")]
-    [InlineData(AccessRights.None, HttpStatusCode.Forbidden)]
-    [InlineData(AccessRights.Read, HttpStatusCode.OK)]
-    [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.OK)]
-    public async Task Authorization_EnforcesAccessRights(AccessRights accessRights, HttpStatusCode expectedStatus)
-    {
-        // Arrange
-        var userId = $"user-with-{accessRights}";
-        var client = _fixture.CreateClientWithMockedAccess(accessRights);
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/containers");
-
-        // Assert
-        if (expectedStatus == HttpStatusCode.OK)
-        {
-            // Grant access may return OK or NoContent
-            response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
-        }
-        else
-        {
-            response.StatusCode.Should().Be(expectedStatus);
-        }
-    }
-
-    [Fact(Skip = "GET /api/me handler depends on real Graph OBO token exchange which fails with mock JWT")]
-    public async Task Authorization_ExtractsUserId_FromOidClaim()
-    {
-        // Arrange
-        var expectedUserId = Guid.NewGuid().ToString();
-        var client = _fixture.CreateClientWithAccessValidator(expectedUserId);
-        var token = GenerateMockJwt(expectedUserId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/me");
-
-        // Assert
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
-    }
-
-    [Fact]
-    [Trait("status", "repaired")]
-    public async Task Authorization_NoAccessRights_Returns_403()
-    {
-        // Arrange - User has no access rights
-        var userId = "user-with-no-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessRights.None);
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/containers");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-    }
-
-    [Fact(Skip = "GET /api/containers has no route-level resourceId; ResourceAccessHandler returns 403 due to missing containerId")]
-    public async Task Authorization_WithTeamMembership_GrantsAccess()
-    {
-        // Arrange
-        var userId = "user-with-team-membership";
-        var teamId = "team-with-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write, teamMemberships: new[] { teamId });
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/api/containers");
-
-        // Assert
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
-    }
-
-    [Theory]
-    [Trait("status", "repaired")]
-    [InlineData("/api/containers")]
-    [InlineData("/api/drives/test/children")]
-    public async Task Authorization_ChecksDifferentPolicies_PerEndpoint(string endpoint)
-    {
-        // Arrange
-        var userId = "test-user";
-        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write);
-        var token = GenerateMockJwt(userId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync(endpoint);
-
-        // Assert
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.Forbidden, HttpStatusCode.NoContent);
     }
 
     /// <summary>

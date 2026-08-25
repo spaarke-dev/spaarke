@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-02: Make AuthorizationService evaluate access as the caller, not the application</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001,003,014</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on THE authorization spine (Spaarke.Core/Auth) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Making AuthorizationService caller-scoped touches the whole auth spine: token plumbing from HttpContext through IAccessDataSource, app-only vs OBO path separation, and every consumer of AuthorizeAsync. High blast radius, genuine architectural judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches src/server/shared/Spaarke.Core/Auth/** — known contended path (task 003 modifies OperationAccessPolicy.cs in the same directory); highest-blast-radius task in Phase 0.</parallel-reason>
+    <deps>001, 003, 014</deps>
+    <tags>bff-api, auth, security, refactoring</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close finding A-2 (spec FR-02, High): AuthorizationService must evaluate access AS THE CALLER, not as the application. Today AuthorizationService.cs:48-52 always passes userAccessToken: null to IAccessDataSource, so every "user permission check" actually answers "can the app see it" — which is always yes. Plumb the caller's bearer token to the data source on every caller-scoped path, and make a caller-scoped path with no token available DENY, not silently degrade to app-only.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke authorization architecture (ADR-003 seams, ADR-028 OBO), ASP.NET Core auth pipelines, and the IAccessDataSource decorator chain. Follow ADRs strictly.</role>
+  <goal>No caller-scoped path reaches IAccessDataSource with userAccessToken: null. A user without Dataverse access to a record is denied by AuthorizationService. Any path that legitimately needs app-only evaluation (background jobs) declares it explicitly via a distinct, reviewable entry point — never by passing null on a caller path.</goal>
+
+  <context>
+    <background>Finding A-2 (design-register §A.1): AuthorizationService.cs:48-52 always passes userAccessToken: null; RetrievePrincipalAccess is never called; "the user permission check answers can-the-app-see-it". Contrast: AiAuthorizationService.cs:176-180 already passes the caller bearer (the only truly caller-scoped path today — A-19 evidence). DataverseAccessDataSource.GetUserAccessAsync:159-227 already implements both modes: SP mode queries app-only, OBO mode queries as the user — the OBO plumbing EXISTS; AuthorizationService just never uses it. Task 014 (cache key includes auth mode) MUST be merged first, or flipping this switch serves stale SP-mode snapshots to the new OBO calls. Spec success criterion 2: "no caller-scoped path passes userAccessToken: null". ADR Tensions note: ADR-003's rules are under path-B amendment in this project (spec §ADR Tensions); the amendment work itself is out of Phase 0 scope — do not rewrite ADR-003 here, but document any new tension you surface.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/AiAuthorizationService.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/CachedAccessDataSource.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="modify">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning app-scoped evaluation, flipped here.</dependency>
+      <dependency task="003" status="pending">Policy keys resolve — caller-scoped denials must be attributable to access, not unknown_operation.</dependency>
+      <dependency task="014" status="pending">Cache key carries auth mode — prevents SP-mode snapshots being served to the new OBO calls.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed: a caller-scoped evaluation with no obtainable user token DENIES; it must never fall back to app-only evaluation. Scope: every AuthorizeAsync path changed by this task.</constraint>
+    <constraint source="ADR-028">Caller identity flows via the OBO bearer from the authenticated HttpContext — do not mint app-only tokens on caller paths and do not cache tokens outside the existing MSAL/token-cache seams. Scope: token plumbing added by this task.</constraint>
+    <constraint source="ADR-010">Extend the existing AuthorizationService/IAccessDataSource seam — MUST NOT introduce a new authorization service layer. If the seam cannot express the split, invoke CLAUDE.md §6.5 (ADR-003 is already a path-B amendment candidate) instead of silently adding a layer. Scope: all new types/registrations.</constraint>
+    <constraint source="project">Spaarke.Core is consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). State the placement decision for any new surface citing .claude/constraints/bff-extensions.md. Scope: this task's PR.</constraint>
+    <constraint source="project">Do not change WHAT rights the data source returns (that is task 005/FR-04); this task changes WHOSE access is evaluated. Scope boundary between tasks 004 and 005.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>caller-scoped authorization / OBO</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Existing UAC pointer — WARNING: carries known drift (design-register §G); trust code over this doc</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor. Confirm tasks 003 and 014 are merged.</step>
+    <step order="1">Map every consumer of AuthorizationService.AuthorizeAsync (grep the solution). Classify each call-site: caller-scoped (HTTP request context exists) vs app-only (background/job). Record the classification in notes BEFORE changing code.</step>
+    <step order="2">Change AuthorizationService so caller-scoped evaluation requires and forwards the caller's bearer token to IAccessDataSource (mirror AiAuthorizationService.cs:176-180). Missing/unresolvable token on a caller-scoped path → Deny with a distinct reason tag.</step>
+    <step order="3">For call-sites classified app-only, route them through an explicitly-named app-only entry point (or requirement flag) so the null-token case is a declared decision, not a default.</step>
+    <step order="4">Add a guard test asserting no caller-scoped path can reach IAccessDataSource with a null token (e.g. a seam test that fails if AuthorizeAsync forwards null when a token is present, and denies when absent).</step>
+    <step order="5">Flip the task-001 characterization tests: a user without Dataverse access to a record is now denied; a user with access passes.</step>
+    <step order="6">Run the FULL test suite including tests/integration where runnable; build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document the call-site classification table and any surfaced ADR-003 tension in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any AuthorizeAsync consumer cannot supply a caller token AND is not clearly a background path (ambiguous classification), STOP and escalate per CLAUDE.md §6 — misclassifying it as app-only recreates A-2 for that route.</trigger>
+    <trigger>If the fix requires changing the IAccessDataSource interface signature in a way that breaks AiAuthorizationService or the cached decorator, STOP and present the options (§6.5 path A/B/C for ADR-003) before implementing.</trigger>
+    <trigger>If caller-scoped evaluation materially regresses request latency beyond the NFR-02 round-trip budget, STOP and escalate with measurements.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build + full test suite</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</output>
+    <output type="test">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">userAccessToken: null no longer reaches IAccessDataSource on any caller-scoped path (FR-02 acceptance; guard test enforces).</criterion>
+    <criterion testable="true">A user WITHOUT Dataverse access to a record is denied by AuthorizationService (asserted at the service seam).</criterion>
+    <criterion testable="true">A user WITH Dataverse access to the record is granted (no over-denial regression).</criterion>
+    <criterion testable="true">Negative: a caller-scoped evaluation where the token cannot be resolved DENIES with a distinct reason — it does not fall back to app-only.</criterion>
+    <criterion testable="true">App-only call-sites (if any) are routed through an explicitly-named app-only entry point, listed in the PR description.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>**COMPLETED 2026-08-21.** Token now rides on `AuthorizationContext.UserAccessToken` (`required string?`);
+  AuthorizationService forwards it and DENIES with `sdap.access.deny.no_caller_token` when absent, never
+  consulting the data source. Suite: BFF 10,625 / ArchTests 36 / Core 45, all green. Publish 43.65 MB
+  compressed (baseline 44.96; no package changes). Lint clean with TreatWarningsAsErrors.
+
+  DESIGN (full rationale: notes/task-004-caller-scoped-design.md): Spaarke.Core has NO ASP.NET Core
+  dependency, so IHttpContextAccessor was rejected (would add a web dep to a non-web shared lib, guarded by
+  LayerDependencyTests) and a second auth service was rejected (ADR-010). Carrying the token on the existing
+  context extends the existing seam. `required` on a NULLABLE is deliberate: it forces every construction
+  site to STATE its intent, so app-only becomes a visible `UserAccessToken = null` rather than the default
+  you get by not thinking — which is how A-2 survived. Produced 7 compile errors across 11 sites.
+
+  STEP 3 WAS VACUOUS, not skipped: the Step-1 classification found ZERO app-only consumers (all six
+  call-sites are caller-scoped), so there was nothing to route to an app-only entry point. `required`
+  delivers the guarantee Step 3 was reaching for. Noted because step mode is prescriptive.
+
+  ⚠️ FR-02's acceptance criterion is NOT fully closed by this task. PermissionsEndpoints.cs:76 and :159
+  still pass `userAccessToken: null` -- they call IAccessDataSource DIRECTLY, bypassing AuthorizationService,
+  so no change here can reach them. That is A-4, owned by **task 006**, which should route those calls
+  THROUGH AuthorizationService rather than re-plumbing the token at the endpoint. Do not credit the
+  criterion to 004.
+
+  Also added TokenHelper.ExtractBearerTokenOrNull -- the existing extractor throws, which would turn a
+  missing credential into a 500 instead of a fail-closed deny. OfficeDocumentAccessFilter was updated only
+  so the solution compiles; it is orphaned (A-23) and task 018 deletes it.
+
+  Spec FR-02 + success criterion 2; finding A-2. Design §1/§8 Phase 1 will decide repair-vs-retire for this path — Phase 0 repairs enforcement only; do not consolidate evaluators here. RetrievePrincipalAccess adoption (if chosen as the mechanism) belongs to task 005's rights mapping — coordinate, don't duplicate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

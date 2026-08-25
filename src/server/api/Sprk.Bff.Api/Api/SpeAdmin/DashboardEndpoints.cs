@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -94,7 +95,7 @@ public static class DashboardEndpoints
             logger.LogError(ex, "Failed to read dashboard metrics from cache.");
 
             return Results.Problem(
-                detail: "Failed to retrieve dashboard metrics. Please try again.",
+                detail: ProblemDetailsHelper.Explain("Failed to retrieve dashboard metrics. Please try again.", ex),
                 statusCode: 503,
                 title: "Service Unavailable",
                 extensions: new Dictionary<string, object?>
@@ -151,7 +152,7 @@ public static class DashboardEndpoints
             logger.LogError(ex, "Dashboard refresh failed.");
 
             return Results.Problem(
-                detail: "Failed to refresh dashboard metrics. Check service logs for details.",
+                detail: ProblemDetailsHelper.Explain("Failed to refresh dashboard metrics. Check service logs for details.", ex),
                 statusCode: 503,
                 title: "Service Unavailable",
                 extensions: new Dictionary<string, object?>

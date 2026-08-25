@@ -157,6 +157,10 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        // Finding H2 (task 022) — this route returns GraphDriveId and GraphItemId, the exact SPE
+        // pointers the destroy and bulk-download paths consume. Ungated, it was the discovery step
+        // for the rest of the surface: read the row by GUID, get the pointers, act on them elsewhere.
+        .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();
 
         // PUT /api/v1/documents/{id} - Update document
@@ -224,6 +228,9 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        // Finding H2 (task 022) — app-only tamper by GUID: any authenticated caller could rewrite any
+        // document row's fields.
+        .AddDocumentAuthorizationFilter("write")
         .RequireAuthorization();
 
         // DELETE /api/v1/documents/{id} - Delete document
@@ -290,6 +297,11 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        // Finding C3 (unified-access-control-r2 task 022) — a second app-only destroy path with no
+        // per-document authorization, while its /download sibling below WAS gated by task 002. The
+        // asymmetry is the finding: one route on this group checked the caller and the neighbouring
+        // destroy route did not.
+        .AddDocumentAuthorizationFilter("delete")
         .RequireAuthorization();
 
         // GET /api/v1/documents/{id}/download - Download document file (app-only auth)

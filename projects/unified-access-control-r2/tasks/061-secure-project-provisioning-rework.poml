@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="unified-access-control-r2">
+  <metadata>
+    <title>Secure Project provisioning rework: service-account owner + share-only, no per-project BU (FR-28)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 060 (POA seam) + 008 (FR-07 delegation rule) merged. Live-dev ACCEPTANCE gated on UAT env setup (BU restructure) — code + tests ship independently.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs: provisioning decides who owns and who can see secure records.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanism fully specified by design §5.1 (owner, BU, share set); the judgment calls are encoded as escalation triggers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/ProvisionProjectEndpoint.cs and related ExternalAccess files — exclusive zone.</parallel-reason>
+    <deps>060, 008</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rework secure-project provisioning to the design §5.1 mechanism: secure records are owned by a configured service account homed in the single `Secure Projects` BU; ALL human access (including the creating attorney's) is an explicit Dataverse share via the consolidated POA seam; per-project secure-BU creation is REMOVED; the designation is reversible. Do NOT create BUs, migrate users, or re-home records — that environment work is UAT scope (spec § UAT and Environment Setup), and this code must fail closed when the environment is not yet configured.</prompt>
+  <role>SPAARKE platform developer. Dataverse ownership/BU semantics, POA sharing, Minimal API endpoints. Follow ADRs strictly.</role>
+  <goal>ProvisionProjectEndpoint (and any secure-designation path) assigns ownership to the configured service account, issues explicit shares (creator + named principals) through the 060 seam, no longer creates business units; an unsecure/reverse path reassigns ownership per config; configuration keys (service-account id, Secure Projects BU id) are validated at startup/first-use and missing config DENIES secure designation with a clear error.</goal>
+
+  <context>
+    <background>spec.md FR-28; design.md §5.1/§5.2. Investigation: ProvisionProjectEndpoint today creates each secure BU as a child of root — the exact anti-pattern §5.2 kills (Deep-from-root reaches it). The BU restructure itself is RECLASSIFIED OUT OF SCOPE (owner decision 2026-08-21): environment configuration happens at UAT. The code must therefore be config-driven and fail-closed: if the `Secure Projects` BU / service account are not configured, secure designation refuses rather than silently provisioning insecurely. The Phase-1 FR-22 veto covers the grant-plane half; this task covers the Dataverse half.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs (closure must not re-home or orphan secure records — verify + pin)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json (config template keys only — no secrets)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/ (060 consolidated POA seam)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (provisioning tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="pending">Consolidated POA seam (grant + revoke, systemuser principal).</dependency>
+      <dependency task="008" status="pending">FR-07 delegation rule on provision-project (Write-on-record OBO check) — this endpoint must already be delegation-gated.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Missing/invalid secure-config (service account, BU id) DENIES secure designation with an explicit ProblemDetails — never falls back to creator-ownership or root-BU provisioning. Scope: every secure-designation code path.</constraint>
+    <constraint source="project">No BU creation anywhere in provisioning after this task (delete the create-BU code, do not gate it); scope: ProvisionProjectEndpoint + helpers.</constraint>
+    <constraint source="project">Reversibility: the unsecure path is part of FR-28's mechanism (design §5.1 "reassign owner + BU") — implement it server-side even though the wizard only ships copy for it in 068. Scope: this endpoint or a sibling; state the route decision in the PR.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filters on the route (delegation filter from FR-07) — no inline role checks. Scope: endpoint wiring.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification cited from .claude/constraints/bff-extensions.md; publish size ≤ 60 MB reported. Scope: PR description.</constraint>
+    <constraint source="ADR-038">Tests updated in tests/unit/Sprk.Bff.Api.Tests; live-dev acceptance criteria recorded as UAT items, not fake-mocked. Scope: test outputs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>secure project mechanism</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Filter wiring for the delegation gate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Read the as-merged ProvisionProjectEndpoint; inventory every side effect of today's secure path (BU create, role assign, ownership, shares) into notes.</step>
+    <step order="2">Add + validate config keys (SecureProjects:ServiceAccountId, SecureProjects:BusinessUnitId); fail-closed guard.</step>
+    <step order="3">Implement: assign owner to service account; share to creator + requested principals via the 060 seam (levels per request); remove BU creation; implement the reverse path.</step>
+    <step order="4">Verify ProjectClosureEndpoint interplay: closing a secure project deactivates grants (FR-15) and leaves shares consistent — pin with a test.</step>
+    <step order="5">Tests: happy path (owner set, shares issued), unconfigured env denies, reverse path restores ownership per config, creator without Write is 403 (delegation), no BU create call remains (assert the code path is gone).</step>
+    <step order="6">Build + tests green; publish size reported. Update TASK-INDEX.md; record UAT-gated live-dev acceptance items in notes/phase4-uat-acceptance.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If existing secure projects in dev were provisioned under the old per-project-BU model, do NOT migrate them in this task — record the inventory and escalate the migration as a UAT/runbook item per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json (template keys)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (provisioning tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase4-uat-acceptance.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid secure-config, provisioning a secure project sets owner = service account and issues explicit shares to the creator and named principals via the consolidated seam; no BU is created.</criterion>
+    <criterion testable="true">Given missing secure-config, the secure designation returns an explicit error (ProblemDetails) and creates NOTHING — no record, no share, no fallback ownership.</criterion>
+    <criterion testable="true">Given the reverse path, ownership is reassigned per config and the record ceases to be share-only-gated; the operation is idempotent on repeat.</criterion>
+    <criterion testable="true">Negative: a caller without Write on the target is 403'd by the delegation filter (FR-07 regression pin on this route).</criterion>
+    <criterion testable="true">Negative: closure of a secure project leaves zero active external grants (FR-15 interplay pinned).</criterion>
+    <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported. Live-dev verification items (Operations user cannot read; shared user reads in MDA + SPA) recorded as UAT acceptance, not claimed by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-28 + § UAT and Environment Setup (BU restructure NOT a task). design.md §5.1-5.2.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

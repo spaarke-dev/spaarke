@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="unified-access-control-r2">
+  <metadata>
+    <title>Create Project wizard Secure step rework: align to share-only model, fix retired copy (FR-31)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 061 (provisioning rework) merged so copy matches implemented behaviour</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend on the secure-designation auth surface; the step drives the FR-28 provisioning contract.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy + flow alignment against a shipped server contract; changes enumerated by spec FR-31.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase4-wave3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches CreateProjectWizard/** only — file-disjoint from 063 (BFF) in the same wave; no overlap with AccessGrantModal tasks.</parallel-reason>
+    <deps>061</deps>
+    <tags>frontend, fluent-ui, auth</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rework the wizard's Secure Project step to the FR-28 mechanism and fix its wrong copy: REMOVE the claim "A Power Pages workspace is activated" (Power Pages is retired — the platform is SWA + CIAM) and REMOVE the permanence warning ("This designation is permanent... cannot be removed") because the designation is reversible under the service-account/share-only mechanism. The step's description must state what actually happens: the project is owned by a secure service account and all access is by explicit share.</prompt>
+  <role>SPAARKE platform developer. Fluent v9 wizard components, provisioning service client. Follow ADRs strictly.</role>
+  <goal>SecureProjectSection.tsx copy + behaviour match the 061 server contract; provisioningService.ts request shape carries what 061 expects (initial share principals if the step collects them); the permanence warning is gone; a reversibility note replaces it; unconfigured-environment errors from 061 render as a clear designed state.</goal>
+
+  <context>
+    <background>spec.md FR-31 ("copy matches implemented behaviour; the secure designation is reversible"); design.md §6.1 + §5.1. Verified current copy: SecureProjectSection.tsx:162 ("A Power Pages workspace is activated so invited external users can access project documents and events.") and :244-247 ("This designation is permanent... cannot be removed"). CloseProjectDialog's "permanently revoking all external access" copy (:400) is about closure, not designation — verify it against FR-15 behaviour and adjust only if wrong.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx (step wiring if the request shape changes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (061 as-merged contract)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="061" status="pending">The provisioning contract + reversibility the copy must describe.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Copy describes ONLY shipped behaviour (CLAUDE.md §2 code-wins) — no forward-looking claims; every sentence in the step must be traceable to 061's contract. Scope: all step copy.</constraint>
+    <constraint source="ADR-021">Semantic tokens for any new/changed visuals; dark-mode correct. Scope: styling changes.</constraint>
+    <constraint source="ADR-028">provisioningService continues via authenticatedFetch; no auth changes. Scope: service edits.</constraint>
+    <constraint source="project">The unconfigured-environment 4xx from 061 (secure designation refused pre-UAT) renders as a designed informational state naming the missing setup — not a raw error toast. Scope: submit error handling.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>wizard secure step</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-modern-theming" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">Token usage.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Read 061's merged contract; list every user-visible consequence of secure designation (owner, shares, reversibility, MDA/SPA behaviour).</step>
+    <step order="2">Rewrite the step copy: delete the Power Pages sentence (:162) and the permanence block (:244-247); add the share-only description + reversibility note.</step>
+    <step order="3">Align provisioningService request/response to 061; wire the unconfigured-environment state.</step>
+    <step order="4">Verify CloseProjectDialog copy against FR-15 shipped behaviour; adjust only if it misstates it (record the verdict either way).</step>
+    <step order="5">Component tests: copy assertions (no "Power Pages", no "permanent"), submit happy path, unconfigured-env state, server error state.</step>
+    <step order="6">Builds + jest green. Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the step's current flow collects inputs 061 no longer accepts (e.g. per-project BU naming), remove them; but if it MISSES an input 061 requires (initial share principals) and adding it changes the wizard's step flow materially, STOP and escalate the UX decision rather than inventing a new step.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Secure step copy matches behaviour">
+      <steps>
+        <step>Open https://{org}.crm.dynamics.com; launch Create Project wizard; open the Secure Project step; toggle secure on.</step>
+      </steps>
+      <expected>Copy describes service-account ownership + explicit-share access + reversibility; NO mention of Power Pages; NO permanence warning.</expected>
+    </test>
+    <test name="Unconfigured environment state">
+      <steps>
+        <step>In an environment without secure-config (pre-UAT dev), complete the wizard with secure on.</step>
+      </steps>
+      <expected>The designed informational state explains secure setup is not yet configured; no partial project in a wrong BU is created (per 061 fail-closed).</expected>
+    </test>
+    <test name="ADR-021 dark mode">
+      <steps>
+        <step>Dark theme; open the Secure step and its info/warning banners.</step>
+      </steps>
+      <expected>Semantic tokens; banners legible in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep of CreateProjectWizard/** finds zero occurrences of "Power Pages" and zero permanence-warning copy for the secure designation.</criterion>
+    <criterion testable="true">The step states the share-only mechanism and reversibility, each sentence traceable to 061 behaviour.</criterion>
+    <criterion testable="true">Secure submit sends the 061 contract shape; success and error paths render designed states.</criterion>
+    <criterion testable="true">Negative: unconfigured-environment refusal renders the informational state — no raw ProblemDetails shown to the user.</criterion>
+    <criterion testable="true">Jest + shared-lib build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-31; design.md §6.1. Verified line refs: SecureProjectSection.tsx:162, :244-247.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

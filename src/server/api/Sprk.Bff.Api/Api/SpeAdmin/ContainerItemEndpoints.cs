@@ -2,7 +2,10 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
-namespace Sprk.Bff.Api.Api;
+// Moved from Api/ into Api/SpeAdmin/ by task 060 (spec F02) — it serves the /api/spe surface and
+// every sibling here declares this namespace. File placement only: the 9 route strings are
+// byte-identical to the pre-move file, verified by diff.
+namespace Sprk.Bff.Api.Api.SpeAdmin;
 
 /// <summary>
 /// SPE Admin endpoint group for file/folder item operations within a container.

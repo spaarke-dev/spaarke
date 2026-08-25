@@ -2,6 +2,20 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!--
+      runtimeconfig.template.json — READ BEFORE EDITING IT.
+      The SDK merges that file's TOP-LEVEL keys INTO the generated runtimeOptions object. It must NOT
+      contain a "runtimeOptions" wrapper and must NOT contain a "tfm" key (the SDK generates tfm from
+      <TargetFramework> above).
+      Until 2026-08-24 it had both. The published Sprk.Bff.Api.runtimeconfig.json therefore carried a
+      NESTED runtimeOptions with a stale "tfm": "net8.0" inside an otherwise-correct net10 publish —
+      in every BFF publish since the net10 retarget — and, less visibly,
+      Microsoft.PowerPlatform.Dataverse.Client.TelemetryOptOut never reached the effective config
+      because it sat inside that nested block. Found by spaarkeai-compose-r8 during the
+      2026-08-24 dev outage investigation; fixed by spaarke-auth-v4-dataverse-MI.
+      Regression check: the published artifact must contain no "net8" string and exactly one
+      "runtimeOptions" key.
+    -->
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Sprk.Bff.Api</AssemblyName>
@@ -112,6 +126,14 @@
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
     <PackageReference Include="Microsoft.Identity.Client" Version="4.87.0" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
+    <!-- Certificateless supplies ManagedIdentityClientAssertion (ADR-028 A4 / auth-v4 task 020).
+         It already resolved TRANSITIVELY via Microsoft.Identity.Web, so this reference costs no
+         publish size — it is declared because we now use the type DIRECTLY, and a direct dependency
+         should not ride on another package's graph: an Identity.Web bump could otherwise drop or
+         float it and break the build for a non-obvious reason. Version pinned in lockstep with the
+         other Identity.Web packages. BFF ONLY — Spaarke.Dataverse declares the contract and must
+         gain no package reference (LayerDependencyTests FR-14). -->
+    <PackageReference Include="Microsoft.Identity.Web.Certificateless" Version="4.14.2" />
     <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.14.2" />
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
     <PackageReference Include="MimeKit" Version="4.17.0" />

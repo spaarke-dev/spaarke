@@ -39,6 +39,22 @@ public sealed class FakeGraphClientFactory : IGraphClientFactory
         return Task.FromResult(CreateFakeClient());
     }
 
+    /// <summary>
+    /// Delegated client against Graph <b>beta</b> — SPE container-type owners.
+    /// </summary>
+    /// <remarks>
+    /// Performs the SAME bearer-token validation as <see cref="ForUserAsync"/>, deliberately. The
+    /// point of that check here is that an endpoint without <c>RequireAuthorization()</c> still
+    /// returns 401 rather than 200 when no Authorization header is present; a beta variant that
+    /// skipped it would make the owners endpoints look authenticated in tests while being open.
+    /// </remarks>
+    public Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default)
+    {
+        _ = TokenHelper.ExtractBearerToken(ctx);
+
+        return Task.FromResult(CreateFakeClient());
+    }
+
     public GraphServiceClient ForApp()
     {
         return CreateFakeClient();

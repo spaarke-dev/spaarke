@@ -128,7 +128,15 @@ public static class CorsModule
                           "request-id",
                           "client-request-id",
                           "traceparent",
-                          "tracestate")
+                          "tracestate",
+                          // SSE job-progress streams (Office add-in SaveFlow → SseClient.ts).
+                          // Neither is a CORS-safelisted request header, so both MUST be listed
+                          // explicitly or the preflight fails with "Request header field
+                          // cache-control is not allowed by Access-Control-Allow-Headers".
+                          // Last-Event-ID is only sent on RECONNECT, so omitting it fails later
+                          // and more confusingly than Cache-Control does.
+                          "Cache-Control",
+                          "Last-Event-ID")
                       .WithExposedHeaders(
                           "ETag",
                           "request-id",

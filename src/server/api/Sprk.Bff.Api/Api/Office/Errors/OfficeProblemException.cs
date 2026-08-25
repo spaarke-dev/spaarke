@@ -184,7 +184,7 @@ public sealed class OfficeProblemException : Exception
         return new OfficeProblemException(
             OfficeErrorCodes.JobNotFound,
             $"Job '{jobId}' was not found. It may have expired or the ID is invalid.",
-            $"/office/jobs/{jobId}");
+            $"/api/office/jobs/{jobId}");
     }
 
     /// <summary>

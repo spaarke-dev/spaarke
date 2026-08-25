@@ -15,10 +15,18 @@
 //   - entityType (required, string)       — Dataverse logical entity name (e.g., "sprk_matter").
 //   - roles (optional, string[])          — passed through as MembershipResolveOptions.Roles
 //                                           (case-insensitive role filter).
-//   - includeRelated (optional, bool)     — Q3 owner clarification: 1-hop max. When true,
-//                                           passed to resolver as ["*"] sentinel; resolver
-//                                           accepts-but-ignores in Phase 1A (task 054 implements
-//                                           transitive expansion).
+//   - includeRelated (optional, bool)     — FIXED 2026-08-21 (task 019 / FR-17 A-22). The
+//                                           resolver's IncludeRelated (MembershipResolverService.
+//                                           ResolveTransitiveAsync) is NOT a wildcard — each entry
+//                                           must be a CONCRETE related-entity logical name that
+//                                           1-hop-validates via Dataverse metadata. This node's
+//                                           config schema has no field for naming those entities,
+//                                           so there is no well-defined related-entity set to
+//                                           pass; includeRelated=true is therefore a documented
+//                                           no-op (IncludeRelated omitted/null) until a
+//                                           relatedEntities-style field is added. See the
+//                                           ExecuteAsync comment below + notes/task-019-*.md for
+//                                           the open product-semantics question.
 //   - outputVariable                      — required by the framework on PlaybookNodeDto itself
 //                                           (NOT inside ConfigJson) — validated below.
 //
@@ -119,7 +127,7 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
                 Name: "includeRelated",
                 Type: SchemaFieldType.Boolean,
                 Required: false,
-                Description: "Phase 1D transitive expansion flag (1-hop max per Q3 owner clarification). Currently accepted-but-ignored by the resolver in Phase 1A; task 054 implements. Defaults to false.",
+                Description: "Reserved for future 1-hop transitive expansion. NO-OP TODAY: this node has no field for naming the related entities the resolver's IncludeRelated contract requires (concrete entity names, not a wildcard) — see FR-17/A-22 (fixed 2026-08-21). Setting true currently has no effect.",
                 Default: false)
         });
 
@@ -223,17 +231,48 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
-            // Build resolver options from node config. Q3 owner clarification:
-            // includeRelated is 1-hop max. The resolver accepts-but-ignores in Phase 1A
-            // (task 054 implements transitive expansion). We pass the sentinel "*" when
-            // the node config requests includeRelated=true so the resolver can log the
-            // intent + future implementers can detect it.
+            // Build resolver options from node config.
+            //
+            // FIXED 2026-08-21 (task 019 / FR-17 A-22): this used to pass the sentinel "*"
+            // when includeRelated=true, under a comment claiming the resolver "accepts-but-
+            // ignores" it in Phase 1A. That is no longer true — MembershipResolverService now
+            // implements Phase 1D transitive expansion (task 054), and its IncludeRelated
+            // contract requires each entry to be a CONCRETE related-entity logical name that
+            // 1-hop-validates via Dataverse metadata (ResolveTransitiveAsync ->
+            // DiscoverLookupsTargetingAsync). "*" is not a real entity name: pre-validation
+            // (MembershipResolverService.ResolveAsync:164-185) lets it through (it contains
+            // neither '.' nor '/'), but the metadata fetch for entity "*" then fails and
+            // surfaces as MembershipDepthExceededException(reasonTag: "unknown-entity") — the
+            // executor's catch(Exception) below turned that into NodeOutput.Error(InternalError)
+            // on every includeRelated=true execution.
+            //
+            // This node's ConfigJson schema has ONLY a boolean includeRelated flag — unlike the
+            // GET /api/users/me/memberships/{entityType}?includeRelated=documents,events HTTP
+            // contract (MembershipEndpoints.cs), there is no field here for naming which related
+            // entities to include. Per the project constraint (no well-defined related-entity set
+            // at this node -> omit IncludeRelated rather than invent a value the resolver can't
+            // resolve), IncludeRelated is always omitted (null) below. `includeRelated: true` is
+            // therefore a documented NO-OP today, not an error — flagged as an open product-
+            // semantics question in projects/unified-access-control-r2/notes/task-019-*.md: if
+            // playbook authors need "these N related entities" transitive expansion from this
+            // node, the config schema needs a relatedEntities: string[] field wired 1:1 to
+            // MembershipResolveOptions.IncludeRelated (each entry still resolver-validated,
+            // 1-hop cap per ADR-034/Q3), not a boolean.
             var options = new MembershipResolveOptions(
                 Roles: NormalizeRoles(config.Roles),
                 IdentityTypes: null,
-                IncludeRelated: (config.IncludeRelated ?? false) ? new[] { "*" } : null,
+                IncludeRelated: null,
                 Limit: MembershipResolveOptions.DefaultLimit,
                 ContinuationToken: null);
+
+            if (config.IncludeRelated == true)
+            {
+                _logger.LogWarning(
+                    "LookupUserMembership node {NodeId}: includeRelated=true was requested but " +
+                    "this node has no config field for concrete related-entity names, so the " +
+                    "request is a no-op (IncludeRelated omitted). See FR-17/A-22.",
+                    context.Node.Id);
+            }
 
             _logger.LogDebug(
                 "LookupUserMembership node {NodeId}: resolving entityType={EntityType} " +
@@ -411,9 +450,11 @@ internal sealed record LookupUserMembershipNodeConfig
     public IReadOnlyList<string>? Roles { get; init; }
 
     /// <summary>
-    /// Phase 1D transitive expansion flag (Q3 owner clarification: 1-hop max).
-    /// When <c>true</c>, the resolver is asked to include related-entity memberships
-    /// (currently accepted-but-ignored — task 054 implements). Default <c>false</c>.
+    /// Reserved for future 1-hop transitive expansion (Q3 owner clarification: 1-hop max).
+    /// NO-OP TODAY (fixed 2026-08-21, task 019 / FR-17 A-22): this node has no field for
+    /// naming which related entities to include, and the resolver's IncludeRelated contract
+    /// requires concrete related-entity names (not a wildcard) — so <c>true</c> currently has
+    /// no effect; <see cref="ExecuteAsync"/> always omits IncludeRelated. Default <c>false</c>.
     /// </summary>
     [JsonPropertyName("includeRelated")]
     public bool? IncludeRelated { get; init; }

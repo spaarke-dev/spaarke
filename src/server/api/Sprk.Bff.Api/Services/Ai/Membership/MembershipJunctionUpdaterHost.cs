@@ -8,12 +8,13 @@
 //
 // Lifecycle invariants:
 //
-//   1. Connects via `ServiceBusClient(ServiceBusNamespace, DefaultAzureCredential)`
-//      — ADR-028 canonical outbound auth (managed identity in Azure,
-//      DefaultAzureCredential cascade in local dev). The
-//      JobProcessingModule's parallel `ServiceBusClient` registration
-//      uses a connection-string overload — distinct singleton; no
-//      collision because we construct our own client inline (Phase 2 is
+//   1. Connects by namespace via `ServiceBusClientFactory.CreateForNamespace`
+//      with the DI-injected, ClientId-pinned TokenCredential — ADR-028
+//      canonical outbound auth. (Corrected 2026-08-23, auth-v4 task 051:
+//      this previously built `new DefaultAzureCredential()` inline, which
+//      cannot disambiguate the five UAMIs in the dev subscription.) The
+//      JobProcessingModule `ServiceBusClient` singleton is a distinct
+//      client; no collision because we construct our own (Phase 2 is
 //      additive).
 //
 //   2. Uses `ServiceBusProcessor` (high-throughput callback model) — NOT
@@ -84,32 +85,46 @@ public sealed class MembershipJunctionUpdaterHost : BackgroundService
     private ServiceBusClient? _client;
     private ServiceBusProcessor? _processor;
 
+    /// <param name="credential">
+    /// The DI-injected managed-identity credential (Program.cs:46). Nullable with a null default so
+    /// existing fixtures keep compiling, per the shape CLAUDE.md prescribes; in production DI always
+    /// supplies it, and the default client factory below fails loudly if it is missing.
+    /// </param>
     public MembershipJunctionUpdaterHost(
         IServiceScopeFactory scopeFactory,
         IOptions<MembershipJunctionUpdaterOptions> options,
-        ILogger<MembershipJunctionUpdaterHost> logger)
-        : this(scopeFactory, options, logger, clientFactory: null)
+        ILogger<MembershipJunctionUpdaterHost> logger,
+        Azure.Core.TokenCredential? credential = null)
+        : this(scopeFactory, options, logger, clientFactory: null, credential: credential)
     {
     }
 
     /// <summary>
     /// Test seam — allows unit tests to inject a fake
     /// <see cref="ServiceBusClient"/> factory without depending on a
-    /// real Azure namespace. Production code uses the parameterless
-    /// constructor which builds a real client via
-    /// <see cref="DefaultAzureCredential"/>.
+    /// real Azure namespace. Production code uses the public constructor,
+    /// which builds a real client through
+    /// <see cref="Infrastructure.Auth.ServiceBusClientFactory"/> using the
+    /// DI-injected credential.
     /// </summary>
     internal MembershipJunctionUpdaterHost(
         IServiceScopeFactory scopeFactory,
         IOptions<MembershipJunctionUpdaterOptions> options,
         ILogger<MembershipJunctionUpdaterHost> logger,
-        Func<MembershipJunctionUpdaterOptions, ServiceBusClient>? clientFactory)
+        Func<MembershipJunctionUpdaterOptions, ServiceBusClient>? clientFactory,
+        Azure.Core.TokenCredential? credential = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _clientFactory = clientFactory ?? (static opts =>
+        // auth-v4 task 051 (FR-E2): this used to build `new DefaultAzureCredential()` inline. That
+        // is the deviation task 051's constraints name explicitly, and it is not cosmetic — five
+        // user-assigned identities exist in the dev subscription and one is named like the BFF's
+        // without being attached to it, so an unpinned DefaultAzureCredential can silently
+        // authenticate as the wrong principal. Construction now goes through
+        // ServiceBusClientFactory with the ClientId-pinned singleton from DI.
+        _clientFactory = clientFactory ?? (opts =>
         {
             if (string.IsNullOrWhiteSpace(opts.ServiceBusNamespace))
             {
@@ -117,7 +132,18 @@ public sealed class MembershipJunctionUpdaterHost : BackgroundService
                     "Membership:JunctionUpdater:ServiceBusNamespace is required when Enabled=true. " +
                     "Set it to the FQDN of the Service Bus namespace (e.g., spaarkesb-dev.servicebus.windows.net).");
             }
-            return new ServiceBusClient(opts.ServiceBusNamespace, new DefaultAzureCredential());
+
+            if (credential is null)
+            {
+                throw new InvalidOperationException(
+                    "MembershipJunctionUpdaterHost requires the DI-injected TokenCredential to connect " +
+                    "to Service Bus by namespace. It is registered as a singleton in Program.cs; if this " +
+                    "throws, the host was constructed outside DI without supplying either a credential " +
+                    "or a test client factory.");
+            }
+
+            return Infrastructure.Auth.ServiceBusClientFactory.CreateForNamespace(
+                opts.ServiceBusNamespace, credential);
         });
     }
 

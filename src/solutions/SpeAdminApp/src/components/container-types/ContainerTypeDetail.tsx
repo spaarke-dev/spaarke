@@ -62,16 +62,26 @@ import {
   Save20Regular,
   Warning20Regular,
   People20Regular,
+  Person20Regular,
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import {
   ContainerTypeSettingsForm,
   type ContainerTypeSettings,
   type SharingCapabilityValue,
 } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
+import { ContainerTypeOwnersPanel } from "./ContainerTypeOwnersPanel";
+import {
+  assessBilling,
+  assessTrialExpiry,
+  labelForSetting,
+  parseConsumingTenantOverridables,
+  SAVE_ACCEPTED_DETAIL,
+  SAVE_ACCEPTED_TITLE,
+} from "./containerTypeLifecycle";
 import type { ContainerType, ContainerTypePermission } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +99,7 @@ export interface ContainerTypeDetailProps {
 // Tab identifiers
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabId = "settings" | "permissions" | "consumers";
+type TabId = "settings" | "owners" | "permissions" | "consumers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -386,6 +396,44 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
     [settings, savedSettings]
   );
 
+  /**
+   * Billing standing for the loaded container type (task 029 / spec FR-C12).
+   *
+   * Computed even when `containerType` is null so the value is always defined; in that state it
+   * assesses to "unknown", which is the truthful reading of "nothing loaded yet".
+   */
+  const billingAssessment = React.useMemo(
+    () => assessBilling(containerType ?? {}),
+    [containerType]
+  );
+
+  /**
+   * Trial expiry standing (spec FR-C13).
+   *
+   * The panel previously rendered `expiryDateTime` as a plain red date, which cannot say whether the
+   * date has PASSED — so the live tenant's trial, expired 2025-10-10, looked the same as one
+   * expiring next year. `now` is captured per loaded container type, not per render.
+   */
+  const trialExpiry = React.useMemo(
+    () => assessTrialExpiry(containerType ?? {}, new Date()),
+    [containerType]
+  );
+
+  /**
+   * Settings a consuming tenant is PERMITTED to override (task 026 / spec FR-C08).
+   *
+   * A permission, not a state — see `containerTypeLifecycle.parseConsumingTenantOverridables`. The
+   * UI must say "may be overridden", never "is overridden", because the effective value lives on a
+   * registration in the consuming tenant that this tenant cannot read.
+   */
+  const overridableSettings = React.useMemo(
+    () =>
+      parseConsumingTenantOverridables(
+        containerType?.settings?.consumingTenantOverridables
+      ),
+    [containerType]
+  );
+
   // ── Tab State ──────────────────────────────────────────────────────────────
 
   const [activeTab, setActiveTab] = React.useState<TabId>("settings");
@@ -422,9 +470,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       })
       .catch((err) => {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to load container type details. Please try again.";
+          describeApiError(err, "Failed to load container type details. Please try again.");
         setError(message);
       })
       .finally(() => {
@@ -447,9 +493,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       setPermissionsLoaded(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load permissions. Please try again.";
+        describeApiError(err, "Failed to load permissions. Please try again.");
       setPermissionsError(message);
     } finally {
       setPermissionsLoading(false);
@@ -484,7 +528,14 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
           sharingCapability: settings.sharingCapability,
           isItemVersioningEnabled: settings.isItemVersioningEnabled,
           itemMajorVersionLimit: settings.itemMajorVersionLimit,
-          maxStoragePerBytes: settings.maxStoragePerBytes,
+          // Renamed from `maxStoragePerBytes` 2026-08-24 (task 023). That was the Dataverse config
+          // column's name leaking onto the wire; the BFF contract key is the Graph property name.
+          // It is a per-container CEILING, never a usage figure — the two must not share a name
+          // anywhere in the chain (spec FR-C05).
+          maxStoragePerContainerInBytes: settings.maxStoragePerBytes,
+          // ⚠️ The BFF has no `isSearchEnabled` on its settings request, so this value is currently
+          // discarded on arrival. It is one of the five remaining settings task 025 (FR-C07) wires
+          // up; the control is left in place because 025 is the next task to touch this surface.
           isSearchEnabled: settings.isSearchEnabled,
         }
       );
@@ -492,9 +543,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       setSaveSuccess(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to save settings. Please try again.";
+        describeApiError(err, "Failed to save settings. Please try again.");
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -560,6 +609,28 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                   {capitalize(containerType.billingClassification)}
                 </Badge>
               )}
+              {/*
+                Billing standing (task 029 / spec FR-C12). Rendered whenever a container type is
+                loaded — including when Graph did not report it, which shows as an explicit "Unknown"
+                rather than being omitted. An omitted badge would be indistinguishable from a healthy
+                one to anyone who does not already know the field exists (NFR-06).
+              */}
+              {containerType && (
+                <Badge
+                  color={billingAssessment.tone}
+                  appearance={
+                    billingAssessment.standing === "unknown" ? "outline" : "filled"
+                  }
+                  size="small"
+                  title={
+                    [billingAssessment.consequence, billingAssessment.remediation]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                >
+                  Billing: {billingAssessment.label}
+                </Badge>
+              )}
               {containerType?.containerTypeId && (
                 <Text
                   className={styles.headerSubtext}
@@ -591,6 +662,9 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       >
         <Tab value="settings" icon={<Settings20Regular />}>
           Settings
+        </Tab>
+        <Tab value="owners" icon={<Person20Regular />}>
+          Owners
         </Tab>
         <Tab value="permissions" icon={<LockClosed20Regular />}>
           Permissions
@@ -664,10 +738,71 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
           {/* ── Settings Tab ── */}
           {activeTab === "settings" && (
             <div className={styles.tabContent}>
-              {/* Save success / error banners */}
+              {/*
+                Invalid-billing warning (task 029 / spec FR-C12). Placed above the settings form
+                because it is a condition of the container type itself, not a result of anything the
+                admin is about to do here — and it is not a save failure, so it must not sit among the
+                save banners. States the operational consequence and where it is remediated (which is
+                deliberately NOT this app); a bare red badge would leave an admin with nowhere to go.
+              */}
+              {billingAssessment.needsAttention && (
+                <MessageBar intent="warning" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>Billing is invalid</MessageBarTitle>
+                    {billingAssessment.consequence}
+                    {billingAssessment.remediation ? (
+                      <>
+                        {" "}
+                        {billingAssessment.remediation}
+                      </>
+                    ) : null}
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
+              {/*
+                Which settings a consuming tenant MAY override (task 026 / spec FR-C08).
+
+                Deliberately worded as a permission. `consumingTenantOverridables` says what a
+                consuming tenant is ALLOWED to override; it carries no effective value and no
+                indication that any override actually exists. The effective value lives on a
+                fileStorageContainerTypeRegistration in the CONSUMING tenant, which the owning tenant
+                has no way to read (notes/task-026-findings.md §2) — so "is overridden" is a claim this
+                screen cannot make, and the last line says so rather than leaving a false impression
+                of completeness.
+              */}
+              {overridableSettings.length > 0 && (
+                <MessageBar intent="info" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>
+                      Consuming tenants may override these settings
+                    </MessageBarTitle>
+                    {overridableSettings.map(labelForSetting).join(", ")}. Where a
+                    consuming tenant has applied its own value, that value stays in
+                    place and changes saved here will not reach it. Overrides applied
+                    in another tenant are not visible from this screen.
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
+              {/*
+                Post-save feedback (task 026 / spec FR-C08).
+
+                This said "Settings saved successfully." — a bare success that implies the change is
+                in effect. It is not: replication to consuming tenants takes up to 24 hours, and any
+                setting a consuming tenant has overridden never picks the new value up at all
+                (learn-containertypes.md:101). An admin who saved, saw "successfully", checked a
+                consuming tenant and found the old value would reasonably conclude the tool is broken.
+
+                Intent is `info`, not `success` — the write was accepted, which is not the same as the
+                setting being live, and green reads as the latter.
+              */}
               {saveSuccess && (
-                <MessageBar intent="success" className={styles.successBanner}>
-                  <MessageBarBody>Settings saved successfully.</MessageBarBody>
+                <MessageBar intent="info" className={styles.successBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>{SAVE_ACCEPTED_TITLE}</MessageBarTitle>
+                    {SAVE_ACCEPTED_DETAIL}
+                  </MessageBarBody>
                 </MessageBar>
               )}
               {saveError && (
@@ -708,7 +843,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                           })
                           .catch((err) => {
                             setError(
-                              err instanceof ApiError ? err.message : "Failed to load."
+                              describeApiError(err, "Failed to load.")
                             );
                           })
                           .finally(() => setLoading(false));
@@ -746,12 +881,35 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                         {containerType.expiryDateTime && (
                           <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Trial Expiry</Text>
-                            <Text
-                              className={styles.fieldValue}
-                              style={{ color: tokens.colorPaletteRedForeground1 }}
-                            >
-                              {formatDate(containerType.expiryDateTime)}
-                            </Text>
+                            {/*
+                              A date alone does not say whether it has PASSED. This rendered as plain
+                              red text, so the live tenant's trial — expired 2025-10-10 — looked
+                              identical to one expiring next year (spec FR-C13).
+                            */}
+                            <div className={styles.fieldValue}>
+                              <Text>{formatDate(containerType.expiryDateTime)}</Text>
+                              {trialExpiry.label && (
+                                <Badge
+                                  color={trialExpiry.tone}
+                                  appearance={
+                                    trialExpiry.state === "unknown" ? "outline" : "filled"
+                                  }
+                                  size="small"
+                                  style={{ marginLeft: tokens.spacingHorizontalXS }}
+                                >
+                                  {trialExpiry.label}
+                                </Badge>
+                              )}
+                              {trialExpiry.consequence && (
+                                <Text
+                                  size={200}
+                                  block
+                                  style={{ color: tokens.colorNeutralForeground3 }}
+                                >
+                                  {trialExpiry.consequence}
+                                </Text>
+                              )}
+                            </div>
                           </div>
                         )}
                         <div className={styles.fieldRow}>
@@ -783,6 +941,17 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                 containerTypeId={containerTypeId}
                 configId={selectedConfig.id}
               />
+            </div>
+          )}
+
+          {/*
+            ── Owners Tab (spec FR-C09) ──
+            PEOPLE who administer the container type. Distinct from the Permissions tab below, which
+            lists which APPLICATIONS may access containers of this type. Neither supersedes the other.
+          */}
+          {activeTab === "owners" && containerTypeId && (
+            <div className={styles.tabContent}>
+              <ContainerTypeOwnersPanel containerTypeId={containerTypeId} />
             </div>
           )}
 

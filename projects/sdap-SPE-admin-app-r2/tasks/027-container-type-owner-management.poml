@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Container-type owner management via fileStorageContainerType.permissions</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>011 complete, 020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph hot path plus endpoints and UI; permission-management surface; tags include bff-api and authorization.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified CRUD against a documented Graph relationship; auth shape already settled by task 011.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W11</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>011, 020, 040</deps>
+    <tags>bff-api, api, authorization, frontend, fluent-ui, testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Adopt the fileStorageContainerType.permissions relationship to manage container-type owners (up to three). This supersedes part of the current ContainerTypePermissions screen.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph permission relationships and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>Container-type owners can be listed, added, and removed against Spaarke Dev, with the three-owner limit enforced in the UI.</goal>
+
+  <context>
+    <background>Spec FR-C09 / §4.3. The permissions relationship is new and supersedes part of the existing ContainerTypePermissions screen — so this is partly a replacement, not purely an addition. The SharePoint admin center allows up to three owners for settings and billing; the UI must model that limit rather than letting a fourth add fail at the API.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypePermissionEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerTypePermissionDto.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/container-types</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Delegated auth — permission management requires it.</dependency>
+      <dependency task="020" status="pending">v1.0 endpoints.</dependency>
+      <dependency task="040" status="pending">WireMock fixture.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: supersession. Determine what the existing ContainerTypePermissions screen still does that the permissions relationship does NOT cover, and keep only that. Do not leave two overlapping owner surfaces — CLAUDE.md §11 points against it.</constraint>
+    <constraint source="project">Scope: the three-owner limit. Enforce it in the UI with a real message at the limit. A fourth add MUST NOT be offered and then fail at the API.</constraint>
+    <constraint source="project">Scope: destructive operations. Removing the last remaining owner is potentially irreversible — require explicit confirmation and warn about the consequence.</constraint>
+    <constraint source="ADR-019">Scope: failure paths. Errors surface as ProblemDetails with the real Graph error.</constraint>
+    <constraint source="ADR-021">Scope: the owner-management UI. Fluent v9 semantic tokens; dark-mode correct.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph container-type permissions relationship</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Relationship navigation and writes.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.3.</step>
+    <step order="1">Audit the existing ContainerTypePermissions screen; record what the permissions relationship supersedes and what it does not.</step>
+    <step order="2">Implement list / add / remove against fileStorageContainerType.permissions.</step>
+    <step order="3">Enforce the three-owner limit in the UI with a real message at the limit.</step>
+    <step order="4">Add confirmation and a consequence warning for removing the last owner.</step>
+    <step order="5">Retire the superseded portion of the old screen so only one owner surface remains.</step>
+    <step order="6">Add WireMock coverage for list/add/remove request shapes.</step>
+    <step order="7">Build BFF and code page; run tests.</step>
+    <step order="8">Verify against Spaarke Dev: add and remove an owner successfully.</step>
+    <step order="9">Measure publish size; record. Update TASK-INDEX.md: task 027 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If retiring the superseded portion of the old screen would remove a capability the permissions relationship does not provide, STOP and escalate — losing an existing capability is a scope decision, not a cleanup side effect.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ContainerTypePermissionEndpoints.cs and ContainerTypePermissionDto.cs already exist for the current permissions screen.</existing>
+    <extension>Yes — extend the existing permission surface onto the new Graph relationship and retire the superseded portion. No parallel owner-management surface is created.</extension>
+    <cost-of-doing-nothing>Container-type owners cannot be managed from the app at all; an admin must use the SharePoint admin center or PowerShell for an operation the tool claims to cover.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Owner add and remove">
+      <steps>
+        <step>Open a container type's owners</step>
+        <step>Add an owner, then remove it</step>
+      </steps>
+      <expected>Both operations succeed and the list reflects each change.</expected>
+    </test>
+    <test name="Three-owner limit enforced">
+      <steps><step>With three owners assigned, attempt to add a fourth</step></steps>
+      <expected>The add affordance is unavailable or blocked with a message naming the limit. No API call is made that would fail.</expected>
+    </test>
+    <test name="Last-owner removal warns">
+      <steps><step>Attempt to remove the only remaining owner</step></steps>
+      <expected>An explicit confirmation appears warning of the consequence before the removal proceeds.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the owners UI</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypePermissionEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (permissions coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Owners can be listed, added, and removed against Spaarke Dev.</criterion>
+    <criterion testable="true">Given three owners, when a fourth add is attempted, then the UI blocks it with a message naming the limit.</criterion>
+    <criterion testable="true">Given the last owner, when removal is attempted, then an explicit confirmation with a consequence warning appears first.</criterion>
+    <criterion testable="true">Only ONE owner-management surface remains; the superseded portion of the old screen is retired.</criterion>
+    <criterion testable="true">Negative: an unauthorized caller attempting to add an owner receives 403 ProblemDetails naming the required permission.</criterion>
+    <criterion testable="true">Negative: adding an owner that does not exist returns the real Graph error, not a silent no-op.</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-C09. Built 2026-08-24; AC-1 awaits operator device-code sign-in.
+    Full record: notes/task-027-findings.md
+
+    🔴 CENTRAL PREMISE FALSE. The task says the new relationship "supersedes part of the current
+    ContainerTypePermissions screen". It supersedes NOTHING — the two are orthogonal surfaces that
+    share one Graph word: the existing endpoint maps to `applicationPermissions` (which APPLICATIONS
+    may access containers, with what scopes); the new one is Collection(graph.permission) (which
+    PEOPLE own the type). Nothing was retired, and retiring anything would have deleted
+    application-permission management outright — exactly what the escalation trigger guards. NOT
+    escalated for adjudication: the correct action is non-destructive and unambiguous, and asking an
+    operator to approve not-deleting-something spends attention for no decision. AC-4 is met
+    vacuously (only one OWNER surface exists); its second clause has no referent. Guarded
+    structurally, not just in prose — route is /owners, DTOs are separate records, separate tab.
+
+    🔴 delegated+beta had never existed and is the ONLY combination Graph serves. Container types
+    reject app-only (403 both versions); `permissions` is beta-only (absent from the v1.0 CSDL —
+    v1.0 fileStorageContainerType has no navigation properties at all). Live: v1.0 → 400 "Resource
+    not found for the segment 'permissions'" (routing fails BEFORE auth), beta → 403 identical to the
+    control GET (route exists, auth stops it). Added ForUserBetaAsync — NOT an auth change: same OBO
+    exchange, same cached token, same version-agnostic .default scope, only the base address differs,
+    so no new credential and no ADR-028 A4/E-3 surface.
+
+    🔴 The SDK has no .Permissions builder (compiler-verified), so requests are hand-built through
+    Kiota's untyped path — deliberately via RequestAdapter, not a bare HttpClient, so ODataError
+    mapping and the retry handlers survive. Nothing here is compiler-checked, hence 8 contract tests
+    with the PATH assertion load-bearing.
+
+    ⚠️ The "three owners" limit is UNSOURCED — zero occurrences of "owner" in the SPE knowledge
+    corpus, and neither CSDL bounds the collection. Stated in the UI as SharePoint-admin-center UX
+    with its source named, never as Graph-enforced, and the API error is still surfaced.
+
+    ⚠️ AC-1 NOT live-verified — container types are delegated-only, so it needs an interactive
+    device-code sign-in (~20s operator time). It MAY hit the open PATCH-400 escalation, though a POST
+    to a sub-collection is not the same operation as a PATCH to the entity, so it may well succeed
+    where PATCH does not. Do not assume either way.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
