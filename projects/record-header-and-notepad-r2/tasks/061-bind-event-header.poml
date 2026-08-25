@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Bind Spaarke Record Header to the Event main form + acceptance QA (datetime renderer)</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable when 034, 050 and 051 are ✅ and the wave-1 soak is accepted by the operator</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker configuration + QA task — no .cs/.ts/.tsx files are modified. The pcf tag denotes the control under test, not code implementation, so the tag-based FULL trigger is deliberately overridden per plan.md Phase 5 ("Form binding is operator/maker work, not agent work"). task-execute may re-evaluate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified configuration + QA run following the proven R1 maker recipe; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment — sequential human form edits + publishes; not agent-automatable. Wave 2 pairs with task 060 but a single operator executes them one after another.</parallel-reason>
+    <deps>034, 050, 051</deps>
+    <tags>pcf, dataverse, config, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Bind the Spaarke Record Header PCF to the Event (sprk_event) main form with the owner-confirmed layoutJson
+    and run the full per-form acceptance QA. Event is the entity that forces the DateAndTime renderer mode
+    (sprk_plannedstart / sprk_plannedend must show date AND time) and exercises a non-conventional lookup
+    (sprk_eventtype_ref is a LOOKUP, not an option set). CRITICAL: the entity has 10 forms — bind ONLY the
+    "Event main form".
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse form-designer access to spaarkedev1. Follow ADRs strictly.
+    Expertise: model-driven-app form configuration, PCF control binding, browser-based UI QA.
+  </role>
+
+  <goal>
+    The "Event main form" (eaf22dcb-9aff-f011-8406-7c1e525abd8b) renders the Spaarke Record Header with the
+    configured 8-field layout including two DateAndTime cells; all 9 per-form success criteria plus the
+    datetime/lookup renderer criteria pass; QA evidence + wave-2 measurements (own or cross-referenced from
+    task 060) are recorded in projects/record-header-and-notepad-r2/notes/rollout-sprk_event.md.
+  </goal>
+
+  <context>
+    <background>
+      Wave 2 = Invoice + Event (spec FR-25). Event exercises the DateField DateAndTime mode (spec FR-06,
+      Success Criterion 11): sprk_plannedstart / sprk_plannedend are DateAndTime (live-verified;
+      scheduledstart / scheduledend / sprk_location do NOT exist on this entity despite live client code
+      referencing them — that is a separately-documented out-of-scope defect, notes/issues/). Primary name is
+      sprk_eventname (required) — NOT sprk_name. sprk_eventtype_ref is a LOOKUP whose target uses sprk_name as
+      its primary name attribute — this is exactly why lookup metadata resolution replaced the hard-coded
+      LOOKUP_META. sprk_eventstatus is a Choice with 8 options (0 Draft → 7 Archived).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/rollout-sprk_event.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="034" status="pending">Completed RecordHeader PCF importable as the RecordHeaderPcf solution</dependency>
+      <dependency task="050" status="pending">Wave-1 Project binding complete and soaked</dependency>
+      <dependency task="051" status="pending">Wave-1 Work Assignment binding complete and soaked</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-25 scope: bind ONLY the "Event main form" eaf22dcb-9aff-f011-8406-7c1e525abd8b. The entity has 10 forms — 8 are side-pane/modal/assign-work variants and there is also a legacy "Information" form; binding ANY form other than "Event main form" is a defect in this task.</constraint>
+    <constraint source="project">This task modifies form configuration and QA notes only. If QA surfaces a code defect in the control or shared library, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6 so it routes to the owning implementation task.</constraint>
+    <constraint source="project">Do NOT touch src/solutions/EventDetailSidePane/** while working on this entity — its schema-drift defects are documented in notes/issues/ and are explicitly out of R2 scope.</constraint>
+    <constraint source="ADR-021">All QA visual checks in this task verify Fluent v9 semantic-token theming — dark mode and high contrast must render with no hard-coded colors (NFR-03).</constraint>
+    <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold. One measurement may be shared across wave-2 tasks 060+061 — cross-reference it in both notes files.</constraint>
+    <constraint source="project">NFR-07: do not alter the Notepad/SmartTodo launch contracts while QA-ing them — regardingEntity/regardingId and action=openTodos&amp;regardingType=…&amp;regardingId=… are external API.</constraint>
+    <constraint source="project">NFR-09: the form GUID above is environment-specific and acceptable in acceptance criteria and notes only — it must not be embedded in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF form binding + rollout QA</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maker binding recipe (proven in R1)" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">
+        Follow this sequence exactly, substituting Event's form/field names. Design.md §5.1.2 is the R2-updated version of the same recipe.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify 034, 050 and 051 are ✅ and the operator has accepted the wave-1 soak.</step>
+    <step order="1">Verify "Spaarke Record Header" appears in the form designer's Add Control gallery in spaarkedev1.</step>
+    <step order="2">Verify the layoutJson below against the shipped RecordHeaderConfiguration v1.0 types (task 030 output) before pasting.</step>
+    <step order="3">make.powerapps.com → Solutions → Tables → sprk_event → Forms → "Event main form" (eaf22dcb-9aff-f011-8406-7c1e525abd8b) — confirm the GUID; the entity has 10 forms and only this one is the target → ⋯ → Edit form → Edit in classic.</step>
+    <step order="4">Click the field the control will replace (sprk_eventnumber) → Controls tab → Add Control → "Spaarke Record Header" → Add → tick Web (and Phone/Tablet).</step>
+    <step order="5">Leave layoutJson BLANK first: Save → Publish → verify tier-2 derived defaults render on a live record. Then set layoutJson to static value {{{ → Save → Publish → verify console.warn + derived defaults, never blank.</step>
+    <step order="6">Set layoutJson to a static value and paste the final JSON:
+{ "_version": "1.0", "title": "Event", "columns": 3,
+  "fields": [
+    { "name": "sprk_eventnumber", "span": 1 },
+    { "name": "sprk_eventname", "span": 2, "required": true },
+    { "name": "sprk_eventtype_ref", "span": 1 },
+    { "name": "sprk_eventstatus", "span": 1 },
+    { "name": "sprk_plannedstart", "span": 1 },
+    { "name": "sprk_plannedend", "span": 1 },
+    { "name": "sprk_highpriority", "span": 1 },
+    { "name": "sprk_description", "span": 3 } ] }
+(summaryField omitted deliberately — it defaults to sprk_recordsummary via RECORDSUMMARY_FIELD.) Set Header title / Show version footer (Yes during QA).</step>
+    <step order="7">Delete the section's other raw fields so they do not render twice; keep sprk_eventnumber (invisible behind the PCF). Save → Publish.</step>
+    <step order="8">Run the per-form acceptance QA on a live Event record (ui-tests below) — pay specific attention to date-AND-time rendering and the sprk_eventtype_ref lookup — including the loud-failure negative test with a real entity field absent from the form (e.g. sprk_duedate if not on the form).</step>
+    <step order="9">Wave-2 measurement: reuse task 060's bundle/TTI numbers if already captured for this wave (cross-reference them), otherwise measure here: bundle.js bytes after npm run build:prod; TTI via browser perf trace cold + warm on the Event form.</step>
+    <step order="10">Write QA evidence (screenshots light + dark, criterion checklist, measurements or cross-reference) to projects/record-header-and-notepad-r2/notes/rollout-sprk_event.md.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the wave-2 measurement breaches NFR-01/NFR-02 (bundle &gt;250 KB minified, or TTI &gt;300 ms warm / &gt;800 ms cold), STOP the rollout — do not bind the next wave — and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If sprk_plannedstart/sprk_plannedend render date-only (no time component), or sprk_eventtype_ref renders as anything other than a lookup, that is a code defect — STOP and escalate rather than patching code inside this configuration task.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Configured layout renders at configured spans (datetime + lookup)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_event&amp;id={record-id}</url>
+      <steps>
+        <step>Open a live Event record with populated planned dates on the Event main form</step>
+        <step>Verify the header renders exactly the 8 configured fields at spans 1/2/1/1/1/1/1/3 in a 3-column grid</step>
+        <step>Verify sprk_plannedstart AND sprk_plannedend each render a locale date AND a time (spec criterion 11)</step>
+        <step>Verify sprk_eventtype_ref renders as a lookup value (its target's primary name is sprk_name — resolved from metadata, not hard-coded)</step>
+        <step>Verify the version footer is present and check the console for JavaScript errors</step>
+      </steps>
+      <expected>Layout matches the pasted layoutJson; datetime cells show date + time; no console errors</expected>
+    </test>
+    <test name="Inline edit stages to the form buffer with no re-render flash">
+      <steps>
+        <step>Edit sprk_eventname inline and commit with Enter</step>
+        <step>Verify the form's Save button activates (dirty) with NO PCF re-render or loading-skeleton flash</step>
+        <step>Edit sprk_eventstatus via the Fluent Dropdown and verify it offers the 8 options Draft → Archived</step>
+        <step>Edit sprk_plannedstart via the Fluent picker (date and time); toggle sprk_highpriority</step>
+        <step>Click the sprk_eventtype_ref cell and verify the OOB Xrm.Utility.lookupObjects picker opens; select a value and verify it stages to the form buffer</step>
+        <step>Click the form's own Save and refresh the page</step>
+      </steps>
+      <expected>All edits persist after form Save; no flash during staging; lookup cell opens the native picker</expected>
+    </test>
+    <test name="Toolbar parity + launch contracts">
+      <steps>
+        <step>Verify the toolbar is identical to Matter's: title, sparkle, To Do badge, Notepad badge</step>
+        <step>Click the sparkle — popover renders "No summary yet" (sprk_recordsummary exists but is unpopulated)</step>
+        <step>Click To Do — SmartTodo opens filtered to this record (action=openTodos&amp;regardingType=sprk_event&amp;regardingId=…)</step>
+        <step>Click Notepad — opens scoped to this record in the 25% × 35% modal</step>
+      </steps>
+      <expected>All four toolbar elements present and functional; launch contracts unchanged (NFR-07)</expected>
+    </test>
+    <test name="Config degradation (negative paths)">
+      <steps>
+        <step>With layoutJson absent: header renders tier-2 derived defaults (primary name first, span 2)</step>
+        <step>With layoutJson = {{{ : console.warn logged, derived defaults render, form never blanks, nothing throws</step>
+        <step>With a layout field not on the form: attempted edit throws "Field '…' not on form" — the input is never silently dropped</step>
+      </steps>
+      <expected>Both bad-config paths degrade gracefully (NFR-10); the missing-field path fails loudly (FR-14)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the model-driven app settings</step>
+        <step>Verify header background, text, datetime cells, sparkle popover and modals adapt (no white-on-dark, no black-on-light)</step>
+        <step>Verify icons use currentColor; spot-check high contrast mode</step>
+      </steps>
+      <expected>All colors come from Fluent v9 semantic tokens per ADR-021 / NFR-03</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com classic form designer + live-record QA (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">Solution verification (pac solution list)</tool>
+    <tool name="npm">Bundle measurement via npm run build:prod in the RecordHeader PCF folder (only if not sharing task 060's wave measurement)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rollout-sprk_event.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the published Event main form (GUID confirmed = eaf22dcb-9aff-f011-8406-7c1e525abd8b, none of the other 9 Event forms touched), when a live record opens, then the header renders the 8 configured fields at spans 1/2/1/1/1/1/1/3 (spec criterion 1).</criterion>
+    <criterion testable="true">sprk_plannedstart and sprk_plannedend render date AND time from the metadata Format (DateAndTime mode), and edit via a Fluent picker (spec criterion 11 / FR-06).</criterion>
+    <criterion testable="true">sprk_eventtype_ref renders and resolves as a LOOKUP via metadata (target primary name sprk_name — no hard-coded target/id/name constants), and its cell opens the OOB picker (FR-15/FR-15a).</criterion>
+    <criterion testable="true">Given an inline edit to any configured field, when committed, then it stages to the form buffer, the form goes dirty with NO PCF re-render flash, and the form's Save persists it (spec criterion 2).</criterion>
+    <criterion testable="true">The toolbar is identical to Matter's — title, sparkle ("No summary yet" from sprk_recordsummary), To Do badge, Notepad badge (spec criterion 3).</criterion>
+    <criterion testable="true">To Do opens SmartTodo filtered to this record; Notepad opens scoped to this record in the 25% × 35% modal (spec criterion 4).</criterion>
+    <criterion testable="true">Negative: malformed layoutJson ({{{) AND absent layoutJson each produce console.warn + derived defaults — never a blank form, never a throw (spec criterion 5).</criterion>
+    <criterion testable="true">Negative: a layoutJson field not present on the form fails loudly on edit with the "Field '…' not on form" throw (spec criterion 6).</criterion>
+    <criterion testable="true">Version footer present (spec criterion 7).</criterion>
+    <criterion testable="true">Bundle ≤250 KB minified and TTI ≤300 ms warm / ≤800 ms cold verified for wave 2 (own measurement or cross-reference to task 060's) (spec criteria 8-9).</criterion>
+    <criterion testable="true">Dark mode + high contrast render correctly with semantic tokens only (ADR-021 / NFR-03).</criterion>
+    <criterion testable="true">notes/rollout-sprk_event.md exists with the criterion checklist, light+dark screenshots, and the wave-2 measurement or its cross-reference.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-25, Success Criteria 1-9 + 11, §9 layout table. Schema traps (live-verified 2026-08-24):
+    primary name is sprk_eventname, NOT sprk_name; sprk_plannedstart/sprk_plannedend are the real DateAndTime
+    pair — scheduledstart/scheduledend/sprk_location do NOT exist (client code referencing them is the
+    out-of-scope Event schema-drift issue in notes/issues/ISSUE-event-schema-drift.md; do not fix it here).
+    sprk_eventtype_ref is a LOOKUP, not an option set — its target uses sprk_name as primary name, which is
+    why metadata resolution (not naming convention) is mandatory. Wave-2 partner: task 060; wave 3 (070)
+    follows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

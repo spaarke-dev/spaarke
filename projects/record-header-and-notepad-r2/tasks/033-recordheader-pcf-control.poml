@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Spaarke.Records.RecordHeader PCF — new control, new RecordHeaderPcf solution</title>
+    <phase>3 Config Resolver + Control</phase>
+    <gate>blocked until 031 is complete (Phase 2 tasks 020-024 and the 001 spike outcome must also already be merged per phase ordering)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include pcf; new control + new solution identity consumed by six entities</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Highest blast radius in the project: brownfield PCF scaffolding under 10 known build/runtime gotchas that each cost R1 a release, integrating five upstream task outputs into one new solution identity</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial by plan section 4 — consumes 031's resolver plus all Phase 1/2 shared-lib outputs; sole owner of the new src/client/pcf/RecordHeader/ tree and toucher of MatterHeaderView.tsx</parallel-reason>
+    <deps>031</deps>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the configuration-driven RecordHeader PCF at src/client/pcf/RecordHeader/ (namespace
+    Spaarke.Records, constructor RecordHeader) in a NEW solution with UniqueName RecordHeaderPcf,
+    generalized from MatterHeader. The manifest keeps boundField/title/showVersion and ADDS
+    layoutJson (usage input, of-type per the task-001 spike outcome). Entity + record are
+    self-detected from context; the generic view consumes the 031 resolver, the Phase 1 renderers,
+    and the Phase 2 hoisted machinery.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in virtual PCF controls on platform libraries (React
+    16.14 + Fluent 9), webpack bundle optimization, and PAC solution packaging. Follow ADRs
+    strictly.
+  </role>
+
+  <goal>
+    A buildable, deployable RecordHeader PCF: npm run build:prod green with bundle at or under
+    250 KB; RecordHeaderPcf solution ZIP packs and imports into spaarkedev1; the control renders
+    from layoutJson config OR derived defaults on any entity form with the full toolbar and
+    version footer v1.1.0; unit tests and ui-tests pass.
+  </goal>
+
+  <context>
+    <background>
+      R2's central deliverable (FR-01, FR-12, NFR-11). One configurable control replaces the
+      withdrawn four-per-entity-PCF plan; adding the header to a new entity becomes a form edit.
+      Owner decision B (reaffirmed 2026-08-22): NEW control identity + one-time Matter re-bind +
+      retire MatterHeaderPcf (Phase 5 tasks 080/081 — NOT this task). This task builds and
+      dev-deploys the control; binding the six production main forms is Phase 5. Every constraint
+      below encodes a failure that cost R1 a release — treat them as load-bearing, not advisory.
+      Read projects/record-header-and-notepad-r1/notes/lessons-learned.md BEFORE any build work.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/pcf/RecordHeader/control/ControlManifest.Input.xml</file>
+      <file role="new">src/client/pcf/RecordHeader/control/index.ts</file>
+      <file role="new">src/client/pcf/RecordHeader/control/RecordHeaderHost.tsx</file>
+      <file role="new">src/client/pcf/RecordHeader/control/RecordHeaderView.tsx</file>
+      <file role="new">src/client/pcf/RecordHeader/control/version.ts</file>
+      <file role="new">src/client/pcf/RecordHeader/package.json</file>
+      <file role="new">src/client/pcf/RecordHeader/tsconfig.json</file>
+      <file role="new">src/client/pcf/RecordHeader/featureconfig.json</file>
+      <file role="new">src/client/pcf/RecordHeader/webpack.config.js</file>
+      <file role="new">src/client/pcf/RecordHeader/__tests__/RecordHeaderView.test.tsx</file>
+      <file role="new">src/client/pcf/RecordHeader/Solution/solution.xml</file>
+      <file role="new">src/client/pcf/RecordHeader/Solution/customizations.xml</file>
+      <file role="new">src/client/pcf/RecordHeader/Solution/pack.ps1</file>
+      <file role="new">src/client/pcf/RecordHeader/Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml</file>
+      <file role="modify">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/ControlManifest.Input.xml</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/MatterHeaderHost.tsx</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/package.json</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/Solution/pack.ps1</file>
+      <file role="canonical-reference">src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/index.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">resolveHeaderConfig + ResolvedHeaderConfig (the view's config input)</dependency>
+      <dependency task="001" status="pending">layoutJson ergonomics spike outcome — decides the manifest of-type (Multiple vs SingleLine.Text); recorded in projects/record-header-and-notepad-r2/notes/</dependency>
+      <dependency task="015" status="pending">fields barrel: DateField/NumberField/BooleanField/OptionSetField/TextField/TextareaField + contract tests</dependency>
+      <dependency task="022" status="pending">useRecordHeaderFields — hoisted form-buffer staging, pending buffer, projectLookup, unified throwing path</dependency>
+      <dependency task="023" status="pending">OOB lookup grid cell (Xrm.Utility.lookupObjects) owning its own span</dependency>
+      <dependency task="024" status="pending">Toolbar slot auto-hide + Agreement parent-map entries</dependency>
+      <dependency task="032" status="pending">RecordHeaderShell columns prop (skeleton parity with configured columns)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">NO apostrophes in ANY manifest string attribute value (display-name-key, description-key, and every other attribute) in ControlManifest.Input.xml AND Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml — pac solution import fails with noAposStringType (pcf-deploy SKILL.md:447; cost R1 a release). Apostrophes in XML comments are fine.</constraint>
+    <constraint source="project">package.json MUST define BOTH prebuild AND prebuild:prod as node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js (copy MatterHeader/package.json lines 6 and 8 verbatim) — binding since 2026-07-07 (NFR-11). build:prod MUST invoke pcf-scripts build --buildMode production.</constraint>
+    <constraint source="project">Every @spaarke/ui-components import in this PCF uses deep dist/* paths (e.g. @spaarke/ui-components/dist/components/RecordHeader, /dist/hooks, /dist/utils/xrmContext). The shared lib has NO exports field; the top-level barrel drags mammoth (~1.6 MB vs ~40 KB). Do NOT "clean up" to barrel imports anywhere in this control (NFR-08; DEF-06 is out of scope).</constraint>
+    <constraint source="project">Delete the stale comment at MatterHeaderView.tsx lines 53-62 claiming the shared lib has an exports map — it does not (the comment survived the task-063 revert) — and do NOT carry any version of that comment into RecordHeaderView.tsx. This is the ONLY MatterHeader change in this task; MatterHeaderPcf stays live until task 081.</constraint>
+    <constraint source="project">RecordHeaderHost.tsx MUST wrap the view in its own FluentProvider — Fluent v9 portals (Popover/Menu/Dialog) mount outside the PCF subtree and platform-library theming does NOT reach them (pcf-build-scaffold gotcha 6). Mirror MatterHeaderHost.tsx including its dark-mode/theme handling; do not rely on platform auto-theming for portals.</constraint>
+    <constraint source="ADR-020">Version sync is FIVE locations, not four: control/ControlManifest.Input.xml, control/version.ts, Solution/solution.xml, Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml, Solution/pack.ps1. Start at 1.1.0 (spec assumption — new identity carrying R1's feature set; confirm and record in notes). The footer renders the version.</constraint>
+    <constraint source="project">Build deployable bundles with npm run build:prod ONLY — npm run build is dev mode, no tree-shaking, 5-10x bundle bloat (FAILURE-MODES AP-1). Bundle at or under 250 KB minified (NFR-02; R1 baseline 62.4 KiB) — measure and record the byte size in task notes.</constraint>
+    <constraint source="project">Manifest for THIS control: control-type virtual; namespace Spaarke.Records, constructor RecordHeader; platform-library React 16.14.0 + Fluent 9.46.2; feature-usage WebAPI + Utility + Navigation; boundField (SingleLine.Text, usage bound, required true), title (SingleLine.Text, input), showVersion (TwoOptions, input, default true) as in MatterHeader; PLUS layoutJson (usage input, required false, of-type EXACTLY per the recorded task-001 spike outcome).</constraint>
+    <constraint source="project">FR-12 self-detection in control/index.ts: entity from context.mode.contextInfo.entityTypeName and record from .entityId, falling back to context.page.entityTypeName / context.page.entityId. Both surfaces are absent from @types/powerapps-component-framework — use the established type-cast idiom (VisualHostRoot.tsx:246-253 primary; TrackingFieldTrio/index.ts:337-348 fallback). NO entity logical name may be compiled into the control source.</constraint>
+    <constraint source="project">RecordHeaderView.tsx contains NO save/search machinery: field writes, pending-buffer display resolution, and lookup projection come ONLY from the hoisted useRecordHeaderFields hook (022); editable lookups ONLY via the 023 OOB-picker cell; toolbar ONLY via useRecordHeaderToolbarActions (024); config ONLY via resolveHeaderConfig (031); shell via RecordHeaderShell with the resolved columns value (032); renderers via the fields barrel (015). MUST NOT fork or re-implement any shared primitive in the PCF layer.</constraint>
+    <constraint source="project">Scaffold hygiene from pcf-build-scaffold.md: copy tsconfig.json from MatterHeader (do not hand-author — gotcha 4); add ajv ^8.12.0 devDependency (gotcha 5); NO direct @fluentui/react-icons imports in the PCF layer (gotcha 1); keep the manifest/code layout MatterHeader uses (manifest + index.ts in control/, code path attribute index.ts — gotcha 2); featureconfig.json with pcfReactPlatformLibraries on + pcfAllowCustomWebpack on and webpack.config.js with the react-icons sideEffects false rule (bundle triad).</constraint>
+    <constraint source="project">New solution: UniqueName RecordHeaderPcf; solution.xml RootComponent type 66 schemaName sprk_Spaarke.Records.RecordHeader; PCF-only solution (no web resources); pack.ps1 adapted from MatterHeader/Solution/pack.ps1 with lowercase ZIP entry names. Do NOT reuse or modify the MatterHeaderPcf solution.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens exclusively in any styling this task authors (version footer, root container) — zero hex/rgb/hsl; dark + high-contrast must resolve (NFR-03).</constraint>
+    <constraint source="ADR-022">React 16/17-safe throughout: no use(), no useSyncExternalStore, no createRoot (NFR-04).</constraint>
+    <constraint source="project">NFR-05/NFR-06/NFR-09 scope: all Dataverse I/O via Xrm.WebApi / Xrm.Page (through the shared hooks/services); no @spaarke/auth, no raw fetch to the Dataverse API, nothing added to src/server/api/Sprk.Bff.Api, and no literal record GUIDs / environment names in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/pcf-build-scaffold.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>.claude/patterns/ui/record-header-composition.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="MatterHeader as scaffold source" location="src/client/pcf/MatterHeader/">
+        The control being generalized: copy folder layout, package.json (incl. prebuild guards +
+        build:prod flag + ajv), tsconfig.json, featureconfig.json, webpack.config.js, Solution/
+        structure and pack.ps1; rename the identity to Spaarke.Records.RecordHeader / solution
+        RecordHeaderPcf. The visual anchor for the generic view is MatterHeaderView.tsx's
+        composition (shell + FieldGrid + renderers + version footer) — same look, config-driven
+        field list.
+      </pattern>
+      <pattern name="Entity self-detection type-cast" location="src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx">
+        Lines 246-253: contextInfo idiom. TrackingFieldTrio/index.ts:337-348 shows the
+        context.page fallback surface. Both require a cast; neither is typed.
+      </pattern>
+      <pattern name="FluentProvider portal wrap" location="src/client/pcf/MatterHeader/control/MatterHeaderHost.tsx">
+        The host wrapper this control mirrors (pcf-build-scaffold gotcha 6; VisualHostHost is the
+        original canonical reference, incl. ThemeProvider port for dark mode).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read pcf-build-scaffold.md, R1 lessons-learned.md, and the recorded task-001 spike outcome. If the spike outcome is missing or contradicts the manifest plan, STOP (escalation trigger 1).</step>
+    <step order="1">Scaffold src/client/pcf/RecordHeader/ by copying the MatterHeader folder structure (control/, Solution/, __tests__/, package.json, tsconfig.json, featureconfig.json, webpack.config.js, jest configs); rename all identity strings to Spaarke.Records.RecordHeader / RecordHeaderPcf; set version 1.1.0 everywhere it appears.</step>
+    <step order="2">Author control/ControlManifest.Input.xml: boundField/title/showVersion carried over, layoutJson added with the spike-decided of-type; verify by grep that no manifest attribute value contains an apostrophe.</step>
+    <step order="3">Verify package.json: prebuild + prebuild:prod ensure-dist-fresh lines, build:prod with --buildMode production, ajv ^8.12.0 devDependency.</step>
+    <step order="4">Implement control/index.ts: standard virtual-control lifecycle; FR-12 self-detection (contextInfo primary, context.page fallback, type-cast idiom); pass entityName, recordId, title, showVersion, and the raw layoutJson string to the host.</step>
+    <step order="5">Implement control/RecordHeaderHost.tsx: FluentProvider wrap mirroring MatterHeaderHost (incl. theme handling), rendering RecordHeaderView.</step>
+    <step order="6">Implement control/RecordHeaderView.tsx: build the resolver's metadata input from the form/metadata surface established by Phase 2 (per the 022 hook contract), call resolveHeaderConfig, render RecordHeaderShell (columns from resolved config) + FieldGrid + per-renderer cells (text/textarea/date/number/boolean/optionset via the fields barrel; lookup via the 023 cell), toolbar via useRecordHeaderToolbarActions, version footer from version.ts. All shared-lib imports deep-path dist/*.</step>
+    <step order="7">Delete the stale exports-map comment at MatterHeaderView.tsx lines 53-62 (no other MatterHeader change).</step>
+    <step order="8">Author Solution/: solution.xml (UniqueName RecordHeaderPcf, RootComponent type 66), customizations.xml, [Content_Types].xml, pack.ps1; confirm the 5-location version sync (1.1.0).</step>
+    <step order="9">Write/adapt __tests__/RecordHeaderView.test.tsx from the MatterHeader test as a config-driven suite (valid layoutJson, absent layoutJson, malformed layoutJson paths).</step>
+    <step order="10">Run npm run build:prod; record the bundle byte size in notes and verify at or under 250 KB; run npm test; both green.</step>
+    <step order="11">Pack the solution ZIP via pack.ps1 and import into spaarkedev1 via the pcf-deploy skill; verify with pac solution list. Bind the control on a dev/test form for verification ONLY — the six production main-form bindings are Phase 5 (tasks 050-080).</step>
+    <step order="12">Execute the ui-tests below (task-execute Step 9.7); record results.</step>
+    <step order="13">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="14">Document deviations + the confirmed starting version + bundle/TTI measurements in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the task-001 spike outcome contradicts the manifest plan — the recorded of-type decision is missing, or the spike found that NEITHER of-type Multiple NOR SingleLine.Text presents a usable editor / survives an export-import round-trip — STOP and escalate per CLAUDE.md section 6. Do NOT invent a third configuration mechanism (config table, bound column, web resource).</trigger>
+    <trigger>If the hoisted machinery contracts from tasks 022/023 do not expose what the generic view needs (e.g. the hook cannot stage a renderer's value type, or the lookup cell cannot take metadata-resolved targets), STOP and escalate rather than re-implementing save/search machinery in the PCF layer — forking shared primitives is a spec MUST NOT.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>src/client/pcf/MatterHeader/ — the shipped v1.0.20 per-entity control this task generalizes (grep: the only RecordHeader-composition PCF in src/client/pcf/).</existing>
+    <extension>This IS the extension: the same control generalized under a clean identity, with the old one retired at task 081. Owner decision B (reaffirmed 2026-08-22) chose new-identity + one-time Matter re-bind over renaming in place; a pure in-place extension would freeze the Matter-flavoured schema name into every future entity's form XML.</extension>
+    <cost-of-doing-nothing>Without the configurable control, the withdrawn plan returns: four more per-entity PCF solutions to version, deploy, bind and fix in parallel, with ~82 lines of form-buffer/lookup machinery duplicated 4x (spec section 11), and every future entity needs a code change + build + new solution instead of a form edit. The field payload stays compiled in (FR-01 cost).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Derived defaults render (no layoutJson)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={test-entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a record of the dev-bound test entity with the layoutJson property left blank</step>
+        <step>Verify the header renders: primary name field first (span 2) plus up to 4 further fields, toolbar with title, version footer v1.1.0</step>
+        <step>Check the console for JavaScript errors</step>
+      </steps>
+      <expected>Control renders tier-2 derived defaults with zero console errors — never blank</expected>
+    </test>
+    <test name="Configured layout renders (valid layoutJson)">
+      <steps>
+        <step>In the form designer, paste a valid v1.0 layout (title, columns, 4+ fields with spans) into layoutJson; save + publish</step>
+        <step>Reload the record; verify fields, order, spans, and title match the pasted config</step>
+        <step>Verify the loading skeleton shown before data resolves matches the configured column count (no 3-column flash for a columns 2 layout)</step>
+      </steps>
+      <expected>Rendered layout matches the configuration exactly, including skeleton column parity</expected>
+    </test>
+    <test name="Malformed layoutJson degrades (FR-03/NFR-10)">
+      <steps>
+        <step>Set layoutJson to {{{ ; save + publish; reload the record</step>
+        <step>Verify the header renders derived defaults and one console.warn appears (no thrown error, no blank section)</step>
+      </steps>
+      <expected>console.warn + derived defaults; the form is never blanked</expected>
+    </test>
+    <test name="Form-buffer edit stages without re-render flash (FR-13)">
+      <steps>
+        <step>Edit a text field inline and commit with Enter</step>
+        <step>Verify the form's Save button activates (dirty) and the header does NOT flash its loading skeleton</step>
+        <step>Save the form; verify the value persists</step>
+      </steps>
+      <expected>Edit stages to the form buffer; no PCF re-render flash; form Save commits</expected>
+    </test>
+    <test name="Missing-field config fails loudly (FR-14)">
+      <steps>
+        <step>Configure layoutJson naming a field that exists on the entity but is NOT on the form; reload</step>
+        <step>Attempt an inline edit on that cell</step>
+      </steps>
+      <expected>The edit surfaces the loud thrown error (Field not on form); the input is never silently dropped</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in model-driven app settings and reload</step>
+        <step>Verify card background, text, skeleton, and the sparkle/To Do/Notepad popover surfaces adapt (no white-on-dark blocks, no black-on-light text)</step>
+        <step>Verify portal-rendered popovers have proper chrome (background, shadow, radius) — the FluentProvider wrap is working</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens in both themes, including portal surfaces</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build:prod — NEVER npm run build for deployable bundles) and run tests</tool>
+    <tool name="pac">Solution pack/import/list via the pcf-deploy skill</tool>
+    <tool name="terminal">pack.ps1, bundle-size measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RecordHeader/control/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RecordHeader/control/index.ts</output>
+    <output type="code">src/client/pcf/RecordHeader/control/RecordHeaderHost.tsx</output>
+    <output type="code">src/client/pcf/RecordHeader/control/RecordHeaderView.tsx</output>
+    <output type="code">src/client/pcf/RecordHeader/control/version.ts</output>
+    <output type="code">src/client/pcf/RecordHeader/Solution/ (solution.xml, customizations.xml, pack.ps1, Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml)</output>
+    <output type="code">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx (stale comment deletion only)</output>
+    <output type="test">src/client/pcf/RecordHeader/__tests__/RecordHeaderView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build:prod exits 0; bundle.js is at or under 250 KB minified; the measured byte size and the diff vs the R1 62.4 KiB baseline are recorded in task notes.</criterion>
+    <criterion testable="true">Grep of ControlManifest.Input.xml and Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml finds ZERO apostrophes inside attribute values.</criterion>
+    <criterion testable="true">package.json contains prebuild AND prebuild:prod ensure-dist-fresh entries and a build:prod script invoking pcf-scripts build --buildMode production; ajv ^8.12.0 is a devDependency.</criterion>
+    <criterion testable="true">Grep of src/client/pcf/RecordHeader/ shows every @spaarke/ui-components import uses a dist/* deep path and no direct @fluentui/react-icons import exists in the PCF layer.</criterion>
+    <criterion testable="true">Negative: grep of src/client/pcf/RecordHeader/control/ finds no compiled-in entity logical name (no sprk_matter, sprk_project, etc.) and no literal record GUID or environment name.</criterion>
+    <criterion testable="true">control/index.ts reads entityTypeName/entityId from context.mode.contextInfo with a context.page fallback, both via the type-cast idiom.</criterion>
+    <criterion testable="true">The manifest carries boundField (bound, required), title, showVersion, and layoutJson (usage input) whose of-type matches the recorded task-001 spike outcome.</criterion>
+    <criterion testable="true">Version 1.1.0 is present and identical in all FIVE locations (ControlManifest.Input.xml, version.ts, solution.xml, Solution ControlManifest.xml, pack.ps1) and renders in the footer.</criterion>
+    <criterion testable="true">The solution ZIP packs via pack.ps1 and imports into spaarkedev1; pac solution list shows RecordHeaderPcf; the control appears in the form-designer gallery.</criterion>
+    <criterion testable="true">RecordHeaderView.tsx contains no direct Xrm.Page attribute access and no OData search-builder code — machinery only via the 022 hook and 023 cell (code inspection at review).</criterion>
+    <criterion testable="true">MatterHeaderView.tsx lines 53-62 stale exports-map comment is deleted with no functional MatterHeader change, and no equivalent comment exists in RecordHeaderView.tsx.</criterion>
+    <criterion testable="true">Unit tests pass (valid/absent/malformed layoutJson paths) and all six ui-tests above executed with results recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-01, FR-12, NFR-01/02/08/09/11; design 5.1-5.4, 6.3. TTI budget (NFR-01: 300 ms
+    warm / 800 ms cold) is formally measured per Phase 5 wave, but capture an initial browser perf
+    trace here and note it. The six production main-form bindings, Matter parity QA, and
+    MatterHeaderPcf retirement are Phase 5 (050-081) — explicitly OUT of this task's scope. Do
+    not add sparkle/summaryField wiring here — that is task 034, layered on this view.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist. Invoke pcf-deploy for the solution import step.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Bind Spaarke Record Header to the Project main form + acceptance QA</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable when task 034 is ✅ (control + sparkle shipped and imported)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker configuration + QA task — no .cs/.ts/.tsx files are modified. The pcf tag denotes the control under test, not code implementation, so the tag-based FULL trigger is deliberately overridden per plan.md Phase 5 ("Form binding is operator/maker work, not agent work"). task-execute may re-evaluate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified configuration + QA run following the proven R1 maker recipe; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment — sequential human form edits + publishes; not agent-automatable. Wave 1 pairs with task 051 but a single operator executes them one after another.</parallel-reason>
+    <deps>034</deps>
+    <tags>pcf, dataverse, config, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Bind the new Spaarke Record Header PCF to the Project (sprk_project) main form with the owner-confirmed
+    layoutJson, then run the full per-form acceptance QA (spec Success Criteria 1-9) including the wave-1
+    bundle + TTI measurement. This is the first of two wave-1 rollout entities (with task 051).
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse form-designer access to spaarkedev1. Follow ADRs strictly.
+    Expertise: model-driven-app form configuration, PCF control binding, browser-based UI QA.
+  </role>
+
+  <goal>
+    The "Project main form" (5aa00242-5212-f111-8342-7ced8d1dc988) renders the Spaarke Record Header with the
+    configured 6-field layout; all 9 per-form success criteria pass; QA evidence + wave-1 bundle/TTI
+    measurements are recorded in projects/record-header-and-notepad-r2/notes/rollout-sprk_project.md.
+  </goal>
+
+  <context>
+    <background>
+      R2 ships ONE configuration-driven RecordHeader control (spec FR-25); rollout is staged per entity, wave 1
+      = Project + Work Assignment. Project exercises the date, boolean and lookup renderers. Schema gotcha
+      (live-verified 2026-08-24): sprk_project's PRIMARY NAME attribute is sprk_projectnumber — NOT
+      sprk_projectname, though that also exists as a plain String. The layout below is the owner-confirmed
+      shipped default (design.md §9); makers may tune it later without a code change.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/rollout-sprk_project.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="034" status="pending">Completed RecordHeader PCF (layoutJson manifest property, sparkle on sprk_recordsummary) built, packed and importable as the RecordHeaderPcf solution</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-25 scope: bind ONLY the "Project main form" 5aa00242-5212-f111-8342-7ced8d1dc988 — NEVER the legacy "Information" form.</constraint>
+    <constraint source="project">This task modifies form configuration and QA notes only. If QA surfaces a code defect in the control or shared library, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6 so it routes to the owning implementation task.</constraint>
+    <constraint source="ADR-021">All QA visual checks in this task verify Fluent v9 semantic-token theming — dark mode and high contrast must render with no hard-coded colors (NFR-03).</constraint>
+    <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE, not deferred: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold. One measurement may be shared across wave-1 tasks 050+051 — cross-reference it in both notes files.</constraint>
+    <constraint source="project">NFR-07: do not alter the Notepad/SmartTodo launch contracts while QA-ing them — regardingEntity/regardingId and action=openTodos&amp;regardingType=…&amp;regardingId=… are external API.</constraint>
+    <constraint source="project">NFR-09: the form GUID above is environment-specific and acceptable in acceptance criteria and notes only — it must not be embedded in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF form binding + rollout QA</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maker binding recipe (proven in R1)" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">
+        Follow this sequence exactly, substituting Project's form/field names. Design.md §5.1.2 is the R2-updated version of the same recipe.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify task 034 is ✅ and the RecordHeaderPcf solution version to be QA'd is identified.</step>
+    <step order="1">Import + publish the RecordHeaderPcf solution in spaarkedev1 (if not already imported by task 034's deployment), then Publish All Customizations. Verify "Spaarke Record Header" appears in the form designer's Add Control gallery.</step>
+    <step order="2">Verify the layoutJson below against the shipped RecordHeaderConfiguration v1.0 types (task 030 output) before pasting — field names were live-verified 2026-08-25 but the schema shape is owned by code.</step>
+    <step order="3">make.powerapps.com → Solutions → Tables → sprk_project → Forms → "Project main form" (5aa00242-5212-f111-8342-7ced8d1dc988) — NEVER the legacy "Information" form → ⋯ → Edit form → Edit in classic.</step>
+    <step order="4">Click the field the control will replace (sprk_projectnumber, the primary name attribute) → Controls tab → Add Control → "Spaarke Record Header" → Add → tick Web (and Phone/Tablet).</step>
+    <step order="5">Leave layoutJson BLANK first: Save → Publish → open a live Project record and verify tier-2 derived defaults render (spec criterion 5, absent-config path). Then set layoutJson to static value {{{ → Save → Publish → verify console.warn + derived defaults, never blank (malformed path).</step>
+    <step order="6">Set layoutJson to a static value and paste the final JSON:
+{ "_version": "1.0", "title": "Project", "columns": 3,
+  "fields": [
+    { "name": "sprk_projectnumber", "span": 1, "required": true },
+    { "name": "sprk_projectname", "span": 2 },
+    { "name": "sprk_projecttype_ref", "span": 1 },
+    { "name": "sprk_openeddate", "span": 1 },
+    { "name": "sprk_highpriority", "span": 1 },
+    { "name": "sprk_projectdescription", "span": 3 } ] }
+(summaryField omitted deliberately — it defaults to sprk_recordsummary via RECORDSUMMARY_FIELD.) Set Header title / Show version footer (Yes during QA).</step>
+    <step order="7">Delete the section's other raw fields (sprk_projectname, sprk_projecttype_ref, sprk_openeddate, sprk_highpriority, sprk_projectdescription if individually placed) so they do not render twice; keep sprk_projectnumber (invisible behind the PCF). Save → Publish.</step>
+    <step order="8">Run the per-form acceptance QA on a live Project record (ui-tests below), including the loud-failure negative test: temporarily add a real sprk_project field that is NOT on the form (e.g. sprk_closeddate) to the layout, attempt an edit, observe the "Field '…' not on form" throw, then remove it and republish.</step>
+    <step order="9">Wave-1 measurement: bundle bytes of bundle.js after npm run build:prod (NOT npm run build) in the RecordHeader PCF folder; TTI via browser performance trace, cold and warm, on the Project form. Record absolute numbers.</step>
+    <step order="10">Write QA evidence (screenshots light + dark, criterion checklist, measurements) to projects/record-header-and-notepad-r2/notes/rollout-sprk_project.md.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the wave-1 measurement breaches NFR-01/NFR-02 (bundle &gt;250 KB minified, or TTI &gt;300 ms warm / &gt;800 ms cold), STOP the rollout — do not bind the next wave — and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If QA surfaces a code defect in the control or shared library, STOP and escalate rather than patching code inside this configuration task.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Configured layout renders at configured spans">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project&amp;id={record-id}</url>
+      <steps>
+        <step>Open a live Project record on the Project main form</step>
+        <step>Verify the header renders exactly the 6 configured fields at spans 1/2/1/1/1/3 in a 3-column grid</step>
+        <step>Verify sprk_openeddate renders as a locale date, sprk_highpriority as Yes/No, sprk_projecttype_ref as a lookup value</step>
+        <step>Verify the version footer is present and check the console for JavaScript errors</step>
+      </steps>
+      <expected>Layout matches the pasted layoutJson; no console errors; version footer shows the shipped version</expected>
+    </test>
+    <test name="Inline edit stages to the form buffer with no re-render flash">
+      <steps>
+        <step>Edit sprk_projectname inline and commit with Enter</step>
+        <step>Verify the form's Save button activates (dirty) with NO PCF re-render or loading-skeleton flash</step>
+        <step>Toggle sprk_highpriority via the Switch; open the sprk_openeddate Fluent date picker and pick a date; click the sprk_projecttype_ref cell and verify the OOB Xrm.Utility.lookupObjects picker opens</step>
+        <step>Click the form's own Save and refresh the page</step>
+      </steps>
+      <expected>All edits persist after form Save; no flash during staging; lookup cell opens the native picker</expected>
+    </test>
+    <test name="Toolbar parity + launch contracts">
+      <steps>
+        <step>Verify the toolbar is identical to Matter's: title, sparkle, To Do badge, Notepad badge</step>
+        <step>Click the sparkle — popover renders "No summary yet" (sprk_recordsummary exists but is unpopulated)</step>
+        <step>Click To Do — SmartTodo opens filtered to this record (action=openTodos&amp;regardingType=sprk_project&amp;regardingId=…)</step>
+        <step>Click Notepad — opens scoped to this record in the 25% × 35% modal</step>
+      </steps>
+      <expected>All four toolbar elements present and functional; launch contracts unchanged (NFR-07)</expected>
+    </test>
+    <test name="Config degradation (negative paths)">
+      <steps>
+        <step>With layoutJson absent: header renders tier-2 derived defaults (primary name first, span 2)</step>
+        <step>With layoutJson = {{{ : console.warn logged, derived defaults render, form never blanks, nothing throws</step>
+        <step>With a layout field not on the form: attempted edit throws "Field '…' not on form" — the input is never silently dropped</step>
+      </steps>
+      <expected>Both bad-config paths degrade gracefully (NFR-10); the missing-field path fails loudly (FR-14)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the model-driven app settings</step>
+        <step>Verify header background, text, field renderers, sparkle popover and modals adapt (no white-on-dark, no black-on-light)</step>
+        <step>Verify icons use currentColor; spot-check high contrast mode</step>
+      </steps>
+      <expected>All colors come from Fluent v9 semantic tokens per ADR-021 / NFR-03</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com classic form designer + live-record QA (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">Solution import/publish verification (pac solution list)</tool>
+    <tool name="npm">Bundle measurement via npm run build:prod in the RecordHeader PCF folder</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rollout-sprk_project.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the published Project main form, when a live Project record opens, then the header renders the 6 configured fields at spans 1/2/1/1/1/3 (spec criterion 1).</criterion>
+    <criterion testable="true">Given an inline edit to any configured field, when committed, then it stages to the form buffer, the form goes dirty with NO PCF re-render flash, and the form's Save persists it (spec criterion 2).</criterion>
+    <criterion testable="true">The toolbar is identical to Matter's — title, sparkle, To Do badge, Notepad badge (spec criterion 3); sparkle shows "No summary yet" from sprk_recordsummary.</criterion>
+    <criterion testable="true">To Do opens SmartTodo filtered to this record; Notepad opens scoped to this record in the 25% × 35% modal (spec criterion 4).</criterion>
+    <criterion testable="true">Negative: malformed layoutJson ({{{) AND absent layoutJson each produce console.warn + derived defaults — never a blank form, never a throw (spec criterion 5).</criterion>
+    <criterion testable="true">Negative: a layoutJson field not present on the form fails loudly on edit with the "Field '…' not on form" throw (spec criterion 6).</criterion>
+    <criterion testable="true">Version footer present (spec criterion 7).</criterion>
+    <criterion testable="true">Bundle ≤250 KB minified, measured this wave via npm run build:prod (spec criterion 8 / NFR-02).</criterion>
+    <criterion testable="true">TTI ≤300 ms warm / ≤800 ms cold, measured this wave via browser perf trace (spec criterion 9 / NFR-01).</criterion>
+    <criterion testable="true">Dark mode + high contrast render correctly with semantic tokens only (ADR-021 / NFR-03).</criterion>
+    <criterion testable="true">notes/rollout-sprk_project.md exists with the criterion checklist, light+dark screenshots, and the wave-1 bundle/TTI numbers.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-25 (binding targets), Success Criteria 1-9, §9 layout table. Primary-name gotcha: sprk_projectnumber
+    is the primary name attribute of sprk_project (sprk_projectname is a plain String that also exists) — the layout
+    deliberately shows both. sprk_project has no sprk_description; the Memo field is sprk_projectdescription.
+    sprk_openeddate is DateOnly. The classic designer is the R1-proven path but is a working preference, not a
+    verified platform constraint — the modern designer may be used if it binds cleanly. Wave-1 partner: task 051;
+    soak before wave 2 (060+061) begins.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

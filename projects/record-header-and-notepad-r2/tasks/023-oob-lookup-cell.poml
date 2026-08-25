@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>OOB lookup cell — editable lookups open Xrm.Utility.lookupObjects; retire the custom type-ahead from the header path</title>
+    <phase>2 Metadata + Machinery</phase>
+    <gate>blocked (deps 020, 022)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include 'pcf' and modifies .ts/.tsx code files — Step 3.5.5 code-implementation trigger</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component extension with an explicit canonical reference to copy (CommunicationActionsApp.tsx:405-413 lookupObjects call) and an unchanged write path (task 022's saveLookup)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial after 020 (metadata targets) and 022 (saveLookup write path); edits hooks/useRecordHeaderFields.ts created by 022.</parallel-reason>
+    <deps>020, 022</deps>
+    <tags>pcf, fluent-ui, react, unit-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the custom inline type-ahead in the record-header path with the OOB Dataverse picker (FR-15, FR-15a): extend the display-only `RecordHeader/fields/LookupField.tsx` with an edit mode that opens `Xrm.Utility.lookupObjects({ entityTypes: [Targets[0]], allowMultiSelect: false })` on click — proven at `src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx:405-413`. The returned `{ id, name, entityType }` IS already the form-buffer `setValue` payload, so the write path (task 022's `saveLookup`) is unchanged. The cell owns its own `span` (R1 hand-rolled a wrapper `div` at `MatterHeaderView.tsx:290-309` because the editable top-level `LookupField` has no `span` prop — the extended renderer needs no wrapper). This DELETES the custom OData `$filter`/`$top=10` search builder from the header path.</prompt>
+  <role>SPAARKE platform developer. Fluent UI v9 field renderers inside virtual PCF platform-library constraints; Xrm.Utility.lookupObjects. Follow ADRs strictly.</role>
+  <goal>`RecordHeader/fields/LookupField.tsx` supports an editable mode: current value displayed in the cell; click opens the native lookup picker; selection flows to `onSave` as `{ id, name, entityType }` for form-buffer staging; read-only mode (no `onSave`) behaves exactly as today. No OData lookup-search builder exists anywhere in the shared RecordHeader path. Unit tests + shared-lib build green.</goal>
+
+  <context>
+    <background>Spec FR-15/FR-15a (added 2026-08-25). R1's editable lookup was a hand-rolled type-ahead (`components/LookupField/LookupField.tsx`) fed by a custom OData `contains()` `$filter` + `$top=10` search builder in `MatterHeaderView.searchLookup` (lines 198-214) driven by the hard-coded `LOOKUP_META` constants. R2 replaces all of it in the header path with the platform's own picker: users get Records / Recent records, "+ New" and Advanced for free, and zero custom search code remains to maintain. Targets come from metadata via task 020 (`EntityAttributeMetadata.targets`), which is what deletes `LOOKUP_META` from the new path (FR-15). Note the FR-15a caveat: "+ New" opens a quick-create flyout only when the TARGET entity has quick-create enabled and a published Quick Create form; that is Dataverse config on tables R2 does not touch — explicitly out of scope, do not chase it.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/LookupField.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/__tests__/LookupField.test.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">`EntityAttributeMetadata.targets` — supplies `Targets[0]` for `entityTypes`</dependency>
+      <dependency task="022" status="pending">`useRecordHeaderFields.saveLookup(name, item, entityType)` — the unchanged write path the picked value flows into</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-15a">The editable cell opens `Xrm.Utility.lookupObjects` with `entityTypes: [targets[0]]` and `allowMultiSelect: false` — copy the call shape from CommunicationActionsApp.tsx:405-413 (including `defaultEntityType`). Do NOT build any OData search: no `retrieveMultipleRecords` with `contains()` filters, no `$top=10`, no debounce — the shared RecordHeader components/hooks must contain zero lookup-search query code after this task.</constraint>
+    <constraint source="FR-15a" scope="read-only mode">When no save handler is supplied (or `disabled` is true), `LookupField` renders and behaves EXACTLY as today — display-only, click navigates to the record via `Xrm.Navigation.navigateTo`. Existing consumers compile and render unchanged (all new props optional).</constraint>
+    <constraint source="project" scope="this task">Do NOT modify or delete the top-level editable `components/LookupField/LookupField.tsx` type-ahead and do NOT modify `MatterHeaderView.tsx` — the old control keeps its path until retirement (task 081). "Deletes the search builder from the header path" means the NEW shared path never contains one, not that R1 files are edited here.</constraint>
+    <constraint source="FR-10">The extended renderer keeps the renderer-contract conventions it already follows: the component applies its own `gridColumn: span N` (no wrapper div needed by consumers), em-dash for empty values, `editable = save handler present &amp;&amp; disabled !== true`.</constraint>
+    <constraint source="ADR-021">All new visual states (editable affordance, hover/focus on the clickable cell) use Fluent v9 semantic tokens exclusively — zero hex/rgb/hsl; verify in dark mode.</constraint>
+    <constraint source="ADR-022">React 16/17-safe; icons only via patterns already proven in this file (direct `@fluentui/react-icons` imports are OK inside the shared lib per pcf-build-scaffold §1 — but verify any NEW icon exists in `@fluentui/react-icons@2.0.331` before importing).</constraint>
+    <constraint source="NFR-05">Xrm access via the `utils/xrmContext.ts` walker (`getXrm()`), matching this component's existing `navigateTo` precedent. Extend the `XrmUtility` interface there with an optional `lookupObjects` member rather than casting to `any` at the call site.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOB lookup picker in shared field renderer</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/pcf-build-scaffold.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="lookupObjects call shape (copy this)" location="src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx">Lines 405-424: cross-frame Xrm resolution, `lookupObjects({ entityTypes: [entityType], defaultEntityType: entityType, allowMultiSelect: false })`, empty-result guard, and brace-strip + lowercase normalization of the returned id (line 420) — normalize the same way so pending values compare consistently with `useRecordFieldValues` projections.</pattern>
+      <pattern name="Visual anchor — the component being extended" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/LookupField.tsx">Mirror its existing label typography, valueRow surface, empty-state, and token usage exactly; the edit mode adds an interaction, not a new look.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL FULL per CLAUDE.md §8; update current-task.md.</step>
+    <step order="1">In `utils/xrmContext.ts`, extend the `XrmUtility` interface with optional `lookupObjects(options): Promise` typed structurally (entityTypes/defaultEntityType/allowMultiSelect in; array of `{ id, name, entityType }` out).</step>
+    <step order="2">Extend `ILookupFieldProps` with optional `targets?: string[]`, `onSave?: (item: ILookupFieldValue | null) =&gt; void | Promise&lt;void&gt;`, and `disabled?: boolean`. Editable when `onSave` is a function, `disabled !== true`, and `targets` is non-empty.</step>
+    <step order="3">Implement edit mode: click opens the picker per the canonical call shape with `entityTypes: [targets[0]]`; on selection, normalize the id (strip braces, lowercase) and invoke `onSave({ id, name, entityType })`; on cancel/empty result, do nothing (no `onSave(null)` — clearing is not staged by cancel). Read-only mode keeps the existing navigateTo behavior untouched.</step>
+    <step order="4">Confirm the write path needs NO change: consumers wire `onSave` to task 022's `saveLookup(fieldName, item, entityType)` — document the wiring in the component JSDoc with an example. If a small picker-launch helper is cleaner, put it in `useRecordHeaderFields.ts` (hooks layer), never a new file.</step>
+    <step order="5">Add/extend unit tests for the renderer: editable mode invokes `lookupObjects` with `entityTypes: [targets[0]]` + `allowMultiSelect: false`; selection calls `onSave` with the normalized payload; cancel calls nothing; missing/empty `targets` renders read-only; read-only snapshot unchanged.</step>
+    <step order="6">Grep the shared RecordHeader path (`components/RecordHeader/**`, `hooks/useRecordHeaderFields.ts`) to prove zero occurrences of `$filter`, `contains(`, or `$top=10` lookup-search code.</step>
+    <step order="7">Build the shared lib and run its full test suite; green.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live `lookupObjects` result payload differs from `{ id, name, entityType }` (so it is NOT directly the form-buffer setValue payload), or if a rollout header lookup carries multiple Targets such that `entityTypes: [Targets[0]]` would hide a legitimate target, STOP and escalate per CLAUDE.md §6 rather than adapting the contract or widening entityTypes on your own judgment.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <!-- Executable once the RecordHeader control is bound to a form (task 033 + Phase 5 waves); recorded here per Step 3.65 so task-execute Step 9.7 / the rollout tasks can run them. -->
+    <test name="Editable lookup opens the OOB picker">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={record-id}</url>
+      <steps>
+        <step>Open a record whose header layout includes an editable lookup (e.g. Matter Type)</step>
+        <step>Click the lookup cell's value area</step>
+        <step>Verify the NATIVE Dataverse lookup dialog opens showing Records / Recent records, "+ New" and "Advanced" affordances (not an inline dropdown)</step>
+        <step>Select a record and verify the cell shows the selection and the form's Save button activates (dirty), with no loading-skeleton flash</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>OOB picker opens; selection stages to the form buffer; no custom type-ahead dropdown appears; no console errors</expected>
+    </test>
+    <test name="Cancel stages nothing">
+      <steps>
+        <step>Click an editable lookup cell, then Cancel the picker</step>
+        <step>Verify the displayed value is unchanged and the form did not go dirty from this interaction</step>
+      </steps>
+      <expected>Cancel is a no-op — no staged edit, no cleared value</expected>
+    </test>
+    <test name="Read-only lookup unchanged">
+      <steps>
+        <step>Click a read-only lookup cell's link</step>
+        <step>Verify navigation to the target record (existing display-only behavior)</step>
+      </steps>
+      <expected>Read-only cells still navigate; no picker opens</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify the lookup cell surface, label, hover/focus states and empty em-dash adapt (no white-on-dark, no black-on-light)</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors come from Fluent UI v9 semantic tokens per ADR-021 in both themes</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) and run tests (`npm test`) in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/LookupField.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/__tests__/LookupField.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `targets` + `onSave` props, when the cell is clicked, then `Xrm.Utility.lookupObjects` is invoked with `entityTypes: [targets[0]]` and `allowMultiSelect: false` (unit-tested via mocked Xrm).</criterion>
+    <criterion testable="true">Given the picker resolves with a record, then `onSave` receives `{ id, name, entityType }` with the id brace-stripped and lowercased — the exact form-buffer setValue payload shape.</criterion>
+    <criterion testable="true">Negative: given the picker is cancelled or resolves empty, `onSave` is NOT called and no pending state changes.</criterion>
+    <criterion testable="true">Negative: given no `onSave` (or `disabled: true`, or empty `targets`), the component renders the current display-only behavior — click navigates via `navigateTo`; the picker never opens; existing consumers compile with zero changes.</criterion>
+    <criterion testable="true">The component applies its own `gridColumn: span N` — composing it editable inside `FieldGrid` requires no wrapper div (the MatterHeaderView.tsx:290-309 wrapper pattern is not needed).</criterion>
+    <criterion testable="true">Grep of `src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/` and `hooks/useRecordHeaderFields.ts` finds zero OData lookup-search code (`contains(`, `$top=10` search, type-ahead debounce); `components/LookupField/LookupField.tsx` and `MatterHeaderView.tsx` are untouched by this task's diff.</criterion>
+    <criterion testable="true">Shared-lib build and full test suite green; the UI tests above are recorded for execution at rollout (Phase 5).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-15, FR-15a (incl. the "+ New" quick-create caveat — out of R2 scope), FR-10 contract, spec success criterion 15 (Matter parity explicitly EXCLUDES the lookup interaction — the OOB picker is an intended change, not a regression). If test-environment mocking of `lookupObjects` proves awkward, mirror how existing tests stub `getXrm()` (see `fields/__tests__` and `utils/__tests__/xrmContext.test.ts`). If no `__tests__/LookupField.test.tsx` exists yet for this renderer, create it in the existing `fields/__tests__/` directory (test files accompany the modified surface; ADR-038 KEEP category).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>layoutJson ergonomics spike — Multiple vs SingleLine.Text on the classic form designer</title>
+    <phase>0 Spike + Baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Spike producing a findings doc plus a throwaway test manifest; no shipped code is modified, but the task performs solution import/export operations against spaarkedev1 and has explicit constraints (Step 3.5.5: new-file creation + explicit constraints = STANDARD).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified verification procedure with a binary recorded outcome; no architectural judgment — the SingleLine.Text fallback is already proven by the shipped `title` property, so the spike cannot change the design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 0 gate: the outcome fixes the `layoutJson` `of-type` that task 033 compiles into the RecordHeader manifest, and the procedure needs exclusive operator/maker interaction with the spaarkedev1 form designer. This task and 002 BLOCK all later tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, solution, config, spike</tags>
+    <estimated-effort>2-4 hours (includes operator/maker round-trip)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the layoutJson ergonomics spike from spec.md Unresolved Question 1: determine whether a static
+    `of-type="Multiple"` `usage="input"` manifest property gives makers a usable multi-line editor in the
+    CLASSIC form designer, and whether a ~1KB JSON paste survives designer save AND a solution
+    export/import round-trip without truncation. The outcome decides exactly ONE manifest attribute
+    (the `of-type` of the future `layoutJson` property, FR-01); it cannot change the design — the
+    `SingleLine.Text` fallback is PROVEN by the shipped `title` property. This is an operator/maker
+    collaborative task: the designer interaction steps cannot be fully automated, so pause and hand the
+    operator explicit instructions where noted.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with Dataverse solution-lifecycle and PCF manifest expertise. Follow ADRs
+    strictly. Coordinate with the human operator for form-designer interaction steps.
+  </role>
+
+  <goal>
+    A committed findings document at projects/record-header-and-notepad-r2/notes/spike-layoutjson-ergonomics.md
+    recording, with evidence (screenshots + extracted formXml values), the verdict for `of-type="Multiple"`
+    on all three checks (designer editor usability, save persistence, export/import round-trip) and the
+    final decision: `layoutJson` ships as `Multiple` or as `SingleLine.Text`. All throwaway artifacts
+    cleaned up from spaarkedev1.
+  </goal>
+
+  <context>
+    <background>
+      FR-01 puts the RecordHeaderConfiguration v1.0 JSON on a `layoutJson` manifest property
+      (`usage="input"`, not bound). Spec Owner Clarifications: "JSON-only on the manifest; spike is an
+      ergonomics check, not a gate; SingleLine.Text named as the proven fallback." The shipped
+      MatterHeader `title` property (ControlManifest.Input.xml:20-22, `of-type="SingleLine.Text"`
+      `usage="input"`) proves the fallback persists in form XML and transports in solutions. What is
+      unproven is whether `of-type="Multiple"` gives a nicer multi-line paste/edit experience in the
+      classic designer and survives the same round-trip at ~1KB. plan.md Phase 0 makes this task (with 002)
+      a blocker for everything else.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/ControlManifest.Input.xml</file>
+      <!-- Deliverable (findings doc) is listed under <outputs>; no src/ surface is added by this task. -->
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Throwaway-only: the scratch control and scratch solution built for this spike MUST NOT live under src/ and MUST NOT be committed; build them in a temp/scratch folder. The only committed artifact is the findings doc (plus screenshots under projects/record-header-and-notepad-r2/notes/).</constraint>
+    <constraint source="project">Every string attribute in the scratch manifest (display-name-key, description-key) MUST contain no apostrophes — `pac solution import` fails with noAposStringType (FR-01 note; pcf-deploy SKILL.md:447).</constraint>
+    <constraint source="project">Do NOT modify src/client/pcf/MatterHeader/** or any shipped source file in this task. Task 002 requires the shipped baseline untouched.</constraint>
+    <constraint source="project">Do NOT bind the scratch control to any of the six live-verified production main forms (Matter 4fa382f2-…, Project 5aa00242-…, Work Assignment 7e578eef-…, Invoice 93aa1c69-…, Event eaf22dcb-…, Agreement 59d88274-…). Use a throwaway/dev form on a dev entity and remove the binding during cleanup.</constraint>
+    <constraint source="project">Cleanup is part of done: delete the scratch form binding, publish, and delete the scratch solution + CustomControl from spaarkedev1 before marking the task complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF manifest properties, Dataverse solution round-trip</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/patterns/pcf/pcf-build-scaffold.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="proven input property" location="src/client/pcf/MatterHeader/control/ControlManifest.Input.xml">The `title` property (lines 20-22) is the proven `SingleLine.Text` `usage="input"` shape — the scratch manifest carries one property of this exact shape as the control group, plus one identical except `of-type="Multiple"`.</pattern>
+      <pattern name="build gotchas" location=".claude/patterns/pcf/pcf-build-scaffold.md">If the scratch control fails to build, check gotchas 1-5 (tsconfig copy from SemanticSearchControl, ajv devDep, manifest path) before debugging from scratch.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read spec.md Unresolved Question 1, FR-01, and the Owner Clarifications row "Config mechanism".</step>
+    <step order="1">Prepare a representative ~1KB RecordHeaderConfiguration v1.0 JSON payload (use the spec FR-01..FR-05 shape: `_version`, `columns`, `fields[]` with name/span entries — 5-6 fields is enough to reach ~1KB). Record its exact byte length in the findings doc.</step>
+    <step order="2">Scaffold a minimal throwaway virtual PCF in a scratch folder OUTSIDE src/ (e.g. the session scratchpad), with two static input properties: `spikeMultiple` (`of-type="Multiple"` `usage="input"` `required="false"`) and `spikeSingleLine` (`of-type="SingleLine.Text"` `usage="input"` `required="false"`), mirroring the `title` property shape. No apostrophes in any manifest string. The control body can render a plain div echoing both property values (this also verifies the values reach the control at runtime).</step>
+    <step order="3">Build with `npm run build:prod` (NOT `npm run build`), pack into a clearly-throwaway solution (e.g. SprkLayoutJsonSpike), and import to spaarkedev1 per the pcf-deploy skill.</step>
+    <step order="4">OPERATOR STEP — hand the operator instructions to: bind the scratch control to a throwaway/dev form (never one of the six production main forms), open the CLASSIC form designer, open the control properties panel, and evaluate: does `spikeMultiple` present a usable multi-line editor (visible multiple lines, scrolling, paste-friendly) vs the single-line box of `spikeSingleLine`? Screenshot both.</step>
+    <step order="5">OPERATOR STEP — paste the ~1KB JSON into BOTH properties, save, publish, close, and re-open the designer. Verify both values persist exactly (compare against the source payload; check tail characters for truncation). Record results.</step>
+    <step order="6">Export the scratch solution, unzip, and inspect the form XML: locate both property values and byte-compare each against the source payload. Then re-import the exported zip (`pac solution import --force-overwrite`), re-open the designer, and verify both values again — this is the export/import round-trip check.</step>
+    <step order="7">Verify at runtime (open the form as a user) that the control receives the full property values (the echo div from step 2). Screenshot.</step>
+    <step order="8">Write projects/record-header-and-notepad-r2/notes/spike-layoutjson-ergonomics.md: per-check verdicts with evidence for both of-types, the exact payload used, and the DECISION — `Multiple` if it passed all three checks, otherwise `SingleLine.Text` (fallback, already proven). Note the decision consumer: task 033 (RecordHeader manifest).</step>
+    <step order="9">CLEANUP — remove the scratch control from the dev form, publish, delete the SprkLayoutJsonSpike solution and its CustomControl from spaarkedev1, and delete the scratch build folder. Verify with `pac solution list`.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">If any deviations from this procedure occurred, document them in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If BOTH `Multiple` AND `SingleLine.Text` fail to carry the ~1KB payload through designer save and the export/import round-trip without truncation, STOP and escalate per root CLAUDE.md §6 — that outcome invalidates the JSON-on-manifest configuration mechanism itself (FR-01 / design D-3), which is an owner-level decision, not something to work around in this task.</trigger>
+    <trigger>If the classic form designer is unavailable in spaarkedev1 or the control-properties panel cannot be reached for a static input property, STOP and escalate rather than substituting the modern designer as the verdict basis — FR-01 acceptance is written against the classic designer experience.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Classic designer ergonomics (manual, operator-driven)">
+      <steps>
+        <step>Open the throwaway form in the classic form designer</step>
+        <step>Open the scratch control properties panel</step>
+        <step>Compare the Multiple property editor against the SingleLine.Text editor for multi-line visibility and paste usability</step>
+      </steps>
+      <expected>Verdict + screenshots recorded in the findings doc; a usable multi-line editor for Multiple, or a documented failure that selects the SingleLine.Text fallback</expected>
+    </test>
+    <test name="Round-trip integrity">
+      <steps>
+        <step>Paste the ~1KB JSON, save, publish, re-open designer</step>
+        <step>Export the solution, inspect form XML, re-import, re-open designer</step>
+        <step>Byte-compare the property value against the source payload at each stage</step>
+      </steps>
+      <expected>Value byte-identical at every stage, or the exact truncation point recorded</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the scratch PCF (build:prod)</tool>
+    <tool name="pac">Solution pack/import/export/list against spaarkedev1</tool>
+    <tool name="terminal">File comparison and unzip</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/spike-layoutjson-ergonomics.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a scratch control with `of-type="Multiple"` and `of-type="SingleLine.Text"` static input properties, when it is imported to spaarkedev1 and opened in the classic form designer, then the findings doc records (with screenshots) whether each property presents a usable editor for a multi-line JSON paste.</criterion>
+    <criterion testable="true">Given a ~1KB RecordHeaderConfiguration JSON pasted into each property, when the form is saved, published, and re-opened, then the findings doc records whether each value persisted byte-identically (exact byte length compared).</criterion>
+    <criterion testable="true">Given the scratch solution exported and re-imported, when the property values are inspected in the exported form XML and again in the designer post-import, then the findings doc records byte-identity or the exact truncation observed for each of-type.</criterion>
+    <criterion testable="true">The findings doc states the single decision consumed by task 033 — `layoutJson` `of-type` is `Multiple` or `SingleLine.Text` — with a one-paragraph rationale tied to the recorded evidence.</criterion>
+    <criterion testable="true">Negative: if `Multiple` failed any check, the doc records the exact failure mode and the decision falls back to `SingleLine.Text`; the spike changes nothing else in the design (spec: the outcome decides only the manifest of-type).</criterion>
+    <criterion testable="true">Cleanup verified: `pac solution list` no longer shows the scratch solution; the throwaway form binding is removed and published; `git status` shows no changes outside projects/record-header-and-notepad-r2/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-01, Unresolved Questions bullet 1, Owner Clarifications "Config mechanism". The spike is
+    an ergonomics check, NOT a gate — do not let a Multiple failure stall the project; the fallback is
+    pre-approved. Modern-designer behavior may be observed and noted as color, but the verdict is the
+    classic designer per FR-01 acceptance. Keep the scratch payload free of apostrophes too, so a designer
+    escaping quirk cannot masquerade as truncation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

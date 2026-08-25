@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>TextField — em-dash for empty string, aligning with sibling renderers (FR-11)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-001-002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped shared-library .tsx component that MatterHeaderPcf v1.0.20 consumes (Step 3.5.5: modifies code files = FULL).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped one-condition change to an existing component with a closed criteria set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason></parallel-reason>
+    <deps>001, 002</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Align `TextField` to the em-dash empty-value convention: today it renders `''` as an empty filled box
+    (TextField.tsx:117 checks only null/undefined) while OptionSetField (OptionSetField.tsx:110) and
+    TextareaField already render `''` as `—`. Add the strict `value === ''` case so `null`, `undefined`,
+    and `''` all render `—` (FR-11). This touches a shipped component that Matter consumes, so the parity
+    QA implications must be recorded for task 080.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and React 16/17-safe shared components. Follow ADRs
+    strictly.
+  </role>
+
+  <goal>
+    TextField renders `''` as `—`, its edit-mode draft round-trip still treats the em-dash placeholder as
+    empty (draft opens as `''`, not `'—'`), the number `0` still renders `0`, a new test file
+    __tests__/TextField.emdash.test.tsx passes, all pre-existing tests pass unmodified, and the 080 parity
+    note is written.
+  </goal>
+
+  <context>
+    <background>
+      FR-11: `null`, `undefined` and `''` must all render `—` across ALL renderers. TextField is the one
+      shipped renderer that deviates: `displayValue = value === null || value === undefined ?
+      EMPTY_VALUE_PLACEHOLDER : String(value)` (TextField.tsx:117) lets `''` through as an empty styled
+      box. The edit-state machinery already normalizes the placeholder back to `''` at five sites
+      (draft init :122, external-sync :129, enterEdit :135, commit-compare :141, cancel :160), so the
+      display change composes with editing without further changes — verify, do not rewrite. Matter's
+      shipped v1.0.20 bundle is pre-compiled, so the live form only changes when the R2 control ships —
+      but task 080's parity diff WILL see empty-string fields flip from empty box to `—`, which is
+      intended (FR-11) and must be on record as such.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/TextField.emdash.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Phase 0 gate (spike decision; no direct input to this task)</dependency>
+      <dependency task="002" status="pending">Parity baseline captured — it is the before-picture for the empty-box-to-em-dash change on Matter</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the display-value condition in TextField.tsx (line 117) gains a strict `|| value === ''` — mirror OptionSetField.tsx:110. The check is STRICT equality: the number `0` and the string `'0'` are real values and MUST render; whitespace-only strings (e.g. `' '`) are out of scope and render as-is.</constraint>
+    <constraint source="project">The edit contract is untouched: entering edit on an empty value opens a draft of `''` (never `'—'`); committing an unchanged empty draft is a no-op; typing then clearing back to `''` and committing saves `''` exactly as today. Update the file-header JSDoc contract line (TextField.tsx:13) to say null/undefined/'' render the em-dash.</constraint>
+    <constraint source="ADR-021">Any style touched stays semantic-tokens-only; this task should add zero styles.</constraint>
+    <constraint source="ADR-022">No React-18-only APIs introduced.</constraint>
+    <constraint source="project">Parallel-safety (scope: this task): MUST NOT edit fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx — those are task 015's; group-A tasks racing on them cost R1 real time. New tests go in the NEW file only. (Verified during task authoring: fields.test.tsx contains no TextField empty-string assertion, so no existing test conflicts with this change.)</constraint>
+    <constraint source="project">Parity obligation: append a short note to projects/record-header-and-notepad-r2/notes/matter-parity-baseline.md (created by task 002) titled "FR-11 em-dash change" stating that empty-string-valued Matter fields will show `—` instead of an empty box in the R2 control, and that task 080 must treat this as intended, citing FR-11. If 002 has not created the file yet, create the note as notes/fr11-emdash-parity-note.md instead and say so in TASK-INDEX.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header field renderers; shipped-component compatibility</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="target convention" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx">Line 110 is the exact condition shape to mirror: `value === null || value === undefined || value === ''`.</pattern>
+      <pattern name="edit-state placeholder normalization" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">Lines 122, 129, 135, 141, 160 all map the placeholder back to `''` — after the change, `''`-valued fields flow through these sites identically to null-valued fields. Verify with tests; do not restructure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read TextField.tsx fully, with attention to the five placeholder-normalization sites.</step>
+    <step order="1">Change TextField.tsx:117 to include the strict `value === ''` case; update the JSDoc contract line (:13) accordingly.</step>
+    <step order="2">Author __tests__/TextField.emdash.test.tsx (NEW file) using `renderWithProviders` from `../../../__mocks__/pcfMocks`, covering the acceptance criteria below.</step>
+    <step order="3">Run the FULL suite (`npm test` in src/client/shared/Spaarke.UI.Components) — every pre-existing test (fields.test.tsx, recordHeader.integration.test.tsx) must pass with those files untouched. Run `npm run build`.</step>
+    <step order="4">Write the FR-11 parity note per the constraint (into the 002 baseline doc, or the fallback file).</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any pre-existing test or consumer type-check fails because of the `''` change (i.e. something depends on empty-string rendering as an empty box), STOP and escalate per root CLAUDE.md §6 — a dependency on the old behavior is exactly what FR-11's "align TextField" scoping assumed did not exist, and the operator must rule before the contract changes under a consumer.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Empty-string field shows em-dash (Matter parity, post-migration)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_matter&amp;id={record-id}</url>
+      <steps>
+        <step>Open a Matter record with at least one empty-string text field in the header (executes at Phase 5 task 080 against the R2 control)</step>
+        <step>Verify the empty field shows `—` inside the filled cell, not a blank box</step>
+        <step>Click it, type a value, commit; then clear it back to empty and commit; verify it returns to `—` and the form goes dirty both times</step>
+      </steps>
+      <expected>Em-dash for empty; edit round-trip unaffected; task 080 diff notes this as intended per FR-11</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify the em-dash placeholder is legible in the filled cell in dark mode</step>
+      </steps>
+      <expected>No hard-coded colors; placeholder uses the same token-driven foreground as values</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git status/diff verification of the untouched-files constraints</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/TextField.emdash.test.tsx</output>
+    <output type="docs">FR-11 parity note appended to projects/record-header-and-notepad-r2/notes/matter-parity-baseline.md (or notes/fr11-emdash-parity-note.md fallback)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given value `''`, TextField renders `—` (same placeholder constant), matching its existing null/undefined behavior.</criterion>
+    <criterion testable="true">Regression: `null` and `undefined` still render `—`; the number `0` renders `0`; the string `'0'` renders `0`; a non-empty string renders itself; the whitespace string `' '` renders as-is (out of scope, documented).</criterion>
+    <criterion testable="true">Edit round-trip with `''` value: entering edit shows a draft of `''` (input empty — NOT `'—'`); committing without typing calls onSave zero times; typing `abc` and committing calls onSave once with `'abc'`.</criterion>
+    <criterion testable="true">Negative: rejected onSave still reverts the draft and STAYS in edit mode (contract untouched by this change).</criterion>
+    <criterion testable="true">Every pre-existing test passes with __tests__/fields.test.tsx and the integration test file untouched in git diff.</criterion>
+    <criterion testable="true">`git status` shows NO modification to fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx; changed files are exactly TextField.tsx, the new test file, and the parity note.</criterion>
+    <criterion testable="true">The FR-11 parity note exists and names task 080 as its consumer.</criterion>
+    <criterion testable="true">All unit tests pass and `npm run build` in Spaarke.UI.Components exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-11, success criterion 14 ("null, undefined and '' all render — in every renderer —
+    verify: unit tests"), spec Owner Clarifications "Renderer conventions" (em-dash yes; required marker
+    NOT adopted). This is a modify-only task — no justification element per CLAUDE.md §11. Keep the diff
+    minimal: one condition, one JSDoc line, one new test file, one note.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

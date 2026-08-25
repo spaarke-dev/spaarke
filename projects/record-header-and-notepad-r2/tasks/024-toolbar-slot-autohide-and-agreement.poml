@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Toolbar slot auto-hide on null regarding filter + add sprk_agreement to both parent maps</title>
+    <phase>2 Metadata + Machinery</phase>
+    <gate>startable after 002 (parity baseline captured)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts code files (hooks/useRecordHeaderToolbarActions.ts, hooks/toolbarLaunchDefaults.ts) — Step 3.5.5 code-implementation trigger</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical, fully-specified edits to two existing hook files with exact line references and a closed test matrix</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>react, shared-components, unit-test</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In `hooks/useRecordHeaderToolbarActions.ts`: omit the Notepad slot when `buildMemoFilterForParent` returns null, and the To Do slot when `buildTodoFilterForParent` returns null (both already return null for unsupported parents — `hooks/toolbarLaunchDefaults.ts:130,178`). Today the annotation slot is pushed on `annotationEnabled` alone (lines 223, 325-333), so a null filter only zeroes the badge and the icon still opens a Notepad that cannot save. ALSO add `sprk_agreement → sprk_regardingagreement` to BOTH `SUPPORTED_TODO_PARENTS` (11→12, line 150) and `SUPPORTED_MEMO_PARENTS` (6→7, line 105) — both lookups were live-verified to exist on `sprk_todo` and `sprk_memo` (2026-08-25). This is FR-16 + FR-24.</prompt>
+  <role>SPAARKE platform developer. Shared-library React hooks; ADR-024 dual-field regarding pattern. Follow ADRs strictly.</role>
+  <goal>On an entity outside the respective parent map, the toolbar icon does not render at all (rather than opening a surface that cannot save); Agreement's header composes with BOTH To Do and Notepad slots. Unit tests cover the closed matrix below; shared-lib build and tests green.</goal>
+
+  <context>
+    <background>Spec FR-16 + FR-24. `sprk_memo` and `sprk_todo` use the ADR-024 dual-field pattern: entity-specific `sprk_regarding{entity}` lookups, no polymorphic regardingobjectid. `buildTodoFilterForParent` / `buildMemoFilterForParent` return `null` for parents outside their maps, which today only idles the badge count at 0 (`useRelatedCount` handles a null filter) — the icon still renders and launches a Notepad/SmartTodo scoped to a parent the child schema cannot reference, so nothing created there can save its regarding link. Auto-hide closes that trap. Agreement joins both maps because the owner added `sprk_regardingagreement` to both child entities (live-verified 2026-08-25); with this change Agreement gets the full toolbar (spec success criterion 15a), and the FR-16 auto-hide test case must therefore use a To-Do-but-not-Memo parent instead: `contact`, `sprk_document`, `sprk_organization`, `sprk_analysis`, or `sprk_communication` (spec success criterion 15b). Agreement is NOT the auto-hide test case.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderToolbarActions.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/toolbarLaunchDefaults.test.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">MatterHeaderPcf v1.0.20 parity baseline captured before any code change</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-16">A slot whose regarding filter is null is OMITTED from `iconSlots` (not rendered-but-disabled, not hidden via CSS) — matching the existing convention that disabled slots are omitted (see the comment at lines 306-310). The `enabled` option flags keep their current meaning and are ANDed with the filter check.</constraint>
+    <constraint source="NFR-07">The Notepad and SmartTodo launch contracts are external API and byte-identical after this task: `regardingEntity=…&amp;regardingId=…` and `action=openTodos&amp;regardingType=…&amp;regardingId=…`. Do not touch `buildNotepadLaunchData` / `buildSmartTodoLaunchData`, the webresource names, or the modal layouts.</constraint>
+    <constraint source="FR-24">Map additions are exactly `sprk_agreement: 'sprk_regardingagreement'` in both maps — no other schema keys change. Update the JSDoc counts on both maps ("exactly six" → seven at line 98; "11 parent entity lookups" → 12 at line 143) so the docs match the code.</constraint>
+    <constraint source="ADR-022">React 16/17-safe; no new dependencies; keep the `useMemo` dependency array correct when adding `todoFilter` / `memoFilter` to the slot construction.</constraint>
+    <constraint source="project">Do not modify `useRelatedCount` — its null-filter idle-at-0 behavior is unchanged and still correct for other consumers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header toolbar slots + regarding maps</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Slot construction being changed" location="src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts">Lines 234-235 already compute `todoFilter` / `memoFilter`; lines 312-336 build `iconSlots` gated on `checkmarkEnabled` / `annotationEnabled` alone. The change is `checkmarkEnabled &amp;&amp; todoFilter !== null` and `annotationEnabled &amp;&amp; memoFilter !== null`, plus the useMemo deps.</pattern>
+      <pattern name="Existing test approach to extend" location="src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderToolbarActions.test.ts">Mirror its renderHook + Xrm-mocking setup for the new slot-omission cases; `toolbarLaunchDefaults.test.ts` for the map/filter assertions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL FULL per CLAUDE.md §8; update current-task.md.</step>
+    <step order="1">In `toolbarLaunchDefaults.ts`, add `sprk_agreement: 'sprk_regardingagreement'` to `SUPPORTED_MEMO_PARENTS` (line 105 map) and `SUPPORTED_TODO_PARENTS` (line 150 map); update both JSDoc counts.</step>
+    <step order="2">In `useRecordHeaderToolbarActions.ts`, gate the checkmark slot on `checkmarkEnabled &amp;&amp; todoFilter !== null` and the annotation slot on `annotationEnabled &amp;&amp; memoFilter !== null`; add the filters to the `useMemo` dependency array; update the hook JSDoc (line ~196) from "null … → memo badge 0" to "null … → slot omitted".</step>
+    <step order="3">Extend `toolbarLaunchDefaults.test.ts`: both maps contain `sprk_agreement`; `buildMemoFilterForParent('sprk_agreement', id)` and `buildTodoFilterForParent('sprk_agreement', id)` return `_sprk_regardingagreement_value eq {id}`; map sizes are 7 and 12.</step>
+    <step order="4">Extend `useRecordHeaderToolbarActions.test.ts` with the closed slot matrix from the acceptance criteria (contact / sprk_agreement / sprk_matter / unsupported entity).</step>
+    <step order="5">Build the shared lib and run its full test suite; green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any evidence contradicts the live-verified schema fact that `sprk_regardingagreement` exists on BOTH `sprk_todo` and `sprk_memo` (e.g., existing code, tests, or schema notes indicating otherwise), STOP and escalate per CLAUDE.md §6 before adding the map entries — a wrong entry produces a 400 on every Agreement header load.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) and run tests (`npm test`) in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderToolbarActions.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/toolbarLaunchDefaults.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given entity `contact` (To-Do-supported, NOT Memo-supported — the FR-16 test case; `sprk_document` / `sprk_organization` / `sprk_analysis` / `sprk_communication` are equivalent), the hook returns iconSlots containing the checkmark slot and NOT the annotation slot.</criterion>
+    <criterion testable="true">Given entity `sprk_agreement`, iconSlots contains BOTH slots (FR-24 — Agreement is in both maps and is NOT the auto-hide test case).</criterion>
+    <criterion testable="true">Given entity `sprk_matter`, iconSlots contains both slots (regression — existing behavior preserved).</criterion>
+    <criterion testable="true">Negative: given an entity in neither map (e.g. `account`), iconSlots contains NEITHER slot, and this omission happens with `enabled` options left at defaults.</criterion>
+    <criterion testable="true">Negative: given `enabled: { checkmark: false }` on a fully-supported entity, the checkmark slot is still omitted — the explicit flag is not overridden by a non-null filter.</criterion>
+    <criterion testable="true">`SUPPORTED_MEMO_PARENTS` has 7 entries and `SUPPORTED_TODO_PARENTS` has 12; both include `sprk_agreement: 'sprk_regardingagreement'`; both build functions return `_sprk_regardingagreement_value eq {id}` for `sprk_agreement`.</criterion>
+    <criterion testable="true">The Notepad/SmartTodo launch data builders, webresource names, and modal layout constants are byte-identical (git diff shows no change to them); shared-lib build and full test suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-16, FR-24, NFR-07, success criteria 15a/15b. Live verification of the two `sprk_regardingagreement` lookups is recorded in `projects/record-header-and-notepad-r2/notes/discovery-checklist.md` (2026-08-25). Rollout task 070 seeds an Agreement record (entity has 0 today) before QA-ing the full toolbar; rollout QA of the auto-hide uses a To-Do-but-not-Memo parent per success criterion 15b.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

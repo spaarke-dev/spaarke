@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>NumberField renderer — Integer/Decimal/Double/Money with metadata-driven formatting (FR-07)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-001-002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a new shared-library .tsx component consumed by PCF surfaces (Step 3.5.5: modifies/creates code files = FULL).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component implementation with an explicit canonical reference to copy (TextField.tsx renderer contract).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason></parallel-reason>
+    <deps>001, 002</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the `NumberField` record-header renderer in the shared library covering `Integer`, `Decimal`,
+    `Double`, and `Money` attributes. Currency symbol and precision arrive as props resolved from metadata
+    by the consumer; the value is right-aligned, following the same alignment convention DataGrid encodes
+    in `defaultAlignFor` (configResolution.ts:393 — numeric/money types align right). Copy the
+    TextField.tsx contract verbatim (FR-10).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 + Griffel and React 16/17-safe shared components.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/NumberField.tsx exists
+    exporting `NumberField` + `INumberFieldProps`, with a passing unit-test file
+    __tests__/NumberField.test.tsx, the shared library building green — and NO edit to fields/index.ts or
+    __tests__/fields.test.tsx (task 015 owns those).
+  </goal>
+
+  <context>
+    <background>
+      FR-07: Invoice `sprk_totalamount` must render as currency with the correct symbol and precision, not
+      as the raw `12500` it renders today through TextField's `String(value)` (TextField.tsx:117). The
+      renderer is context-agnostic (ADR-012): the consumer resolves attribute kind, precision, and currency
+      symbol from metadata and passes them as props; this component never touches Xrm or metadata APIs.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/NumberField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/NumberField.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Phase 0 gate (spike decision; no direct input to this task)</dependency>
+      <dependency task="002" status="pending">Parity baseline captured — code changes are barred until it exists</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every color, typography, spacing, and radius value in NumberField.tsx comes from Fluent v9 semantic tokens (`tokens.*`); zero hex/rgb/hsl literals anywhere in the new files.</constraint>
+    <constraint source="ADR-022">NumberField.tsx must be React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot`, no React-18-only APIs.</constraint>
+    <constraint source="ADR-012">NumberField is context-agnostic: no `ComponentFramework` types, no `Xrm` access, no metadata calls. Kind, precision, and currency symbol arrive as props.</constraint>
+    <constraint source="project">FR-10 contract, copied verbatim from TextField.tsx: props `{ label, value, span: 1|2|3, required?, onSave?, disabled? }` (plus the numeric-format props); self-applied `gridColumn: span N`; `editable = typeof onSave === 'function' AND disabled !== true`; on save rejection revert draft and STAY in edit mode; Enter commits / Escape cancels; blur commits; edit input uses `appearance="filled-lighter"` `size="small"`, `autoFocus`, `disabled={saving}`, trailing tiny `Spinner`; module-scope `makeStyles`.</constraint>
+    <constraint source="project">D-10 / FR-11: the `required` prop exists for contract-shape parity but renders NOTHING — the `*` marker is deliberately TextField-only.</constraint>
+    <constraint source="project">Parallel-safety (scope: this task): MUST NOT edit src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx — those are task 015's; group-A tasks racing on them cost R1 real time.</constraint>
+    <constraint source="project">FR-11: `null`, `undefined`, and `''` render the em-dash `—`. The number `0` is a REAL value and MUST render as formatted `0` — the empty check is strict, never falsy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header field renderers; number/currency formatting; Fluent v9 in React 16/17 shared components</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical renderer contract" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">THE reference implementation. Copy its structure end-to-end: props shape, EMPTY_VALUE_PLACEHOLDER, editable gate, draft/commit/cancel, revert-on-reject-stay-in-edit (lines 139-157), keyboard handling, data-testid conventions, makeStyles layout.</pattern>
+      <pattern name="alignment convention" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">`defaultAlignFor` (line 393) is the repo's statement that numeric/money attribute types read right-aligned. NumberField hard-codes right alignment for its value cell and edit input (it renders only numeric kinds) — do not import the function, mirror the convention.</pattern>
+      <pattern name="Fluent v9 authoring conventions" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Component structure, token usage, JSDoc conventions.</pattern>
+      <pattern name="React version boundary" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">What is safe under the React 16/17 platform-library boundary.</pattern>
+      <pattern name="control initialization" location=".claude/patterns/pcf/control-initialization.md">Consumer-side context; renderer stays props-only.</pattern>
+      <pattern name="theme reach" location=".claude/patterns/pcf/theme-management.md">Host-provided FluentProvider; renderer assumes tokens only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read TextField.tsx fully; read the FR-07/FR-10/FR-11 spec sections and configResolution.ts:390-400.</step>
+    <step order="1">Define `INumberFieldProps`: `{ label: string; value: number | string | null | undefined; span: 1 | 2 | 3; kind: 'integer' | 'decimal' | 'double' | 'money'; precision?: number; currencySymbol?: string; required?: boolean; onSave?: (newValue: number | null) =&gt; Promise&lt;void&gt;; disabled?: boolean }`. JSDoc: kind maps from metadata AttributeType; precision from metadata Precision; currencySymbol from the record's formatted value / currency metadata (consumer-resolved); onSave payload is renderer-domain (number), contract semantics identical to TextField.</step>
+    <step order="2">Read mode: format with `Intl.NumberFormat(undefined, ...)` — integer: 0 fraction digits; decimal/double: min/max fraction digits = precision (default a sensible 2 when omitted); money: precision-formatted number prefixed by `currencySymbol` (the symbol is metadata text, not an ISO code — do not use Intl currency style with a guessed code). Numeric strings are parsed; `''` renders em-dash; non-numeric strings render em-dash + `console.warn` (NFR-10). Value cell text-align right; label stays left like siblings.</step>
+    <step order="3">Edit mode: Fluent `Input` (filled-lighter, small, right-aligned text) holding the RAW unformatted number as the draft (no symbol, no thousands separators while typing). Enter commits, Escape cancels, blur commits; empty draft commits `null`; a non-numeric draft does NOT call onSave — keep editing (treat like a locally-rejected save); rejection from onSave reverts draft and stays in edit; tiny Spinner + disabled input while saving.</step>
+    <step order="4">Author __tests__/NumberField.test.tsx (new file) using `renderWithProviders` from `../../../__mocks__/pcfMocks`: cover the acceptance criteria including the `0` value, the four kinds, and both rejection paths.</step>
+    <step order="5">Run `npm test` and `npm run build` in src/client/shared/Spaarke.UI.Components. Verify zero edits to fields/index.ts, components/RecordHeader/index.ts, and __tests__/fields.test.tsx via `git status`.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If faithful Money rendering turns out to require data this props contract cannot carry (e.g. per-record currency symbol unavailable to the consumer without an extra Dataverse call), STOP and escalate per root CLAUDE.md §6 rather than inventing a metadata-fetching path inside the renderer — ADR-012 keeps this component props-only, and the consumer-side data question belongs to tasks 020/022.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Money renders as currency (Invoice)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_invoice&amp;id={record-id}</url>
+      <steps>
+        <step>Open an Invoice record whose header layout includes sprk_totalamount (executes at Phase 5 task 060, once the RecordHeader control is bound)</step>
+        <step>Verify the value renders as currency with symbol and precision (e.g. $12,500.00), NOT `12500`</step>
+        <step>Verify the value is right-aligned in its cell</step>
+        <step>Click the value; verify the edit input shows the raw number; change it; verify the form goes dirty with no re-render flash</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Currency-formatted right-aligned display; raw-number editing; zero console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify NumberField label and value cell adapt (no hard-coded colors)</step>
+        <step>Verify the em-dash empty state is legible in dark mode</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <justification>
+    <existing>TextField — src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx:117 (`String(value)` is its entire display transform); verified in the spec §11 gate table.</existing>
+    <extension>No — TextField cannot format Money by currency/precision or right-align numerics without absorbing a second attribute domain into one renderer (contra docs/standards/COMPONENT-COMPLEXITY.md). The sibling-renderer file pattern is the established seam.</extension>
+    <cost-of-doing-nothing>Live-verified (spec §11): Invoice `sprk_totalamount` renders as raw `12500` on the header — no symbol, no precision, left-aligned — failing FR-07 acceptance on the entity that was explicitly added to force this renderer (plan: "Invoice is explicitly required, not optional").</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git status verification of the untouched-files constraint</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/NumberField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/NumberField.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given kind='money', value=12500, precision=2, currencySymbol='$', the read mode renders `$12,500.00`; given kind='integer', value=42, it renders `42` with no fraction digits; given kind='decimal' or 'double' with precision=3, value=1.5 renders `1.500`.</criterion>
+    <criterion testable="true">The value cell and the edit input are right-aligned; the label is left-aligned like sibling renderers.</criterion>
+    <criterion testable="true">Given `null`, `undefined`, or `''`, the renderer shows `—`; given the number `0`, it renders formatted `0` (NOT the em-dash); given a non-numeric string value, it shows `—` and emits `console.warn` — never a throw, never `NaN` text.</criterion>
+    <criterion testable="true">The root div carries `gridColumn: span N` matching the span prop for spans 1, 2, and 3 (self-applied).</criterion>
+    <criterion testable="true">With no `onSave` the value is read-only; with `onSave` and `disabled=true` it is read-only; with `onSave` alone, clicking enters edit mode showing the RAW unformatted number as the draft.</criterion>
+    <criterion testable="true">In edit mode: Enter commits, Escape cancels, blur commits; empty draft commits `null`; while saving the input is disabled and a tiny Spinner shows.</criterion>
+    <criterion testable="true">Negative: a non-numeric draft never reaches onSave (zero calls) and the component stays in edit mode; when onSave rejects, the draft reverts to the prior value AND the component STAYS in edit mode.</criterion>
+    <criterion testable="true">Negative (D-10): with `required=true`, NO `*` marker renders.</criterion>
+    <criterion testable="true">Grep of NumberField.tsx and NumberField.test.tsx for hex/rgb/hsl returns nothing (ADR-021); grep for `use(`, `useSyncExternalStore`, `createRoot` returns nothing (ADR-022).</criterion>
+    <criterion testable="true">`git status` shows NO modification to fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx.</criterion>
+    <criterion testable="true">All unit tests pass and `npm run build` in Spaarke.UI.Components exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-07, FR-10, FR-11 (+ D-10), NFR-03, NFR-04, spec §11 gate row "NumberField", success
+    criterion 10. Consumer wiring (metadata kind/precision/symbol resolution, form-buffer number payload)
+    is later tasks (020/022/031) — do not build it here. Do not export from the barrel (task 015).
+    Rendering only the symbol (not Intl currency style) is deliberate: Dataverse gives the consumer a
+    symbol string via formatted values / currency metadata; guessing an ISO code from it would be wrong for
+    multi-currency orgs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

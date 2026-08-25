@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>RecordHeaderShell optional columns prop driving the loading skeleton</title>
+    <phase>3 Config Resolver + Control</phase>
+    <gate>blocked until 015 (fields barrel + contract tests) is complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared-library .tsx code consumed by the shipped MatterHeaderPcf and the new RecordHeader control</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-patterned component change with the exact current implementation cited (RecordHeaderShell.tsx lines 93-131)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>015</deps>
+    <tags>react, typescript, unit-test</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add an optional columns prop (2 | 3, default 3) to RecordHeaderShell and drive the loading
+    skeleton from it. Today the skeleton hard-codes repeat(3, 1fr) and six SkeletonItems
+    (RecordHeaderShell.tsx lines 93-131), so a columns: 2 header flashes a mismatched 3-column
+    skeleton during load. The change must be fully backward compatible.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 components, Griffel makeStyles, and
+    backward-compatible shared-library API evolution. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    RecordHeaderShell accepts columns?: 2 | 3 (default 3); the loading skeleton renders a
+    2-column x 2-row grid (4 cells) when columns is 2 and the existing 3-column x 2-row grid
+    (6 cells) otherwise; IRecordHeaderShellProps documents the prop; existing tests updated and
+    green.
+  </goal>
+
+  <context>
+    <background>
+      FR-18: the RecordHeaderConfiguration schema supports columns 2 | 3. The shell's loading
+      skeleton exists so the card chrome stays visually stable while data resolves — but it is
+      hard-coded to the 3-column FieldGrid default. A configured 2-column header would flash a
+      3-column skeleton then snap to 2 columns on load. Owner decision ("Pass columns", spec
+      Owner Clarifications) chose the prop over accepting the flash. Task 033's generic view
+      passes the resolved columns value through.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/RecordHeaderShell.test.tsx</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="pending">Phase 1 renderer/barrel work merged (group C prerequisite per plan section 4)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Backward compatible: columns is OPTIONAL with default 3. When omitted, the rendered DOM for the skeleton is IDENTICAL to today (repeat(3, 1fr), six SkeletonItems, existing data-testids record-header-shell-skeleton-cell-0 through -5 unchanged). The existing consumer MatterHeaderView compiles and behaves unchanged.</constraint>
+    <constraint source="project">Griffel makeStyles is build-time static — do NOT interpolate the runtime columns value into makeStyles. Use two precompiled classes (2-column and 3-column skeleton grids) selected by the prop, or an inline gridTemplateColumns style on the grid element; prefer the two-class approach to stay within the file's existing makeStyles conventions.</constraint>
+    <constraint source="project">Skeleton cell count = columns x 2 rows: columns 2 renders exactly 4 SkeletonItems, columns 3 renders exactly 6. The prop affects ONLY the loading skeleton — the loaded children path, toolbar, and borderless variant are untouched.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens exclusively; introduce zero hex/rgb/hsl literals. The existing token usage (spacingHorizontalM, spacingVerticalS, lineHeightBase400) carries over to both variants.</constraint>
+    <constraint source="ADR-022">React 16/17-safe: plain React.FC, no React 18-only APIs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+    <patterns>
+      <pattern name="Current skeleton implementation" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx">
+        Lines 93-131: the skeleton makeStyles class (gridTemplateColumns: repeat(3, 1fr)) and the
+        LoadingSkeleton component with six hard-coded SkeletonItems. This is the exact surface to
+        parameterize. Anchor the visual result on this existing component — same tokens, same
+        testid scheme.
+      </pattern>
+      <pattern name="Props contract" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/types.ts">
+        IRecordHeaderShellProps — add columns?: 2 | 3 with JSDoc mirroring the borderless prop's
+        documentation style.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read RecordHeaderShell.tsx and its test file in full.</step>
+    <step order="1">Add columns?: 2 | 3 to IRecordHeaderShellProps (types.ts) with JSDoc: drives the loading-skeleton grid only; default 3.</step>
+    <step order="2">Parameterize the skeleton: second makeStyles class for the 2-column grid; LoadingSkeleton renders columns x 2 SkeletonItems with the existing stable testid scheme.</step>
+    <step order="3">Update __tests__/RecordHeaderShell.test.tsx for the acceptance matrix below (default unchanged, columns 2 variant).</step>
+    <step order="4">Run shared-library build + tests; both green.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library (npm run build, npm test in Spaarke.UI.Components)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/RecordHeaderShell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given loading true and columns omitted, the skeleton renders a 3-column grid template with exactly 6 SkeletonItems and the pre-existing testids record-header-shell-skeleton-cell-0..5 — byte-identical behavior to today.</criterion>
+    <criterion testable="true">Given loading true and columns 2, the skeleton renders a 2-column grid template with exactly 4 SkeletonItems.</criterion>
+    <criterion testable="true">Given loading true and columns 3 explicitly, output equals the default case.</criterion>
+    <criterion testable="true">Given loading false, children render identically regardless of the columns value (prop affects the skeleton only).</criterion>
+    <criterion testable="true">Negative: no makeStyles rule interpolates a runtime value; no hex/rgb/hsl literal is introduced (code inspection in review).</criterion>
+    <criterion testable="true">IRecordHeaderShellProps carries columns?: 2 | 3 with JSDoc; shared-library build green; full shared-lib test suite green (existing MatterHeader-facing tests unaffected).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FR-18. No justification element: modify-only task (existing component, existing file).
+    Browser-visible verification (the 2-column skeleton with no 3-column flash, plus ADR-021 dark
+    mode) is covered by task 033's ui-tests and the Phase 5 per-wave acceptance runs — this task's
+    scope is the shared-lib change + unit tests.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

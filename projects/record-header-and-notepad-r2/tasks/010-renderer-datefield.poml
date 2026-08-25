@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>DateField renderer — one component, date + datetime modes (FR-06)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-001-002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a new shared-library .tsx component consumed by PCF surfaces (Step 3.5.5: modifies/creates code files = FULL).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component implementation with an explicit canonical reference to copy (TextField.tsx renderer contract).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason></parallel-reason>
+    <deps>001, 002</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the `DateField` record-header renderer in the shared library: ONE component covering both
+    `DateTime`/`DateOnly` and `DateTime`/`DateAndTime` attributes, with the mode selected from the
+    metadata `Format` (passed in as a prop by the consumer — NOT two components). Read mode shows a
+    locale-formatted date (and time in datetime mode); edit mode uses a Fluent date picker. Copy the
+    TextField.tsx contract verbatim (FR-10).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 + Griffel and React 16/17-safe shared components.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/DateField.tsx exists
+    exporting `DateField` + `IDateFieldProps`, with a passing unit-test file
+    __tests__/DateField.test.tsx, the shared library building green — and NO edit to fields/index.ts or
+    __tests__/fields.test.tsx (task 015 owns those).
+  </goal>
+
+  <context>
+    <background>
+      FR-06: `sprk_invoicedate` (DateOnly) must render as a locale date and Event's `sprk_plannedstart` /
+      `sprk_plannedend` (DateAndTime) as locale date AND time. Today the only text-ish renderer is
+      TextField, which does `String(value)` (TextField.tsx:117), so ISO strings render raw. The renderer
+      is context-agnostic (ADR-012): the consumer (useRecordHeaderFields / resolveHeaderConfig, later
+      tasks) resolves the metadata Format and passes a mode prop; this component never touches Xrm or
+      ComponentFramework types.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/DateField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/DateField.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Phase 0 gate (spike decision; no direct input to this task)</dependency>
+      <dependency task="002" status="pending">Parity baseline captured — code changes are barred until it exists</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every color, typography, spacing, and radius value in DateField.tsx comes from Fluent v9 semantic tokens (`tokens.*`); zero hex/rgb/hsl literals anywhere in the new files.</constraint>
+    <constraint source="ADR-022">DateField.tsx must be React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot`, no React-18-only APIs. It ships to PCFs running platform-library React 16.14.</constraint>
+    <constraint source="ADR-012">DateField is context-agnostic: no `ComponentFramework` types, no `Xrm` access, no metadata calls. The date-vs-datetime mode arrives as a prop; the consumer resolves it from metadata `Format`.</constraint>
+    <constraint source="project">FR-10 contract, copied verbatim from TextField.tsx: props `{ label, value, span: 1|2|3, required?, onSave?, disabled? }` (plus the mode prop); the renderer applies its OWN `gridColumn: span N` inline style on its root div; `editable = typeof onSave === 'function' AND disabled !== true`; on save rejection revert the draft and STAY in edit mode; Enter commits / Escape cancels; blur commits; edit input uses `appearance="filled-lighter"` `size="small"`, `autoFocus`, `disabled={saving}`, trailing tiny `Spinner`; styles via module-scope `makeStyles`.</constraint>
+    <constraint source="project">D-10 / FR-11: the `required` prop exists for contract-shape parity but renders NOTHING — the `*` marker is deliberately TextField-only. Do not add a marker.</constraint>
+    <constraint source="project">Parallel-safety (scope: this task): MUST NOT edit src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx — barrel exports and the shared test file are task 015's; group-A tasks racing on them cost R1 real time.</constraint>
+    <constraint source="project">FR-11: `null`, `undefined`, and `''` all render the em-dash `—` (reuse/mirror the `EMPTY_VALUE_PLACEHOLDER` constant pattern). An unparseable date value renders `—` plus a `console.warn` (NFR-10 graceful degradation) — never a throw, never `Invalid Date` text.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header field renderers; Fluent v9 in React 16/17 shared components</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical renderer contract" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">THE reference implementation. Copy its structure end-to-end: props interface shape, EMPTY_VALUE_PLACEHOLDER handling, editable gate, draft state + commit/cancel callbacks, revert-on-reject-stay-in-edit (lines 139-157), keyboard handling, data-testid conventions, makeStyles layout (label/value/editRow).</pattern>
+      <pattern name="Fluent v9 authoring conventions" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Component structure, token usage, JSDoc conventions for the shared library.</pattern>
+      <pattern name="React version boundary" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">What is and is not safe under the React 16/17 platform-library boundary.</pattern>
+      <pattern name="theme reach" location=".claude/patterns/pcf/theme-management.md">Why portal-mounted Fluent surfaces (the date-picker popup) need the host FluentProvider wrap — the PCF layer provides it; the renderer must not assume more.</pattern>
+      <pattern name="control initialization" location=".claude/patterns/pcf/control-initialization.md">Consumer-side context; renderer stays props-only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read TextField.tsx fully; read the FR-06/FR-10/FR-11 spec sections.</step>
+    <step order="1">Define `IDateFieldProps`: `{ label: string; value: string | Date | null | undefined; span: 1 | 2 | 3; format: 'date' | 'datetime'; required?: boolean; onSave?: (newValue: Date | null) =&gt; Promise&lt;void&gt;; disabled?: boolean }`. Document in JSDoc that `format` maps from Dataverse metadata Format (DateOnly → 'date', DateAndTime → 'datetime') and that the value-type of `onSave` is renderer-domain (Date), while the contract SEMANTICS (gate, draft, revert, keys) are identical to TextField.</step>
+    <step order="2">Read mode: parse `value` (ISO string or Date); format with `Intl.DateTimeFormat(undefined, ...)` — date-only options for 'date', date + time options for 'datetime'. No hard-coded locale, no manual pattern strings. Empty/unparseable → em-dash per constraints.</step>
+    <step order="3">Edit mode: Fluent date picker (`DatePicker` from `@fluentui/react-datepicker-compat`), plus a time input alongside it in 'datetime' mode (Fluent `TimePicker` compat or a Fluent `Input type="time"` — choose the lightest option that stays token-pure and React-16-safe). Wire the full TextField commit contract: Enter commits, Escape cancels, blur commits, rejection reverts draft and stays in edit, tiny Spinner + disabled inputs while saving. Check the escalation trigger BEFORE adding any new package dependency.</step>
+    <step order="4">Author __tests__/DateField.test.tsx (new file) using `renderWithProviders` from `../../../__mocks__/pcfMocks` (same harness as fields.test.tsx): cover the acceptance criteria below including the rejected-save negative path and both format modes.</step>
+    <step order="5">Run the shared-library test suite and build (`npm test`, `npm run build` in src/client/shared/Spaarke.UI.Components). Verify zero edits to fields/index.ts, components/RecordHeader/index.ts, and __tests__/fields.test.tsx via `git status`.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Fluent date-picker path requires adding a package (e.g. `@fluentui/react-datepicker-compat` is not already a shared-lib dependency) that fails the React 16/17 platform-library boundary (ADR-022), drags heavy transitive deps into the shared-lib dist, or cannot be themed with semantic tokens — STOP and escalate per root CLAUDE.md §6 with the observed evidence, rather than hand-rolling a calendar or swapping in a non-Fluent picker. The fallback decision (e.g. token-styled native input) belongs to the operator.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="DateOnly renders as locale date (Invoice)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_invoice&amp;id={record-id}</url>
+      <steps>
+        <step>Open an Invoice record whose header layout includes sprk_invoicedate (executes at Phase 5 task 060, once the RecordHeader control is bound)</step>
+        <step>Verify the value renders as a locale date (e.g. 8/21/2026), NOT `2026-08-21T00:00:00Z`</step>
+        <step>Click the value; verify the Fluent date picker opens; pick a date; verify the form goes dirty with no re-render flash</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Locale date display; picker edit stages to the form buffer; zero console errors</expected>
+    </test>
+    <test name="DateAndTime renders date + time (Event)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_event&amp;id={record-id}</url>
+      <steps>
+        <step>Open an Event record showing sprk_plannedstart / sprk_plannedend (executes at Phase 5 task 061)</step>
+        <step>Verify both render locale date AND time</step>
+      </steps>
+      <expected>Date and time both visible, locale-formatted</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify DateField label, value cell, and open picker surface adapt (no white-on-white, no hard-coded colors)</step>
+        <step>Verify the em-dash empty state is legible in dark mode</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens per ADR-021; picker popup themed via the host FluentProvider</expected>
+    </test>
+  </ui-tests>
+
+  <justification>
+    <existing>TextField — src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx:117 (`String(value)` is its entire display transform); verified in the spec §11 gate table.</existing>
+    <extension>No — TextField renders raw `String(value)`; adding metadata-format-aware date/datetime display plus a date-picker edit path would turn one cohesive text renderer into a multi-type god renderer (contra docs/standards/COMPONENT-COMPLEXITY.md). The sibling-renderer file pattern (OptionSetField, TextareaField) is the established seam.</extension>
+    <cost-of-doing-nothing>Live-verified (spec §11): Invoice `sprk_invoicedate` renders as the raw ISO string `2026-08-21T00:00:00Z` on the header, and Event's `sprk_plannedstart`/`sprk_plannedend` (DateAndTime, live-verified field names) are equally unreadable — failing FR-06 acceptance on two of the six rollout entities.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git status verification of the untouched-files constraint</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/DateField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/DateField.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given format='date' and an ISO date value, the read mode renders a locale-formatted date with no time component; given format='datetime', it renders locale date AND time — one component, mode switched by the prop (no second component file exists).</criterion>
+    <criterion testable="true">Given `null`, `undefined`, or `''` as value, the renderer shows `—`; given an unparseable string (e.g. 'not-a-date'), it shows `—` and emits `console.warn` — it never throws and never renders 'Invalid Date'.</criterion>
+    <criterion testable="true">The root div carries `gridColumn: span N` matching the span prop for spans 1, 2, and 3 (self-applied, FieldGrid does not set it).</criterion>
+    <criterion testable="true">With no `onSave`, the value is read-only (no editable affordance, no role=button); with `onSave` and `disabled=true`, it is also read-only; with `onSave` alone, clicking enters edit mode.</criterion>
+    <criterion testable="true">In edit mode: Enter commits, Escape cancels (draft discarded, edit exited), blur commits; while saving the inputs are disabled and a tiny Spinner shows.</criterion>
+    <criterion testable="true">Negative: when `onSave` rejects, the draft reverts to the prior value AND the component STAYS in edit mode (mirrors TextField.tsx:150-153).</criterion>
+    <criterion testable="true">Negative (D-10): with `required=true`, NO `*` marker renders — the prop is accepted but visually inert.</criterion>
+    <criterion testable="true">Grep of DateField.tsx and DateField.test.tsx for hex/rgb/hsl color literals returns nothing (ADR-021); grep for `use(`, `useSyncExternalStore`, `createRoot` returns nothing (ADR-022).</criterion>
+    <criterion testable="true">`git status` shows NO modification to fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx.</criterion>
+    <criterion testable="true">All unit tests pass and `npm run build` in Spaarke.UI.Components exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-06, FR-10, FR-11 (+ D-10 consequence note), NFR-03, NFR-04, spec §11 gate row "DateField".
+    The consumer wiring (metadata Format → format prop, form-buffer Date payload) is later tasks
+    (022/031/033) — do not build any of it here. Do not export from the barrel: consumers cannot use
+    DateField until task 015 lands, and that is intentional. onSave emits `Date | null` because the
+    form-buffer setValue payload for datetime attributes is a Date — the contract suite (015) asserts
+    behavior/semantics parity, not payload-type uniformity.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>resolveHeaderConfig — pure tiered resolver with span clamp + renderer derivation</title>
+    <phase>3 Config Resolver + Control</phase>
+    <gate>blocked until 030 (RecordHeaderConfiguration types + guard) is complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code implementation in the shared library; the resolver is the single point of config correctness for every entity the control ships on</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex-but-fully-specified pure-function work: complete spec (FR-02/04/05 + design 5.2/5.3), low ambiguity, exhaustively unit-testable — the Step 3.5.5b xhigh profile, not an opus blast-radius/architecture case</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial after 030 per plan section 4 — consumes the 030 types and owns the same RecordHeader component folder that 033 builds on next</parallel-reason>
+    <deps>030</deps>
+    <tags>typescript, config, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement resolveHeaderConfig(manifestJson, formMetadata) returning a fully-resolved
+    ResolvedHeaderConfig — a PURE function (no React, no I/O, no Xrm) mirroring the structure and
+    test approach of components/DataGrid/configResolution.ts. Tier 1 = valid layoutJson; Tier 2 =
+    metadata-derived defaults. Every output field is fully resolved, and span is ALWAYS clamped to
+    min(span, columns).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in pure-function design, tiered configuration merging, and
+    exhaustive unit testing of resolution logic. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/configResolution.ts
+    exporting resolveHeaderConfig, ResolvedHeaderConfig, ResolvedHeaderField, and the resolver's
+    metadata-input interface, exported from the RecordHeader barrel, with an exhaustive unit-test
+    suite passing (ADR-038 KEEP category).
+  </goal>
+
+  <context>
+    <background>
+      The RecordHeader PCF (033) renders whatever this resolver returns. Tier 1 consumes a valid
+      layoutJson (guard from 030); Tier 2 derives a useful default from form metadata so the
+      control NEVER renders blank on a form with no configuration (FR-04, NFR-10). The proven
+      in-repo shape is components/DataGrid/configResolution.ts resolveConfig — a pure function
+      over tiers with per-field merge and metadata-derived fallbacks. Design section 5.3 states
+      the tier-2 skip list "already matches synthesizeColumnsFromMetadata's skipSet verbatim"
+      (configResolution.ts:361-371) — replicating that exact list is load-bearing. The clamp
+      (FR-05) exists because FieldGrid does NOT validate span: each cell applies its own
+      gridColumn, so a span 3 field in a columns 2 grid silently creates an implicit third grid
+      track. Spec: FR-02, FR-04, FR-05.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/configResolution.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/configResolution.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">RecordHeaderConfiguration types + isValidRecordHeaderConfiguration guard</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">resolveHeaderConfig is PURE: no React, no I/O, no Xrm, no network. The ONLY permitted side effect is console.warn on invalid/absent config (FR-03). It accepts the RAW manifest string (string | undefined), does JSON.parse inside try/catch, applies isValidRecordHeaderConfiguration from task 030, and on ANY failure (malformed JSON, wrong _version, absent/empty property) emits exactly one console.warn and falls through to tier-2 derived defaults. It MUST NOT throw for any input.</constraint>
+    <constraint source="project">Span clamp applies to EVERY resolved field in BOTH tiers: span = min(span, columns). Applies after span defaulting (unspecified span: textarea renderer defaults to columns, every other renderer defaults to 1 — design 5.2). FieldGrid never validates; the resolver is the only guard (FR-05).</constraint>
+    <constraint source="project">Tier-2 derivation (FR-04): primary name field first at span 2, then up to FOUR further non-system fields in FORM ORDER (metadata insertion order), for at most 5 fields total. Skip the primary id attribute plus the IDENTICAL skip list used by synthesizeColumnsFromMetadata at configResolution.ts:361-371: createdon, modifiedon, createdby, modifiedby, ownerid, statecode, statuscode, versionnumber. Replicate the list locally in this file — it is not exported from DataGrid and this task MUST NOT import DataGrid internals.</constraint>
+    <constraint source="project">Per-field merge precedence for every resolved property: config override ?? form-control/metadata value ?? derived fallback. Label: config label ?? metadata displayName/label ?? humanizeLogicalName(name) (implement humanizeLogicalName locally, mirroring configResolution.ts:521 — it is module-private in DataGrid). Required: config required ?? derived from metadata requirement level. ReadOnly: config readOnly ?? false. Title: config title ?? entity display name from metadata ?? humanized entity logical name.</constraint>
+    <constraint source="project">Renderer derivation mirrors the STRUCTURE of rendererFromAttributeType (configResolution.ts:197) — a switch on attributeType + format — but emits the header renderer union from task 030: Money to currency; DateTime with format DateOnly to date, otherwise datetime; Picklist/Status/State to optionset; Boolean to boolean; Lookup to lookup; Memo (multiline string) to textarea; Integer/Decimal/Double/BigInt to number; String and everything else to text. Config fields[].renderer overrides derivation.</constraint>
+    <constraint source="project">Output is FULLY resolved: every ResolvedHeaderField carries a concrete non-optional name, label, span, renderer, readOnly, required (maxLines may remain optional — it is renderer-specific to textarea; pass the config value through when present). ResolvedHeaderConfig carries concrete title and columns. columns: config value when 2 or 3; ANY other value (absent, 0, 5, string) normalizes to 3 with the rest of the config still honored.</constraint>
+    <constraint source="project">summaryField passes through AS-IS (string | undefined — config value when present, otherwise undefined). The RECORDSUMMARY_FIELD default and the metadata-existence gate are applied by task 034 at the wiring site, NOT here. Do not import toolbarLaunchDefaults.</constraint>
+    <constraint source="project">Define the resolver's metadata input interface in this file (e.g. HeaderFormMetadata): entity logical name, entity display name, primaryIdAttribute, primaryNameAttribute, and an insertion-ordered attributes record (name to projected attribute: displayName/label, attributeType, format, requiredLevel) — mirroring the EntityMetadata shape resolveConfig consumes. Document that insertion order = form order and callers guarantee it. Keep it decoupled from IDataverseClient so the function stays unit-testable with plain literals.</constraint>
+    <constraint source="ADR-038">resolveHeaderConfig is a pure function — its unit tests are a KEEP category. The test suite must be exhaustive over the acceptance-criteria matrix, mirroring the DataGrid configResolution test approach.</constraint>
+    <constraint source="ADR-022">Shared-library code stays React-free here; nothing in this file may reference React or React-18-only APIs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+    <patterns>
+      <pattern name="resolveConfig tiered merge" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">
+        Lines 218-334: pure tiered resolver + buildResolvedColumn per-field merge (config override
+        ?? metadata ?? humanizeLogicalName). Mirror the structure AND the test approach.
+      </pattern>
+      <pattern name="synthesizeColumnsFromMetadata skipSet" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">
+        Lines 336-389: primary-name-first synthesis, seen-set, skipSet at 361-371, cap on count.
+        The tier-2 derivation is this pattern with a 5-field cap and span-2 primary name.
+      </pattern>
+      <pattern name="rendererFromAttributeType" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">
+        Lines 197-216: switch on attributeType + format. Mirror the shape; emit the header
+        renderer union instead of the grid one.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read DataGrid configResolution.ts in full and design.md sections 5.2-5.4.</step>
+    <step order="1">Fire the escalation check FIRST: re-read configResolution.ts:361-371 and compare the live skipSet against the list in the constraints. If they differ, STOP (see escalation).</step>
+    <step order="2">Create configResolution.ts under components/RecordHeader/: input interface, ResolvedHeaderConfig / ResolvedHeaderField output types, local humanizeLogicalName, local renderer derivation, tier-1 parse+guard path, tier-2 synthesis, per-field merge, span defaulting then clamp, columns normalization.</step>
+    <step order="3">Export the new surface from components/RecordHeader/index.ts.</step>
+    <step order="4">Write __tests__/configResolution.test.ts covering the full acceptance matrix (tier selection, clamp, defaults, renderer table, skip list, never-throws).</step>
+    <step order="5">Run shared-library build + tests; both green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live DataGrid skipSet (configResolution.ts:361-371) no longer matches the spec list (primary id + createdon, modifiedon, createdby, modifiedby, ownerid, statecode, statuscode, versionnumber), STOP and escalate per CLAUDE.md section 6 — do NOT invent a new list and do NOT silently adopt the divergent one. FR-04 requires the SAME skip set.</trigger>
+    <trigger>If the 030 schema or the metadata projection cannot supply an input the merge needs (e.g. requirement level missing from the projected attribute shape), STOP and escalate rather than widening the schema or reaching for I/O inside the resolver.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts:244 resolveConfig — the proven tiered resolver, grep-verified closest neighbor; no header-config resolver exists (grep resolveHeaderConfig returns nothing).</existing>
+    <extension>No — resolveConfig resolves a different domain object (grid columns/views/behavior from savedquery layoutXml) and is coupled to grid types; the header resolver resolves fields/spans/renderers from a manifest string. The design mirrors its structure and test approach instead of extending it (spec section 11 table).</extension>
+    <cost-of-doing-nothing>Without one pure resolver: (a) config precedence spreads through the render path untested (spec section 11); (b) a form with no layoutJson renders a blank control, failing FR-04/NFR-10 acceptance ("renders usefully on a form with no layoutJson at all"); (c) with no clamp, a span 3 field in a columns 2 layout silently creates an implicit third grid track because FieldGrid never validates (FR-05 acceptance fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build/test the shared library (npm run build, npm test in Spaarke.UI.Components)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/configResolution.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/configResolution.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the design section 5.2 Matter example as manifestJson plus matching metadata, tier 1 resolves: fields exactly as configured in order, labels/renderers/required merged per precedence, every span clamped to columns.</criterion>
+    <criterion testable="true">Given a span 3 field with columns 2, the resolved span is 2 (clamp), and given a textarea field with no span in a columns 3 layout, the resolved span is 3 (renderer-derived default).</criterion>
+    <criterion testable="true">Negative: manifestJson of undefined, '', '{{{', valid JSON with _version '2.0', and valid JSON with fields missing EACH produce exactly one console.warn plus a tier-2 result — and resolveHeaderConfig never throws for any of them (asserted).</criterion>
+    <criterion testable="true">Tier 2: primary name field first at span 2, then up to 4 further fields in metadata insertion order, at most 5 total; primary id, createdon, modifiedon, createdby, modifiedby, ownerid, statecode, statuscode, versionnumber all excluded (each asserted).</criterion>
+    <criterion testable="true">Renderer derivation unit-tested per type: Money to currency; DateTime+DateOnly to date; DateTime otherwise to datetime; Picklist, Status, State to optionset; Boolean to boolean; Lookup to lookup; Memo to textarea; Integer, Decimal, Double to number; String/unknown to text; and a config renderer override beats derivation.</criterion>
+    <criterion testable="true">columns of 2 and 3 are honored; columns absent, 0, 5, or non-numeric each normalize to 3 while the rest of the config is still applied.</criterion>
+    <criterion testable="true">Every ResolvedHeaderField in every test result has concrete name, label, span, renderer, readOnly, required (no undefined); resolved title falls back config title, then entity display name, then humanized logical name.</criterion>
+    <criterion testable="true">summaryField: present in config passes through verbatim; absent resolves to undefined — no RECORDSUMMARY_FIELD default in this module (grep of the file shows no toolbarLaunchDefaults import).</criterion>
+    <criterion testable="true">The module imports nothing from react, @fluentui, DataGrid internals, services, or hooks (verified by reading the import list); shared-library build and full test suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-02 (pure, fully resolved), FR-04 (tier-2 defaults), FR-05 (clamp); design 5.2
+    (defaults table), 5.3 (tiers + skip list). The resolver is deliberately tier-SHAPED so a
+    config-record tier can slot in later without touching renderers (design 5.1 reversibility).
+    Task 033 wires it to live form metadata; keep this module testable with plain object literals.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
