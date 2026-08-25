@@ -141,10 +141,94 @@ VETO  (after the max; order matters)
 
 ### 5.1 Mechanism
 
-- One **`Secure Projects` business unit**; secure records live there.
-- A **service account in that BU owns the records**, so they stay there naturally — no matrix-data-access dependency, no BU-per-project proliferation.
+- One **`Secure Projects` business unit**; secure records live there. Resolved **by NAME, from
+  configuration** — never by GUID, which differs per environment (owner decision 2026-08-25). Absent
+  BU = fail closed; never fall back to the root or the caller's BU.
+- The BU's **default owner team owns the records**, so they stay there naturally — no
+  matrix-data-access dependency, no BU-per-project proliferation.
 - **All human access is by explicit Dataverse share**, including the creating attorney's. Nobody gets access by ownership; nobody by business unit.
 - For types 2 and 3, the §4.5 veto suppresses derived and org terms — explicit `sprk_externalrecordaccess` grants only.
+
+#### 5.1a Ownership: an owner TEAM, not a service account (decided 2026-08-25)
+
+This section previously specified "a service account in that BU owns the records". **It does not need
+one, and should not have one.** Three Dataverse facts settle it:
+
+1. **Every business unit is created with a default owner team**, named after the BU. The team that
+   corresponds to `Secure Projects` therefore **already exists** and requires no provisioning.
+2. `sprk_project` is user-or-team owned (`ownerid` is an `OWNER` field, confirmed against live
+   metadata), so a team is a valid owner.
+3. Ownership and privilege are independent concerns in Dataverse.
+
+Team ownership costs **no licence, no credential to rotate, and adds no identity to audit**, all of
+which a service account would. The only requirement is that the BFF application user holds `Assign`
+and `Write` on `sprk_project`.
+
+**The owner team DOES require a security role** — this is the part that is easy to get wrong. Dataverse
+validates that an assignment target holds entity privileges; assigning a record to a team with no
+privileges on that entity fails. So:
+
+- Define a dedicated **`Secure Project Owner`** role: Create / Read / Write / Delete / Append /
+  AppendTo / Share on `sprk_project` and its child entities, at **Business Unit** depth.
+- Assign it to the **`Secure Projects` default owner team only**.
+- **Keep that team free of human members.** The role's BU depth means any member would read every
+  secure project *by membership*, which is exactly the ownership-derived access this section forbids.
+  The team exists to hold ownership, not to confer access.
+
+⚠️ **A POA share is only effective if the user also holds the entity privilege at some depth.** Normal
+user roles must therefore **retain Read on `sprk_project` at Basic/User depth**. That grants nothing on
+its own — without ownership or a share it matches no records — but stripping it in the name of
+"securing" the entity would silently stop sharing from working at all.
+
+**Consequence for NFR-05** — see spec. The assertion as originally written ("no security role may
+reach the `Secure Projects` BU") becomes false by construction, because `Secure Project Owner` must
+reach it. The assertion must be restated to exempt that one role and instead assert the property that
+actually matters: **no role held by a human principal reaches the `Secure Projects` BU, and the owner
+team has no human members.**
+
+#### 5.1b Licensed-user access: access teams, not per-user shares (decided 2026-08-25)
+
+Both satisfy "explicit Dataverse share". Access teams are preferred: **one POA row per record instead
+of N**, revocation is a single membership delete rather than hunting POA rows, and it is Dataverse's
+purpose-built mechanism for per-record sharing to a changing set of users.
+
+Build it on the **existing** POA-with-teams code in `Services/Ai/PlaybookSharingService.cs:302-350`,
+consolidated with `IDataverseAccessGrantService` per CLAUDE.md §11 — do **not** write a third sharing
+client.
+
+Do **not** create a static per-project owner team. That is BU-per-project proliferation in a different
+costume.
+
+#### 5.1c SPE container: a secure-project special case, not a re-architecture (decided 2026-08-25)
+
+**The general BU-based approach stays.** A secure project is the exception: when `sprk_issecure = true`,
+the container comes from **the project's own `sprk_containerid`**, provisioned uniquely for it.
+
+This is the right call and it is far smaller than making resolution record-based everywhere. But
+"just special-case it" understates the surface slightly, because there are **three** container
+resolution strategies in the codebase today, not one:
+
+| # | Strategy | Where | Secure-project behaviour needed |
+|---|---|---|---|
+| 1 | Acting **user's BU** → `businessunit.sprk_containerid` | 7 client sites; canonical resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. The BFF deliberately does not resolve this server-side (INV-7) | **special case** → project's own `sprk_containerid` |
+| 2 | A single global `ArchiveContainerId` from config | server-side email/communication ingest (`IncomingCommunicationProcessor:868, 991`) | **special case** → the parent secure project's container, else secure attachments land in the shared archive |
+| 3 | The document's own `GraphDriveId` / `GraphItemId` | every read/download path once a document exists | ✅ no change — already per-document |
+
+Strategy 3 needs nothing. Strategies 1 and 2 both need the special case, and **2 is the one easiest to
+forget** because it has no client involved and no wizard to put a resolver in.
+
+**Implementation rule**: one shared, record-aware resolver — *if the context record is a secure project,
+use its `sprk_containerid`; otherwise the existing BU cascade* — and route **every** call site through
+it. Do not add the `issecure` test at seven client sites; that is seven places to drift. This respects
+INV-7 (the resolver stays client-side for strategy 1) while giving strategy 2 a server-side equivalent.
+
+**Also required**: the wizard's BU cascade (`EntityCreationService.applyUserBuDefaults`) must **not**
+apply `sprk_containerid` to a secure project. Today it does, which both defeats isolation and collides
+with provisioning's idempotency marker (see the workflow review, §4).
+
+**Sequencing note**: until this lands, a per-project container stamped by provisioning is written but
+never read. Provisioning is still worth correcting first — it removes a live failure and is a
+prerequisite — but isolation of documents is not achieved until strategies 1 and 2 are special-cased.
 
 Result: *on a secure project, all access is explicit on both surfaces.* And because Type 1's SPA access is Dataverse's own answer, **the share that grants MDA access grants SPA access automatically** — the two surfaces cannot diverge.
 
