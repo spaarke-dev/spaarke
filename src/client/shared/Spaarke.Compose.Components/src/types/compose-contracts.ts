@@ -514,6 +514,28 @@ export interface ComposeInlineRun {
    */
   symbol?: { font: string; charCode: string };
 
+  /**
+   * Task 049 (server) / task 057 (client, r8): this run IS a Word FIELD — `w:fldSimple`, or the
+   * `w:fldChar` begin/instrText/separate/result/end run sequence. Same marker/property contract as
+   * {@link isTab}: {@link text} is empty and the run's other content fields are ignored.
+   *
+   * The INSTRUCTION is the field's identity; `cachedResult` is only what Word last displayed. Carrying
+   * both means the save changes nothing on screen while the construct stays a field — before this,
+   * editing a paragraph replaced `{ REF _Ref_Confidentiality \r \h }` with the literal characters `4`,
+   * and the cross-reference went on claiming "Section 4" forever after the agreement renumbered.
+   *
+   * `complex` records which FORM the document used (`true` = the `w:fldChar` run sequence) so the
+   * renderer reproduces it rather than normalising; `locked` (`w:fldLock`) and `dirty` (`w:dirty`) are
+   * the author's own instructions about when the field may update — dropping `locked` would silently
+   * convert a deliberately frozen field into a live one.
+   *
+   * Set by the server projection AND, since task 057, by the client mapper from a `field`
+   * `composeInlineAtom`'s payload attributes. The client NEVER invents one: an atom that arrived without
+   * `data-field-instr` is a field the server said it could not reproduce (nested, or with no recoverable
+   * instruction), and it produces no field run at all.
+   */
+  field?: { instruction: string; cachedResult: string; complex: boolean; locked: boolean; dirty: boolean };
+
   /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
    * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
    * Server-set; preserve untouched on re-post. */

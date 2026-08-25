@@ -8,7 +8,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
-#### 2026-08-25 — Compose write fidelity: Word fields carried (task 049, `spaarkeai-compose-r8`)
+##### 2026-08-25 — Compose write fidelity: the CLIENT half of the field carry (task 057, `spaarkeai-compose-r8`)
+
+- Task 049's Word-field carry was **unreachable from a keystroke edit**: `docxBridge.ts` never mapped a
+  `field` atom into the posted model, and `composeInlineAtom` did not DECLARE the `data-field-*` payload,
+  so ProseMirror dropped it at parse. Both closed. A producer with no consumer — this project's recurring
+  failure with the polarity reversed.
+- **A field is the first segment present in the run stream and ABSENT from the text coordinate space.** A
+  tab or symbol contributes one character, which is what kept task 048's walk byte-identical to
+  `rejectStateText`; a field contributes zero. Byte-identity is re-proven by two independent oracles (the
+  verbatim-tier gate and the rebuild-tier redline diff), both verified to FAIL under a deliberate
+  one-character injection — so they are not tests that only ever pass.
+- **Fixed a `getHTML()` round-trip defect**: the atom's placeholder label (`"Field: 4"`) was re-parsed as
+  its display text, compounding to `"Field: Field: 4"` on a second pass. Harmless while that string was a
+  UI label; a document-content bug once task 057 made it the field's `cachedResult`, and reachable via the
+  ~15s dirty-autosave tick. Fixed backward-compatibly (`data-atom-display`, falling back to `textContent`,
+  so server HTML is unaffected).
+- **Accepted scope extension**: `opaqueAtomNode.ts` + `compose-contracts.ts` sit outside task 057's
+  declared outputs. Its escalation trigger fired on the literal predicate ("attributes do not survive the
+  round trip") but not on the reasoning behind it — the payload was present in the server's HTML and only
+  needed declaring, the same four-line mechanism task 048 used for `symFont`/`symChar` in that file. The
+  agent flagged it and offered revert-and-redispatch rather than proceeding silently, which is the
+  behaviour the trigger exists to produce.
+- **Correction to the published list**: on a keystroke edit the field result's bold/italic/underline are
+  NOT carried (an opaque atom holds no marks), so a bold cross-reference in a plain paragraph returns
+  plain. `notes/049-field-carry-decisions.md` §4 had claimed those three survive — true of the server path
+  only. Both documents corrected; the field itself still survives.
+
+## 2026-08-25 — Compose write fidelity: Word fields carried (task 049, `spaarkeai-compose-r8`)
 
 - `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`: the field row moves **§2 (lost) → §3 (carried)**.
   Ordinary Word fields now round-trip an edit to their own paragraph as their **instruction** plus the

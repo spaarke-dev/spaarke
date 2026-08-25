@@ -211,6 +211,48 @@ export interface ComposeInlineAtomAttributes {
   symFont?: string | null;
   /** Task 048, `symbol` kind only: the code point within that font (`w:sym/@w:char`, e.g. `F0A7`). */
   symChar?: string | null;
+  /**
+   * Task 057, `field` kind only: the field INSTRUCTION verbatim (`data-field-instr` —
+   * `w:fldSimple/@w:instr`, or the concatenated `w:instrText` of the `w:fldChar` code phase), including
+   * the leading/trailing spaces Word writes.
+   *
+   * Its PRESENCE is the carryability gate. `ComposeDocxProjectionBuilder.FieldAtomDataAttributes` emits
+   * this attribute only for a field the server can re-emit exactly; a NESTED or instruction-less field
+   * gets no payload at all, so a client structurally cannot hand back a construct the server would have
+   * to refuse. The rule lives in one place (the server's `TryCarryField`), mirrored here as data rather
+   * than restated as client policy.
+   *
+   * Declared here because ProseMirror keeps only the attributes a node's schema NAMES: without this
+   * declaration the server's payload is dropped at `setContent` and task 049's carry is unreachable from
+   * a keystroke edit. Same mechanism task 048 added for `w:sym`'s font + code point — and, like those,
+   * re-emitted by `renderHTML` so the payload also survives the `getHTML()` round trip the local draft
+   * store persists (`ComposeEditor.getDraftHtml`).
+   *
+   * DISPLAY-ONLY still holds: this module never parses or authors the instruction, and never renders it.
+   * The atom shows the same "Field: <cached result>" label it always did.
+   */
+  fieldInstruction?: string | null;
+  /**
+   * Task 057, `field` kind only: `true` when the source authored the field as the `w:fldChar`
+   * begin/instrText/separate/result/end RUN sequence (`data-field-complex`); `false` for the compact
+   * `w:fldSimple` element. The renderer reproduces the FORM the document used rather than normalising —
+   * Word treats the two as equivalent, but a save is not licensed to rewrite what the file contains.
+   */
+  fieldComplex?: boolean;
+  /**
+   * Task 057, `field` kind only: `w:fldLock` (`data-field-locked`) — the author froze this field so it
+   * never updates. Dropping it is the one way the carry could be WORSE than flattening: it would convert
+   * a deliberately frozen field into a live one.
+   */
+  fieldLocked?: boolean;
+  /** Task 057, `field` kind only: `w:dirty` (`data-field-dirty`) — the author asked Word to re-evaluate
+   * this field on next open. The document's own instruction about when the field may change. */
+  fieldDirty?: boolean;
+}
+
+/** Read a server `data-field-*` boolean flag — emitted as `"1"` when true, omitted entirely when false. */
+function readFieldFlag(element: HTMLElement, attribute: string): boolean {
+  return element.getAttribute(attribute) === '1';
 }
 
 /**
@@ -252,10 +294,20 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
         // space, which is exactly the space the server's offset table already counts for a `w:tab`. The
         // opaque kinds are unaffected: their display text never has meaningful edge whitespace, and an
         // empty string still falls back to the bare label below.
-        parseHTML: (element: HTMLElement) => element.textContent || null,
-        // Not re-emitted as an attribute — re-rendered as the placeholder's visible label instead
-        // (see renderHTML below), so it stays testable via getHTML() without a redundant data-*.
-        renderHTML: () => ({}),
+        //
+        // Task 057: prefer an explicit `data-atom-display` over the element's text. The server never
+        // emits that attribute (its atom span contains exactly the display text), so the load path is
+        // unchanged — but THIS node's own `renderHTML` does, and without it the round trip corrupts the
+        // value. An OPAQUE atom renders as "<label>: <displayText>", so re-parsing `getHTML()` output
+        // read `Field: 4` back as the display text, and a second pass read `Field: Field: 4`. That was
+        // cosmetic while the display text was only ever a UI label; it stopped being cosmetic once task
+        // 057 made it the field's `cachedResult`, i.e. a string written into the saved document. The
+        // round trip is real and reachable: `ComposeEditor.getDraftHtml` persists `getHTML()` to the
+        // local draft store on the dirty-autosave tick, and the FR-03 recovery path re-mounts it.
+        parseHTML: (element: HTMLElement) =>
+          element.getAttribute('data-atom-display') ?? (element.textContent || null),
+        renderHTML: attributes =>
+          attributes.displayText ? { 'data-atom-display': attributes.displayText as string } : {},
       },
       symFont: {
         default: null,
@@ -266,6 +318,31 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
         default: null,
         parseHTML: (element: HTMLElement) => element.getAttribute('data-sym-char'),
         renderHTML: attributes => (attributes.symChar ? { 'data-sym-char': attributes.symChar as string } : {}),
+      },
+      // Task 057 — the field payload. Parsed AND re-emitted: parsing is what makes the carry reachable
+      // from a keystroke edit at all, re-emitting is what keeps it alive across the `getHTML()` round trip
+      // the local draft store persists. Absent `data-field-instr` => `null` => the mapper emits no field
+      // run, which is exactly the server's own carryability refusal.
+      fieldInstruction: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-field-instr'),
+        renderHTML: attributes =>
+          attributes.fieldInstruction ? { 'data-field-instr': attributes.fieldInstruction as string } : {},
+      },
+      fieldComplex: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-complex'),
+        renderHTML: attributes => (attributes.fieldComplex ? { 'data-field-complex': '1' } : {}),
+      },
+      fieldLocked: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-locked'),
+        renderHTML: attributes => (attributes.fieldLocked ? { 'data-field-locked': '1' } : {}),
+      },
+      fieldDirty: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-dirty'),
+        renderHTML: attributes => (attributes.fieldDirty ? { 'data-field-dirty': '1' } : {}),
       },
     };
   },

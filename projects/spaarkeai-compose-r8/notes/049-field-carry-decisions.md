@@ -116,6 +116,14 @@ Stated here and on the published list, because "carried" must not be read as "by
 - The result run's properties **beyond bold / italic / underline** — `w:noProof`, a character style, a
   colour. The result is re-authored from the marker run's marks, which is the same property tier every other
   run in an edited block gets.
+- **Correction (task 057, 2026-08-25):** the line above is true of the SERVER path only. On a KEYSTROKE
+  edit, bold / italic / underline are lost too. The projection sets them on the field run from the result
+  run's `rPr`, but an opaque atom declares `marks: ''`, so the client cannot carry them and `AppendField`
+  receives `false` for all three; `ComposeBlockMerge.InheritRunProperties` then applies the edited
+  paragraph's DOMINANT run properties. A bold cross-reference in an otherwise-plain paragraph therefore
+  comes back plain. Same posture task 048 shipped for tab/symbol. Fixing it needs server-side atom
+  attributes and is not in 049's or 057's scope — recorded so the published list is not read as
+  promising more than the code delivers.
 - A result that was **several differently-formatted runs** comes back as one.
 - Field markup **inside** a text box (`w:txbxContent`, `mc:AlternateContent`) is not entered — those regions
   are carried whole or not at all, which is unchanged and deliberate.

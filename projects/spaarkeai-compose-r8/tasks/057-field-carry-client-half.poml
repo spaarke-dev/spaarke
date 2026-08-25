@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-A10 residual — the CLIENT half of the field carry: a `field` atom must round-trip into the posted content model, or task 049's carry is unreachable from a keystroke edit</title>
     <phase>4 Track A — Fidelity</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches `docxBridge.ts` — the client's authoritative editor→model projection, whose text coordinate space the diff/redline paths depend on. A segment that contributes the wrong number of characters silently corrupts every offset after it.</rigor-reason>
     <model-tier>opus</model-tier>
