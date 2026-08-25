@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-25 (by context-handoff) — **021 + 045 complete; MERGED TO MASTER**
+> **Last Updated**: 2026-08-25 (task 046 complete) — **021 + 045 merged to master; 046 configured live**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
@@ -10,17 +10,70 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **021 + 045 COMPLETE and MERGED TO MASTER** (`290d9ab79`) |
-| **Step** | Between tasks. Nothing in flight, nothing uncommitted |
-| **Status** | clean · `Router = SUCCESS` · **PR #812 is MERGED** — continued work needs a NEW PR |
-| **Phase** | **Phase 0 — 14 of 20** (001–010, 014, 016, 017, 019 ✅ · remaining **011 012 013 015 018 020**) · **Phase 0b — 3 of 12** (**021 ✅ 022 ✅ 045 ✅** · remaining **046 047** 023 024 025 026 027 028 029) |
-| **Next Action** | **Run task 046** — [`tasks/046-secure-project-owner-role.poml`](tasks/046-secure-project-owner-role.poml). Live Dataverse config; no deploy needed; can start immediately. **Then the operator deploys the BFF to dev, then task 047.** |
+| **Task** | ✅ **046 COMPLETE** (live Dataverse config + docs; **uncommitted**). 021 + 045 merged to master (`290d9ab79`) |
+| **Step** | Between tasks. Nothing in flight. **Working tree has uncommitted 046 doc changes — commit before anything else** |
+| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR |
+| **Phase** | **Phase 0 — 14 of 20** (001–010, 014, 016, 017, 019 ✅ · remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023 024 025 026 027 028 029) |
+| **Next Action** | **Commit + push 046**, then **🔔 owner decides the §5.1a-2 depth fix** (below). Task **047** is runnable after the operator deploys the BFF to dev — but see the scope caveat |
+
+### 🔔 OWNER DECISION REQUIRED — task 046 found that secure projects are NOT isolated
+
+**Proven empirically, not inferred.** `Test User 1` — an ordinary non-admin user — **read a real
+`sprk_issecure=true` project** owned by the `Secure Project` owner team, sitting in the `Secure Project`
+BU. Cause: **`Spaarke Basic User` holds `prvReadsprk_Project` at `Deep` depth**, and `Deep` held at the
+**root** BU reaches every descendant BU.
+
+This is **design §5.2's blocking prerequisite, still unremediated** — not a new defect. §5.2 inferred it
+from a depth census on 2026-08-20; task 046 exercised the whole mechanism against a real record. The
+**negative control passed** (a `Basic`-depth principal WAS denied on the same record), which is what
+establishes that BU containment works correctly *once no ordinary role holds `Deep` or `Global`*.
+
+| Fix | Blast radius (measured live 2026-08-25) | Note |
+|---|---|---|
+| **A — BU restructure** (§5.2's already-decided direction): users out of root into an Operations BU; secure BU becomes a **sibling** | Larger — every user's BU changes; secure BU re-parented; BU-cascade container re-seeded | Durable; survives future role edits |
+| **B — narrow the depth**: `Spaarke Basic User` `prvReadsprk_Project` `Deep`(4) → `Local`(2) | **ZERO today** — all 18 real projects and all 5 human users are in the root BU, so `Local` preserves current visibility exactly | One reversible edit, but a *role* guarantee, so a later role edit can silently undo it |
+
+**Not applied by 046 on purpose** — editing an ordinary end-user role changes every user's effective
+access. B closes the exposure now at near-zero risk while A is scheduled; they are not exclusive.
+Detail: design §5.1a-2. **Do NOT "fix" it by removing `sprk_project` Read from ordinary roles** — a
+share confers nothing without the entity privilege, so that would silently disable all sharing.
+
+### ⚠️ What this does to task 047's claim
+
+047 can validly conclude **"provisioning runs end-to-end"** — worth doing, since provisioning has never
+succeeded in any environment. It **cannot** conclude "isolation works" until the decision above lands.
+Keep those claims separate in the report.
 
 ### The one thing that needs the OPERATOR, not the agent
 
 **Task 047 (live provisioning validation) needs the BFF deployed to dev.** The `Deploy BFF API`
 workflow is **`disabled_manually`**, so that deploy is operator-driven. Sequence:
-**046 (agent) → deploy (operator) → 047 (agent).**
+**~~046 (agent)~~ ✅ → deploy (operator) → 047 (agent).**
+
+### What 046 configured in live dev (`spaarkedev1`) — already done, do not redo
+
+| | |
+|---|---|
+| `Secure Project Owner` | `roleid e4ebabd9-b4a0-f111-aaac-000d3a99d1d7`, in the `Secure Project` BU |
+| Privileges | **exactly 1** — `prvReadsprk_Project` @ **User (`Basic`)** depth (hypothesis said 7 @ BU depth — wrong in both dimensions) |
+| Held by | that one owner team; **0 users, 0 other teams** |
+| `System Administrator` | **REMOVED** from the team; assignment re-proven *after* removal |
+| Team members | **0** |
+| Test artifacts | probe project deleted — 0 secure projects, 0 projects in the secure BU |
+
+Runbook: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) ·
+write-up: [`notes/task-046-secure-project-owner-role.md`](notes/task-046-secure-project-owner-role.md)
+
+### Still open from 046
+
+- **Child-entity ownership** — **18 Spaarke entities via 19 lookups** carry a project lookup (the POML
+  said 3); `sprk_document` carries **two** (`sprk_project` *and* `sprk_relatedproject`, so a one-lookup
+  check misses half the cases). **Nothing assigns children to the secure team**, so they are unisolated
+  independently of the depth defect and would stay so after it is fixed. **Needs its own task** —
+  extending task 021's assign is the wrong shape (children are created continuously, long after
+  provisioning returns; this needs a create-time rule). Sequence with `spaarke-secure-project-r1`.
+- **FR-28's share→read assertion is untestable** until the depth fix lands — every human with
+  `sprk_project` Read holds `Deep`/`Global`, so no record exists that they cannot already read.
 
 ### Live Dataverse facts task 046 needs (verified 2026-08-25 — do NOT re-derive from docs)
 
@@ -94,13 +147,27 @@ and [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-aut
 
 ---
 
-## Three lessons that keep paying off — apply to every remaining task
+## Four lessons that keep paying off — apply to every remaining task
 
-**1. A zero-failure perturbation now has THREE causes, not two.** (a) test at the wrong level,
-(b) perturbed code unreachable, and — added by task 021 — **(c) a FAKE that ignores part of the
-contract.** Task 021's fixture ignored `$top` and the discriminating `$filter` predicates, so two
-perturbations looked "covered" by accident. *A fake is evidence only to the extent it refuses what
-Dataverse would refuse.* Third instance of task 016's class.
+**1. A misleading "it passed" now has FOUR causes, not two.** (a) test at the wrong level,
+(b) perturbed code unreachable, (c) — task 021 — **a FAKE that ignores part of the contract**
+(its fixture ignored `$top` and the discriminating `$filter` predicates, so two perturbations looked
+"covered" by accident; *a fake is evidence only to the extent it refuses what Dataverse would refuse*),
+and (d) — task 046 — **the platform answered from a STALE CACHE.** Dataverse's principal-privilege
+cache lags role edits by ~one operation; an early 046 pass reported *"assignment allowed with zero
+privileges"*, which taken at face value would have justified shipping a role that grants nothing.
+**Defences**: re-probe until stable across ≥3 polls, and cross-check the `privilegeCount` reported in
+any denial against the role's real privilege count. Run a zero-privilege control — if a role with no
+privileges still allows the operation, every reading in that session is void.
+*All four share one shape: the observation was real, but it was not an observation of the thing you
+thought it was.*
+
+**1b. Configuration-shaped assertions miss depth-shaped holes.** Task 046's headline finding —
+ordinary users can read secure projects — is invisible to any check that enumerates roles "scoped to
+the secure BU". `Spaarke Basic User` names that BU nowhere and reaches it anyway, via `Deep` at an
+ancestor. **Reach is a property of depth held at an ancestor, not of the target.** Prefer the
+empirical form: provision the record, attempt an impersonated read as a known non-admin, require
+denial. Same shape as NFR-04's negative canary — **success where you expect denial is the signal.**
 
 **2. Read the GATE, not a substitute — and check the gate EXISTS.** A conflicted PR produces **NO
 gate, not a red one**: GitHub cannot compute `refs/pull/N/merge` and dispatches zero workflows. Two
