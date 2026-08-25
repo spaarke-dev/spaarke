@@ -38,11 +38,14 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
     public async Task ApiEndpoints_ReturnConsistentErrorFormat()
     {
         // Test multiple endpoints return RFC 7807 compliant errors
+        // `/api/containers/invalid-id/drive` was removed from this list on 2026-08-25: auth-v4
+        // (commit c17e856f4) deleted GET /api/containers/{containerId}/drive along with five other
+        // endpoints whose per-resource authorization requirement was structurally unsatisfiable on a
+        // collection route. A deleted endpoint returns 404 with no body, which is not a statement
+        // about ProblemDetails formatting — the thing this test exists to check.
         var endpointsToTest = new[]
         {
-            "/api/me",
-            "/api/containers",
-            "/api/containers/invalid-id/drive"
+            "/api/me"
         };
 
         foreach (var endpoint in endpointsToTest)
@@ -83,7 +86,6 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
         var endpointGroups = new Dictionary<string, string[]>
         {
             ["User Endpoints"] = ["/api/me", "/api/me/capabilities"],
-            ["Document Endpoints"] = ["/api/containers", "/api/drives/test/children"],
             ["OBO Endpoints"] = ["/api/obo/containers/test/children"]
         };
 
