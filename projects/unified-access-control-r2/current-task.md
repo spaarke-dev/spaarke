@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-24 (task 022 COMPLETE — 19 of 22 routes gated)
+> **Last Updated**: 2026-08-25 (022 complete · 021 re-scoped · design §5.1 amended · new project filed)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,43 +10,63 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **022 COMPLETE** — document-surface authorization sweep. **19 of 22 routes gated**; the 3 remaining have no caller-supplied document id and are Phase 1 collection-scoping work |
-| **Step** | 🔔 **021 ESCALATED at step 0** — the two `@odata.bind` nav-property names cannot be recovered from any available source (see the escalation below). **Next unblocked task: 025**, or 026/027 which are parallel-safe |
-| **Status** | clean — all work committed and pushed (`f076b1e38`) |
+| **Task** | ✅ **022 COMPLETE** (19 of 22 routes gated) · **021 RE-SCOPED and ready to execute** — no longer blocked |
+| **Step** | **Execute re-scoped 021.** The POML is rewritten; design §5.1a/b/c, FR-28 and NFR-05 are amended; the nav-property blocker is **gone** (the only stamped field is now plain text) |
+| **Status** | clean — all work committed and pushed |
 | **Phase** | Phase 0 — enforcement remediation · **14 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ **009 ✅** 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) · **+ Phase 0b filed: 021–029** — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6); **029 added 2026-08-24 by owner decision** (To Do read/create parity — task 009 left PATCH wider than list) |
 | **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | **Start task 025** (test-integrity — the reason the rest could hide: `CallerRecordAccessProbe.GetCallerRightsAsync` can be replaced with "return all rights" and the suite stays green). 026 and 027 are parallel-safe and can run any time. **021 stays blocked** until the owner supplies the two nav-property names — see the escalation below. |
+| **Next Action** | **Execute re-scoped task 021** — [`tasks/021-provisioning-stamping-patch.poml`](tasks/021-provisioning-stamping-patch.poml). Start with the idempotency-marker fix: it is a **live regression** (mine, 2026-08-23) that 409s every secure project today. Then delete BU + account creation, resolve the BU by name, own via its default team, stamp only `sprk_containerid`, fail loudly. Read BOTH notes files first. |
 
-### 🔔 ESCALATION — task 021 blocked at step 0 (2026-08-24)
+### 🔴 TASK 021 WAS RE-SCOPED — do not execute the old scope
 
-**ADR/POML constraint invoked**: *"MANDATORY FIRST STEP: recover the navigation-property names from
-live `$metadata`. DO NOT GUESS."* Full detail + evidence:
-[`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md).
+The original scope ("fix 3 wrong `@odata.bind` names + the swallow") would have **activated a
+data-corruption bug**. Full reasoning:
+[`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md) +
+[`notes/secure-project-workflow-review-2026-08-24.md`](notes/secure-project-workflow-review-2026-08-24.md).
 
-**Two findings that change the task**, both from live metadata:
+**Four things the review found:**
 
-1. **Only 2 of the 3 writes are lookups.** `sprk_containerid` is `NVARCHAR(100)` — a plain string
-   write needing no navigation property. The POML's "three wrong names" framing obscured this.
-2. **ROOT CAUSE: a stale schema doc, not a typo.**
-   `src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md` documents
-   `sprk_securitybuid` / `sprk_externalaccountid`; live metadata has `sprk_securitybu` /
-   `sprk_externalaccount`. **The code was implemented faithfully from that doc.** Its relationship
-   names and its `pac data export` example are wrong too. Scope added to task 026.
+1. **BU-per-project contradicts design §5.1** ("no BU-per-project proliferation"), and the code parents
+   each BU to **root** — so those BUs sit *outside* the BU that NFR-05's assertion guards.
+2. **`sprk_externalaccount` is the CLIENT field.** `ProjectLiveFactResolver.cs:33` and
+   `MatterLiveFactResolver.cs:35` both map predicate `client` to it. Repairing the names would have
+   **overwritten each project's client** with a synthetic "External Access — {project}" account. The
+   five-month failure is the only reason no client data was corrupted.
+3. **A live regression, mine.** The 2026-08-23 idempotency guard keys on `sprk_containerid`, but the
+   wizard's BU cascade writes that field at create time — so any user whose BU carries a container id
+   creates a secure project that immediately **409s and is never provisioned**. My error: I picked a
+   marker without checking who else writes the field.
+4. **The nav-property blocker is GONE.** Under the new scope the only stamped field is
+   `sprk_containerid` (`NVARCHAR(100)`) — a plain string, no `@odata.bind`.
 
-**Blocked because**: `describe` returns logical names only; `read_query` is SQL-over-data and cannot
-reach `EntityDefinitions`; the one repo source is the stale doc; no secure project exists in dev to
-read back. A wrong nav property is silently accepted and the write does not happen — guessing
-re-commits the exact sin under repair.
+**Owner decisions 2026-08-25, now in `design.md` §5.1a/b/c + FR-28 + NFR-05:**
 
-**Nothing shipped, deliberately** — the three writes go out in ONE PATCH, so fixing only the verified
-container changes no behaviour, and fixing only the swallow hard-blocks provisioning on names known
-to be wrong.
+| Decision | Detail |
+|---|---|
+| No BU creation | Use the single canonical `Secure Projects` BU, resolved **by NAME from config** (GUID differs per environment). Fail closed if absent/ambiguous — never fall back to root or the caller's BU |
+| **No service account** | The BU's **default owner team** owns the records. Every BU gets one automatically; no licence, no credential, no extra identity |
+| **But the team DOES need a role** | I was wrong to say "no roles". Dataverse validates that an assignment target holds entity privileges. A dedicated `Secure Project Owner` role at **Business Unit** depth, on that one team, and **the team must have no human members** |
+| **NFR-05 amended** | The original ("no security role may reach the `Secure Projects` BU") is now **false by construction**. Restated: no role held by a **human** principal reaches it, and the owner team has no human members |
+| ⚠️ **Do NOT strip `sprk_project` Read from user roles** | A POA share only takes effect if the user also holds the entity privilege at some depth. Removing Basic/User Read would silently disable sharing |
+| Access teams, not per-user shares | 1 POA row instead of N; revoke = one membership delete. Build on `PlaybookSharingService.cs:302-350`, consolidated per §11 — do not fork a third sharing client |
+| Container: **special-case secure projects** | General BU cascade stays correct. `issecure` → the project's own `sprk_containerid` |
 
-**Owner options**: (A) supply the two names from `$metadata` on any environment with the solution
-deployed — *recommended, one lookup*; (B) deploy a secure project in dev and read them back (also
-gives task 034 a live target); (C) switch this write to the SDK path (`EntityReference` addresses
-lookups by **logical** name, no nav property) — the only option that stops this recurring, but an
-architectural change beyond 021's scope.
+### 🆕 New project filed: `spaarke-secure-project-r1`
+
+[`projects/spaarke-secure-project-r1/design.md`](../spaarke-secure-project-r1/design.md) — DRAFT for
+owner review, 4 open questions.
+
+**Why split**: container routing is document-storage plumbing with a security consequence, not
+evaluator work. It spans 7 client call sites, a server ingest path, invariant INV-7, and wizard UX.
+
+**The finding it is built on** — there are **THREE** container-resolution strategies, and the answer to
+"record or BU?" was *neither*: (1) the **acting user's BU**, client-side, 7 sites, BFF deliberately not
+involved (INV-7); (2) a single global `ArchiveContainerId` in **server-side** communication ingest —
+easiest to miss, no client, no wizard; (3) the document's own `GraphDriveId` — already correct.
+
+⚠️ **Sequencing gap to state plainly**: 021 stamps a container that **nothing reads yet**. 021 is still
+right to ship first (it closes the live 409 and is the prerequisite), but **document isolation is not
+achieved until `spaarke-secure-project-r1` lands.**
 
 ### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
 
