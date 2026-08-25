@@ -141,9 +141,19 @@ VETO  (after the max; order matters)
 
 ### 5.1 Mechanism
 
-- One **`Secure Projects` business unit**; secure records live there. Resolved **by NAME, from
-  configuration** — never by GUID, which differs per environment (owner decision 2026-08-25). Absent
-  BU = fail closed; never fall back to the root or the caller's BU.
+- One **`Secure Project` business unit**; secure records live there. Resolved **by NAME, from
+  configuration** (`SecureProject:BusinessUnitName`) — never by GUID, which differs per environment
+  (owner decision 2026-08-25). Absent BU = fail closed; never fall back to the root or the caller's BU.
+
+  > ⚠️ **Name corrected 2026-08-25 (task 021), SINGULAR.** This section and spec FR-28/NFR-05
+  > previously said `Secure Projects` (plural). Live Dataverse metadata says the deployed business
+  > unit is **`Secure Project`** — `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, parented to the root BU
+  > `Spaarke`. The plural was written from assumption and never checked against the environment.
+  > Shipping it as the configuration default would have made every provisioning call fail closed
+  > with "business unit not found" — the correct *direction*, but for a fabricated reason, and it
+  > would have read as a missing environment rather than a wrong string. **Eighth instance in this
+  > project of "docs lose to live metadata."** Pinned by a test
+  > (`DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed`).
 - The BU's **default owner team owns the records**, so they stay there naturally — no
   matrix-data-access dependency, no BU-per-project proliferation.
 - **All human access is by explicit Dataverse share**, including the creating attorney's. Nobody gets access by ownership; nobody by business unit.
@@ -170,10 +180,33 @@ privileges on that entity fails. So:
 
 - Define a dedicated **`Secure Project Owner`** role: Create / Read / Write / Delete / Append /
   AppendTo / Share on `sprk_project` and its child entities, at **Business Unit** depth.
-- Assign it to the **`Secure Projects` default owner team only**.
+- Assign it to the **`Secure Project` default owner team only**.
 - **Keep that team free of human members.** The role's BU depth means any member would read every
   secure project *by membership*, which is exactly the ownership-derived access this section forbids.
   The team exists to hold ownership, not to confer access.
+
+> 🔔 **Live-environment finding, 2026-08-25 (task 021) — owner action needed.**
+>
+> The dev environment's state was read directly. Two of three properties already hold; one does not.
+>
+> | Property | Live state |
+> |---|---|
+> | The default owner team exists | ✅ `Secure Project`, `teamid daec0b6f-…`, `teamtype=0` (Owner), `isdefault=Yes` |
+> | The team has no human members | ✅ zero rows in `teammembership` |
+> | The team holds a scoped role | ❌ it holds **`System Administrator`**, and no role matching `Secure%` exists in the environment |
+>
+> Review §D of the workflow review says of this exact question: *"None — and definitely NOT System
+> Administrator."* Nothing is exposed **today**, because the team has no members — but the posture is
+> one membership row away from granting a human full administrative rights, and it is the opposite of
+> the least-privilege intent above.
+>
+> This is **environment setup**, so task 021 did not change it (and creating the role is explicitly
+> out of that task's scope). It has a consequence worth stating plainly: task 021's escalation
+> trigger *"if assigning a record to the owner team fails because the team lacks entity privileges,
+> STOP"* **cannot fire in dev** — assignment succeeds because the team is omnipotent, not because it
+> is correctly scoped. So a green provisioning run in dev is **not** evidence that the
+> `Secure Project Owner` role is configured. Creating that role and swapping it for System
+> Administrator remains an open UAT/environment item.
 
 ⚠️ **A POA share is only effective if the user also holds the entity privilege at some depth.** Normal
 user roles must therefore **retain Read on `sprk_project` at Basic/User depth**. That grants nothing on

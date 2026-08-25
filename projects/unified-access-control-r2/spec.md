@@ -87,7 +87,18 @@ All findings independently confirmed; evidence at [`notes/investigation/10-findi
 
 ### Phase 4 — Secure Project, Manage Access, wizard
 
-28. **FR-28** *(amended 2026-08-25 — owner decision; see design §5.1a)*: Secure Projects are owned by the **`Secure Projects` BU's default owner team** (NOT a service account — none is needed); the BU is resolved **by name from configuration**, never by GUID; all human access is by explicit Dataverse share, implemented as **per-record access teams** — Acceptance: no principal reads a secure project via ownership or business unit; a shared user reads it in **both** the MDA and the SPA; the owner team has **no human members**; provisioning **fails closed** if the named BU is absent.
+28. **FR-28** *(amended 2026-08-25 — owner decision; see design §5.1a)*: Secure Projects are owned by the **`Secure Project` BU's default owner team** (NOT a service account — none is needed); the BU is resolved **by name from configuration**, never by GUID; all human access is by explicit Dataverse share, implemented as **per-record access teams** — Acceptance: no principal reads a secure project via ownership or business unit; a shared user reads it in **both** the MDA and the SPA; the owner team has **no human members**; provisioning **fails closed** if the named BU is absent.
+    - **Partially delivered by task 021 (2026-08-25)**: provisioning now resolves the BU by name from
+      `SecureProject:BusinessUnitName` (default **`Secure Project`** — SINGULAR; the plural in this
+      spec and design §5.1 was assumed and is corrected, see design §5.1), assigns the project to that
+      BU's default owner team **verified by reading the owner back**, and fails closed on an absent or
+      ambiguous BU. **Still outstanding on FR-28**: the explicit share itself — per-record access teams
+      (design §5.1b), built on `PlaybookSharingService.cs:302-350` per CLAUDE.md §11. Until that
+      lands, a secure project is *isolated* but nothing has been *shared*, so no human can reach it.
+      Needs its own task.
+    - ⚠️ **The `Secure Project Owner` role is NOT configured in dev** — the owner team currently holds
+      `System Administrator` (design §5.1a, live finding). The team is memberless so nothing is
+      exposed, but a green provisioning run in dev does **not** evidence a correctly scoped role.
 29. **FR-29**: the Manage Access PCF adds a **"+ User"** system-user picker writing Dataverse shares, and surfaces service-user assignment and BU alignment — Acceptance: an internal user can be granted and revoked from the modal.
 30. **FR-30**: every Current Access row displays **provenance** (share · explicit grant · organization grant · standing grant · derived-from-field) and level; Secure and Restricted states render suppressed rows as suppressed with a reason — Acceptance: the modal answers "who can see this record and why" without leaving the form.
 31. **FR-31**: the Create Project wizard Secure step aligns to FR-28, removes the retired Power Pages claim, and drops the permanence warning — Acceptance: copy matches implemented behaviour; the secure designation is reversible.
@@ -102,7 +113,7 @@ All findings independently confirmed; evidence at [`notes/investigation/10-findi
 - **NFR-02**: No regression in request cost — the impersonated root-set source uses the same 3 Dataverse round trips per request as today's membership queries.
 - **NFR-03**: Result caps must never be silent. When a result set is capped, the user sees **"Only 5,000 records displayed"**.
 - **NFR-04**: A negative canary test gates Phase 1: an impersonated low-privilege read must return a **strict subset** of, and **strictly fewer** rows than, the same query app-only. Equality means impersonation is inert and the build fails.
-- **NFR-05** *(amended 2026-08-25 — the original is false by construction; see design §5.1a)*: A standing assertion verifies that **no role held by a human principal** grants a depth on `sprk_project` / `sprk_matter` reaching the `Secure Projects` BU, **and** that the `Secure Projects` owner team has no human members. A role edit that re-opens secure projects must fail the build, not ship.
+- **NFR-05** *(amended 2026-08-25 — the original is false by construction; see design §5.1a)*: A standing assertion verifies that **no role held by a human principal** grants a depth on `sprk_project` / `sprk_matter` reaching the `Secure Project` BU, **and** that the `Secure Project` owner team has no human members. A role edit that re-opens secure projects must fail the build, not ship.
   - **Why amended**: FR-28's owner team *requires* a `Secure Project Owner` role at Business-Unit depth — Dataverse refuses to assign a record to a team without entity privileges. So "no security role reaches the BU" cannot hold. The exemption is exactly one role, assigned to exactly one memberless team; the assertion's teeth move to *human reachability*, which is the property that was always intended.
   - **Do NOT "fix" this by removing `sprk_project` Read from ordinary user roles.** A POA share only takes effect if the user also holds the entity privilege at some depth; stripping Basic/User Read would silently disable sharing altogether.
 - **NFR-06**: BFF publish size ≤ 60 MB compressed (baseline ~44.96 MB incl. PDBs); measured and reported per BFF-touching task.
@@ -167,7 +178,7 @@ No new NuGet packages. Publish-size delta expected ≈0.
 2. [ ] One evaluator; `AuthorizationService` path repaired or retired — Verify: no caller-scoped path passes `userAccessToken: null`
 3. [ ] Negative canary green — Verify: NFR-04 test in CI
 4. [ ] Role-depth assertion green — Verify: NFR-05 test in CI
-5. [ ] A user in the Operations subtree cannot read a `Secure Projects`-owned record — Verify: live dev test
+5. [ ] A user in the Operations subtree cannot read a `Secure Project`-owned record — Verify: live dev test
 6. [ ] A shared user reads a secure project in both MDA and SPA — Verify: live dev test
 7. [ ] Manage Access answers "who can see this and why" with provenance per row — Verify: UAT
 8. [ ] Contact with Project access sees its invoices, events, communications and To Dos — Verify: live dev test
@@ -179,12 +190,12 @@ No new NuGet packages. Publish-size delta expected ≈0.
 
 | Item | Detail |
 |---|---|
-| **BU restructure** | Create `Spaarke Operations` and `Secure Projects` as Level-1 siblings under root; Level-2 BUs under Operations (design §5.2) |
-| **User migration** | Move all non-admin users out of the root BU into the Operations subtree — Deep from root reaches `Secure Projects` |
+| **BU restructure** | Create `Spaarke Operations` and `Secure Project` as Level-1 siblings under root; Level-2 BUs under Operations (design §5.2) |
+| **User migration** | Move all non-admin users out of the root BU into the Operations subtree — Deep from root reaches `Secure Project` |
 | **Record re-homing** | Re-home root-owned core records to Operations; BU depth reaches only downward |
 | **Role config** | Security roles assigned at the **Operations** level (owner decision); no per-Level-2 roles |
 | **Non-admin test user** | In the Operations subtree, Operations-level role, **no Global-read role**. Isolation is not verifiable from an admin account |
-| **Verification** | A user in the Operations subtree cannot read a `Secure Projects`-owned record; a shared user reads it in **both** MDA and SPA |
+| **Verification** | A user in the Operations subtree cannot read a `Secure Project`-owned record; a shared user reads it in **both** MDA and SPA |
 
 Phase 4 code ships and unit/integration-tests independently of this; its **live-dev acceptance** is gated on it.
 
@@ -213,7 +224,7 @@ Phase 4 code ships and unit/integration-tests independently of this; its **live-
 | Ethical wall | Is "No Access" a level? | Data model per owner: No Access List subgrid matched on organization | Implemented as a **veto**, not a level (FR-23) |
 | Standing grant scope | Who can hold one? | **Organizations, contacts, and internal workforce**, each with a baseline level | FR-25 |
 | Secure Project | Mechanism? | **Secure BU sibling of Operations + BU default-owner-team owner + share-only via access teams** (amended 2026-08-25 — no service account needed) | FR-18, FR-28 |
-| BU topology | Local, or restructure? | **Restructure** — Operations and Secure Projects as Level-1 siblings; users at Deep in the Operations subtree | Avoids matrix-data-access dependency |
+| BU topology | Local, or restructure? | **Restructure** — Operations and Secure Project as Level-1 siblings; users at Deep in the Operations subtree | Avoids matrix-data-access dependency |
 | Phase 0 scope | Fix findings in other modules? | **Policy-key fixes in scope; A-21 files out** | FR-03, FR-04 in; AI trimming out |
 | Result caps | Behaviour above 5,000? | **Show "Only 5,000 records displayed"** | NFR-03 |
 | Deferrals | Break-glass, org hierarchy, GDPR? | **All out of scope**; no org-hierarchy cascade | Recorded as known gaps |

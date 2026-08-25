@@ -60,7 +60,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 | # | Task | Finding | Deps | Safe | Tier | Effort | Why |
 |---|---|---|---|---|---|---|---|
 | ✅ **022** | Document-surface authorization sweep | **C1,C2,C3**,H2,H3,H5 | 002 | ❌ | **opus** | **xhigh** | **DONE 2026-08-24** — 19 of 22 routes gated; 3 remaining are collection-shaped (Phase 1). See outcome below |
-| 🔲 **021** | **RE-SCOPED**: match design 5.1 - drop BU + account creation, resolve BU by name, own via default team, stamp only the container, fail loudly | Critical (C4/C5) | 008 | ❌ | **opus** | high | **READY - no longer blocked**; the nav-prop blocker dissolved. Also fixes a **LIVE 409 regression**. See [`notes/secure-project-workflow-review-2026-08-24.md`](../notes/secure-project-workflow-review-2026-08-24.md) |
+| ✅ **021** | **RE-SCOPED + DONE**: matched design 5.1 - dropped BU + account creation, BU resolved by name, owned via its default team, container-only stamp, fails loudly | Critical (C4/C5) | 008 | ❌ | **opus** | high | **COMPLETE 2026-08-25.** Live 409 regression CLOSED. 9/9 perturbations bit; the sweep found **2 coverage holes in the FAKE** (it ignored `$top` and the team-filter predicates - third instance of task 016's class). **2 owner findings**: the BU is `Secure Project` **SINGULAR** (docs said plural - 8th docs-vs-metadata instance), and the owner team holds **System Administrator** (review §D says it must not). Neither document isolation nor FR-28's share is achieved by this task. See [`notes/task-021-provisioning-stamping.md`](../notes/task-021-provisioning-stamping.md) |
 | 🔲 **025** | Test-integrity: 4 untested seams + gate mechanism + false-claim tests | H6,M3,M7 | 003,007,017 | ❌ | **opus** | **xhigh** | This is WHY the rest could hide — the central gate can return blanket rights with the suite green |
 | 🔲 **023** | Grant upsert must write `sprk_expiresdate` (+ FR-09 acceptance) | H1 | 007,010 | ❌ | sonnet | high | A-5's shape resurrected on the write path by the two tasks that closed it on the read path |
 | 🔲 **029** | External To Do read + create parity (matter + WA) | (task 009 asymmetry) | 009 | ❌ | sonnet | high | Task 009 widened PATCH but not list/create — **the write plane is now wider than the read plane**. Owner intent: parent flows from creation context |
@@ -94,7 +94,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 >   *unreachable* code rather than missing coverage (14 → 17 failure delta proves the guard is
 >   covered once reachable).
 
-**Recommended order**: ~~022~~ ✅ → 021 → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
+**Recommended order**: ~~022~~ ✅ → ~~021~~ ✅ → 025 → 023 → **029** → 028 → 024, with 026 and 027 runnable
 in parallel at any time (both `parallel-safe: true`, no deps, no contended code).
 
 **029 before 028**: 029 closes a live incoherence on the shipped surface (writable-but-not-listable

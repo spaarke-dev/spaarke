@@ -1,9 +1,14 @@
 # Task 021 — provisioning stamping PATCH (C4/C5)
 
-> **STATUS: ESCALATED — and RE-SCOPED, 2026-08-24.** Two escalations, and the second one supersedes
-> the first. Owner review of the mechanism (not the bug) found that **two of the three things
-> provisioning stamps should probably not exist at all**, and that fixing the names as written would
-> *activate* a data-corruption bug rather than close a gap.
+> **STATUS: ✅ COMPLETE, 2026-08-25.** Implemented under the re-scope. See
+> [§ What shipped](#-what-shipped-2026-08-25) at the bottom for the delivered behaviour, the
+> perturbation counts, and the two findings the work turned up. The escalation history below is kept
+> because it is *why* the shipped scope is what it is.
+>
+> **Previously: ESCALATED — and RE-SCOPED, 2026-08-24.** Two escalations, and the second one
+> supersedes the first. Owner review of the mechanism (not the bug) found that **two of the three
+> things provisioning stamps should probably not exist at all**, and that fixing the names as written
+> would *activate* a data-corruption bug rather than close a gap.
 
 ---
 
@@ -187,3 +192,163 @@ consequence of the design question, not a workaround for it.
 4. Tests + perturbations: revert each name individually; re-swallow the error.
 5. Port task 016's `$select`-validating fake so a wrong projection cannot pass — already noted as the
    reason 5 of 5 provisioning tests stayed green while the endpoint 500'd.
+
+---
+
+# ✅ What shipped (2026-08-25)
+
+## Delivered behaviour
+
+`POST /api/v1/external-access/provision-project` now does exactly four things, in this order:
+
+| # | Step | Failure mode |
+|---|---|---|
+| 1 | Resolve the canonical `Secure Project` BU **by name** from `SecureProject:BusinessUnitName`, `$top=2` | absent → `sdap.provision.secure_bu_not_found`; >1 → `…secure_bu_ambiguous`. **Never** falls back to root or the caller's BU |
+| 2 | Resolve that BU's **default owner team** by `_businessunitid_value + isdefault + teamtype=0` | absent → `…secure_owner_team_not_found`; >1 → `…secure_owner_team_ambiguous` |
+| 3 | Assign `ownerid` → that team, then **read `_owningteam_value` back** | refused → `…owner_assignment_failed`; accepted-but-not-applied → `…owner_assignment_not_applied` |
+| 4 | Create the project's own SPE container, then record it on `sprk_containerid` | cannot record → `…container_not_recorded`, **non-2xx carrying the container id** (ADR-003) |
+
+**Deleted**: BU creation, account creation, both rollback paths, `ResolveRootBusinessUnitIdAsync`,
+`ResolveAccountForBuAsync`, `AttemptRollbackBuAsync`, the umbrella-BU branch, `UmbrellaBuId` on the
+request, and `AccountId`/`AccountName`/`WasUmbrellaBu` on the response. Net deletion — the endpoint
+does strictly less than it did.
+
+## Three decisions worth recording
+
+**1. The idempotency marker is OWNERSHIP, never `sprk_containerid`.**
+The 2026-08-23 guard keyed on `sprk_containerid` being non-empty — but the wizard writes that field
+at create time from the creating user's BU, so every secure project 409'd and none was ever
+provisioned. Ownership by the `Secure Project` owner team is state **only provisioning writes**: the
+wizard cannot set it (it does not know the team) and `applyUserBuDefaults` cascades BU-derived
+*fields*, not ownership. `_sprk_securitybu_value` is still read as a **legacy** marker so projects
+provisioned by the retired mechanism are refused rather than silently migrated.
+
+*Residual edge, stated not hidden*: an administrator who deliberately reassigns a provisioned secure
+project away from the owner team makes a later run see it as unprovisioned and create a second
+container. That requires a deliberate ownership change on a secure project; the displaced container
+id is logged so the first container stays traceable.
+
+**2. Ownership is assigned BEFORE the container is created, and that order is load-bearing.**
+Ownership is the *security* step; the container is the *storage* step. If the container fails after
+ownership, the project is at least correctly owned inside the Secure Project BU. Reversed, the same
+failure leaves a secure project owned by its creating user in an Operations BU — strictly the worse
+posture. There is deliberately **no rollback** of the assignment: rolling it back would move the
+record back out of the secure BU, turning a storage failure into a disclosure. Pinned by
+`ProvisionProject_WhenContainerCreationFails_TheProjectIsStillOwnedByTheSecureTeam`.
+
+**3. The one remaining `@odata.bind` is verified by read-back, not trusted.**
+`ownerid@odata.bind` is the only navigation-property write left. Dataverse's behaviour on an
+unrecognised `@odata.bind` property is to **accept the request and ignore the property** — the exact
+mechanism that hid the old stamping bug for five months, and one that "get the name right" cannot
+defend against, because "did I get the name right?" is unanswerable offline. Re-reading
+`_owningteam_value` converts an unverifiable assumption into an observed fact. That is also why the
+original nav-property blocker dissolved rather than being solved: `sprk_containerid` is
+`NVARCHAR(100)`, a plain string, and the two lookups whose PascalCase names could not be recovered
+should never have been written at all.
+
+## Perturbations — 9 run, 9 bit
+
+Harness: `scratchpad/perturb021.py`, both task-022 rules enforced (`os.utime` after restore; a
+clean-tree baseline that must be 0). Baseline was 0 before and after the sweep.
+
+| # | Perturbation | Failures |
+|---|---|---|
+| P1 | absent BU no longer fails closed | 1 |
+| P2 | BU lookup `$top=2` → `$top=1` (ambiguity invisible) | **1** ← was 0 |
+| P3 | **marker reverted to `sprk_containerid`** (the live regression) | **2** |
+| P4 | re-swallow the container-stamp failure | 1 |
+| P5 | stamp also writes `sprk_externalaccount` (the CLIENT column) | 1 |
+| P6 | skip the owner assignment entirely | 3 |
+| P7 | trust the ownership PATCH (drop the read-back comparison) | 1 |
+| P8 | owner-team filter drops `isdefault` + `teamtype` | **12** ← was 0 |
+| P9 | default BU name reverted to the plural | 1 |
+
+### The sweep found two real coverage holes — in the FAKE, not the tests
+
+P2 and P8 first came back **0**, and the cause was neither "test at the wrong level" nor "unreachable
+code" — the two causes task 022 taught us to distinguish. It was a third thing: the fixture's
+Dataverse double **ignored `$top` and ignored the discriminating `$filter` predicates**, so both
+perturbations were invisible to it.
+
+- With `$top` ignored, the double returned two BUs either way, so the ambiguity guard stayed covered
+  by accident — while against real Dataverse `$top=1` makes ambiguity undetectable and an arbitrary
+  BU is silently accepted.
+- With the team filter ignored, the double answered on the BU id alone. Real BUs carry several teams
+  (the live root BU has **four owner teams and three access teams**), so that query returns the wrong
+  team.
+
+Fixed by making the double honour `$top`, apply only the predicates actually asked for, and seed
+**decoy teams** (one access team, one non-default owner team) ahead of the real one — so "took an
+arbitrary team" is a visible failure rather than a coincidence that happens to work.
+
+**Third instance of this class in this project**, after task 016's `$select`-ignoring fake and its
+guard not being ported one directory over. Generalised: *a fake is evidence only to the extent it
+refuses what Dataverse would refuse.* Any part of a query the double discards is a part the
+production code can build wrongly for free.
+
+## Two findings for the owner
+
+**(a) The BU name in the docs was wrong — SINGULAR, not plural.** design §5.1, spec FR-28/NFR-05 and
+this task's own POML all said `Secure Projects`. Live metadata: the BU is **`Secure Project`**
+(`d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, parented to root `Spaarke`). Shipping the plural as the
+config default would have failed closed on every call — right direction, fabricated reason, and it
+would have read as a missing environment rather than a wrong string. Corrected in design.md and
+spec.md, pinned by `DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed`. **Eighth instance of
+"docs lose to live metadata."**
+
+**(b) 🔔 The owner team holds `System Administrator`.** Full detail in design §5.1a. The team is
+memberless, so nothing is exposed today — but review §D says of this exact question *"None — and
+definitely NOT System Administrator"*, and the posture is one membership row away from full
+administrative rights for a human. Environment setup, so out of this task's scope. Note the
+consequence though: **this task's escalation trigger for "the team lacks entity privileges" cannot
+fire in dev**, because assignment succeeds by omnipotence rather than by correct scoping. A green
+provisioning run in dev is not evidence that the `Secure Project Owner` role exists. It does not.
+
+## What this task did NOT achieve
+
+**Document isolation.** Nothing reads the project's `sprk_containerid` yet — that needs the three
+container-resolution strategies special-cased, which is `spaarke-secure-project-r1`. And **no human
+can reach a secure project yet**: FR-28's explicit share (access teams) is still outstanding, so the
+record is isolated but unshared. Both stated in design §5.1c and spec FR-28.
+
+## Verification
+
+- **All seven test projects: 11,443 passed / 0 failed** (was 11,431; +12 = 19 new − 7 replaced).
+  `Sprk.Bff.Api.Tests` 10,831 · `Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 ·
+  `Spaarke.Scheduling.Tests` 46 · `Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 ·
+  `RecordSyncJob.IsolatedTests` 12
+- **Publish 43.70 MB** compressed incl. PDBs — **zero delta** vs baseline; ceiling 60. No packages
+  added. `dotnet list package --vulnerable --include-transitive` clean.
+- `Spaarke.UI.Components` `tsc --noEmit`: 0 errors in the changed files. Three pre-existing
+  `@spaarke/auth` / `@spaarke/sdap-client` module-resolution errors remain in files this task did not
+  touch (unbuilt workspace packages in a fresh worktree).
+
+## One production change made for testability
+
+`SpeFileStore.CreateContainerAsync` is now `virtual`. Substituting it at the ADR-007 facade is what
+lets a test assert the provisioning SUCCESS path at all — before this, the only available assertion
+was that provisioning reached business-unit creation and then failed on unavailable test-host Graph
+services, and business-unit creation no longer exists. The alternative, faking `IGraphClientFactory`,
+means standing up Graph SDK internals: transport-shaped mocking, banned by ADR-038 B1. Same reasoning
+and same precedent as `DocumentCheckoutService.DeleteAsync` in task 022. No behaviour change.
+
+## Client + e2e fallout
+
+Both `provisioningService.ts` copies (`Spaarke.UI.Components` and the `LegalWorkspace` fork) updated
+to the new request/response shape, and `PROVISIONING_STEPS` now names the steps that actually run —
+the `bu` and `account` steps described work that no longer happens.
+
+`tests/e2e/.../secure-project-creation.spec.ts` is **not CI-gated** (no workflow references
+`tests/e2e`) and can only be validated against a live environment. Five cases whose mechanism was
+deleted are `test.skip`ped with per-case reasons rather than rewritten blind — assertions I cannot
+execute would look verified and would not be. The happy path, the container-isolation case and the
+reference-completeness case were updated. Two real defects were fixed there in passing:
+
+- its `queryProject` helper `$select`ed **three columns that do not exist**, so the query 400'd and
+  its own `catch` returned `null` — every assertion built on it was **vacuous**;
+- the happy-path and isolation cases tracked the business unit **for deletion**. Against the new
+  endpoint that deletes the shared canonical `Secure Project` BU. Removed, with a note.
+
+It also still uses `sprk_projectref` and `sprk_description` in its payload builders, neither of which
+exists on live `sprk_project` — so it could not have passed as written whatever the endpoint did.
+Flagged in the file header for whoever re-authors it.

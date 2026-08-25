@@ -3,7 +3,7 @@
   <metadata>
     <title>Re-scoped: make provision-project match design 5.1 -- drop BU + account creation, resolve the Secure Projects BU by name, own via its default team, stamp only the container, fail loudly</title>
     <phase>0b Review remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the secure-project provisioning path; deletes two creation steps with rollback fallout; changes record OWNERSHIP; and fixes a live regression that currently 409s every secure project.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -124,5 +124,22 @@ OUT OF SCOPE, deliberately -- do NOT drift into these:
     <criterion>All 7 test projects pass; publish size reported and &lt;=60 MB compressed incl. PDBs.</criterion>
   </acceptance-criteria>
 
-  <notes>RE-SCOPED 2026-08-25. The original "fix 3 wrong names" scope would have activated a data-corruption bug. The nav-property blocker that stopped the first attempt dissolves here because the only remaining stamped field is plain text. Document isolation is NOT achieved by this task -- nothing reads the project's container yet; that is `spaarke-secure-project-r1`.</notes>
+  <notes>RE-SCOPED 2026-08-25. The original "fix 3 wrong names" scope would have activated a data-corruption bug. The nav-property blocker that stopped the first attempt dissolves here because the only remaining stamped field is plain text. Document isolation is NOT achieved by this task -- nothing reads the project's container yet; that is `spaarke-secure-project-r1`.
+
+COMPLETED 2026-08-25. Full record: notes/task-021-provisioning-stamping.md "What shipped".
+
+Delivered: BU resolved by name from SecureProject:BusinessUnitName ($top=2, fails closed on absent AND ambiguous, never falls back); ownership assigned to the BU's default owner team and VERIFIED BY READ-BACK; container-only stamp as a plain string; fail-loud on an unrecorded container carrying its id (ADR-003). Deleted: BU creation, account creation, both rollbacks, ResolveRootBusinessUnitIdAsync, ResolveAccountForBuAsync, AttemptRollbackBuAsync, the umbrella branch, UmbrellaBuId, and three response members.
+
+Idempotency marker = OWNERSHIP, not sprk_containerid (which the wizard writes at create time -- that was the live 409 regression). _sprk_securitybu_value still read as a legacy marker so retired-mechanism projects are refused, not silently migrated.
+
+Perturbations: 9 run, 9 bit (1/1/2/1/1/3/1/12/1). P2 and P8 initially returned ZERO -- neither cause task 022 named, but a third: the fixture's Dataverse double ignored $top and ignored the discriminating $filter predicates. Fixed the FAKE (honour $top, apply only the predicates asked for, seed decoy teams). Third instance of task 016's class.
+
+DEVIATIONS from the POML, all deliberate:
+1. Tests went to tests/integration/data-mutation/ExternalAccess/ (the EXISTING provisioning fixture, already a KEEP path with the $select guard) rather than the POML's tests/integration/auth/UnifiedAccessControl/ProvisionSecureProjectTests.cs, which did not exist. Forking a second provisioning fixture is what CLAUDE.md 11 forbids. Seventh unreliable POML path in this project.
+2. The POML's default BU name "Secure Projects" is WRONG. Live metadata: "Secure Project", SINGULAR. Shipping the plural would have failed closed on every call. Corrected in design.md + spec.md; pinned by a test.
+3. SpeFileStore.CreateContainerAsync made virtual -- the ADR-007 facade seam, without which the success path cannot be asserted at all. Precedent: DocumentCheckoutService.DeleteAsync, task 022.
+
+ESCALATION TRIGGER 1 DID NOT FIRE, and note WHY: the owner team holds System Administrator, so assignment succeeds by omnipotence, not by correct scoping. A green run in dev is NOT evidence the Secure Project Owner role exists -- it does not exist in the environment. Surfaced in design 5.1a and spec FR-28 as an open owner item.
+
+Verified: all 7 test projects 11,443 passed / 0 failed; publish 43.70 MB compressed incl. PDBs (ZERO delta, ceiling 60); --vulnerable clean.</notes>
 </task>

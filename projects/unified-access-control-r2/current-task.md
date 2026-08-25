@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-25 (022 complete · 021 re-scoped · design §5.1 amended · new project filed)
+> **Last Updated**: 2026-08-25 (**021 COMPLETE** — live 409 regression closed; 2 owner findings)
 > **Recovery**: read "Quick Recovery" first. History lives in
 > [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
 
@@ -10,46 +10,82 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **022 COMPLETE** (19 of 22 routes gated) · **021 RE-SCOPED and ready to execute** — no longer blocked |
-| **Step** | **Execute re-scoped 021.** The POML is rewritten; design §5.1a/b/c, FR-28 and NFR-05 are amended; the nav-property blocker is **gone** (the only stamped field is now plain text) |
-| **Status** | clean — all work committed and pushed |
-| **Phase** | Phase 0 — enforcement remediation · **14 of 20 complete** (001 ✅ 002 ✅ 003 ✅ 004 ✅ 005 ✅ 006 ✅ 007 ✅ 008 ✅ **009 ✅** 010 ✅ 014 ✅ 016 ✅ 017 ✅ 019 ✅) · **+ Phase 0b filed: 021–029** — **020 added 2026-08-24 by owner decision** (org-grant SPE member cleanup, was a deferred note in 017 §6); **029 added 2026-08-24 by owner decision** (To Do read/create parity — task 009 left PATCH wider than list) |
-| **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft, all work pushed |
-| **Next Action** | **Execute re-scoped task 021** — [`tasks/021-provisioning-stamping-patch.poml`](tasks/021-provisioning-stamping-patch.poml). Start with the idempotency-marker fix: it is a **live regression** (mine, 2026-08-23) that 409s every secure project today. Then delete BU + account creation, resolve the BU by name, own via its default team, stamp only `sprk_containerid`, fail loudly. Read BOTH notes files first. |
+| **Task** | ✅ **021 COMPLETE** (re-scoped + implemented) · ✅ 022 complete |
+| **Step** | Task complete, all gates green. **Not yet committed** |
+| **Status** | 15 files modified, uncommitted. Next: commit + push |
+| **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 2 of 9** (**021 ✅** 022 ✅ · remaining: 023 024 025 026 027 028 029) |
+| **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft |
+| **Next Action** | **Commit the 021 changeset and push.** Then `/push-to-github`. After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
 
-### 🔴 TASK 021 WAS RE-SCOPED — do not execute the old scope
+### ✅ Task 021 — what shipped
 
-The original scope ("fix 3 wrong `@odata.bind` names + the swallow") would have **activated a
-data-corruption bug**. Full reasoning:
-[`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md) +
-[`notes/secure-project-workflow-review-2026-08-24.md`](notes/secure-project-workflow-review-2026-08-24.md).
+Full record: [`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md) § "What shipped".
 
-**Four things the review found:**
+Provisioning now: resolves the canonical BU **by name** from `SecureProject:BusinessUnitName`
+(`$top=2`, fails closed on absent AND ambiguous, **never** falls back) → resolves that BU's **default
+owner team** by `_businessunitid_value + isdefault + teamtype=0` → assigns `ownerid` and **reads the
+owner back to verify** → creates the project's own SPE container → records it on `sprk_containerid`,
+**failing loudly with the container id** if that write cannot land (ADR-003).
 
-1. **BU-per-project contradicts design §5.1** ("no BU-per-project proliferation"), and the code parents
-   each BU to **root** — so those BUs sit *outside* the BU that NFR-05's assertion guards.
-2. **`sprk_externalaccount` is the CLIENT field.** `ProjectLiveFactResolver.cs:33` and
-   `MatterLiveFactResolver.cs:35` both map predicate `client` to it. Repairing the names would have
-   **overwritten each project's client** with a synthetic "External Access — {project}" account. The
-   five-month failure is the only reason no client data was corrupted.
-3. **A live regression, mine.** The 2026-08-23 idempotency guard keys on `sprk_containerid`, but the
-   wizard's BU cascade writes that field at create time — so any user whose BU carries a container id
-   creates a secure project that immediately **409s and is never provisioned**. My error: I picked a
-   marker without checking who else writes the field.
-4. **The nav-property blocker is GONE.** Under the new scope the only stamped field is
-   `sprk_containerid` (`NVARCHAR(100)`) — a plain string, no `@odata.bind`.
+**Deleted**: BU creation, account creation, both rollbacks, `ResolveRootBusinessUnitIdAsync`,
+`ResolveAccountForBuAsync`, `AttemptRollbackBuAsync`, the umbrella branch, `UmbrellaBuId`, and three
+response members. `sprk_externalaccount` — the project's **CLIENT** lookup — is now never written, and
+a test fails if it reappears in any payload.
 
-**Owner decisions 2026-08-25, now in `design.md` §5.1a/b/c + FR-28 + NFR-05:**
+**The live 409 regression is closed.** The marker is now **ownership**, which only provisioning
+writes; `sprk_containerid` was shared state (the wizard's BU cascade writes it at create time), which
+was the whole bug. `_sprk_securitybu_value` is still read as a *legacy* marker so retired-mechanism
+projects are refused rather than silently migrated.
 
-| Decision | Detail |
-|---|---|
-| No BU creation | Use the single canonical `Secure Projects` BU, resolved **by NAME from config** (GUID differs per environment). Fail closed if absent/ambiguous — never fall back to root or the caller's BU |
-| **No service account** | The BU's **default owner team** owns the records. Every BU gets one automatically; no licence, no credential, no extra identity |
-| **But the team DOES need a role** | I was wrong to say "no roles". Dataverse validates that an assignment target holds entity privileges. A dedicated `Secure Project Owner` role at **Business Unit** depth, on that one team, and **the team must have no human members** |
-| **NFR-05 amended** | The original ("no security role may reach the `Secure Projects` BU") is now **false by construction**. Restated: no role held by a **human** principal reaches it, and the owner team has no human members |
-| ⚠️ **Do NOT strip `sprk_project` Read from user roles** | A POA share only takes effect if the user also holds the entity privilege at some depth. Removing Basic/User Read would silently disable sharing |
-| Access teams, not per-user shares | 1 POA row instead of N; revoke = one membership delete. Build on `PlaybookSharingService.cs:302-350`, consolidated per §11 — do not fork a third sharing client |
-| Container: **special-case secure projects** | General BU cascade stays correct. `issecure` → the project's own `sprk_containerid` |
+**Ordering is load-bearing**: ownership is assigned BEFORE the container, because ownership is the
+*security* step. A container failure then leaves the record correctly owned inside the Secure Project
+BU; reversed, it would leave a secure project owned by its creator in an Operations BU. There is
+deliberately **no rollback** of the assignment — rolling it back would turn a storage failure into a
+disclosure.
+
+### 🔔 TWO OWNER FINDINGS from 021 — read these
+
+**1. The BU name in every doc was WRONG — it is `Secure Project`, SINGULAR.** design §5.1, spec
+FR-28/NFR-05 and 021's own POML all said `Secure Projects`. Live metadata:
+`d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, name **`Secure Project`**, parented to root `Spaarke`.
+Shipping the plural as the config default would have failed closed on *every* call — right direction,
+fabricated reason, and it would have read as a missing environment rather than a wrong string.
+Corrected in design.md + spec.md; pinned by a test. **Eighth "docs lose to live metadata" instance.**
+
+**2. 🔴 The `Secure Project` owner team holds `System Administrator`.** The team exists and is
+correctly **memberless** (✅ §5.1a), but the only role on it is System Administrator — and review §D
+says of this exact question *"None — and definitely NOT System Administrator."* No role matching
+`Secure%` exists in the environment, so **the `Secure Project Owner` role has never been created.**
+
+Nothing is exposed today (no members), but the posture is one membership row from full admin rights
+for a human. It is environment setup, so 021 did not change it. **The consequence to understand**:
+021's escalation trigger for *"the team lacks entity privileges"* **cannot fire in dev** — assignment
+succeeds because the team is omnipotent, not because it is correctly scoped. **A green provisioning
+run in dev is NOT evidence that the role is configured.** Recorded in design §5.1a + spec FR-28.
+
+### ⚠️ What 021 did NOT achieve — state this plainly
+
+- **No document isolation.** Nothing reads the project's `sprk_containerid` yet. That needs the three
+  container-resolution strategies special-cased → `spaarke-secure-project-r1`.
+- **No human can reach a secure project.** FR-28's explicit share (access teams, design §5.1b) is
+  still outstanding, so the record is isolated but **unshared**. Needs its own task — the obvious
+  next candidate after the remaining Phase 0 work.
+
+### 🧪 The perturbation lesson from 021 — generalise this
+
+9 perturbations, 9 bit. But **P2 and P8 first returned ZERO**, and the cause was **neither** of the
+two task 022 taught us to distinguish (wrong test level / unreachable code). It was a third: the
+fixture's Dataverse double **ignored `$top` and ignored the discriminating `$filter` predicates**.
+
+- `$top` ignored → the double returned 2 BUs regardless, so the ambiguity guard was covered *by
+  accident*, while real Dataverse at `$top=1` makes ambiguity undetectable.
+- team-filter predicates ignored → answered on the BU id alone. Real BUs carry several teams (the live
+  root BU has **4 owner teams + 3 access teams**), so that query returns the WRONG team.
+
+Fixed the **fake**, not the tests: honour `$top`, apply only the predicates asked for, and seed
+**decoy teams** so "took an arbitrary team" is visible. **Third instance of task 016's class.**
+> **A fake is evidence only to the extent it refuses what Dataverse would refuse.** Any part of a
+> query the double discards is a part production code can build wrongly for free.
 
 ### 🆕 New project filed: `spaarke-secure-project-r1`
 
