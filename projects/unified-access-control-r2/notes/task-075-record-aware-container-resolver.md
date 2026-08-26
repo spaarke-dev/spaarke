@@ -284,4 +284,90 @@ here). Worth recording: that is the failure mode the explicit-build rule exists 
 build error been ignored, `dotnet test` would have run the previous assembly and reported green,
 which reads exactly like "the perturbation did not bite".
 
-All three perturbations were reverted and the suites re-run green (24 C# / 35 TS) before commit.
+All three perturbations were reverted and the suites re-run green before commit.
+
+---
+
+## 10. Step 9.5 quality gates — 3 CRITICALs found and fixed
+
+`code-review` + `adr-check` ran against commit `6153049`. **0 hard ADR violations**, but **3 CRITICAL
+fail-open defects**, all in the FETCH/QUERY layer rather than the decision layer — which is exactly
+the residual §4 called "honest and bounded". It was honest; it was not bounded. Recorded here because
+the lesson generalises: **the fixture pins the decision, and every remaining defect was somewhere the
+fixture cannot see.**
+
+| # | Defect | Why it was fail-OPEN | Fix |
+|---|---|---|---|
+| **C-1** | The reverse lookup trimmed on the wrong side. Forward normalizes with `Trim()`, so a record stamped `"  b!x  "` stores content in `b!x`; the reverse filtered Dataverse with `Equal` on the *trimmed* input, and Dataverse does not trim stored values → **no match → `null` → "this is a shared container"**. Tasks 073/078 would authorize a secure container as unowned. | The fixture has a dedicated padded-stamp case, so the design already treats padding as a real shape — the reverse half was the only place it broke | Select `sprk_containerid` (the old `ColumnSet` never fetched it, so the query could not self-check) and match **in code**, trim-tolerant and exact. `Like '%…%'` was rejected: SPE drive ids routinely contain `_`, a LIKE single-char wildcard, so it would over-match |
+| **C-2** | The reverse lookup silently truncated at 25 rows. `TopCount` does **not** populate `MoreRecords`, so truncation was undetectable by construction. >25 non-secure claimants could push the one secure claimant out of the page → `null` → shared container | The code's own comment conceded the premise — three live projects already share the root BU container, so "many claimants" is the normal case | Split into **two bounded queries**: secure claimants filtered on `sprk_issecure == true` (cannot be crowded out by noise), and a `TopCount 1` co-mingling probe. Hitting the bound now **refuses** (`container_ownership_indeterminate`) instead of answering |
+| **C-3** | The TS half failed **open** where the C# half failed closed. `record?.[flag] === true` maps a `null`/`undefined` read to `isSecure = false` → BU fallback container. `IWebApiLike.retrieveRecord` is typed non-nullable and satisfied **structurally**, so TypeScript warns at no call site — and the shipped adapters are not the only implementations | A fail-open client next to a fail-closed server is the worst of the two | Throw before computing `isSecure`. An empty *object* stays non-secure (a real read that returned no columns), which is the pre-existing honest answer |
+
+### Warnings also fixed in the same pass
+
+- **W-1 (ADR-010 headroom).** The two new 1:1 interfaces took the in-assembly count to exactly the
+  `knownOneToOneCeiling = 153`. `<= 153` still passes, so "zero ArchTest delta" was true *and*
+  concealed that headroom was now zero — the next 1:1 interface anywhere in the BFF would fail the
+  build blaming an unrelated project. **`IRecordContainerResolver` was deleted** and the concrete
+  class registered instead (the file became `OwningSecureRecord.cs`). No seam was lost: the tests
+  substitute the resolver's *dependencies* and exercise the real decision logic, which is
+  higher-fidelity than mocking the decision. `ISecurableEntityRegistry` stays — it is a genuine seam
+  the tests use. Net: 152, headroom restored.
+- **W-2 (ADR-009).** Cache key added to the `SystemCacheKeys` allow-list as
+  `DataverseSecurableEntities` with its SYSTEM-LEVEL EXCEPTION (NFR-08) justification, plus the
+  inline comment. The code had also mis-cited **ADR-029** (publish hygiene) for "one Redis per BFF";
+  the Redis ADR is **ADR-009**. Corrected.
+- **W-3.** `CommunicationContainerResolver` converted "couldn't find out" into "not secure" **twice**
+  — a null communication read and an empty securable-entity set both returned an empty regarding
+  list, which falls through to the shared archive container. Its own `<remarks>` claimed failures
+  propagate. Both now throw (`communication_regarding_unknown`, `securable_entities_unknown`).
+- **W-4.** An empty securable-entity set was cached for 6h. An empty set is indistinguishable from a
+  failed metadata query or an under-privileged identity, so caching it would extend a transient fault
+  into a 6-hour window where every record reads as non-secure. **Empty is now never cached**, and
+  logged at Error rather than Warning.
+- **W-5.** `sprk_issecure` **absent** is not the same as `false`: Dataverse omits null-valued
+  properties, and field-level security returns the row with the attribute *masked* rather than
+  erroring — both map to non-secure via `GetAttributeValue<bool>`. A blanket throw would be wrong (a
+  securable entity legitimately has NULL rows), so absence is now logged distinguishably; the live
+  assertion that `sprk_issecure` is neither field-secured nor NULL belongs with task 047.
+- **W-6.** `IGenericEntityService.RetrieveAsync` returns non-nullable and the production impl
+  **throws** on not-found, so the documented `container_record_not_found` 404 was unreachable and a
+  deleted record surfaced as a raw fault — which the ingest helper's catch did not classify as
+  permanent, producing an unwinnable retry loop. Not-found is now normalized to the documented 404
+  (matched narrowly, so a timeout is never mis-classified as permanent).
+
+### Perturbation round 2 — the three new guards
+
+| # | What was broken | Actual |
+|---|---|---|
+| 4 | C-1's trim-tolerant code match reverted to an untrimmed comparison | ✅ **1 red** — `reverse (C-1): a PADDED stored container still resolves to its owner`. The substring test correctly stayed green: that perturbation does not introduce over-matching |
+| 5 | C-2's truncation refusal disabled (`>= int.MaxValue`) | ✅ **1 red** — `reverse (C-2): hitting the probe bound REFUSES instead of reporting 'unowned'` |
+| 6 | C-3's empty-read guard removed from the TS half | ✅ **2 red** — both `FAILS CLOSED when the record read resolves to null / undefined` |
+
+### Re-verification after the fixes
+
+| Gate | Result |
+|---|---|
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests/` | ✅ **11,199 passed / 0 failed / 82 skipped** (+27 vs the 11,172 baseline) |
+| TS | ✅ 38 passed |
+| ArchTests | ✅ 9 failed / 105 passed — **still the exact known baseline, zero delta**, now with ADR-010 headroom restored |
+| Publish | ✅ **45.10 MB** compressed incl. PDBs (unchanged; +0.02 vs 45.08 baseline) |
+| CVE | ✅ clean |
+| eslint / tsc | ✅ clean (the 3 `tsc` errors remain pre-existing, none in these files) |
+
+### What the review found that the design genuinely missed
+
+1. **The fixture pins the decision, not the fetch — and all three CRITICALs lived in the fetch.** §4's
+   residual was understated. The perturbation evidence proves the *decision* is pinned; it says
+   nothing about the query layer, which is where the risk actually was.
+2. **Two-hop children are still a live gap.** F-4 covers `communication → secure matter`. It does
+   **not** cover `communication → sprk_invoice → secure matter`: `sprk_invoice` is in
+   `RegardingFieldMap.All` but is not securable, so it is skipped and the attachment lands in the
+   shared archive. The project's model says children inherit one hop via a denormalized core
+   ancestor; the container decision does not follow that stamp. **Not fixed here** — it needs the
+   Phase 3 ancestor stamp (tasks 050–055) and is filed as a finding, not faked.
+3. **`RegardingFieldMap.All` is hard-coded (12 entries) while the securable list is metadata-derived.**
+   On the communication path a fourth securable entity bypasses the resolver unless someone also
+   edits that map. Benign today and self-limiting (a new regarding lookup needs a map entry anyway),
+   but the stated invariant is stronger than what ships.
+4. **"ArchTests: zero delta" is a weaker signal than it reads as** — a ceiling-based ratchet consumed
+   to zero headroom reports as unchanged. Failure-count parity ≠ ratchet-headroom parity (W-1).

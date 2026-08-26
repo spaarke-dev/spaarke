@@ -279,8 +279,20 @@ export async function resolveContainerForRecord(
     `?$select=${SECURE_FLAG_ATTRIBUTE},${CONTAINER_ATTRIBUTE}`
   );
 
-  const isSecure = record?.[SECURE_FLAG_ATTRIBUTE] === true;
-  const ownContainerId = record?.[CONTAINER_ATTRIBUTE];
+  // FAIL CLOSED ON AN EMPTY READ — this half must not be softer than the C# half.
+  //
+  // `IWebApiLike.retrieveRecord` is TYPED `Promise<Record<string, unknown>>` (non-nullable) and satisfied
+  // STRUCTURALLY, so TypeScript will not warn at any call site if an implementation resolves `null`,
+  // `undefined` or `{}` — and the shipped adapters are not the only implementations (PCF `context.webAPI`,
+  // host shims, mocks). Without this guard `record?.[flag] === true` is `false` for all three, which routes
+  // the content to the BU fallback container. The C# resolver throws `container_record_not_found` on
+  // exactly this condition; an asymmetry here would be a fail-OPEN client with a fail-CLOSED server.
+  if (record === null || record === undefined) {
+    throw new SecureContainerUnresolvedError(entity, id, !!normalize(fallbackContainerId));
+  }
+
+  const isSecure = record[SECURE_FLAG_ATTRIBUTE] === true;
+  const ownContainerId = record[CONTAINER_ATTRIBUTE];
 
   return toResolution(
     decideContainer({

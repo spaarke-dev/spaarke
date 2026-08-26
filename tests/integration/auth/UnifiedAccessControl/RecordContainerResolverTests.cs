@@ -295,7 +295,8 @@ public class RecordContainerResolverTests
             [
                 (SecureProjectEntity, RecordId, true),
                 (SecureProjectEntity, Guid.NewGuid(), false)
-            ]);
+            ],
+            storedContainerOverride: SharedBuContainer);
 
         var act = async () => await resolver.ResolveOwningRecordAsync(SharedBuContainer);
 
@@ -318,6 +319,59 @@ public class RecordContainerResolverTests
 
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.Code.Should().Be("container_ownership_ambiguous");
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (C-1): a PADDED stored container still resolves to its owner")]
+    public async Task Reverse_PaddedStoredContainer_StillResolves()
+    {
+        // C-1 regression. The forward direction trims, so a record stamped "  b!x  " stores content in b!x.
+        // If the reverse direction filtered Dataverse on the trimmed value it would MISS that row — Dataverse
+        // does not trim stored values — yielding zero secure claimants and the fail-OPEN answer "this is an
+        // ordinary shared container". Tasks 073/078 would then authorize a secure container as unowned.
+        var resolver = Build(
+            securable: [SecureProjectEntity],
+            claimants: [(SecureProjectEntity, RecordId, true)],
+            storedContainerOverride: $"  {OwnContainer}  ");
+
+        var owner = await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        owner.Should().NotBeNull("a padded stored container id must still resolve to its owning record");
+        owner!.RecordId.Should().Be(RecordId);
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (C-1): a container that merely CONTAINS the query as a substring is not a match")]
+    public async Task Reverse_SubstringContainer_IsNotAMatch()
+    {
+        // The other half of C-1: the fix must not over-match. SPE drive ids routinely contain '_', which is a
+        // LIKE single-character wildcard, so a `Like '%…%'` filter would match unrelated containers. Matching
+        // is exact-after-trim, so a superstring is not an owner.
+        var resolver = Build(
+            securable: [SecureProjectEntity],
+            claimants: [(SecureProjectEntity, RecordId, true)],
+            storedContainerOverride: OwnContainer + "-suffix");
+
+        (await resolver.ResolveOwningRecordAsync(OwnContainer)).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (C-2): hitting the probe bound REFUSES instead of reporting 'unowned'")]
+    public async Task Reverse_ProbeTruncation_Refuses()
+    {
+        // C-2 regression. TopCount does not populate MoreRecords, so truncation is invisible. If the probe
+        // silently truncated, a secure claimant outside the page would read as absent → null → "shared
+        // container". Reaching the bound means ownership is genuinely unknown, so it refuses.
+        var manyClaimants = Enumerable.Range(0, 25)
+            .Select(_ => (SecureProjectEntity, Guid.NewGuid(), true))
+            .ToArray();
+
+        var resolver = Build(
+            securable: [SecureProjectEntity],
+            claimants: manyClaimants,
+            storedContainerOverride: "b!some-other-container-0000000");
+
+        var act = async () => await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be("container_ownership_indeterminate");
     }
 
     [Fact(DisplayName = "Task 075 reverse: a blank container id resolves to null without querying")]
@@ -355,7 +409,8 @@ public class RecordContainerResolverTests
         string[] securable,
         Entity? record = null,
         (string Entity, Guid Id, bool IsSecure)[]? claimants = null,
-        IGenericEntityService? entityService = null)
+        IGenericEntityService? entityService = null,
+        string? storedContainerOverride = null)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
         var set = new HashSet<string>(securable.Select(s => s.ToLowerInvariant()), StringComparer.Ordinal);
@@ -373,15 +428,46 @@ public class RecordContainerResolverTests
                     Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(record!));
 
-            var collection = new EntityCollection();
-            foreach (var (entity, id, isSecure) in claimants ?? [])
-            {
-                var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
-                collection.Entities.Add(row);
-            }
+            // The resolver's reverse direction issues TWO queries per securable entity, and the split is the
+            // C-2 fix, so this double must answer them SEPARATELY rather than returning one blended
+            // collection — otherwise the test would pass against the truncation bug it exists to catch.
+            //
+            //   secure probe   — selects sprk_containerid, filters sprk_issecure == true
+            //   co-mingle probe — selects nothing, TopCount 1, filters sprk_issecure != true
+            //
+            // Discriminated on whether the ColumnSet asks for the container column.
+            var stored = storedContainerOverride ?? OwnContainer;
 
             svc.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult(collection));
+                .Returns(call =>
+                {
+                    var query = call.Arg<QueryExpression>();
+                    var isSecureProbe = query.ColumnSet?.Columns?.Contains("sprk_containerid") == true;
+
+                    var collection = new EntityCollection();
+
+                    foreach (var (entity, id, isSecure) in claimants ?? [])
+                    {
+                        if (isSecure != isSecureProbe)
+                        {
+                            continue;
+                        }
+
+                        var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
+
+                        if (isSecureProbe)
+                        {
+                            // Only the secure probe selects the container column, and the resolver matches on
+                            // it in code (trim-tolerant, exact) rather than in the filter — that is the C-1
+                            // fix, so the stored value is what these tests vary.
+                            row["sprk_containerid"] = stored;
+                        }
+
+                        collection.Entities.Add(row);
+                    }
+
+                    return Task.FromResult(collection);
+                });
         }
 
         return new RecordContainerResolver(registry, svc, NullLogger<RecordContainerResolver>.Instance);

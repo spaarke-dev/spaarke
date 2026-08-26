@@ -7,9 +7,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// <summary>
 /// unified-access-control-r2 task 075, strategy 2 — the adapter between the communication family's
 /// polymorphic regarding (ADR-024, <see cref="RegardingFieldMap"/>) and the record-aware container decision
-/// (<see cref="IRecordContainerResolver"/>).
+/// (<see cref="RecordContainerResolver"/>).
 ///
-/// <para><b>Why an adapter is needed.</b> <see cref="IRecordContainerResolver"/> answers about a record you
+/// <para><b>Why an adapter is needed.</b> <see cref="RecordContainerResolver"/> answers about a record you
 /// can name. The email/communication ingest path cannot name one: it has a <c>sprk_communication</c> id and a
 /// single global <c>Communication:ArchiveContainerId</c>, and <c>sprk_communication</c> does not carry
 /// <c>sprk_issecure</c>. Something has to decide WHICH record the decision is about, and that is
@@ -29,13 +29,13 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// </summary>
 public sealed class CommunicationContainerResolver
 {
-    private readonly IRecordContainerResolver _containerResolver;
+    private readonly RecordContainerResolver _containerResolver;
     private readonly IGenericEntityService _entityService;
     private readonly ISecurableEntityRegistry _securableEntities;
     private readonly ILogger<CommunicationContainerResolver> _logger;
 
     public CommunicationContainerResolver(
-        IRecordContainerResolver containerResolver,
+        RecordContainerResolver containerResolver,
         IGenericEntityService entityService,
         ISecurableEntityRegistry securableEntities,
         ILogger<CommunicationContainerResolver> logger)
@@ -151,7 +151,23 @@ public sealed class CommunicationContainerResolver
 
         if (securableEntities.Count == 0)
         {
-            return found;
+            // An empty set is legitimate in an org where sprk_issecure has never been added — and it is also
+            // exactly what a broken metadata query or an under-privileged identity looks like. Returning
+            // "no securable regarding" here would send the content to the shared archive container on that
+            // reading, so it refuses instead. SecurableEntityRegistry does NOT cache an empty answer, so this
+            // clears as soon as metadata answers properly.
+            _logger.LogError(
+                "[SECURE-CONTAINER] No securable entities are known, so it cannot be determined whether "
+                + "communication {CommunicationId} regards a secure record. Refusing rather than writing its "
+                + "content to the shared archive container.",
+                communicationId);
+
+            throw new Infrastructure.Exceptions.SdapProblemException(
+                code: "securable_entities_unknown",
+                title: "Securability could not be determined",
+                detail: "No entity carrying sprk_issecure is known, so it cannot be established whether this "
+                        + "communication's content belongs in a secure container.",
+                statusCode: 409);
         }
 
         var communication = await _entityService
@@ -164,7 +180,20 @@ public sealed class CommunicationContainerResolver
 
         if (communication is null)
         {
-            return found;
+            // Same shape as above, and it diverges from the RecordContainerResolver's throw on the identical
+            // condition if left as a null return. Without the row there is no regarding, so "not secure" is a
+            // guess — and the guess writes bytes to a shared container.
+            _logger.LogError(
+                "[SECURE-CONTAINER] Communication {CommunicationId} could not be read, so its regarding — and "
+                + "therefore whether its content belongs in a secure container — is unknown. Refusing.",
+                communicationId);
+
+            throw new Infrastructure.Exceptions.SdapProblemException(
+                code: "communication_regarding_unknown",
+                title: "Securability could not be determined",
+                detail: "The communication row could not be read, so it cannot be established whether its "
+                        + "content belongs in a secure container.",
+                statusCode: 409);
         }
 
         foreach (var (entityLogicalName, regardingField) in RegardingFieldMap.All)
