@@ -116,7 +116,7 @@ public sealed class QuarantineClearService : IQuarantineClearService
         {
             ReplaceRunResult.Success s => new QuarantineClearResult.Success(s.Run),
             ReplaceRunResult.Conflict c => new QuarantineClearResult.ConcurrencyConflict(c.Current.Run),
-            ReplaceRunResult.NotFound  => new QuarantineClearResult.NotFound(),
+            ReplaceRunResult.NotFound => new QuarantineClearResult.NotFound(),
             _ => throw new System.Diagnostics.UnreachableException(
                 "ReplaceRunResult exhaustive union changed — update QuarantineClearService."),
         };

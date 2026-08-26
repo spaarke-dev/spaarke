@@ -149,7 +149,11 @@ public sealed class H14bGraphWebhookSubHandlerTests
         var handler = BuildHandler(FakeReader.Success(SigningKey), FakeCreator.Success());
         var wrongEnvelope = new HandlerEnvelope
         {
-            HandlerId = "H0", RunId = RunId, CustomerId = CustomerId, ParametersJson = "{}", EnqueuedAt = DateTimeOffset.UtcNow,
+            HandlerId = "H0",
+            RunId = RunId,
+            CustomerId = CustomerId,
+            ParametersJson = "{}",
+            EnqueuedAt = DateTimeOffset.UtcNow,
         };
 
         var act = async () => await handler.HandleAsync(wrongEnvelope, CancellationToken.None);
