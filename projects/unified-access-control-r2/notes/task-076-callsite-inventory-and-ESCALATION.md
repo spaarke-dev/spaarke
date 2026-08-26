@@ -110,6 +110,34 @@ mechanisms (route-through-resolver vs consume-provisioning-return-value).
 needs no new mechanism, and makes the resolver the single decision point on both create and
 existing-record paths.
 
+### ⚠️ Check the chosen option against the two-hop child gap — do not decide it by accident
+
+Task 075's review surfaced a gap that is **the same question as this escalation, one hop further
+out**, so whichever option is chosen here should be checked against it deliberately:
+
+> A communication regarding `sprk_invoice`, where that invoice belongs to a **secure matter**,
+> resolves to the shared archive container. `sprk_invoice` is in `RegardingFieldMap.All` but is not
+> securable, so the securable-regarding scan skips it. One hop out, the answer is wrong.
+
+This is not a separate defect class — it is *"which record is the decision about?"*, which is exactly
+what options A/B/C are choosing between. The connection matters because:
+
+- **Under (A)**, the resolver is asked at upload time about a record the caller names. If that record
+  is a child, the same gap appears on the client paths too, not just on ingest. (A) does not close the
+  gap, but it puts every path through **one** place where closing it later is a single change.
+- **Under (B)**, the create path takes its container from provisioning's return value and never asks
+  the resolver — so the two-hop case cannot be fixed there at all without adding a third mechanism.
+- **Under (C)** (record-keyed upload), the server resolves from the record it is authorizing, so
+  closing the gap is a server-side change in one place and the client is unaffected.
+
+Closing the gap itself needs the **Phase 3 denormalized core-ancestor stamp** (tasks 050–055) — the
+project's model already says children inherit one hop via that stamp; the container decision simply
+does not follow it yet. So this is **not** a prerequisite for 076. It is a constraint on the choice:
+pick the option that leaves the gap closable in one place rather than three.
+
+Cross-references: `task-075-*.md` §6 finding F-4 (the ingest-side statement of the gap) and §10
+"what the review found that the design genuinely missed" item 2 (the two-hop extension).
+
 ---
 
 ## 3. THE COMPLETE INVENTORY — grepped, not remembered
