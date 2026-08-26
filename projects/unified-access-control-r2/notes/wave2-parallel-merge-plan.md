@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
 | **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
-| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` → `7db13de` → `ff45847` → **`3289844`** | ✅ **READY TO MERGE** — D-1/D-2 fixed, pass 3 conditionally clean |
+| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` → `7db13de` → `ff45847` → `3289844` → **`3685e55`** (docs) | ✅ **READY TO MERGE — gate CLOSED, PASS** |
 | **076** route call sites | same worktree | `792c38a` (inventory + escalation only) | 🔔 **ESCALATED — not implemented. Needs owner decision.** |
 
 ## ⛔⛔ 075 IS BLOCKED FROM MERGE — read before touching that worktree
@@ -140,6 +140,25 @@ Six defects, three rounds, all six in the fetch layer. Not six coincidences.
 5. **Dataverse string collation is case-insensitive, while both `IsSameContainer` and the double use
    `Ordinal`** — so the double is strictly *stricter* than the platform and can never surface case
    behaviour. This is also why D-2 survived three rounds.
+6. **Page determinism** (added round 5): the production queries carry **no `OrderBy`**, so Dataverse's
+   `TOP` picks an arbitrary page while the double picks deterministically in fixture order. Same shape as
+   #5 — the double is *more determinate than the platform*, so an order-dependent defect could not
+   surface there either.
+
+**Deferred to task 078 with reasoning on record** (not silently dropped): an off-by-one at the boundary —
+exactly `ClaimantProbeLimit` matching rows diagnoses as `indeterminate` when `ambiguous` is the truer
+code. Fail-closed either way; only the error code and log wording differ. Rounds 1–3 each re-entered this
+query layer and each introduced a fresh defect, and round 4 was clean *because* it confined itself to the
+double plus a one-word change — so re-entering for a cosmetic improvement immediately after closing the
+gate is the trade the history argues against. 078 is already gated on 047 and will be reading this code.
+
+### A fourth instance of the same shape, caught by inspection rather than by any test
+
+The reviewer verified that `page++` sits **below** the filter `continue`s, so the double models
+TOP-after-WHERE. Had the counter sat above them, the cap would have consumed budget on non-matching
+rows, the 30-row test would have measured **query cost instead of page truncation** — **and it would
+still have been green.** The implementing agent's own words: *"I got it right, but not deliberately, and
+it wouldn't have been caught by any test I wrote."*
 
 **Action:** task **047** (live-org assertion, already in scope) should gain an explicit **Dataverse
 operator-semantics assertion list** covering those five plus the `sprk_issecure` field-security/NULL
