@@ -6,6 +6,46 @@
 
 ---
 
+## 🟠 IN FLIGHT — 3 PARALLEL AGENTS IN SEPARATE WORKTREES (dispatched 2026-08-26)
+
+**Work is NOT all in this worktree right now.** Three `task-execute` agents were dispatched with
+`isolation: worktree`, so each has its own checkout and its own commits:
+
+| Agent | Tasks | Model | Why isolated |
+|---|---|---|---|
+| `wave2-075-076` | **075 → 076** sequential (Wave 2) | opus | 075 is `∥-safe:false` and creates the shared resolver seam |
+| `task-073` | **073** container upload | opus | — |
+| `task-079` | **079** version OBO routes | opus | — |
+
+**Why worktrees rather than shared-worktree parallelism** (the POMLs' `∥-safe:true` does not cover
+these): sub-agents share ONE worktree by default, so concurrent edits to a shared file are **lost
+writes, not git conflicts** — and 073 + 079 BOTH need waivers deleted from
+`RouteAuthorizationGuardTests.cs`, while either may want a new `OperationAccessPolicy` key. Concurrent
+`dotnet build` in one worktree also contends on `bin`/`obj`.
+
+**MAIN-SESSION-OWNED files — the agents were told NOT to touch these and to report needed changes:**
+`Spaarke.Core/Auth/OperationAccessPolicy.cs` · `Api/Filters/DocumentAuthorizationFilter.cs` ·
+`Infrastructure/Graph/SpeFileStore.cs` · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` ·
+`current-task.md` · `tasks/TASK-INDEX.md`. Same boundary pattern as the `.claude/` rule (root §3).
+
+**Merge-back obligations when they report:**
+1. Apply each reported `OperationAccessPolicy` key centrally (073 and 079 may both want one).
+2. Delete the now-stale Pending waivers: 073 owns **4** (`PUT /api/containers/{id}/files/{*path}`,
+   `POST /api/containers/{id}/upload`, `PUT /api/upload-session/chunk`, `PUT /api/drives/{id}/upload`);
+   079 owns **2** (versions list + prior-version content). Only delete the ones actually gated —
+   `NoWaiverIsStale` fires on a waived route that became gated, and a waiver for a route that no longer
+   exists is worse than noise.
+3. Re-run the full suite + ArchTests in THIS worktree after merging — each agent verified only its own
+   worktree, so nothing has yet tested the combination.
+4. Expect 073 to possibly come back **blocked on 075's seam** — its waivers are tagged "073/075/076"
+   jointly. That is a correct outcome, not a failure; it was told not to duplicate or stub the mapping.
+
+**Baselines the agents were given** (so their numbers are comparable): full suite **11,172 / 0 / 82** ·
+ArchTests **9 known master failures** (FR-27 ×2, FR-28, FR-29, FR-32, FR-F1, FR-F2, ADR-010,
+ServiceBusClientGuard) · publish **45.08 MB** compressed incl. PDBs, ceiling 60.
+
+---
+
 ## 🔴 START HERE
 
 **081 is UNBLOCKED and rewritten to option B.** The POML, the decision record
