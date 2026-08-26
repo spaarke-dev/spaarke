@@ -547,3 +547,37 @@ already gated on 047 and will be reading this code closely as its first consumer
 should add the missing boundary case: exactly `ClaimantProbeLimit` matching rows, asserting the
 diagnosis is `container_ownership_ambiguous` (determinable, and ambiguous on the merits) rather than
 `container_ownership_indeterminate`.
+
+### Closing observation — verification errors are found LAST, not because they arrive last
+
+Four review passes on this component, and what they found splits into two categories that were
+**sequenced, not interleaved**:
+
+| Round | Found |
+|---|---|
+| 1 | wrong **code** — C-1, C-2, C-3 (three fail-opens) |
+| 2 | wrong **code** — N-1, N-2, N-3, N-4 |
+| 3 | wrong **verification** — D-1, plus two regression tests that had passed **vacuously** |
+| 4 | wrong **document** — the option-B mechanism in the 076 escalation; a mis-severitied finding (F-9) |
+
+The verification errors were present the whole time. Two of the round-2 regression tests were
+vacuous **on the day they were written** — green, fast, correctly named, asserting nothing — and the
+round-4 document error was written in round 2 as well. They were not found earlier because **louder
+defects masked them**: while the code is obviously wrong, every green test reads as "not yet
+reached", and every sentence in a design note reads as provisional.
+
+The operational conclusion, which generalises past this component:
+
+> **"The suite is green" is the point at which to START checking the verification, not the point at
+> which to stop.**
+
+A green suite and an accurate document are **separate claims**, and neither is evidence for the
+other. Concretely, when a component's tests first go green after a defect round, that is the moment
+to (a) perturb every guard individually rather than in batches, and (b) re-read any design document
+written during the defect rounds, because its claims were formed while the mechanism was still
+moving.
+
+**Suggested for [`.claude/FAILURE-MODES.md`](../../../.claude/FAILURE-MODES.md)** — this is a
+cross-cutting anti-pattern, not a property of this component, and that file is its natural home. Not
+filed from here: `.claude/**` is outside the sub-agent write boundary (root CLAUDE.md §3), so it
+needs a main-session edit.
