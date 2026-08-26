@@ -335,6 +335,32 @@ The orchestration layer that sequences handlers, manages run state, enforces gat
 
 **Rejected topologies** (DS-1b §3–4): fat tools container (Option A — ~1.5–2 GB, az CLI CVE stream, 25 stdout parsers, ambient auth sessions as permanent fleet infrastructure); ACA Job (reopens B2's Container-Apps rejection for one call/run); separate App Service (a second host for one cmdlet); ACI (cold start + separate identity story).
 
+#### 4.2a.1 `.Api` / `.Worker` split contract (added by task 204d per DS-3 §3 Option 2 owner-lock)
+
+The **single** `Sprk.Provisioning.ControlPlane` project referenced by v3.4 above no longer exists. Wave G-1 tasks 100 / 101 / 102 split it into three, driven by DS-3 §1.3's staging-slot shadow-worker defect finding — an always-on staging slot on a host running `StateReconcilerService` + `CrashRecoveryStartupService` + `ProvisioningHandlerDispatcher` would silently double-consume the production `sprk-provisioning-jobs` queue and double-write the production Cosmos `runs` container the instant it started. The split makes that defect **structurally impossible**, not merely gated.
+
+**Project boundaries**:
+
+| Project | Runtime role | Composition root | Staging slot? |
+|---|---|---|---|
+| `Sprk.Provisioning.ControlPlane.Api` | REST intake host. Serves `POST /api/runs`, `GET /api/runs/{id}`, and the 6 other `/api/runs/*` endpoints. Registers auth (JWT + Operator/Reader), Swagger, audit middleware, `IHandlerEnqueuer` (write side of the SB wire), `ICustomerRunGuard`, `IQuarantineClearService`, and shared Cosmos/SB/Telemetry clients. Zero `IProvisioningHandler` keyed registrations, zero `AddHostedService`. | `src/server/services/Sprk.Provisioning.ControlPlane.Api/Program.cs` | **Yes** — blue-green REST deploy via `modules/controlplane-app-service.bicep` (existing behavior). Safe because this host cannot execute a handler. |
+| `Sprk.Provisioning.ControlPlane.Worker` | Background execution host. Registers all 21 keyed `IProvisioningHandler` implementations, `AddReconcilerModule` (→ `AddHostedService<StateReconcilerService>`), `AddHostedService<CrashRecoveryStartupService>`, and `AddHostedService<ProvisioningHandlerDispatcher>` (the `ServiceBusSessionProcessor` drain loop). Exposes only anonymous `/healthz` + `/ping`. | `src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs` | **No — slotless by Bicep design.** `modules/controlplane-worker-app-service.bicep` declares `Microsoft.Web/sites@2023-01-01` with no child `Microsoft.Web/sites/slots` resource; deploy = stop → zip-deploy → start. Crash-recovery + SB redelivery + §4C rollback machinery is the resume story (already exercised on every dispatcher restart). |
+| `Sprk.Provisioning.ControlPlane.Core` | Shared types + module DI extension methods (`AddCosmosModule`, `AddServiceBusModule`, `AddReconcilerModule`, `AddCustomerRunGuard`, `AddRollbackModule`, `AddDispatchModule`, plus every `IProvisioningHandler` implementation and its collaborator seams). No composition root of its own. | (Class library) | N/A |
+
+**Sizing**: both `.Api` and `.Worker` App Services run on the SAME P1v3 plan (per DS-3 §3 Option 2 — $0 marginal Azure cost). `.Worker` is `alwaysOn: true`.
+
+**Test project references** (`Sprk.Provisioning.ControlPlane.Tests.csproj`): both `.Api` and `.Worker` are referenced; the `.Worker` reference carries `Aliases="WorkerHost"` so tests distinguish the two implicit `Program` top-level classes (`extern alias WorkerHost;` + `WorkerHost::Program` for the Worker-facing tests).
+
+**Guard tests** (build-time invariant enforcement — regression closure of DS-3 §1.3):
+
+| Test file | Invariant asserted |
+|---|---|
+| `Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerRegistrationCompletenessTests.cs` | Every `HandlerIds.Dispatchable` id resolves to a keyed `IProvisioningHandler` in the **.Worker** DI graph (task 103, Wave G-1). |
+| `Sprk.Provisioning.ControlPlane.Tests/Dispatch/ApiHostShadowWorkerGuardTests.cs` | The **.Api** DI graph registers ZERO project-owned `IHostedService` **and** ZERO keyed `IProvisioningHandler` for any `HandlerIds.Dispatchable` id (task 204d — this task). |
+| `Sprk.Provisioning.ControlPlane.Tests/Dispatch/ProvisioningHandlerDispatcherInvariantTests.cs` | `MaxConcurrentCallsPerSession == 1` on the Worker's `ServiceBusSessionProcessorOptions` (task 102 forcing function; single-writer-per-customer). |
+
+**What Path FLAGS would have looked like (rejected — see `notes/task-204d-path-decision.md`)**: three `Enabled` config flags (`Dispatcher:Enabled` / `Reconciler:Enabled` / `CrashRecovery:Enabled`) added to a single-host Worker composition, marked `slotSetting: true` in Bicep with production=true / staging=false. Post-split this reduces to pure new surface with no behavioral gain — the Worker has no staging slot to flip flags on, and reintroducing one would be the exact topology change the split was created to avoid.
+
 #### 4.2b Dispatcher & Handler Resolution (added v3.4 per DS-2/DS-2b)
 
 **`Dispatch/ProvisioningHandlerDispatcher`** — a `BackgroundService` hosting a `ServiceBusSessionProcessor` on `sprk-provisioning-jobs`:
@@ -1802,6 +1828,7 @@ Before every U3 (Bicep infra) upgrade, run `az deployment group what-if` to dete
 - **`model1-shared.bicep`** (v3 §3A A1): first-class trial-tier composition using shared fixed-floor resources (App Service Plan, OpenAI, AI Search) + dedicated for everything else.
 - **NEW: Terraform Power Platform provider directory** (v3, `infrastructure/terraform/dataverse/`): separate IaC dialect from Bicep; scoped strictly to Dataverse env + application user lifecycle per §4A.
 - **NEW: Per-tenant token-metering layer** (v3, D19): either APIM gateway or app-level custom App-Insights metric keyed on `tenantId`. Placement TBD in D-phase implementation; either way, minimal BFF DI impact (single tracker service).
+- **B04 multi-tenant Dataverse routing — documented exception (Path A per CLAUDE.md §6.5)** — `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:62`'s single-URL shape (`configuration["Dataverse:ServiceUrl"]` read once at DI-setup) is **correct-by-design for the shared-BFF pattern**, NOT a Model-1 multi-tenancy defect. Per owner Q1 SESSION 11 (2026-08-26 — BINDING; see `current-task.md` Locked owner decisions + Two-stage E2E model): Model 1 uses **ONE shared Dataverse env per shared BFF app-reg per Azure env**, with multiple *customers* segregated at the data layer (customer records, Business Units, SPE containers) *within* that shared env — NOT via multiple Dataverse environments. The URL is genuinely per-env; there is no runtime cross-tenant DV routing decision being taken. Stage-2 per-customer segregation (SPE containers, search-index params, DV Business Units) is a future r2 customer-onboarding workflow, out of r1 scope. Model 2's `customer.bicep`-provisioned BFF likewise has env=customer 1:1, so its single-URL shape is trivially correct. The §4D I1–I5 invariants enforce logical isolation of the multiple customer records that share one Dataverse env in Model 1. NO code change to `DataverseServiceClientImpl.cs`; NO new ADR amendment; NO new DI seam. Full rationale + rejected alternatives (Path B/Path C) in spec.md §ADR Tensions row for ADR-027+ADR-028 B04. Task 202 punch list row B04; task 204b (this task) formalized the exception in this bullet.
 
 ---
 

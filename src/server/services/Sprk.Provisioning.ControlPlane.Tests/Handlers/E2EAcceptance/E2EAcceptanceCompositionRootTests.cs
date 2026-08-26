@@ -300,7 +300,7 @@ public sealed class E2EAcceptanceCompositionRootTests
             { InvariantKind.I1NoHardcodedTenant,    typeof(PackagedScriptTenantLiteralInvariantProbe) },
             { InvariantKind.I2AiSearchTenantFilter, typeof(AiSearchTenantFilterInvariantProbe) },
             { InvariantKind.I3CosmosPartitionKey,   typeof(CosmosPartitionKeyInvariantProbe) },
-            { InvariantKind.I4SpeContainerResolver, typeof(SpeContainerResolverInvariantProbe) },
+            { InvariantKind.I4SpeContainerResolver, typeof(SpeContainerTenantDerivationInvariantProbe) },   // task 204c B07 SESSION 12 2026-08-26: swap from task-176 SpeContainerResolverInvariantProbe (BFF-diagnostic) to independent ARM app-settings re-verification per 204c dispatch principle
             { InvariantKind.I5GraphTokenTenant,     typeof(I5GraphTokenTenantScopeProbe) },
         };
     }

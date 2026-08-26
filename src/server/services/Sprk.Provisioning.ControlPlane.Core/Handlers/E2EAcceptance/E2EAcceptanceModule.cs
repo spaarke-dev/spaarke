@@ -171,17 +171,27 @@ public static class E2EAcceptanceModule
         services.AddHttpClient(AiSearchTenantFilterInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, AiSearchTenantFilterInvariantProbe>();   // I2 (task 173)
         services.AddSingleton<IInvariantProbe, CosmosPartitionKeyInvariantProbe>();     // I3 (task 174)
-        // I4 (task 176) — real BFF-diagnostic probe for
-        // ITenantContainerResolver-derived SPE container ids. Needs a NAMED
+        // I4 (task 204c B07 — Wave G-7 replacement of task 176, 2026-08-26).
+        // INDEPENDENT re-verification variant: reads DEPLOYED App Service
+        // config directly via ARM `Microsoft.Web/sites/{name}/config/appsettings/list`
+        // and classifies the `SharePointEmbedded__ContainerTypeId` value
+        // (`@Microsoft.KeyVault(...)` reference → Passed; canonical `b!` SPE
+        // container-id literal → Failed CATASTROPHIC; empty / non-KV-ref
+        // string → Failed). Task 204c dispatch directive: "do NOT trust
+        // RunStatus.HandlerReports; re-read the underlying Azure/Cosmos/
+        // Graph/SPE surface directly" — task 176's BFF-diagnostic pattern
+        // trusts the BFF's own self-report and cannot detect a compromised
+        // deploy whose BFF diagnostic echoes plausibly while the app-setting
+        // is hardcoded (§4D I4 CATASTROPHIC class). See probe file header
+        // § SILENT-FAIL AUDIT for the failure-mode delta. Needs a NAMED
         // HttpClient (registered below) + the shared UAMI-pinned
-        // TokenCredential (pre-registered by Worker Program.cs). See
-        // SpeContainerResolverInvariantProbe.cs file header for the honest
-        // fake-vs-live posture: authored + unit-tested against fake HTTP
-        // transport NOW; LIVE verification against a real deployed BFF
-        // diagnostic endpoint is deferred to Phase F rerun (task 186) per
-        // this task's POML escalation trigger.
-        services.AddHttpClient(SpeContainerResolverInvariantProbe.HttpClientName);
-        services.AddSingleton<IInvariantProbe, SpeContainerResolverInvariantProbe>();   // I4 (task 176)
+        // TokenCredential + IOptions<H13AcceptanceOptions>. Task 176's
+        // SpeContainerResolverInvariantProbe is retained on disk UNREGISTERED
+        // per Wave G-6 retirement convention (see its retirement banner);
+        // its BFF-diagnostic complementary coverage may be re-registered
+        // under a distinct InvariantKind post-186 if operator sign-off.
+        services.AddHttpClient(SpeContainerTenantDerivationInvariantProbe.HttpClientName);
+        services.AddSingleton<IInvariantProbe, SpeContainerTenantDerivationInvariantProbe>();   // I4 (task 204c B07; supersedes task 176)
         services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)
         // Task 182 (Phase C'' Wave G-7 Batch G-7A1): pure-C# port replaces the
         // NamingConformanceScriptRunner shell-out per DS-4 section 6 (this script
