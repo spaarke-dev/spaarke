@@ -38,4 +38,4 @@
  *   DEF-2 `layoutJson` moved to `of-type="Multiple"` - the classic form
  *   designer caps SingleLine.Text at 100 characters, below any real layout.
  */
-export const CONTROL_VERSION = '1.1.1';
+export const CONTROL_VERSION = '1.1.2';

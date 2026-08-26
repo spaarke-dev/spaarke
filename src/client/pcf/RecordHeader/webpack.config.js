@@ -1,30 +1,34 @@
-const FLUENT_ALIAS = 'FluentUIReactv940';
-// SAFE subset only: every symbol the compat packages import from these is
-// verified present on the umbrella's RUNTIME export surface.
-// Deliberately EXCLUDED (symbols missing at runtime -> would crash on mount):
-//   react-utilities, react-shared-contexts, react-motion-components-preview
-const GRANULAR = [
-  'react-components',
-  'react-theme', 'react-tabster', 'react-motion',
-  'react-portal', 'react-input', 'react-field',
-  'react-popover', 'react-positioning',
-];
-const map = { react: 'React', 'react-dom': 'ReactDOM' };
-GRANULAR.forEach(p => { map[`@fluentui/${p}`] = FLUENT_ALIAS; });
-
+// Custom webpack configuration for PCF
+// Enables tree-shaking for @fluentui/react-icons to reduce bundle size.
+// Without this, the full icon library (~6.8MB) gets bundled.
+//
+// Matches SemanticSearchControl / DocumentRelationshipViewer / MatterHeader —
+// the established repo pattern. Combined with featureconfig.json:
+//   { "pcfReactPlatformLibraries": "on", "pcfAllowCustomWebpack": "on" }
+// and the <platform-library> entries in ControlManifest.Input.xml.
+//
+// ⛔ DO NOT add a custom `externals` block mapping granular @fluentui/* packages
+// onto the platform Fluent global. It was tried in v1.1.0/v1.1.1 to cut the
+// date-picker's bundle cost and it FAILS AT RUNTIME with
+// "Minified React error #31" once real Fluent components mount: it splits
+// Fluent's internals between the host copy (react-input/field/popover) and the
+// bundled copy (react-utilities slot machinery, jsx-runtime, @griffel/react),
+// and a slot object crossing that boundary is not a valid React child.
+// The build succeeds and static symbol checks pass — neither proves runtime.
+// See notes/decisions/033-nfr02-externals-runtime-failure.md.
 module.exports = {
-  optimization: { usedExports: true, sideEffects: true, innerGraph: true, providedExports: true },
-  externals: [
-    map,
-    function (ctx, cb) {
-      if (/^@fluentui\/react-components\//.test(ctx.request || '')) return cb(null, FLUENT_ALIAS);
-      cb();
-    },
-  ],
+  optimization: {
+    usedExports: true,
+    sideEffects: true,
+    innerGraph: true,
+    providedExports: true,
+  },
   module: {
     rules: [
-      { test: /[\/]node_modules[\/]@fluentui[\/]react-icons[\/]/, sideEffects: false },
-      { test: /[\/]node_modules[\/]@fluentui[\/]react-(calendar|datepicker)-compat[\/]/, sideEffects: false },
+      {
+        test: /[\/]node_modules[\/]@fluentui[\/]react-icons[\/]/,
+        sideEffects: false,
+      },
     ],
   },
 };
