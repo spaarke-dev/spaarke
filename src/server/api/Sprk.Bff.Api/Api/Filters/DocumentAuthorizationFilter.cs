@@ -76,16 +76,23 @@ public class DocumentAuthorizationFilter : IEndpointFilter
             UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
         };
 
+        // The try covers the AUTHORIZATION DECISION ONLY — deliberately not next().
+        //
+        // unified-access-control-r2 task 072: `return await next(context)` used to sit inside this try,
+        // so EVERY exception the downstream handler threw was caught here and rendered as
+        // 500 "Authorization Error" / "An error occurred during authorization". On the nine routes
+        // carrying this filter that silently converted each handler's intended status into a misleading
+        // 500 — a document 404, a 409 "no file attached", a 409 "invalid drive id", and (the case that
+        // surfaced it) task 072's own 403 for a disallowed anonymous link. It also defeats the global
+        // UseExceptionHandler that renders SdapProblemException as canonical ProblemDetails per ADR-019.
+        //
+        // Two independent reasons to keep the boundary here: correctness of the response contract, and
+        // honesty of the log line — "Authorization failed" was being written for faults that had nothing
+        // to do with authorization, which is the kind of log that misdirects an incident.
+        AuthorizationResult result;
         try
         {
-            var result = await _authorizationService.AuthorizeAsync(authContext);
-
-            if (!result.IsAllowed)
-            {
-                return ProblemDetailsHelper.Forbidden(result.ReasonCode);
-            }
-
-            return await next(context);
+            result = await _authorizationService.AuthorizeAsync(authContext);
         }
         catch (Exception ex)
         {
@@ -100,6 +107,13 @@ public class DocumentAuthorizationFilter : IEndpointFilter
                 detail: "An error occurred during authorization",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
+
+        if (!result.IsAllowed)
+        {
+            return ProblemDetailsHelper.Forbidden(result.ReasonCode);
+        }
+
+        return await next(context);
     }
 
     private static string? ExtractResourceId(EndpointFilterInvocationContext context)

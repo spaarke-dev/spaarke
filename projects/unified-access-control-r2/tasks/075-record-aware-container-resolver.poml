@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="unified-access-control-r2">
+  <metadata>
+    <title>Build the record-aware container resolver: a secure record resolves to its OWN sprk_containerid, everything else to the BU cascade, absent secure container fails closed</title>
+    <phase>0c Secure Documents — Wave 2</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is the seam the entire document-isolation guarantee rests on. Provisioning already stamps the container; this is the component that makes the stamp mean something.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural seam consumed by 7+ client sites and server ingest, in both directions (record→container for reads/writes, container→record for task 073). Getting the shape wrong propagates everywhere.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield with three existing resolution strategies, a client/server split constrained by INV-7, and a bidirectional mapping requirement.</effort-reason>
+    <parallel-group>wave2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Introduces a shared Infrastructure seam consumed by task 073 and task 076; concurrent edits would fork the mapping.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, dataverse, security</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Verified: NO server-side path reads `sprk_containerid` off an `sprk_project` row other than provisioning's own guard. Task 021 stamps it; nothing consumes it. Confirmed live: three existing projects carry the ROOT BU's container id, identical to `SharePointEmbedded__DefaultContainerId`.</origin>
+  </metadata>
+
+  <prompt>Provisioning gives every secure project its own SPE container and writes the id to the project row. Nothing reads it. Build the one resolver that decides which container a document belongs to — the record's own for secure records, the BU cascade otherwise — and make an absent secure container a hard failure rather than a fallback.</prompt>
+
+  <role>SPAARKE platform engineer. Designing a seam that many callers will depend on, and that must be impossible to bypass by accident.</role>
+
+  <goal>One shared, record-aware container resolver exists and is the only way any code decides which container to use. A secure record resolves to its own container or fails; it never resolves to a shared one. The same mapping answers the reverse question (container → owning record) for task 073.</goal>
+
+  <context>
+    <background>WHY THIS IS THE WHOLE GUARANTEE. SharePoint Embedded permissions are **additive-only** — verified against current Microsoft documentation 2026-08-25: *"SharePoint Embedded content inherits permissions from its container hierarchy. You can't break inheritance on arbitrary files or folders."* This is the same shape as Dataverse's no-per-record-deny. **You cannot make a document inside a shared container invisible to that container's members.** Therefore a secure project's documents MUST live in their own container; there is no per-item alternative. This makes design §5.1c load-bearing, not an optimisation.
+
+THE THREE EXISTING STRATEGIES (design §5.1c):
+1. **Acting user's BU** → `businessunit.sprk_containerid`. 7 client sites; canonical client resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. The BFF deliberately does NOT resolve this server-side (INV-7). → **needs the secure special case**
+2. **A single global `ArchiveContainerId`** from config — server-side email/communication ingest (`IncomingCommunicationProcessor`). → **needs the secure special case, and is the one easiest to forget** because it has no client and no wizard
+3. **The document's own `GraphDriveId`/`GraphItemId`** — every read/download path once a document exists. → **no change needed**
+
+Strategy 3 is fine. Strategies 1 and 2 both need the special case, and today neither has it — which is why secure content lands in shared containers.
+
+THE RULE: *if the context record is a secure record, use its own `sprk_containerid`; otherwise the existing BU cascade.* `sprk_issecure` exists on exactly three entities (verified from live attribute metadata 2026-08-25): `sprk_project`, `sprk_matter`, `sprk_workassignment`. Derive that list from metadata, not from this paragraph.
+
+FAIL CLOSED, AND THIS IS THE POINT. A secure record whose `sprk_containerid` is null must produce a hard failure — never a fallback to the BU or archive container. A silent fallback is precisely the isolation failure this task exists to remove, and it would be invisible: the upload would succeed.
+
+INV-7 AND THE CLIENT/SERVER SPLIT. Strategy 1's resolver is deliberately client-side. Respect that: the shared component may need a client half and a server half. What must NOT happen is two independent implementations of the secure special case that can drift. Give strategy 2 a server-side equivalent of the same decision.
+
+BIDIRECTIONAL. Task 073 needs container → owning record to authorize uploads. Build the mapping so both directions come from one place. Coordinate; do not let 073 build a second mapping.
+
+DO NOT ADD THE `issecure` TEST AT SEVEN CLIENT SITES — that is seven places to drift. Route every call site through the resolver (that routing work is task 076).
+
+ALSO IN SCOPE FOR AWARENESS: a client write-back at `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form. Even a correct resolver is defeated by that. Task 076 owns suppressing the wizard cascade; flag anything you find here.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ — record-aware container resolver</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="reference">projects/unified-access-control-r2/design.md</file>
+      <file role="reference">projects/spaarke-secure-project-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">A secure record with no container FAILS CLOSED and loudly. Never fall back to the BU cascade or the archive container for a secure record. This is the single most important behaviour in the task.</constraint>
+    <constraint source="build-plan">ONE resolver. Not a client copy and a server copy of the decision — a shared decision with, if INV-7 requires, two thin call sites. State how drift is prevented.</constraint>
+    <constraint source="build-plan">Bidirectional: record → container AND container → owning record, from one mapping, so task 073 consumes it rather than reimplementing.</constraint>
+    <constraint source="project">Derive the securable-entity list from live metadata (`sprk_issecure` present), not from a hard-coded list. A fourth securable entity must not silently bypass the resolver.</constraint>
+    <constraint source="project">Do NOT put the `issecure` test at individual call sites. The whole point is one decision point.</constraint>
+    <constraint source="ADR-007">SPE access goes through the `SpeFileStore` facade; do not inject Graph types outside Infrastructure.</constraint>
+    <constraint source="CLAUDE.md §10">State the Placement Justification for any new BFF component; verify publish size (≤60 MB, baseline 45.05 MB) and CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm from live metadata which entities carry `sprk_issecure`, and confirm no server path currently reads `sprk_project.sprk_containerid` outside provisioning.</step>
+    <step order="1">Design the seam: signature, where it lives, how client and server halves stay consistent under INV-7, and how the reverse lookup is exposed for task 073. Write this down before coding.</step>
+    <step order="2">Implement, with fail-closed as the default branch for secure records rather than an afterthought.</step>
+    <step order="3">Give strategy 2 (server-side ingest / `ArchiveContainerId`) its equivalent decision — it has no client and is the one most likely to be missed.</step>
+    <step order="4">Tests that FAIL without the fix: a secure record resolves to its own container; a secure record with a null container FAILS rather than falling back; a non-secure record still resolves via the BU cascade. Include the perturbation check — break the secure branch and confirm a test goes red.</step>
+    <step order="5">Build, tests, publish size, CVE. Record the seam design and the drift-prevention argument in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If INV-7 makes a single shared decision genuinely impossible and two implementations are unavoidable, STOP and surface it. Two implementations of an isolation rule is a design decision with a known failure mode, not an implementation detail to absorb quietly.</trigger>
+    <trigger>If existing documents are found already sitting in a shared container for a record that is (or becomes) secure, STOP — that is a migration, and this task does not own it. Note that dev currently has ZERO secure projects, so this should not arise; if it does, the assumption behind the whole plan is wrong.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Provisioning already creates and stamps the per-project container (task 021). The BU cascade resolver already exists client-side. `SpeFileStore` already brokers SPE access.</existing>
+    <extension>Cannot extend an existing resolver: the BU cascade is client-side by design (INV-7) and has no notion of record security, while the archive path is server-side config with no resolver at all. This component is the join between them, and it is the only new surface Wave 2 adds.</extension>
+    <cost-of-doing-nothing>Provisioning writes a container id that nothing reads, so every secure document lands in a shared container. Because SPE permissions are additive-only, no later per-item permission can undo that — the content is readable by every member of the shared container, outside the BFF's control entirely.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">Record-aware container resolver (shared seam, bidirectional)</output>
+    <output type="code">Server-side equivalent for the ingest/archive path</output>
+    <output type="test">tests/ — secure→own container, secure+null→fail closed, non-secure→BU cascade</output>
+    <output type="doc">notes — seam design, INV-7 split, drift prevention</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A secure record resolves to its own `sprk_containerid`, proven by a test that fails without the change.</criterion>
+    <criterion>A secure record with a null container FAILS CLOSED — no fallback to BU or archive — proven by a test.</criterion>
+    <criterion>A non-secure record still resolves through the BU cascade unchanged.</criterion>
+    <criterion>The securable-entity list is derived from live metadata, not hard-coded.</criterion>
+    <criterion>The reverse mapping (container → owning record) is exposed and consumed by task 073 — exactly one mapping in the codebase.</criterion>
+    <criterion>The server-side ingest/archive path uses the same decision.</criterion>
+    <criterion>Perturbation check performed: breaking the secure branch turns a test red.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task 076 routes the call sites; this task builds the thing they route through. Keep the two separate so the seam gets designed on its own merits rather than emerging from whichever call site was edited first.</notes>
+</task>

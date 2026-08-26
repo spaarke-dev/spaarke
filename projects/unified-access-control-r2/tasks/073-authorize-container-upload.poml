@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="unified-access-control-r2">
+  <metadata>
+    <title>Authorize PUT /api/containers/{containerId}/files/{*path} against the owning record — it currently writes app-only into any caller-named container</title>
+    <phase>0c Secure Documents — Wave 1</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>An unauthorized write path into arbitrary SPE containers, executed as the managed identity. Integrity and containment both depend on this.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The correct authorization subject is not obvious — the route is keyed by container, not by record — so the fix requires deciding what a container id must be authorized *against*.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small surface, but the container-to-record mapping is the crux and interacts with Wave 2's resolver.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to UploadEndpoints.cs plus a read-only use of container resolution; no shared authorization surface edits expected.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, auth, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Verified first-hand in `Api/UploadEndpoints.cs`: the handler validates only that `containerId` is non-empty and the path shape is legal, then calls `speFileStore.UploadSmallAsync(containerId, path, req.Body, ct)` — app-only, managed identity. The container id comes straight off the route and is never checked against anything.</origin>
+  </metadata>
+
+  <prompt>This route takes a container id from the URL and writes into it as the managed identity, behind only a coarse policy. Nothing checks that the caller has any relationship to that container or to the record it belongs to. Authorize the write against the owning record before it happens.</prompt>
+
+  <role>SPAARKE BFF security engineer. Focused on integrity and containment, not only confidentiality.</role>
+
+  <goal>A caller can only write into a container they are entitled to write into, decided from the owning record rather than from the caller-supplied container id. Unresolvable containers are refused.</goal>
+
+  <context>
+    <background>WHAT IS WRONG, verified in code:
+
+`src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs` — `PUT /api/containers/{containerId}/files/{*path}`:
+- validates `containerId` non-empty
+- validates the path shape via `PathValidator`
+- validates a non-empty body
+- then `speFileStore.UploadSmallAsync(containerId, path, req.Body, ct)`
+
+`SpeFileStore.UploadSmallAsync` takes no caller context and delegates to `UploadSessionManager` — this is **app-only (managed identity)**. So unlike the OBO routes, SPE performs **no** caller-side check: the write proceeds regardless of the caller's container permission. The route sits behind `.RequireAuthorization("canwritefiles")`, a coarse policy, not a per-resource decision.
+
+WHY IT MATTERS UNDER BROKER-ONLY. The per-project container is the blast-radius boundary (SECURE-DOCUMENTS-BUILD-PLAN.md §1). A write path that accepts any container id punctures that boundary from the write side: a caller can place content into a secure project's container, or into the shared archive, as the trusted identity.
+
+THE HARD PART: what is the authorization subject? The route is keyed by container, but containers belong to records — a business unit (the BU cascade container) or, after Wave 2, a secure project (`sprk_project.sprk_containerid`). So the fix is: resolve container -> owning record, then authorize the caller's Write on that record. This is the inverse of Wave 2's task 075 resolver (record -> container) and the two should agree; coordinate rather than build a second mapping.
+
+INTERACTION WITH WAVE 2. Task 075 introduces the record-aware resolver. If 075 has landed, reuse its mapping. If this task runs first, build the reverse lookup in a form 075 can consume, and say so in notes — do NOT leave two independent container-mapping implementations.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">If the container cannot be mapped to an owning record, DENY. Never fall through to "upload anyway" — an unmappable container is exactly the case this task exists to stop.</constraint>
+    <constraint source="build-plan">Do not solve this by granting the caller an SPE container permission and switching to OBO. `GrantMembershipAsync` stays at zero callers; broker-only means the BFF decides and the app writes.</constraint>
+    <constraint source="project">Do NOT build a second container-to-record mapping. Coordinate with task 075's resolver — one mapping, used in both directions.</constraint>
+    <constraint source="project">`canwritefiles` is a coarse policy, not a resource decision. Keep it if useful as a first hurdle, but it does not satisfy this task.</constraint>
+    <constraint source="project">Check client callers before tightening — this route is used by upload flows; a refusal that breaks legitimate uploads will be reverted, which reopens the hole.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/notes/task-046-secure-project-owner-role.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm the handler still takes the container id unchecked, and confirm `UploadSmallAsync` is app-only (no caller context in the signature).</step>
+    <step order="1">Inventory callers of this route across client and solutions — what container ids do they legitimately pass, and where do those come from?</step>
+    <step order="2">Decide the authorization subject: container -> owning record (BU or secure project) -> caller's Write on that record. Coordinate with 075's resolver; if 075 has not landed, build the reverse lookup so 075 can consume it.</step>
+    <step order="3">Implement the check before the write. Deny on unresolvable containers.</step>
+    <step order="4">Tests: a caller without Write on the owning record is refused; an unresolvable container is refused; legitimate upload flows still succeed.</step>
+    <step order="5">Build, test, publish size, CVE. Record the mapping decision in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If containers legitimately exist that map to no record — staging or scratch containers used by AI pre-fill, chat or compose — STOP and surface it. Authorizing writes to unmodelled containers requires deciding what they belong to, which is a modelling decision, not an implementation one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`AuthorizationService` already answers "may this caller act on this record"; SpeFileStore already performs the write.</existing>
+    <extension>Adds the missing subject resolution and check to an existing route; the container-to-record mapping is shared with task 075, not new.</extension>
+    <cost-of-doing-nothing>Any caller holding the coarse `canwritefiles` claim can write arbitrary content into any container by id — including a secure project's container and the shared archive — as the managed identity, with no per-resource check and no SPE-side defence because the write is app-only.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</output>
+    <output type="test">tests/ — unauthorized-container-write denial + unresolvable-container denial</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller without Write on the owning record cannot write into that record's container — proven by a test that fails without the change.</criterion>
+    <criterion>An unresolvable container id is refused, not uploaded.</criterion>
+    <criterion>Exactly one container-to-record mapping exists in the codebase, shared with task 075.</criterion>
+    <criterion>Legitimate client upload flows still succeed (caller inventory evidenced).</criterion>
+    <criterion>No SPE container permission is granted to any user as part of this fix.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is an integrity and containment fix more than a confidentiality one, which is why it is easy to under-rate. A per-project container that anyone can write into is not a containment boundary.</notes>
+</task>

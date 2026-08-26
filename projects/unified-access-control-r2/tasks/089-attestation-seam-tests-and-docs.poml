@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<task id="083" project="unified-access-control-r2">
+<task id="089" project="unified-access-control-r2">
   <metadata>
     <title>Attestation seam tests + architecture documentation (FR-32 closure)</title>
     <phase>5 Attestation</phase>
@@ -13,7 +13,7 @@
     <parallel-group>phase5-wave4</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Touches tests/** + docs/** only; solo wave at phase end.</parallel-reason>
-    <deps>081, 082</deps>
+    <deps>087, 088</deps>
     <tags>testing, integration-test, auth, documentation</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>

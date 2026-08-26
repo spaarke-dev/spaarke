@@ -22,7 +22,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 
 | In | Out |
 |---|---|
-| One access evaluator returning `(recordId → rights)` for both principal kinds | MDA authorization (Dataverse enforces natively — no code) |
+| One access evaluator returning `(recordId → rights)` for both principal kinds | MDA authorization **for native forms/grids/views only** (Dataverse enforces natively — no code). ⚠️ **NOT** MDA-hosted PCFs that read via the BFF — those are in scope; see §4.1 correction |
 | Phase 0 enforcement remediation (§8) | AI-plane security trimming for contacts (deferred, D-4) |
 | Core-vs-child inheritance | Field-level visibility (deferred, D-3) |
 | Secure Project rework | Expiry enforcement beyond the Phase 0 minimum (D-1) |
@@ -67,8 +67,26 @@ The axis that governs risk is **which system enforces**, not who the user is:
 
 | Surface | Enforced by | Consequence |
 |---|---|---|
-| **MDA** | Dataverse natively (role depth × owner/BU/team + sharing) | Nothing to build. Do not reimplement |
+| **MDA — native forms, grids, views** | Dataverse natively (role depth × owner/BU/team + sharing) | Nothing to build. Do not reimplement |
+| **MDA — embedded PCFs that read via the BFF** | ⚠️ **The BFF filter** — same as SPA. See correction below | The MDA is **not** uniformly Dataverse-enforced |
 | **SPA / Teams** | **The BFF filter, and nothing else** — all reads are app-only, so Dataverse row security is inert | A bug here is a disclosure, not a nuisance |
+
+> 🔴 **Correction, 2026-08-25 (task 046 follow-up).** The two-row version of this table said the MDA is
+> Dataverse-enforced, full stop, and the Scope table above still says *"MDA authorization (Dataverse
+> enforces natively — no code)"*. **That is false wherever an MDA form hosts a PCF that reads through
+> the BFF**, which the Matter form does today: `SemanticSearchControl` fetches its document grid from
+> `POST /api/ai/search`, never from `Xrm.WebApi`, so nothing on that path is security-trimmed.
+>
+> **Demonstrated, not theorised**: a non-admin who is denied Read on every one of a matter's documents
+> by Dataverse (verified by impersonation — 0 of 442 documents visible) nonetheless saw the full
+> document list in that PCF, and could open and download the files. Details, endpoint-level trace and
+> the three distinct defects: [`notes/task-046-secure-project-owner-role.md`](notes/task-046-secure-project-owner-role.md) §7b.
+>
+> **Why this matters beyond one control**: the "MDA is safe, only the SPA needs a filter" framing is
+> what made this surface invisible to the project's own threat model. The correct rule is **per read
+> path, not per surface**: *any* read that goes through the BFF is app-only and needs the evaluator,
+> regardless of which host the code sits in. Treat "is this MDA?" as irrelevant; ask "does this read
+> go through the BFF?"
 
 ### 4.2 User types
 
@@ -178,12 +196,62 @@ and `Write` on `sprk_project`.
 validates that an assignment target holds entity privileges; assigning a record to a team with no
 privileges on that entity fails. So:
 
-- Define a dedicated **`Secure Project Owner`** role: Create / Read / Write / Delete / Append /
-  AppendTo / Share on `sprk_project` and its child entities, at **Business Unit** depth.
+- Define a dedicated **`Secure Project Owner`** role holding **`Read` at User (`Basic`) depth on every
+  entity that carries an `sprk_issecure` column, and nothing else.** As of 2026-08-25 that is **three**
+  entities — `sprk_project`, `sprk_matter`, `sprk_workassignment` — confirmed from live attribute
+  metadata (`sprk_servicerequest` and `sprk_document` do **not** carry it). **Derive the list from
+  metadata, never from a written list**: if a fourth entity gains `sprk_issecure`, the role must gain
+  the matching `Read` or assignment for that type fails.
 - Assign it to the **`Secure Project` default owner team only**.
-- **Keep that team free of human members.** The role's BU depth means any member would read every
-  secure project *by membership*, which is exactly the ownership-derived access this section forbids.
-  The team exists to hold ownership, not to confer access.
+- **Keep that team free of human members.** The team owns *every* secure project, so at User depth a
+  member would read every one of them *by membership* — which is exactly the ownership-derived access
+  this section forbids. The team exists to hold ownership, not to confer access. (Note the reasoning:
+  the hazard is **what the team owns**, not the role's depth. Narrowing the depth does not relax this.)
+
+  > ⚠️ **Corrected 2026-08-25 by task 046 — determined empirically, not from this list.** This
+  > section previously specified *"Create / Read / Write / Delete / Append / AppendTo / Share on
+  > `sprk_project` and its child entities, at **Business Unit** depth"* — seven privileges at a depth
+  > that spans the whole BU. That was a hypothesis written from plausibility. Tested against live
+  > Dataverse it is wrong in both dimensions:
+  >
+  > | | Hypothesised | Empirically required |
+  > |---|---|---|
+  > | Privileges | Create, Read, Write, Delete, Append, AppendTo, Share | **Read only** |
+  > | Depth | Business Unit (`Local`) | **User (`Basic`)** |
+  > | Entity scope | `sprk_project` + "its child entities" | **the 3 entities carrying `sprk_issecure`** — `sprk_project`, `sprk_matter`, `sprk_workassignment` |
+  > | Child entities | included | **not required** (nothing assigns children — see §5.1d) |
+  >
+  > ⚠️ **The entity-scope row was found the hard way, by operator testing on 2026-08-25 — after the
+  > role had already been "completed".** The first cut covered `sprk_project` only, because this
+  > section and the task both talk about *projects*. Assigning a **Matter** to the owner team then
+  > failed, and the natural field fix was to pile broad roles onto the team
+  > (`Spaarke Basic User`, `Spaarke AI Analysis User`, `Spaarke Reporting Access Viewer` were all
+  > added) — **recreating the exact over-grant posture removing System Administrator was meant to
+  > end.** The lesson generalises: *when assignment fails, the cause is a missing `Read` on that one
+  > entity; add the privilege, never a role.* Corrected by granting `Read`@`Basic` on all three and
+  > re-proving assignment for each with the three workaround roles removed; the team is back to one
+  > role and zero members.
+  >
+  > **Evidence.** With the role reduced to `Write`-only, Dataverse refused the assignment and named
+  > the missing privilege itself: *"Principal team (Id=daec0b6f-…, teamType=0, privilegeCount=5) is
+  > missing prvReadsprk_Project privilege"* — the reported `privilegeCount` matched the role's actual
+  > privilege count exactly, confirming the message described current state rather than a stale cache.
+  > With `Read`-only and **System Administrator removed from the team**, assignment succeeded and
+  > `owningbusinessunit` moved from root `Spaarke` to `Secure Project`, stable across three
+  > consecutive polls spanning ~50 s. `Write` is therefore **not** required: the team is an ownership
+  > anchor, never an actor. The BFF application user — not the team — performs every mutation.
+  >
+  > ⚠️ **Method note for anyone re-running this.** Dataverse's **principal-privilege cache lags role
+  > edits by roughly one operation**, so a single probe immediately after a privilege change can
+  > report the *previous* configuration. An early pass here produced a false "assignment allowed with
+  > zero privileges". Always re-probe until the outcome is stable across ≥3 polls, and cross-check the
+  > `privilegeCount` in any denial against the role's real privilege count.
+  >
+  > **Platform behaviour worth knowing**: creating a role injects ~9 baseline privileges
+  > (SDK-message/plugin-metadata reads, legacy SharePoint integration) at Global depth.
+  > `ReplacePrivilegesRole` removes the SDK/plugin ones but **not** the four SharePoint ones, and
+  > `AddPrivilegesRole` **re-injects** them. Only `RemovePrivilegeRole`, called one privilege at a
+  > time with an entity-reference payload, clears them. The runbook does this explicitly.
 
 > 🔔 **Live-environment finding, 2026-08-25 (task 021) — owner action needed.**
 >
@@ -207,6 +275,118 @@ privileges on that entity fails. So:
 > is correctly scoped. So a green provisioning run in dev is **not** evidence that the
 > `Secure Project Owner` role is configured. Creating that role and swapping it for System
 > Administrator remains an open UAT/environment item.
+>
+> ✅ **RESOLVED 2026-08-25 by task 046.** `Secure Project Owner` now exists
+> (`roleid e4ebabd9-b4a0-f111-aaac-000d3a99d1d7`, in the `Secure Project` BU) holding exactly
+> `prvReadsprk_Project` @ User depth; it is assigned to the `Secure Project` owner team and to **no
+> user and no other team**; **`System Administrator` has been removed from that team**; the team
+> still has **zero** members. Assignment was re-proven *after* the removal. Task 021's escalation
+> trigger is now meaningful in dev.
+
+#### 5.1a-2 🔴 A child business unit does NOT isolate anything from a role with `Deep` depth (found 2026-08-25, task 046)
+
+**This defeats the mechanism in §5.1 and it is the most important finding of task 046.** It was found
+by testing, not by reading configuration.
+
+`Spaarke Basic User` — the ordinary end-user role — grants **`prvReadsprk_Project` at `Deep` depth**
+(`privilegedepthmask = 4`, "Parent: Child Business Units"). `Deep` held from the **root** BU reaches
+**every descendant** BU. `Secure Project` is parented to root. Therefore it is in reach.
+
+**Proven empirically.** A secure project (`sprk_issecure = true`) owned by the `Secure Project` owner
+team, with `owningbusinessunit = Secure Project`, was read successfully via impersonation
+(`MSCRMCallerID`) by **`Test User 1`** — an ordinary enabled user in the root BU holding only
+`Basic User`, `Spaarke Basic User`, `Spaarke Office Add In User`, `Spaarke Reporting Access Viewer`.
+It also appeared in an unfiltered `sprk_projects` list as that user (1 of 19 rows).
+
+**This is not a new defect — it is §5.2, still unremediated, now proven against a real secure record.**
+§5.2 ("Blocking prerequisite — role depth") already recorded the same depth census on 2026-08-20 and
+already carries an operator decision (2026-08-21) to fix it by **restructuring the BU tree**. What task
+046 adds is the *end-to-end* proof: §5.2's evidence was a privilege-depth census, from which the
+exposure was inferred. This is an actual impersonated read of an actual `sprk_issecure = true` record
+actually owned by the actual `Secure Project` owner team — the full mechanism, exercised. It confirms
+the inference was right and that **the prerequisite is still open in dev**.
+
+**Correction to an earlier draft of this section**: it claimed no BU-tree rearrangement could fix this,
+on the grounds that every BU is a descendant of root. That is true only **while ordinary users sit in
+the root BU**, which is the current dev state. §5.2's decided fix moves users *out* of root into
+`Spaarke Operations` and makes `Secure Projects` a **sibling** of it — a sibling subtree is not a
+descendant, so `Deep` held at Operations does not reach it. The tree fix works; it just has not been
+applied.
+
+**The corresponding negative control passed**, which is what makes the diagnosis precise rather than
+speculative: a principal holding `prvReadsprk_Project` at **Basic** depth (`Support User`) was
+**denied** on the same record. So BU containment works exactly as designed — *once no ordinary role
+holds Deep or Global*.
+
+**Full depth census for `prvReadsprk_Project` in dev (live, 2026-08-25):**
+
+| Role | BU | Depth | Held by |
+|---|---|---|---|
+| Service Reader · Service Writer · System Customizer | root `Spaarke` | **Global** | application users only — **no human** |
+| System Administrator | root `Spaarke` | **Global** | app users + `Ralph Schroeder`, `Delegated Admin` (admins — expected) |
+| **`Spaarke Basic User`** | root `Spaarke` | **🔴 Deep** | **`Test User 1`**, `Ralph Schroeder` (external identity) |
+| Support User | root `Spaarke` | Basic | `Support User` (Microsoft-managed) |
+| `Secure Project Owner` | `Secure Project` | Basic | the owner team only |
+
+**Two viable fixes. Neither applied by task 046 — both change every user's effective access and are
+the owner's call, not a role-provisioning task's.**
+
+| | Fix | Blast radius, measured live 2026-08-25 | Trade-off |
+|---|---|---|---|
+| **A** | **§5.2's BU restructure** (already the decided fix): move users out of root into `Spaarke Operations`; make the secure BU a **sibling**, not a child | Larger — every user's BU changes; `Secure Project` must be re-parented; the BU cascade (`businessunit.sprk_containerid`) must be re-seeded per BU | Keeps `Deep` depth, so multi-BU orgs still work. Encodes the boundary structurally, which survives future role edits |
+| **B** | **Narrow the depth**: `Spaarke Basic User`'s `prvReadsprk_Project` `Deep` (4) → `Local` (2) | **Zero today** — all 18 real projects are owned in the root BU and all 5 human users are in the root BU, so `Local` preserves exactly their current visibility while removing reach into `Secure Project` | One privilege edit, immediately reversible. But it is a *role* guarantee, so any later role edit can silently undo it — which is precisely how this hole appeared |
+
+**B is the cheap immediate mitigation; A is the durable fix, and A is already the decided direction.**
+They are not mutually exclusive — B can be applied now at near-zero risk to close the exposure while A
+is scheduled. Note B also satisfies §5.1a's "do not strip Read" constraint: narrowing a depth is not
+stripping a privilege, and `Local` still lets ordinary users read the 18 root-BU projects.
+
+Whichever is chosen, the guarantee should be **tested empirically** (impersonated read → expect
+denial), not asserted from the role configuration — see the NFR-05 note above.
+
+> ### ✅ Fix A is VALIDATED in dev (operator test, 2026-08-25)
+>
+> `Spaarke Business Unit 1` was created as a child of root, `testuser1@spaarke.com` moved into it, and
+> the user **kept `Deep` depth**. Because `Spaarke Business Unit 1` and `Secure Project` are **siblings**,
+> `Deep` covers the user's own subtree and cannot reach the secure BU:
+>
+> | Test | Result |
+> |---|---|
+> | Matter owned by `Spaarke Business Unit 1` | visible |
+> | Records in other BUs | not visible |
+> | Same Matter after reassignment to the `Secure Project` BU/team | **DENIED** ✅ |
+> | Same Matter after an explicit **share** | visible ✅ |
+>
+> **This is the entire intended model working end-to-end**, and it resolves two things this section
+> previously listed as blocked:
+>
+> - **Consequence 3 is discharged.** FR-28's share→read assertion is no longer untestable — it was
+>   tested, and it **passes**. The user regained access *only* via the explicit share.
+> - **Consequence 1 is fixable by configuration alone.** No code change was needed; the guarantee comes
+>   from where the user's BU sits relative to the secure BU.
+>
+> **The insight worth keeping**: the fix is not "reduce the depth", it is **"do not let ordinary users
+> sit at or above the secure BU in the tree"**. `Deep` is fine — it is `Deep` *held at an ancestor of
+> the secure BU* that is not.
+>
+> ⚠️ **Migration caveat — this is a data decision, not only a security one.** Existing records were left
+> in the root BU, so the relocated user can no longer see any of them. Rolling this out means either
+> reassigning existing records into the new BUs or placing users to match where their records already
+> live. In a populated environment that is the larger half of the work.
+
+**Consequences until it is applied:**
+
+1. **Secure projects are not isolated.** Provisioning correctly moves the record into the
+   `Secure Project` BU; that move currently confers no protection against ordinary Spaarke users.
+2. **Task 047 cannot conclude "isolation works"** — only "provisioning runs". Those are different
+   claims and the second does not imply the first.
+3. **FR-28's sharing test (design §5.1b) is untestable.** Every remaining human with
+   `sprk_project` Read holds Deep or Global, so no record exists that they cannot already read — the
+   share→read assertion has nothing to discriminate against. It becomes testable once the depth is
+   narrowed.
+4. **The same class of exposure applies to child records, and worse** — see §5.1c and the child-entity
+   analysis below: children are never assigned to the secure team at all, so they are owned in the
+   creator's BU regardless of the parent's BU.
 
 ⚠️ **A POA share is only effective if the user also holds the entity privilege at some depth.** Normal
 user roles must therefore **retain Read on `sprk_project` at Basic/User depth**. That grants nothing on
@@ -218,6 +398,30 @@ reach the `Secure Projects` BU") becomes false by construction, because `Secure 
 reach it. The assertion must be restated to exempt that one role and instead assert the property that
 actually matters: **no role held by a human principal reaches the `Secure Projects` BU, and the owner
 team has no human members.**
+
+> **Restated again 2026-08-25 by task 046 — and this is a bigger change than the exemption.** Two
+> corrections, one narrowing and one widening:
+>
+> 1. **The exemption narrows.** `Secure Project Owner` needs `Read` at **User** depth, not seven
+>    privileges at Business Unit depth. At User depth the role matches only records the team owns, so
+>    the exemption is far tighter than the amendment assumed. Whitelist **one privilege at one depth**.
+> 2. **The assertion must be about DEPTH, not about the BU** (§5.1a-2). "Does any role reach the
+>    `Secure Project` BU?" is the wrong question — it is unanswerable by inspecting the BU, because
+>    reach is a property of *depth held at an ancestor*. `Spaarke Basic User` never mentions the
+>    `Secure Project` BU anywhere and reaches it anyway, via `Deep` at root. A test that enumerated
+>    roles "scoped to the secure BU" would have passed while the hole was wide open.
+>
+> **NFR-05 must therefore assert:** no role held by a **non-administrator human** principal grants
+> `prvReadsprk_Project` (or the `sprk_matter` equivalent) at **`Deep` or `Global`** depth; the
+> `Secure Project` owner team has **zero** human members; and `Secure Project Owner` is held by that
+> team alone. The depth clause is the load-bearing one — it is the clause that is **currently
+> failing**, and the only clause that would have caught this.
+>
+> **Prefer the empirical form of this test to the configuration form.** The census in §5.1a-2 is
+> derived from privilege depth masks; the *proof* was an impersonated read that returned a row. A CI
+> assertion that provisions a secure project and then attempts an impersonated read as a known
+> non-admin fixture user tests the actual property. This is the same lesson as NFR-04's negative
+> canary: **equality/success where you expect denial is the signal.**
 
 #### 5.1b Licensed-user access: access teams, not per-user shares (decided 2026-08-25)
 
@@ -269,7 +473,69 @@ The veto must apply **regardless of principal kind**: a Type 1 user whose contac
 
 **Reversibility**: under this mechanism the designation is reversible (reassign owner + BU). The wizard's "cannot be removed" warning was a consequence of BU-per-project and should be removed.
 
+#### 5.1d Child-entity ownership on a secure project — answered from live metadata (task 046, 2026-08-25)
+
+**The question**: task 021 assigns **only** the `sprk_project` row to the secure owner team. Should the
+project's child records be team-owned too?
+
+**The set, enumerated from `EntityDefinitions(LogicalName='sprk_project')/OneToManyRelationships`** —
+not from memory. 34 relationships total; excluding 15 platform tables (`asyncoperation`,
+`bulkdeletefailure`, `deleteditemreference`, `duplicaterecord`, `mailboxtrackingfolder`,
+`principalobjectattributeaccess`, `processsession`, `queueitem`, `sharepointdocument`,
+`sharepointdocumentlocation`, `syncerror`, `team`, `userentityinstancedata`) leaves **18 Spaarke
+business entities carrying a lookup to `sprk_project`, via 19 lookups**:
+
+| Entity | Lookup | | Entity | Lookup |
+|---|---|---|---|---|
+| `sprk_agreement` | `sprk_regardingproject` | | `sprk_invoice` | `sprk_project` |
+| `sprk_analysis` | `sprk_regardingproject` | | `sprk_kpiassessment` | `sprk_project` |
+| `sprk_billingevent` | `sprk_project` | | `sprk_memo` | `sprk_regardingproject` |
+| `sprk_budget` | `sprk_project` | | `sprk_reportcard` | `sprk_regardingproject` |
+| `sprk_communication` | `sprk_regardingproject` | | `sprk_servicerequest` | `sprk_regardingproject` |
+| `sprk_communicationthread` | `sprk_regardingproject` | | `sprk_spendsignal` | `sprk_project` |
+| **`sprk_document`** | **`sprk_project` *and* `sprk_relatedproject`** | | `sprk_spendsnapshot` | `sprk_project` |
+| `sprk_event` | `sprk_regardingproject` | | `sprk_todo` | `sprk_regardingproject` |
+| `sprk_externalrecordaccess` | `sprk_project` | | `sprk_workassignment` | `sprk_regardingproject` |
+| | | | `email` | `sprk_project` (system entity, custom lookup) |
+
+The task POML listed three known children (`sprk_document`, `sprk_invoice`, `sprk_workassignment`).
+The real count is **six times that**. `sprk_document` carries **two** distinct project lookups, so any
+"is this document on a secure project?" test must check both or it will miss half the cases.
+
+**Answer, and it is a `STOP`-level one.** Children are **not** assigned to the secure team by
+provisioning, and nothing else assigns them either. A document created by an ordinary user is owned by
+that user, in **their** BU — regardless of the parent project's BU. So:
+
+- Child records of a secure project are **not isolated at all** — not merely "less isolated". This is
+  independent of §5.1a-2's depth defect and would survive fixing it.
+- This is the ownership counterpart of §5.1c's container gap. §5.1c stops secure *content* landing in
+  shared storage; this is about the *Dataverse rows*.
+
+**Recommendation — a separate task, not a change to task 021.** Per CLAUDE.md §11, the cheap-looking
+move (extend task 021's assign to cascade over 19 lookups) is the wrong one:
+
+1. **It is not one assign, it is a cascade with no natural bound** — children are created continuously,
+   long after provisioning returns. A one-shot assign at provisioning time cannot cover records that do
+   not exist yet. This needs a create-time rule (plugin or BFF write path), not a provisioning step.
+2. **`sprk_document` reachable two ways** means the rule is per-lookup, not per-entity.
+3. **It interacts with the evaluator**, which already inherits child access **1 hop** via a
+   denormalized core ancestor (root project CLAUDE.md). If children become team-owned, the Dataverse
+   term and the inheritance term both fire and the interaction must be reasoned about, not discovered.
+
+So the honest scope is: *"decide and implement the ownership rule for children of a secure project"* —
+its own task, sequenced with `spaarke-secure-project-r1` (which already owns the container half of the
+same problem). **Filed rather than implemented here**, per the task's own instruction to surface it.
+
 ### 5.2 🔴 Blocking prerequisite — role depth (empirically confirmed)
+
+> **Still open, and now proven end-to-end (task 046, 2026-08-25).** The census below was a *depth
+> census*, from which the exposure was inferred. Task 046 exercised the whole mechanism: a real
+> `sprk_issecure = true` project, really owned by the real `Secure Project` owner team, sitting in the
+> `Secure Project` BU, was **read successfully via impersonation by `Test User 1`** — an ordinary
+> non-admin user. The inference was correct and **the restructure below has not been applied**: dev
+> still has all 5 human users in root `Spaarke`, with `Secure Project` as a direct child of root.
+> See §5.1a-2 for the proof, the two candidate fixes with measured blast radius, and why this makes
+> task 047 unable to conclude "isolation works".
 
 Live query against dev, 2026-08-20:
 

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="unified-access-control-r2">
+  <metadata>
+    <title>Authorize GET /api/v1/containers/{containerId}/documents — lists any container's documents behind RequireAuthorization() alone</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>An unauthenticated-by-resource read of document metadata keyed by a caller-supplied container id — the read-side twin of task 073's write-side hole.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Needs the container→record mapping decision to agree with tasks 073 and 075 rather than forking a third one.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small surface; the judgement is in reusing the shared mapping rather than in the route itself.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to the container documents endpoint plus read-only use of the shared container mapping.</parallel-reason>
+    <deps>075</deps>
+    <tags>bff-api, api, auth, security</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <origin>Found 2026-08-25 by task 074's route-authorization ArchTest on its first run — the SIXTH miss, present in no Wave 1 task and in neither the workflow review nor task 022's sweep.</origin>
+  </metadata>
+
+  <prompt>This route takes a container id from the URL and lists that container's documents, gated only by `RequireAuthorization()` — authentication, not authorization. Nothing checks that the caller has any relationship to the container or to the record that owns it.</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>A caller can only list documents in a container they are entitled to see, decided from the owning record. Unresolvable containers are refused.</goal>
+
+  <context>
+    <background>`GET /api/v1/containers/{containerId}/documents` returns document metadata for an arbitrary caller-supplied container id, behind `.RequireAuthorization()` and no per-resource filter.
+
+This is the READ-side twin of task 073 (`PUT /api/containers/{containerId}/files/{*path}`, the write side). Both take a container id straight off the route and neither authorizes it against anything. Under the broker-only decision the per-project container is the blast-radius boundary; a route that enumerates any container's contents by id punctures that boundary from the read side, and — like task 073 — it does not depend on the caller holding an SPE container ACL, so it is not mitigated by the fact that nobody has one.
+
+THE MAPPING IS SHARED, NOT NEW. Task 075 builds the record-aware container resolver, bidirectionally, and task 073 consumes the container→record direction. This task consumes the same mapping. There must be exactly ONE container→record mapping in the codebase; if implementing this appears to need a second, that is the signal to stop and reconcile with 075.
+
+SEQUENCING. Depends on task 075 for the mapping. If 075 has not landed, do not build a private lookup — coordinate.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/ — the container documents endpoint</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+      <file role="reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">If the container cannot be mapped to an owning record, DENY. Never list "anyway".</constraint>
+    <constraint source="project">Consume task 075's mapping. Do NOT build a second container→record lookup.</constraint>
+    <constraint source="build-plan">Do not solve this by granting the caller an SPE container permission. `GrantMembershipAsync` stays at zero callers.</constraint>
+    <constraint source="project">Inventory client callers before tightening — a refusal that breaks a legitimate list view gets reverted, which reopens the hole.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Locate the route and confirm it still carries no per-resource filter. Inventory client callers with grep evidence.</step>
+    <step order="1">Resolve container → owning record via task 075's mapping; authorize the caller's Read on that record.</step>
+    <step order="2">Tests: a caller without Read on the owning record is refused; an unresolvable container is refused; legitimate list views still work.</step>
+    <step order="3">Build, tests, publish size, CVE. Confirm task 074's rule no longer waives this route, and DELETE its waiver entry.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If containers legitimately exist that map to no record, STOP and surface it — same modelling gap task 073 names. Do not invent an owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`AuthorizationService` answers "may this caller act on this record"; task 075 supplies container→record.</existing>
+    <extension>Adds the missing check to an existing route using an existing mapping. No new component.</extension>
+    <cost-of-doing-nothing>Any authenticated caller can enumerate the document metadata of any container by id, including a secure project's dedicated container — with no SPE ACL required, so nothing else stops it.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">The container documents endpoint, authorized against the owning record</output>
+    <output type="test">tests/ — unauthorized-container listing denied; unresolvable container denied</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller without Read on the owning record cannot list that container's documents — proven by a test that fails without the change.</criterion>
+    <criterion>An unresolvable container id is refused.</criterion>
+    <criterion>Exactly one container→record mapping exists, shared with tasks 073 and 075.</criterion>
+    <criterion>Legitimate client callers still work (inventory evidenced).</criterion>
+    <criterion>Task 074's waiver for this route is deleted, not merely updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>Found by the forcing function on its first run, in a project that had already enumerated this surface four times by hand. That is the argument for task 074 in one sentence.</notes>
+</task>
