@@ -1,8 +1,136 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **IN PROGRESS (SESSION 11)**: Task 205c (A39 H4b per_env_settings — 8 §10.2 live-contract entries) dispatched under FULL rigor, Sonnet/xhigh. Ordering-guard verified: A36/A37 @ `1bc049e4c`, A38 @ `f280de764`/`cc6ecb6e4`, A42 @ `cc6ecb6e4` — all confirmed landed via `git log`. Proceeding per POML `tasks/205c-a39-h4b-per-env-settings.poml`.
+> **Last Updated**: 2026-08-26 SESSION 11 END — **🎯 SESSION 11 accomplishments** (all pushed to origin, branch @ `edc3a94ad` = master + 8 ahead; working tree clean): (1) **Task 205 c/d/e/f wave COMPLETE** (`8ca5a056f`) — 3 parallel task-execute background agents (205c/d/e Sonnet-mix, ~1.13M tokens, ~41min) + main-session 205f landed; 205c caught + fixed pre-existing YamlDotNet naming-convention bug (ALL 15 per_env_settings entries had silently returned Failure since task 201 — undetected because no prior test exercised the real embedded manifest); 205d closed §10.4 objectid trap not addressed by task 053; 205e landed 3-branch gate in Deploy-AllIndexes.ps1; 205f DROPPED sub-scope (a) as scope-drift + owner Path C (H4b/H9 do NOT iterate appsettings.template.json — live-code verified), APPLIED §6.5 EDIT package verbatim + companion sweep (6 of 7 sites; Site F was already cured) + doc sweep (mirror 280→642 lines + copy.md delete + rotation-cadence + 3 SF-1 UAMI sites); 1668/0/1 test suite green; +0.11 MB publish delta. **Task 205 FULLY COMPLETE — 9 of 9 sub-phases landed** (a/b/c/d/e/f/g/h/i). (2) **Master merge** (`edc3a94ad`) — 5 SPE-admin-app-r2 fix commits (PR #824) merged clean, 0 conflicts, no overlap with 205 changes. (3) **Housekeeping check** — git state verified clean, Azure identity confirmed as owner AAD `ralph.schroeder@spaarke.com` (NFR-11), 5 subs enumerated (default = `484bc857` Spaarke Devlopment Environment), L2 platform verified LIVE (`spaarke-provisioning-controlplane-dev` Running), Dataverse admin env identified (`spaarkedev1`), Q1-Q7 owner Q&A resolved + two-stage E2E model clarified. (4) **CRITICAL FINDING — task 186 NOT clear to fire despite 205 completion**: punch-list audit revealed 4 prerequisite waves + A26 queue-recreate ceremony still needed. Task 204c (H13 real probes) is explicitly labeled "HARD-BLOCKS TASK 186" in TASK-INDEX. Owner directive: **complete ALL prerequisites** before task 186 fires. (5) **Owner Q&A locked customerId=`trial1`** (matches §7.9 R1 naming convention) + two-stage E2E model + resource reuse plan + destructive A26 authorization + KEEP trial1 env permanently as production SMB shared-trial infrastructure.
 
-> **PARALLEL LANE COMPLETE (SESSION 11, 205d)**: Task 205d (A41 H10 dual DV app-user + Q8 extension) APPLIED — Sonnet/high, FULL rigor, run in parallel with 205c per the recommended sequencing above. Dedupe found task 053 landed the two-row structure but the §10.4 objectid trap was uncovered by both dedupe sources (053 + ds8 design study) — NO scope-collapse, H10 handler code changed. All 3 design.md edits (D3 wording, :153 figure, Naming Standards row) + runbook §12.7 + T2 probe byte-equality extension landed in the working tree. NOT committed (executor obligation — main session bundles the commit). Full record: `notes/auth-v4-integration-draft-punch-rows.md` § "A41 execution record"; `tasks/TASK-INDEX.md` row 205d updated to ✅. Working-tree files touched are DISJOINT from 205c's `H4bBulkAppSettingsHandler`/`FilePerEnvSettingsManifest` surface — safe to commit independently or bundle together, main session's call.
+## 🎯 SESSION 11 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 205 FULLY COMPLETE (9 of 9 sub-phases: a/b/c/d/e/f/g/h/i). Master merged. Housekeeping done. Owner Q&A resolved 7 open questions locking customerId=`trial1` + two-stage E2E model + full resource reuse plan. Punch-list gate audit revealed 4 more prerequisite waves + A26 ceremony required before task 186 can fire. |
+| **Next actionable** | **Dispatch prerequisite wave** (Ultracode/Workflow): 203c (skill wiring — A02/A03/A04/A15/A16, MAIN-SESSION-ONLY per `.claude/skills/**` write boundary) + 204b (§6.5 Path A formalization, ~2h) + 204c (H13 real probes — 10 sub-tasks, **HARD-BLOCKS 186**, dispatched as nested workflow) + 204d (staging-slot topology, ~16h). Then A26 queue delete/recreate (30min human authorization). Then Bicep what-if verify. Then task 186 (16-24h with 24h SPE gate). |
+| **Rigor** | ALL prerequisites are FULL rigor (auth-tagged OR code-modifying OR test-modifying). 203c MAIN-SESSION-ONLY; 204c/204d parallel-safe background; 204b parallel-safe (small formalization). |
+| **Model / Effort** | 204c sub-probes: Sonnet/high (mechanical port per probe); 203c: Sonnet/high MAIN-SESSION; 204b: Sonnet/high; 204d: Sonnet/high (structural — could escalate to Opus/Fable for higher-risk refactor). |
+| **Parallel-safe** | 203c: NO (MAIN-SESSION-ONLY per `.claude/**` boundary); 204b/c/d: YES (background). Recommended dispatch: nested Workflow with 204c(10 sub-probes) + 204b + 204d as 12 background agents; 203c concurrent in main session. |
+| **Estimated remaining effort** | ~15-20h wall-clock parallelized to task 186 dispatch (bottleneck = 203c ~13h main-session + 204c ~4-6h with 10 parallel sub-probes); then A26 30min + Bicep what-if 1h + task 186 16-24h. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `edc3a94ad` = origin/master + 8 ahead; working tree CLEAN. |
+| **Next action for fresh session** | **"dispatch prerequisite wave"** (recommended, Ultracode-native) OR **"execute task 204c"** (HARD-BLOCKER focus) OR **"execute task 203c"** (main-session skill wiring only). **DO NOT** run task 186 yet. |
+
+### SESSION 11 commits (ALL PUSHED)
+
+- `8ca5a056f` — feat(provisioning): task 205 sub-phases c/d/e/f complete (auth-v4 integration finalized) — 38 files (34 mod + 3 new + 1 del), +2134/-669
+- `edc3a94ad` — Merge remote-tracking branch 'origin/master' into work/customer-provisioning-orchestration-r1 — 10 files from SPE-admin-app-r2 fix bundle (PR #824), clean merge
+- `[this SESSION 11 END checkpoint commit]` — checkpoint: owner Q&A locked + prerequisite wave prep
+
+### Critical Context (1-3 sentences)
+
+**Task 205 fully closed the auth-v4 integration cascade** — the platform now has the correct auth contract end-to-end (MI-FIC secret-free + `RequireSecretFreeIdentity=true` boot assertion + no sentinel patterns + updated never-delete rules per §6.5 resolution). **Owner Q&A locked the FIRST E2E's scope**: customerId=`trial1` drives §7.9 R1 naming, tenancyModel=`spaarke-hosted-model2` (full stack create for one env), new Dataverse env "Spaarke Trial Environment 1" (type=Production, PERMANENT — becomes the SMB shared-trial production infrastructure; future SMB customers like Contoso1 added later via customer-onboarding workflow NOT in r1 scope). **Punch-list audit revealed the completion trap**: 205 landing did NOT unblock 186 — Class-A A15/A16 (203c) + Class-B B04/B07/B11 (204b/c/d) + A26 queue-recreate remain hard prerequisites. Task 204c H13 real probes explicitly HARD-BLOCKS 186.
+
+### Terminology reconciliation (fixed drift, BINDING for future sessions)
+
+Prior sessions conflated AAD tenant with Dataverse env with customer. Correct definitions:
+- **AAD tenant** = ONE for all Spaarke (`a221a95e-6abc-4434-aecc-e48338a1b2f2`). Customer AAD tenants (Contoso, etc.) are EXTERNAL orgs.
+- **Azure subscription** = 5 in Spaarke's tenant; E2E targets `484bc857-3802-427f-9ea5-ca47b43db0f0` (Spaarke Devlopment Environment).
+- **Dataverse environment** = 1 today (`spaarkedev1`) → 2 after E2E (new: **"Spaarke Trial Environment 1"**, permanent).
+- **BFF app-reg** = 1 per Dataverse env (new env gets its own multitenant BFF app-reg).
+- **Customer** = many per shared trial env in Model 1 pattern; contoso1 is FUTURE user record in trial1 env post-186.
+
+When ADR-028 / spec.md say "cross-tenant" / "multitenant", they mean CUSTOMER AAD tenants (external orgs sending users into Spaarke's ONE tenant via B2B/CIAM), NOT Spaarke's tenant being multiple.
+
+### Locked owner decisions (SESSION 11 Q&A, 2026-08-26 — BINDING)
+
+**Q1 (B04 ADR-tension)**: **§6.5 Path A** — Model 1 uses ONE shared Dataverse env per shared BFF app-reg per env. `DataverseServiceClientImpl.cs:39` single-URL shape is correct-by-design. Task 204b formalizes as decision doc.
+
+**Q2 (E2E tenancy for task 186)**: Full stack create — tenancyModel = `spaarke-hosted-model2`. All 19 handlers run (no skips). Creates NEW Dataverse env "Spaarke Trial Environment 1" + full infrastructure stack.
+
+**Q3 (customerId + tenant)**: **customerId = `trial1`** (drives §7.9 R1 naming across ALL resources: `rg-spaarke-trial1`, `sprk-trial1-kv`, `spaarke-bff-trial1`, etc.). TenantId = `a221a95e-6abc-4434-aecc-e48338a1b2f2` (Spaarke's one AAD tenant). Contoso1 = FIRST customer USER added to trial1 env in a FUTURE customer-onboarding workflow (post-186, NOT r1 scope).
+
+**Q4 (teardown)**: KEEP trial1 env PERMANENTLY. Becomes the SMB shared-trial production infrastructure. NO teardown after E2E. Treat all naming/costs/security as production-quality.
+
+**Q5 (spaarke-bff-prod)**: LEAVE in place (Stopped, tagged `deploymentModel=model1 environment=prod`). May reuse in future.
+
+**Q6 (spaarke-dms-dev1-func)**: LEAVE in place (legacy). May reuse in future.
+
+**Q7 (A26 queue-recreate)**: OWNER AUTHORIZED destructive `az servicebus queue delete sprk-provisioning-jobs` + Bicep re-provision per `notes/queue-recreate-runbook-2026-08.md` §7. ORDER: schedule AFTER 204c code lands + BEFORE task 186 fires. CustomerId=`trial1` does NOT affect A26 (queue is L2-scoped, not customer-scoped).
+
+### Two-stage E2E model (owner clarification 2026-08-26 — BINDING for all future planning)
+
+- **Stage 1: Create the E2E platform** — task 186 does this: full infrastructure stack + Dataverse env for trial1 (customerId=trial1).
+- **Stage 2: Create customer-specific resources** — per-customer segregation for each SMB customer added to the platform post-186 (SPE containers, search index params/settings, Dataverse business units, etc.). This is a FUTURE flow NOT YET BUILT — file as follow-on r2 scope (customer-onboarding workflow).
+- **Model 1 vs Model 2 difference**: Model 2 has effectively ONE customer per env (dedicated); Model 1 has MULTIPLE customers per env requiring per-customer segregation for data isolation. Both use SAME provisioning platform for Stage 1; only the Stage-2 customer-add flow differs.
+
+### Resource reuse plan for task 186 (locked SESSION 11)
+
+**REUSE** (platform L2 + shared identity — DO NOT recreate):
+- `spaarke-provisioning-controlplane-dev` (L2 REST API — this IS what task 186 calls)
+- `spaarke-provisioning-controlplane-worker-dev` (L2 Worker)
+- `sprk-controlplane-dev-kv` (L2 KV)
+- L2 Cosmos DB (for ProvisioningRun state)
+- `spaarke-servicebus-dev` (SB namespace; `sprk-provisioning-jobs` queue recreated per A26)
+- `spaarkedev1` (admin Dataverse env — where L2 writes `sprk_dataverseenvironment` row for trial1)
+- Shared BFF app-reg for `spaarkedev1` (existing, unchanged)
+- `sprk-{env}-shared-bff-uami` (existing, unchanged)
+- `spaarke-spekvcert` (SPE cert KV, DO-NOT-RENAME §7.9 R4)
+- `GraphAppRoles.cs` 14 role GUIDs (11 populated fresh by 203c A16 live `az` enumeration)
+- `spaarke-bff-prod` + `spaarke-dms-dev1-func` (leave in place; may reuse — Q5/Q6)
+
+**CREATE FRESH for trial1 E2E** (all named per §7.9 R1 with `trial1` identifier):
+- New Azure RG `rg-spaarke-trial1` (westus2 per canonical Spaarke strategy — user memory: westus2 platform + westus3 OpenAI)
+- New per-env UAMI, KV `sprk-trial1-kv`, App Service Plan, BFF App Service `spaarke-bff-trial1`
+- New Cosmos, Service Bus, Redis (Model 2 shape per FR-12 v3.6 = per-customer Redis)
+- New AI Search + 7 canonical indexes (per H2b)
+- New OpenAI (with pinned model version per ADR-020; westus3 per regional strategy; ALWAYS `az cognitiveservices model list` check before greenfield Bicep deploy per user memory — model pins deprecate ~4-6 months after GA)
+- New Storage, App Insights
+- New Dataverse env "Spaarke Trial Environment 1" (type=Production, PERMANENT)
+- New Entra multitenant BFF app-reg for trial1 env (per user Q1: each env has its own BFF app-reg)
+- New SPE container (24h Microsoft gate — near-instant in practice per user memory)
+- New Graph app-role assignments to trial1 UAMI (per completed GraphAppRoles.cs 14 GUIDs)
+- New Dataverse solutions imported (8 solutions per §11.1a)
+- New AI Search indexes (7 canonical per H2b)
+
+### Pending prerequisites for task 186 (per owner directive: complete ALL)
+
+| Task | Scope | Effort | Status | Blocks 186? |
+|---|---|---|---|---|
+| **203c** | Skill wiring (A02 Step-0.5 external prereqs + A03 --batch flag + A04 Step-7 postmortem + A15 `Grant-ControlPlaneIdentity.ps1` + A16 live `az` enumerate 11 null `AppRoleId` GUIDs in `GraphAppRoles.cs`) | ~13h | not-started | **YES** (A15+A16 hard-block per spec.md MUST) |
+| **204b** | B04 §6.5 Path A formalization decision doc (unblocked SESSION 11) | ~2h | ⏸ was blocked (owner-decision-gate — **RESOLVED SESSION 11 as Path A**) | YES (adr-check gate) |
+| **204c** | B07 H13 real probes (T1/T2/T3/T4/T5/T6 traps + I2/I3/I4/I5 invariants — 10 sub-probes) | ~40h serial → ~4-6h parallel (dispatch as nested workflow) | not-started | **HARD BLOCKS 186** per TASK-INDEX label |
+| **204d** | B11 staging-slot topology split (`.Core` + `.Api` + `.Worker` refactor already partial per verification matrix) | ~16h | not-started | Structural — load-bearing but may not block execution |
+| **204e** | B01/B02/B15 regression ArchTests + IOptions checklist | ~17h | not-started | Not blocking 186 — hygiene; can defer to post-186 |
+| **A26** | Human `az servicebus queue delete sprk-provisioning-jobs` + Bicep re-provision per runbook §7 | 30min | not-scheduled | **YES** (H0.5 dispatch depends on `requiresSession=true` + `requiresDuplicateDetection=true` — creation-time-only) |
+
+### Ultracode dispatch plan (recommended for fresh session)
+
+Single Workflow launching prerequisites in parallel:
+- **Nested Workflow — 204c H13 real probes** (10 parallel sub-agents, Sonnet/high each; one per probe: T1, T2, T3, T4, T5, T6, I2, I3, I4, I5; ~4-6h wall-clock compressed from ~40h serial)
+- **Background agent — 204b** (§6.5 Path A decision doc; ~2h; Sonnet/high)
+- **Background agent — 204d** (staging-slot topology split; ~16h; Sonnet/high — may escalate to Opus/Fable if refactor risk high)
+- **Main session — 203c** (skill wiring MAIN-SESSION-ONLY per `.claude/**` write boundary; ~13h)
+
+Wall-clock: ~13-16h (main session 203c) + parallel background ~4-16h; total ~15-20h. Then:
+- A26 queue-recreate (30min human authorization)
+- Bicep `what-if` dry-run against `484bc857` sub with trial1 params (proves clean create plan; ~1h)
+- Task 186 fires (16-24h with 24h SPE gate)
+
+### Deferred follow-ups (queued for post-186 or long-term)
+
+1. **Customer-onboarding workflow (Stage 2)** — build per-customer resource creation flow (SPE containers, search index params, DV business units per customer). NOT r1 scope; file as follow-on r2 project. This is what enables adding contoso1/contoso2/etc. to trial1 env.
+2. **A22 Path A architectural row** — Model 1 uses H4-shared runtime pattern; Model 2 already applied via `customer.bicep:655`; documented per §6.5 (no code change).
+3. **A26 queue-recreate ceremony** — human execution scheduled after 204c code lands.
+4. **spaarke-bff-prod / spaarke-dms-dev1-func** — leave in place; investigate provenance separately if reuse plans firm up.
+5. **B22 refined scope** — original punch row said ~30 endpoints; actual 121 methods + 28 files; residual work is OpenAPI docs (14 files) + policy decisions on 9 non-rate-limited endpoints — 4-6h follow-on, not the mechanical 8h wiring the row assumed.
+6. **Task 162 sidecar live-verify** — happens naturally during task 186's H14a execution; standalone verify optional.
+7. **204e** — regression-prevention ArchTests + IOptions checklist; ~17h; can defer to post-186.
+
+### To resume next session — say ONE of these
+
+- **"dispatch prerequisite wave"** — launches 203c (main-session) + 204b + 204c (nested workflow for 10 sub-probes) + 204d (background workflow) — the RECOMMENDED path
+- **"execute task 204c"** — HARD-BLOCKS 186; multi-agent workflow of 10 sub-probes
+- **"execute task 203c"** — MAIN-SESSION-ONLY skill wiring; 5 rows (A02/A03/A04/A15/A16)
+- **"dispatch 203c and 204c"** — just the two blocking items, defer 204b + 204d
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended dispatch
+- **DO NOT** run task 186 (owner directive 2026-08-26 SESSION 11 — complete ALL prerequisites first)
+
+---
 
 > **Last Updated**: 2026-08-26 SESSION 10 END — **🎯 SESSION 10 accomplishments** (3 clean commits pushed to origin `f280de764` = branch HEAD): (1) **Initial 205 sub-phase authored** (`7b82f60eb`) — 6 POMLs (205a-f) via 6 parallel background agents covering auth-v4 §10 addendum Δ1-Δ5 + traps + DELIVERED consumption. (2) **Peer 205a A38 ESCALATED cleanly** (`partial-omit-set-discovered` trigger fired at Step-2 grep-verify — 5 upsert sites verified beyond `StaticKvSecretManifest`) → owner APPROVED full re-scope split → **4 revised/new POMLs authored** (205a=A38a + 205g=A38b + 205h=A38c + 205i=A44.5). (3) **S1∥ mini-wave landed** (`cc6ecb6e4`) — 205b (A42) COMPLETE path (b) contract-parity (Fable/xhigh; 26 parity tests; `AssertFicTenancy` ported; `FicExchangeOutcomeClassifier` + `CrossTenantFicRefusedException` + typed exit codes; task-130 I6 preserved). (4) **S2∥ execution wave complete** (`f280de764`) — 4 parallel agents landed A38a+A38b+A38c+A44.5 (~1.5M tokens, 78min wall-clock, ALL green: build 0/0/0/0, `dotnet test` 1646/0/1). (5) **Peer A38a fired site-inventory-drifted on 6th site** (`Setup-OfficeServiceBus.ps1:172`) → owner-directed live `az` diagnosis confirmed script is 80% dead (Step-5 App Service ResourceNotFound, Step-4 KV secret SecretNotFound, SB namespace LIVE via canonical Bicep + MI auth per auth-v4 task 051; 3 `office-*` queues hardcoded + actively polled by Workers/Office/*.cs) → owner chose retain + A38c gate + deprecation banner → **main-session fold-in landed** (helper dot-source + gate + ~50-line banner naming canonical replacements). All 5 executed sub-phases pass Step 9.5 code-review + adr-check UNCONDITIONAL (auth-tagged); 0 ADR violations across the wave.
 
