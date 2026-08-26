@@ -10,7 +10,10 @@
 > **the field row retired 2026-08-25** by task 049 — ordinary Word fields moved to §3, leaving only the
 > nested/unterminated case in §2;
 > **the embedded-object row retired 2026-08-25** by task 056 — images, charts, shapes and OLE embeds moved
-> to §3, leaving only the text-carrying box in §2.
+> to §3, leaving only the text-carrying box in §2;
+> **no row changed 2026-08-26** by task 047b — the table below is exactly as it was signed, but the promise
+> the table rests on was repaired: two save paths could drop a construct **without naming it**. See
+> [§5, "The hole under the list"](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26).
 > **Owner sign-off**: ✅ **ACCEPTED 2026-08-25** — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
@@ -39,7 +42,8 @@ preservation is a consequence of not rewriting, not a feature list.
 
 When you edit the paragraph a construct sits in, that paragraph is re-authored from the editor's content
 model — and the model does not carry these. Each loss is **reported by name** on the save; none is
-silent.
+silent — at **every** block position, including the awkward ones where the save cannot tell two of your
+paragraphs apart ([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26)).
 
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
@@ -123,6 +127,7 @@ edited block — and holds this document to the result in **both** directions:
 | `object` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
 | `pict` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
 | `pictTextBox` — a shape wrapping `w:txbxContent` | 1/1 kept | 0/1 | `complex-object-dropped` |
+| `pictTextBoxTwin` — the same box, in a document where the edited block has an identically-projecting twin | 2/2 kept | 1/2 | `complex-object-dropped` |
 | `footnoteReference` | 1/1 kept | 0/1 | `unrepresented-footnote-reference` |
 | `endnoteReference` | 1/1 kept | 0/1 | `unrepresented-endnote-reference` |
 | `br` | 1/1 kept | **1/1 kept** | *(none — carried, task 046)* |
@@ -166,6 +171,43 @@ line breaks to round-trip, and the parity check failed because this document sti
 both-directions rule exists for — a list that keeps claiming losses the code has already fixed looks
 maintained while quietly becoming fiction.
 
+### The hole under the list (found 2026-08-25, closed 2026-08-26)
+
+Everything above measures whether a construct **survives**. This section is about the other half of the
+promise — that when one does not survive, you are **told** — because for a while, in two places, you were
+not, and a list that under-reports is worse than no list precisely because it is trusted.
+
+Neither hole was found by the parity check. Both were found by looking: the first by task 056 probing a
+corpus fixture by hand, the second by task 047b auditing the rest of the save path after it. Both are
+closed, and both now have a test standing on them.
+
+**1 — an edited block whose paragraph has a twin.** Compose decides what to re-author and what to clone by
+aligning your document against the copy it opened. When two of your paragraphs are *indistinguishable* to
+that alignment — consecutive empty paragraphs, repeated signature lines, two callout boxes with the same
+words — there is more than one way to line the two versions up, and the one Compose used to pick could pair
+your edited paragraph with **no** original at all. Everything downstream of that pairing then had nothing to
+work from: no formatting to inherit, nothing to restore, and nothing to compare against, so a text box that
+was dropped was dropped in **complete silence**. Editing the first of two identical boxes said nothing;
+editing the second reported it correctly. Measured across the corpus at every block position — 294 edits of
+24 documents — it happened five times, and **four of those were in a real signed agreement**, on consecutive
+empty paragraphs.
+
+It also cost fidelity, not just honesty: the paragraph you did **not** touch was cloned from the wrong
+original, so the saved file held the first box's bytes twice and the second box's not at all — the one thing
+§1 promises cannot happen to a block you never edited.
+
+**2 — a block that wrote nothing at all.** A table posted with no rows is skipped by the renderer, and the
+report was skipped with it: there was no output element to inspect, so the code returned before counting.
+"Nothing was written" is a perfectly countable output — it is zero of everything — and treating it as a
+reason not to count made a whole block leave the document without a word.
+
+**What holds them closed.** The `pictTextBoxTwin` row in the table above is the first case, measured through
+the real renderer at the block position where it used to fail: the row asserts the loss is **reported**, so a
+regression fails the parity check rather than going quiet again. Alongside it,
+`ComposeMergeSeamTests` sweeps every corpus document at **every** block position and fails if a single-block
+edit leaves any paragraph without its original, and asserts the untouched twin is cloned from its own bytes.
+The second case has its own test on the same file. All four were observed failing before the fix.
+
 Corroborating corpus evidence (23 documents, `tests/fixtures/compose-corpus/`): 100% overall and 100%
 near-tier preservation, 100% strict on 16 of 18 of the original set and on all four of the construct
 fixtures added in task 043; zero hard-fails.
@@ -193,6 +235,13 @@ Two of those five are narrower carve-outs created by the fixes, not pre-existing
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the
 paragraph a user edits and are reported by name every time. Declining any single item makes it a scope
 question — fix it — rather than a documentation revision (ADR-049 / task 045 escalation).
+
+**The 2026-08-26 repair does not re-open the sign-off, and does not silently ride on it either.** Task 047b
+changed no row: the five losses accepted above are the same five, occurring in the same place, reported with
+the same codes. What it changed is that the second half of the sentence above — *"and are reported by name
+every time"* — is now true in two situations where it was not
+([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26)). A signature given on a condition is
+worth what the condition is worth, so the repair is recorded here rather than left in a commit message.
 
 ## 7. Related
 

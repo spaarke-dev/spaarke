@@ -110,15 +110,32 @@ internal static class ComposeBlockMerge
     /// is the single most common edit there is. The task-030 prototype only ever measured single-paragraph
     /// edits, so it never met that case. LCS handles edit, insert and delete exactly.</para>
     ///
-    /// <para>LCS pairs only blocks that are already EQUIVALENT, so a mis-pairing is harmless by construction:
-    /// two equivalent blocks clone to the same output. What it deliberately cannot do is recognise a MOVED
-    /// block (matches never cross), so a reordered body degrades to R6's behaviour — never a failure, but no
-    /// preservation. That limitation is recorded in the ADR.</para>
+    /// <para>LCS pairs only blocks whose PROJECTED MODELS are equivalent. That is not the same as their OOXML
+    /// being equivalent — the model carries <c>w:jc</c>, <c>w:b</c>, <c>w:i</c> and little else, and a text box
+    /// is accept-flattened into prose — so two blocks can share a key while differing in everything the clone
+    /// exists to preserve. <b>Which duplicate a match binds to therefore matters</b> (corrected in task 047b;
+    /// this remark previously called a mis-pairing "harmless by construction", and
+    /// <c>interior-text-boxes.docx</c> disproves it: the plan cloned base block 1 into output position 2 and
+    /// stranded base block 2, so the document ended with the FIRST text box twice and the second one gone).
+    /// The traceback tie-break in <c>Align</c> is what keeps the binding right.</para>
+    ///
+    /// <para>What LCS deliberately cannot do is recognise a MOVED block (matches never cross), so a reordered
+    /// body degrades to R6's behaviour — never a failure, but no preservation. That limitation is recorded in
+    /// the ADR.</para>
     ///
     /// <para><b>Unmatched blocks are then paired positionally within their gap</b> so that an edited block
     /// still receives its base counterpart for property inheritance (FR-A04). Without this an edited block
     /// would have no base to inherit from and would collapse to Normal — the exact user-visible symptom the
-    /// amendment's residue section names.</para>
+    /// amendment's residue section names. The counterpart is load-bearing for HONESTY as well as fidelity:
+    /// <see cref="CarryUnmodeledConstructs"/> and its loss report both run off the base, so a block that fails
+    /// to get one is a block whose losses go unreported (task 047b).</para>
+    ///
+    /// <para><b>An unpaired block is not a defect — an unpaired block WITH A STRANDED BASE is.</b> When the
+    /// posted gap genuinely holds more blocks than the base gap, the surplus is content the user ADDED: it has
+    /// no base because it never had one, it loses nothing, and it must stay quiet (a warning on every new
+    /// paragraph is how a warning surface becomes ignorable). The failure this method must not produce is the
+    /// other shape — a posted block left unpaired while a base block goes unused — because there the base
+    /// existed and the alignment simply failed to find it.</para>
     ///
     /// <para><c>paraId</c> is NOT a key anywhere here (invariant 4). Duplicates are spec-legal across
     /// <c>mc:AlternateContent</c> and Word regenerates ids on save; keying on it mis-binds on precisely the
@@ -204,6 +221,14 @@ internal static class ComposeBlockMerge
     /// Falls back to positional pairing of equal keys when the DP table would exceed
     /// <see cref="MaxAlignmentCells"/>.
     /// </summary>
+    /// <remarks>
+    /// <para><b>The traceback's tie-break is load-bearing</b> (task 047b). When a document contains two blocks
+    /// that project IDENTICALLY — consecutive empty paragraphs, repeated signature lines, two text boxes whose
+    /// interior prose is the same — the LCS is AMBIGUOUS: several maximum-length alignments exist and they are
+    /// not equally good. The original tie-break advanced the POSTED cursor, which pairs a later posted block
+    /// with an earlier base one and leaves the gap in front of it holding a posted block and NO base. That is
+    /// not a cosmetic preference; see the tie branch below for what it costs.</para>
+    /// </remarks>
     private static List<(int Posted, int Base)> Align(string[] posted, string[] baseKeys, ComposeMergeStats? stats)
     {
         var pairs = new List<(int, int)>();
@@ -244,6 +269,13 @@ internal static class ComposeBlockMerge
 
         var x = 0;
         var y = 0;
+
+        // The two halves of the CURRENT gap: posted and base blocks skipped since the last match. `Plan`
+        // pairs a gap's leftovers positionally, so what matters to an edited block is not WHICH base block
+        // its gap holds but WHETHER its gap holds one at all.
+        var gapPosted = 0;
+        var gapBase = 0;
+
         while (x < n && y < m)
         {
             if (string.Equals(posted[x], baseKeys[y], StringComparison.Ordinal))
@@ -251,14 +283,44 @@ internal static class ComposeBlockMerge
                 pairs.Add((x, y));
                 x++;
                 y++;
+                gapPosted = 0;
+                gapBase = 0;
+                continue;
             }
-            else if (dp[x + 1, y] >= dp[x, y + 1])
+
+            var skippingPosted = dp[x + 1, y];
+            var skippingBase = dp[x, y + 1];
+
+            // A TIE means the LCS is genuinely indifferent — both moves yield a maximum-length alignment —
+            // so the choice is ours to make on other grounds, and the two are NOT equally good:
+            //
+            //   • skipping the BASE block leaves it in the gap, where FillGap hands it to the next unmatched
+            //     posted block as its counterpart;
+            //   • skipping the POSTED block puts a block into a gap that may have no base at all, and a
+            //     posted block with no base counterpart inherits no properties, receives no carry, and —
+            //     because WarnForConstructsLostOnThisBlock diffs the render AGAINST its base — reports no
+            //     construct loss either. An edited paragraph then drops a text box, a footnote reference or a
+            //     content control in complete SILENCE, which is the one outcome the residual-loss list
+            //     (docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md) promises cannot happen.
+            //
+            // So on a tie, feed the gap a base block unless it already has spare ones. This is not a guess
+            // about intent: it makes the traceback agree with the pairing rule FillGap already applies, where
+            // an unmatched posted block sitting next to an unmatched base block IS the edit of it (FR-A04).
+            // Measured on the 24-document corpus (294 single-block-edit scenarios) before the change: FIVE
+            // posted blocks left unpaired, every one of them with a base block stranded — four of them in
+            // AppligentNDA_Signed.docx, a real signed agreement, on consecutive empty paragraphs.
+            //
+            // The tie is the ONLY branch that changed. Where the DP has a strict preference it is still
+            // obeyed exactly, so an alignment with no duplicate keys is unaffected.
+            if (skippingPosted > skippingBase || (skippingPosted == skippingBase && gapBase > gapPosted))
             {
                 x++;
+                gapPosted++;
             }
             else
             {
                 y++;
+                gapBase++;
             }
         }
 
@@ -568,8 +630,23 @@ internal static class ComposeBlockMerge
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(baseElement);
 
-        if (firstRenderedIndex < 0 || firstRenderedIndex >= body.ChildElements.Count)
+        if (firstRenderedIndex < 0)
         {
+            return 0;
+        }
+
+        if (firstRenderedIndex >= body.ChildElements.Count)
+        {
+            // The block rendered NOTHING. `RenderBlocks` appends exactly one child for every block shape
+            // except one: a `Table` block whose model carries no rows is skipped entirely. There is nothing
+            // to carry ONTO — but there is still a report to make, and this method used to return here before
+            // making it, so a block that vanished whole vanished in SILENCE. That is the same never-silent
+            // hole task 047b closed on the alignment side, reached by a different route: found by auditing
+            // the rest of this path rather than by a bug report, per the task's step 4.
+            //
+            // Nothing is invented by reporting it — the base's constructs are counted against an output of
+            // nothing, so a base that held none still reports none.
+            WarnForConstructsLostOnThisBlock(body, firstRenderedIndex, baseElement, warn);
             return 0;
         }
 
@@ -693,12 +770,17 @@ internal static class ComposeBlockMerge
     private static void WarnForConstructsLostOnThisBlock(
         Body body, int firstRenderedIndex, OpenXmlElement baseElement, Action<string>? warn)
     {
-        if (warn is null || firstRenderedIndex >= body.ChildElements.Count)
+        if (warn is null)
         {
             return;
         }
 
-        var rendered = body.ChildElements[firstRenderedIndex];
+        // NULL when the block rendered nothing at all (see the caller). "Nothing was written" is a perfectly
+        // countable output — it is zero of everything — and treating it as a reason to SKIP the count is what
+        // made a dropped block silent.
+        var rendered = firstRenderedIndex < body.ChildElements.Count
+            ? body.ChildElements[firstRenderedIndex]
+            : null;
 
         foreach (var family in ReportableConstructs.GroupBy(c => c.Code))
         {
@@ -709,7 +791,7 @@ internal static class ComposeBlockMerge
                 continue;
             }
 
-            var after = CountConstructs(rendered, names);
+            var after = rendered is null ? 0 : CountConstructs(rendered, names);
             for (var i = after; i < before; i++)
             {
                 // One warning per LOST instance, not per family, so the count the banner shows is the

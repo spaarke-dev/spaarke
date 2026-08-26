@@ -78,6 +78,17 @@ public sealed class ComposeResidualLossParityTests
         // longer emit — the accretion failure direction B exists to catch, exactly as `fldNested` does for
         // fields.
         new object?[] { "pictTextBox", "pict", "complex-object-dropped" },
+        // Task 047b — the SAME loss, in a document where the edited block has an identically-projecting
+        // TWIN. Every row above sits in a document whose three blocks all read differently, so the merge's
+        // alignment is unambiguous and the loss report always has a base to diff against. Real documents are
+        // not like that: consecutive empty paragraphs, repeated signature lines and duplicated callouts all
+        // project to the same model, and there the longest common subsequence has SEVERAL maximum-length
+        // answers. The one the traceback used to pick left the edited block with no base counterpart at all,
+        // and the report — which diffs the render against its base — then had nothing to diff, so the box
+        // vanished in COMPLETE SILENCE while the identical row above passed. A parity check that only ever
+        // measures unambiguous documents cannot see that, which is why this row exists: it holds the
+        // published list's never-silent promise at a block position where it was actually being broken.
+        new object?[] { "pictTextBoxTwin", "pict", "complex-object-dropped" },
         new object?[] { "footnoteReference", "footnoteReference", "unrepresented-footnote-reference" },
         new object?[] { "endnoteReference", "endnoteReference", "unrepresented-endnote-reference" },
         // Task 046: a soft line break is now CARRIED, not lost — it round-trips as an IsLineBreak
@@ -110,6 +121,7 @@ public sealed class ComposeResidualLossParityTests
         CountIn(source, localName).Should().BeGreaterThan(0,
             $"[{familyKey}] the synthetic document must actually contain <w:{localName}> — a parity check " +
             "over an absent construct proves nothing");
+        AssertTwinProjectsIdentically(familyKey, source);
 
         // ── Half 1: the construct sits in an UNTOUCHED block. Always preserved, byte-verbatim. ──
         var untouched = RenderWithEditAt(source, blockIndex: 0, out var untouchedCodes);
@@ -262,11 +274,7 @@ public sealed class ComposeResidualLossParityTests
         "pict" => "<w:r><w:pict><v:shape id=\"s2\" style=\"width:10pt;height:10pt\"/></w:pict></w:r>",
         // A VML shape wrapping a TEXT BOX — the shape `interior-text-boxes.docx` takes. Its interior text is
         // accept-flattened into the paragraph, so the box itself is deliberately not carried.
-        "pictTextBox" => "<w:r><w:pict><v:shape id=\"s3\" type=\"#_x0000_t202\" "
-                         + "style=\"width:200pt;height:60pt\"><v:textbox><w:txbxContent>"
-                         + "<w:p w14:paraId=\"4B000001\" w14:textId=\"4B000001\">"
-                         + "<w:r><w:t xml:space=\"preserve\">Boxed line.</w:t></w:r></w:p>"
-                         + "</w:txbxContent></v:textbox></v:shape></w:pict></w:r>",
+        "pictTextBox" or "pictTextBoxTwin" => PictTextBox("s3", "4B000001"),
         "footnoteReference" => "<w:r><w:footnoteReference w:id=\"2\"/></w:r>",
         "endnoteReference" => "<w:r><w:endnoteReference w:id=\"2\"/></w:r>",
         "br" => "<w:r><w:t xml:space=\"preserve\">before</w:t><w:br/>"
@@ -284,6 +292,32 @@ public sealed class ComposeResidualLossParityTests
         _ => throw new ArgumentOutOfRangeException(nameof(familyKey), familyKey, "unknown construct family"),
     };
 
+    private static string PictTextBox(string shapeId, string interiorParaId) =>
+        "<w:r><w:pict><v:shape id=\"" + shapeId + "\" type=\"#_x0000_t202\" "
+        + "style=\"width:200pt;height:60pt\"><v:textbox><w:txbxContent>"
+        + "<w:p w14:paraId=\"" + interiorParaId + "\" w14:textId=\"" + interiorParaId + "\">"
+        + "<w:r><w:t xml:space=\"preserve\">Boxed line.</w:t></w:r></w:p>"
+        + "</w:txbxContent></v:textbox></v:shape></w:pict></w:r>";
+
+    /// <summary>
+    /// An extra block, inserted directly AFTER the construct block, that projects to exactly the same content
+    /// model as it while being a different block in the file. Empty for every family that does not need one.
+    /// </summary>
+    /// <remarks>
+    /// The twin's own shape id and interior <c>paraId</c> differ, which is what makes a wrongly-cloned twin
+    /// detectable in the saved package — but neither reaches the content model (the box's prose is
+    /// accept-flattened and <c>paraId</c> is stripped from the merge's comparison key by design), so the two
+    /// blocks are genuinely indistinguishable to the alignment. That indistinguishability IS the condition
+    /// under test; <c>TwinBlocksProjectIdentically</c> asserts it rather than assuming it.
+    /// </remarks>
+    private static string TwinBlockFor(string familyKey) => familyKey switch
+    {
+        "pictTextBoxTwin" => Para(
+            "4A000004",
+            "<w:r><w:t xml:space=\"preserve\">Carrier. </w:t></w:r>" + PictTextBox("s3-twin", "4B000002")),
+        _ => string.Empty,
+    };
+
     private static byte[] BuildDocument(string familyKey)
     {
         // Written as a raw package rather than through the SDK object model. `Body.InnerXml` is parsed
@@ -295,6 +329,7 @@ public sealed class ComposeResidualLossParityTests
             Para("4A000001", "<w:r><w:t xml:space=\"preserve\">Opening paragraph.</w:t></w:r>")
             + Para("4A000002",
                    "<w:r><w:t xml:space=\"preserve\">Carrier. </w:t></w:r>" + BodyFor(familyKey))
+            + TwinBlockFor(familyKey)
             + Para("4A000003", "<w:r><w:t xml:space=\"preserve\">Closing paragraph.</w:t></w:r>")
             + "<w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/>"
             + "<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr>";
@@ -344,6 +379,32 @@ public sealed class ComposeResidualLossParityTests
 
     private static string Para(string paraId, string children) =>
         $"<w:p w14:paraId=\"{paraId}\" w14:textId=\"{paraId}\">{children}</w:p>";
+
+    /// <summary>
+    /// Anti-vacuity guard for a twin family (task 047b): the twin must really be indistinguishable from the
+    /// construct block in the projected model. If a projection change ever gave the two blocks different
+    /// content, the alignment would stop being ambiguous and the row would keep passing while measuring the
+    /// ordinary case a row above it already covers — a test that quietly stops testing what it names.
+    /// </summary>
+    private static void AssertTwinProjectsIdentically(string familyKey, byte[] source)
+    {
+        if (TwinBlockFor(familyKey).Length == 0)
+        {
+            return;
+        }
+
+        var projection = new ComposeDocxProjectionBuilder().BuildContentModel(source, CancellationToken.None);
+        projection.Model.Should().NotBeNull($"[{familyKey}] the twin document must project");
+
+        var blocks = projection.Model!.Blocks;
+        blocks.Count.Should().BeGreaterThan(2, $"[{familyKey}] the twin document must have a block[2] to be the twin");
+
+        string TextOf(int index) => string.Concat(blocks[index].Runs.Select(r => r.Text));
+
+        TextOf(2).Should().Be(TextOf(1),
+            $"[{familyKey}] block[2] must project to the same content as block[1] — the alignment ambiguity " +
+            "is the whole condition this family exists to exercise");
+    }
 
     private static byte[] RenderWithEditAt(byte[] source, int blockIndex, out List<string> codes)
     {

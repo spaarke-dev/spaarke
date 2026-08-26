@@ -196,6 +196,20 @@ task. Out of scope here (a different family, a different mechanism, and a fix wo
 on the whole corpus) but written down rather than left in a terminal, because "an edited block with no base
 counterpart reports no construct loss" is a real gap in the never-silent contract and someone should own it.
 
+> **Owned and closed 2026-08-26 by task 047b** — see
+> [`047b-unpaired-block-decisions.md`](047b-unpaired-block-decisions.md). Two things this section got right
+> and one it got wrong. Right: it IS a pairing artifact, and the fix does live in the alignment. Right again:
+> it is not a general silent loss — a genuinely new paragraph is unpaired too and must stay quiet, which is
+> what made "warn on unpaired blocks" the wrong fix. **Wrong**: "not a general silent loss" undersold it
+> twice over. It fires on any two blocks that project identically — consecutive EMPTY paragraphs being the
+> commonest shape by far, which is why the corpus sweep found four more of these in a real signed NDA, not
+> just the one in the fixture. And the fallout was not confined to the report: the same mis-pairing cloned
+> the *untouched* twin from the wrong base, so `interior-text-boxes.docx` saved with the first box's bytes
+> twice and the second box's not at all. The fear that "a fix would change merge alignment on the whole
+> corpus" turned out to be measurable rather than speculative: only the traceback's TIE branch changed, the
+> fidelity gate is byte-for-byte identical before and after (100% overall · 100% near tier · 0 fails), and
+> the five unpaired blocks went to zero.
+
 ---
 
 ## 8. Measured

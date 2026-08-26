@@ -22,6 +22,13 @@ also what a vacuous test suite looks like, and two of these very nearly were.
 | Duplicate paraIds cannot mis-clone | ✅ by construction | The merge **never resolves a paraId**. Alignment is a longest common subsequence over block CONTENT, so a duplicate id has nothing to act on. The POML's consume-in-document-order scheme with a dup-detection fallback is unnecessary |
 | FR-G05 actual document open | ✅ **runs** | Headless LibreOffice opens four merged documents and the extracted text still contains the user's edit |
 
+> **Footnote to row 4, 2026-08-26 (task 047b).** The row is still true as written — the merge really does
+> never resolve a `paraId`, so a duplicate **id** has nothing to act on. What it does not cover, and what
+> nobody thought to ask at the time, is duplicate **content**: when two blocks project to the same model the
+> alignment has several equally-long answers, and the one it used to pick cloned the wrong one of them and
+> left the edited block with no base at all. Duplicate ids were the hazard everyone was watching; duplicate
+> content was the one that bit. See [`047b-unpaired-block-decisions.md`](047b-unpaired-block-decisions.md).
+
 ---
 
 ## The defect adding a fixture found

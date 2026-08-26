@@ -20,6 +20,17 @@ any code was written.
 | **R4** | thread cloned list items through `ListRenderState` (gate §6) | **Done — and the underlying defect was larger** | `orderedRunByLevel` was **local to each `RenderBlocks` call**, and the prototype flushed a batch at every clone. So the cursor was not merely un-advanced by clones, it was **destroyed** at every clone boundary. Fixed by hoisting one cursor for the whole body, passed in, and recording every cloned block into it. |
 | **R5** | FR-A04 property inheritance (POML) vs "041 owns it" (gate §6) | **Basic inheritance HERE; 041 keeps the deeper work** | The base counterpart is already paired and in hand at exactly this point in the code; deferring would mean a second pass over the most contended file in the repo. 040 delivers `pPr` inheritance + dominant-`rPr` inheritance. **041 still owns** opaque-atom carry and character-level re-association, and remains non-optional. |
 
+> **Correction to R3, 2026-08-26 (task 047b).** The last clause — *"pairs only blocks that are already
+> equivalent, so a mis-pair is harmless by construction"* — is **wrong**, and left standing it would have kept
+> anyone from looking. Equivalence is over the **projected model**, which carries `w:jc`, `w:b`, `w:i` and
+> essentially nothing else and accept-flattens a text box into prose; two blocks can share a comparison key
+> while differing in everything cloning exists to preserve. `interior-text-boxes.docx` is the counter-example:
+> the plan cloned base block 1 into output position 2 and stranded base block 2, so the save wrote the first
+> text box's bytes twice and the second box's not at all. The rest of R3 stands — LCS is still the right
+> mechanism, and positional pairing still collapses on insert/delete — but WHICH duplicate a match binds to
+> is load-bearing, and the traceback's tie-break is what decides it. Fixed and measured in
+> [`047b-unpaired-block-decisions.md`](047b-unpaired-block-decisions.md).
+
 Also carried out per gate §6: **carrier provenance** — the merge captures its base side from the *same*
 `carrierBytes` the renderer opened, inside `RenderIntoCarrier`, so base and output cannot come from different
 documents. There is no path by which a stale carrier reaches one and not the other.

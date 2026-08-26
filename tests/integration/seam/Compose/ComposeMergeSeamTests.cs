@@ -299,6 +299,189 @@ public sealed class ComposeMergeSeamTests
             "every posted block is either cloned or rendered — a block that is neither has been silently dropped");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 7. DUPLICATE-KEY ALIGNMENT — the never-silent guarantee, at EVERY block position (task 047b).
+    //
+    // Found by task 056 while probing `interior-text-boxes.docx`, and it is the alignment's fault, not the
+    // reporting's. The document holds two paragraphs whose projected models are byte-identical (each is a
+    // text box carrying the same two lines), so the longest common subsequence is AMBIGUOUS: several
+    // maximum-length alignments exist. The traceback's tie-break picked one that pairs the LATER posted
+    // block with the EARLIER base block, which cost two things at once:
+    //
+    //   • the edited block got NO base counterpart, so no inheritance, no carry, and — because the loss
+    //     report diffs the render against its base — NO REPORT. Editing block 1 dropped a `w:pict` in
+    //     silence while editing block 2 reported `complex-object-dropped` correctly. A residual-loss list
+    //     that under-reports is worse than no list, because it is trusted;
+    //   • the UNTOUCHED twin was cloned from the wrong base. The saved document contained the first text
+    //     box's bytes twice over and the second box's not at all — ADR-049 invariant 2, breached by a
+    //     clone. The old remark on `Plan` claimed a mis-pairing was "harmless by construction because two
+    //     equivalent blocks clone to the same output"; equal MODEL keys are not equal OOXML, and this
+    //     fixture is the counter-example.
+    //
+    // The distinction these tests pin down is the one that matters: an unpaired block is NORMAL — it is
+    // what a paragraph the user just typed looks like, and warning on those is how a warning surface
+    // becomes ignorable. An unpaired block WITH A BASE BLOCK LEFT UNUSED is the defect.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    private const string TwinFixture = "interior-text-boxes.docx";
+
+    /// <summary>The first of the two identically-projecting text-box paragraphs.</summary>
+    private const int FirstTwinBlockIndex = 1;
+
+    [Fact]
+    public void Merge_EditedBlockWithAnIdenticallyProjectingTwin_ReportsTheConstructItLost()
+    {
+        var source = LoadCorpus(TwinFixture);
+        var model = Project(source);
+
+        AssertTwinsProjectIdentically(model);
+
+        var rendered = Render(source, EditBlockAt(model, FirstTwinBlockIndex), out var stats, out var codes);
+
+        _output.WriteLine(
+            $"{TwinFixture} edit@{FirstTwinBlockIndex}: cloned={stats.ClonedBlocks} rendered={stats.RenderedBlocks} " +
+            $"noCounterpart={stats.RenderedWithoutCounterpart} codes=" +
+            (codes.Count == 0 ? "(none)" : string.Join(", ", codes)));
+
+        stats.RenderedWithoutCounterpart.Should().Be(0,
+            "the edited block HAS a base — the twin ahead of it is a different block. An alignment that " +
+            "cannot say which one it is leaves the edit with nothing to inherit from and nothing to " +
+            "report against");
+
+        CountLocalName(rendered, "pict").Should().Be(CountLocalName(source, "pict") - 1,
+            "the edited paragraph's text box is genuinely gone: its words are already in the paragraph as " +
+            "prose, so carrying the box on top of them would duplicate the sentence");
+
+        codes.Should().Contain("complex-object-dropped",
+            "editing block 1 must report the same loss editing block 2 already reported. The published " +
+            "residual list (docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md) rests on one promise — a loss " +
+            "is named, never silent — and the owner signed it on that basis");
+    }
+
+    [Fact]
+    public void Merge_EditedBlockWithAnIdenticallyProjectingTwin_ClonesTheTwinsOwnBytes()
+    {
+        var source = LoadCorpus(TwinFixture);
+        var model = Project(source);
+        var sourceShapeIds = VmlShapeIds(source);
+        sourceShapeIds.Should().HaveCount(2, $"[{TwinFixture}] must hold two distinguishable text boxes");
+        sourceShapeIds[0].Should().NotBe(sourceShapeIds[1],
+            "the shape ids are what make a wrongly-cloned twin detectable — identical ids would make this " +
+            "test pass on the very bug it exists to catch");
+
+        var rendered = Render(source, EditBlockAt(model, FirstTwinBlockIndex), out _, out _);
+
+        VmlShapeIds(rendered).Should().Equal(new[] { sourceShapeIds[1] },
+            "the UNTOUCHED twin must be cloned from its OWN base block. Before task 047b the alignment " +
+            "cloned the edited block's base into the twin's position and stranded the twin's own bytes, so " +
+            "the save silently replaced one untouched block with a copy of another — ADR-049 invariant 2");
+    }
+
+    [Fact]
+    public void Merge_ParagraphInsertedBesideAnIdenticalTwin_ReportsNoConstructLoss()
+    {
+        var source = LoadCorpus(TwinFixture);
+        var model = Project(source);
+
+        // Touch NOTHING; just type a new paragraph in front of the twins. This block genuinely has no base
+        // — it never had one — and the whole point of the fix is that it still says nothing.
+        var withInsert = model with
+        {
+            Blocks = model.Blocks.Take(FirstTwinBlockIndex)
+                .Append(NewParagraph("A paragraph the user just typed."))
+                .Concat(model.Blocks.Skip(FirstTwinBlockIndex))
+                .ToList(),
+        };
+
+        var rendered = Render(source, withInsert, out var stats, out var codes);
+
+        stats.ClonedBlocks.Should().Be(model.Blocks.Count, "nothing that existed before was touched");
+        stats.RenderedWithoutCounterpart.Should().Be(1,
+            "the typed paragraph is the ONE block with no base — an alignment that manufactured a " +
+            "counterpart for it would be reporting an edit that never happened");
+
+        codes.Should().BeEmpty(
+            "a block with no base lost nothing, so it must report nothing. Warning on every new paragraph " +
+            "is precisely how R7's banner became something users learned to dismiss");
+
+        CountLocalName(rendered, "pict").Should().Be(CountLocalName(source, "pict"),
+            "both text boxes are untouched and must survive whole");
+        BodyText(rendered).Should().Contain("A paragraph the user just typed.");
+    }
+
+    [Fact]
+    public void Merge_SingleBlockEdit_NeverLeavesAPostedBlockWithoutItsBase()
+    {
+        // The generalisation of the two tests above, over the whole corpus at EVERY block position rather
+        // than the one position the fidelity gate happens to edit. Editing a single block changes no block
+        // COUNT, so every posted block has a base by arithmetic; a plan that reports otherwise has stranded
+        // one, and a stranded base is an edit whose losses go unreported.
+        var scenarios = 0;
+        var offenders = new List<string>();
+
+        foreach (var path in ComposeCorpusFixtureLocator.EnumerateDocumentPaths())
+        {
+            var fileName = Path.GetFileName(path);
+            var source = ComposeCorpusFixtureLocator.LoadVerifiedBytes(path);
+            var projection = new ComposeDocxProjectionBuilder().BuildContentModel(source);
+            if (projection.Status == ComposeProjectionStatus.Failed || projection.Model is null)
+            {
+                continue;
+            }
+
+            var model = projection.Model;
+            for (var blockIndex = 0; blockIndex < model.Blocks.Count; blockIndex++)
+            {
+                Render(source, EditBlockAt(model, blockIndex), out var stats, out _);
+                scenarios++;
+
+                if (stats.RenderedWithoutCounterpart > 0)
+                {
+                    offenders.Add($"{fileName}@{blockIndex} ({stats.RenderedWithoutCounterpart})");
+                }
+            }
+        }
+
+        _output.WriteLine($"single-block-edit scenarios: {scenarios} · without a base counterpart: {offenders.Count}");
+
+        scenarios.Should().BeGreaterThan(200, "the sweep must actually cover the corpus, not an empty enumeration");
+        offenders.Should().BeEmpty(
+            "an edit that adds and removes no block leaves every posted block with a base. Measured before " +
+            "task 047b: FIVE offenders — four of them in AppligentNDA_Signed.docx, a real signed agreement, " +
+            "on consecutive empty paragraphs, which is the commonest duplicate-key shape there is: " +
+            string.Join(", ", offenders));
+    }
+
+    [Fact]
+    public void Merge_BlockThatRendersNothing_StillReportsWhatItsBaseHeld()
+    {
+        // The second silent path task 047b's audit turned up, reached by a different route than the
+        // alignment one. `RenderBlocks` appends exactly one child per block for every shape except one: a
+        // Table block whose model carries no rows is skipped entirely. The block then has a base counterpart
+        // — the alignment is fine — but nothing was appended, so the carry used to return before reporting
+        // and an entire block's contents left the document without a word.
+        var source = BuildInlineControlSource();
+        var model = Project(source);
+        model.Blocks.Count.Should().Be(3, "the fixture is opening / control-bearing / closing");
+
+        var blocks = model.Blocks.ToList();
+        blocks[1] = new ComposeBlock { Kind = ComposeBlockKind.Table, Table = null };
+
+        var rendered = Render(source, model with { Blocks = blocks }, out var stats, out var codes);
+
+        _output.WriteLine(
+            $"empty-table block: rendered={stats.RenderedBlocks} noCounterpart={stats.RenderedWithoutCounterpart} " +
+            "codes=" + (codes.Count == 0 ? "(none)" : string.Join(", ", codes)));
+
+        stats.RenderedWithoutCounterpart.Should().Be(0, "the block has a base — this is not the alignment case");
+        BodyText(rendered).Should().NotContain("1 March 2026",
+            "the block really did leave the document — if it survived, this test is measuring nothing");
+
+        codes.Should().Contain("hard-tier-sdt-flattened",
+            "a block that wrote NOTHING lost everything its base held, and 'nothing was written' is a " +
+            "countable output — zero of everything — not a reason to skip the count");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
     private static byte[] Render(byte[] carrier, ComposeContentModel model, out ComposeMergeStats stats)
@@ -308,11 +491,82 @@ public sealed class ComposeMergeSeamTests
             carrier, model, "seam-test", degradations: null, mergeUnchangedBlocks: true, mergeStats: stats);
     }
 
+    /// <summary>As <see cref="Render(byte[], ComposeContentModel, out ComposeMergeStats)"/>, also collecting
+    /// the degradation codes the save reported — the never-silent contract's observable side.</summary>
+    private static byte[] Render(
+        byte[] carrier, ComposeContentModel model, out ComposeMergeStats stats, out List<string> codes)
+    {
+        stats = new ComposeMergeStats();
+        var degradations = new List<ComposeProjectionWarning>();
+        var rendered = new ComposeDocumentRenderer().RenderIntoCarrier(
+            carrier, model, "seam-test", degradations, mergeUnchangedBlocks: true, mergeStats: stats);
+        codes = degradations.Select(d => d.Code).ToList();
+        return rendered;
+    }
+
     private static ComposeContentModel Project(byte[] bytes)
     {
         var projection = new ComposeDocxProjectionBuilder().BuildContentModel(bytes);
         projection.Status.Should().NotBe(ComposeProjectionStatus.Failed, "the fixture must project");
         return projection.Model!;
+    }
+
+    /// <summary>
+    /// Edits one block BY INDEX. The twin fixture's two text-box paragraphs are indistinguishable by text,
+    /// which is the whole point of it, so <see cref="EditFirstRunOf"/> cannot address them.
+    /// </summary>
+    private static ComposeContentModel EditBlockAt(ComposeContentModel model, int blockIndex)
+    {
+        var blocks = model.Blocks.ToList();
+        var runs = blocks[blockIndex].Runs.ToList();
+        if (runs.Count == 0)
+        {
+            runs.Add(new ComposeInlineRun { Text = EditMarker.TrimStart() });
+        }
+        else
+        {
+            runs[0] = runs[0] with { Text = (runs[0].Text ?? string.Empty) + EditMarker };
+        }
+
+        blocks[blockIndex] = blocks[blockIndex] with { Runs = runs };
+        return model with { Blocks = blocks };
+    }
+
+    /// <summary>
+    /// Anti-vacuity guard: the twin fixture only exercises the ambiguous alignment while its two text-box
+    /// paragraphs really do project to the same text. If a projection change ever made them distinguishable
+    /// the tests above would keep passing while testing nothing, which is the failure mode a fixture-coupled
+    /// test dies of quietly.
+    /// </summary>
+    private static void AssertTwinsProjectIdentically(ComposeContentModel model)
+    {
+        static string TextOf(ComposeBlock block) => string.Concat(block.Runs.Select(r => r.Text));
+
+        model.Blocks.Count.Should().BeGreaterThan(FirstTwinBlockIndex + 1);
+        TextOf(model.Blocks[FirstTwinBlockIndex + 1]).Should().Be(TextOf(model.Blocks[FirstTwinBlockIndex]),
+            $"[{TwinFixture}] the two text-box paragraphs must still project identically — that ambiguity IS " +
+            "the condition under test");
+    }
+
+    private static int CountLocalName(byte[] docx, string localName)
+    {
+        using var doc = WordprocessingDocument.Open(new MemoryStream(docx, writable: false), isEditable: false);
+        return doc.MainDocumentPart!.Document!.Body!.Descendants()
+            .Count(e => string.Equals(e.LocalName, localName, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The `v:shape` ids in body order. Two text boxes that project identically still carry DIFFERENT shape
+    /// ids in the file, so this is what tells a correctly-cloned twin from a copy of its neighbour.
+    /// </summary>
+    private static List<string> VmlShapeIds(byte[] docx)
+    {
+        using var doc = WordprocessingDocument.Open(new MemoryStream(docx, writable: false), isEditable: false);
+        return doc.MainDocumentPart!.Document!.Body!.Descendants()
+            .Where(e => string.Equals(e.LocalName, "shape", StringComparison.Ordinal))
+            .Select(e => e.GetAttributes()
+                .FirstOrDefault(a => string.Equals(a.LocalName, "id", StringComparison.Ordinal)).Value ?? "(no id)")
+            .ToList();
     }
 
     private static ComposeBlock NewParagraph(string text) => new()
@@ -448,6 +702,24 @@ public sealed class ComposeMergeSeamTests
                         new NumberingId { Val = 5 })),
                 new Run(new Text(text))));
         }
+    });
+
+    /// <summary>
+    /// Opening prose / a paragraph carrying an INLINE content control / closing prose. The control is the
+    /// construct: it is on the published residual list, it is reported as `hard-tier-sdt-flattened`, and it
+    /// is authored inline so the whole thing lives inside ONE body block.
+    /// </summary>
+    private static byte[] BuildInlineControlSource() => BuildDocx(body =>
+    {
+        body.AppendChild(new Paragraph(new Run(new Text("Opening prose."))));
+
+        body.AppendChild(new Paragraph(
+            new Run(new Text("Effective ")),
+            new SdtRun(
+                new SdtProperties(new SdtAlias { Val = "Effective Date" }, new SdtId { Val = 77 }),
+                new SdtContentRun(new Run(new Text("1 March 2026"))))));
+
+        body.AppendChild(new Paragraph(new Run(new Text("Closing prose."))));
     });
 
     private static byte[] BuildEmptyBodySource() => BuildDocx(_ => { });
