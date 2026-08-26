@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-25 (task 040 in progress)
+> **Last Updated**: 2026-08-26 (by `context-handoff` — end of implementation session)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,100 +9,97 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040** — RS-1: fix live Matter header HTTP 400 (`sprk_mattersummary` → `RECORDSUMMARY_FIELD`) |
-| **Rigor** | FULL · opus @ high · steps `directional` |
-| **Phase** | 4 — Schema-drift remediation |
-| **Status** | in-progress |
-| **Next Action** | ⏸ **BLOCKED on owner decision** — hotfix v1.0.21 now vs wait for R2. See [`notes/rs1-hotfix-decision.md`](notes/rs1-hotfix-decision.md). Steps 1–6 + quality gates done; Steps 7–8 (deploy/annotate, TASK-INDEX ✅) gated on the answer. |
-| **Blocked by** | Owner release decision (POML `<escalation>` trigger fired by design). |
+| **Task** | **033** — `Spaarke.Records.RecordHeader` PCF, in UAT on `sprk_project` |
+| **Phase** | 3 done → Phase 5 rollout blocked on UAT closing |
+| **Status** | ⚠️ in UAT · **one fix agent may still be in flight** (see below) |
+| **Next Action** | Check whether the DateField option-B rework landed. If yes: verify bundle <250 KB, repack v1.1.3, hand the zip to the owner for `spaarkedev1` import + re-UAT. If no: read `notes/decisions/033-nfr02-externals-runtime-failure.md` and finish it. |
+| **Blocked by** | Owner re-UAT of the RecordHeader control. Nothing else. |
+| **Working tree** | **clean**, 17 commits this session, all pushed to the branch |
 
-### Steps 1–6 complete (code work is final either way)
+### 🔴 Read this before touching the bundle
 
-| File | Change |
-|---|---|
-| `control/MatterHeaderView.tsx` | `$select` + summary read now use `RECORDSUMMARY_FIELD`; stale v1.0.20 header comment rewritten |
-| `control/ControlManifest.Input.xml` | description-key stripped of the `sprk_mattersummary` clause (no apostrophes) |
-| `__tests__/MatterHeaderView.test.tsx` | fixture, `$select` assertion, popover tests, header comment retargeted; hooks mock now exports `RECORDSUMMARY_FIELD` |
-| `tsconfig.json` | **pre-existing build break** — added `exclude` for `__tests__` (mirrors RegardingResolver/VisualHost) |
-| `package-lock.json` | byproduct of `npm install` in a fresh worktree; resyncs shared-lib metadata 2.3.0 → 2.4.0 |
+**Two "clever" NFR-02 fixes have already failed. Do not re-derive them.**
 
-**Verified**: 7/7 tests green · `build:prod` exits 0 · bundle 62.5 KiB (ceiling 250 KB) · zero
-`sprk_mattersummary` in `control/` + `__tests__/` · no hand-edit under `Solution/`.
+1. **Lazy-load `DateField`** → measured *larger*. `pcf-scripts` emits a single chunk; `import()` inlines back. Code splitting is not a lever in a PCF.
+2. **Externalize granular `@fluentui/*` onto the platform global** → built clean, passed static symbol verification, then **crashed at runtime with Minified React error #31**. It splits Fluent's slot machinery across two live copies. `webpack.config.js` now carries a ⛔ comment. RecordHeader must match the **standard triad** every other PCF uses — it was the only PCF in the repo deviating.
 
-**Step 9.5 gates**: `code-review` → 0 Critical, 1 Warning (tsconfig scope, justified below), 2 Suggestions;
-0 AI code smells; ESLint clean. `adr-check` → **0 violations, 0 warnings** across ADR-006/012/020/021/022/028/038.
-§10 BFF hygiene and §11 component justification both N/A (no server files; modification-only).
+**A successful build proves nothing about a PCF's runtime.** Both failures built green.
 
-### Critical context (3 sentences)
+### The in-flight work
 
-R2 replaces the withdrawn four-per-entity-PCF plan with **ONE configuration-driven `Spaarke.Records.RecordHeader`** control, rolled out to six entities with Matter migrated last as the parity regression test. Every schema fact in `spec.md` §9 was **live-verified against `spaarkedev1`** — the original field lists were substantially wrong, and verification also surfaced two live production breakages that are now tasks 040/041. Nothing has been implemented; the branch contains design + spec + plan + tasks only.
+The owner chose **option B**: replace `@fluentui/react-datepicker-compat` with the Fluent
+`<Input type="date">` pattern **already shipping** at
+`Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx:338-340`.
+`Input`/`Field` are in `@fluentui/react-components`, which the platform externalizes → **zero bundle
+bytes**. Expected result ≈ **92,000 B** (the measured "minus DateField" figure) vs the current
+378,457 B against a 250,000 ceiling.
 
-### 🔴 Start here and why
-
-**Task 040 first.** The shipped `MatterHeaderPcf` v1.0.20 `$select` names `sprk_mattersummary`, deleted during the 2026-08-25 summary standardization. **Re-verified live 2026-08-25**: that exact query returns **HTTP 400**; swapping to `sprk_recordsummary` returns 200. The whole header fails, not just the sparkle. It has no dependencies and blocks task 002's runtime capture.
-
-### Files modified this session
-
-| File | Purpose |
-|---|---|
-| `plan.md` | **NEW** — 7-phase WBS, discovered resources, parallel groups, DoD |
-| `tasks/` (30 `.poml` + `TASK-INDEX.md`) | **NEW** — full task decomposition |
-| `notes/matter-parity-baseline.md` | **NEW** — parity baseline seeded from the owner screenshot |
-| `notes/matter-record-header.jpg` | **NEW** — owner-supplied v1.0.20 screenshot (pre-deletion) |
-| `../INDEX.md` | R2 registry row added |
-| `current-task.md` | this handoff |
-
-All committed — see the commit referenced below. **Working tree is clean.**
+Watch for: `type="date"` wants `yyyy-MM-dd`, `datetime-local` wants `yyyy-MM-ddTHH:mm`, Dataverse
+returns ISO-8601 UTC. A date shifting a day across timezones is the classic failure.
 
 ---
 
 ## Where things stand
 
-### Artifact status
+**16 of 30 tasks ✅ · 033 ⛔ (in UAT) · Phase 5 rollout not started.**
 
-✅ `design.md` · ✅ `spec.md` (27 FR / 11 NFR / 24 criteria) · ✅ `plan.md` · ✅ `tasks/` (30 POMLs) · ✅ `TASK-INDEX.md` · ✅ `projects/INDEX.md` row
-⏳ Not run: task execution · portfolio registration (`/devops-project-register` — README's pointer still reads "TBD") · no PR opened
+| Phase | State |
+|---|---|
+| 0 — spike + baseline | 001 operator-gated (see below); 002 static half captured |
+| 1 — renderers | ✅ all six + 91-test FR-10 contract suite |
+| 2 — metadata/machinery | ✅ 020, 021, 022, 023, 024 |
+| 3 — resolver + control | ✅ 030, 031, 032 · **033 in UAT** · 034 not started |
+| 4 — schema drift | ✅ 040 (shipped v1.0.21), 041 |
+| 5 — rollout | blocked on 034 |
 
-### Pipeline run (2026-08-25)
-
-`/project-pipeline` Steps 0–3, stopped before branch/commit/execution per operator choice. Pre-flight caught the branch **163 commits behind `origin/master`**; verified the drift touched **zero** R2 dependency paths, then merged clean. Build green (0 errors, 7 warnings).
-
-**Validation**: `scripts/Validate-TaskPoml.ps1` → **PASS**, 30 scanned, **0 errors**, 30/30 well-formed XML. The 10 warnings are triaged in `TASK-INDEX.md` — all are the `role="new"` heuristic firing on **test files and notes artifacts**, which §11 does not govern. Do not "fix" them by adding hollow `<justification>` blocks.
-
-### ⚠️ Traps the next session must respect
-
-1. **040 before 002.** Task 002 captures the Matter parity baseline, but the header currently 400s. The static/visual half is already captured in `notes/matter-parity-baseline.md` from the owner screenshot; the **runtime** half (dirty-state-no-flash, Notepad modal, openTodos filter) needs 040 shipped first.
-2. **File collisions across parallel groups** — 021 and 040 both edit `MatterHeaderView.tsx`; 022 owns `hooks/index.ts`; 015 owns `fields/index.ts`. Full table in `TASK-INDEX.md` § "Cross-group file collisions".
-3. **`npm run build:prod`**, never `npm run build`, for PCF.
-4. **Task 086 is main-session-only** — it writes `.claude/`, where sub-agents cannot.
-5. **Dark-mode baseline still missing** for task 080's parity gate.
+**Tests**: 17 R2-owned suites, 601/601. Repo-wide there are **9 known-red suites**, all outside R2's
+file scope, enumerated in [`notes/issues/ISSUE-recordheader-integration-test-stale.md`](notes/issues/ISSUE-recordheader-integration-test-stale.md).
+Do not report the project "green" without that caveat.
 
 ---
 
-## Decisions Log
+## Session decisions
 
-| Date | Decision |
-|------|----------|
-| 2026-08-21 | One configurable control replaces four cloned PCFs |
-| 2026-08-21 | JSON-on-manifest config; `sprk_headerconfiguration` table explicitly rejected |
-| 2026-08-21 | DEF-06 + DEF-08 dropped from R2 |
-| 2026-08-22 | Control identity option B reaffirmed after the corrected trade; forms ship inside a transported solution; metadata reuses `IDataverseClient` (extended with `targets`) |
-| 2026-08-24 | JSON-only config confirmed; retire `MatterHeaderPcf` on delivery; §9 rewritten from live schema; per-entity layouts confirmed; `BooleanField` kept; skeleton takes a `columns` prop; em-dash `''` everywhere (**required marker NOT adopted** — consequence documented in design §6.1) |
-| 2026-08-25 | Summary field standardized to **`sprk_recordsummary`** (avoids collision with Microsoft OOB "AI summary"); columns already created by owner → R2 does **no** schema work |
-| 2026-08-25 | Lookups use the **OOB `Xrm.Utility.lookupObjects` picker** — deletes the custom OData search builder rather than hoisting it; Matter's lookup interaction changes, so the parity criterion excludes it |
-| 2026-08-25 | **`sprk_agreement`** added as a sixth entity; owner created its main form and added `sprk_regardingagreement` to `sprk_todo` + `sprk_memo` → R2's only toolbar-map change |
-| 2026-08-25 | `+ New` quick-create in the OOB picker is a **target-entity** Dataverse setting, out of R2 scope; recommended: enable for `contact`, leave the five taxonomy tables off |
+| Decision | Why |
+|---|---|
+| **RS-1 hotfix shipped as v1.0.21** (owner: option A) | Matter header 400'd on every record; R2's replacement was weeks out |
+| **Fluent pinned to exactly 9.68.0** across 19 PCFs + 4 PCF-consumed shared libs | Caret ranges floated to 9.74.x while the host serves 9.68.0. Fluent is *externalized*, so any post-9.68 API is `undefined` at runtime. Vite solutions deliberately NOT pinned — they bundle their own |
+| **`layoutJson` → `of-type="Multiple"`** | Classic designer caps a `SingleLine.Text` static value at **100 chars**; a real layout is ~310 B |
+| **DateField → option B** (`Input type="date"`) | Reuses a shipping in-repo pattern; zero bundle cost; the two clever alternatives failed |
+| **Binding recipe: MOVE, don't delete** | Form-buffer staging needs `getAttribute`, which is null for a field with no control on the form. Verified against the shipped R1 `formxml` |
 
 ---
 
-## Open Questions
+## ⚠️ Open items for the owner
 
-| # | Question | Owner | Resolve by |
-|---|---|---|---|
-| 1 | Ship a **v1.0.21 hotfix** for RS-1 now, or wait for R2's control? R2 fixes it by construction but is weeks out; the header is broken today. | Ralph | Task 040 (escalates by design) |
-| 2 | PCF starting version — `1.1.0` assumed for the renamed control. | Ralph | Task 033 |
-| 3 | Register on the portfolio board? README pointer still reads "TBD". | Ralph | Any time — `/devops-project-register` |
-| 4 | Required-marker gap: non-text renderers show no `*` (D-10). Revisit if UAT flags it. | Ralph | Post-UAT |
+| # | Item | Notes |
+|---|---|---|
+| 1 | **Re-UAT the control** after the DateField fix | Import to **`spaarkedev1`** — never `spaarke-model1-prod` |
+| 2 | **Task 001** still operator-gated | Needs a classic-designer session: does `Multiple` give a multi-line editor, and does ~310 B round-trip through form XML? No build or query can verify this |
+| 3 | **Lookup picker check** at re-UAT | MS does not document `Targets` on the Client API payload. Display works regardless; the OOB picker depends on `targets[0]`. If it misbehaves, the fix is a scoped `LookupAttributeMetadata` call (verified HTTP 200) |
+| 4 | Sparkle is **task 034**, not a defect | Correctly absent today |
+| 5 | 14 other PCFs carry the Fluent pin but were not rebuilt | No redeploy needed — the pin is preventive; the umbrella is externalized so it is not in any shipped bundle |
+
+---
+
+## Traps for the next session
+
+1. **Never `git add -A` while agents run.** It swept in-flight renderer work into an unrelated commit (`f85258f75`) once already.
+2. **`npm run build:prod`**, never `npm run build`.
+3. **Rebuild the shared lib before any PCF** — PCFs bundle `dist/`, not source.
+4. **Task 086 is main-session-only** (writes `.claude/`, where sub-agents cannot).
+5. **Pinning can prune `scheduler`** (a react-dom 16.14 transitive), producing a misleading
+   `@fluentui/react-context-selector` jest error. Fix: `rm -rf node_modules package-lock.json`, reinstall.
+6. **`grep <package-name> bundle.js` proves nothing** — minification strips package paths; it reads 0
+   whether or not the code is present. Use a class prefix such as `fui-Calendar`.
+
+---
+
+## New cross-cutting knowledge (already in `.claude/FAILURE-MODES.md`)
+
+- **AP-8** — never amend a failing test to match the source without checking the source against the vendor contract. Task 020 did exactly that and destroyed the only signal for the metadata bug that later broke UAT.
+- **G-12** — a Dataverse `$select` is all-or-nothing; one bad column blanks the whole control. Three occurrences; now guarded generically by a no-`$select` retry in `useRecordFieldValues`.
+- **G-13** — `Xrm.Utility.getEntityMetadata` returns the **Client API** shape (numeric `AttributeType`, string `DisplayName`), not the Web API shape. Parsing only Web-API shapes degraded every attribute to `String`.
 
 ---
 
@@ -110,7 +107,7 @@ All committed — see the commit referenced below. **Working tree is clean.**
 
 | Intent | Say |
 |---|---|
-| Start implementing | `work on task 040` |
-| Reorient first | `where was I?` → `project-continue` |
-| See the task board | open [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) |
-| Understand the design | [`design.md`](design.md) §5 (config model) · §9 (verified schema) |
+| Continue | `where was I?` → `project-continue` |
+| Task board | open [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) |
+| Bundle history | [`notes/decisions/033-nfr02-externals-runtime-failure.md`](notes/decisions/033-nfr02-externals-runtime-failure.md) |
+| UAT root cause | [`notes/decisions/033-def1-metadata-never-reached-resolver.md`](notes/decisions/033-def1-metadata-never-reached-resolver.md) |
