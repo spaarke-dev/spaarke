@@ -1,5 +1,42 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-26 SESSION 12 FINAL (context-handoff — user ending session for fresh context) — Task 186 is FULLY UNBLOCKED. All prerequisites cleared including the OpenAI region gap caught + fixed this session. Branch @ `f9962816d` = origin, 15 ahead of master (12 behind — master moved via other projects, non-blocking; merge at project close per §14A upgrade model). Working tree CLEAN. All work pushed. Next actionable is task 186 dispatch via `/provision-environment trial1` (interactive) or `/provision-environment trial1 --batch runs/trial1-intake.json` (batch — needs main-session to author the intake JSON first from SESSION 11 locked values). No pending main-session work.
+
+## 🎯 SESSION 12 FINAL QUICK RECOVERY — 2026-08-26 (READ THIS FIRST — supersedes SESSION 12 END below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | (1) Prerequisite wave (204b + 204c I4 REPLACE + 204d + 10 H13 probes verified already-applied); (2) 203c SKILL.md wiring (A02 Step 0.5 + A03 --batch + A04 Step 7 postmortem + intake.schema.json); (3) A26 queue-recreate ceremony (operator executed; verified); (4) Bicep what-if dry-run + operator-review report (265 lines); (5) OpenAI region gap DIAGNOSED (westus2 empty for OpenAI in sub 484bc857) + FIXED via 4-agent bundle wf_d7ec4624-584 (customer.bicep openAiLocation param + openai.bicep pin bump + PRQ-E-14 preflight + intake schema + Step 0.5 classifier tightened to exit-code-first + bash -c wrapper). |
+| **Next actionable** | **Task 186 dispatch**. Two modes: (A) `/provision-environment trial1` interactive — skill walks 7 steps live, operator handles manual gates. (B) `/provision-environment trial1 --batch runs/trial1-intake.json` batch — needs main-session to author the intake JSON first from SESSION 11 locked values (customerId=trial1, tenantId=a221a95e-6abc-4434-aecc-e48338a1b2f2, tenancyModel=Model2Dedicated, environment=dev, profile=spaarke-hosted-model2, region=westus2, openAiRegion=westus3, tier=shared-trial). Task 186 is 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **All blockers cleared** | 203c/204b/204c/204d all ✅ · A26 queue verified (`requiresSession=true, requiresDuplicateDetection=true, PT1H`) · Bicep what-if clean · OpenAI region gap FIXED · PRQ-E-14 preflight PASSES against westus3 today (`gpt-4o:2024-11-20=Legacy, gpt-4o-mini:2024-07-18=Deprecating, text-embedding-3-large:1=GA`) |
+| **Locked owner decisions** | Q1-Q7 SESSION 11 (customerId=trial1, KEEP PERMANENT, Model 1 shared BFF pattern, canonical §7.9 R1 naming); I4 REPLACE SESSION 12 (retire task 176 probe on-disk-with-banner, register new independent-ARM-read probe); OpenAI region westus3 SESSION 12 (canonical split-region strategy per user memory) |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `f9962816d`; 15 ahead of master, 12 behind (non-blocking — other projects moved master; merge at project close) |
+| **Working tree** | CLEAN — all 6 SESSION 12 commits pushed |
+| **Filed follow-on (post-186 or parallel r2)** | gpt-5 migration path — gpt-5 + gpt-5-mini + gpt-5-nano all GA in westus3 for this sub with quota granted (`gpt-5: 3000 TPM globalstandard, 10 in-use`; `gpt-5-mini: 2000 TPM`; `gpt-5-nano: 16000 TPM`). Current pins ship trial1 today; migration is future-proofing (est 1-2 days validation for chat/tool/JPS-schema behavior). |
+
+### SESSION 12 commits (6 total, all pushed)
+
+- `0185a7071` — SESSION 12 prerequisite wave (I4 REPLACE + 204b/c/d, 10 files +1706/-14)
+- `abe16465a` — 203c SKILL.md wiring (A02/A03/A04 landed, 4 files +351/-7)
+- `056db7828` — SESSION 12 END checkpoint (before A26)
+- `445286de7` — A26 queue-recreate executed
+- `37c0e4bad` — OpenAI region gap fix bundle (6 files +366/-38)
+- `f9962816d` — SESSION 12.5 addendum in current-task.md
+
+### To resume fresh session — say ONE of these
+
+- **"dispatch task 186 interactive"** — invoke `/provision-environment trial1` in Claude Code; operator walks each step + confirms `proceed with provisioning`
+- **"prepare batch intake for trial1"** — main-session generates `runs/trial1-intake.json` per updated `scripts/provisioning-prereqs/intake.schema.json` from SESSION 11 locked values; then paste `/provision-environment trial1 --batch runs/trial1-intake.json`
+- **"file gpt-5 migration project"** — spin up a small POML/spec for the gpt-5 family migration (est 1-2 days; scope: 3 model pin changes + code retest + cost recalc; can run parallel to task 186 or post-186)
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended dispatch
+- **DO NOT** run task 186 without running the /provision-environment skill (Step 0.5 will pre-check PRQ-E-14 + PRQ-* prereqs; Step 3 confirmation gate protects against slip)
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is truly ready.** The prerequisite wave was mostly a discovery exercise (9 of 10 H13 probes + 204d topology already landed by prior Wave G tasks; punch-list carried stale OPEN markers). The one real code addition was the OpenAI region gap catch — sub 484bc857 has no OpenAI models in westus2 despite the template originally binding to it — and the fix bundle (37c0e4bad) closed that with a proper split-region param + preflight + classifier tightening so the gap can never re-appear silently. Everything is committed, pushed, and verified live.
+
+---
+
 > **Last Updated**: 2026-08-26 SESSION 12 END — **🎯 SESSION 12 accomplishments** (all pushed to origin, branch @ `abe16465a` = master + 11 ahead; working tree CLEAN): (1) **Prerequisite wave dispatched** (`wf_5d833b87-331`, 12 background agents, 1.74M tokens, ~21min) landing 204b Path A + 204c 10 H13 probes + 204d topology decision. **MASSIVE FINDING**: 9 of 10 H13 real probes for 204c B07 were ALREADY APPLIED by prior Wave G tasks (170/172/173/174/175/177/178/179/180 + composite wiring by 185); task 204d Path SPLIT was ALREADY DONE by Wave G-1 tasks 100/101/102 (2026-08-19); punch-list carried STALE "OPEN" markers. The 15-20h prerequisite estimate was illusory. (2) **I4 REPLACE** (owner directive SESSION 12): swapped I4 registration in `E2EAcceptanceModule.cs` from task-176 `SpeContainerResolverInvariantProbe` (BFF-diagnostic trust-me pattern; retained on disk with Wave G-6 retirement banner) → new `SpeContainerTenantDerivationInvariantProbe` (task 204c B07, INDEPENDENT ARM app-settings direct re-verification per 204c dispatch principle). Composition-root test I4 mapping updated. Tests 148/148 pass. (3) **204d regression guard**: `ApiHostShadowWorkerGuardTests.cs` (191 LOC) asserts `.Api` never registers hosted services (protects Path-SPLIT topology). Quality gates PASSED (0 Critical / 0 Warning / 1 non-blocking Suggestion). (4) **204b Path A landed**: spec.md §ADR Tensions row + design.md §17 Placement Justification + punch-list B04 annotated. NO code change to `DataverseServiceClientImpl.cs`. (5) **Task 203c SKILL.md wiring COMPLETE**: A15 + A16 verified ALREADY APPLIED (tasks 005 + 111 + 144); A02/A03/A04 landed as advisory quality-of-life additions to `/provision-environment` skill — Step 0.5 external-prereqs iteration (line 174, HARD STOP), Step 1.0 batch mode + `intake.schema.json` (Draft 2020-12 + conditional invariant + 2 examples), Step 7 postmortem (line 909, MANDATORY per template). Actual effort ~3h vs 15-20h estimate. (6) **TASK-INDEX**: 203c/204b/204c/204d all flipped to ✅. **CRITICAL OUTCOME — task 186 blocker status DRAMATICALLY REDUCED**: essentially unblocked pending A26 queue-recreate (30min human authorization per runbook §7). Owner directive still stands: DO NOT run 186 until A26 is executed by human operator.
 
 ## 🎯 SESSION 12 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
