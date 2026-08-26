@@ -8,6 +8,14 @@
  * 033) and the OOB lookup cell (task 023) — shares ONE implementation instead
  * of re-copying ~82 lines each.
  *
+ * Task 033 (r2) EXTENDED the hoist with the generic `saveValue` / `displayValue`
+ * pair. The original hoist carried only what `MatterHeaderView` rendered — text
+ * and lookup — but the configuration-driven control renders all seven renderers,
+ * and `DateField` / `NumberField` / `BooleanField` / `OptionSetField` hand back
+ * `Date | null`, `number | null` and `boolean` from `onSave`. Staging those in
+ * the PCF layer would have forked the form-buffer primitive, so the third
+ * buffer lives here alongside its siblings and shares their throwing gate.
+ *
  * ══════════════════════════════════════════════════════════════════════════
  * THE LOAD-BEARING RULE (R1 v1.0.7 — do not "optimize" this away)
  * ══════════════════════════════════════════════════════════════════════════
@@ -219,11 +227,53 @@ export interface IUseRecordHeaderFieldsResult {
    */
   saveLookup: (fieldName: string, item: ILookupItem | null, entityType: string) => void;
   /**
+   * Stage a NON-text, NON-lookup edit into the form buffer and record it in the
+   * pending buffer — the generic path for the `date` / `datetime` / `number` /
+   * `currency` / `boolean` / `optionset` renderers.
+   *
+   * Added by task 033 (r2). The hoist in task 022 covered only the two value
+   * kinds `MatterHeaderView` actually rendered (text + lookup), but the
+   * configuration-driven `RecordHeader` control renders ALL seven renderers,
+   * and FR-06 / FR-07 / FR-08 / FR-09 each require an EDIT mode. Their `onSave`
+   * callbacks hand back `Date | null`, `number | null` and `boolean`, none of
+   * which `saveText` accepts. Implementing that staging in the PCF layer would
+   * have forked the form-buffer primitive (a spec MUST NOT), so the behavior
+   * lands here instead and every consumer gets it.
+   *
+   * The value is passed to `setValue` UNCHANGED. Dataverses form buffer already
+   * accepts the native types its renderers produce — `Date` for DateTime
+   * attributes, `number` for Integer/Decimal/Double/Money and for the numeric
+   * option value of a Picklist, `boolean` for TwoOptions — and `null` clears.
+   * Coercion belongs to the caller that knows the attribute type, not here.
+   *
+   * `async` so it drops directly into the renderers
+   * `onSave?: (v) => Promise<void>` contract — they revert the cell and stay in
+   * edit mode on a rejected promise, which is how a throw here reaches the user.
+   *
+   * @throws `Error("Form buffer unavailable")` / ``Error(`Field '<n>' not on form`)``
+   *         — the SAME unified throwing path as `saveText` / `saveLookup` (FR-14).
+   */
+  saveValue: (fieldName: string, newValue: unknown) => Promise<void>;
+  /**
    * Resolve a text field for display: `pendingText[name] ?? values?.[name]`.
    * A staged edit wins over the Dataverse-loaded value until the form's Save
    * reloads the record.
    */
   displayText: (fieldName: string) => string | null | undefined;
+  /**
+   * Resolve a NON-text, NON-lookup field for display (task 033, r2).
+   *
+   * Uses a `'name' in pendingValue` MEMBERSHIP check rather than `??` for the
+   * same reason `displayLookup` does: a staged CLEAR stores `null`, and `??`
+   * would treat that as "no pending value" and fall back to the still-loaded
+   * Dataverse value — the cleared date would spring back.
+   *
+   * Returns `unknown`: the caller knows the attribute type and hands the value
+   * to the matching renderer, each of which already accepts a widened input
+   * (`NumberField` takes `number | string`, `DateField` takes `string | Date`,
+   * `BooleanField` takes `boolean | ''`).
+   */
+  displayValue: (fieldName: string) => unknown;
   /**
    * Resolve a lookup for display. Uses a `'name' in pendingLookup` MEMBERSHIP
    * check rather than `??` so a staged CLEAR (pending `null`) displays as empty
@@ -274,12 +324,16 @@ export function useRecordHeaderFields(options: IUseRecordHeaderFieldsOptions): I
   // to re-render the whole control.
   const [pendingText, setPendingText] = React.useState<Record<string, string>>({});
   const [pendingLookup, setPendingLookup] = React.useState<Record<string, ILookupItem | null>>({});
+  // Task 033 (r2): the generic buffer backing `saveValue` / `displayValue` —
+  // date, number, currency, boolean and optionset staged values.
+  const [pendingValue, setPendingValue] = React.useState<Record<string, unknown>>({});
 
   // Reset on record change — and at NO other time. A reset on any other
   // dependency would discard the user's staged, uncommitted edits.
   React.useEffect(() => {
     setPendingText({});
     setPendingLookup({});
+    setPendingValue({});
   }, [recordId]);
 
   // ── Text save (form buffer) ────────────────────────────────────────────────
@@ -310,6 +364,19 @@ export function useRecordHeaderFields(options: IUseRecordHeaderFieldsOptions): I
     []
   );
 
+  // ── Generic value save (form buffer) — task 033 (r2) ───────────────────────
+  // Same `requireFormAttribute` gate as the two paths above, so the FR-14
+  // "no silent no-op in ANY path" guarantee extends to every renderer.
+  const saveValue = React.useCallback(async (fieldName: string, newValue: unknown): Promise<void> => {
+    const attribute = requireFormAttribute(fieldName);
+    attribute.setValue(newValue);
+    setPendingValue(prev => ({ ...prev, [fieldName]: newValue }));
+    logger.logDebug(LOG_COMPONENT, 'staged value edit', {
+      field: fieldName,
+      dirty: !!attribute.getIsDirty?.(),
+    });
+  }, []);
+
   // ── Display resolution ─────────────────────────────────────────────────────
   const displayText = React.useCallback(
     (fieldName: string): string | null | undefined =>
@@ -325,5 +392,11 @@ export function useRecordHeaderFields(options: IUseRecordHeaderFieldsOptions): I
     [pendingLookup, values]
   );
 
-  return { values, loading, error, saveText, saveLookup, displayText, displayLookup };
+  const displayValue = React.useCallback(
+    // MEMBERSHIP check, not `??` — see `displayLookup` above for why.
+    (fieldName: string): unknown => (fieldName in pendingValue ? pendingValue[fieldName] : values?.[fieldName]),
+    [pendingValue, values]
+  );
+
+  return { values, loading, error, saveText, saveLookup, saveValue, displayText, displayLookup, displayValue };
 }

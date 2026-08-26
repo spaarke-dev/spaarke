@@ -1,0 +1,26 @@
+{
+  "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
+  "compilerOptions": {
+    "typeRoots": ["node_modules/@types"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
+  },
+  // Tests are compiled by ts-jest (jest.config.js), NOT by the PCF production
+  // build. Without this, `pcf-scripts build` type-checks __tests__ and fails on
+  // the jest.mock factories' `require('react')` (untyped => TS2347 on
+  // `React.useState<T>()`). Mirrors RegardingResolver + VisualHost, the two
+  // sibling PCFs that also keep a __tests__ folder next to the control.
+  "exclude": [
+    "node_modules",
+    "out",
+    "__tests__",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

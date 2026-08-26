@@ -4,7 +4,7 @@
     <title>Spaarke.Records.RecordHeader PCF — new control, new RecordHeaderPcf solution</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 031 is complete (Phase 2 tasks 020-024 and the 001 spike outcome must also already be merged per phase ordering)</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include pcf; new control + new solution identity consumed by six entities</rigor-reason>
     <model-tier>opus</model-tier>
@@ -255,6 +255,33 @@
   </acceptance-criteria>
 
   <notes>
+    STATUS 2026-08-25 — steps 0-10 COMPLETE and green; steps 11-12 BLOCKED on an NFR-02
+    escalation. Full record: notes/decisions/033-recordheader-pcf-bundle-nfr02.md
+
+    Build green, 35/35 PCF tests, 473/473 shared-lib tests, lint green, ZIP packs, version
+    1.1.0 synced across all 5 locations, zero apostrophes in both manifests.
+
+    BLOCKER: bundle.js is 377,680 bytes vs the 250 KB NFR-02 ceiling (+51%). Measured
+    attribution: @fluentui/react-datepicker-compat (reached via DateField, required by FR-06)
+    costs 284,974 B = 75% of the bundle; everything else is 92,706 B, well inside budget. The
+    *-compat packages sit outside the platform-library Fluent externalization. The fallback
+    documented in wave1-sideeffects-tree-shaking.md (lazy deep-path DateField import) was
+    TESTED and does NOT work: pcf-scripts emits a single chunk, so React.lazy inlines straight
+    back and the bundle grows 1,415 B. Solution packed but deliberately NOT imported to
+    spaarkedev1; ui-tests need the deployed control. Owner decision required between raising
+    the ceiling (recommended - 250 KB predates FR-06) and replacing DatePicker in task 010.
+
+    Shared-lib extension made under CLAUDE.md section 11: useRecordHeaderFields gained
+    saveValue/displayValue because task 022 staged text+lookup only while FR-06/07/08/09 need
+    Date/number/boolean staging. Put in the shared hook, NOT forked into the PCF layer.
+
+    New build gotcha for pcf-build-scaffold.md (recommend adding as #11): the manifest entry
+    module must define EXACTLY ONE export - a second one fails with pcf-1023.
+
+    Findings requested: ZERO polymorphic lookups across the six rollout layouts (all 7 lookups
+    single-target), so 023 targets[0] is sufficient. String+TextArea deriving 'text' does NOT
+    bite - every multiline field in every layout is Memo, which derives 'textarea' correctly.
+
     Spec refs: FR-01, FR-12, NFR-01/02/08/09/11; design 5.1-5.4, 6.3. TTI budget (NFR-01: 300 ms
     warm / 800 ms cold) is formally measured per Phase 5 wave, but capture an initial browser perf
     trace here and note it. The six production main-form bindings, Matter parity QA, and
