@@ -100,7 +100,11 @@ public sealed class H14aExchangePolicySubHandlerTests
         var handler = BuildHandler(FakeApplier.Applied(0, new[] { BffAppRegId, UamiClientId }));
         var wrongEnvelope = new HandlerEnvelope
         {
-            HandlerId = "H0", RunId = RunId, CustomerId = CustomerId, ParametersJson = "{}", EnqueuedAt = DateTimeOffset.UtcNow,
+            HandlerId = "H0",
+            RunId = RunId,
+            CustomerId = CustomerId,
+            ParametersJson = "{}",
+            EnqueuedAt = DateTimeOffset.UtcNow,
         };
 
         var act = async () => await handler.HandleAsync(wrongEnvelope, CancellationToken.None);

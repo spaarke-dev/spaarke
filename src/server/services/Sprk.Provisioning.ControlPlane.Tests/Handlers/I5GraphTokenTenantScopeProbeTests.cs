@@ -44,9 +44,9 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 public sealed class I5GraphTokenTenantScopeProbeTests
 {
     private const string ExpectedTenantId = "00000000-1111-2222-3333-444444444444";
-    private const string ForeignTenantId  = "99999999-8888-7777-6666-555555555555";
-    private const string CustomerId       = "acme";
-    private const string RunId            = "01j7q3zp-i5-run";
+    private const string ForeignTenantId = "99999999-8888-7777-6666-555555555555";
+    private const string CustomerId = "acme";
+    private const string RunId = "01j7q3zp-i5-run";
 
     // ---------- AC-Pass_TidMatchesTenant ----------
 

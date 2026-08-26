@@ -540,8 +540,11 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         LogReplaceOutcome(replace, new HandlerEnvelope
         {
-            HandlerId = HandlerIdentifier, RunId = run.RunId, CustomerId = run.CustomerId,
-            ParametersJson = "{}", EnqueuedAt = DateTimeOffset.UtcNow,
+            HandlerId = HandlerIdentifier,
+            RunId = run.RunId,
+            CustomerId = run.CustomerId,
+            ParametersJson = "{}",
+            EnqueuedAt = DateTimeOffset.UtcNow,
         });
 
         return new HandlerResult.Failure(failureClass, rejectionCode, diagnostic);
