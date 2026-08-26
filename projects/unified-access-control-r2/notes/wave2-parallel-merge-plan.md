@@ -12,7 +12,13 @@
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
 | **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
-| **075 → 076** Wave 2 | (agent `wave2-075-076`) | — | 🔄 **STILL RUNNING** |
+| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` + `7db13de` (Step 9.5 critical fixes) | ✅ shipped · gates ran, **3 CRITICALs found and fixed** |
+| **076** route call sites | same worktree | `792c38a` (inventory + escalation only) | 🔔 **ESCALATED — not implemented. Needs owner decision.** |
+
+### ✅ CENSUS IS NOW DETERMINED: **110**
+
+`111 − 1 (073 deleted UploadEndpoints.cs) + 0 (079 re-keyed in place) + 0 (075 added no endpoint file) = 110`.
+All three deltas are in. Apply `ExpectedEndpointFileCount = 110` at `:337`.
 
 Both completed agents based correctly on `4dee62a0f` (verified: 073's tree carries 072's `["share"]`
 key and the `DocumentAuthorizationFilter` fix). 079 disclosed that its worktree was cut from
@@ -115,6 +121,45 @@ SPE-pointer validation is a drift risk — evaluate whether to extract a shared 
 | Commented-out `using` should be **deleted**, not commented (and two sibling usings are now orphaned too) | 073's `EndpointGroupingTests.cs` | 073 review N1 |
 | Orphaned `[Fact(Skip)]` asserting `POST /api/containers` — **a route registered nowhere**. By 073's own stated rule it should have gone with the other three | `EndpointGroupingTests.DocumentsEndpoints_ReturnsProblemDetailsOnError` | 073 adr-check W-8 |
 | Record a one-line ADR-038:559 citation (Path A) so `/test-diet` reads the endpoint-table assertion as classifier noise, not a finding | project notes | 073 adr-check W-1 |
+
+## 4b. 🔔 076 ESCALATION — blocks 076 only; 075 merges independently
+
+Full options in `notes/task-076-callsite-inventory-and-ESCALATION.md` §2. The trigger fired materially:
+
+**Every `Create*Wizard` resolves its container when the wizard OPENS — before the record exists.** So
+075's seam, which takes `(entity, recordId)`, cannot be asked where those call sites currently sit. And
+the POML contradicts itself: its constraint says "route every site through the resolver" while its own
+worked example says "consume `provisionResult.data.speContainerId`" — different mechanisms with
+different coverage.
+
+Agent's recommendation is **option (A)**: wizards keep resolving the BU container at open (INV-7
+unchanged) but treat it as the **fallback only**, and each upload path asks the resolver immediately
+before the first byte moves. One mechanism, covers create *and* existing-record uploads, and it also
+closes a silent-skip hole where an absent `authFetch`/`bffBaseUrl` skips provisioning while the success
+screen claims the container was provisioned.
+
+It deliberately did **not** half-implement 076 — a half-routed surface reads as "076 landed" while paths
+stay open. The seam is shipped and the site list is complete, so this is a clean stop.
+
+### The inventory is bigger than the POML said — 076 must be re-scoped whichever option wins
+
+| POML said | Actually |
+|---|---|
+| Strategy 2: 2 sites in 1 file | **9 sites in 3 files** (`CommunicationService.cs` alone has 5) |
+| 7 client resolution sites | **12** (+ `CreateWorkAssignmentWizard`, `CreateTodoWizard`, a form-context read in `sprk_analysis_commands.js`) |
+| — | **`AssociateToStep.tsx:154-160` is ALREADY record-aware and FAILS OPEN** — reads the record's `sprk_containerid` and falls through to the BU container on *any* failure. The exact shape 075 exists to remove, already shipped, and absent from the POML. **Highest-value single site.** |
+| — | `SmartTodo/src/services/xrmProvider.ts:97` is a full duplicate of the canonical resolver — same name, same line number as the LegalWorkspace copy |
+
+## 4c. 075's best finding — a ratchet consumed without failing
+
+**"ArchTests zero delta" concealed a consumed ratchet.** 075's two 1:1 interfaces took ADR-010's
+interface count to **exactly its 153 ceiling** — still passing, but with **zero headroom**, so the next
+interface added anywhere in the BFF would fail the build while blaming an unrelated project. It deleted
+`IRecordContainerResolver` and registered the concrete class (ADR-010 compliant anyway).
+
+**Generalizable, and worth adding to the verification habit: failure-count parity ≠ ratchet-headroom
+parity.** Every check in this batch used "9 failures = baseline" as the pass criterion, which by
+construction cannot see a ratchet that was consumed but not breached.
 
 ## 5. Follow-up tasks to FILE (not fix now)
 
