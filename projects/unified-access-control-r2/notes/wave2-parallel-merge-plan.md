@@ -346,6 +346,13 @@ the POML contradicts itself: its constraint says "route every site through the r
 worked example says "consume `provisionResult.data.speContainerId`" — different mechanisms with
 different coverage.
 
+> ⚠️ **The 076 decision is wider than the 076 note describes.** The gate reviewer flagged that the
+> **two-hop child gap** (`communication → sprk_invoice → secure matter`, currently landing in the shared
+> archive) is *substantively the same question* as 076's escalation: **"which record is the decision
+> about?"** So whichever resolution point is chosen for 076 should be checked against the two-hop case
+> deliberately, rather than having that case settled as a side effect. Phase 3's ancestor stamp
+> (tasks 050–055) is the other half of the same answer.
+
 Agent's recommendation is **option (A)**: wizards keep resolving the BU container at open (INV-7
 unchanged) but treat it as the **fallback only**, and each upload path asks the resolver immediately
 before the first byte moves. One mechanism, covers create *and* existing-record uploads, and it also
