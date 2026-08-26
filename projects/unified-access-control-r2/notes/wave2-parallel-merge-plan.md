@@ -366,6 +366,48 @@ different coverage.
 > deliberately, rather than having that case settled as a side effect. Phase 3's ancestor stamp
 > (tasks 050–055) is the other half of the same answer.
 
+## 4b-0. 🔴🔴 THE ROW IS RIGHT AND THE BYTES ARE WRONG — verified in main session
+
+Chasing the mechanism correction below produced the batch's most operationally significant finding. The
+full create sequence, each step traced to source and **independently re-verified here**:
+
+| # | What happens | Where |
+|---|---|---|
+| 1 | `sprk_issecure = true` set on the create payload | `projectService.ts:283-285` |
+| 2 | BU cascade applied **unconditionally**, no secure suppression — **write W1** | `projectService.ts:291-292` |
+| 3 | Provisioning **overwrites** the stamp with the project's own container | `ProvisionProjectEndpoint.cs:698-705` |
+| 4 | Upload uses `context.speContainerId` **from wizard-open** — `provisionResult` is checked only for `.success` and its container id is **discarded** | `CreateProjectWizard.tsx:707-712` |
+
+**Net effect: the Dataverse row ends up CORRECT and the BYTES end up in the shared BU container.**
+
+Two consequences:
+
+1. **"A container id is set on the project" is a FALSE POSITIVE** — it cannot be used as evidence of
+   correct isolation. Task **047** must not accept it. This is a live sequencing consequence, not a
+   data-state observation.
+2. **This may need data remediation, not just a code fix.** SPE is **additive-only** — this project's own
+   CLAUDE.md: *"you can't break inheritance on arbitrary files"* — so files already written to a shared
+   container cannot be retroactively isolated by permission change. If dev has ever created a secure
+   project **with files**, those bytes are in shared storage now and may need **moving**. Worth a
+   dedicated task; 076 fixes the forward path only.
+
+### 🔊 The system has been reporting this in its own logs the entire time
+
+`ProvisionProjectEndpoint.cs:690-695`, verified verbatim:
+
+```
+[PROVISION] Overwriting sprk_containerid on project {ProjectId}: '{Previous}' → '{New}'.
+The previous value was cascaded from the creating user's business unit and
+is shared storage, not this project's container.
+```
+
+A `LogWarning`, naming the defect precisely, on every secure-project creation. **If dev has ever run one,
+that Warning is in App Insights right now** and would have pointed straight at this.
+
+This project keeps finding "docs lose to live metadata". Same shape, different loser: **logs losing to
+nobody looking.** Worth asking what else is already being reported and unread — a log-review sweep is
+cheap next to another four-round review cycle.
+
 ### ⚠️ MECHANISM CORRECTION — verified in main session, fix in the 076 note before the operator acts
 
 The 076 escalation note argues against option (B) by saying the create path *"takes its container from
