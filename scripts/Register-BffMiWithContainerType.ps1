@@ -23,7 +23,12 @@
 #    is present in the CurrentUser cert store on this machine (thumbprint below).
 
 param(
-    [string]$TenantId        = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    # v3.3 change: -TenantId is MANDATORY (was defaulted to Spaarke tenant) per r1
+    # customer-provisioning-orchestration-r1 design.md §4D tenant-isolation invariant
+    # I1 / FR-28. Sibling script Register-EntraAppRegistrations.ps1 received the
+    # baseline fix (commit 1834b77bc); this script mirrors that pattern via task 065.
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
     [string]$ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
     [string]$OwnerAppId      = "170c98e1-d486-4355-bcbe-170454e0207c",   # container-type owner (auth as this)
     [string]$GuestAppId      = "5967251e-171c-46fe-a6c2-ef843c90309d",   # mi-bff-api-dev (the grantee)

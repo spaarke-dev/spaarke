@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H2b AI Search Index Provisioning Handler (7 canonical indexes)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; owns the tenant-isolation-filter template for Model 1 (I2 invariant).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps existing scripts/ai-search/Deploy-AllIndexes.ps1 which IS the catalog authority; complete spec (FR-05); not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 044</deps>
+    <tags>l2-controlplane, job-handler, azure-deployment, powershell</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H2b AI Search index-provisioning handler as an IJobHandler in the L2 control-plane. H2b invokes scripts/ai-search/Deploy-AllIndexes.ps1 for the 7 canonical indexes (files, discovery, records, rag-references, insights, session-files, invoices). For Model 1 (shared platform AI Search): verifies the 7 indexes already exist on the shared service AND provisions a per-tenant tenantId-filter query template (does NOT re-create indexes). Idempotency key: aisearch-{customerId}-{indexVer}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Azure AI Search REST API (PUT-idempotent), Model 1 vs Model 2 branching per design.md §4.1a, and tenant-isolation query-template patterns per §4D I2. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2bAiSearchIndexHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) for tenancyModel == Model2Dedicated, invokes Deploy-AllIndexes.ps1 to create all 7 canonical indexes on the customer's dedicated AI Search service; (b) for tenancyModel == Model1Shared, verifies the 7 indexes exist on the shared platform service AND provisions a per-tenant tenantId-filter query template (does NOT re-create indexes); (c) runs the per-index invariant verifier (required filterable + vector + forbidden-fields-absent) and fails on any invariant violation; (d) asserts idempotency key aisearch-{customerId}-{indexVer}. Unit tests cover Model 1 + Model 2 branches, invariant-failure, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-05 + design.md §4.1 H2b row + §4.1a Model 1/2 differences: 7 canonical indexes per FR-07 catalog. Model 2 gets dedicated indexes; Model 1 shares platform indexes and only adds a per-tenant filter template. The retired spaarke-playbook-embeddings index MUST NOT be re-provisioned (spec.md SC #10).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2bAiSearchIndexHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2bAiSearchIndexHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="pending">H2a Bicep deploy — must complete before H2b (AI Search service must exist for Model 2)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane; do NOT add to BFF DI.</constraint>
+    <constraint source="ADR-014">Session isolation — spaarke-session-files retains the canonical tenantId + sessionId dual-filter invariant. H2b's Model-1 tenantId-filter template is a SUPERSET of ADR-014's requirement (I2 strengthens).</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202 to caller; fire-and-forget.</constraint>
+    <constraint source="ADR-039">The 7 canonical indexes are the closed catalog; spaarke-playbook-embeddings is RETIRED and MUST NOT be re-provisioned (per r1 architecture-redesign task 035 / FR-P2-06).</constraint>
+    <constraint source="project">Idempotency key: aisearch-{customerId}-{indexVer} — indexVer is the manifest hash of the schema JSONs in scripts/ai-search/.</constraint>
+    <constraint source="project">Model 1 branch (design.md §4.1a): verifies presence on shared platform service; does NOT re-create indexes; provisions per-tenant filter query template only.</constraint>
+    <constraint source="project">Per-index invariant verifier (spec.md FR-05 acceptance): required filterable fields + vector fields present, forbidden fields absent. Fail on any violation.</constraint>
+    <constraint source="spec.md §4D I2">The tenantId-filter template MUST unconditionally include `tenantId eq '{ctx.TenantId}'` — this is the Model 1 tenant-isolation invariant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping the 7-index catalog script with Model 1/2 branching</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H2bAiSearchIndexHandler.cs — inject IPowerShellRunner, IAiSearchClient, ICosmosRunStore, IIdempotencyService.</step>
+    <step order="2">Implement Model 2 branch — invoke Deploy-AllIndexes.ps1 against customer's dedicated AI Search endpoint.</step>
+    <step order="3">Implement Model 1 branch — verify presence of 7 canonical indexes on shared platform AI Search + provision per-tenant tenantId-filter query template.</step>
+    <step order="4">Implement per-index invariant verifier — fail on missing required fields or presence of forbidden fields.</step>
+    <step order="5">Author unit tests: Model 2 happy path, Model 1 happy path (verify-only + template), invariant-failure, retired-index (spaarke-playbook-embeddings) presence = fail, idempotency.</step>
+    <step order="6">Register in L2 Program.cs DI.</step>
+    <step order="7">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="8">Update TASK-INDEX.md: change task 045 status from 🔲 to ✅.</step>
+    <step order="9">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>scripts/ai-search/Deploy-AllIndexes.ps1 IS the catalog authority (canonical implementation per CLAUDE.md). No existing IJobHandler for AI Search index provisioning.</existing>
+    <extension>No — the PS script needs to be invocable as an idempotent, resumable L2 handler that ALSO owns Model 1 vs Model 2 branching per §4.1a. Extending the PS script alone doesn't give us the DAG advancement signal or the per-tenant template branch.</extension>
+    <cost-of-doing-nothing>Without H2b as a handler, Model 1 tenant-isolation invariant I2 (per §4D) is NOT enforced at provisioning — new Model 1 tenants would run queries against shared indexes without a tenantId filter template, leading to CATASTROPHIC cross-tenant document bleed (legal privilege leak — see §4D I2 severity rationale).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2bAiSearchIndexHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2bAiSearchIndexHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given tenancyModel == "Model2Dedicated", when HandleAsync runs, then all 7 canonical indexes (files, discovery, records, rag-references, insights, session-files, invoices) are created on the customer's dedicated AI Search endpoint with per-index invariants passing.</criterion>
+    <criterion testable="true">Given tenancyModel == "Model1Shared", when HandleAsync runs, then all 7 canonical indexes are VERIFIED (not re-created) on the shared platform AI Search AND a per-tenant tenantId-filter query template is provisioned with `tenantId eq '{ctx.TenantId}'` predicate.</criterion>
+    <criterion testable="true">Negative: given a required filterable field missing from an index schema, when HandleAsync runs, then it returns failure with distinct rejection code "IndexInvariantViolation" naming the failing field.</criterion>
+    <criterion testable="true">Negative: given spaarke-playbook-embeddings index present in the catalog invocation, when HandleAsync runs, then it returns failure with "RetiredIndexProvisioningForbidden" (per ADR-039 + spec.md SC #10).</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + indexVer — second call is a no-op (aisearch-{customerId}-{indexVer} match); PUT semantics of Deploy-AllIndexes.ps1 ensure no destructive re-provisioning.</criterion>
+    <criterion testable="true">Negative: H2b invoked without tenantId parameter returns failure (§4D I1); no AI Search API call fired with a default tenant.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-05 + SC #10; design.md §4.1 H2b + §4.1a Model 1/2 differences + §4D I2. This handler consumes scripts/ai-search/Deploy-AllIndexes.ps1 which is the catalog authority.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081.5" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Refactor RegistrationDataverseService ctor off DemoProvisioningOptions fallback (unblocks task 082)</title>
+    <phase>E DemoExpirationService Migration</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api' + 'deploy'; modifies frozen BFF file at DI-singleton ctor consumed by IHostedService (boot-path); requires pre-deploy Azure App Service config mutation with rollback plan. Fix-drift-at-discovery follow-up to task 082 POML escalation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, focused ctor refactor at known line ranges (RegistrationDataverseService.cs:60-75); pattern already established by sibling tasks 080/081. Boot-path risk is managed by pre-deploy Azure config + rollback snapshot, not by tier escalation. Step 3.5.5b sonnet @ high, matches Phase E siblings.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 081</deps>
+    <tags>bff-api, dataverse, deploy, azure-deployment, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Refactor src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs to remove the [Obsolete] fallback branch at ctor lines 60-75 that consumes DemoProvisioningOptions.Environments/DefaultEnvironment. After this refactor, the ctor requires configuration["DATAVERSE_URL"] with no fallback — so the deploy sequence MUST set DATAVERSE_URL on spaarke-bff-dev BEFORE the refactored code is deployed, or /healthz will fail (500.30 at IHost.StartAsync). Follow the pre-deploy sequence in Steps 1-2 STRICTLY. This task unblocks task 082 (deleting the DemoProvisioning__Environments__* Azure config keys).</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF DI singleton lifecycle, IHostedService boot dependencies, Azure App Service config precedence, and pre-deploy safety sequences. Follow ADRs strictly (ADR-010 DI minimalism, ADR-028 auth v2).</role>
+
+  <goal>RegistrationDataverseService ctor requires configuration["DATAVERSE_URL"] only (no [Obsolete] fallback); `_options` field + `IOptions&lt;DemoProvisioningOptions&gt;` ctor param removed if truly unused post-refactor; Azure App Service spaarke-bff-dev has DATAVERSE_URL set BEFORE code deploy; BFF /healthz returns 200 after redeploy; task 082 becomes safe to execute. Publish-size delta reported per NFR-01.</goal>
+
+  <context>
+    <background>Task 082 POML escalation trigger fired 2026-08-18: pre-verification grep surfaced live production binding to the "orphan" [Obsolete] properties at RegistrationDataverseService.cs:60-75. Tasks 080/081 migrated DemoExpirationService + RegistrationEndpoints but did NOT touch RegistrationDataverseService. Because this class is a DI singleton (RegistrationModule.cs:32) consumed by DemoExpirationService (IHostedService), its ctor runs at IHost.StartAsync(). On spaarke-bff-dev today, DATAVERSE_URL is NOT set — the fallback branch (`_options.Environments[0].DataverseUrl`) is the LIVE source of `_apiUrl`. If task 082 deletes the DemoProvisioning keys with the current code in place, the ctor throws → BFF 500.30 → /healthz down. This task removes the fallback dependency so the config deletion becomes safe.
+
+Per project CLAUDE.md fix-drift-at-discovery principle (established this session, saved as user feedback memory): drift discovered mid-task MUST be fixed properly, not deferred. Path C (author 081.5) chosen over Path A (add DATAVERSE_URL + leave dead fallback code) because Path A leaves the [Obsolete] class wired forever, contradicting FR-33 retirement.
+
+CANONICAL INSIGHT: DataverseEnvironmentService (sibling class) does NOT help here — it also requires DATAVERSE_URL at ctor time for HttpClient BaseAddress. The bootstrap URL is fundamentally a config value, not a Dataverse-lookup value. The proper refactor is "remove the fallback branch entirely, keep the DATAVERSE_URL branch." Do NOT attempt to migrate onto DataverseEnvironmentService — different concerns.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="reference-do-not-modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
+      <file role="reference-do-not-modify">src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+      <file role="reference-do-not-modify">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs (parallel bootstrap pattern)</file>
+      <file role="escalation-context">projects/customer-provisioning-orchestration-r1/notes/task-082-deviations.md</file>
+      <file role="rollback-snapshot">projects/customer-provisioning-orchestration-r1/notes/phase-e-config-snapshot.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="✅">DemoExpirationService migration (commit 5fdd1d9ea)</dependency>
+      <dependency task="081" status="✅">RegistrationEndpoints migration (commit 0b8ca53ba)</dependency>
+    </dependencies>
+    <blocks>
+      <blocked-task id="082">Delete DemoProvisioning__Environments__* + __DefaultEnvironment Azure config keys</blocked-task>
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="fix-drift-at-discovery">SCOPE: Complete FR-33 [Obsolete] retirement properly — remove the fallback code AND deploy so it takes effect. Do NOT ship a "half-fix" that leaves the fallback branch in production while Azure config masks the drift.</constraint>
+    <constraint source="deploy-safety">SCOPE: Azure config mutation MUST precede code deploy. NEVER deploy the refactored code with DATAVERSE_URL unset — boot crash at IHost.StartAsync. Order: (1) `az webapp config appsettings set` DATAVERSE_URL, (2) verify current unmodified BFF /healthz still 200 (should be — old code has fallback), (3) commit + push refactor, (4) publish + deploy, (5) verify /healthz again.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching task — load .claude/constraints/bff-extensions.md; /conflict-check before PR; publish-size delta reported per NFR-01; update tests/unit/Sprk.Bff.Api.Tests/ if RegistrationDataverseService has ctor tests that need the DemoProvisioningOptions param removed.</constraint>
+    <constraint source="NFR-05">SCOPE: Post-refactor, ctor MUST fail fast at boot on missing DATAVERSE_URL (throw InvalidOperationException). Current behavior already throws when both sources empty — refactor tightens to "DATAVERSE_URL required" only.</constraint>
+    <constraint source="ADR-010">SCOPE: DI minimalism — do NOT introduce new interfaces or wrapper classes. Just remove the fallback branch + drop unused ctor param.</constraint>
+    <constraint source="ADR-028">SCOPE: Auth path unchanged — TokenCredential injection stays; refactor only touches the URL resolution.</constraint>
+    <constraint source="god-class-ratchet">SCOPE: RegistrationDataverseService is a large existing file — this refactor REDUCES LOC (removes ~15 lines including `#pragma` block, fallback branch, `_options` field, ctor param). Ratchet allows shrinkage.</constraint>
+    <constraint source="project">SCOPE: RegistrationDataverseService's public API + all method signatures stay identical. This is a pure internal ctor refactor.</constraint>
+    <constraint source="project">SCOPE: DemoProvisioningOptions class stays (other 7 files still consume other properties — AccountDomain, Licenses, etc.). Only remove the [Obsolete] Environments/DefaultEnvironment consumers within RegistrationDataverseService.</constraint>
+    <constraint source="testing">SCOPE: If tests/unit/Sprk.Bff.Api.Tests/ contains constructor tests for RegistrationDataverseService that reference IOptions&lt;DemoProvisioningOptions&gt;, update them to drop the removed param. Do NOT skip — TEST-MODIFYING override triggers unconditional code-review + adr-check per root §8.</constraint>
+    <constraint source="deploy-verification">SCOPE: /healthz MUST return 200 AFTER refactored code is deployed. If it fails, execute the rollback plan in Step 9 IMMEDIATELY.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RegistrationDataverseService ctor refactor + pre-deploy Azure config sequencing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-082-deviations.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/phase-e-config-snapshot.json</file>
+    </files>
+    <patterns>
+      <pattern name="DataverseEnvironmentService bootstrap (canonical)" location="src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs">Lines 25-45 show the target shape: DATAVERSE_URL required, throw if missing, no fallback, no IOptions injection. Mirror this exact shape.</pattern>
+      <pattern name="Task 080 sibling refactor commit" location="git show 5fdd1d9ea">DemoExpirationService migration off [Obsolete] props — reference for scope discipline (touch only the [Obsolete] surface).</pattern>
+      <pattern name="Task 081 sibling refactor commit" location="git show 0b8ca53ba">RegistrationEndpoints migration off [Obsolete] props — reference for endpoint-side pattern (not applicable here but confirms the retirement approach).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL block (FULL, TEST-MODIFYING override if tests exist). Load .claude/constraints/bff-extensions.md + .claude/constraints/azure-deployment.md + projects/customer-provisioning-orchestration-r1/notes/task-082-deviations.md.</step>
+
+    <step order="1" name="Pre-check current dev state (baseline)">Verify unmodified BFF is currently healthy: `curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/healthz` → MUST return 200. If NOT 200, STOP and escalate (something else is broken, not this task's problem). Record baseline in task notes.</step>
+
+    <step order="2" name="Set DATAVERSE_URL on spaarke-bff-dev (PRE-DEPLOY GATE — must precede code deploy)">Run: `az webapp config appsettings set --resource-group rg-spaarke-dev --name spaarke-bff-dev --settings DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com` — this triggers a slot restart. Wait ~30s. Re-verify /healthz returns 200 (proves old-code path still works with both sources present). CHECK if there are staging slots via `az webapp deployment slot list --resource-group rg-spaarke-dev --name spaarke-bff-dev`; if slots exist, apply the same setting to ALL slots (T5 slot-parity invariant). Record in task notes.</step>
+
+    <step order="3" name="Refactor RegistrationDataverseService.cs">Edit src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs:
+      (a) Line 32: DELETE `private readonly DemoProvisioningOptions _options;` field
+      (b) Line 46-52: In ctor signature, REMOVE `IOptions&lt;DemoProvisioningOptions&gt; options,` parameter
+      (c) Line 55: DELETE `_options = options.Value;`
+      (d) Lines 60-75: REPLACE the entire block with:
+```csharp
+        // Admin Dataverse URL: required config (no fallback per FR-33 retirement).
+        var dataverseUrl = configuration["DATAVERSE_URL"];
+        if (string.IsNullOrEmpty(dataverseUrl))
+        {
+            throw new InvalidOperationException(
+                "RegistrationDataverseService requires DATAVERSE_URL configuration.");
+        }
+```
+      (e) Verify no other references to `_options` or `DemoProvisioningOptions` remain in this file (grep-verify).
+      (f) Verify `using Microsoft.Extensions.Options;` can be removed if IOptions is no longer used in this file.</step>
+
+    <step order="4" name="Verify DI still resolves">Read src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs — confirm `services.AddSingleton&lt;RegistrationDataverseService&gt;();` at line 32 does NOT need changes (DI resolves ctor params by type; removing a param is transparent to registration). Do NOT modify RegistrationModule.cs unless a compile error forces you to.</step>
+
+    <step order="5" name="Test updates">Grep tests/unit/Sprk.Bff.Api.Tests/ for `new RegistrationDataverseService(` and `IOptions&lt;DemoProvisioningOptions&gt;` — if constructor tests exist that pass the removed param, update them to drop it. Follow the RecordMatchServiceTests drift-3 pattern (Wave 4E) as reference for minimal test surgery.</step>
+
+    <step order="6" name="Build + Test">Run `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors, warnings unchanged or reduced (this refactor may reduce the [Obsolete] warning count in the BFF from ~4 to 0 if the ctor was the last consumer of `.Environments`/`.DefaultEnvironment` — verify via `dotnet build 2&gt;&amp;1 | grep -i CS0618`). Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all pass. Run `dotnet test tests/Spaarke.ArchTests/` — all pass (no new god-class ratchet trip; this shrinks the file).</step>
+
+    <step order="7" name="Publish + Deploy">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Report compressed size + delta vs current baseline (44.96 MB incl. PDBs per CLAUDE.md §10 baseline). Deploy to spaarke-bff-dev via existing deploy mechanism (script or `az webapp deploy` — check scripts/Deploy-Release.ps1 for the canonical command; do NOT invent a new deploy path).</step>
+
+    <step order="8" name="Verify /healthz post-deploy">Wait for deploy to complete + slot restart (~1-2 min). Verify: `curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/healthz` → MUST return 200. Also verify: BFF logs for `RegistrationDataverseService targeting Dataverse at https://spaarkedev1.crm.dynamics.com/api/data/v9.2` on startup (proves DATAVERSE_URL branch executed, not throw-branch). If /healthz != 200, execute Step 9 IMMEDIATELY.</step>
+
+    <step order="9" name="Rollback plan (execute ONLY if Step 8 fails)">If /healthz returns non-200 after Step 8:
+      (a) Revert code: `git revert HEAD --no-edit` then push
+      (b) Redeploy old code: same deploy command as Step 7
+      (c) Verify /healthz recovers to 200
+      (d) DO NOT remove DATAVERSE_URL from App Service (harmless if unused; keeps it available for retry)
+      (e) File deviations note in projects/customer-provisioning-orchestration-r1/notes/task-081.5-rollback.md with root cause
+      (f) Escalate per CLAUDE.md §6 — do NOT retry blindly</step>
+
+    <step order="10" name="CVE + publish-size compliance">`dotnet list package --vulnerable --include-transitive` — zero HIGH. Report publish size in task notes: absolute (MB) + delta vs prior baseline. If delta &gt; +5 MB, add explicit justification per CLAUDE.md §10 bullet 4 (unlikely — this refactor should be neutral or slightly negative).</step>
+
+    <step order="11" name="TASK-INDEX + current-task.md update">Update TASK-INDEX.md: add new row 081.5 between 081 and 082, status ✅. Update task 082 row's deps from "080, 081 + deploy" to "080, 081, 081.5 + deploy". Update current-task.md to reflect 081.5 completion + task 082 now unblocked.</step>
+
+    <step order="12" name="Commit">Single commit: `refactor(bff-registration): remove [Obsolete] DemoProvisioningOptions fallback in RegistrationDataverseService (task 081.5)`. Body: cite task-082-deviations.md as root cause; note pre-deploy Azure config gate (DATAVERSE_URL set on dev) in commit body per fix-drift-at-discovery discipline; report publish-size delta + /healthz verification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF</tool>
+    <tool name="az">Azure App Service config mutation (Step 2) + slot check</tool>
+    <tool name="curl">/healthz verification (Steps 1, 2, 8)</tool>
+    <tool name="git">Commit + revert (Step 9 rollback)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/**/RegistrationDataverseServiceTests.cs (if ctor tests need param removal)</output>
+    <output type="azure-config">spaarke-bff-dev App Service: DATAVERSE_URL app-setting added (all slots)</output>
+    <output type="note">projects/customer-provisioning-orchestration-r1/notes/phase-e-publish-size-2026-08-18.md (publish-size delta report per NFR-01)</output>
+    <output type="index">projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md (add row 081.5)</output>
+    <output type="state">projects/customer-provisioning-orchestration-r1/current-task.md (reflect 081.5 completion + 082 unblocked)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep `RegistrationDataverseService.cs` for `_options\.` returns ZERO matches (was 3).</criterion>
+    <criterion testable="true">Grep `RegistrationDataverseService.cs` for `DemoProvisioningOptions` returns ZERO matches (was 3 including field + ctor param + type reference).</criterion>
+    <criterion testable="true">Grep `RegistrationDataverseService.cs` for `#pragma warning disable CS0618` returns ZERO matches (was 1).</criterion>
+    <criterion testable="true">Grep `RegistrationDataverseService.cs` for `IOptions&lt;` returns ZERO matches (Microsoft.Extensions.Options using can be removed).</criterion>
+    <criterion testable="true">Post-refactor dotnet build shows zero net-new warnings; overall [Obsolete] warning count reduced or unchanged in this file.</criterion>
+    <criterion testable="true">All tests/unit/Sprk.Bff.Api.Tests/ pass unchanged (10,491+ tests) — or updated ctor tests pass with the DemoProvisioningOptions param dropped.</criterion>
+    <criterion testable="true">All tests/Spaarke.ArchTests/ pass (65+ tests) — god-class-ratchet does not trip (file shrinks).</criterion>
+    <criterion testable="true">`az webapp config appsettings list --resource-group rg-spaarke-dev --name spaarke-bff-dev --query "[?name=='DATAVERSE_URL']"` returns the value `https://spaarkedev1.crm.dynamics.com` on ALL slots.</criterion>
+    <criterion testable="true">BFF /healthz returns 200 AFTER refactored code is deployed to spaarke-bff-dev.</criterion>
+    <criterion testable="true">BFF startup log shows `RegistrationDataverseService targeting Dataverse at https://spaarkedev1.crm.dynamics.com/api/data/v9.2` (proves DATAVERSE_URL branch executed).</criterion>
+    <criterion testable="true">Publish-size delta reported in phase-e-publish-size-2026-08-18.md; delta ≤ +5 MB (or explicit justification per §10).</criterion>
+    <criterion testable="true">Zero new HIGH CVEs (`dotnet list package --vulnerable --include-transitive`).</criterion>
+    <criterion testable="true">TASK-INDEX.md includes row 081.5 = ✅; row 082 deps updated to include 081.5.</criterion>
+    <criterion testable="true">Task 082 pre-verification grep (per its POML Step 0) now shows ZERO matches for `_options.Environments|_options.DefaultEnvironment` in src/ — proves 082 is now safe to execute.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If Step 1 baseline /healthz != 200, STOP — pre-existing dev-env problem, not this task's scope. Escalate per CLAUDE.md §6.</trigger>
+    <trigger>If Step 2 az webapp appsettings set fails (permission, throttling, other), STOP + escalate — do NOT proceed to code refactor without DATAVERSE_URL set.</trigger>
+    <trigger>If Step 4 discovers `_options` used elsewhere in the file beyond lines 55/63/65/66, STOP + escalate — scope expanded beyond original assessment; may need coordination with r3 dead-code sweep.</trigger>
+    <trigger>If Step 5 discovers extensive test-suite fanout (10+ tests need the ctor param dropped), STOP + escalate — may indicate a broader refactor pattern worth batching.</trigger>
+    <trigger>If Step 8 /healthz != 200 after refactored deploy, execute Step 9 rollback IMMEDIATELY (do NOT retry blindly, do NOT skip); THEN escalate with rollback confirmation.</trigger>
+    <trigger>If Step 10 publish-size delta &gt; +5 MB (should be nearly zero — this is a shrink refactor), investigate before commit — unexpected size growth signals a mis-refactor.</trigger>
+  </escalation>
+
+  <notes>Reference: notes/task-082-deviations.md is the root escalation record + rollback template. This task exists solely to fix the drift 082 discovered — the "fix-drift-at-discovery" principle established in this session (saved as user feedback memory). CANONICAL INSIGHT captured in background: DataverseEnvironmentService is NOT a valid migration target for this ctor — bootstrap URL is a config value, not a Dataverse-lookup value. Refactor is "remove fallback branch" NOT "migrate onto sibling service."
+
+Post-completion: task 082's POML pre-verification GATE will re-run and should show zero matches — 082 becomes safe to execute. The next dispatch decision (execute 082 immediately or hold for owner review) is main-session's call.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

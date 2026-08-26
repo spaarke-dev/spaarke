@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/schemas/provisioning-arm-manifest.json",
+  "title": "Provisioning ARM Artifact Manifest (provisioning-arm-{buildId}.json / provisioning-arm-latest.json)",
+  "description": "Schema for the manifest pushed alongside the CI-pre-compiled ARM-JSON artifacts (az bicep build output of infrastructure/bicep/customer.bicep + infrastructure/bicep/stacks/model1-shared.bicep) to the platform provisioning-artifacts blob container by .github/workflows/publish-provisioning-arm-artifacts.yml (customer-provisioning-orchestration-r1 task 117, Phase C'' Wave G-1, design.md DS-1b §1 H2a row / §4A). H2a's SDK-port handler (task 123, Wave G-2) reads this file to resolve the ARM JSON artifact for the run's TenancyModel, downloads it via Azure.Storage.Blobs, and passes it to Azure.ResourceManager.Resources.ArmDeploymentResource.CreateOrUpdateAsync -- because the ARM SDK deploys ARM JSON, not raw .bicep, and the L2 main-site runtime has zero shells (no bicep CLI) per DS-1b's Option D constraint (design.md §4.2a).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["buildId", "sha", "publishedAt", "bicepCliVersion", "templates"],
+  "properties": {
+    "buildId": {
+      "type": "string",
+      "description": "Deterministic, monotonic, human-sortable build identifier: {UTC yyyy.MM.dd}-{github.run_number}. Matches the exact convention used by .github/workflows/deploy-bff-api.yml (task 116) and build-provisioning-sidecar.yml (task 115) for cross-artifact consistency. Every blob name in this manifest embeds this buildId.",
+      "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}-\\d+$"
+    },
+    "sha": {
+      "type": "string",
+      "description": "Full git commit SHA (github.sha) the ARM JSON was compiled from. This is the provenance anchor for the ENTIRE Bicep source tree consumed by the compile (customer.bicep / stacks/model1-shared.bicep + every infrastructure/bicep/modules/*.bicep file each one transitively references) -- az bicep build resolves module references from the checked-out working tree at this commit, so a single repo-level sha covers all of them (no separate per-module source hash is tracked).",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "publishedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC ISO-8601 timestamp of manifest generation. Always AFTER every ARM JSON blob referenced below has been uploaded successfully -- a manifest reader never sees a manifest pointing at a not-yet-uploaded blob."
+    },
+    "bicepCliVersion": {
+      "type": "string",
+      "description": "Output of `az bicep version` on the CI runner at compile time (e.g. '0.46.1'). Recorded for reproducibility / troubleshooting drift between CI compiles, not consumed programmatically by H2a."
+    },
+    "templates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["customer", "model1-shared"],
+      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.ResolveTemplatePath (the authoritative C# source: TenancyModel == 'Model1Shared' (case-insensitive) selects 'model1-shared'; every other value, including 'Model2Dedicated', falls through to the 'customer' default).",
+      "properties": {
+        "customer": {
+          "$ref": "#/definitions/templateEntry",
+          "description": "Compiled from infrastructure/bicep/customer.bicep. This is the DEFAULT template -- selected whenever TenancyModel is anything other than 'Model1Shared' (currently: 'Model2Dedicated', and any future value not yet enumerated)."
+        },
+        "model1-shared": {
+          "$ref": "#/definitions/templateEntry",
+          "description": "Compiled from infrastructure/bicep/stacks/model1-shared.bicep. Selected only when TenancyModel == 'Model1Shared' (case-insensitive)."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "templateEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath", "resolutionHint", "armJsonBlobName", "sha256", "sizeBytes"],
+      "properties": {
+        "sourcePath": {
+          "type": "string",
+          "description": "Repo-relative path to the top-level .bicep source file this entry was compiled from."
+        },
+        "resolutionHint": {
+          "type": "string",
+          "description": "Human-readable statement of the TenancyModel selection rule for this template, kept in sync with FileBicepTemplateInspector.ResolveTemplatePath. Advisory / documentation only -- H2a's handler encodes the actual branch in code, this field lets an operator or a future audit confirm the manifest and the code still agree."
+        },
+        "armJsonBlobName": {
+          "type": "string",
+          "description": "Exact blob name of the compiled ARM JSON within the SAME provisioning-artifacts container the H9 BFF artifact (task 116) uses, e.g. customer-arm-{buildId}.json. Immutable once published -- a given buildId's blob is never overwritten."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the compiled ARM JSON file's bytes, computed in the SAME CI job immediately after az bicep build produced it. H2a SHOULD verify this after downloading the blob before passing the content to ArmDeploymentResource.CreateOrUpdateAsync, to detect a truncated or corrupted download."
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size in bytes of the compiled ARM JSON file."
+        }
+      }
+    }
+  }
+}

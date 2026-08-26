@@ -664,10 +664,23 @@ export const speApiClient = {
      * GET /api/spe/containers/{containerId}/permissions?configId={id}
      * List all permission entries on a container.
      */
-    list(containerId: string, configId: string): Promise<ContainerPermission[]> {
-      return get<ContainerPermission[]>(
+    async list(
+      containerId: string,
+      configId: string,
+    ): Promise<ContainerPermission[]> {
+      // Envelope: `{ items, count }` (ContainerPermissionListResponse), not a bare array. This one
+      // had not surfaced in UAT yet only because nobody had opened Manage Permissions.
+      const page = await get<{ items?: ContainerPermission[] }>(
         "/spe/containers/" + containerId + "/permissions" + qs({ configId }),
       );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The permissions service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). Permissions could not be read; this is NOT a report that the " +
+            "container has none.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -917,27 +930,101 @@ export const speApiClient = {
   // Search
   // =========================================================================
 
+  /**
+   * Both search calls answer with a paged envelope of FLAT DTOs, while the results grids consume a
+   * NESTED shape (`{ container }` / `{ item }`). Two mismatches at once, and both were silent:
+   * TypeScript believed the old `Promise<…[]>` annotation, so the page stored an object where it
+   * expected an array and died on `.filter` — the "i.filter is not a function" seen in UAT
+   * 2026-08-25. Adapting here keeps the grids untouched and puts the wire-to-view translation in the
+   * one layer whose job it is.
+   */
   search: {
     /**
      * POST /api/spe/search/containers?configId={id}
      * Search for containers matching a query.
      */
-    containers(configId: string, body: SearchRequest): Promise<ContainerSearchResult[]> {
-      return post<SearchRequest, ContainerSearchResult[]>(
-        "/spe/search/containers" + qs({ configId }),
-        body,
-      );
+    async containers(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<ContainerSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            displayName: string;
+            description?: string;
+            containerTypeId?: string;
+          }>;
+        }
+      >("/spe/search/containers" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The container search service returned an unrecognized response shape (expected an " +
+            "object with an 'items' array). No results could be read, which is not the same as " +
+            "there being no matches.",
+        );
+      }
+
+      // status / createdDateTime / storageUsedInBytes are deliberately left undefined — search does
+      // not report them, and defaulting them here would put invented values on an admin screen.
+      return page.items.map((c) => ({
+        container: {
+          id: c.id,
+          displayName: c.displayName,
+          description: c.description,
+          containerTypeId: c.containerTypeId,
+        },
+      }));
     },
 
     /**
      * POST /api/spe/search/items?configId={id}
      * Search for drive items matching a query.
      */
-    items(configId: string, body: SearchRequest): Promise<DriveItemSearchResult[]> {
-      return post<SearchRequest, DriveItemSearchResult[]>(
-        "/spe/search/items" + qs({ configId }),
-        body,
-      );
+    async items(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<DriveItemSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            name: string;
+            size?: number;
+            lastModifiedDateTime?: string;
+            containerId?: string;
+            containerName?: string;
+            webUrl?: string;
+            mimeType?: string;
+          }>;
+        }
+      >("/spe/search/items" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The item search service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). No results could be read, which is not the same as there " +
+            "being no matches.",
+        );
+      }
+
+      return page.items.map((i) => ({
+        item: {
+          id: i.id,
+          name: i.name,
+          size: i.size,
+          lastModifiedDateTime: i.lastModifiedDateTime,
+          webUrl: i.webUrl,
+          // A drive item is a FILE when search reported a mime type, and a folder otherwise. This is
+          // the only signal the search projection carries, and the grid uses it to pick the icon.
+          ...(i.mimeType ? { file: { mimeType: i.mimeType } } : {}),
+        },
+        containerId: i.containerId ?? "",
+        containerName: i.containerName,
+      }));
     },
   },
 
@@ -984,8 +1071,18 @@ export const speApiClient = {
      * GET /api/spe/security/alerts?configId={id}
      * List security alerts for the tenant.
      */
-    listAlerts(configId: string): Promise<SecurityAlert[]> {
-      return get<SecurityAlert[]>("/spe/security/alerts" + qs({ configId }));
+    async listAlerts(configId: string): Promise<SecurityAlert[]> {
+      // Envelope: `{ items, count }` (SecurityAlertsResponse), not a bare array.
+      const page = await get<{ items?: SecurityAlert[] }>(
+        "/spe/security/alerts" + qs({ configId }),
+      );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The security service returned an unrecognized response shape (expected an object with " +
+            "an 'items' array). Alerts could not be read — do not read this as 'no alerts'.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -1029,8 +1126,15 @@ export const speApiClient = {
     /**
      * GET /api/spe/audit?configId={id}&from={date}&to={date}&category={cat}
      * Query the audit log with optional date/category filters.
+     *
+     * The endpoint answers with a paged ENVELOPE — `{ items, count, top, skip }` — not a bare array.
+     * This call previously declared `Promise<AuditLogEntry[]>` and handed the envelope object straight
+     * to the page, which stored it in an array-typed state and then called `.slice()` on it. That threw
+     * `TypeError: entries.slice is not a function` during render, and with no error boundary above it
+     * the whole app unmounted — the white screen reported in UAT on 2026-08-25. TypeScript could not
+     * catch it: the declared return type was simply an assertion about JSON that nothing verified.
      */
-    query(options: {
+    async query(options: {
       configId: string;
       from?: string;
       to?: string;
@@ -1038,7 +1142,7 @@ export const speApiClient = {
       top?: number;
       skip?: number;
     }): Promise<AuditLogEntry[]> {
-      return get<AuditLogEntry[]>(
+      const page = await get<{ items?: AuditLogEntry[] }>(
         "/spe/audit" + qs({
           configId: options.configId,
           from: options.from,
@@ -1048,6 +1152,18 @@ export const speApiClient = {
           skip: options.skip,
         }),
       );
+
+      // Verify the shape rather than trusting the type parameter. An unexpected body must surface as a
+      // visible error, NOT as an empty array — "no audit entries" is a claim about the tenant's history
+      // that this client is in no position to make just because it failed to understand the response.
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The audit log service returned an unrecognized response shape (expected an object with an " +
+            "'items' array). The entries could not be read, and this is not the same as there being none.",
+        );
+      }
+
+      return page.items;
     },
   },
 

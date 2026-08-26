@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Harden scripts/Register-EntraAppRegistrations.ps1 for full 14-grant idempotency</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell script (not BFF code); tags include powershell + auth; per root CLAUDE.md §8, non-BFF script hardening with explicit constraints = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped hardening with clear canonical reference (v3.3 mandatory -TenantId already landed in `1834b77bc`); no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, auth, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Harden scripts/Register-EntraAppRegistrations.ps1 so all ~14 Graph + Dynamics permission grants (per Infrastructure/Auth/GraphAppRoles.cs) are fully idempotent (re-run = no-op when grants already present) per spec.md FR-06 + Gap 3 + R4. Note: mandatory -TenantId parameter (v3.3 §4D I1 code fix) already landed in commit `1834b77bc` — do NOT re-do that. Ship: (a) idempotent grant loop with pre-check via Graph oauth2PermissionGrants query, (b) audience `AzureADMultipleOrgs` (v3 change), (c) single BFF app-reg only (S2S dropped per r3 task 060), (d) client secret stored as KV URI ref.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with PowerShell 7.4+, Microsoft Graph (oauth2PermissionGrants + appRoleAssignments), Entra app-registration lifecycle, and Azure CLI (az ad app permission). Follow ADR-028 (Spaarke Auth v2) 21 MUSTs.</role>
+
+  <goal>scripts/Register-EntraAppRegistrations.ps1 idempotently manages 1 BFF Entra app-reg with ~14 Graph + Dynamics permission grants: (a) re-run against a fully-configured app-reg produces zero net changes (no-op), (b) re-run against a partially-configured app-reg completes the remaining grants without duplication, (c) -TenantId is mandatory (v3.3 §4D I1 already landed), (d) sign-in audience = AzureADMultipleOrgs, (e) client secret written as KV URI reference to platform KV (not cleartext), (f) S2S Dataverse app-reg NOT provisioned (r3 task 060 dropped).</goal>
+
+  <context>
+    <background>
+Per spec.md FR-06 + Gap 3 + R4 + design.md § handlers H3. The current Register-EntraAppRegistrations.ps1 has partial idempotency; when re-run against a fully-configured customer it can produce duplicate grants or error on already-present ones. H3 handler (Wave C4) invokes this script; without full idempotency, retry-on-failure produces state divergence. r3 task 060 dropped S2S Dataverse app-reg; do NOT re-introduce.
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Register-EntraAppRegistrations.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable independent of task 005 (this script does not READ GraphAppRoles.cs — task 015 does)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Modifies ONLY scripts/Register-EntraAppRegistrations.ps1. Do NOT re-introduce the Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers per spec MUST rules).</constraint>
+    <constraint source="spec.md">SCOPE: -TenantId parameter is Mandatory (already landed in `1834b77bc` per §4D I1 / FR-28 — v3.3 code fix); do NOT re-do OR relax it.</constraint>
+    <constraint source="ADR-028">SCOPE: Client secret MUST be stored as KV URI reference in platform KV (never cleartext in script output, logs, or Cosmos). Ceremony follows the 21 MUSTs.</constraint>
+    <constraint source="spec.md">SCOPE: Sign-in audience = AzureADMultipleOrgs (v3 change enables Model 2 consent per FR-06); do NOT use single-tenant or personal-account audiences.</constraint>
+    <constraint source="project">SCOPE: Idempotency contract: re-run against fully-configured app-reg emits log line "no changes" and exits 0; re-run against partially-configured produces the exact delta and exits 0. Exit 1 only on actual error (not on "already exists").</constraint>
+    <constraint source="project">SCOPE: Do NOT edit GraphAppRoles.cs from within this script (task 015 handles the C# → PS grant reader). Script consumes a permission list — grant enumeration is orthogonal.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Entra app-reg + PowerShell + ADR-028 auth ceremony</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent grant loop" location="scripts/">Pre-check via Graph query → skip when present → add-and-verify when absent → summarize deltas at exit.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load ADR-028 + auth constraint + r3-handoff §60/62 notes.</step>
+    <step order="1" name="Baseline">Read current script; enumerate each grant/write operation; identify current failure modes on re-run.</step>
+    <step order="2" name="Design pre-check pattern">For each grant type (delegated permission, app-role, Dynamics scope), define the Graph pre-check query that determines "already present" before attempting the grant.</step>
+    <step order="3" name="Refactor loop">Rewrite grant loop to: (a) fetch current grants once, (b) diff vs required, (c) apply only the missing deltas, (d) verify each addition took effect, (e) summarize deltas.</step>
+    <step order="4" name="Confirm audience + KV ref pattern">Verify script writes audience = AzureADMultipleOrgs; verify secret write goes through KV (URI ref pattern) not cleartext file/log.</step>
+    <step order="5" name="Idempotency tests">Manually run script twice against a dev tenant + confirm second run emits "no changes" and exits 0. Then delete one grant, run again, confirm exact delta applied.</step>
+    <step order="6" name="S2S drop verification">Confirm no code path attempts to create Dataverse S2S app-reg (r3 task 060 dropped it).</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 010 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the ~14 grants cannot be validated as idempotent via Graph pre-check (e.g., Graph API returns partial state or ambiguous "duplicate ok" response), STOP and escalate per CLAUDE.md §6 rather than silently accepting non-idempotent grant. Silent non-idempotency cascades into H3 retry-storm in Wave C4.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI for `ad app permission` + Graph queries</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Register-EntraAppRegistrations.ps1 (hardened)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fully-configured BFF app-reg, when running Register-EntraAppRegistrations.ps1 -TenantId {tid}, then output includes "no changes" summary and exits 0.</criterion>
+    <criterion testable="true">Given a partially-configured app-reg (1 grant deleted), when running the script, then only the missing grant is added, verified, and reported; exits 0.</criterion>
+    <criterion testable="true">Given the script, when invoked without -TenantId, then it exits with a mandatory-parameter error (§4D I1 already-landed contract preserved).</criterion>
+    <criterion testable="true">Given the script's KV-secret write path, when inspecting outputs, then the client secret leaves the script as a KV URI reference (never cleartext in stdout, log, or file).</criterion>
+    <criterion testable="true">Given the script, when scanning for Dataverse S2S app-reg code paths, then no such code path exists (r3 task 060 dropped).</criterion>
+    <criterion testable="true">Given the app-reg after script run, when reading manifest via `az ad app show`, then signInAudience == "AzureADMultipleOrgs".</criterion>
+    <criterion testable="true">Negative: git diff shows only scripts/Register-EntraAppRegistrations.ps1 modified (no drift into GraphAppRoles.cs or other scripts).</criterion>
+    <criterion testable="true">Negative: on Graph API error (real error, not "already present"), script exits non-zero with diagnostic message — not silently swallowed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06 + Gap 3 + R4 + ADR-028. H3 handler (Wave C4) invokes this script. r3 task 060 (S2S drop) is BINDING; task 062 (GraphAppRoles.cs constant) is READ by task 015 helper — this script does not read GraphAppRoles.cs.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

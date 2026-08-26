@@ -1,0 +1,467 @@
+// -----------------------------------------------------------------------------
+// HandlerOutcomeApplierTests.cs
+//
+// L2 CONTROL-PLANE tests for the extracted HandlerOutcomeApplier (task 104,
+// Phase C'' Wave G-1 -- extraction of StateReconcilerService's former
+// internal ApplyHandlerOutcomeAsync per design-study-ds2-dispatcher-design.md
+// §5, closing gap C2.1).
+//
+// TESTED BEHAVIORS (POML 104 acceptance criterion #4 + task 107's moved AC3):
+//   Success-no-op          -- HandlerResult.Success writes nothing, enqueues
+//                              nothing, releases nothing; returns the run's
+//                              CURRENT status unchanged + FailureClass null.
+//   Failure-transition +
+//     quarantine            -- QuarantineRequired populates QuarantineInfo,
+//                              transitions to RunStatus.Quarantined, does NOT
+//                              re-enqueue, does NOT release the I5 guard
+//                              (spec FR-24 SCOPE keeps quarantined customers
+//                              blocked).
+//   RetryableWithCleanup    -- auto-retries with an incremented
+//                              HandlerEnvelope.Attempt (task 107) so the
+//                              retry's MessageId differs from the original
+//                              dispatch's; monotonic across repeated
+//                              failures of the same handler. MOVED from
+//                              ReconcilerEnqueuePayloadAttemptTests.cs (task
+//                              104) -- now constructs HandlerOutcomeApplier
+//                              directly instead of driving it through
+//                              StateReconcilerService's delegating shim.
+//   ETag-Conflict-tolerant  -- a concurrent writer's ETag conflict skips
+//                              BOTH re-enqueue AND guard-release for OUR
+//                              call (the winning writer owns its own
+//                              transition's side effects); no exception.
+//   SuccessfulButDrifted    -- task 104's gap closure: releases the I5
+//                              same-customer guard (task 059
+//                              ICustomerRunGuard) exactly once, is
+//                              tolerant of a transient release failure
+//                              (best-effort -- operator cancel/clear-
+//                              quarantine remain available as a backstop).
+//   Resumable               -- transitions to Failed, does NOT re-enqueue,
+//                              does NOT release the guard (operator resumes
+//                              explicitly).
+//
+// SEAM STRATEGY (docs/standards/TEST-ARCHITECTURE.md §5):
+//   Hand-rolled in-memory test doubles for IFailureClassifier,
+//   IProvisioningRunRepository, IHandlerEnqueuer, ICustomerRunGuard -- no Moq,
+//   mirrors the existing StateReconcilerServiceTests.cs /
+//   ReconcilerEnqueuePayloadAttemptTests.cs convention.
+// -----------------------------------------------------------------------------
+
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Reconciler;
+using Sprk.Provisioning.ControlPlane.Repositories;
+using Sprk.Provisioning.ControlPlane.Rollback;
+using Xunit;
+
+namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
+
+public sealed class HandlerOutcomeApplierTests
+{
+    private const string TestCustomerId = "test-customer";
+    private const string TestRunId = "00000000-0000-0000-0000-000000000001";
+
+    // -----------------------------------------------------------------------
+    // Success -- no-op (handlers own their own CompletedPhases + Cosmos write
+    // on success; the applier must not double-write, enqueue, or release).
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_Success_IsNoOp_WritesNothingEnqueuesNothingReleasesNothing()
+    {
+        var repository = new RecordingRunRepository();
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _, repository: repository, enqueuer: enqueuer, guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0", "H1");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: new HandlerResult.Success("h2a-test-customer-idem"), handlerId: "H2a", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Running, "Success returns the run's CURRENT status unchanged.");
+        applied.Reenqueued.Should().BeFalse();
+        applied.FailureClass.Should().BeNull("no classification fires on the Success path.");
+
+        repository.ReplaceCalls.Should().BeEmpty("handlers own the CompletedPhases append + Cosmos write on Success.");
+        enqueuer.Envelopes.Should().BeEmpty();
+        guard.ReleaseCalls.Should().BeEmpty();
+    }
+
+    // -----------------------------------------------------------------------
+    // QuarantineRequired -- transitions to Quarantined, populates
+    // QuarantineInfo, does NOT re-enqueue, does NOT release the guard.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_QuarantineRequired_TransitionsAndPopulatesQuarantineInfo_DoesNotReenqueueOrReleaseGuard()
+    {
+        var frozenNow = DateTimeOffset.Parse("2026-08-19T15:00:00Z");
+        var repository = new RecordingRunRepository();
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _,
+            classifier: new StubFailureClassifier(FailureClass.QuarantineRequired),
+            repository: repository,
+            enqueuer: enqueuer,
+            guard: guard,
+            timeProvider: new TestTimeProvider(frozenNow));
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.QuarantineRequired, "orphaned-resources", "H2a Bicep failed after 12 of 16 resources.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H2a", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Quarantined);
+        applied.Reenqueued.Should().BeFalse("QuarantineRequired requires operator clear-quarantine, not auto-retry.");
+        applied.FailureClass.Should().Be(FailureClass.QuarantineRequired);
+
+        run.Status.Should().Be(RunStatus.Quarantined);
+        run.Quarantine.Should().NotBeNull();
+        run.Quarantine!.State.Should().Be(QuarantineState.Quarantined);
+        run.Quarantine.Reason.Should().Be(failure.Diagnostic);
+        run.Quarantine.QuarantinedByHandler.Should().Be("H2a");
+        run.Quarantine.QuarantinedAt.Should().Be(frozenNow);
+        run.CompletedOn.Should().Be(frozenNow, "Quarantined is a terminal transition for auditability.");
+
+        enqueuer.Envelopes.Should().BeEmpty();
+        guard.ReleaseCalls.Should().BeEmpty(
+            "spec FR-24 SCOPE: Quarantined runs BLOCK new runs against the same customerId until cleared.");
+    }
+
+    // -----------------------------------------------------------------------
+    // RetryableWithCleanup -- auto-retry with incremented Attempt (task 107).
+    // MOVED from ReconcilerEnqueuePayloadAttemptTests.cs by task 104.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_RetryableWithCleanup_ReenqueuesWithIncrementedAttempt_DistinctFromOriginalMessageId()
+    {
+        var sut = BuildSut(out var enqueuer,
+            classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup));
+        var run = MakeRun(RunStatus.Running, "H0");
+
+        // The "just-consumed original" dispatch -- what the reconciler sent
+        // BEFORE this handler failed (attempt=0, the normal enqueue path).
+        // ReconcilerEnvelopeBuilder is internal but visible here via
+        // InternalsVisibleTo (Core -> Tests) -- reusing the REAL production
+        // builder (not a hand-copy) so this assertion can never silently
+        // drift from the actual envelope shape.
+        var originalEnvelope = ReconcilerEnvelopeBuilder.Build("H1", run, TimeProvider.System);
+        var originalMessageId = ServiceBusHandlerEnqueuer.ComputeMessageId(originalEnvelope);
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.RetryableWithCleanup,
+            RejectionCode: "transient-http-503",
+            Diagnostic: "Downstream call returned 503; safe to retry.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H1", CancellationToken.None);
+
+        applied.Reenqueued.Should().BeTrue("RetryableWithCleanup MUST auto-retry per §4C.");
+        enqueuer.Envelopes.Should().ContainSingle();
+
+        var retryEnvelope = enqueuer.Envelopes[0];
+        retryEnvelope.Attempt.Should().Be(1, "the FIRST auto-retry increments attempt from 0 -> 1.");
+
+        var retryMessageId = ServiceBusHandlerEnqueuer.ComputeMessageId(retryEnvelope);
+        retryMessageId.Should().NotBe(originalMessageId,
+            "task 107 / DS-2 §4-L1: without the attempt-field fix, this retry would carry the IDENTICAL " +
+            "MessageId as the original dispatch and Service Bus level-1 dedup would silently drop it.");
+
+        run.HandlerRetryAttempts.Should().ContainKey("H1").WhoseValue.Should().Be(1,
+            "the per-handler retry counter is persisted on the run doc alongside the failure transition.");
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_RetryableWithCleanup_CalledTwiceForSameHandler_MonotonicallyIncrementsAttempt_EachRetryDistinct()
+    {
+        var sut = BuildSut(out var enqueuer,
+            classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup));
+        var run = MakeRun(RunStatus.Running, "H0");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.RetryableWithCleanup, "transient-http-503", "Retry #1 diagnostic.");
+
+        // First failure -> first retry (attempt 0 -> 1).
+        await sut.ApplyHandlerOutcomeAsync(run, "etag-1", failure, "H1", CancellationToken.None);
+
+        // Second failure of the SAME handler (the retry itself failed again)
+        // -> second retry (attempt 1 -> 2).
+        await sut.ApplyHandlerOutcomeAsync(run, "etag-2", failure, "H1", CancellationToken.None);
+
+        enqueuer.Envelopes.Should().HaveCount(2);
+        enqueuer.Envelopes[0].Attempt.Should().Be(1);
+        enqueuer.Envelopes[1].Attempt.Should().Be(2);
+
+        var messageId1 = ServiceBusHandlerEnqueuer.ComputeMessageId(enqueuer.Envelopes[0]);
+        var messageId2 = ServiceBusHandlerEnqueuer.ComputeMessageId(enqueuer.Envelopes[1]);
+        messageId1.Should().NotBe(messageId2,
+            "each successive §4C retry MUST produce a fresh MessageId so it is never absorbed by the prior retry's dedup window.");
+
+        run.HandlerRetryAttempts["H1"].Should().Be(2);
+    }
+
+    // -----------------------------------------------------------------------
+    // ETag-Conflict-tolerant -- a concurrent writer already landed a
+    // transition; OUR call must not re-enqueue or release the guard.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_EtagConflict_RetryableWithCleanup_DoesNotReenqueue()
+    {
+        var enqueuer = new RecordingEnqueuer();
+        var sut = BuildSut(out _,
+            classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup),
+            repository: new ConflictRunRepository(),
+            enqueuer: enqueuer);
+        var run = MakeRun(RunStatus.Running, "H0");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.RetryableWithCleanup, "transient-http-503", "Downstream 503.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H1", CancellationToken.None);
+
+        applied.Reenqueued.Should().BeFalse(
+            "a concurrent writer already landed the transition -- the next reconciler tick reconciles, per design.md §4C.");
+        applied.TargetStatus.Should().Be(RunStatus.Failed);
+        enqueuer.Envelopes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_EtagConflict_SuccessfulButDrifted_DoesNotReleaseGuard()
+    {
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _,
+            classifier: new StubFailureClassifier(FailureClass.SuccessfulButDrifted),
+            repository: new ConflictRunRepository(),
+            guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.SuccessfulButDrifted, "drift-detected", "H13 detected drift in 2 resources.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H13", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Completed);
+        guard.ReleaseCalls.Should().BeEmpty(
+            "OUR write did not land -- the concurrent winner (or its own ApplyHandlerOutcomeAsync call) " +
+            "owns the release decision for its own committed transition; releasing here too would double-release.");
+    }
+
+    // -----------------------------------------------------------------------
+    // SuccessfulButDrifted -- task 104 gap closure: releases the I5 guard.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_SuccessfulButDrifted_ReleasesCustomerGuardExactlyOnce()
+    {
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out var enqueuer,
+            classifier: new StubFailureClassifier(FailureClass.SuccessfulButDrifted),
+            guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H13");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.SuccessfulButDrifted, "drift-detected", "H13 detected drift in 2 resources.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H13", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Completed);
+        applied.Reenqueued.Should().BeFalse("SuccessfulButDrifted requires operator resume with resumeFromPhase, not auto-retry.");
+        enqueuer.Envelopes.Should().BeEmpty();
+
+        guard.ReleaseCalls.Should().ContainSingle().Which.Should().Be((run.CustomerId, run.RunId),
+            "task 104 gap closure (DS-2 §5): the customer may start a new run once drift is Completed.");
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_SuccessfulButDrifted_GuardReleaseTransientFailure_DoesNotThrow_OutcomeStillApplied()
+    {
+        var guard = new RecordingCustomerRunGuard { ReturnTransientFailure = true };
+        var sut = BuildSut(out _,
+            classifier: new StubFailureClassifier(FailureClass.SuccessfulButDrifted),
+            guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.SuccessfulButDrifted, "drift-detected", "Diagnostic.");
+
+        var act = async () => await sut.ApplyHandlerOutcomeAsync(
+            run, "etag-1", failure, "H13", CancellationToken.None);
+
+        var applied = await act.Should().NotThrowAsync(
+            "guard release is best-effort -- a transient failure must not fail the outcome application; " +
+            "the operator's cancel/clear-quarantine endpoints remain available as a backstop.");
+        applied.Subject.TargetStatus.Should().Be(RunStatus.Completed);
+        guard.ReleaseCalls.Should().ContainSingle();
+    }
+
+    // -----------------------------------------------------------------------
+    // Resumable -- Failed, no re-enqueue, no guard release.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_Resumable_TransitionsToFailed_DoesNotReenqueueOrReleaseGuard()
+    {
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _,
+            classifier: new StubFailureClassifier(FailureClass.Resumable),
+            enqueuer: enqueuer,
+            guard: guard);
+        var run = MakeRun(RunStatus.Running, "H0", "H1");
+
+        var failure = new HandlerResult.Failure(
+            FailureClass.Resumable, "missing-precondition", "Operator must grant subscription access first.");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H2a", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Failed);
+        applied.Reenqueued.Should().BeFalse("Resumable requires operator POST /api/runs/{id}/resume.");
+        enqueuer.Envelopes.Should().BeEmpty();
+        guard.ReleaseCalls.Should().BeEmpty("the guard stays held so the operator's resume targets the SAME run.");
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers + test doubles
+    // -----------------------------------------------------------------------
+
+    private static HandlerOutcomeApplier BuildSut(
+        out RecordingEnqueuer enqueuerOut,
+        IFailureClassifier? classifier = null,
+        IProvisioningRunRepository? repository = null,
+        RecordingEnqueuer? enqueuer = null,
+        ICustomerRunGuard? guard = null,
+        TimeProvider? timeProvider = null)
+    {
+        enqueuerOut = enqueuer ?? new RecordingEnqueuer();
+
+        return new HandlerOutcomeApplier(
+            classifier ?? new StubFailureClassifier(FailureClass.Resumable),
+            repository ?? new RecordingRunRepository(),
+            enqueuerOut,
+            guard ?? new RecordingCustomerRunGuard(),
+            timeProvider ?? TimeProvider.System,
+            NullLogger<HandlerOutcomeApplier>.Instance);
+    }
+
+    private static ProvisioningRun MakeRun(RunStatus status, params string[] completedPhases)
+    {
+        var run = new ProvisioningRun
+        {
+            RunId = TestRunId,
+            CustomerId = TestCustomerId,
+            EnvironmentId = "env-1",
+            TenancyModel = "Model2Dedicated",
+            Profile = "spaarke-hosted-model2",
+            Status = status,
+        };
+        var now = DateTimeOffset.UtcNow;
+        foreach (var phase in completedPhases)
+        {
+            run.CompletedPhases.Add(new CompletedPhase
+            {
+                Phase = phase,
+                StartedAt = now,
+                CompletedAt = now,
+                IdempotencyKey = $"{phase.ToLowerInvariant()}-{TestCustomerId}-test",
+                JobId = TestRunId,
+            });
+        }
+        return run;
+    }
+
+    private sealed class StubFailureClassifier : IFailureClassifier
+    {
+        private readonly FailureClass _class;
+        public StubFailureClassifier(FailureClass @class) => _class = @class;
+        public FailureClass Classify(HandlerResult.Failure failure) => _class;
+        public FailureClass ClassifyException(Exception exception) => _class;
+    }
+
+    /// <summary>Records every ReplaceRunAsync call; always succeeds by default -- mirrors real Cosmos replace-success shape without a live/emulated account.</summary>
+    private sealed class RecordingRunRepository : IProvisioningRunRepository
+    {
+        public List<(ProvisioningRun Run, string ETag)> ReplaceCalls { get; } = new();
+
+        public Task<ProvisioningRunReadResult?> ReadRunAsync(string customerId, string runId, CancellationToken ct)
+            => Task.FromResult<ProvisioningRunReadResult?>(null);
+
+        public Task<ProvisioningRunReadResult> CreateRunAsync(ProvisioningRun run, CancellationToken ct)
+            => Task.FromResult(new ProvisioningRunReadResult(run, "etag-created"));
+
+        public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
+        {
+            ReplaceCalls.Add((run, ifMatchEtag));
+            return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, $"etag-{Guid.NewGuid()}"));
+        }
+    }
+
+    /// <summary>Always returns Conflict -- simulates a concurrent writer having already advanced the document's ETag.</summary>
+    private sealed class ConflictRunRepository : IProvisioningRunRepository
+    {
+        public Task<ProvisioningRunReadResult?> ReadRunAsync(string customerId, string runId, CancellationToken ct)
+            => Task.FromResult<ProvisioningRunReadResult?>(null);
+
+        public Task<ProvisioningRunReadResult> CreateRunAsync(ProvisioningRun run, CancellationToken ct)
+            => Task.FromResult(new ProvisioningRunReadResult(run, "etag-created"));
+
+        public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
+            => Task.FromResult<ReplaceRunResult>(
+                new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(run, "etag-winner")));
+    }
+
+    /// <summary>Records every enqueued envelope in call order -- no dedup, so tests can inspect each individual dispatch.</summary>
+    private sealed class RecordingEnqueuer : IHandlerEnqueuer
+    {
+        private readonly List<HandlerEnvelope> _envelopes = new();
+        public IReadOnlyList<HandlerEnvelope> Envelopes => _envelopes;
+
+        public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken ct)
+        {
+            _envelopes.Add(envelope);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Records every ReleaseAsync call. TryAcquireAsync is NEVER called by
+    /// HandlerOutcomeApplier -- throws NotSupportedException if invoked so a
+    /// future regression that starts calling it fails loudly instead of
+    /// silently returning a default.
+    /// </summary>
+    private sealed class RecordingCustomerRunGuard : ICustomerRunGuard
+    {
+        public List<(string CustomerId, string RunId)> ReleaseCalls { get; } = new();
+        public bool ReturnTransientFailure { get; init; }
+
+        public Task<AcquireResult> TryAcquireAsync(string customerId, string runId, CancellationToken cancellationToken)
+            => throw new NotSupportedException("HandlerOutcomeApplier never calls ICustomerRunGuard.TryAcquireAsync.");
+
+        public Task<ReleaseResult> ReleaseAsync(string customerId, string runId, CancellationToken cancellationToken)
+        {
+            ReleaseCalls.Add((customerId, runId));
+            ReleaseResult result = ReturnTransientFailure
+                ? new ReleaseResult.TransientFailure(customerId, runId, "simulated transient guard failure")
+                : new ReleaseResult.Released(customerId, runId);
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>Minimal TimeProvider double -- avoids adding Microsoft.Extensions.TimeProvider.Testing as a new package dep (per tests/CLAUDE.md guidance).</summary>
+    private sealed class TestTimeProvider : TimeProvider
+    {
+        private readonly DateTimeOffset _now;
+        public TestTimeProvider(DateTimeOffset now) => _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
+}

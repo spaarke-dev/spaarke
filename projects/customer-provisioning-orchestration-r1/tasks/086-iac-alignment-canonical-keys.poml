@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>IaC alignment — update Bicep secret names + BFF app-setting keys to canonical (__ convention) + delete orphan flat keys</title>
+    <phase>H KV Federation Full Remediation</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','auth','azure-deployment'; modifies Bicep + BFF app-settings; deletes orphan KV keys with zero code binds; propagates canonical naming into IaC. FR-36 scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused Bicep + app-setting refactor to canonical names consumed from task 084 manifest; well-scoped, no design. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>084, 085</deps>
+    <tags>bff-api, auth, azure-deployment, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Align IaC (Bicep + BFF app-settings) to the canonical KV secret names produced by the task-084 manifest. Update Bicep secret sets + BFF app-setting keys to canonical `__` convention (e.g., AzureOpenAI__ApiKey). Delete orphan flat keys with 0 code binds: openai-api-key, aisearch-admin-key, docintel-key. Regenerate Bicep outputs via `Invoke-CatalogGenerator.ps1 --verify` and confirm zero drift. NEVER touch Dataverse-ClientSecret or BFF-API-ClientSecret.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Bicep KV secret sets, BFF app-setting canonical `__` convention, ADR-028 auth ceremony, and orphan-detection via grep (0 code binds = safe delete). Follow ADRs strictly.</role>
+
+  <goal>Bicep KV secret sets + BFF app-setting keys match the canonical names in the task-084 manifest; orphan flat keys (openai-api-key, aisearch-admin-key, docintel-key) are deleted per r1 dev scope; Invoke-CatalogGenerator.ps1 --verify exits 0; BFF /health returns 200 post-deployment.</goal>
+
+  <context>
+    <background>Per spec.md FR-36 + design.md §7.9: today Bicep + BFF app-settings hold non-canonical secret names (flat + kebab-case) alongside canonical (double-underscore). This task propagates the manifest's canonical names into IaC + deletes truly orphan flat keys (zero code binds). Owner directive #3: r1 dev scope only.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/modules/key-vault.bicep</file>
+      <file role="modify">infrastructure/bicep/customer.bicep (secret references)</file>
+      <file role="modify">infrastructure/bicep/platform.bicep (secret references)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json (canonical keys)</file>
+      <file role="canonical-reference">scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file role="canonical-reference">scripts/canonical-secret-catalog/generated/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084" status="pending">Manifest + generator baseline</dependency>
+      <dependency task="085" status="pending">Alias collapse for AI Search key complete (this task can now delete the orphan flat key aisearch-admin-key)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-36">SCOPE: Bicep + BFF app-setting keys match canonical `__` convention per task-084 manifest.</constraint>
+    <constraint source="spec.md §7.9">SCOPE: Delete orphan flat keys with 0 code binds (openai-api-key, aisearch-admin-key, docintel-key) — verify via grep FIRST.</constraint>
+    <constraint source="spec.md §7.9 BINDING pre-check">SCOPE: NEVER delete Dataverse-ClientSecret or BFF-API-ClientSecret; pre-check via grep + `az webapp config appsettings list`.</constraint>
+    <constraint source="ADR-028">SCOPE: Every canonical secret reference uses `@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=&lt;Canonical-Name&gt;)` shape.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching (app-settings change) — /conflict-check before PR; publish-size delta per NFR-01; fail-fast startup validation per NFR-05.</constraint>
+    <constraint source="NFR-05">SCOPE: If a canonical rename requires a new IOptions&lt;T&gt; binding, classify per Tier 1/2/3 + validate-on-start per r3 task 061 pattern.</constraint>
+    <constraint source="project">SCOPE: Deletion of orphan flat keys is dev-scope only per owner directive #3.</constraint>
+    <constraint source="project">SCOPE: Post-alignment, re-run Invoke-CatalogGenerator.ps1 --verify — expected exit 0 (Bicep outputs match manifest).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>IaC alignment to canonical KV secret names + orphan-key deletion</topic>
+    <files>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bicep KV secret reference" location="infrastructure/bicep/modules/key-vault.bicep">Existing secret-set output shape; refactor to canonical names.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-36 + §7.9 + task 084 manifest + task 085 alias collapse.</step>
+    <step order="1" name="Grep orphan check">Grep src/** for openai-api-key, aisearch-admin-key, docintel-key literal strings — expect zero code binds. If any bind found, STOP + escalate.</step>
+    <step order="2" name="Bicep align">Update Bicep secret sets + references to canonical `__` names per manifest.</step>
+    <step order="3" name="App-setting align">Update src/server/api/Sprk.Bff.Api/appsettings.json + related to canonical `__` keys with `@Microsoft.KeyVault(...)` references.</step>
+    <step order="4" name="Delete orphans">`az keyvault secret delete --vault-name {vault} --name openai-api-key` (repeat for aisearch-admin-key, docintel-key) — r1 dev scope only.</step>
+    <step order="5" name="Regenerate + verify">Run `Invoke-CatalogGenerator.ps1 --verify` — expect exit 0.</step>
+    <step order="6" name="Deploy + verify">Deploy BFF + Bicep; curl /health per env; expect 200.</step>
+    <step order="7" name="Publish size">Report BFF publish-size delta per NFR-01.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 086 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Manage Azure KV + App Service</tool>
+    <tool name="dotnet">Build + publish + test BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infrastructure/bicep/modules/key-vault.bicep</output>
+    <output type="config">infrastructure/bicep/customer.bicep</output>
+    <output type="config">infrastructure/bicep/platform.bicep</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bicep + BFF app-settings match canonical `__` names per task-084 manifest.</criterion>
+    <criterion testable="true">Orphan flat keys (openai-api-key, aisearch-admin-key, docintel-key) DELETED from dev KV — `az keyvault secret list` shows zero.</criterion>
+    <criterion testable="true">Dataverse-ClientSecret + BFF-API-ClientSecret intact (pre/post snapshot verified).</criterion>
+    <criterion testable="true">Invoke-CatalogGenerator.ps1 --verify exits 0.</criterion>
+    <criterion testable="true">BFF /health returns 200 post-deployment per env.</criterion>
+    <criterion testable="true">BFF publish-size delta reported per NFR-01.</criterion>
+    <criterion testable="true">Negative: pre-deletion grep of orphan candidates against src/** returns zero code binds; if any bind found, task STOPS + escalates.</criterion>
+    <criterion testable="true">dotnet build exits 0; zero analyzer warnings; zero new HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-36 + §7.9 + owner directive #3 (dev-only). Consumes task 084 + task 085.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

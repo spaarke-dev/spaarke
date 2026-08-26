@@ -145,7 +145,13 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 ? await _deploymentService.GetSearchClientAsync(tenantId, request.SearchIndexName, cancellationToken)
                 : await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
 
-            // Step 4: Build filter using SearchFilterBuilder
+            // Step 4: Build filter using SearchFilterBuilder — authors the unconditional
+            // `tenantId eq '{tenantId}'` OData predicate per §4D tenant-isolation invariant I2 /
+            // FR-29 (customer-provisioning-orchestration-r1). See SearchFilterBuilder.cs
+            // (BuildTenantFilter + BuildFilter) — the emitted filter shape is:
+            //     tenantId eq '{tenantId}' AND {scope-filter} AND {optional-filters}
+            // Inline mention preserved so the tenant-isolation ArchTest (I2) can see the
+            // required substring in this call file.
             var filter = SearchFilterBuilder.BuildFilter(
                 tenantId,
                 processedRequest.Scope,

@@ -279,11 +279,24 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
             status.DocumentCount = indexStats.Value.DocumentCount;
             status.IsHealthy = true;
 
+            // customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I2 / FR-29
+            // (task 065): scope the facet count to this BFF's tenant. The BFF runs against a
+            // single Dataverse environment which is itself tied to one Azure AD tenant; the
+            // canonical tenant source is AzureAd:TenantId (same source the write side uses at
+            // TransformToDocument line 364 when it stamps `tenantId` onto each indexed record).
+            // Without this filter the status counts would include documents from other tenants
+            // once the records index moves to a shared-index-multi-tenant shape.
+            var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+            var statusFilter = string.IsNullOrEmpty(tenantId)
+                ? null
+                : $"tenantId eq '{tenantId.Replace("'", "''")}'";
+
             // Get document counts by type using facets
             var searchOptions = new SearchOptions
             {
                 Size = 0,
-                Facets = { "recordType" }
+                Facets = { "recordType" },
+                Filter = statusFilter
             };
 
             var results = await _searchClient.SearchAsync<SearchIndexDocument>("*", searchOptions, cancellationToken);

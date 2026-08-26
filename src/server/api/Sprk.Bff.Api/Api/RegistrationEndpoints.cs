@@ -69,6 +69,7 @@ public static class RegistrationEndpoints
         DemoRequestDto request,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
+        DataverseEnvironmentService environmentService,
         EmailDomainValidator domainValidator,
         IOptions<DemoProvisioningOptions> options,
         ILogger<RegistrationDataverseService> logger,
@@ -171,7 +172,7 @@ public static class RegistrationEndpoints
 
             // Send admin notification (fire-and-forget — do not block the response)
             _ = SendAdminNotificationAsync(
-                emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
+                emailService, environmentService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
                 dataverseUrl: null, appId: null);
 
             // Send acknowledgement email to applicant (fire-and-forget)
@@ -441,9 +442,13 @@ public static class RegistrationEndpoints
 
     /// <summary>
     /// Sends admin notification email as fire-and-forget (must not block the HTTP response).
+    /// Resolves the default Dataverse environment from <see cref="DataverseEnvironmentService"/>
+    /// (customer-provisioning-orchestration-r1 task 081; supersedes the removed
+    /// <c>DemoProvisioningOptions.Environments</c> + <c>DefaultEnvironment</c> pair).
     /// </summary>
     private static async Task SendAdminNotificationAsync(
         RegistrationEmailService emailService,
+        DataverseEnvironmentService environmentService,
         DemoProvisioningOptions options,
         string trackingId,
         DemoRequestDto request,
@@ -455,29 +460,34 @@ public static class RegistrationEndpoints
     {
         try
         {
-            // Build record URL: prefer explicit parameters, fall back to Environments config (legacy)
-            string envUrl;
-            string? envAppId;
-            if (!string.IsNullOrEmpty(dataverseUrl))
+            // Build record URL: prefer explicit parameters, then fall back to the default
+            // Dataverse environment record read from Dataverse (via DataverseEnvironmentService).
+            // customer-provisioning-orchestration-r1 task 081 migrated this off the
+            // now-removed DemoProvisioningOptions.Environments/DefaultEnvironment pair —
+            // task 080's DataverseEnvironmentRecord.SelectDefault helper preserves the
+            // original selection semantics.
+            string? envUrl = dataverseUrl;
+            string? envAppId = appId;
+            if (string.IsNullOrEmpty(envUrl))
             {
-                envUrl = dataverseUrl;
-                envAppId = appId;
+                try
+                {
+                    var envs = await environmentService.GetActiveEnvironmentsAsync(CancellationToken.None);
+                    var defaultEnv = DataverseEnvironmentRecord.SelectDefault(envs);
+                    envUrl = defaultEnv.DataverseUrl;
+                    envAppId = defaultEnv.AppId;
+                }
+                catch (Exception envEx)
+                {
+                    // Environment lookup failed — log and fall back to a generic URL below so
+                    // the admin still gets the notification with a best-effort deep link.
+                    logger.LogWarning(
+                        envEx,
+                        "Failed to resolve default Dataverse environment for admin notification (TrackingId={TrackingId}, TraceId={TraceId}); falling back to generic Dataverse URL.",
+                        trackingId, traceIdentifier);
+                }
             }
-            else if (options.Environments.Length > 0)
-            {
-                var defaultEnv = options.Environments.FirstOrDefault(e => e.Name == options.DefaultEnvironment)
-                    ?? options.Environments.First();
-                envUrl = defaultEnv.DataverseUrl;
-                envAppId = defaultEnv.AppId;
-            }
-            else
-            {
-                // No environment config available — use a generic URL
-                envUrl = "https://spaarkedev1.crm.dynamics.com";
-                envAppId = null;
-            }
-            var appIdParam = !string.IsNullOrEmpty(envAppId) ? $"appid={envAppId}&" : "";
-            var recordUrl = $"{envUrl.TrimEnd('/')}/main.aspx?{appIdParam}pagetype=entityrecord&etn=sprk_registrationrequest&id={recordId}";
+            var recordUrl = BuildRegistrationRecordUrl(envUrl, envAppId, recordId);
 
             await emailService.SendAdminNotificationAsync(
                 adminEmails: options.AdminNotificationEmails,
@@ -502,6 +512,30 @@ public static class RegistrationEndpoints
                 "Failed to send admin notification for TrackingId={TrackingId}, TraceId={TraceId} — {ErrorMessage}",
                 trackingId, traceIdentifier, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Builds the model-driven-app deep link URL for a <c>sprk_registrationrequest</c> record.
+    /// Pure static helper (no I/O, no DI) so the URL-formation rule can be unit-tested
+    /// under <c>tests/unit/domain/Registration/</c> without spinning up the endpoint or
+    /// mocking <see cref="DataverseEnvironmentService"/>.
+    ///
+    /// Semantics preserved from the pre-task-081 inline code:
+    ///  - Trailing slash on <paramref name="envUrl"/> is trimmed before concatenation.
+    ///  - <paramref name="envAppId"/> when set becomes an <c>appid=</c> query parameter
+    ///    (preserved as <c>appid=…&amp;</c> immediately before <c>pagetype=</c>).
+    ///  - When <paramref name="envUrl"/> is null or empty, the historical generic
+    ///    fallback <c>https://spaarkedev1.crm.dynamics.com</c> is used so the admin
+    ///    still receives a best-effort deep link if environment lookup fails.
+    /// customer-provisioning-orchestration-r1 task 081.
+    /// </summary>
+    internal static string BuildRegistrationRecordUrl(string? envUrl, string? envAppId, Guid recordId)
+    {
+        var effectiveUrl = string.IsNullOrEmpty(envUrl)
+            ? "https://spaarkedev1.crm.dynamics.com"
+            : envUrl;
+        var appIdParam = !string.IsNullOrEmpty(envAppId) ? $"appid={envAppId}&" : "";
+        return $"{effectiveUrl.TrimEnd('/')}/main.aspx?{appIdParam}pagetype=entityrecord&etn=sprk_registrationrequest&id={recordId}";
     }
 
     /// <summary>

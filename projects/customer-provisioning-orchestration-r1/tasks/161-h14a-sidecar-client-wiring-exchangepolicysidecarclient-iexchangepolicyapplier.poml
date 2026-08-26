@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="161" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H14a: sidecar client wiring (ExchangePolicySidecarClient : IExchangePolicyApplier) + envelope round-trip contract test</title>
+    <phase>C'' Wave G-6 -- Integration wiring</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires the ONLY Class-C residual in the whole handler fleet -- the sidecar client is the seam through which H14a's real functionality (T4 trap) flows; a contract mismatch here silently breaks Exchange policy application.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius per parent task instructions (sidecar-adjacent, security-sensitive Exchange-admin-capability wiring) -- Opus tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>114, 160</deps>
+    <tags>l2-controlplane, job-handler, sidecar, option-d</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace ExchangePolicyScriptApplier (which shells to Set-ExchangeApplicationAccessPolicy.ps1 today) with ExchangePolicySidecarClient : IExchangePolicyApplier -- an HTTP client calling task 114's sidecar image at http://localhost:8091/apply-policy per DS-1b §3's exact message contract: POST { tenantId, expectedAppIds, policyScopeGroupId, descriptionPrefix, correlationId: RunId, timeoutSeconds } -&gt; 200 { outcome: Success|Failure|AlreadyCompliant, policiesApplied, diagnostic }. Map the sidecar's structured response onto HandlerResult EXACTLY as ExchangePolicyScriptApplier maps exit codes today (a mapping-preserving swap, not a new outcome taxonomy). Auth: localhost-only binding + a per-boot shared-secret header sourced from platform KV (defense-in-depth per DS-1b -- the network namespace is already private). One retry with backoff inside the client for transient EXO throttling (per DS-1b §3); everything else defers to the run-level §4C retry machinery, exactly like every other collaborator.</prompt>
+
+  <role>SPAARKE platform developer. Expert in localhost-only sitecontainer HTTP client wiring, shared-secret header authentication, and outcome-envelope mapping onto an existing HandlerResult taxonomy.</role>
+
+  <goal>ExchangePolicySidecarClient : IExchangePolicyApplier exists, replacing ExchangePolicyScriptApplier. It POSTs to the sidecar's /apply-policy endpoint with correlationId=RunId, includes the per-boot shared-secret header, retries once with backoff on transient failure, and maps the response envelope onto HandlerResult using the SAME outcome semantics the exit-code mapper used (Success/Failure/AlreadyCompliant -&gt; the handler's existing 3-way classification). A contract test round-trips a synthetic request/response through both the client's serialization AND the sidecar Listener.ps1's (task 114) deserialization, proving the envelope shape matches on both sides.</goal>
+
+  <context>
+    <background>DS-1b §3 designs this exact client-sidecar pair to the floor: 'the C# ExchangePolicySidecarClient : IExchangePolicyApplier maps it onto HandlerResult exactly as ExchangePolicyScriptApplier maps exit codes today. No Service Bus, no shared-volume file drop: one caller, one callee, request/response semantics.' DS-1b §3's idempotency note is explicit: 'No new idempotency layer. The script is internally get-before-set idempotent... the handler's L3 dedup (CompletedPhases) and the §4C taxonomy stay authoritative.' Sidecar HTTP failures map: connection-refused/timeout -&gt; InfraFault (Resumable, reconciler re-enqueues); structured Failure envelope -&gt; classified by existing H14 logic.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14aExchangePolicySubHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/ExchangePolicySidecarClient.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/ExchangePolicyScriptApplier.cs (retire)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Listener.ps1 (task 114's output -- the contract counterpart)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="114" status="pending">The sidecar image + its message-contract implementation this client calls</dependency>
+      <dependency task="160" status="pending">H14's KV reader swap -- the shared-secret header value is read via the swapped reader</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-1b §3 auth">Main -&gt; sidecar leg: localhost-only binding + a per-boot shared-secret header sourced from platform KV (defense-in-depth; the network namespace is already private). This client MUST include the shared-secret header on every request.</constraint>
+    <constraint source="DS-1b §3 idempotency">No new idempotency layer in the client -- rely on the sidecar script's internal get-before-set idempotency + the handler's existing L3 CompletedPhases dedup + §4C taxonomy. Do NOT add a client-side dedup cache.</constraint>
+    <constraint source="DS-1b §3 failure mapping">Connection-refused/timeout -&gt; InfraFault (Resumable); structured Failure envelope -&gt; classified by H14's EXISTING logic (do not introduce a new outcome taxonomy alongside the existing exit-code-derived one).</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H14a sidecar client wiring</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="Exit-code-to-outcome mapping (preserve)" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/ExchangePolicyScriptApplier.cs">The existing exit-code mapper's Success/Failure/AlreadyCompliant classification is the authoritative outcome taxonomy this client's response-envelope mapping MUST preserve exactly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-1b §3 in full plus ExchangePolicyScriptApplier.cs's existing exit-code mapping.</step>
+    <step order="1" name="Client">Author ExchangePolicySidecarClient : IExchangePolicyApplier -- HttpClient targeting http://localhost:8091/apply-policy, with correlationId=RunId, timeoutSeconds bound from config.</step>
+    <step order="2" name="Shared-secret header">Wire the per-boot shared-secret header, read via task 160's SecretClientKvReader.</step>
+    <step order="3" name="Retry">Add one retry with backoff for transient EXO-throttling-class failures inside the client (per DS-1b §3), NOT for infrastructure connection failures (those map to InfraFault instead).</step>
+    <step order="4" name="Response mapping">Map outcome/policiesApplied/diagnostic onto HandlerResult using the SAME 3-way classification ExchangePolicyScriptApplier's exit-code mapper used.</step>
+    <step order="5" name="Wire up">Replace ExchangePolicyScriptApplier in H14a's owning module with the new client.</step>
+    <step order="6" name="Contract test">Author an envelope round-trip test: serialize a request via the client's serialization, deserialize it as task 114's Listener.ps1 would (or against a stub server implementing the SAME contract), and vice versa for the response -- proving both sides agree on the JSON shape.</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sidecar's actual JSON response shape (once task 114's Listener.ps1 is testable) diverges from what this client assumes (a field name mismatch, for instance), STOP and reconcile BOTH sides together rather than silently adapting only the client — a silent one-sided fix reintroduces exactly the contract-drift risk this task's round-trip test exists to catch.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/ExchangePolicySidecarClient.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/IntegrationWiring/ExchangePolicySidecarClientContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo\|Set-ExchangeApplicationAccessPolicy' in ExchangePolicySidecarClient.cs returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms every outbound request includes the shared-secret header.</criterion>
+    <criterion testable="true">A test confirms correlationId in the outbound request equals the RunId of the invoking handler context.</criterion>
+    <criterion testable="true">A round-trip contract test confirms the client's request serialization AND response deserialization match the DS-1b §3 envelope shape exactly (field names, types).</criterion>
+    <criterion testable="true">A test confirms a connection-refused/timeout response maps to InfraFault (Resumable), while a structured Failure envelope maps via H14's EXISTING classification logic (not a new taxonomy).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- IExchangePolicyApplier already exists as the seam ExchangePolicyScriptApplier implements today; this task provides a second implementation behind the SAME interface, not a new one. Extension -- the sidecar's message contract is entirely DS-1b's own design (§3), authored specifically for this reuse. Cost-of-doing-nothing -- H14a (the T4 trap owner -- the ONE real security-hardening step in the fleet with no SDK equivalent, per DS-1b §0's verified finding) has no way to reach the sidecar's functionality at all; the whole point of building the sidecar (task 114) is unrealized without this client.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="203d" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Apply Class-A punch list — Sub-phase 203d nice-to-have POST-186 (3 rows: skill Step 6 read-verify + h9-workflow cadence runbook + SC #11 env-var checks)</title>
+    <phase>Phase Pre-Live-Fire — Class-A punch list nice-to-have POST-186</phase>
+    <gate>deferred-post-186</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small polish + doc + code touch: skill Step 6 semantics change (A32), operator runbook update (A33), SC #11 env-var check wiring (A34). A34 touches code (`src/server/api/Sprk.Bff.Api/**` may be affected via H13 envelope) but the change is small. Given this sub-phase runs POST-186 (after E2E ceremony proves the pipeline works), rigor is STANDARD unless A34 grep-verify reveals BFF touch requiring FULL escalation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small polish tasks fully specified from punch list rows A32/A33/A34. Per user directive parent task Model-tier per sub-phase table: "203d: sonnet @ high (small polish)".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to `.claude/skills/provision-environment/SKILL.md` (A32). Sub-Agent Write Boundary (root CLAUDE.md §3) forbids sub-agents from editing `.claude/**`.</parallel-reason>
+    <deps>186</deps>
+    <tags>provisioning, skill-directive, root-claude, docs, l3-skill</tags>
+    <estimated-effort>5 hours (per task 202 punch list: A32(1) + A33(1) + A34(3) = 5h)</estimated-effort>
+  </metadata>
+
+  <prompt>Apply Class-A rows A32, A33, A34 from `notes/task-202-punch-list.md` — the nice-to-have sub-phase of task 203, running AFTER task 186 E2E completes. Row-by-row: (a) grep-verify current repo state BEFORE applying; (b) if `already-applied`, annotate row + skip; (c) if `open`, apply per row landing-spot + effort. Scope: change `/provision-environment` SKILL.md Step 6 from `write sprk_setupstatus=Ready` to `read-verify` (A32 — H13 is now authoritative writer per task 184/185); update h9-workflow cadence runbook to document "BFF-artifact workflow MUST run before customer provisioning" OR add `workflow_run` follow-on trigger (A33); wire SC #11 dev-leakage + env-var presence checks — L2 currently lacks Dataverse identity on H13 envelope (A34 per audit-gap-22). Publish-size verification: A34 MAY touch `src/server/api/Sprk.Bff.Api/**` — grep-verify BEFORE editing; if BFF touched → NFR-01 publish-size ≤60 MB verification REQUIRED. Amend punch list annotations. Do NOT commit — main session handles commit after review.</prompt>
+
+  <role>SPAARKE L3 operator skill author + docs maintainer + provisioning envelope engineer. Expert in: `/provision-environment` SKILL.md Step 6 flow (post-task-184's real Dataverse Ready-writer takeover); GitHub Actions cadence + `workflow_run` follow-on triggers (per h9-artifact-publish-ci-coord); H13 envelope contents (per SC #11 audit-gap-22 — L2 currently lacks Dataverse identity for envelope enrichment).</role>
+
+  <goal>All 3 in-scope Class-A rows annotated with `last_known_status_after_execution` in `notes/task-202-punch-list.md`. `/provision-environment` SKILL.md Step 6 semantics changed from write to read-verify — post-task-184's H13-authoritative-writer takeover, the skill no longer writes `sprk_setupstatus=Ready` itself but reads + verifies H13 already wrote it (A32). h9-workflow cadence runbook OR CI workflow `workflow_run` follow-on trigger implements "BFF-artifact workflow MUST run before customer provisioning" ordering constraint (A33). SC #11 dev-leakage + env-var presence checks wired into L2 H13 envelope enrichment — Dataverse identity now flows through (A34). If A34 touched BFF, NFR-01 publish-size reported with delta vs 44.96 MB baseline (expected ≈0 MB).</goal>
+
+  <context>
+    <background>Task 202 punch list §A-blocks-E2E NO lists 3 nice-to-have rows explicitly marked "can land AFTER 186" (task 186 is the E2E live-fire ceremony). These are minor polish: (A32) semantic change to skill Step 6 now that H13 (task 185's aggregation + task 184's Dataverse writer) is authoritative; (A33) operator runbook cadence documentation for the h9 BFF-artifact publish workflow; (A34) SC #11 audit-gap-22 fix — L2 was missing Dataverse identity on the H13 envelope, so dev-leakage + env-var presence checks were skipped. Sub-phase 203d runs POST-186 so any lessons from task 186's live-fire can be folded into these three rows before applying (e.g. if task 186 surfaces a real-world Step 6 read-verify race condition, A32 can adapt).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/post-authoring-audit-2026-08-20.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/h9-artifact-publish-ci-coord.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r1-gap-analysis-2026-08-18.md</file>
+      <file role="target-modify">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="target-modify-maybe">.github/workflows/bff-artifact-publish.yml</file>
+      <file role="target-modify-maybe">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file role="target-modify-maybe">src/server/services/Sprk.Provisioning.ControlPlane.Core/**/H13*.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="186" status="pending">E2E ceremony completes first; any real-world lessons fold into this sub-phase before applying</dependency>
+      <dependency task="184" status="pending">H13 authoritative Ready-writer live (A32 read-verify pivot only makes sense if writer is authoritative)</dependency>
+      <dependency task="185" status="pending">H13 aggregation live (A32 read-verify reads what 185 wrote)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each row's actual state BEFORE applying. A34 in particular: grep for `Dataverse identity` in H13 envelope construction to see if audit-gap-22 was patched during Waves G-7/G-8.</constraint>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary">Edits to `.claude/skills/provision-environment/SKILL.md` (A32) MUST occur in MAIN SESSION.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF Hygiene NFR-01">A34 may or may not touch BFF (`src/server/api/Sprk.Bff.Api/**`) depending on whether H13 envelope enrichment lives in L2 (`Sprk.Provisioning.ControlPlane.*`) or crosses into BFF-shared code. Grep-verify BEFORE editing. If BFF touched: MUST report publish-size + delta vs 44.96 MB baseline.</constraint>
+    <constraint source="A32 semantics">SKILL.md Step 6 was originally "write sprk_setupstatus=Ready" as an interim measure while H13 was a placeholder. Task 184's real Dataverse writer makes H13 authoritative. Skill Step 6 becomes: (a) poll for H13-written Ready status; (b) verify it landed; (c) HARD STOP + report if not written within expected window (per task 185 aggregation timing).</constraint>
+    <constraint source="A33 approaches">Row A33 offers TWO approaches: (i) OPERATOR RUNBOOK — document "BFF-artifact workflow MUST run before customer provisioning" in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §Operator Runbook; (ii) CI-ENFORCED — add `workflow_run` follow-on trigger in the customer-provisioning workflow that depends on `bff-artifact-publish.yml` completion. Choose per PR reviewer preference — CI-enforced is stronger but higher-touch.</constraint>
+    <constraint source="A34 env-var check scope">SC #11 checks include: dev-leakage (no dev URLs in prod env vars), env-var presence (all required Tier-1 IOptions vars set at boot). Wire into H13 envelope by adding Dataverse identity (per audit-gap-22) so the check can query the target env's actual settings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-A punch list execution — nice-to-have POST-186 (skill Step 6 + h9 cadence + SC #11 env-var)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/post-authoring-audit-2026-08-20.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/h9-artifact-publish-ci-coord.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r1-gap-analysis-2026-08-18.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL block (STANDARD, high effort). Verify task 186 completed (grep TASK-INDEX.md for 186 status). Read `notes/task-202-punch-list.md` §CLASS A rows A32, A33, A34. Read post-186 lessons (if any surfaced) to fold into row-application.</step>
+    <step order="1" name="Grep-verify each row BEFORE applying">For each row A32, A33, A34: run row-specific grep. A32: check SKILL.md Step 6 current wording. A33: check for existing `workflow_run` trigger in customer-provisioning workflow. A34: check H13 envelope construction for Dataverse identity presence.</step>
+    <step order="2" name="A32 apply — skill Step 6 read-verify pivot">EDIT `.claude/skills/provision-environment/SKILL.md` Step 6: replace write-of-sprk_setupstatus with poll-and-verify H13-written Ready status. Include timeout + HARD STOP + report if not written.</step>
+    <step order="3" name="A33 apply — h9-workflow cadence (choose approach)">CHOOSE OPERATOR RUNBOOK vs CI-ENFORCED per constraint. If OPERATOR RUNBOOK: EDIT `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §Operator Runbook. If CI-ENFORCED: EDIT relevant `.github/workflows/*.yml` to add `workflow_run` trigger. Document choice + rejected alternative.</step>
+    <step order="4" name="A34 apply — SC #11 env-var checks + Dataverse identity on H13 envelope">Grep-verify H13 envelope construction. Add Dataverse identity to envelope (per audit-gap-22). Wire SC #11 dev-leakage check + env-var presence check to query envelope + verify. If BFF touched: run `dotnet publish` + report publish size delta.</step>
+    <step order="5" name="Build + test">Run `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` (and Sprk.Bff.Api if A34 touched BFF) — must succeed.</step>
+    <step order="6" name="Amend punch list annotations">EDIT `notes/task-202-punch-list.md` — add `last_known_status_after_execution` per row A32, A33, A34. Append §203d execution results subsection with A33 approach-choice + A34 BFF-touch outcome (+ publish size delta if applicable).</step>
+    <step order="7" name="Report">Emit concise summary: rows applied, rows already-applied, rows deferred (with reason), A33 approach chosen, A34 BFF-touch status + publish size delta (if applicable), any post-186 lessons folded in. Do NOT commit — main session handles commit after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 186 has NOT completed yet, ABORT — this sub-phase is explicitly `gate: deferred-post-186` per parent task instructions. Do not apply POST-186 rows before 186 lands.</trigger>
+    <trigger>If A34 grep-verify shows the H13 envelope enrichment WILL cross into BFF-shared code AND publish-size delta &gt;+1 MB, STOP — this is unexpected for a nice-to-have polish row; escalate for scope review.</trigger>
+    <trigger>If A32 read-verify shows H13 (task 184/185) is NOT actually authoritative in current live state (e.g. skill Step 6 write is still the only writer), STOP — this is a task 184/185 completion audit failure, not a Step 6 pivot opportunity.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every in-scope Class-A row (A32, A33, A34) has `last_known_status_after_execution` annotated in `notes/task-202-punch-list.md`.</criterion>
+    <criterion testable="true">SKILL.md Step 6 grep for "write sprk_setupstatus" returns 0 (replaced with poll/verify semantics).</criterion>
+    <criterion testable="true">A33: either `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §Operator Runbook documents the BFF-artifact ordering constraint OR a `workflow_run` trigger exists in the customer-provisioning workflow.</criterion>
+    <criterion testable="true">H13 envelope construction includes Dataverse identity (grep for Dataverse-related fields in envelope builder).</criterion>
+    <criterion testable="true">SC #11 dev-leakage + env-var presence checks are wired (grep for "dev-leakage" or "SC11" or equivalent in H13 envelope-consuming code).</criterion>
+    <criterion testable="true">`dotnet build` succeeds against affected projects.</criterion>
+    <criterion testable="true">If A34 touched BFF: publish size + delta reported in task summary; delta ≤+1 MB; absolute ≤60 MB.</criterion>
+    <criterion testable="true">Task 186 completion status verified BEFORE this sub-phase applies rows (per gate constraint).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing — task 202 identified 3 nice-to-have rows explicitly deferred past task 186. Extension — 203d applies them AFTER 186 so any real-world lessons fold in. Cost-of-doing-nothing — without A32 the skill still writes Ready itself (redundant with H13's authoritative write; harmless but polish); without A33 operators may forget the BFF-artifact ordering constraint (SESSION 5 fail-cycle risk); without A34 SC #11 dev-leakage + env-var checks stay skipped (audit gap remains open). None of these BLOCK task 186; all IMPROVE the operator experience going forward. If A34 touches BFF, NFR-01 publish-size verification REQUIRED (baseline 44.96 MB; expected delta ≈0 MB).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

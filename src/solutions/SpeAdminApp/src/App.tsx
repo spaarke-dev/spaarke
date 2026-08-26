@@ -7,6 +7,7 @@ import {
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { BuProvider, useBuContext } from "./contexts/BuContext";
 import { AppShell, type SpeAdminPage } from "./components/layout/AppShell";
+import { PageErrorBoundary } from "./components/layout/PageErrorBoundary";
 import { DashboardPage } from "./components/dashboard/DashboardPage";
 import { FileBrowserPage } from "./components/files/FileBrowserPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -200,6 +201,13 @@ const AppContent: React.FC<AppContentProps> = ({
        * ContainersPage:       task SPE-033 (placeholder still shown)
        * ContainerTypesPage:   task SPE-061
        */}
+      {/*
+       * Wraps the routed page only — never the shell. A render crash inside one page must not take
+       * the nav rail and pickers down with it, because navigating away is the operator's escape
+       * hatch. Before this boundary existed, any such crash unmounted the entire app and showed a
+       * blank white page (UAT 2026-08-25, Audit Log).
+       */}
+      <PageErrorBoundary pageKey={activePage}>
       {activePage === "dashboard" ? (
         <DashboardPage />
       ) : activePage === "file-browser" ? (
@@ -255,6 +263,7 @@ const AppContent: React.FC<AppContentProps> = ({
           </Text>
         </div>
       )}
+      </PageErrorBoundary>
     </AppShell>
   );
 };
