@@ -353,7 +353,7 @@ different coverage.
 > | Option | Effect on the two-hop gap |
 > |---|---|
 > | **(A)** | Doesn't close it, but routes every path through **one** place where closing it later is a single change |
-> | **(B)** | **Cannot** fix it on the create path at all — that path takes its container from provisioning's return value and never asks the resolver, so closing it would need a *third* mechanism. **A second argument against (B), independent of the F-8 silent-skip one.** |
+> | **(B)** | **Cannot** fix it on the create path at all, so closing it would need a *third* mechanism. **A second argument against (B), independent of the F-8 silent-skip one.** ⚠️ **See the mechanism correction below — the conclusion holds but the note's stated reason does not.** |
 > | **(C)** | Closes it server-side in one place; client untouched |
 >
 > It is **not a prerequisite** for 076 (closing it needs the Phase 3 ancestor stamp, 050–055). It is a
@@ -365,6 +365,36 @@ different coverage.
 > about?"** So whichever resolution point is chosen for 076 should be checked against the two-hop case
 > deliberately, rather than having that case settled as a side effect. Phase 3's ancestor stamp
 > (tasks 050–055) is the other half of the same answer.
+
+### ⚠️ MECHANISM CORRECTION — verified in main session, fix in the 076 note before the operator acts
+
+The 076 escalation note argues against option (B) by saying the create path *"takes its container from
+provisioning's return value and never asks the resolver."* The gate reviewer challenged that and
+**deliberately did not investigate**, since 076 is escalated and outside its scope. **I verified it. The
+reviewer is right — the stated reason is wrong.**
+
+`src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts`:
+
+- `:283-285` — the `formValues.isSecure === true` branch sets **only** `entity['sprk_issecure'] = true`.
+- `:290-293` — `EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults)` then runs
+  **unconditionally**, with **no suppression for secure projects**.
+
+So a secure project's create payload is stamped with `sprk_containerid` from the **client-side BU
+cascade** — not from provisioning's return value. (I did not check whether provisioning later overwrites
+it, so both writes may occur.)
+
+**Why the distinction changes the argument, not the conclusion:**
+
+- **Conclusion unchanged, arguably stronger** — (B) still cannot reach the create path through the resolver.
+- **But the argument type flips.** A client-side create-time write is a **scope** argument against (B) —
+  the write is inside 076's own declared scope, whose POML title literally reads *"stop the wizard
+  stamping secure records"*. A different-subsystem write would have been an **architectural** argument.
+  An operator weighing A vs B deserves the accurate one.
+- **It also corroborates 075's finding #2** (`AssociateToStep.tsx:154-160` fails OPEN): the wizard
+  stamping secure records unconditionally is the same class of already-shipped defect, on the create side.
+
+**Action:** correct that sentence in `notes/task-076-callsite-inventory-and-ESCALATION.md` §2 when the
+worktree merges, before the decision is made on it.
 
 Agent's recommendation is **option (A)**: wizards keep resolving the BU container at open (INV-7
 unchanged) but treat it as the **fallback only**, and each upload path asks the resolver immediately
