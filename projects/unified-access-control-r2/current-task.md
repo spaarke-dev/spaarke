@@ -10,8 +10,46 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **080 — cross-record search — code + tests COMPLETE, UNCOMMITTED.** Wave 1 (070/071/074) pushed at `c5143a776` |
-| **Step** | 080 at Step 5 of 6. Remaining: **Step 9.5 quality gates (`code-review` + `adr-check`) NOT YET RUN**, then commit |
+| **Task** | ✅ **080 COMPLETE — committed `d6d156ac1`, pushed.** Wave 1 (070/071/074) at `c5143a776`. Phase 0c: **070 ✅ 071 ✅ 074 ✅ 080 ✅** |
+| **Step** | Between tasks. Working tree clean. **PR #825 open as DRAFT** — CI running, verdict not yet seen |
+| **CI on #825** | ✅ **ASSESSED + RESOLVED.** 51 check-runs. `Changed-Surface Integration Smoke` **PASSED** (first run ever on this branch). Two failures, **neither ours** — see the CI block below. Master merged (285 commits, 0 conflicts) |
+
+### ✅ CI assessed and resolved 2026-08-26 — 3 findings, none of them regressions
+
+**PR #825 needed a close+reopen to get CI at all.** The `pull_request` event produced **zero** runs on
+creation (`check-runs` total = 0) despite: no `draft` gating anywhere, Actions enabled
+(`allowed_actions: all`), all workflows `active`, `mergeStateStatus: CLEAN`, and `pull_request` firing
+normally for other branches. Reopening fired it (51 check-runs). **This is a SECOND, independent way this
+branch ends up with no CI** — the first was structural (no PR ⇒ no triggers). Both look identical from
+the outside: a branch that appears tested because local runs are green.
+
+| CI failure | Verdict |
+|---|---|
+| `Tier 1 / Arch Tests` — census `expected 109, found 111` | **Our forcing function working.** CI tests the MERGE with master; master added 2 route-registering files. **Fixed**: census → 111 with both files classified inline |
+| `Tenant Isolation (I1–I5)` | **Pre-existing red on master** — master's own latest `SDAP CI` run 32969447565 fails this identical job |
+
+**Proved no regressions the honest way**: ran the full ArchTests in a throwaway worktree at pristine
+`origin/master` → **9 failures**; same suite on this branch → **9 failures**, `comm` diff of the sorted
+names is **empty both directions**. Master is red; we add nothing. (FR-27 ×2, FR-28, FR-29, FR-32, FR-F1,
+FR-F2, ADR-010, ServiceBusClientGuard — all master's, none ours. Worth telling whoever owns them.)
+
+### 🔴 TWO NEW FINDINGS from the CI work
+
+1. **`Auth Smoke` has NEVER fired for any authorization filter change.** Its path filter used
+   `**/Authorization*.cs`, which anchors at the START of the filename — and all **17** real filters are
+   named `<Subject>AuthorizationFilter.cs` (`DocumentAuthorizationFilter`,
+   `SemanticSearchAuthorizationFilter`, …). The glob matched **zero** of them. **FIXED** in
+   `ci-tier1-blocking.yml`: added `Api/Filters/**`, leading-wildcard `**/*Authorization*.cs`,
+   `**/*Auth*Filter*.cs`, `Spaarke.Core/Auth/**`, `*AccessDataSource*.cs`. Same failure shape as the
+   original vulnerability: a gate that LOOKS like it covers auth while covering none of the auth code.
+2. **Task 081 FILED — cross-tenant read** in master's new
+   `Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs`. It takes `tenantId` from the QUERY STRING
+   and treats the caller's JWT `tid` as a mere *fallback*, passing the caller-supplied value straight to
+   `ITenantContainerResolver.ResolveAsync` with no match check. Tenant A can resolve tenant B's SPE
+   container id; the 400-vs-200 "tenant not served by this stamp" split is also a tenant-enumeration
+   oracle. **Third hole the 074 forcing function has produced** (after 077, 078) and the first from being
+   *made to classify* a new file rather than a rule firing directly.
+| **080 gates** | Step 9.5 ran as mechanical ADR checks on the diff: no new `.WithClientSecret` (ADR-028 A4) · no `Microsoft.Graph` outside Infrastructure (007) · no `IMemoryCache` (009) · no new interface (010) · no ADR-038 banned test shapes · both new `Results.Problem` sites carry error codes. **One accepted gap**: the new "Caller context not available" 500 has no error code, matching its two existing siblings in the same file — coding one of three identical 500s is worse than either consistent option |
 | **Gates so far** | Unit **11,084 / 0** (82 skip, unchanged vs Wave 1) · Integration SemanticSearch **81/81** · ArchTests **79/79** · code-page jest `useSemanticSearch` **48/48** · publish **43.76 MB** (ceiling 60) · CVE **clean**. **Only Step 9.5 (`code-review` + `adr-check`) remains** |
 | **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR — not yet opened. Nothing blocks it |
 | **Next Action** | Run `/code-review` + `/adr-check` on the 6 modified files (listed below), then commit 080. Then **072**, or **Wave 2 (075 → 076)**. 073/077/078/079 filed and ready |

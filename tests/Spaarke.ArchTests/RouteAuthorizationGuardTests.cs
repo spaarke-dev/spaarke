@@ -298,9 +298,32 @@ public class RouteAuthorizationGuardTests
     };
 
     // Census: the total routing surface. A new endpoint file must be classified before the build goes
-    // green. 108 files under Api/** plus Infrastructure/DI/EndpointMappingExtensions.cs (health probes and
-    // the module aggregator). See TheEndpointFileCensusIsPinned for the maintenance procedure.
-    private const int ExpectedEndpointFileCount = 109;
+    // green. See TheEndpointFileCensusIsPinned for the maintenance procedure.
+    //
+    // 109 -> 111 (2026-08-26, unified-access-control-r2 task 080, on merging 285 commits of master).
+    // The ratchet fired for the second time in two days and was RIGHT both times. Master added two
+    // route-registering files, and classifying them is what the count exists to force:
+    //
+    //   Endpoints/Onboarding/ConsentCallbackEndpoint.cs
+    //     MapPost + AllowAnonymous(). Legitimately anonymous — it is an external OAuth consent
+    //     redirect target, so the caller cannot hold a token yet. Not a document/Dataverse route.
+    //     NOT added to GovernedFiles.
+    //
+    //   Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs
+    //     MapGet + RequireAuthorization() and nothing else. Classifying it surfaced a CROSS-TENANT
+    //     READ, filed as task 081: it takes tenantId from the QUERY STRING and treats the caller's
+    //     JWT `tid` claim as a mere fallback, so an authenticated caller in tenant A can resolve
+    //     tenant B's SPE container id by passing ?tenantId={B}. The 400-vs-200 split on "tenant not
+    //     served by this stamp" is also a tenant-enumeration oracle. Its own doc comment claims
+    //     "parity with all other BFF endpoints" for auth and it carries a Placement Justification, so
+    //     it passed review with this in it.
+    //     NOT added to GovernedFiles — this guard's governed scope is per-DOCUMENT/record
+    //     authorization, and a tenant-scoping defect is a different class. Task 081 owns the fix;
+    //     forcing it in here would blur what Rule A means.
+    //
+    // Both files are outside the governed set, so this is a pure count bump — which is exactly the
+    // outcome the census is designed to make deliberate rather than silent.
+    private const int ExpectedEndpointFileCount = 111;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

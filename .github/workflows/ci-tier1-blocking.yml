@@ -120,6 +120,28 @@ jobs:
               - 'src/server/api/Sprk.Bff.Api/**/Claims*.cs'
               - 'src/server/api/Sprk.Bff.Api/**/Authorization*.cs'
               - 'src/server/api/Sprk.Bff.Api/**/Authentication*.cs'
+              # ---------------------------------------------------------------
+              # Added 2026-08-26 by unified-access-control-r2 task 080.
+              #
+              # The five patterns above matched ZERO of the BFF's 17 per-resource
+              # authorization filters. `**/Authorization*.cs` anchors at the START of the
+              # filename, and every real filter is named <Subject>AuthorizationFilter.cs —
+              # DocumentAuthorizationFilter, SemanticSearchAuthorizationFilter,
+              # RecordSearchAuthorizationFilter, and 14 more. So `Auth Smoke` had never once
+              # fired for a change to the code that actually performs authorization.
+              #
+              # This is the same failure shape the project keeps meeting: a gate that LOOKS
+              # like it covers authorization while covering none of the authorization code.
+              # It is why task 074 needs its Rule B ("does the filter consult an
+              # authorization service?") in addition to Rule A ("is a filter attached?").
+              #
+              # Leading wildcard, plus the filter directory itself, so a filter added under a
+              # new name is still classified.
+              - 'src/server/api/Sprk.Bff.Api/Api/Filters/**'
+              - 'src/server/api/Sprk.Bff.Api/**/*Authorization*.cs'
+              - 'src/server/api/Sprk.Bff.Api/**/*Auth*Filter*.cs'
+              - 'src/server/shared/Spaarke.Core/Auth/**'
+              - 'src/server/shared/Spaarke.Dataverse/*AccessDataSource*.cs'
             ai_surface:
               - 'src/server/api/Sprk.Bff.Api/Services/Ai/**'
               - 'src/server/api/Sprk.Bff.Api/Endpoints/Ai*.cs'

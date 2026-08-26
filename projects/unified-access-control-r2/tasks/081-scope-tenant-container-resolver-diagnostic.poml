@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="unified-access-control-r2">
+  <metadata>
+    <title>Scope the tenant-container-resolver diagnostic to the caller's own tenant — the query string currently overrides the JWT tid claim</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-tenant read on an authenticated BFF route. Tenant isolation is the one boundary this platform cannot get wrong.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect and the fix are both small and unambiguous — bind tenantId to the caller's claim. No design judgement required.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Tiny surface, but the caller (an L2 invariant probe) must keep working, and that is where the care goes.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to one endpoint file plus its tests; no shared seam.</parallel-reason>
+    <deps></deps>
+    <tags>bff-api, api, auth, security, tenant-isolation</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <origin>Found 2026-08-26 by task 080 while reconciling task 074's endpoint-file census after merging 285 commits of master. The census forced classification of two new route-registering files; reading one of them surfaced this. NOT found by any route inventory — the file did not exist when the four prior enumerations ran.</origin>
+  </metadata>
+
+  <prompt>`GET /api/diagnostics/tenant-container-resolver` reads `tenantId` from the query string and falls back to the caller's JWT `tid` claim only when the query parameter is absent. The caller-supplied value is passed straight to `ITenantContainerResolver.ResolveAsync`, with no check that it matches the caller's own tenant.</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>The diagnostic can only resolve the caller's OWN tenant, and the L2 invariant probe still works.</goal>
+
+  <context>
+    <background>THE DEFECT — `src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs`:
+
+```csharp
+var tenantId = httpContext.Request.Query["tenantId"].FirstOrDefault();
+if (string.IsNullOrWhiteSpace(tenantId))
+{
+    tenantId = httpContext.User?.FindFirst("tid")?.Value ?? ...;   // FALLBACK, not authority
+}
+...
+result = await resolver.ResolveAsync(tenantId, cancellationToken);  // caller-supplied value, unchecked
+```
+
+The JWT claim is the fallback and the query string is the authority. That is backwards. An authenticated
+caller in tenant A can pass `?tenantId={tenant-B-guid}` and receive tenant B's resolved SPE container id.
+
+TWO DISTINCT DISCLOSURES, and the second is easy to miss:
+
+1. **The container id itself.** It is the handle SPE operations are addressed by. Leaking another
+   tenant's is not catastrophic on its own, but it is not nothing, and it is not the caller's.
+2. **A tenant-enumeration oracle.** The endpoint's own documented error mapping is "tenant not served by
+   this stamp → 400", while a served tenant returns 200. So the response code alone tells an
+   authenticated caller which tenants this stamp hosts. That is customer-list disclosure, and it works
+   even if the container id were removed from the payload.
+
+WHY IT PASSED REVIEW. The file carries a Placement Justification (CLAUDE.md §10) and its own doc comment
+asserts *"missing/invalid JWT → 401 via standard auth middleware (`RequireAuthorization` — parity with all
+other BFF endpoints)"*. Both are true and neither is the point: `RequireAuthorization()` establishes THAT
+the caller is authenticated, never WHICH tenant's data they may ask for. This is the same shape as the
+project's other findings — an authorization statement that is accurate about the wrong question.
+
+THE CONSTRAINT THAT MAKES THIS NON-TRIVIAL. The query parameter exists for a reason: the endpoint is
+called by the L2 control-plane's H13 I4 invariant probe, whose calling convention passes `?tenantId=`.
+Simply deleting the parameter may break that probe. Determine what identity the probe calls with before
+choosing a fix — if it holds a per-tenant token, binding to the claim is transparent to it.
+
+FIX SHAPE (verify before implementing): treat the JWT `tid` claim as the AUTHORITY. If a query
+`tenantId` is supplied and does not match the caller's claim, respond 403 rather than silently ignoring
+it — silently ignoring a parameter the caller believes is being honoured is its own defect. Consider
+whether a diagnostics route should additionally require an admin/operator scope.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs</file>
+      <file role="reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed. A caller with no resolvable tenant claim is DENIED, not defaulted to an ambient tenant.</constraint>
+    <constraint source="project">The JWT claim is the authority. A mismatched query parameter is a 403, never a silent override and never silently ignored.</constraint>
+    <constraint source="project">Do not break the L2 H13 I4 probe. Establish what identity it calls with FIRST; if it cannot hold a per-tenant token, escalate rather than widening the route back open.</constraint>
+    <constraint source="project">Close the enumeration oracle too — a served vs not-served tenant must not be distinguishable by status code to a caller asking about someone else's tenant. Fixing only the payload leaves the oracle intact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-080-cross-record-search.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm the defect: authenticate as tenant A, request `?tenantId={B}`, observe the resolution. Then identify the L2 probe's calling identity.</step>
+    <step order="1">Make the JWT `tid` claim the authority; 403 on mismatch; deny when absent.</step>
+    <step order="2">Close the enumeration oracle — uniform response for any tenant that is not the caller's.</step>
+    <step order="3">Tests: cross-tenant request denied; own-tenant request still resolves; no-claim request denied; the oracle is closed (same status for served and unserved foreign tenants).</step>
+    <step order="4">Verify the L2 probe still passes. Build, tests, publish size, CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the L2 probe genuinely cannot present a per-tenant token, STOP. The answer is then a scoped operator credential or moving the probe off a public route — NOT restoring caller-supplied tenant selection. Inventing a bypass for a diagnostics caller is how bypasses get built.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`TenantAuthorizationFilter` already exists and performs tenant-claim enforcement for other routes.</existing>
+    <extension>Apply the existing tenant-scoping decision to a route that skipped it. No new component.</extension>
+    <cost-of-doing-nothing>Any authenticated user of any tenant can enumerate which tenants this stamp serves and resolve their SPE container ids. On a multi-tenant platform that is customer-list disclosure.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs</output>
+    <output type="test">tests/ — cross-tenant denial, own-tenant success, oracle closed</output>
+    <output type="doc">notes — the L2 probe's identity and why the chosen fix does not break it</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller authenticated to tenant A cannot resolve tenant B — proven by a test that fails without the change.</criterion>
+    <criterion>A caller with no tenant claim is denied, not defaulted to an ambient tenant.</criterion>
+    <criterion>Served and not-served foreign tenants are indistinguishable by status code.</criterion>
+    <criterion>The L2 H13 I4 probe still passes.</criterion>
+    <criterion>Task 074's census stays green (this task changes no file count).</criterion>
+  </acceptance-criteria>
+
+  <notes>Found by the census ratchet, not by a route inventory — the file post-dates all four prior enumerations of this surface. That is the third hole task 074's forcing function has produced (after 077 and 078), and the first one that came from being *made to classify* a new file rather than from a rule firing directly.</notes>
+</task>
