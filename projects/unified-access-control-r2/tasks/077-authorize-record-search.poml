@@ -3,7 +3,7 @@
   <metadata>
     <title>Authorize POST /api/ai/search/records — the twin of the /api/ai/search defect, on the same route group, still allow-by-default</title>
     <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>A live tenant-wide record disclosure on the BFF authorization surface. Same class as task 070, different data plane.</rigor-reason>
     <model-tier>opus</model-tier>

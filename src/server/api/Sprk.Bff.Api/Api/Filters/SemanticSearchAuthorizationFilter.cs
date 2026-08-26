@@ -135,12 +135,12 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
     /// <para>
     /// <b>internal, and deliberately the ONLY such map.</b> The <c>scope=all</c> path added by task 080
     /// authorizes each returned row against its parent, so it needs the same entityType → entity-set
-    /// resolution. It consumes THIS dictionary through <see cref="TryResolveParentEntitySet"/> rather
+    /// resolution. It consumes THIS dictionary through <see cref="TryResolveAuthorizableEntitySet"/> rather
     /// than declaring its own — a second copy would be a second access policy, and the two would drift
     /// (the project already carries three disagreeing entity-type vocabularies; see the task 080 notes).
     /// </para>
     /// </remarks>
-    internal static readonly IReadOnlyDictionary<string, string> AuthorizableParentEntitySets =
+    internal static readonly IReadOnlyDictionary<string, string> AuthorizableEntitySets =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["matter"] = "sprk_matters",
@@ -188,10 +188,10 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
     /// securable entities (matter / project / work assignment); widening it is a one-line addition and an
     /// owner decision, recorded as O-1 in the task 080 notes.
     /// </remarks>
-    internal static bool TryResolveParentEntitySet(string? parentEntityType, out string entitySetName)
+    internal static bool TryResolveAuthorizableEntitySet(string? parentEntityType, out string entitySetName)
     {
         if (!string.IsNullOrWhiteSpace(parentEntityType)
-            && AuthorizableParentEntitySets.TryGetValue(parentEntityType, out var resolved))
+            && AuthorizableEntitySets.TryGetValue(parentEntityType, out var resolved))
         {
             entitySetName = resolved;
             return true;
@@ -461,7 +461,7 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
                     correlationId)));
         }
 
-        if (!AuthorizableParentEntitySets.TryGetValue(request.EntityType, out var entitySetName))
+        if (!AuthorizableEntitySets.TryGetValue(request.EntityType, out var entitySetName))
         {
             _logger?.LogWarning(
                 "Semantic search DENIED for caller {CallerId}: entityType '{EntityType}' is not an "

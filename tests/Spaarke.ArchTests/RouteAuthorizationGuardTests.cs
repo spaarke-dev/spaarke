@@ -533,11 +533,47 @@ public class RouteAuthorizationGuardTests
             }
 
             var code = Decomment(File.ReadAllText(file));
-            if (!DecisionServices.Any(s => code.Contains(s, StringComparison.Ordinal)))
+            if (DecisionServices.Any(s => code.Contains(s, StringComparison.Ordinal)))
             {
-                violations.Add(
-                    $"{SourceScan.Relative(file)}: references none of the authorization decision services");
+                continue;
             }
+
+            // THE PAIR MAY DECIDE (extended 2026-08-26 by task 077).
+            //
+            // A filter runs BEFORE the handler, so it cannot authorize rows that do not exist yet. Where
+            // the subject of authorization IS the result set — record search, and document search under
+            // scope=all — the only honest split is: the filter authorizes the request and publishes the
+            // obligation, and the ENDPOINT authorizes the rows. Rule B's original per-file question
+            // ("does this filter consult a decision service?") cannot express that, and the first version
+            // of this rule therefore had to park RecordSearchAuthorizationFilter in
+            // KnownDecorativeFilters even after it was fixed.
+            //
+            // Two ways to satisfy the rule were considered. Making the filter wrap next() and rewrite the
+            // handler's result WOULD satisfy the per-file form — and would fail OPEN the moment the
+            // handler's result shape changed, because the filter's pattern-match would silently stop
+            // matching. Enforcing in the endpoint fails CLOSED: the handler refuses outright when the
+            // published obligation is absent. Rule B must not push a design toward the fail-open option,
+            // so the rule widened instead of the code narrowing.
+            //
+            // The invariant enforced here is therefore "the filter/endpoint PAIR decides": a filter with
+            // no decision service of its own is acceptable only if EVERY endpoint file that attaches it
+            // consults one. A decorative filter attached to a decorative endpoint still fails, which is
+            // the shape that mattered.
+            var attachingEndpoints = EndpointFilesAttaching(name);
+            if (attachingEndpoints.Count > 0
+                && attachingEndpoints.All(endpointFile =>
+                    DecisionServices.Any(s =>
+                        Decomment(File.ReadAllText(endpointFile)).Contains(s, StringComparison.Ordinal))))
+            {
+                continue;
+            }
+
+            violations.Add(
+                $"{SourceScan.Relative(file)}: references none of the authorization decision services"
+                + (attachingEndpoints.Count == 0
+                    ? " (and no endpoint file attaching it was found)"
+                    : ", and neither do all of the endpoint files attaching it: "
+                      + string.Join(", ", attachingEndpoints.Select(SourceScan.Relative))));
         }
 
         Assert.True(
@@ -603,20 +639,26 @@ public class RouteAuthorizationGuardTests
     ///
     /// <para><b>Rule B found this one itself.</b> It is not from any finding list.</para>
     /// </summary>
+    /// <remarks>
+    /// EMPTY, as of 2026-08-26 (task 077) — and the entry it used to hold is worth remembering.
+    ///
+    /// <c>RecordSearchAuthorizationFilter</c> sat here from the day Rule B first ran, with the note
+    /// "FOUND BY RULE B, in no finding list … Delete this entry when it does." That is the whole argument
+    /// for Rule B in one line: the filter WAS attached to <c>POST /api/ai/search/records</c>, so Rule A
+    /// classified the route as GATED, and four separate hand enumerations of this surface agreed. Only
+    /// the question "does the filter consult a decision service?" saw through it.
+    ///
+    /// Task 077 made that filter authorize (caller identity, OBO token, and that every requested record
+    /// type is one whose access can be evaluated) and moved row authorization into the endpoint, which
+    /// now refuses outright when the published obligation is absent. Rule B was widened in the same
+    /// change to accept a deciding filter/endpoint PAIR, so this entry was deleted rather than reworded —
+    /// the distinction the task file insisted on.
+    ///
+    /// Keep this dictionary EMPTY. An entry here is a route serving content behind a filter that decides
+    /// nothing; it should be a work item with an owner, not a permanent exemption.
+    /// </remarks>
     private static readonly IReadOnlyDictionary<string, string> KnownDecorativeFilters =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["RecordSearchAuthorizationFilter"] =
-                "PENDING — owner UNASSIGNED. FOUND BY RULE B, in no finding list. This is finding #1's TWIN, "
-                + "on the same /api/ai/search group: it reads the 'tid' claim, extracts the request, writes "
-                + "one LogInformation, and returns `await next(context)`. There is no authorization decision "
-                + "anywhere in it, and its only dependency is ILogger — the exact shape "
-                + "SemanticSearchAuthorizationFilter had when a non-admin denied Read on all 442 documents "
-                + "read a matter's full document list through POST /api/ai/search. It gates "
-                + "POST /api/ai/search/records, so Rule A currently classifies that route as GATED. Needs "
-                + "the same treatment task 070 is giving its sibling — constrain to the caller's accessible "
-                + "record set. Delete this entry when it does.",
-        };
+        new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
     /// The types that constitute "an authorization decision" in this codebase. A filter referencing any of
@@ -1253,4 +1295,32 @@ public class RouteAuthorizationGuardTests
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .OrderBy(f => f, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every non-filter source file that ATTACHES the named filter via its
+    /// <c>Add{FilterName}()</c> extension. Used by Rule B to ask whether the filter/endpoint pair
+    /// reaches a decision when the filter alone does not.
+    /// </summary>
+    /// <remarks>
+    /// Matches on the generated extension-method name rather than the type name, because the type name
+    /// also appears in <c>using</c>s, logger generics and doc comments — a match on those would let a
+    /// filter be "attached" by any file that merely mentions it. <c>*AuthorizationFilter.cs</c> files are
+    /// excluded so a filter's own extension class does not count as its attaching endpoint.
+    ///
+    /// Returning EMPTY is a violation, not a pass: a filter nothing attaches is either dead code or
+    /// evidence that the attachment convention changed, and both deserve a look.
+    /// </remarks>
+    private static IReadOnlyList<string> EndpointFilesAttaching(string filterTypeName)
+    {
+        var attachCall = $"Add{filterTypeName}(";
+
+        return Directory
+            .EnumerateFiles(BffRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.EndsWith("AuthorizationFilter.cs", StringComparison.Ordinal))
+            .Where(f => Decomment(File.ReadAllText(f)).Contains(attachCall, StringComparison.Ordinal))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+    }
 }

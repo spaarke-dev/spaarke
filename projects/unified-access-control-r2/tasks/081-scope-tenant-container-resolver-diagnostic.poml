@@ -3,7 +3,7 @@
   <metadata>
     <title>Scope the tenant-container-resolver diagnostic to the caller's own tenant — the query string currently overrides the JWT tid claim</title>
     <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
-    <status>pending</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-tenant read on an authenticated BFF route. Tenant isolation is the one boundary this platform cannot get wrong.</rigor-reason>
     <model-tier>sonnet</model-tier>

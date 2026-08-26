@@ -543,7 +543,7 @@ public static class SemanticSearchEndpoints
 
             examined++;
 
-            if (!SemanticSearchAuthorizationFilter.TryResolveParentEntitySet(
+            if (!SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet(
                     row.ParentEntityType, out var entitySetName)
                 || !Guid.TryParse(row.ParentEntityId, out var parentId)
                 || parentId == Guid.Empty)
