@@ -567,6 +567,25 @@ Each agent verified only its own worktree. **No one has tested the combination.*
 - **079**: BFF + the AllDocuments Code Page must ship together, or version history 404s for cached
   bundles. Transient outage on one modal, **not** a disclosure.
 
+## 7b. The distilled lesson from 075's four passes
+
+The four review passes split evenly between two categories:
+
+- **Rounds 1–2 — "the code is wrong"**: two fail-open defects. This is what a review is nominally for.
+- **Rounds 3–4 — "the verification is wrong"**: two vacuously-passing tests, one false sentence in a
+  decision document, one mis-severitied finding.
+
+**The sequencing matters.** The verification errors were present from the start and only became
+*findable* once the code stopped being loudly wrong.
+
+> **A green suite is the point at which to start checking the verification, not the point at which to
+> stop.**
+
+Corollary, learned three times in this batch: **a green suite and an accurate document are separate
+claims.** The wrong sentence in the 076 note would have mis-decided an operator question while every test
+stayed green, and the mis-severitied finding would have had the operator deciding "which design is
+cleaner" instead of "which option closes a live fail-open".
+
 ## 8. Process note worth keeping
 
 The POMLs marked 073 and 079 `∥-safe: true`, and on *modify* targets that was accurate. It did not
