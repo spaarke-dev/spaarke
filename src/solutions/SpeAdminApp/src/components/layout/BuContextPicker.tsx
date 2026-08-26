@@ -32,6 +32,7 @@ import {
   MessageBarBody,
   Badge,
   Combobox,
+  Field,
   Option,
   shorthands,
 } from "@fluentui/react-components";
@@ -195,17 +196,17 @@ const useStyles = makeStyles({
   compactRoot: {
     display: "flex",
     flexDirection: "row",
-    alignItems: "center",
-    ...shorthands.gap(tokens.spacingHorizontalS),
+    // flex-end, not center: the Fields now stack label-over-control, so their controls only line
+    // up with the environment badge when the row is bottom-aligned.
+    alignItems: "flex-end",
+    ...shorthands.gap(tokens.spacingHorizontalM),
     flexWrap: "nowrap",
   },
 
-  /** Each compact item (combobox or badge) in the header row. */
+  /** Each compact item (a labelled Field, or the environment badge) in the header row. */
   compactItem: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    ...shorthands.gap(tokens.spacingHorizontalXXS),
+    minWidth: "170px",
+    maxWidth: "230px",
   },
 
   compactLabel: {
@@ -474,9 +475,13 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
   if (variant === "compact") {
     return (
       <div className={styles.compactRoot} role="region" aria-label="Context selector">
-        {/* BU Combobox */}
-        <div className={styles.compactItem}>
-          <Text className={styles.compactLabel}>BU</Text>
+        {/*
+          Labels are spelled out and sit ABOVE their control as a Fluent Field, matching the
+          label-over-control pattern already used in the Container Type details pane. Previously
+          they were abbreviated ("BU", "Config") and rendered as loose text beside a bare box.
+          Operator-directed, UAT 2026-08-26.
+        */}
+        <Field label="Business Unit" className={styles.compactItem}>
           <Combobox
             size="small"
             placeholder={busLoading ? "Loading…" : busError ? "⚠ Load failed" : "Business unit…"}
@@ -497,17 +502,24 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
               </Option>
             ))}
           </Combobox>
-        </div>
+        </Field>
 
-        <Text className={styles.compactSeparator}>/</Text>
-
-        {/* Config Combobox */}
-        <div className={styles.compactItem}>
-          <Text className={styles.compactLabel}>Config</Text>
+        {/*
+          Labelled "Container Type", not "Config". The underlying record
+          (sprk_specontainertypeconfig) binds a container type to a business unit, an environment,
+          an owning app registration and its Key Vault secret — but "Config" named the plumbing,
+          not the thing an administrator believes they are choosing. Operator-directed, UAT
+          2026-08-26.
+        */}
+        <Field label="Container Type" className={styles.compactItem}>
           <Combobox
             size="small"
             placeholder={
-              !selectedBu ? "Select BU first" : configsLoading ? "Loading…" : "Config…"
+              !selectedBu
+                ? "Select a business unit first"
+                : configsLoading
+                  ? "Loading…"
+                  : "Container type…"
             }
             disabled={!selectedBu || configsLoading}
             value={configInputValue}
@@ -525,12 +537,11 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
               </Option>
             ))}
           </Combobox>
-        </div>
+        </Field>
 
         {/* Environment badge (read-only) */}
         {selectedEnvironment && (
           <>
-            <Text className={styles.compactSeparator}>·</Text>
             <div className={styles.compactEnvBadge}>
               <Globe16Regular aria-hidden="true" style={{ color: tokens.colorNeutralForeground3 }} />
               <Badge

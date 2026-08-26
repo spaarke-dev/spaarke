@@ -86,10 +86,15 @@ interface NavItem {
   iconActive: React.ReactElement;
 }
 
+/**
+ * Tab order follows the administrator's mental model rather than the order the pages were built in:
+ * a container type must exist before containers can live under it, so Container Types precedes
+ * Containers. (Operator-directed, UAT 2026-08-26.)
+ */
 const NAV_ITEMS: NavItem[] = [
   { page: "dashboard",       label: "Dashboard",        icon: <Home20Regular />,                iconActive: <Home20Filled /> },
-  { page: "containers",      label: "Containers",       icon: <Storage20Regular />,             iconActive: <Storage20Filled /> },
   { page: "container-types", label: "Container Types",  icon: <DocumentBulletList20Regular />,  iconActive: <DocumentBulletList20Filled /> },
+  { page: "containers",      label: "Containers",       icon: <Storage20Regular />,             iconActive: <Storage20Filled /> },
   { page: "file-browser",    label: "File Browser",     icon: <FolderOpen20Regular />,          iconActive: <FolderOpen20Filled /> },
   { page: "search",          label: "Search",           icon: <Search20Regular />,              iconActive: <Search20Filled /> },
   { page: "recycle-bin",     label: "Recycle Bin",      icon: <DeleteDismiss20Regular />,       iconActive: <DeleteDismiss20Filled /> },
@@ -221,18 +226,22 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* ── Header ── */}
+      {/*
+        ── Header ──
+        Title row: product name on the left, scope pickers right-aligned, version last.
+        The spacer moved ABOVE the pickers (it used to sit after them, which left-packed the
+        pickers against the title). Operator-directed, UAT 2026-08-26.
+      */}
       <div className={styles.header}>
         <Text className={styles.appTitle} size={400}>
-          SPE Admin
+          SharePoint Embedded Admin
         </Text>
 
-        <div className={styles.headerDivider} aria-hidden="true" />
+        <div className={styles.headerSpacer} />
 
-        {/* BuContextPicker in compact header mode */}
         <BuContextPicker variant="compact" />
 
-        <div className={styles.headerSpacer} />
+        <div className={styles.headerDivider} aria-hidden="true" />
 
         <Text className={styles.versionText} size={100}>
           v{version}
