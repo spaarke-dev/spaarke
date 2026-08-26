@@ -193,7 +193,8 @@ type XrmNavigateToTwoArg = (
  * `notes/design-alignment-corrections.md`): accepts `recordSummary` inline
  * so no separate `Xrm.WebApi.retrieveRecord` runs for the sparkle popover;
  * memo count uses the entity-specific ADR-024 lookup via
- * `buildMemoFilterForParent` (`null` for unsupported parents → memo badge 0).
+ * `buildMemoFilterForParent` (`null` for unsupported parents → slot omitted,
+ * per FR-16; the checkmark slot mirrors this via `buildTodoFilterForParent`).
  *
  * @example Per-entity PCF consumer (MatterHeaderPcf):
  * ```tsx
@@ -226,11 +227,16 @@ export function useRecordHeaderToolbarActions(
   // Both sprk_todo AND sprk_memo use ADR-024 dual-field pattern with entity-specific
   // lookups (verified via Dataverse MCP describe queries — see notes/sprk-memo-schema.md
   // + v1.0.2 fix note for sprk_todo). The initial assumption that sprk_todo used the
-  // standard polymorphic `_regardingobjectid_value` was WRONG — sprk_todo has 11
-  // entity-specific `sprk_regarding{entity}` lookups (a superset of sprk_memo's 6).
+  // standard polymorphic `_regardingobjectid_value` was WRONG — sprk_todo has 12
+  // entity-specific `sprk_regarding{entity}` lookups (a superset of sprk_memo's 7).
   //
-  // Both helpers return `null` for unsupported entities (→ useRelatedCount idles
-  // at count=0). Discovered 2026-07-03 during live QA.
+  // Both helpers return `null` for unsupported entities. `useRelatedCount` still
+  // idles at count=0 on a null filter, but as of FR-16 (R2 task 024) a null
+  // filter ALSO omits the corresponding icon slot entirely below — a null
+  // filter means the child schema cannot reference this parent at all, so the
+  // launcher must not render (it would open a Notepad/SmartTodo scoped to a
+  // parent that cannot save). Discovered 2026-07-03 during live QA; slot
+  // auto-hide added 2026-08-25.
   const todoFilter = buildTodoFilterForParent(entity, recordId);
   const memoFilter = buildMemoFilterForParent(entity, recordId);
 
@@ -308,11 +314,20 @@ export function useRecordHeaderToolbarActions(
   // Each slot is built conditionally so a disabled slot is OMITTED (not merely
   // hidden — spec FR-07 acceptance criterion). Icons are the fixed set per
   // FR-08 / FR-09 / FR-10.
+  //
+  // FR-16 (R2 task 024): a slot is ALSO omitted when its regarding filter is
+  // null — i.e. the current entity is outside the child schema's supported-
+  // parent map (`SUPPORTED_TODO_PARENTS` / `SUPPORTED_MEMO_PARENTS`). Without
+  // this, the icon still rendered and launched a Notepad/SmartTodo scoped to
+  // a parent the child entity cannot reference, so nothing created there
+  // could save its regarding link — only the badge count idled at 0. The
+  // `enabled` flag and the filter check are ANDed; an explicit `enabled:
+  // false` still wins regardless of filter state.
 
   const iconSlots = React.useMemo<IHeaderToolbarSlot[]>(() => {
     const slots: IHeaderToolbarSlot[] = [];
 
-    if (checkmarkEnabled) {
+    if (checkmarkEnabled && todoFilter !== null) {
       slots.push({
         key: 'checkmark',
         icon: React.createElement(Checkmark24Regular),
@@ -322,7 +337,7 @@ export function useRecordHeaderToolbarActions(
       });
     }
 
-    if (annotationEnabled) {
+    if (annotationEnabled && memoFilter !== null) {
       slots.push({
         key: 'annotation',
         icon: React.createElement(Note24Regular),
@@ -333,7 +348,16 @@ export function useRecordHeaderToolbarActions(
     }
 
     return slots;
-  }, [checkmarkEnabled, annotationEnabled, handleCheckmarkClick, handleAnnotationClick, todoCount, memoCount]);
+  }, [
+    checkmarkEnabled,
+    annotationEnabled,
+    todoFilter,
+    memoFilter,
+    handleCheckmarkClick,
+    handleAnnotationClick,
+    todoCount,
+    memoCount,
+  ]);
 
   const toolbarProps = React.useMemo<IHeaderToolbarProps>(() => ({ iconSlots, title }), [iconSlots, title]);
 

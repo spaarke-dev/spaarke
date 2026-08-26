@@ -75,7 +75,7 @@ import {
   useRecordFieldValues,
   useRecordHeaderToolbarActions,
 } from '@spaarke/ui-components/dist/hooks';
-import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
+import { getXrm, getXrmPage } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { CONTROL_VERSION } from './version';
 
 const ENTITY = 'sprk_matter';
@@ -132,19 +132,6 @@ export interface IMatterHeaderViewProps {
   title?: string;
   /** When `true` (default), the version footer is rendered. */
   showVersion?: boolean;
-}
-
-/** Extract Xrm.Page (deprecated but functional API used by AssociationResolver + other PCFs). */
-function getXrmPage(): unknown | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrmObj = w.Xrm || (w.parent as any)?.Xrm;
-    return xrmObj?.Page ?? null;
-  } catch {
-    return null;
-  }
 }
 
 /** Project a lookup value from `useRecordFieldValues` into `ILookupItem`. */

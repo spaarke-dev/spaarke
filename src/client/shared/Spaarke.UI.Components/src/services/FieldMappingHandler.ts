@@ -22,6 +22,7 @@
  */
 
 import { createLogger } from '../utils/logger';
+import { getXrmPage } from '../utils/xrmContext';
 
 // Logger prefix preserved as 'AssociationResolver' to keep existing log-scraping / diagnostics
 // contracts unchanged during this behavior-preserving relocation.
@@ -476,7 +477,13 @@ export class FieldMappingHandler {
    * @returns Count of fields actually set on the form
    */
   applyToForm(mappedValues: Record<string, unknown>, skipDirtyFields = true): number {
-    const xrmPage = this.getXrmPage();
+    // Shared accessor (FR-20, utils/xrmContext.ts) — never throws. Its
+    // structural `XrmPageLike` declares `getIsDirty`/`getValue` as optional
+    // (not every consumer needs them); this handler's `IXrmPageLike` requires
+    // `getIsDirty()`, which real `Xrm.Page` attributes always provide, so the
+    // cast is safe. The shared function does not log on failure — this
+    // handler's warn below preserves that observable behavior.
+    const xrmPage = getXrmPage() as unknown as IXrmPageLike | null;
     if (!xrmPage) {
       logger.logWarn('FieldMappingHandler', 'Xrm.Page not available - cannot apply to form');
       return 0;
@@ -544,21 +551,6 @@ export class FieldMappingHandler {
     }
   }
 
-  /**
-   * Get Xrm.Page from parent window (PCF runs in iframe).
-   * Returns the minimal structural type used by this handler; the runtime
-   * object is the full `Xrm.Page` provided by the model-driven-app host.
-   */
-  private getXrmPage(): IXrmPageLike | null {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-      return (xrm?.Page as IXrmPageLike | undefined) ?? null;
-    } catch (error) {
-      logger.logWarn('FieldMappingHandler', 'Unable to access Xrm.Page', error);
-      return null;
-    }
-  }
 }
 
 /**

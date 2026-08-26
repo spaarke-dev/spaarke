@@ -10,6 +10,7 @@ Grouped by record / component type, as requested.
 | [ISSUE-daily-briefing-schema-drift.md](ISSUE-daily-briefing-schema-drift.md) | **Daily Briefing** — `DailyBriefingCollector` | High | **Silent** — flagged Projects and Events vanish from every briefing with no user-visible error | 0.25 d |
 | [ISSUE-work-assignment-schema-drift.md](ISSUE-work-assignment-schema-drift.md) | **Work Assignment** — create endpoint | Medium-High | HTTP 500 whenever a matter or due date is supplied | 0.25–1 d |
 | [ISSUE-output-mapping-unreachable.md](ISSUE-output-mapping-unreachable.md) | **BFF AI** — `PlaybookService` / `OutputOrchestratorService` | High | **Silent** — every playbook `outputMapping` is dead config; `extraction.aiSummary` has no consumer at all | scoping first, then TBD |
+| [ISSUE-recordheader-integration-test-stale.md](ISSUE-recordheader-integration-test-stale.md) | **Shared UI** — `recordHeader.integration.test.tsx` | Medium | Red since v1.0.10 — asserts a hook contract removed then; a permanently-red suite trains people to ignore the gate | rewrite in task 034 |
 
 ## Common root cause
 

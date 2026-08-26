@@ -86,6 +86,15 @@ export interface ITextareaFieldProps {
   className?: string;
 
   /**
+   * Accepted for FR-10 contract-shape parity with sibling renderers but
+   * intentionally renders NOTHING — the `*` marker is deliberately
+   * TextField-only (record-header-and-notepad-r2 D-10). Added by r2 task 015
+   * so the shared renderer-contract suite can assert the D-10 negative
+   * uniformly; behaviorally inert, so no existing consumer is affected.
+   */
+  required?: boolean;
+
+  /**
    * When provided, the value becomes click-to-edit. Callback is invoked with
    * the new string on Ctrl+Enter or blur (only when the value changed).
    * Return a rejected Promise to signal a save error — the field will revert

@@ -177,6 +177,12 @@ jest.mock('@spaarke/ui-components/dist/hooks', () => ({
 jest.mock('@spaarke/ui-components/dist/utils/xrmContext', () => ({
   __esModule: true,
   getXrm: jest.fn(() => null),
+  // Task 021 (FR-20): the view now imports the shared `getXrmPage` from this
+  // same deep path instead of hand-rolling its own window/parent walker —
+  // the mock must export it too, or the view silently gets `undefined` and
+  // every form-buffer save call throws "Form buffer unavailable" (the same
+  // class of silent-mock-gap bug task 040 hit with `RECORDSUMMARY_FIELD`).
+  getXrmPage: jest.fn(() => null),
 }));
 
 import { MatterHeaderView } from '../control/MatterHeaderView';

@@ -95,12 +95,15 @@ export const RECORDSUMMARY_FIELD = 'sprk_recordsummary';
  * Key   = parent entity logical name.
  * Value = lookup field name on `sprk_memo` that points at that parent.
  *
- * `sprk_memo` supports exactly six parent entities (schema-limited).
+ * `sprk_memo` supports exactly seven parent entities (schema-limited).
  * Any launch context whose `regardingEntity` is not in this map cannot
  * create memos and must render an error surface (FR-13 / FR-19).
  *
  * Verified via Dataverse MCP `describe('tables/sprk_memo')` in task 001.
  * See notes/sprk-memo-schema.md.
+ *
+ * `sprk_agreement` added 2026-08-25 (R2 task 024 / FR-24) — owner
+ * live-verified `sprk_regardingagreement` exists on `sprk_memo`.
  */
 export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
   sprk_matter: 'sprk_regardingmatter',
@@ -109,6 +112,7 @@ export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
   sprk_invoice: 'sprk_regardinginvoice',
   sprk_budget: 'sprk_regardingbudget',
   sprk_workassignment: 'sprk_regardingworkassignment',
+  sprk_agreement: 'sprk_regardingagreement',
 };
 
 /**
@@ -140,12 +144,15 @@ export function buildMemoFilterForParent(regardingEntity: string, regardingId: s
  * Dataverse MCP `describe('tables/sprk_todo')` on 2026-07-03 after live QA surfaced a
  * "Could not find a property named '_regardingobjectid_value'" 400 error.
  *
- * `sprk_todo` supports **11 parent entity lookups** (a superset of `sprk_memo`'s six):
+ * `sprk_todo` supports **12 parent entity lookups** (a superset of `sprk_memo`'s seven):
  * Matter, Project, Event, Invoice, Budget, WorkAssignment, Analysis, Communication,
- * Contact, Document, Organization.
+ * Contact, Document, Organization, Agreement.
  *
  * Key   = parent entity logical name.
  * Value = lookup field name on `sprk_todo` that points at that parent.
+ *
+ * `sprk_agreement` added 2026-08-25 (R2 task 024 / FR-24) — owner
+ * live-verified `sprk_regardingagreement` exists on `sprk_todo`.
  */
 export const SUPPORTED_TODO_PARENTS: Record<string, string> = {
   sprk_matter: 'sprk_regardingmatter',
@@ -159,6 +166,7 @@ export const SUPPORTED_TODO_PARENTS: Record<string, string> = {
   contact: 'sprk_regardingcontact',
   sprk_document: 'sprk_regardingdocument',
   sprk_organization: 'sprk_regardingorganization',
+  sprk_agreement: 'sprk_regardingagreement',
 };
 
 /**

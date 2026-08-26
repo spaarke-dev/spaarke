@@ -4,7 +4,7 @@
     <title>Renderer barrel exports + shared FR-10 contract test suite (serial, after Group A)</title>
     <phase>1 Renderers</phase>
     <gate>after-010-014</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts barrel files and adds tests (Step 3.5.5: code files = FULL). Tags include `testing`, so the TEST-MODIFYING override row (root CLAUDE.md §8) makes the Step 9.5 code-review + adr-check gates unconditional regardless.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -157,6 +157,44 @@
     <criterion testable="true">notes/renderer-contract-reconciliation.md exists and either lists each conformance fix (file, behavior, catching assertion) or states "no violations found" over the six verified renderers.</criterion>
     <criterion testable="true">Negative (NFR-08): package.json gained no `exports` map and no consumer-facing import path changed — `git diff` on package.json is empty.</criterion>
   </acceptance-criteria>
+
+  <completion-notes date="2026-08-25">
+    DONE. Both barrels wired (append-only, alphabetical, no `export *`, no aliases needed — repo-wide
+    grep confirmed zero symbol collisions for BooleanField/DateField/NumberField). New suite
+    `__tests__/rendererContract.test.tsx` runs 91 assertions over SIX adapters, none skipped:
+    **91/91 green on the first run**. All 9 RecordHeader suites: **232/232**. `tsc --noEmit` exit 0;
+    shared-lib `npm run build` exit 0; eslint 0 errors; prettier clean.
+
+    ZERO behavioral contract violations found — every renderer already obeyed the TextField contract
+    verbatim (em-dash triple, self-applied gridColumn, editable gate, exactly-one-onSave,
+    Escape-cancels, blur-commits, and revert-on-reject-STAY-in-edit with spinner). Two PROP-SHAPE
+    conformance fixes were required and applied: `required?: boolean` added as accepted-but-inert to
+    `ITextareaFieldProps` and `IOptionSetFieldProps` (D-10 parity — the other three renderers already
+    declared it). Both are declaration-only: never destructured, never rendered, zero consumer impact.
+    Neither escalation trigger fired.
+
+    NFR-02 bundle re-measured after rebuilding the shared lib: MatterHeader `bundle.js` =
+    **62,114 bytes** (25% of the 250 KB ceiling), and `grep -c react-datepicker-compat` on the bundle
+    returns **0** — the barrel re-export is genuinely pruned, not merely compressed. `sideEffects: false`
+    was neither removed nor altered. `package.json` git diff is empty (NFR-08 / DEF-06 honored);
+    `__tests__/fields.test.tsx` git diff is empty.
+
+    Quality gates: code-review PASS (0 critical, 1 process warning re: absent POML `&lt;justification&gt;`
+    — answered concretely in the reconciliation note instead; 4 low suggestions). adr-check PASS
+    (0 violations, 0 warnings; ADR-021/022/012/028/038 all compliant; ADR-010 candidate dismissed —
+    the flagged interfaces are React prop types and a test adapter with six implementations).
+
+    Full reasoning, the per-renderer allowance table, and the one documented suite branch (OptionSetField
+    is the sole immediate-commit adapter, so its blur assertion asserts wired-and-exits-clean rather than
+    commits-a-pending-draft) are in `notes/renderer-contract-reconciliation.md`.
+
+    NOT DONE, deliberately: (1) TASK-INDEX.md left untouched — main session owns it. (2) The
+    "full `npm test` exits 0" criterion is NOT met, for two reasons independent of this task, both
+    documented in the reconciliation note §8: `src/__tests__/recordHeader.integration.test.tsx` has been
+    red since v1.0.10 retired the sparkle slot (`git show HEAD:...useRecordHeaderToolbarActions.ts |
+    grep -c aiSummary` → 0, while `HeaderToolbar.tsx:157` gates the button on that prop), and tasks
+    021/024 were concurrently mutating this worktree during execution. Re-run the full gate after they land.
+  </completion-notes>
 
   <notes>
     Spec refs: FR-10 (this task IS its acceptance), FR-11, D-10, NFR-08; plan.md Strategy point 3 and

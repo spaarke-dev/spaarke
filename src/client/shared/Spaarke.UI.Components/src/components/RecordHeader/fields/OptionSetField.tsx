@@ -119,6 +119,15 @@ export interface IOptionSetFieldProps {
   className?: string;
 
   /**
+   * Accepted for FR-10 contract-shape parity with sibling renderers but
+   * intentionally renders NOTHING — the `*` marker is deliberately
+   * TextField-only (record-header-and-notepad-r2 D-10). Added by r2 task 015
+   * so the shared renderer-contract suite can assert the D-10 negative
+   * uniformly; behaviorally inert, so no existing consumer is affected.
+   */
+  required?: boolean;
+
+  /**
    * The full resolved option list for edit mode — the consumer resolves
    * this via `getXrmPage().getAttribute(name).getOptions()`. Required
    * (non-empty) together with `onSave` for the field to become editable;

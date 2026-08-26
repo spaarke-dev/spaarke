@@ -4,7 +4,7 @@
     <title>Toolbar slot auto-hide on null regarding filter + add sprk_agreement to both parent maps</title>
     <phase>2 Metadata + Machinery</phase>
     <gate>startable after 002 (parity baseline captured)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts code files (hooks/useRecordHeaderToolbarActions.ts, hooks/toolbarLaunchDefaults.ts) — Step 3.5.5 code-implementation trigger</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,7 +94,9 @@
     <criterion testable="true">The Notepad/SmartTodo launch data builders, webresource names, and modal layout constants are byte-identical (git diff shows no change to them); shared-lib build and full test suite green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-16, FR-24, NFR-07, success criteria 15a/15b. Live verification of the two `sprk_regardingagreement` lookups is recorded in `projects/record-header-and-notepad-r2/notes/discovery-checklist.md` (2026-08-25). Rollout task 070 seeds an Agreement record (entity has 0 today) before QA-ing the full toolbar; rollout QA of the auto-hide uses a To-Do-but-not-Memo parent per success criterion 15b.</notes>
+  <notes>Spec refs: FR-16, FR-24, NFR-07, success criteria 15a/15b. Live verification of the two `sprk_regardingagreement` lookups is recorded in `projects/record-header-and-notepad-r2/notes/discovery-checklist.md` (2026-08-25). Rollout task 070 seeds an Agreement record (entity has 0 today) before QA-ing the full toolbar; rollout QA of the auto-hide uses a To-Do-but-not-Memo parent per success criterion 15b.
+
+COMPLETED 2026-08-25. Both maps updated (+`sprk_agreement`); checkmark/annotation slots gated on `checkmarkEnabled && todoFilter !== null` / `annotationEnabled && memoFilter !== null`; `useMemo` deps updated. All 7 acceptance criteria verified via new/rewritten unit tests. `useRelatedCount` untouched. NFR-07 launch-contract strings, webresource names, and modal constants confirmed byte-identical via `git diff` (zero changed lines touching those symbols). Shared-lib `npm run build` clean; targeted test files (`toolbarLaunchDefaults.test.ts`, `useRecordHeaderToolbarActions.test.ts`) fully green for all logic this task touches. Deviations + a full-suite pre-existing-failure caveat (12 unrelated failing suites elsewhere in the shared lib, confirmed no dependency on the two files this task modified) documented in `notes/decisions/024-toolbar-autohide-agreement-deviations.md`. Per orchestrator instruction, `current-task.md` and `tasks/TASK-INDEX.md` were intentionally NOT updated by this sub-agent (concurrent parallel-agent worktree; owned by the coordinating session).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

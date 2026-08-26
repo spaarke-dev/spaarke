@@ -22,18 +22,18 @@
 
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [010](010-renderer-datefield.poml) | `DateField` (date + datetime modes) | FULL | sonnet | ✅ A | 002 | 🔲 |
-| [011](011-renderer-numberfield.poml) | `NumberField` (incl. Money) | FULL | sonnet | ✅ A | 002 | 🔲 |
-| [012](012-renderer-booleanfield.poml) | `BooleanField` | FULL | sonnet | ✅ A | 002 | 🔲 |
-| [013](013-optionsetfield-edit-mode.poml) | `OptionSetField` edit mode + typography | FULL | sonnet | ✅ A | 002 | 🔲 |
-| [014](014-textfield-emdash-alignment.poml) | `TextField` em-dash alignment | FULL | sonnet | ✅ A | 002 | 🔲 |
+| [010](010-renderer-datefield.poml) | `DateField` (date + datetime modes) | FULL | sonnet | ✅ A | 002 | ✅ |
+| [011](011-renderer-numberfield.poml) | `NumberField` (incl. Money) | FULL | sonnet | ✅ A | 002 | ✅ |
+| [012](012-renderer-booleanfield.poml) | `BooleanField` | FULL | sonnet | ✅ A | 002 | ✅ |
+| [013](013-optionsetfield-edit-mode.poml) | `OptionSetField` edit mode + typography | FULL | sonnet | ✅ A | 002 | ✅ |
+| [014](014-textfield-emdash-alignment.poml) | `TextField` em-dash alignment | FULL | sonnet | ✅ A | 002 | ✅ |
 | [015](015-renderer-barrel-and-contract-tests.poml) | Barrel + renderer-contract tests | FULL | opus | ❌ serial | 010–014 | 🔲 |
 
 ### Phase 2 — Metadata + Machinery
 
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [020](020-metadata-targets-and-cache.poml) | `targets` projection + metadata cache | FULL | sonnet | ✅ B | 002 | 🔲 |
+| [020](020-metadata-targets-and-cache.poml) | `targets` projection + metadata cache | FULL | sonnet | ✅ B | 002 | ✅ |
 | [021](021-shared-getxrmpage.poml) | Shared `getXrmPage()` + `xrmContext.Page` | FULL | sonnet | ✅ B | 002 | 🔲 |
 | [022](022-hoist-record-header-fields.poml) | Hoist `useRecordHeaderFields` | FULL | opus | ❌ | 021 | 🔲 |
 | [023](023-oob-lookup-cell.poml) | OOB lookup cell (`lookupObjects`) | FULL | sonnet | ❌ | 020, 022 | 🔲 |
