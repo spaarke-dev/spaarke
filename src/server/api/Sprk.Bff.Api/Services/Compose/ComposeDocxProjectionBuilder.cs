@@ -536,12 +536,26 @@ public sealed class ComposeDocxProjectionBuilder
         public readonly StringBuilder Instruction = new();
 
         /// <summary>
-        /// Task 049: the deepest nesting reached in this span. A field is carryable only at 1 — at 2 the
-        /// inner field's own <c>w:instrText</c> has been folded into this accumulation, so the string is a
-        /// concatenation that would author a DIFFERENT field. Recorded rather than inferred from
-        /// <see cref="Depth"/>, which is back at 0 by the time the caller decides.
+        /// Task 049: the deepest nesting reached in this span. The INSTRUCTION carry is available only at 1
+        /// — at 2 the inner field's own <c>w:instrText</c> has been folded into this accumulation, so the
+        /// string is a concatenation that would author a DIFFERENT field. Recorded rather than inferred from
+        /// <see cref="Depth"/>, which is back at 0 by the time the caller decides. (Task 058: at 2 the field
+        /// is still carried — by <see cref="SpanRuns"/>, which never takes the instruction apart.)
         /// </summary>
         public int MaxDepth;
+
+        /// <summary>
+        /// Task 058: every run this span consumed, in document order — the <c>begin</c>, the code phase, any
+        /// nested field's own runs, the <c>separate</c>, the result runs and the <c>end</c>.
+        /// </summary>
+        /// <remarks>
+        /// This is the whole of the nested carry. <see cref="Instruction"/> is a lossy summary of the code
+        /// phase and cannot describe a tree; this is the tree, unread. Accumulated unconditionally rather
+        /// than only when nesting appears, because the decision is made at the close and the runs are gone
+        /// by then — and because a conditional accumulation would be a second rule to keep in step with the
+        /// first. Costs one list of references per field span.
+        /// </remarks>
+        public readonly List<Run> SpanRuns = new();
 
         /// <summary><c>w:fldLock</c> on the outermost <c>begin</c> — the author froze this field.</summary>
         public bool Locked;
@@ -555,6 +569,7 @@ public sealed class ComposeDocxProjectionBuilder
             Phase = FieldPhase.None;
             ResultRuns.Clear();
             Instruction.Clear();
+            SpanRuns.Clear();
             MaxDepth = 0;
             Locked = false;
             Dirty = false;
@@ -584,6 +599,7 @@ public sealed class ComposeDocxProjectionBuilder
                     field.Phase = FieldPhase.Code;
                     field.ResultRuns.Clear();
                     field.Instruction.Clear();
+                    field.SpanRuns.Clear();
                     // Task 049: fldLock / dirty are declared on the OUTERMOST begin and govern the whole
                     // field, so they are read here and not overwritten by a nested begin below.
                     field.Locked = fldChar.FieldLock?.Value == true;
@@ -591,12 +607,14 @@ public sealed class ComposeDocxProjectionBuilder
                 }
                 field.Depth++;
                 if (field.Depth > field.MaxDepth) field.MaxDepth = field.Depth;
+                field.SpanRuns.Add(run);
                 return true;
             }
             if (type == FieldCharValues.Separate)
             {
                 if (field.Depth == 0) return false; // stray separate outside any field — fail open
                 if (field.Phase == FieldPhase.Code) field.Phase = FieldPhase.Result;
+                field.SpanRuns.Add(run);
                 return true;
             }
             if (type == FieldCharValues.End)
@@ -604,6 +622,7 @@ public sealed class ComposeDocxProjectionBuilder
                 if (field.Depth == 0) return false; // stray end outside any field — fail open
                 field.Depth--;
                 if (field.Depth == 0) closed = true;
+                field.SpanRuns.Add(run);
                 return true;
             }
             return false; // unrecognized/absent FieldCharType — treat as ordinary (empty) content
@@ -611,6 +630,10 @@ public sealed class ComposeDocxProjectionBuilder
 
         if (field.Depth > 0)
         {
+            // Task 058: recorded on EVERY consumed-run path, control markup included. The span carry needs
+            // the whole sequence, and a run recorded on some paths but not others would be a hole that only
+            // shows up as a mangled field in a saved document.
+            field.SpanRuns.Add(run);
             if (field.Phase == FieldPhase.Result)
             {
                 field.ResultRuns.Add(run); // cached result content — becomes the atom's display text
@@ -2522,6 +2545,7 @@ public sealed class ComposeDocxProjectionBuilder
                             // prose, which is what every field did before this task: the visible value
                             // survives, the dynamic behaviour does not, and the loss is named.
                             var complexResult = ExtractRunsDisplayText(field.ResultRuns);
+                            var complexNested = field.MaxDepth > 1;
                             if (!TryCarryField(
                                     sink, ctx, href, revision,
                                     instruction: field.Instruction.ToString(),
@@ -2529,8 +2553,9 @@ public sealed class ComposeDocxProjectionBuilder
                                     complex: true,
                                     locked: field.Locked,
                                     dirty: field.Dirty,
-                                    nested: field.MaxDepth > 1,
-                                    firstResultRun: field.ResultRuns.FirstOrDefault()))
+                                    nested: complexNested,
+                                    firstResultRun: field.ResultRuns.FirstOrDefault(),
+                                    spanXml: complexNested ? TryCaptureFieldSpanXml(field.SpanRuns) : null))
                             {
                                 AddPlainRun(sink, complexResult, href, ctx, revision);
                                 ctx.AddWarning("field-flattened-to-text", 1);
@@ -2579,6 +2604,7 @@ public sealed class ComposeDocxProjectionBuilder
                     // so it is read directly — but the carryability gate is the same one the complex form
                     // uses, including the nesting exclusion (a w:fldSimple may itself contain a field).
                     var simpleResult = ExtractAtomDisplayText(sf);
+                    var simpleNested = sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any();
                     if (!TryCarryField(
                             sink, ctx, href, revision,
                             instruction: sf.Instruction?.Value ?? string.Empty,
@@ -2586,8 +2612,9 @@ public sealed class ComposeDocxProjectionBuilder
                             complex: false,
                             locked: sf.FieldLock?.Value == true,
                             dirty: sf.Dirty?.Value == true,
-                            nested: sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any(),
-                            firstResultRun: sf.Descendants<Run>().FirstOrDefault()))
+                            nested: simpleNested,
+                            firstResultRun: sf.Descendants<Run>().FirstOrDefault(),
+                            spanXml: simpleNested ? TryCaptureSimpleFieldSpanXml(sf) : null))
                     {
                         AddPlainRun(sink, simpleResult, href, ctx, revision);
                         ctx.AddWarning("field-flattened-to-text", 1);
@@ -2987,11 +3014,16 @@ public sealed class ComposeDocxProjectionBuilder
     /// "Section 4" after the agreement renumbers to 5. A visible broken reference is a worse-looking failure
     /// and a better one: silence in a legal document is the failure nobody catches.</description></item>
     /// </list>
-    /// <para>What genuinely cannot be reproduced is excluded here, and only that: a NESTED field (the
-    /// instruction recoverable from the outer scan is a concatenation of two fields, so re-emitting it would
-    /// author neither), and a field with no instruction at all. A field whose begin/end straddle paragraphs
-    /// never closes, so it never reaches this method — it keeps its own <c>field-unterminated</c> anomaly on
-    /// the read side and flattens on the write side.</para>
+    /// <para>What genuinely cannot be reproduced is excluded here, and only that: a field with no
+    /// instruction at all. A field whose begin/end straddle paragraphs never closes, so it never reaches
+    /// this method — it keeps its own <c>field-unterminated</c> anomaly on the read side and flattens on
+    /// the write side.</para>
+    /// <para><b>Task 058 — the nested case takes the other door.</b> A NESTED field still has no single
+    /// recoverable instruction (the outer scan's accumulation is a concatenation of two fields' code
+    /// phases), so it does not take the instruction path above and never will. It is carried instead by
+    /// <see cref="ComposeField.SpanXml"/>: the span's own OOXML, captured by
+    /// <see cref="TryCaptureFieldSpanXml"/> and re-emitted verbatim. Nothing about the instruction argument
+    /// changes — the field is carried by not being taken apart.</para>
     /// <para><b>Run properties come from the field's RESULT run</b> — a cross-reference is routinely bold or
     /// italic, and that formatting lives there. Same rule as <c>IsTab</c>: the marker replaces the content,
     /// never the properties.</para>
@@ -3007,9 +3039,48 @@ public sealed class ComposeDocxProjectionBuilder
         bool locked,
         bool dirty,
         bool nested,
-        Run? firstResultRun)
+        Run? firstResultRun,
+        string? spanXml = null)
     {
-        if (nested || string.IsNullOrWhiteSpace(instruction) || !ctx.HasOutputBudget)
+        if (!ctx.HasOutputBudget)
+        {
+            return false;
+        }
+
+        if (nested)
+        {
+            // Task 058: a nested field has no single instruction, so the instruction carry above cannot
+            // describe it — and task 049 was right that inventing one would author a different field. It is
+            // carried by its own OOXML instead (see ComposeField.SpanXml). Instruction is left EMPTY on
+            // purpose: if the render-time gate refuses the span, the renderer finds nothing to author and
+            // flattens to the cached result — today's outcome, never a substitution.
+            if (spanXml is null)
+            {
+                return false;
+            }
+
+            var nestedRPr = firstResultRun?.RunProperties;
+            sink.Add(new ComposeInlineRun
+            {
+                Field = new ComposeField
+                {
+                    Instruction = string.Empty,
+                    SpanXml = spanXml,
+                    CachedResult = ctx.ClampText(cachedResult),
+                    Complex = complex,
+                    Locked = locked,
+                    Dirty = dirty,
+                },
+                Bold = IsOn(nestedRPr?.Bold),
+                Italic = IsOn(nestedRPr?.Italic),
+                Underline = nestedRPr?.Underline is { Val: not null } nu && nu.Val!.Value != UnderlineValues.None,
+                Href = href,
+                Revision = revision,
+            });
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(instruction))
         {
             return false;
         }
@@ -3037,6 +3108,65 @@ public sealed class ComposeDocxProjectionBuilder
         });
 
         return true;
+    }
+
+    /// <summary>
+    /// Task 058 (FR-A10 residual): captures a NESTED <c>w:fldChar</c> field span as the verbatim OOXML the
+    /// renderer re-emits, or <c>null</c> when the span cannot be captured safely and the field keeps
+    /// flattening.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The contiguity check is the whole safety argument.</b> The scan consumes RUNS, but the
+    /// container it walks may hold other children between them — a <c>w:bookmarkStart</c>, a
+    /// <c>w:commentRangeStart</c>, a <c>w:proofErr</c>, a <c>w:hyperlink</c> — and each of those is emitted
+    /// by its OWN arm of <see cref="ProjectInline"/>, at its own position. Capturing just the runs of such a
+    /// span would carry the field while the interleaved element was emitted somewhere else, silently
+    /// reordering the paragraph. A span whose runs are not consecutive siblings is therefore refused and
+    /// keeps today's flatten — a smaller, already-described loss than a paragraph whose parts moved.</para>
+    /// <para><b>A holder <c>w:p</c>, not a bare fragment.</b> The captured runs are cloned into a fresh
+    /// paragraph and that paragraph's <c>OuterXml</c> is what travels: the SDK emits the namespace
+    /// declarations the fragment needs on the holder (the same mechanism <see cref="ComposeEmbeddedObject"/>
+    /// relies on), and a single root means ONE parse gate at render serves both this and the
+    /// <c>w:fldSimple</c> form.</para>
+    /// <para>Capped by the shared opaque-carry limit and REFUSED rather than truncated over it — half a
+    /// field is not the construct the document contained.</para>
+    /// </remarks>
+    private static string? TryCaptureFieldSpanXml(IReadOnlyList<Run> spanRuns)
+    {
+        if (spanRuns.Count == 0)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < spanRuns.Count - 1; i++)
+        {
+            if (!ReferenceEquals(spanRuns[i].NextSibling(), spanRuns[i + 1]))
+            {
+                return null;
+            }
+        }
+
+        return CaptureInHolderParagraph(spanRuns);
+    }
+
+    /// <summary>
+    /// Task 058: the compact form's capture — a <c>w:fldSimple</c> that itself contains a field is ONE
+    /// element, so there is no contiguity question to answer; it is cloned into the same holder shape as the
+    /// complex span so both forms meet the same render-time gate.
+    /// </summary>
+    private static string? TryCaptureSimpleFieldSpanXml(SimpleField field) =>
+        CaptureInHolderParagraph(new OpenXmlElement[] { field });
+
+    private static string? CaptureInHolderParagraph(IEnumerable<OpenXmlElement> children)
+    {
+        var holder = new Paragraph();
+        foreach (var child in children)
+        {
+            holder.AppendChild(child.CloneNode(true));
+        }
+
+        var xml = holder.OuterXml;
+        return xml.Length == 0 || xml.Length > ComposeDocumentRenderer.MaxOpaqueCarryXmlChars ? null : xml;
     }
 
     /// <summary>

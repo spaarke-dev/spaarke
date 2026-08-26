@@ -543,6 +543,22 @@ internal static class ComposeBlockMerge
     /// properties would spread that fragment's formatting across the whole paragraph. Character-level
     /// re-association of properties to the runs they came from is out of scope here and belongs with the
     /// opaque-atom carry work.
+    ///
+    /// <para><b>A run carried VERBATIM is exempt (task 058).</b> Inheritance exists because a re-authored run
+    /// LOST its properties at projection time — the content model carries three marks and discards the rest —
+    /// so donating the paragraph's dominant formatting is a repair. A run that was never re-authored has
+    /// nothing to repair: it already holds the properties the document gave it, and adding to them is not a
+    /// repair but a mutation of carried content. Found by measurement, not by reasoning — a nested field's
+    /// inner <c>MERGEFIELD</c> result carries <c>w:noProof</c> and nothing else, while the outer <c>IF</c>
+    /// result (the dominant run, being the longest) carries <c>w:b</c>; without this exemption the verbatim
+    /// carry landed and then every inner merge value in it came back BOLD. That would have been a fidelity
+    /// loss introduced by the fix for a fidelity loss.</para>
+    ///
+    /// <para>Scoped to the nested field span deliberately. A NON-nested field is re-authored from the model
+    /// by <c>ComposeDocumentRenderer.AppendField</c>, so its result run is exactly the kind of re-authored
+    /// run inheritance is for, and the published residual list says so ("the same edited-block property tier
+    /// every other run is subject to"). Widening the exemption to every field would silently change that
+    /// shipped behaviour.</para>
     /// </remarks>
     private static void InheritRunProperties(Paragraph rendered, Paragraph baseParagraph)
     {
@@ -552,8 +568,16 @@ internal static class ComposeBlockMerge
             return;
         }
 
+        var verbatim = new HashSet<Run>();
+        CollectNestedFieldSpanRuns(rendered, verbatim);
+
         foreach (var run in rendered.Descendants<Run>().ToList())
         {
+            if (verbatim.Contains(run))
+            {
+                continue;
+            }
+
             var runPr = run.RunProperties;
             if (runPr is null)
             {
@@ -570,6 +594,203 @@ internal static class ComposeBlockMerge
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Task 058: collects every run belonging to a NESTED <c>w:fldChar</c> field span in
+    /// <paramref name="container"/> — the runs <c>ComposeDocumentRenderer</c> carried verbatim rather than
+    /// re-authored, and therefore the ones property inheritance must leave alone.
+    /// </summary>
+    /// <remarks>
+    /// Recognised from the OUTPUT's own structure rather than from a marker the renderer left behind. A
+    /// marker would have to be stripped before the package is written, and a marker that survived one code
+    /// path would be junk in a saved legal document; a balanced field span that nests is self-evident in the
+    /// XML and cannot get out of step with the renderer that produced it. Descends into <c>w:ins</c>,
+    /// <c>w:del</c> and <c>w:hyperlink</c> because that is exactly where <c>AppendFieldParts</c> puts a span
+    /// with revision or link context.
+    /// </remarks>
+    private static void CollectNestedFieldSpanRuns(OpenXmlElement container, HashSet<Run> sink)
+    {
+        foreach (var (runs, _) in NestedFieldSpansIn(container))
+        {
+            foreach (var run in runs)
+            {
+                sink.Add(run);
+            }
+        }
+
+        foreach (var child in container.ChildElements)
+        {
+            if (child is InsertedRun or DeletedRun or Hyperlink)
+            {
+                CollectNestedFieldSpanRuns(child, sink);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every NESTED <c>w:fldChar</c> field span among <paramref name="container"/>'s DIRECT children, each
+    /// with the CONTENT ORDINAL of its first run — the index it holds among the container's content
+    /// children, counted the same way <see cref="CarryEmbeddedObjects"/> counts.
+    /// </summary>
+    /// <remarks>
+    /// Direct children only, so a span's ordinal means something at the level it will be restored to. A span
+    /// inside a revision wrapper or a hyperlink is reached by the recursive caller above, which wants the
+    /// runs and not their positions.
+    /// </remarks>
+    private static List<(List<Run> Runs, int Ordinal)> NestedFieldSpansIn(OpenXmlElement container)
+    {
+        var found = new List<(List<Run>, int)>();
+        var span = new List<Run>();
+        var depth = 0;
+        var maxDepth = 0;
+        var spanOrdinal = 0;
+        var ordinal = 0;
+
+        foreach (var child in container.ChildElements)
+        {
+            if (child is ParagraphProperties)
+            {
+                continue; // not a content position
+            }
+
+            if (child is Run run)
+            {
+                var type = run.GetFirstChild<FieldChar>()?.FieldCharType?.Value;
+
+                if (type == FieldCharValues.Begin)
+                {
+                    if (depth == 0)
+                    {
+                        span.Clear();
+                        maxDepth = 0;
+                        spanOrdinal = ordinal;
+                    }
+
+                    depth++;
+                    if (depth > maxDepth) maxDepth = depth;
+                    span.Add(run);
+                }
+                else if (depth > 0)
+                {
+                    span.Add(run);
+                    if (type == FieldCharValues.End && --depth == 0)
+                    {
+                        if (maxDepth > 1)
+                        {
+                            found.Add((new List<Run>(span), spanOrdinal));
+                        }
+
+                        span.Clear();
+                    }
+                }
+            }
+
+            ordinal++;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Task 058: restores NESTED field spans the base paragraph had and the rendered one does not, at the
+    /// base's own content ordinal. Returns the number restored.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why base-carry is the only door for this construct.</b> An ORDINARY field reaches the client
+    /// as an atom carrying its instruction, so task 057 could teach the mapper to hand it back. A nested
+    /// field's payload is its SUBTREE, and markup does not cross the wire (ADR-049 I-2) — the read-side atom
+    /// deliberately carries nothing for one. Without this method the model carry would be a producer with no
+    /// consumer for every keystroke edit made in a browser, which is exactly the shape task 049 shipped and
+    /// task 057 had to come back for.</para>
+    ///
+    /// <para><b>Restore-if-missing, so it composes with the model carry instead of competing with it.</b> A
+    /// span already present in the rendered paragraph — which is what every server-side model round trip
+    /// produces — is matched and left alone. When the model carried everything, this restores nothing.</para>
+    ///
+    /// <para><b>Identity is the span's instruction text plus its run count, NOT its bytes.</b> Byte equality
+    /// is the obvious choice and is wrong for the same reason it was wrong for embedded objects: a subtree
+    /// re-parsed standalone can be re-serialized with different namespace declarations, so byte matching
+    /// reports a MISS on the very span sitting right there and the paragraph ends up with the conditional
+    /// clause TWICE. The concatenated field codes are what actually distinguish one conditional from another
+    /// and they survive re-serialization untouched. Counted rather than set-matched, so a paragraph holding
+    /// the same conditional twice restores the right NUMBER of them.</para>
+    ///
+    /// <para><b>Position is the base's content ordinal, clamped</b> — the same approximation, with the same
+    /// justification, as the embedded-object restore: exact for a conditional alone in its paragraph (the
+    /// shape a governing-law or a signature-conditional clause takes), an approximation for one mid-sentence
+    /// in a paragraph the user rewrote, and a strictly smaller loss than the deletion it replaces.</para>
+    ///
+    /// <para><b>What it cannot distinguish</b>, stated rather than discovered: a user who DELETED the field
+    /// chip from an otherwise-edited paragraph looks identical, at this layer, to a client that never sent
+    /// it — so the span is restored. That is the same trade already accepted for bookmarks (041), content-
+    /// control shells (041) and embedded objects (056), and it is the conservative direction: re-instating a
+    /// construct the user meant to remove is visible and undoable, while dropping one they meant to keep is
+    /// neither.</para>
+    /// </remarks>
+    private static int CarryNestedFieldSpans(Paragraph baseParagraph, Paragraph rendered)
+    {
+        var baseSpans = NestedFieldSpansIn(baseParagraph);
+        if (baseSpans.Count == 0)
+        {
+            return 0;
+        }
+
+        var present = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var (runs, _) in NestedFieldSpansIn(rendered))
+        {
+            var key = NestedFieldSpanIdentity(runs);
+            present[key] = present.TryGetValue(key, out var seen) ? seen + 1 : 1;
+        }
+
+        var carried = 0;
+        foreach (var (runs, baseOrdinal) in baseSpans)
+        {
+            var key = NestedFieldSpanIdentity(runs);
+            if (present.TryGetValue(key, out var remaining) && remaining > 0)
+            {
+                present[key] = remaining - 1;
+                continue;
+            }
+
+            var contentStart = rendered.ParagraphProperties is null ? 0 : 1;
+            var insertAt = Math.Min(contentStart + baseOrdinal, rendered.ChildElements.Count);
+            foreach (var run in runs)
+            {
+                rendered.InsertAt(run.CloneNode(true), insertAt);
+                insertAt++;
+            }
+
+            carried++;
+        }
+
+        return carried;
+    }
+
+    /// <summary>
+    /// A re-serialization-stable identity for a nested field span: how many runs it holds, plus every field
+    /// code inside it in document order. See <see cref="CarryNestedFieldSpans"/> for why OuterXml is not
+    /// usable here.
+    /// </summary>
+    private static string NestedFieldSpanIdentity(IReadOnlyList<Run> span)
+    {
+        var identity = new System.Text.StringBuilder();
+        identity.Append(span.Count).Append('|');
+
+        foreach (var run in span)
+        {
+            foreach (var child in run.ChildElements)
+            {
+                switch (child)
+                {
+                    case FieldCode code: identity.Append(code.Text); break;
+                    case DeletedFieldCode deleted: identity.Append(deleted.Text); break;
+                    default: break;
+                }
+            }
+        }
+
+        return identity.ToString();
     }
 
     private static RunProperties? DominantRunProperties(Paragraph baseParagraph)
@@ -687,6 +908,24 @@ internal static class ComposeBlockMerge
         if (baseParagraph is not null && renderedParagraph is not null)
         {
             carried += CarryEmbeddedObjects(baseParagraph, renderedParagraph);
+        }
+
+        // ── 1c. Nested field spans (task 058) ───────────────────────────────────────────────────
+        //
+        // The conditional merge block — `{ IF { MERGEFIELD State } = … }`, the shape a template is built
+        // from. Its span ALSO round-trips through the content model (`ComposeField.SpanXml`), which is what
+        // preserves its exact position inside the paragraph. This is the other half, for a save whose posted
+        // model does not carry it — which is what a KEYSTROKE EDIT from the browser looks like, because a
+        // nested field's read-side atom deliberately carries no payload at all (its content is markup, and
+        // markup does not cross the wire — ADR-049 I-2).
+        //
+        // Ordering matters and is not incidental: this runs AFTER InheritProperties, so a base-restored span
+        // is never stamped with the paragraph's dominant run properties. The model-carried span gets the same
+        // protection from InheritRunProperties' own exemption; both halves end up carrying the base's bytes
+        // and nothing else.
+        if (baseParagraph is not null && renderedParagraph is not null)
+        {
+            carried += CarryNestedFieldSpans(baseParagraph, renderedParagraph);
         }
 
         // ── 2. A block-level `w:sdt` shell ──────────────────────────────────────────────────────

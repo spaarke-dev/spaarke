@@ -313,3 +313,23 @@ the corpus directory at test-discovery time. The suite went from 21 to 29 tests 
 files into `tests/fixtures/compose-corpus/`. Asserted by
 `Gate_CorpusEnumerationIsDynamic_NewDocumentNeedsZeroCodeChanges`.
 
+
+---
+
+## 1.9. R8 construct fixtures added after §1.8 (tasks 043, 056, 058)
+
+> **Standing gap, recorded rather than papered over.** This catalog stops at §1.8 (task 022). The construct
+> fixtures added by tasks 043 and 056 — `inline-image.docx`, `chart-embedded.docx`,
+> `ole-embedded-object.docx`, `embedded-font.docx`, `endnote-references.docx`,
+> `comment-ranges-multiparagraph.docx`, `symbol-section-mark.docx`, `nda-interrupted-clauses.docx` and
+> others now sitting in this directory — have **no rows here**. Each generator's own docstring carries the
+> record, which is where a reader will actually look, but the manifest's claim to be a catalog is currently
+> only partly true. Backfilling those rows is a small deliberate task, not a side effect of this one; naming
+> the gap is what stops it being rediscovered a fourth time.
+
+| # | Filename | What it contains | Why it had to exist | Added by |
+|---|---|---|---|---|
+| 25 | `nested-merge-fields.docx` | A **conditional merge template**: `{ IF { MERGEFIELD State } = "California" "…" "…{ MERGEFIELD State }…" }` alone in its own block, a second smaller conditional **mid-sentence**, and a plain `{ MERGEFIELD ClientName }` in a third block. `w:noProof` on every field result run (Word's own shape), `w:b` on one of them. The outer instruction is split across **three** `w:instrText` runs. | The corpus covered ordinary fields (`ref-cross-references.docx`) but contained **no nested field at all** — the only ones in the repo were synthetic fragments inside two test files. The shape the owner asked about is not the bare `MERGEFIELD` that already round-tripped; it is the conditional block a template is built from. `w:noProof` is the property that makes "carried verbatim" measurably different from "re-authored from the model's three marks", and the plain merge field in the same document is the flat-scan non-regression control arm. | 058 |
+
+Generator: `generators/make-nested-merge-fields.py`. Picked up by every harness with no `.cs` edit
+(`ComposeCorpusFixtureLocator` globs `*.docx`) — the FR-G08 property above, exercised again.

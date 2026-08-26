@@ -57,12 +57,22 @@ public sealed class ComposeResidualLossParityTests
         // code so the preserve direction is enforced: a regression fails this row instead of going quiet.
         new object?[] { "fldSimple", "fldSimple", null },
         new object?[] { "fldChar", "fldChar", null },
-        // …but NOT every field. A NESTED field's instruction cannot be recovered intact (the outer scan
-        // folds the inner one in, so the string is a concatenation that would author neither field), so it
-        // keeps flattening and keeps saying so. This row is what stops the retirement above from turning
-        // `field-flattened-to-text` into a code the document names and the renderer never emits — the
-        // accretion failure direction B exists to catch.
-        new object?[] { "fldNested", "fldChar", "field-flattened-to-text" },
+        // Task 058: a NESTED field — the conditional merge block a template is built from — is now carried
+        // too. Its instruction still cannot be RECOVERED (the outer scan folds the inner one in, so the
+        // string is a concatenation that would author neither field), and it is not: the span is carried as
+        // its own OOXML and re-emitted verbatim, so nothing ever reconstructs an instruction. Null code so
+        // the preserve direction is enforced.
+        new object?[] { "fldNested", "fldChar", null },
+        // …but NOT every field, and this is the row that keeps `field-flattened-to-text` a code the renderer
+        // really does emit. An UNTERMINATED field — a `w:fldChar` begin whose `end` lives in another
+        // paragraph, which is what a TOC or an INDEX is — never closes inside one container, so there is no
+        // complete field for either carry to take. It keeps flattening and keeps saying so.
+        //
+        // Retiring the last producer of a code without noticing is direction B's failure mode arriving
+        // through the front door: the published document would go on naming a warning nothing can raise.
+        // `fldNested` used to be that producer; this row replaces it in the same change, exactly as the
+        // `fldNested` row itself was added when task 049 retired the two ordinary field rows.
+        new object?[] { "fldUnterminated", "fldChar", "field-flattened-to-text" },
         // Task 056: all three embedded-object forms are now CARRIED through an edit to their own block. The
         // subtree round-trips as ComposeInlineRun.EmbeddedObject (opaque OuterXml, SDK-parse-gated) and,
         // when a posted model does not carry it — which is what a keystroke edit from the browser looks
@@ -266,6 +276,12 @@ public sealed class ComposeResidualLossParityTests
                        + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
                        + "<w:r><w:t>First</w:t></w:r>"
                        + "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
+        // `{ TOC \o "1-3" \h` with no `end` in this paragraph — the shape a table of contents takes, whose
+        // result spans paragraph marks so its `begin` and `end` sit in different containers.
+        "fldUnterminated" => "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+                             + "<w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-3\" \\h </w:instrText></w:r>"
+                             + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+                             + "<w:r><w:t>Table of contents entry</w:t></w:r>",
         "drawing" => "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"
                      + "<wp:extent cx=\"914400\" cy=\"914400\"/><wp:docPr id=\"1\" name=\"P\"/>"
                      + "<a:graphic><a:graphicData uri=\"x\"/></a:graphic></wp:inline></w:drawing></w:r>",

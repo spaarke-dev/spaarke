@@ -138,12 +138,18 @@ public sealed record ComposeSymbol
 /// the base-carry path instead, which is exactly why they are not modelled this way.
 /// </para>
 /// <para>
-/// <b>What is NOT carried, and why</b> (see <c>projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</c>):
-/// a NESTED field (<c>{ IF { PAGE } = 1 … }</c>) and a field whose begin/end straddle paragraphs have no
-/// single recoverable instruction, so re-emitting one would author a DIFFERENT field than the document
-/// contained. Those keep flattening and are reported <c>field-flattened-to-text</c> — the gate is structural
-/// (can the construct be reproduced exactly?), never a keyword allow-list, because freezing PAGE in the one
-/// paragraph a user edited while the other 39 pages stay live makes a document that behaves two ways.
+/// <b>What is NOT carried, and why</b> (see <c>projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</c>
+/// and <c>058-nested-field-carry.md</c>): a field whose <c>begin</c>/<c>end</c> straddle paragraphs (a
+/// <c>TOC</c>, an <c>INDEX</c>) never closes inside one container, so there is no complete field to carry at
+/// all. It keeps flattening and is reported <c>field-flattened-to-text</c> — the gate is structural (can the
+/// construct be reproduced exactly?), never a keyword allow-list, because freezing PAGE in the one paragraph
+/// a user edited while the other 39 pages stay live makes a document that behaves two ways.
+/// </para>
+/// <para>
+/// A NESTED field (<c>{ IF { MERGEFIELD State } = … }</c> — the conditional merge block a template is built
+/// from) has no single recoverable instruction either, and until task 058 it flattened for that reason. It is
+/// now carried by <see cref="SpanXml"/>, which does not recover the instruction at all: it carries the
+/// field's own OOXML.
 /// </para>
 /// </summary>
 public sealed record ComposeField
@@ -183,6 +189,49 @@ public sealed record ComposeField
     /// the field may change, and silently dropping it changes behaviour.
     /// </summary>
     public bool Dirty { get; init; }
+
+    /// <summary>
+    /// Task 058: the NESTED field's own OOXML, carried verbatim. <c>null</c> for every other field.
+    /// <para>
+    /// <b>Why a second representation exists at all.</b> A nested field — <c>{ IF { MERGEFIELD State } =
+    /// "California" "…" "…{ MERGEFIELD State }…" }</c>, the shape a conditional merge template is built from
+    /// — is a TREE, and <see cref="Instruction"/> is a scalar. Task 049 recorded the consequence precisely:
+    /// the scan folds the inner field's <c>w:instrText</c> into the outer accumulation, so the only string
+    /// recoverable is a CONCATENATION of both fields' instructions, and re-emitting it would author neither.
+    /// That reasoning is correct and is not overturned here. What it does not establish is that the field
+    /// cannot be carried — only that it cannot be RECONSTRUCTED. This property is the third option: the
+    /// span is captured and re-emitted without ever being taken apart, so the tree survives because nothing
+    /// parses it. Same argument, one construct larger, as
+    /// <see cref="ComposeEmbeddedObject.Xml"/> — a typed model of a construct discards every property it
+    /// failed to enumerate, and carrying the bytes preserves the ones nobody thought of.
+    /// </para>
+    /// <para>
+    /// <b>Mutually exclusive with <see cref="Instruction"/>.</b> When this is set the instruction is EMPTY,
+    /// because there is no single instruction to state — and that is load-bearing rather than tidy: if the
+    /// carry is refused at render time, the renderer falls through to the instruction path, finds nothing,
+    /// and flattens to <see cref="CachedResult"/> — today's outcome, a defined one (ADR-049 invariant 1).
+    /// A concatenated instruction sitting in that slot would instead author a different field, which is the
+    /// exact failure task 049 declined to ship.
+    /// </para>
+    /// <para>
+    /// <b>Shape.</b> A holder <c>w:p</c> whose children are the field: either the contiguous
+    /// <c>w:fldChar</c> begin/…/end RUN sequence, or a single <c>w:fldSimple</c>. The wrapper exists so ONE
+    /// parse gate serves both forms — the SDK emits the namespace declarations the fragment needs on the
+    /// holder, exactly as <see cref="ComposeEmbeddedObject.Xml"/> relies on.
+    /// </para>
+    /// <para>
+    /// <b>Server-set, and NEVER handed to the client.</b> The read-side atom deliberately carries no payload
+    /// for a nested field (<c>data-field-instr</c> is absent), so no client can round-trip this and ADR-049
+    /// I-2 is not stretched: a field instruction is a scalar the document states in plain text, but a field
+    /// SUBTREE is markup, and markup does not cross the wire. It reaches the renderer only through a
+    /// server-side model round trip. At render it is parsed through the typed SDK class, schema-validated,
+    /// size-capped, checked to resolve every relationship it names, and — unlike any other carry — checked
+    /// to BE a nested field: a balanced span that opens on its first run, closes on its last, and nests at
+    /// least once. A payload that is not that is refused, so the property cannot become a way to author
+    /// arbitrary content into a saved package.
+    /// </para>
+    /// </summary>
+    public string? SpanXml { get; init; }
 }
 
 /// <summary>

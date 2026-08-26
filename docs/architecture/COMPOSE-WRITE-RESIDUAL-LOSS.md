@@ -13,7 +13,10 @@
 > to §3, leaving only the text-carrying box in §2;
 > **no row changed 2026-08-26** by task 047b — the table below is exactly as it was signed, but the promise
 > the table rests on was repaired: two save paths could drop a construct **without naming it**. See
-> [§5, "The hole under the list"](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26).
+> [§5, "The hole under the list"](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26);
+> **the nested-field half retired 2026-08-26** by task 058 — a conditional merge block
+> (`{ IF { MERGEFIELD State } = … }`, the shape a template is built from) moved to §3, leaving only the
+> **unterminated** field in §2.
 > **Owner sign-off**: ✅ **ACCEPTED 2026-08-25** — see [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
@@ -47,7 +50,7 @@ paragraphs apart ([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08
 
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
-| **Nested or unterminated field** — `{ IF { PAGE } = 1 … }`, or a field whose `begin`/`end` straddle paragraphs (a `TOC`, an `INDEX`). Ordinary fields are **carried** — see §3 | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
+| **Unterminated field** — one whose `begin` and `end` straddle paragraphs (a `TOC`, an `INDEX`). Ordinary and **conditional/nested** fields are carried — see §3 | Flattened to the text it was displaying; stops updating | `field-flattened-to-text` |
 | **Text box** (a `w:pict` / `w:drawing` wrapping `w:txbxContent`) — a floating callout or signature block. Text-free objects (images, charts, shapes, OLE embeds) are **carried** — see §3 | The box's **text is kept**, as ordinary prose at the box's position; the box itself — its frame, size, wrap and float — is not | `complex-object-dropped` (plus `text-box-flattened` at open) |
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
@@ -67,7 +70,8 @@ of the list is enforced too — if a future change starts losing one, the parity
 | **Soft line breaks** (`w:br`) | Round-trip as a marker run. Address blocks, party blocks and signature blocks are held together by these, so the paragraphs users edit most were the ones collapsing (fixed task 046) |
 | **Tabs** (`w:tab`) | Round-trip as a marker run. Definitions lists, signature blocks and table-of-contents lines are held in alignment by exactly these; flattening one to a space is invisible in a diff and obvious on the page (fixed task 048) |
 | **Symbols** (`w:sym`) — §, ¶, Wingdings glyphs | Round-trip as their **font + code point**, not as the glyph the reader resolved for display. § in a legal document is usually Symbol-font `F0A7`, so re-authoring the resolved look-alike would quietly change the character the document contains — and for a code point we cannot resolve, it would have written the on-screen placeholder into the file as content (fixed task 048) |
-| **Fields** (`w:fldSimple`, `w:fldChar`) — `REF`, `PAGEREF`, `PAGE`, `DATE`, `SEQ`, `STYLEREF`, vendor instructions | Round-trip as their **instruction**, alongside the result Word last computed — so the save changes nothing on screen and the field is a field again. `w:fldLock` rides along, because the one way this could be worse than freezing is converting a field the author deliberately locked into a live one. The form the document used (`fldSimple` vs the `fldChar` run sequence) is re-emitted, not normalised. On a KEYSTROKE edit the result's bold/italic/underline are NOT carried (an opaque atom holds no marks), so a bold cross-reference in a plain paragraph returns plain — the field itself survives. **Not** nested or unterminated fields — those stay in §2 (fixed task 049; client half task 057) |
+| **Fields** (`w:fldSimple`, `w:fldChar`) — `REF`, `PAGEREF`, `PAGE`, `DATE`, `SEQ`, `STYLEREF`, `MERGEFIELD`, vendor instructions | Round-trip as their **instruction**, alongside the result Word last computed — so the save changes nothing on screen and the field is a field again. `w:fldLock` rides along, because the one way this could be worse than freezing is converting a field the author deliberately locked into a live one. The form the document used (`fldSimple` vs the `fldChar` run sequence) is re-emitted, not normalised. On a KEYSTROKE edit the result's bold/italic/underline are NOT carried (an opaque atom holds no marks), so a bold cross-reference in a plain paragraph returns plain — the field itself survives. **Not** unterminated fields — those stay in §2 (fixed task 049; client half task 057) |
+| **Conditional / nested fields** — `{ IF { MERGEFIELD State } = "California" "…" "…{ MERGEFIELD State }…" }`, the shape a merge template is built from | Round-trip as the field's **own OOXML, character-for-character** — outer instruction, every inner field, both branches, the cached result, `w:fldLock` and `w:dirty`. This one is carried by *not being taken apart*: a nested field is a tree and an instruction is a scalar, so any attempt to recover "the instruction" yields a concatenation of two fields that would author neither (task 049's finding, which stands). The span is captured and re-emitted whole instead, so what nobody parsed cannot be lost — including run properties the ordinary field carry does drop, such as the `w:noProof` Word writes on every merge result. Works for a keystroke edit too, without the field's markup ever reaching the browser: the conditional's atom deliberately carries no payload, so when the posted model does not hold it the span is restored from the paragraph's pre-edit base (fixed task 058) |
 | **Embedded objects** (`w:drawing`, `w:object`, `w:pict`) — a picture, chart, shape or OLE embed | The object's own OOXML subtree is carried **verbatim**, so properties nobody enumerated survive for the same reason cloning an untouched block preserves them. The picture's bytes never travel: they stay in their own package part and only the reference moves, and the save **resolves that reference against the document before authoring it** — a subtree naming a relationship the package does not have is refused rather than written, because a file Word reports as *damaged* is worse than a missing picture. Works for a keystroke edit too, without the object's markup ever reaching the browser: when the posted content model does not carry it, the object is restored from the paragraph's pre-edit base (fixed task 056). **Not** a text box — that stays in §2 |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
@@ -88,6 +92,24 @@ of the list is enforced too — if a future change starts losing one, the parity
 > and a result that was several differently-formatted runs comes back as one. This is the same edited-block
 > property tier every other run is subject to — it is stated here rather than left to be discovered, because
 > "carried" should not be read as "byte-identical".
+>
+> **The CONDITIONAL field is the exception, and it is worth understanding why.** It *is* byte-identical —
+> `w:noProof`, character styles, colours, multi-run results and all — for the same reason an untouched block
+> is: nothing re-authored it. The ordinary field carry is a *reconstruction* from an instruction plus a
+> result, so it can only restore what the model holds. The conditional carry is not a reconstruction at all,
+> which makes it the more faithful of the two. That is not an argument for reconstructing less elsewhere: a
+> non-nested field's instruction is a scalar the client can safely hand back, and a subtree is not, which is
+> exactly why the ordinary field survives a keystroke edit through the client and the conditional survives it
+> through the base instead.
+>
+> **What the conditional carry does *not* keep.** Its POSITION inside the paragraph, in one case — the same
+> case, with the same trade, as a carried embedded object. Through the content model (every server-side path,
+> including an AI edit) the position is exact. Restored from the base instead (a keystroke edit) it is placed
+> at the index it held among the paragraph's parts before the edit: exact for a conditional alone in its
+> paragraph, which is the shape a governing-law or signature-conditional clause almost always takes, and an
+> approximation for one mid-sentence in a paragraph the user rewrote. A base restore also cannot tell a user
+> who **deleted** the conditional chip from a client that never sent it, so it restores — the conservative
+> direction, and the same one bookmarks, content-control shells and embedded objects already take.
 
 ## 4. Known gaps that are not construct loss
 
@@ -116,13 +138,14 @@ edited block — and holds this document to the result in **both** directions:
   "safely conservative" — it tells you we damage things we do not, which is how a document stops being
   read.
 
-### Measured 2026-08-25 (task 056; the four object rows changed since the task-049 run)
+### Measured 2026-08-26 (task 058; the two field rows changed since the task-056 run)
 
 | Family | Untouched block | Edited block | Code emitted |
 |---|---|---|---|
 | `fldSimple` | 1/1 kept | **1/1 kept** | *(none — carried, task 049)* |
 | `fldChar` | 2/2 kept | **2/2 kept** | *(none — carried, task 049)* |
-| `fldNested` — `{ IF { PAGE } = 1 … }` | 6/6 kept | 0/6 | `field-flattened-to-text` |
+| `fldNested` — `{ IF { PAGE } = 1 … }` | 6/6 kept | **6/6 kept** | *(none — carried, task 058)* |
+| `fldUnterminated` — a `begin` whose `end` is in another paragraph | 2/2 kept | 0/2 | `field-flattened-to-text` |
 | `drawing` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
 | `object` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
 | `pict` | 1/1 kept | **1/1 kept** | *(none — carried, task 056)* |
@@ -164,6 +187,21 @@ check failed in the over-claim direction until this document stopped calling the
 `fldNested` row was added in the same change precisely so `field-flattened-to-text` remains a code the
 renderer really does emit. Retiring the last producer of a code without noticing would have left the
 document naming a warning nothing can raise, which is direction B's failure mode arriving by the front door.
+
+And on its fifth run it retired that very row, by the same mechanism, one task later. Task 058 taught the
+conditional merge block to round-trip, `fldNested` went from `0/6` to `6/6`, and the check failed in the
+over-claim direction until this document stopped calling it lost — while `fldUnterminated` was added in the
+same change to keep `field-flattened-to-text` a code the renderer can still raise. That is now three
+consecutive retirements where the row added to preserve a warning code was itself retired by the next task,
+which is what a shrinking list is supposed to look like.
+
+**And it caught something the row did not name.** The verbatim carry landed and the field came back complete
+— and every one of its runs came back **bold**, because `ComposeBlockMerge` donates the base paragraph's
+dominant run properties to every rendered run, and the dominant run here was the outer `IF`'s result. Applied
+to content that was *carried* rather than re-authored, that repair becomes a mutation: both inner merge
+values were silently bolded by the fix for a silent loss. Property inheritance is now exempt for runs it did
+not author, and the boundary is pinned by a test — the run the user actually typed still inherits, because
+that one really was rebuilt from a model that dropped its formatting.
 
 And on its second run it caught the document going stale in the other direction: task 046 taught soft
 line breaks to round-trip, and the parity check failed because this document still listed
@@ -228,9 +266,17 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 
 **What was accepted — and what was NOT.** The owner **declined** the original field and embedded-object
 rows on 2026-08-25. Those were not signed off; they were **fixed** (tasks 049 + 057 carry fields, task
-056 carries objects). This sign-off covers only the five rows remaining in §2:
+056 carries objects). This sign-off covered five rows in §2:
 nested/unterminated fields · text boxes · footnote references · endnote references · content controls.
-Two of those five are narrower carve-outs created by the fixes, not pre-existing losses.
+Two of those five were narrower carve-outs created by the fixes, not pre-existing losses.
+
+**One of the five has since been narrowed again, in the owner's favour (task 058, 2026-08-26).** Answering
+"we will be introducing templates and field-merge-codes, will these be supported?", the nested half of the
+first row was **fixed rather than signed**: a conditional merge block now round-trips byte-for-byte, and what
+remains on that row is only the **unterminated** field — a `TOC` or an `INDEX`, whose `begin` and `end` sit in
+different paragraphs so there is no complete field to carry in the first place. That is a strictly smaller
+promise than the one accepted, so it does not re-open the sign-off; it is recorded because a list that
+quietly gets *better* is as much a drift from its signature as one that gets worse.
 
 **What signing means**: that the losses in §2 are acceptable to ship *given* they occur only in the
 paragraph a user edits and are reported by name every time. Declining any single item makes it a scope

@@ -1258,6 +1258,19 @@ public sealed partial class ComposeDocumentRenderer
     /// </remarks>
     private static bool AppendField(Paragraph paragraph, ComposeInlineRun run, ComposeField field, ListRenderState state)
     {
+        // Task 058: a NESTED field carries its own OOXML rather than an instruction, because it HAS no
+        // single instruction — see ComposeField.SpanXml. Re-emitted verbatim, so the outer field, every
+        // inner field, and both of their result runs come back as the document authored them. A span that
+        // does not survive the gate falls through: SpanXml and Instruction are mutually exclusive, so the
+        // guard below finds nothing and the caller flattens to the cached result — today's outcome, never a
+        // reconstruction (ADR-049 invariant 1).
+        if (!string.IsNullOrEmpty(field.SpanXml)
+            && TryBuildCarriedFieldSpan(field.SpanXml, state) is { } spanParts)
+        {
+            AppendFieldParts(paragraph, spanParts, run, state);
+            return true;
+        }
+
         // CLIENT INPUT REACHING OOXML AUTHORING — the recurring review-finding class this file already
         // gates for revision attribution (021-F1 / 022-F1 / 024-F1), applied to the instruction. A posted
         // model is not necessarily one we projected: it can carry XML-illegal control characters (which
@@ -1306,26 +1319,8 @@ public sealed partial class ComposeDocumentRenderer
             }
             parts.Add(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
 
-            if (run.Revision is { } complexRevision)
-            {
-                var wrapper = NewRevisionWrapper(complexRevision, state);
-                foreach (var part in parts) wrapper.AppendChild(part);
-                fieldElement = wrapper;
-            }
-            else if (!string.IsNullOrWhiteSpace(run.Href))
-            {
-                // A hyperlink admits EG_PContent, so it can hold the whole sequence.
-                var link = new Hyperlink { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
-                foreach (var part in parts) link.AppendChild(part);
-                paragraph.AppendChild(link);
-                return true;
-            }
-            else
-            {
-                // No element may hold a bare run sequence, so the parts go straight onto the paragraph.
-                foreach (var part in parts) paragraph.AppendChild(part);
-                return true;
-            }
+            AppendFieldParts(paragraph, parts, run, state);
+            return true;
         }
         else
         {
@@ -1358,6 +1353,141 @@ public sealed partial class ComposeDocumentRenderer
 
         paragraph.AppendChild(fieldElement);
         return true;
+    }
+
+    /// <summary>
+    /// Appends a field authored as a bare RUN SEQUENCE onto <paramref name="paragraph"/>, in the revision /
+    /// hyperlink nesting Word itself writes: <c>w:hyperlink</c> OUTSIDE, <c>w:ins</c>/<c>w:del</c> INSIDE
+    /// (CT_RunTrackChange does not admit <c>w:hyperlink</c>, and the reverse nesting risks Word's repair
+    /// prompt). No element may hold a bare run sequence, so with neither context the parts go straight onto
+    /// the paragraph.
+    /// </summary>
+    /// <remarks>
+    /// Extracted at task 058 from the complex-form branch of <see cref="AppendField"/>, unchanged, so the
+    /// re-authored sequence and the VERBATIM-carried nested span land in the document the same way. Two
+    /// copies of this nesting would be two chances to get the schema wrong, in a file whose one job is to
+    /// author packages Word does not report as damaged.
+    /// </remarks>
+    private static void AppendFieldParts(
+        Paragraph paragraph, IReadOnlyList<OpenXmlElement> parts, ComposeInlineRun run, ListRenderState state)
+    {
+        if (run.Revision is { } revision)
+        {
+            var wrapper = NewRevisionWrapper(revision, state);
+            foreach (var part in parts) wrapper.AppendChild(part);
+            paragraph.AppendChild(string.IsNullOrWhiteSpace(run.Href)
+                ? wrapper
+                : new Hyperlink(wrapper) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            // A hyperlink admits EG_PContent, so it can hold the whole sequence.
+            var link = new Hyperlink { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+            foreach (var part in parts) link.AppendChild(part);
+            paragraph.AppendChild(link);
+            return;
+        }
+
+        foreach (var part in parts) paragraph.AppendChild(part);
+    }
+
+    /// <summary>
+    /// Task 058 (FR-A10 residual): parses a carried NESTED field span and returns its elements ONLY if it is
+    /// safe to author into this carrier. Returns <c>null</c> when it is not, and the caller then falls
+    /// through to the flatten.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Three gates, and the third one is specific to this carry.</b></para>
+    /// <list type="number">
+    /// <item><description>The shared opaque-carry gate (<see cref="TryParseOpaqueCarry{T}"/>) — typed SDK
+    /// parse plus schema validation plus the size cap, the same one <c>w:pPrChange</c> has used since task
+    /// 025 and the embedded-object carry since 056. Client XML never reaches the package
+    /// unparsed.</description></item>
+    /// <item><description><b>Relationship resolution</b> (<see cref="CarriedObjectRelationshipsResolve"/>) —
+    /// a field's RESULT can contain anything a run can, an <c>INCLUDEPICTURE</c> result included, so a span
+    /// can name a relationship this package does not have. Authoring that produces a file Word reports as
+    /// DAMAGED: strictly worse than the honest flatten it would replace.</description></item>
+    /// <item><description><b>It must BE a nested field</b> (<see cref="IsCarryableFieldSpan"/>). Every other
+    /// carry in this file is gated by the SDK's own root-element check — a <c>w:drawing</c> payload can only
+    /// parse as a <c>w:drawing</c>. This one's holder is a <c>w:p</c>, which admits any paragraph content at
+    /// all, so without a structural check the property would be a general-purpose way to author arbitrary
+    /// markup into a saved document. The check is what keeps <c>SpanXml</c> a field carry rather than an
+    /// injection point, and it is asserted by a test that posts prose through it.</description></item>
+    /// </list>
+    /// </remarks>
+    private static List<OpenXmlElement>? TryBuildCarriedFieldSpan(string spanXml, ListRenderState state)
+    {
+        var holder = TryParseOpaqueCarry<Paragraph>(spanXml);
+        if (holder is null)
+        {
+            return null;
+        }
+
+        var children = holder.ChildElements.ToList();
+        if (!IsCarryableFieldSpan(children))
+        {
+            return null;
+        }
+
+        return CarriedObjectRelationshipsResolve(holder, state.CarrierRelationshipIds)
+            ? children.Select(c => c.CloneNode(true)).ToList()
+            : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="children"/> are exactly one NESTED Word field and nothing else — either a
+    /// single <c>w:fldSimple</c> containing a field, or a <c>w:fldChar</c> run sequence that opens on its
+    /// first run, closes on its last, holds nothing outside itself, and nests at least once.
+    /// </summary>
+    /// <remarks>
+    /// The nesting requirement is not decoration. A span that does NOT nest is a field the instruction carry
+    /// already handles, and admitting it here would give one construct two authoring paths that could drift
+    /// apart. Requiring depth &gt; 1 keeps <c>SpanXml</c> scoped to the one class it exists for.
+    /// </remarks>
+    private static bool IsCarryableFieldSpan(IReadOnlyList<OpenXmlElement> children)
+    {
+        if (children.Count == 0)
+        {
+            return false;
+        }
+
+        if (children.Count == 1 && children[0] is SimpleField simple)
+        {
+            return simple.Descendants<SimpleField>().Any() || simple.Descendants<FieldChar>().Any();
+        }
+
+        var depth = 0;
+        var maxDepth = 0;
+        for (var i = 0; i < children.Count; i++)
+        {
+            if (children[i] is not Run run)
+            {
+                return false;
+            }
+
+            var type = run.GetFirstChild<FieldChar>()?.FieldCharType?.Value;
+            if (type == FieldCharValues.Begin)
+            {
+                depth++;
+                if (depth > maxDepth) maxDepth = depth;
+            }
+            else if (type == FieldCharValues.End)
+            {
+                if (depth == 0) return false;
+                depth--;
+                // Closing the outermost field anywhere but on the LAST element would leave content trailing
+                // outside the field — content the projection never captured as part of it.
+                if (depth == 0 && i != children.Count - 1) return false;
+            }
+            else if (depth == 0)
+            {
+                return false; // anything at all outside the field: prose, a separate with no begin, markup
+            }
+        }
+
+        return depth == 0 && maxDepth > 1;
     }
 
     /// <summary>
