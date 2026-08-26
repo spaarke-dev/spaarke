@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
 | **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
-| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` → `7db13de` → **`ff45847`** | ⏳ N-1..N-4 fixed; **3rd gate pass requested — 075 merges on its verdict** |
+| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` → `7db13de` → `ff45847` → **`3289844`** | ✅ **READY TO MERGE** — D-1/D-2 fixed, pass 3 conditionally clean |
 | **076** route call sites | same worktree | `792c38a` (inventory + escalation only) | 🔔 **ESCALATED — not implemented. Needs owner decision.** |
 
 ## ⛔⛔ 075 IS BLOCKED FROM MERGE — read before touching that worktree
@@ -86,6 +86,39 @@ German-message test proving the classification isn't reading English). Structura
 
 **Sharper than the agent framed it:** `NotNull`/`Null` on the container column are **unreachable in
 production**, not merely unperturbed — neither pass emits them. Dead model code.
+
+### Round 4 (`3289844`) — D-1/D-2 fixed, and the proposed PERTURBATION was wrong
+
+D-1 fixed with the `TopCount` cap plus a **30-row** test and a **just-under-the-cap** test, so the bound
+is pinned as a *threshold* rather than "any largish number refuses". D-2 fixed to `Ordinal`, with a
+comment recording that Dataverse collation is case-*insensitive* so the comparison is deliberately
+stricter than the platform. Cleanups: dead `isSecureProbe`/`MatchesSecureProbe` pair and its stale
+"stable key" comment deleted; `ContainerConditionMatches` now **throws** on a nested container condition
+rather than flattening and ANDing an `Or`'s members; dead `NotNull`/`Null` arms removed.
+
+⚠️ **The reviewer's proposed proof for D-1 was wrong, and I relayed it verbatim.** *"Delete `TopCount`
+and both tests stay green"* **does not bite** — removing the cap only *increases* the returned count,
+and the guard is `Count >= ClaimantProbeLimit`, so the refusal fires **more** readily. Verified
+empirically (0 red).
+
+**The direction that matters is the inverse: cap BELOW the check threshold**, where truncation goes
+undetected and a claimant beyond the page is silently missed — **fail-open**. Cap 5 vs threshold 25 →
+**2 red**, including the new 30-row test. And that perturbation only bites *because of* the D-1 fix:
+with the double ignoring `TopCount` it returned all 30 rows regardless, so `30 >= 25` fired and the test
+passed anyway.
+
+**The diagnosis was right; the proposed proof wasn't.** Worth keeping as its own lesson: a reviewer's
+*suggested perturbation* is a hypothesis, not a specification, and running it is what distinguishes the
+two. The agent tested rather than complied — correct behaviour, and it caught an error that had passed
+through both the reviewer and me.
+
+### Stale-assembly trap, third occurrence in this batch
+
+The `isSecureProbe` cleanup left a dangling reference, the **test build failed**, and
+`dotnet test --no-build` still reported **32 green off the stale assembly**. Caught only by reading the
+build output rather than the test summary. This trap has now appeared three times in one batch (072's
+false-PASS perturbation, 075's `if (false)` CS0162, this). **Always read the build result before the
+test result.**
 
 ## 🔴🔴🔴 THE VERDICT ON THE LAYER — this needs a different KIND of test
 
