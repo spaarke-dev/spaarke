@@ -65,6 +65,58 @@ Note the double's failure mode was a **permissive default** — the same shape a
 `default:`, now recurring inside test infrastructure. Both helpers now evaluate the query's real
 conditions and **throw** on an unmodelled operator or a condition-less probe.
 
+### Pass 3 verdict on `ff45847` — **conditionally clean, 075 CAN merge**
+
+N-1..N-4 all verified correct against source (escape order `[`→`[[]` first, traced round-trip; nested
+`Or` correctly on `Criteria.Filters` not `Conditions`; typed `FaultException` on `-2147220969` with a
+German-message test proving the classification isn't reading English). Structural fix confirmed to have
+**no third door**. Two findings, neither blocking — **sent back to the owner; merge on their fix**:
+
+- **D-1 · the truncation refusal is STILL vacuous — third instance of the batch's own rule.** The double
+  evaluates real conditions now but **never honours `query.TopCount`**. Both
+  `container_ownership_indeterminate` tests pass only because the fixture supplies exactly 25 rows —
+  **delete `TopCount = ClaimantProbeLimit` from either production query and both stay green.** The check
+  and the cap read the same constant, so the test cannot distinguish "the page filled" from "there are
+  25 rows". Fix: `.Take(query.TopCount ?? int.MaxValue)` + a 30-row test.
+- **D-2 · two definitions of container equality, looser one on the byte path.** `IsSameContainer` uses
+  `Ordinal`; `CommunicationContainerResolver.cs:83` builds `secureContainers` with
+  `OrdinalIgnoreCase`. Two secure records differing only in case collapse to one entry, the ambiguity
+  refusal never fires, and `Single()` writes bytes to whichever was inserted first. Negligible
+  reachability, but it is a security-identity comparison defined two ways inside one task.
+
+**Sharper than the agent framed it:** `NotNull`/`Null` on the container column are **unreachable in
+production**, not merely unperturbed — neither pass emits them. Dead model code.
+
+## 🔴🔴🔴 THE VERDICT ON THE LAYER — this needs a different KIND of test
+
+Asked explicitly whether another review round was worth it, the reviewer said **no**, and the reasoning
+is the most important output of this entire batch:
+
+> Both verification mechanisms are blind in the same place. The **shared fixture** pins the decision and
+> cannot see a query. The **double** now pins the query — *against a model of Dataverse written by the
+> same agent that wrote the query.* The perturbations prove the code matches the double. **They cannot
+> prove either matches Dataverse.**
+
+Six defects, three rounds, all six in the fetch layer. Not six coincidences.
+
+**Five claims in this component are currently unfalsifiable by any test in this repository:**
+1. `Like` honours T-SQL bracket escaping
+2. `NotEqual` excludes NULL under three-valued logic
+3. `TopCount` does not populate `MoreRecords`
+4. `Null` works on a two-option field
+5. **Dataverse string collation is case-insensitive, while both `IsSameContainer` and the double use
+   `Ordinal`** — so the double is strictly *stricter* than the platform and can never surface case
+   behaviour. This is also why D-2 survived three rounds.
+
+**Action:** task **047** (live-org assertion, already in scope) should gain an explicit **Dataverse
+operator-semantics assertion list** covering those five plus the `sprk_issecure` field-security/NULL
+check already booked onto it. **Task 078 must not ship before 047 runs** — it is the first real consumer
+of the reverse direction.
+
+⚠️ **One correction to that recommendation:** the reviewer paired 073 with 078. **Stale for 073** — it
+retired its three routes rather than consuming the seam, so as shipped it consumes nothing from 075.
+**078 only.**
+
 ### 🔴 THE TRANSFERABLE LESSON — why my own verification could not have caught this
 
 > *"11,199 passed / ArchTests zero delta / publish unchanged is all true and all consistent with a
