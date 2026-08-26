@@ -33,8 +33,6 @@ import {
   Storage20Filled,
   DocumentBulletList20Regular,
   DocumentBulletList20Filled,
-  FolderOpen20Regular,
-  FolderOpen20Filled,
   Search20Regular,
   Search20Filled,
   DeleteDismiss20Regular,
@@ -95,12 +93,20 @@ const NAV_ITEMS: NavItem[] = [
   { page: "dashboard",       label: "Dashboard",        icon: <Home20Regular />,                iconActive: <Home20Filled /> },
   { page: "container-types", label: "Container Types",  icon: <DocumentBulletList20Regular />,  iconActive: <DocumentBulletList20Filled /> },
   { page: "containers",      label: "Containers",       icon: <Storage20Regular />,             iconActive: <Storage20Filled /> },
-  { page: "file-browser",    label: "File Browser",     icon: <FolderOpen20Regular />,          iconActive: <FolderOpen20Filled /> },
+  // "file-browser" is intentionally ABSENT from the tab bar as of 2026-08-26. It only ever worked
+  // on a container selected on the Containers page, so as a peer tab it was permanently greyed out
+  // or showed a "select a container" prompt — a tab whose only content was directions to another
+  // tab. It now lives in the browse pane beneath the container list, reached from the Browse
+  // toolbar button. The PAGE and its route are deliberately KEPT so existing `?page=file-browser`
+  // deep links continue to resolve rather than 404 into the placeholder.
   { page: "search",          label: "Search",           icon: <Search20Regular />,              iconActive: <Search20Filled /> },
   { page: "recycle-bin",     label: "Recycle Bin",      icon: <DeleteDismiss20Regular />,       iconActive: <DeleteDismiss20Filled /> },
   { page: "security",        label: "Security",         icon: <Shield20Regular />,              iconActive: <Shield20Filled /> },
   { page: "audit-log",       label: "Audit Log",        icon: <TextBulletList20Regular />,      iconActive: <TextBulletList20Filled /> },
-  { page: "settings",        label: "Settings",         icon: <Settings20Regular />,            iconActive: <Settings20Filled /> },
+  // Labelled "Environments", not "Settings": container-type configs moved to the Container Types
+  // page (2026-08-26), leaving environments as this tab's only subject. A tab called "Settings"
+  // that holds exactly one kind of record is a category pretending to be a page.
+  { page: "settings",        label: "Environments",     icon: <Settings20Regular />,            iconActive: <Settings20Filled /> },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

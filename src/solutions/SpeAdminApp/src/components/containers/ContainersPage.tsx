@@ -72,12 +72,14 @@ import {
   Copy16Regular,
   CheckmarkCircle16Filled,
   Link16Regular,
+  Dismiss20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
 import { copyToClipboard } from "../../services/clipboard";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
+import { FileBrowserPage } from "../files/FileBrowserPage";
 import {
   CONTAINER_URL_LABEL,
   CONTAINER_URL_ABSENT_LABEL,
@@ -217,6 +219,45 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
+  },
+
+  /**
+   * Browse pane below the list. Capped at half the viewport so the container list stays visible
+   * and usable while browsing — the point of the split is to see both, not to trade one for the
+   * other.
+   */
+  browsePane: {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1 1 50%",
+    minHeight: "220px",
+    maxHeight: "55%",
+    overflow: "hidden",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  browsePaneHeader: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+  },
+
+  /** minHeight:0 is required, or the embedded page's own scroll container never scrolls. */
+  browsePaneBody: {
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflow: "hidden",
   },
 
   /** DataGrid fills its parent. */
@@ -622,6 +663,18 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createSaving, setCreateSaving] = React.useState(false);
 
+  /**
+   * The container currently open in the browse pane below the list, or null when the pane is
+   * closed. File Browser stopped being a top-level tab on 2026-08-26: it could only ever work on a
+   * container chosen HERE, so as a peer tab it was either greyed out or showed a "pick a container"
+   * prompt — a tab whose job was to tell you to go to another tab. It is now the bottom half of
+   * this page.
+   */
+  const [browseContainer, setBrowseContainer] = React.useState<{
+    id: string;
+    name?: string;
+  } | null>(null);
+
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   const columns = React.useMemo(
@@ -895,6 +948,36 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
           </ToolbarButton>
         </Tooltip>
 
+        {/*
+          Browse opens the file browser in the pane below, for the ONE selected container.
+          Deliberately requires exactly one selection: browsing is a single-container act, so with
+          two rows ticked there is no defensible answer to "browse which?".
+        */}
+        <Tooltip
+          content={
+            selectedContainers.length === 1
+              ? `Browse files in "${selectedContainers[0].displayName}"`
+              : selectedContainers.length > 1
+                ? "Select a single container to browse its files"
+                : "Select a container to browse its files"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<FolderOpen20Regular />}
+            onClick={() =>
+              setBrowseContainer({
+                id: selectedContainers[0].id,
+                name: selectedContainers[0].displayName,
+              })
+            }
+            disabled={selectedContainers.length !== 1 || actionInProgress || loading}
+            aria-label="Browse files in the selected container"
+          >
+            <span className={styles.buttonLabel}>Browse</span>
+          </ToolbarButton>
+        </Tooltip>
+
         <ToolbarDivider />
 
         {/* Activate */}
@@ -1083,6 +1166,38 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
           />
         )}
       </div>
+
+      {/*
+        ── Browse pane (the former File Browser tab) ──
+        Renders only when a container has been chosen, so the page costs nothing until asked for.
+        FileBrowserPage already took (containerId, configId, containerName) as props, so it embeds
+        here unchanged — it never needed to be a route.
+      */}
+      {browseContainer && (
+        <div className={styles.browsePane}>
+          <div className={styles.browsePaneHeader}>
+            <Text size={300} weight="semibold">
+              Files in &ldquo;{browseContainer.name ?? browseContainer.id}&rdquo;
+            </Text>
+            <Tooltip content="Close the file browser" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                onClick={() => setBrowseContainer(null)}
+                aria-label="Close the file browser"
+              />
+            </Tooltip>
+          </div>
+          <div className={styles.browsePaneBody}>
+            <FileBrowserPage
+              containerId={browseContainer.id}
+              configId={selectedConfig.id}
+              containerName={browseContainer.name}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Create Container Dialog ── */}
       <CreateContainerDialog
