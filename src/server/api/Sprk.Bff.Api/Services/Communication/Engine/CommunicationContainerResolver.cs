@@ -80,7 +80,17 @@ public sealed class CommunicationContainerResolver
                 .ContainerId;
         }
 
-        var secureContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // ORDINAL, not OrdinalIgnoreCase. This is a security-identity comparison and it must use the SAME
+        // definition of "same container" as RecordContainerResolver.IsSameContainer, which is Ordinal.
+        //
+        // Under OrdinalIgnoreCase, two secure records whose container ids differ only in case collapse to one
+        // entry: Count > 1 never fires, the ambiguity refusal never runs, and Single() writes the bytes into
+        // whichever was inserted first — one of two different secure records' containers, chosen by iteration
+        // order. SPE container ids are base64url and case-significant, so the probability is negligible; the
+        // reason to fix it is that a security-identity comparison must not be defined two ways inside one
+        // feature. (Note Dataverse's own string collation is case-INSENSITIVE, so this comparison is stricter
+        // than the platform — see the verification-debt list in the task notes.)
+        var secureContainers = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (entityLogicalName, recordId) in securableRegardings)
         {

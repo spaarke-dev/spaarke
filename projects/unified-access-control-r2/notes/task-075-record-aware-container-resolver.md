@@ -435,3 +435,87 @@ guard was perturbed individually.
 | ArchTests | ✅ 9 failed / 105 passed — exact known baseline, zero delta |
 | Publish | ✅ **45.10 MB** compressed incl. PDBs (unchanged) |
 | CVE | ✅ clean |
+
+---
+
+## 12. Third review round — D-1, D-2, and the verification-debt ceiling
+
+Pass 3 verified N-1..N-4 correct against source (including that `EscapeForLike` applies `[`→`[[]`
+**first** — traced a literal `[_]` through escape and the double's inverse; it round-trips) and
+confirmed the structural fix has no third door. Two findings.
+
+### D-1 — the truncation refusal was still vacuous: the double ignored `TopCount`
+
+`ContainerConditionMatches` / `FlagConditionsMatch` evaluated real conditions, but the double returned
+**every** matching row and never honoured `query.TopCount`. Both
+`container_ownership_indeterminate` tests therefore passed only because the fixture happened to
+supply exactly `ClaimantProbeLimit` rows — the count check and the cap read the same constant, so the
+test could not tell *"the page filled"* from *"there are 25 rows"*.
+
+**This is the third instance of my own rule, inside the fix for the defect the rule came from.**
+
+Fixed: the double now applies `query.TopCount ?? int.MaxValue`, plus a **30-row** test so the refusal
+is driven by the real cap rather than by fixture size, and a just-under-the-cap test so the bound is
+pinned as a *threshold* rather than as "any largish number refuses".
+
+**One correction to the reported perturbation.** The suggested check — *delete `TopCount` from either
+query and both tests stay green* — **does not bite, and would not have bitten even after the fix.**
+Removing the cap only *increases* the returned row count, and the guard is `Count >= ClaimantProbeLimit`,
+so the refusal fires more readily rather than less. Verified empirically (P11: 0 red).
+
+The dangerous divergence is the **opposite** direction — cap **below** the check threshold — because
+then truncation goes undetected and a claimant beyond the page is silently missed: fail-**open**.
+That direction is now caught (P12, cap 5 vs threshold 25: **2 red**, including the new 30-row test).
+And critically, **P12 only bites because of the D-1 fix**: with the double ignoring `TopCount` it
+returned all 30 rows regardless of the cap, so `30 >= 25` fired and the test passed. So the fix is
+load-bearing — just for a different perturbation than the one reported. The reviewer's diagnosis was
+right; the proposed proof was not the one that works.
+
+### D-2 — two definitions of container equality, the looser one on the byte path
+
+`RecordContainerResolver.IsSameContainer` uses `Ordinal`; `CommunicationContainerResolver` still built
+`secureContainers` with `StringComparer.OrdinalIgnoreCase`. Two secure records whose containers differ
+only in case would collapse to one entry, `Count > 1` never fires, and `Single()` writes the bytes
+into whichever was inserted first — one of two different secure records' containers, chosen by
+iteration order. Reachability is negligible (SPE ids are base64url and case-significant); fixed anyway
+because it is a security-identity comparison and this task was defining "same container" two ways
+across its own two components. Now `Ordinal`.
+
+### Cleanups in the same pass
+
+- Deleted the dead `isSecureProbe` / `MatchesSecureProbe` routing pair and its stale "stable key"
+  comment. Routing is now purely condition-evaluation, so there is no discriminator to mis-key — the
+  comment was describing a mechanism that no longer exists.
+- `ContainerConditionMatches` no longer flattens `Criteria.Filters` into the top-level list and ANDs
+  everything. Harmless today (no container condition sits inside the `Or`), but it would silently
+  mis-model the day one does — ANDing the members of an `Or` is simply wrong. It now **throws** if a
+  container condition appears nested.
+- Removed the dead `NotNull`/`Null` arms for the container column and `NotNull` for the flag. Neither
+  probe emits them any more, so they were model code asserting nothing; an unmodelled operator now
+  throws, which is the loud outcome.
+
+### 🔻 OPEN VERIFICATION DEBT — the component's ceiling (recorded verbatim, per the coordinator)
+
+Another review round has **low expected yield**, because both verification mechanisms are blind in the
+same place. The fixture pins the decision and cannot see a query; the double now pins the query —
+*against a model of Dataverse written by the same agent that wrote the query*. The perturbations prove
+the code matches the double; **they cannot prove either matches Dataverse.**
+
+Five claims in this component are currently **unfalsifiable by any test in this repo**:
+
+1. That `Like` honours T-SQL bracket escaping (`[_]`, `[%]`, `[[]`).
+2. That `NotEqual` excludes NULL under three-valued logic.
+3. That `TopCount` does not populate `MoreRecords`.
+4. That `Null` works on a two-option attribute.
+5. **That Dataverse string collation is case-INSENSITIVE while both `IsSameContainer` and the double
+   use `Ordinal`** — so the double is strictly *stricter* than the platform and can never surface case
+   behaviour. This is also why **D-2 went unnoticed for three rounds.**
+
+**Recommendation**: **task 047 gains an explicit Dataverse operator-semantics assertion list** covering
+those five, plus the `sprk_issecure` field-security / NULL check already booked onto it. Until that
+runs, the five claims above are assumptions carrying a fail-open or fail-closed consequence each.
+
+**Sequencing** (corrected): **task 078 should not ship before 047**, as the first real consumer of the
+reverse direction. Task **073 is NOT gated** on this — it retired its three routes rather than
+consuming this seam, so as shipped it consumes nothing from 075. An earlier draft of this
+recommendation said "073 and 078"; that is stale for 073.

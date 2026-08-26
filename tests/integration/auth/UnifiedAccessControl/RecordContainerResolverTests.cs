@@ -379,6 +379,52 @@ public class RecordContainerResolverTests
             .Which.Code.Should().Be("container_ownership_indeterminate");
     }
 
+    [Fact(DisplayName = "Task 075 reverse (D-1): the refusal is driven by the query's CAP, not by fixture size")]
+    public async Task Reverse_TruncationRefusal_IsDrivenByTheCap_NotTheFixtureSize()
+    {
+        // D-1 regression, and the reason the sibling test above was not enough.
+        //
+        // That test supplies exactly ClaimantProbeLimit rows, so it cannot distinguish "the page filled"
+        // from "the fixture happened to contain 25 rows" — the count check and the cap read the same
+        // constant. Before the double honoured TopCount, DELETING the cap from the production query left
+        // both truncation tests green: Dataverse would return up to 5000, the double returned the 25
+        // supplied, and Count >= limit still fired.
+        //
+        // Supplying THIRTY matching rows breaks that coupling. The resolver may only ever see the first 25,
+        // so the refusal can only come from the cap actually being applied.
+        var thirty = Enumerable.Range(0, 30)
+            .Select(_ => new Claimant(SecureProjectEntity, Guid.NewGuid(), true, OwnContainer))
+            .ToArray();
+
+        var resolver = Build(securable: [SecureProjectEntity], explicitClaimants: thirty);
+
+        var act = async () => await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be("container_ownership_indeterminate");
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (D-1): a page one short of the cap resolves normally")]
+    public async Task Reverse_JustUnderTheCap_DoesNotRefuse()
+    {
+        // The other side of the boundary, so the cap is pinned as a threshold rather than as "any largish
+        // number refuses". 24 unrelated secure records plus the real owner = 25 rows returned... which WOULD
+        // fill the page. So 23 unrelated + 1 owner = 24 rows, one short.
+        var justUnder = Enumerable.Range(0, 23)
+            .Select(i => new Claimant(SecureProjectEntity, Guid.NewGuid(), true, $"b!unrelated-{i:D4}"))
+            .Append(new Claimant(SecureProjectEntity, RecordId, true, OwnContainer))
+            .ToArray();
+
+        var resolver = Build(securable: [SecureProjectEntity], explicitClaimants: justUnder);
+
+        // The unrelated rows do not match the LIKE filter, so only the owner comes back — one row, well
+        // under the cap.
+        var owner = await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        owner.Should().NotBeNull();
+        owner!.RecordId.Should().Be(RecordId);
+    }
+
     [Fact(DisplayName = "Task 075 reverse (N-1): 25 secure records that DON'T claim this container must not break resolution")]
     public async Task Reverse_ManyUnrelatedSecureRecords_StillResolvesTheOwner()
     {
@@ -547,7 +593,7 @@ public class RecordContainerResolverTests
     /// 1</c> is UNKNOWN, so a NULL-flagged row is EXCLUDED by it. Modelling that is what makes the N-3
     /// regression test bite instead of passing vacuously.</para>
     /// </summary>
-    private static bool FlagConditionsMatch(QueryExpression query, bool isSecureProbe, bool? flag)
+    private static bool FlagConditionsMatch(QueryExpression query, bool? flag)
     {
         const string flagAttribute = "sprk_issecure";
 
@@ -560,7 +606,6 @@ public class RecordContainerResolverTests
             ConditionOperator.NotEqual => flag.HasValue && flag.Value != (bool)condition.Values[0],
 
             ConditionOperator.Null => !flag.HasValue,
-            ConditionOperator.NotNull => flag.HasValue,
 
             _ => throw new InvalidOperationException(
                 $"The test double does not model ConditionOperator.{condition.Operator} on {flagAttribute}. "
@@ -601,7 +646,7 @@ public class RecordContainerResolverTests
         if (topLevel.Count == 0 && query.Criteria.Filters.Count == 0)
         {
             throw new InvalidOperationException(
-                $"A reverse-lookup probe carried NO {flagAttribute} condition (isSecureProbe={isSecureProbe}). "
+                $"A reverse-lookup probe carried NO {flagAttribute} condition. "
                 + "Both passes would then see every row and the secure/non-secure split would be untested.");
         }
 
@@ -628,8 +673,25 @@ public class RecordContainerResolverTests
     {
         const string containerAttribute = "sprk_containerid";
 
+        // Only TOP-LEVEL container conditions are ANDed. Flattening the nested filters in here would
+        // silently mis-model the day a container condition lands inside the Or group, because ANDing the
+        // members of an Or is simply wrong. FlagConditionsMatch already honours FilterOperator; rather than
+        // duplicate that for a case no probe produces, this throws — a silent mis-model is what this double
+        // has repeatedly been caught doing.
+        var nestedContainer = query.Criteria.Filters
+            .SelectMany(f => f.Conditions)
+            .Where(c => c.AttributeName == containerAttribute)
+            .ToList();
+
+        if (nestedContainer.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"A {containerAttribute} condition appeared inside a NESTED filter. This double models only "
+                + "top-level container conditions (ANDed). Extend it to honour FilterOperator before moving "
+                + "a container condition into an Or group, or the filter will stop being verified.");
+        }
+
         var conditions = query.Criteria.Conditions
-            .Concat(query.Criteria.Filters.SelectMany(f => f.Conditions))
             .Where(c => c.AttributeName == containerAttribute)
             .ToList();
 
@@ -657,9 +719,9 @@ public class RecordContainerResolverTests
                 // Exact and UNTRIMMED — this is the operator whose use on a padded stored value is the bug.
                 ConditionOperator.Equal => string.Equals(stored, value, StringComparison.Ordinal),
 
-                ConditionOperator.NotNull => !string.IsNullOrEmpty(stored),
-                ConditionOperator.Null => string.IsNullOrEmpty(stored),
-
+                // NotNull / Null are deliberately NOT modelled: neither probe emits them on the container
+                // column any more, so an arm for them would be dead code that quietly asserts nothing. If a
+                // probe starts emitting one, this throws — the correct, loud outcome.
                 _ => throw new InvalidOperationException(
                     $"The test double does not model ConditionOperator.{condition.Operator} on "
                     + $"{containerAttribute}. Add it rather than defaulting, or a query change will silently "
@@ -676,26 +738,27 @@ public class RecordContainerResolverTests
     }
 
     /// <summary>
-    /// Normalizes the simple tuple form plus any explicit <see cref="Claimant"/> rows into one list, and
-    /// computes which probe each row belongs to. Pass 1 sees <c>flag == true</c>; pass 2 sees
-    /// <c>flag != true OR flag IS NULL</c>.
+    /// Normalizes the simple tuple form plus any explicit <see cref="Claimant"/> rows into one list.
+    ///
+    /// <para>It deliberately does NOT decide which probe a row belongs to. Routing is done purely by
+    /// evaluating the query's real conditions (<see cref="FlagConditionsMatch"/> /
+    /// <see cref="ContainerConditionMatches"/>), so there is no discriminator to mis-key — an earlier
+    /// version pre-computed the answer here, and that is exactly what made the N-2 and N-3 regressions
+    /// pass vacuously.</para>
     /// </summary>
-    private static List<(Claimant Row, bool MatchesSecureProbe)> ExpandClaimants(
+    private static List<Claimant> ExpandClaimants(
         (string Entity, Guid Id, bool IsSecure)[]? simple,
         Claimant[]? explicitRows,
         string stored)
     {
-        var result = new List<(Claimant, bool)>();
+        var result = new List<Claimant>();
 
         foreach (var (entity, id, isSecure) in simple ?? [])
         {
-            result.Add((new Claimant(entity, id, isSecure, stored), isSecure));
+            result.Add(new Claimant(entity, id, isSecure, stored));
         }
 
-        foreach (var row in explicitRows ?? [])
-        {
-            result.Add((row, row.Flag == true));
-        }
+        result.AddRange(explicitRows ?? []);
 
         return result;
     }
@@ -742,13 +805,29 @@ public class RecordContainerResolverTests
                 .Returns(call =>
                 {
                     var query = call.Arg<QueryExpression>();
-                    var isSecureProbe = (query.Criteria?.Filters?.Count ?? 0) == 0;
 
                     var collection = new EntityCollection();
 
-                    foreach (var (claimant, _) in
-                             ExpandClaimants(claimants, explicitClaimants, stored))
+                    // TopCount IS HONOURED, and that is the D-1 fix.
+                    //
+                    // Without it the double returned every matching row, so both
+                    // container_ownership_indeterminate tests passed only because the fixture happened to
+                    // supply exactly ClaimantProbeLimit rows. Deleting the cap from the production query
+                    // outright would NOT have turned them red: Dataverse would return up to 5000, the double
+                    // would still return the 25 supplied, and Count >= limit would still fire. The refusal's
+                    // whole correctness rests on the cap being applied, and nothing pinned it — the count
+                    // check and the cap read the same constant, so the test could not tell "the page filled"
+                    // from "there are 25 rows".
+                    var page = 0;
+                    var cap = query.TopCount ?? int.MaxValue;
+
+                    foreach (var claimant in ExpandClaimants(claimants, explicitClaimants, stored))
                     {
+                        if (page >= cap)
+                        {
+                            break;
+                        }
+
                         // Evaluate the query's ACTUAL flag conditions against the row, under SQL three-valued
                         // logic — do NOT assume what the probe "means".
                         //
@@ -757,7 +836,7 @@ public class RecordContainerResolverTests
                         // nested Or to `NotEqual true` alone changed the query but not the double, so the
                         // NULL-flag row still reached the co-mingling probe and the perturbation did not bite.
                         // Modelling `NULL <> 1 → UNKNOWN → excluded` is the whole point of that test.
-                        if (!FlagConditionsMatch(query, isSecureProbe, claimant.Flag))
+                        if (!FlagConditionsMatch(query, claimant.Flag))
                         {
                             continue;
                         }
@@ -783,6 +862,7 @@ public class RecordContainerResolverTests
                         row["sprk_containerid"] = claimant.Stored;
 
                         collection.Entities.Add(row);
+                        page++;
                     }
 
                     return Task.FromResult(collection);
