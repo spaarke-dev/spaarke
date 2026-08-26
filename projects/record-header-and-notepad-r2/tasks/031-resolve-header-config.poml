@@ -4,7 +4,7 @@
     <title>resolveHeaderConfig — pure tiered resolver with span clamp + renderer derivation</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 030 (RecordHeaderConfiguration types + guard) is complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code implementation in the shared library; the resolver is the single point of config correctness for every entity the control ships on</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -150,6 +150,59 @@
     (defaults table), 5.3 (tiers + skip list). The resolver is deliberately tier-SHAPED so a
     config-record tier can slot in later without touching renderers (design 5.1 reversibility).
     Task 033 wires it to live form metadata; keep this module testable with plain object literals.
+
+    ── COMPLETION SUMMARY (2026-08-25) ────────────────────────────────────────
+    Delivered: components/RecordHeader/configResolution.ts (265 executable lines,
+    13 single-purpose functions, 6 exports) + __tests__/configResolution.test.ts
+    (192 tests) + barrel exports. 483/483 green across RecordHeader + types;
+    tsc --noEmit exit 0; eslint exit 0. Quality gates: code-review (1 finding,
+    fixed) + adr-check (0 violations, 0 warnings).
+
+    ESCALATION CHECK (step 1) — NOT fired. The live DataGrid skipSet at
+    configResolution.ts:361-371 matches the spec list EXACTLY (primaryIdAttribute
+    + createdon/modifiedon/createdby/modifiedby/ownerid/statecode/statuscode/
+    versionnumber). Replicated verbatim; DataGrid was not imported.
+
+    THREE JUDGMENT CALLS task 033/034 should know about:
+
+    1. EMPTY / UNUSABLE `fields` FALLS THROUGH TO TIER 2 (beyond the literal
+       acceptance list, required by NFR-10). Task 030's guard is deliberately
+       shallow — `fields: []` and `fields: [{}]` both pass it. Rendering either
+       verbatim yields a BLANK header, which is exactly the failure NFR-10
+       forbids. So entry-level validation lives in the resolver: entries with no
+       usable string `name` are dropped, and if NOTHING renderable survives the
+       field list falls through to tier-2 derivation (still exactly one warn).
+       Nuance: a guard-PASSING config keeps its `title` / `columns` /
+       `summaryField` even when only its fields fall through — "the rest of the
+       config still honored". Partial drops (some entries bad) stay in tier 1
+       and warn once.
+
+    2. `String` + `format: 'TextArea'` DERIVES `text`, NOT `textarea`. The
+       renderer table was implemented as the closed set the constraints specify
+       (Memo ⇒ textarea; String and everything else ⇒ text). A multiline String
+       attribute therefore needs an explicit `"renderer": "textarea"` in config.
+       Deliberate — widening the set was not in scope. Flag for 033 UAT.
+
+    3. ATTRIBUTE LOOKUP IS OWN-PROPERTY ONLY (`lookupAttribute`). `fields[].name`
+       is maker free text; a plain `attributes[name]` read resolves inherited
+       Object.prototype members, so `{"name":"toString"}` would hand back a
+       truthy function posing as metadata. Found + fixed at code-review; 5 tests
+       cover it.
+
+    Contract notes for 033: every ResolvedHeaderField carries concrete name /
+    label / span / renderer / readOnly / required — `maxLines` is the ONE
+    optional and is OMITTED (never present-and-undefined). `span` is always
+    1..columns. `summaryField` passes through as-is (no RECORDSUMMARY_FIELD
+    default — that stays task 034's). `requiredLevel` accepts BOTH the Xrm
+    form-control vocabulary (none/required/recommended) and the metadata
+    vocabulary (None/SystemRequired/ApplicationRequired/Recommended),
+    case-insensitively; `recommended` ⇒ false (Dataverse renders + not *).
+    `HeaderFormMetadata.attributes` insertion order IS form order — 033 must
+    build it by walking the form's control collection in order.
+
+    Step 7 deviation note: no separate notes/*.md was written (orchestrator
+    instruction). All three judgment calls are captured in module JSDoc, asserted
+    in tests, and recorded here.
   </notes>
 
   <execution>

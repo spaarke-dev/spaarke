@@ -3,8 +3,8 @@
   <metadata>
     <title>OOB lookup cell — editable lookups open Xrm.Utility.lookupObjects; retire the custom type-ahead from the header path</title>
     <phase>2 Metadata + Machinery</phase>
-    <gate>blocked (deps 020, 022)</gate>
-    <status>not-started</status>
+    <gate>unblocked (deps 020, 022 complete)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include 'pcf' and modifies .ts/.tsx code files — Step 3.5.5 code-implementation trigger</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -141,7 +141,22 @@
     <criterion testable="true">Shared-lib build and full test suite green; the UI tests above are recorded for execution at rollout (Phase 5).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-15, FR-15a (incl. the "+ New" quick-create caveat — out of R2 scope), FR-10 contract, spec success criterion 15 (Matter parity explicitly EXCLUDES the lookup interaction — the OOB picker is an intended change, not a regression). If test-environment mocking of `lookupObjects` proves awkward, mirror how existing tests stub `getXrm()` (see `fields/__tests__` and `utils/__tests__/xrmContext.test.ts`). If no `__tests__/LookupField.test.tsx` exists yet for this renderer, create it in the existing `fields/__tests__/` directory (test files accompany the modified surface; ADR-038 KEEP category).</notes>
+  <notes>Spec refs: FR-15, FR-15a (incl. the "+ New" quick-create caveat — out of R2 scope), FR-10 contract, spec success criterion 15 (Matter parity explicitly EXCLUDES the lookup interaction — the OOB picker is an intended change, not a regression). If test-environment mocking of `lookupObjects` proves awkward, mirror how existing tests stub `getXrm()` (see `fields/__tests__` and `utils/__tests__/xrmContext.test.ts`). If no `__tests__/LookupField.test.tsx` exists yet for this renderer, create it in the existing `fields/__tests__/` directory (test files accompany the modified surface; ADR-038 KEEP category).
+
+**COMPLETION (2026-08-25)**: Implemented as directed with one deviation from the literal test-file path, documented below.
+
+Files touched:
+- `components/RecordHeader/fields/LookupField.tsx` — added `targets?`, `onSave?`, `disabled?` props. Editable when `onSave` is a function, `disabled !== true`, and `targets` is non-empty (populated OR empty cell both clickable). Click opens `Xrm.Utility.lookupObjects({ entityTypes: [targets[0]], defaultEntityType: targets[0], allowMultiSelect: false })`; on a non-empty result, normalizes the id (brace-strip + lowercase, matching CommunicationActionsApp.tsx:420) and calls `onSave({ id, name, entityType })` — never `onSave(null)`. Cancel/empty result/missing `lookupObjects`/missing Xrm are all silent no-ops (existing "never throw" contract preserved). Read-only branch (no onSave, or disabled, or empty targets) renders EXACTLY the pre-existing Link+navigateTo behavior, byte-for-byte — verified by acceptance criterion 4's compound negative test (disabled=true still navigates, does not silently no-op).
+- `utils/xrmContext.ts` — added `LookupObjectsOptions` / `LookupObjectsResultItem` structural types and an optional `XrmUtility.lookupObjects` member (NFR-05: no `as any` cast at the call site).
+- `hooks/useRecordHeaderFields.ts` — JSDoc-only: added a LookupField wiring example to the hook's usage doc. Zero logic change (saveLookup untouched, confirmed by diff).
+- `components/RecordHeader/__tests__/rendererContract.test.tsx` — comment-only fix: the "LookupField excluded because it has no onSave" rationale was stale once this task added onSave; corrected to the real reason (the picker is a native dialog with no separable draft/stage/blur/revert gesture, so the suite's shared assertions don't apply).
+- **NEW** `components/RecordHeader/__tests__/LookupField.edit.test.tsx` — 19 tests (editability gating, picker call-shape, id normalization, cancel/empty no-op, graceful degradation when Xrm/lookupObjects is absent, and the 3-way negative-path regression for criterion 4).
+
+**Deviation (directional steps, documented per task-execute Step 0)**: the task's `<relevant-files>` / `<outputs>` named the test path `fields/__tests__/LookupField.test.tsx`. That directory does not exist in this codebase — verified via Glob before writing. The actual, consistently-applied convention for RecordHeader field tests is `RecordHeader/__tests__/*.test.tsx` (TextField.emdash, BooleanField, DateField, NumberField, OptionSetField.edit all live there), and the OptionSetField edit-mode precedent explicitly created a STANDALONE `OptionSetField.edit.test.tsx` sibling file rather than touching the shared `fields.test.tsx` (which owns the pre-existing read-only `LookupField` describe block, per that file's own header comment). Followed the stronger, real precedent: created `RecordHeader/__tests__/LookupField.edit.test.tsx`, touched nothing in `fields.test.tsx`.
+
+**Verified**: `tsc --noEmit` clean · `eslint` clean on all 5 touched/created files · shared-lib `npm run build` (tsc) succeeds · new suite 19/19 green · full package suite unchanged baseline (10 pre-existing failing suites, 9 of which are the documented known-red list + 1 is task 031's concurrent in-progress `configResolution.ts`/`.test.ts` WIP visible in the same shared worktree — neither touched by this task) · grep of `RecordHeader/**` + `hooks/useRecordHeaderFields.ts` for `contains(`/`$top=10`/`$filter`/`debounce` → zero code matches (one JSDoc prose mention describing what was deleted) · `components/LookupField/LookupField.tsx` and `MatterHeaderView.tsx` confirmed untouched · `hooks/index.ts` and `fields/index.ts` confirmed untouched (no new export needed — `ILookupFieldProps`/`ILookupFieldValue` were already barrel-exported by task 015) · `package.json` `sideEffects: false` confirmed intact.
+
+Quality gates (Step 9.5, self-conducted per code-review/adr-check skill procedures loaded inline): 0 Critical, 0 Warning across security/performance/style/AI-code-smell/ADR-021/ADR-022/ADR-012/ADR-028/ADR-038. §10 BFF hygiene N/A (no server files). §11 component justification N/A (modification of an existing renderer + existing interface; no new service/endpoint/DI/package/Dataverse column).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

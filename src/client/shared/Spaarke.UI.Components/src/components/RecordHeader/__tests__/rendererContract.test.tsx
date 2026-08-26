@@ -20,10 +20,15 @@
  *
  * ── Deliberate exclusion ────────────────────────────────────────────────────
  * The RecordHeader `LookupField` (`fields/LookupField.tsx`, barrel-aliased
- * `RecordHeaderLookupField`) is OUT of this suite's scope by design: it is a
- * display-only navigation renderer with a different value shape
- * (`ILookupFieldValue`, not a scalar) and no `onSave` — there is no edit
- * contract to assert. Its behavior is covered by `fields.test.tsx`.
+ * `RecordHeaderLookupField`) is OUT of this suite's scope by design — this
+ * remains true after task 023 (FR-15/FR-15a) added its editable mode: the
+ * "editor" is the OOB native `Xrm.Utility.lookupObjects` picker DIALOG, not
+ * an inline Input/Dropdown/Switch, so there is no separable
+ * draft/stage/blur/revert-on-reject gesture to drive through this suite's
+ * shared assertions — commit is a single atomic pick-and-resolve with no
+ * pending-draft state in between. Its value shape (`ILookupFieldValue`) also
+ * remains non-scalar. Read-only behavior is covered by `fields.test.tsx`;
+ * editable-mode behavior is covered by `LookupField.edit.test.tsx`.
  * (Not to be confused with the unrelated editable `components/LookupField/`.)
  *
  * ── Documented per-renderer allowances (suite PARAMETERS, never skips) ──────

@@ -152,12 +152,58 @@ export interface PageInput {
 }
 
 /**
+ * Options accepted by {@link XrmUtility.lookupObjects} — the OOB Dataverse
+ * lookup picker dialog (`Xrm.Utility.lookupObjects`). Structurally typed to
+ * the subset shared-lib consumers need; declared inline so this module does
+ * not take a dependency on `@types/xrm` (mirrors {@link XrmPageLike} above).
+ *
+ * @see record-header-and-notepad-r2 FR-15 / FR-15a
+ * @see CommunicationActionsApp.tsx:405-424 — the canonical call-shape precedent
+ */
+export interface LookupObjectsOptions {
+  /** Target table logical name(s) the picker searches / allows selecting from. */
+  entityTypes: string[];
+  /** Which entity type's view is shown first when `entityTypes` has more than one. */
+  defaultEntityType?: string;
+  /** `false` restricts the picker to a single selection. */
+  allowMultiSelect?: boolean;
+}
+
+/**
+ * A single record selected via {@link XrmUtility.lookupObjects}. This shape
+ * IS the Xrm lookup value the form buffer expects — `[{ id, name, entityType }]`
+ * — so no translation layer sits between the picker result and
+ * `Xrm.Page.getAttribute(n).setValue([...])` (see `useRecordHeaderFields.saveLookup`).
+ */
+export interface LookupObjectsResultItem {
+  /** GUID of the selected record. May arrive brace-wrapped — callers normalize. */
+  id: string;
+  /** Display name (primary attribute) of the selected record. */
+  name: string;
+  /** Logical name of the entity the selected record belongs to. */
+  entityType: string;
+}
+
+/**
  * Utility interface for global context and user settings
  */
 export interface XrmUtility {
   getGlobalContext(): GlobalContext;
   showProgressIndicator?(message: string): void;
   closeProgressIndicator?(): void;
+  /**
+   * Opens the native Dataverse lookup picker dialog (Records / Recent /
+   * Advanced / "+ New" per the target table's own Dataverse configuration).
+   * Resolves with the selected record(s), or an empty array when the user
+   * cancels — it never rejects on cancel. Optional because callers must
+   * feature-detect (`typeof xrm.Utility?.lookupObjects === 'function'`)
+   * before invoking, the same optionality precedent as
+   * `showProgressIndicator` above.
+   *
+   * @see record-header-and-notepad-r2 FR-15 / FR-15a
+   * @see CommunicationActionsApp.tsx:405-424 — the canonical call-shape precedent
+   */
+  lookupObjects?(options: LookupObjectsOptions): Promise<LookupObjectsResultItem[]>;
 }
 
 export interface GlobalContext {

@@ -251,10 +251,15 @@ export interface IUseRecordHeaderFieldsResult {
  *   value={h.displayText('sprk_mattername')}
  *   onSave={v => h.saveText('sprk_mattername', v)} />
  *
- * <LookupField label="Matter Type"
+ * // LookupField (task 023, FR-15/FR-15a): `targets` resolved from Dataverse
+ * // metadata (task 020's `EntityAttributeMetadata.targets`), never
+ * // hard-coded. The OOB `Xrm.Utility.lookupObjects` picker's result
+ * // `{ id, name, entityType }` IS `saveLookup`'s `item` + `entityType`
+ * // arguments — no translation layer between the picker and the form buffer.
+ * <LookupField label="Matter Type" span={1}
  *   value={h.displayLookup('sprk_mattertype')}
- *   onChange={item => h.saveLookup('sprk_mattertype', item, targetEntity)}
- *   onSearch={search} />
+ *   targets={targets}
+ *   onSave={item => item && h.saveLookup('sprk_mattertype', item, item.entityType)} />
  * ```
  */
 export function useRecordHeaderFields(options: IUseRecordHeaderFieldsOptions): IUseRecordHeaderFieldsResult {

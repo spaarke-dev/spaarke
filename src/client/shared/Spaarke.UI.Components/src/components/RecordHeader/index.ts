@@ -61,3 +61,21 @@ export type { IDateFieldProps } from './fields';
 
 export { NumberField } from './fields';
 export type { INumberFieldProps, NumberFieldKind } from './fields';
+
+// Config resolver (record-header-and-notepad-r2 FR-02 / FR-04 / FR-05, task 031).
+//
+// `resolveHeaderConfig` is a PURE two-tier resolver (no React, no I/O, no Xrm)
+// that turns the control's raw `layoutJson` manifest string + form metadata
+// into a fully-resolved layout. It is exported here rather than from `types/`
+// because it is header-renderer machinery, not schema. A repo-wide grep
+// confirmed none of these five symbols collides with an existing export, so
+// all re-export un-aliased (`src/components/index.ts` does `export * from
+// './RecordHeader'`, so they surface at the top-level barrel too).
+export { resolveHeaderConfig } from './configResolution';
+export type {
+  ResolvedHeaderConfig,
+  ResolvedHeaderField,
+  HeaderFormMetadata,
+  HeaderAttributeMetadata,
+  HeaderAttributeRequiredLevel,
+} from './configResolution';

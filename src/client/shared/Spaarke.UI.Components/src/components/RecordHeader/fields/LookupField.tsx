@@ -1,18 +1,34 @@
 /**
- * LookupField — record-header field renderer for Xrm-style lookup values (FR-04).
+ * LookupField — record-header field renderer for Xrm-style lookup values
+ * (FR-04; editable mode FR-15/FR-15a, record-header-and-notepad-r2 task 023).
  *
- * Renders a Fluent v9 field cell with a label above and a clickable value row
- * consisting of an optional 16x16 entity icon prefix + a `Link` displaying the
- * lookup's display name. On click, the field opens the lookup target via
+ * READ-ONLY MODE (default, unchanged from R1): renders a Fluent v9 field cell
+ * with a label above and a clickable value row consisting of an optional
+ * 16x16 entity icon prefix + a `Link` displaying the lookup's display name.
+ * On click, the field opens the lookup target via
  * `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName, entityId })`
  * — the exact contract in FR-04 / spec §3.3.
+ *
+ * EDITABLE MODE (FR-15/FR-15a — opt in via `targets` + `onSave`): clicking the
+ * value (populated OR empty) opens the OOB `Xrm.Utility.lookupObjects` picker
+ * — the same native Records/Recent/Advanced/"+ New" dialog every Dataverse
+ * lookup uses — instead of navigating. This deliberately replaces R1's
+ * hand-rolled OData `contains()` search-as-you-type builder rather than
+ * hoisting it: `lookupObjects` already returns `{ id, name, entityType }`,
+ * which IS the exact `Xrm.Page` form-buffer `setValue([{ id, name, entityType }])`
+ * payload `useRecordHeaderFields.saveLookup` needs — no translation layer.
+ * Only `targets[0]` is used (multi-target lookups are out of scope; see the
+ * task's `<escalation>` trigger). Cancelling the picker or resolving with zero
+ * results is a no-op: `onSave` is NEVER invoked with `null` from this
+ * component — clearing a lookup is not part of this contract.
  *
  * Xrm access uses `getXrm()` from `../../../utils/xrmContext` — the same
  * cross-frame walker used by `useRecordFieldValues` (task 009), so this
  * renderer works from both PCF surfaces (window.Xrm) and Custom Pages
- * (window.parent.Xrm). If Xrm is unavailable (test environment, non-Xrm host),
- * the click is a silent no-op — the render still succeeds so consumers can
- * unit-test compositions without stubbing the full SDK.
+ * (window.parent.Xrm). If Xrm (or `Xrm.Utility.lookupObjects`) is unavailable
+ * (test environment, non-Xrm host, older API surface), the click is a silent
+ * no-op — the render still succeeds so consumers can unit-test compositions
+ * without stubbing the full SDK.
  *
  * Value shape (`ILookupFieldValue`) intentionally mirrors the Xrm.LookupValue
  * projection used by `useRecordFieldValues` for lookup attributes:
@@ -20,13 +36,18 @@
  *
  * Null / undefined / empty values render a hyphen "—" (matching TextField's
  * empty-state convention) so consumers get a consistent empty-cell look
- * across the FieldGrid regardless of which renderer occupies the cell.
+ * across the FieldGrid regardless of which renderer occupies the cell. In
+ * editable mode the empty hyphen is ALSO clickable, so a field with no value
+ * yet can be populated for the first time.
  *
  * Layout:
  *  - `gridColumn: span N` applied by THIS component per FR-03 contract
- *    (FieldGrid is renderer-agnostic; the child owns its span).
+ *    (FieldGrid is renderer-agnostic; the child owns its span) — composing it
+ *    editable inside `FieldGrid` needs no wrapper `div` from the consumer.
  *  - Label typography matches TextField (small, secondary-foreground caption).
- *  - Value row uses currentColor icon + Fluent Link text (semantic link color).
+ *  - Read-only value row uses currentColor icon + Fluent Link text (semantic
+ *    link color). Editable value row uses the same icon + plain text (it is
+ *    an action trigger, not a navigation link) with a hover affordance.
  *
  * Standards:
  *  - ADR-021 Fluent v9 semantic tokens only — zero hex / rgb / hsl literals
@@ -36,10 +57,11 @@
  *  - NFR-07  No BFF calls
  *
  * @see FR-04 record-header-and-notepad-r1 spec
+ * @see FR-15, FR-15a record-header-and-notepad-r2 spec
  * @see ADR-021 Fluent UI v9 design system
  * @see ADR-022 PCF platform libraries
  *
- * @example
+ * @example Read-only (unchanged)
  * ```tsx
  * <FieldGrid columns={3}>
  *   <LookupField
@@ -48,6 +70,20 @@
  *     value={{ id: "…guid…", name: "Litigation", entityType: "sprk_mattertype" }}
  *   />
  * </FieldGrid>
+ * ```
+ *
+ * @example Editable — wired to task 022's `useRecordHeaderFields.saveLookup`
+ * ```tsx
+ * const h = useRecordHeaderFields({ entity, recordId, fields });
+ * // `targets` resolved from Dataverse metadata (task 020's
+ * // `EntityAttributeMetadata.targets`) — NEVER hard-coded.
+ * <LookupField
+ *   span={1}
+ *   label="Matter Type"
+ *   value={h.displayLookup('sprk_mattertype')}
+ *   targets={targets}
+ *   onSave={item => item && h.saveLookup('sprk_mattertype', item, item.entityType)}
+ * />
  * ```
  */
 
@@ -89,6 +125,38 @@ export interface ILookupFieldProps {
    * Applied via inline `gridColumn: span N` per FieldGrid FR-03 contract.
    */
   span: 1 | 2 | 3;
+  /**
+   * Target table logical name(s) for this lookup, resolved by the caller
+   * from Dataverse metadata (task 020's `EntityAttributeMetadata.targets`) —
+   * NEVER hard-code a target entity name here (the naming convention across
+   * taxonomy tables is non-uniform). Only `targets[0]` is used — see the
+   * task's escalation trigger for the multi-target case. Required
+   * (non-empty) together with `onSave` for the field to become editable;
+   * omit to keep the field permanently read-only (default, backward
+   * compatible).
+   */
+  targets?: string[];
+  /**
+   * When provided together with a non-empty `targets` array, the value
+   * (populated OR empty) becomes click-to-open the OOB
+   * `Xrm.Utility.lookupObjects` picker. Invoked with the selected record's
+   * `{ id, name, entityType }` — the id is brace-stripped and lowercased —
+   * which IS the exact `Xrm.Page` form-buffer `setValue([{ id, name,
+   * entityType }])` payload shape (see task 022's
+   * `useRecordHeaderFields.saveLookup`). Never called with `null` from THIS
+   * component: cancelling the picker or an empty result is a no-op — no
+   * pending state changes, `onSave` is simply not invoked. The `| null` arm
+   * exists only for prop-shape symmetry with a future explicit clear
+   * affordance (out of this task's scope). Omit to render read-only
+   * (default, backward compatible).
+   */
+  onSave?: (item: ILookupFieldValue | null) => void | Promise<void>;
+  /**
+   * When `true`, disables editing (value shown but not clickable, and no
+   * picker opens). Only meaningful when `onSave` and `targets` are also
+   * provided.
+   */
+  disabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +247,29 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
   },
+
+  // FR-15/FR-15a editable affordance — hint clickability on the picker
+  // trigger (populated or empty). Mirrors TextField's / OptionSetField's
+  // `valueEditable` hover treatment (ADR-021 semantic tokens only).
+  valueEditable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+
+  // Plain (non-Link) text used for the editable populated value — clicking
+  // opens the picker rather than navigating, so this is an action trigger,
+  // not a hyperlink.
+  editableValueText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -202,9 +293,10 @@ function isEmpty(value: ILookupFieldValue | null | undefined): boolean {
 /**
  * Clickable field renderer for Xrm-style lookup values.
  *
- * See file-level JSDoc for full contract, layout, and empty-state behavior.
+ * See file-level JSDoc for full contract, layout, empty-state, and editable
+ * (FR-15/FR-15a) behavior.
  */
-export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span }) => {
+export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, targets, onSave, disabled }) => {
   const styles = useStyles();
 
   // Spanning is applied inline per FR-03 contract (FieldGrid does not touch
@@ -213,8 +305,62 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span })
 
   const empty = isEmpty(value);
 
-  const handleClick = React.useCallback(
-    (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const hasTargets = Array.isArray(targets) && targets.length > 0;
+  const editable = typeof onSave === 'function' && disabled !== true && hasTargets;
+
+  // Guards against a double-invocation of `lookupObjects` (e.g. a rapid
+  // double-click) spawning two native picker dialogs while the first is
+  // still awaiting the user. A ref (not state) — this is a re-entrancy
+  // guard, not something the render output ever needs to reflect.
+  const openingRef = React.useRef(false);
+
+  // ── FR-15/FR-15a: open the OOB Xrm.Utility.lookupObjects picker ──────────
+  const openPicker = React.useCallback(async (): Promise<void> => {
+    if (!editable || openingRef.current) {
+      return;
+    }
+    const target = targets![0];
+
+    openingRef.current = true;
+    try {
+      const xrm = getXrm();
+      const lookupObjects = xrm?.Utility?.lookupObjects;
+      if (typeof lookupObjects !== 'function') {
+        // Host doesn't expose the picker (test env, unsupported surface) —
+        // graceful no-op per the component's "never throws on click" contract.
+        return;
+      }
+
+      const results = await lookupObjects({
+        entityTypes: [target],
+        defaultEntityType: target,
+        allowMultiSelect: false,
+      });
+
+      if (!results || results.length === 0) {
+        // Cancelled or resolved empty — no-op. `onSave` is intentionally NOT
+        // called with `null` here; clearing is not staged by cancel.
+        return;
+      }
+
+      const picked = results[0];
+      // Normalize the same way CommunicationActionsApp.tsx:420 does, so
+      // pending values compare consistently with useRecordFieldValues
+      // projections (brace-stripped, lowercased GUID).
+      const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+
+      await onSave!({ id, name: picked.name, entityType: picked.entityType });
+    } catch {
+      // Xrm surfaces its own error UX for picker/save failures; swallow here
+      // to preserve the "no throw" contract (mirrors the read-only path).
+    } finally {
+      openingRef.current = false;
+    }
+  }, [editable, targets, onSave]);
+
+  // ── Read-only mode (unchanged): click navigates via Xrm.Navigation ───────
+  const handleNavigateClick = React.useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
       // Prevent any default anchor navigation — we control routing via Xrm.
       event.preventDefault();
 
@@ -249,16 +395,66 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span })
     [empty, value]
   );
 
+  // ── Unified click handler: editable opens the picker, read-only navigates ─
+  const handleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      if (editable) {
+        void openPicker();
+        return;
+      }
+      handleNavigateClick(event);
+    },
+    [editable, openPicker, handleNavigateClick]
+  );
+
+  const handleKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      if (!editable) {
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        void openPicker();
+      }
+    },
+    [editable, openPicker]
+  );
+
   return (
-    <div className={styles.root} style={gridColumnStyle} data-field-type="lookup">
+    <div
+      className={styles.root}
+      style={gridColumnStyle}
+      data-field-type="lookup"
+      data-testid="record-header-lookup-field"
+      data-editable={editable ? 'true' : 'false'}
+    >
       <Text as="span" className={styles.label} title={label}>
         {label}
       </Text>
 
       {empty ? (
-        <span className={mergeClasses(styles.valueRow, styles.empty)} aria-label={`${label}: empty`}>
-          —
-        </span>
+        editable ? (
+          <span
+            className={mergeClasses(styles.valueRow, styles.empty, styles.valueEditable)}
+            aria-label={`${label}: empty`}
+            role="button"
+            tabIndex={0}
+            onClick={handleClick}
+            onKeyDown={handleKeyDown}
+            data-testid="record-header-lookup-field-value"
+          >
+            —
+          </span>
+        ) : (
+          <span
+            className={mergeClasses(styles.valueRow, styles.empty)}
+            aria-label={`${label}: empty`}
+            data-testid="record-header-lookup-field-value"
+          >
+            —
+          </span>
+        )
       ) : (
         <span className={styles.valueRow}>
           <span className={styles.icon} aria-hidden="true">
@@ -275,15 +471,32 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span })
               <Link24Regular width={16} height={16} />
             )}
           </span>
-          <Link
-            as="a"
-            href="#"
-            onClick={handleClick}
-            className={styles.linkText}
-            title={(value as ILookupFieldValue).name}
-          >
-            {(value as ILookupFieldValue).name}
-          </Link>
+          {editable ? (
+            // Editable: an action trigger (opens the picker), not a
+            // navigation link — plain text, not a Fluent `Link`.
+            <span
+              className={mergeClasses(styles.editableValueText, styles.valueEditable)}
+              title={(value as ILookupFieldValue).name}
+              role="button"
+              tabIndex={0}
+              onClick={handleClick}
+              onKeyDown={handleKeyDown}
+              data-testid="record-header-lookup-field-value"
+            >
+              {(value as ILookupFieldValue).name}
+            </span>
+          ) : (
+            <Link
+              as="a"
+              href="#"
+              onClick={handleClick}
+              className={styles.linkText}
+              title={(value as ILookupFieldValue).name}
+              data-testid="record-header-lookup-field-value"
+            >
+              {(value as ILookupFieldValue).name}
+            </Link>
+          )}
         </span>
       )}
     </div>

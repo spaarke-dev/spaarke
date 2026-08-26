@@ -35,7 +35,7 @@
 |---|---|---|---|---|---|---|
 | [020](020-metadata-targets-and-cache.poml) | `targets` projection + metadata cache | FULL | sonnet | ✅ B | 002 | ✅ |
 | [021](021-shared-getxrmpage.poml) | Shared `getXrmPage()` + `xrmContext.Page` | FULL | sonnet | ✅ B | 002 | ✅ |
-| [022](022-hoist-record-header-fields.poml) | Hoist `useRecordHeaderFields` | FULL | opus | ❌ | 021 | 🔲 |
+| [022](022-hoist-record-header-fields.poml) | Hoist `useRecordHeaderFields` | FULL | opus | ❌ | 021 | ✅ |
 | [023](023-oob-lookup-cell.poml) | OOB lookup cell (`lookupObjects`) | FULL | sonnet | ❌ | 020, 022 | 🔲 |
 | [024](024-toolbar-slot-autohide-and-agreement.poml) | Slot auto-hide + Agreement map entries | FULL | sonnet | ✅ B | 002 | ✅ |
 
@@ -43,9 +43,9 @@
 
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [030](030-config-schema-and-guard.poml) | Config types + non-throwing guard | FULL | sonnet | ✅ C | 015 | 🔲 |
+| [030](030-config-schema-and-guard.poml) | Config types + non-throwing guard | FULL | sonnet | ✅ C | 015 | ✅ |
 | [031](031-resolve-header-config.poml) | `resolveHeaderConfig` (pure) | FULL | opus | ❌ | 030 | 🔲 |
-| [032](032-shell-columns-prop.poml) | `RecordHeaderShell` `columns` prop | FULL | sonnet | ✅ C | 015 | 🔲 |
+| [032](032-shell-columns-prop.poml) | `RecordHeaderShell` `columns` prop | FULL | sonnet | ✅ C | 015 | ✅ |
 | [033](033-recordheader-pcf-control.poml) | **`RecordHeader` PCF control** | FULL | opus | ❌ | 001, 031, 023 | 🔲 |
 | [034](034-sparkle-recordsummary-wiring.poml) | Sparkle → `sprk_recordsummary` | FULL | sonnet | ❌ | 033 | 🔲 |
 
