@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="unified-access-control-r2">
+  <metadata>
+    <title>Validate secure-project provisioning end-to-end against live dev: a real secure project gets its OWN SPE container, owned by the Secure Project team</title>
+    <phase>0b Review remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live-environment verification of a security mechanism whose entire local test suite is offline doubles. This is the first and only evidence that provisioning actually works.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Interpreting a live security outcome; a false "it worked" here would license trusting an unverified isolation mechanism.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Creates and provisions real records in live dev, and reads live Dataverse security state.</parallel-reason>
+    <deps>045, 046</deps>
+    <tags>bff-api, auth, dataverse, security, deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <origin>Filed 2026-08-25 at owner request ("note to run/validate after 045"). Task 021 shipped provisioning but it CANNOT be validated on the branch: the deployed BFF predates it, and dev contains ZERO secure projects — none has ever been successfully provisioned.</origin>
+  </metadata>
+
+  <prompt>Provisioning has never once run successfully in any environment. Deploy the branch and prove, against live dev, that creating a secure project gives it its OWN SPE container — distinct from the shared business-unit container — and that the record is owned by the Secure Project owner team. Then prove the two failure paths deny rather than fall back.</prompt>
+
+  <role>SPAARKE platform engineer performing live verification. Skeptical of green results: the job is to find out whether it works, not to confirm that it does.</role>
+
+  <goal>A real secure project in dev carries a container id that is NOT any business unit's container, is owned by the Secure Project default owner team, and the whole sequence is reproducible. Where a claim cannot be evidenced, it is reported as unverified rather than assumed.</goal>
+
+  <context>
+    <background>WHY THIS TASK EXISTS. Everything known about task 021's correctness comes from offline doubles. Live state verified 2026-08-25:
+
+| Fact | Value |
+|---|---|
+| Secure projects in dev | **ZERO — none has ever been provisioned** |
+| `SP-*` business units | **NONE** — the retired BU-per-project path never succeeded either |
+| `SharePointEmbedded__ContainerTypeId` (dev) | ✅ `8a6ce34c-6055-4681-8f87-2f4f9f921c06` |
+| `SharePointEmbedded__DefaultContainerId` (dev) | `b!vzGDfDpd7km…` — the SHARED container |
+| Root BU `Spaarke`.`sprk_containerid` | `b!vzGDfDpd7km…` — **the same value** |
+| `Secure Project` BU.`sprk_containerid` | `null` ✅ correct |
+| `SecureProject__BusinessUnitName` app setting | **NOT SET** → the endpoint uses the code default `Secure Project` |
+| Deployed BFF | **predates task 021** |
+| `Deploy BFF API` workflow | `disabled_manually` — deploy is OPERATOR-DRIVEN |
+
+THE ASSERTION THAT MATTERS. Three existing projects carry `sprk_containerid = b!vzGDfDpd7km…`, identical to the ROOT business unit's container — proof the wizard's cascade stamps shared storage onto projects. So the test is NOT "does a container id appear?" It is: **is the container id DIFFERENT from every business unit's container id?** A provisioned project that ends up holding `b!vzGDfDpd7km…` has failed, even though the field is populated. Assert inequality, not presence.
+
+WHAT WILL NOT BE PROVEN HERE, AND MUST NOT BE CLAIMED. Nothing yet READS the project's container — document isolation needs the three container-resolution strategies special-cased (`spaarke-secure-project-r1`). So a passing run proves provisioning RECORDS the right container; it does NOT prove documents land in it. Say so explicitly in the notes; the gap is design §5.1c's stated sequencing risk.
+
+DEPENDS ON 046 FOR A MEANINGFUL RESULT. Until task 046 replaces `System Administrator` on the owner team with the scoped `Secure Project Owner` role, a successful ownership assignment proves only that an omnipotent team can be assigned records. Run 046 first, or state plainly that the ownership half is verified only against an over-privileged team.
+
+THE `SecureProject__BusinessUnitName` SETTING IS ABSENT ON PURPOSE-BY-ACCIDENT. It is worth deciding here whether to set it explicitly in dev. Leaving it unset means the deployed default is the only thing keeping the lookup correct; setting it makes the dependency visible in configuration. Either is defensible — make it a decision, not an oversight.</background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</file>
+      <file role="modify">tests/e2e/specs/secure-project-creation/secure-project-creation.spec.ts</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-047-live-provisioning-validation.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ASSERT INEQUALITY, NOT PRESENCE. The provisioned container id MUST differ from every `businessunit.sprk_containerid` in the environment AND from `SharePointEmbedded__DefaultContainerId`. A populated field is not evidence — the cascade populates it with shared storage.</constraint>
+    <constraint source="ADR-003">Verify the DENY paths too, not just the happy path: (a) point `SecureProject__BusinessUnitName` at a name that does not exist and confirm a non-2xx with `sdap.provision.secure_bu_not_found` and that NOTHING was created; (b) re-post the same project and confirm 409 with `sdap.provision.already_provisioned`. A mechanism verified only on its happy path is not verified — task 009 hit that twice.</constraint>
+    <constraint source="project">Do NOT delete the canonical `Secure Project` business unit or its default owner team during cleanup. The retired e2e spec queued the BU for deletion because provisioning used to create one per project; against the current endpoint that would destroy shared infrastructure.</constraint>
+    <constraint source="project">Clean up every test record created (project, container). Record the SPE container id so an orphan can be reconciled if the run fails midway — that is exactly what task 021's fail-loud response exists to give you.</constraint>
+    <constraint source="project">Deploy is operator-driven (`Deploy BFF API` is `disabled_manually`). Do not attempt an unattended deployment; coordinate, and record which build/SHA was deployed so the result is attributable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-021-provisioning-stamping.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm 045 is merged and CI-verified, and 046 has replaced System Administrator on the owner team. Record the SHA that gets deployed.</step>
+    <step order="1">Snapshot the live baseline BEFORE anything: every `businessunit.sprk_containerid`, `SharePointEmbedded__DefaultContainerId`, and the set of existing `sprk_container` rows. These are the values the result must NOT equal.</step>
+    <step order="2">Deploy the branch build to dev (operator-driven). Decide and record whether `SecureProject__BusinessUnitName` is set explicitly.</step>
+    <step order="3">Create a secure project through the Create Project wizard — the real path, not a hand-crafted API call — so the BU cascade participates exactly as it does for a user.</step>
+    <step order="4">Verify: (a) the response's `speContainerId` differs from every baseline container id; (b) `sprk_project.sprk_containerid` equals it; (c) `_owningteam_value` is the Secure Project owner team; (d) `sprk_externalaccount` is UNCHANGED — the client was not overwritten; (e) no business unit and no account were created.</step>
+    <step order="5">Verify the SPE container actually exists in Graph and is distinct from the shared one — a recorded id that points at nothing is the orphan case, not success.</step>
+    <step order="6">Verify the 409: re-post the same project id. Confirm `sdap.provision.already_provisioned` and that no SECOND container was created.</step>
+    <step order="7">Verify fail-closed: point the BU name at a nonexistent value, provision a fresh secure project, confirm `sdap.provision.secure_bu_not_found`, nothing created, ownership unmoved. Restore the setting.</step>
+    <step order="8">Verify the 409 regression is really gone: confirm the project created in step 3 had a cascaded `sprk_containerid` at create time (read it before provisioning if possible) and still provisioned. This is the live proof of task 021's headline fix.</step>
+    <step order="9">Re-author the e2e spec's skipped cases against what was just learned, and fix its two known staleness bugs (`BFF_API_BASE` still defaults to `spe-api-dev-67e2xz`; the dev BFF is `spaarke-bff-dev`; payload builders use `sprk_projectref`/`sprk_description`, neither of which exists on live `sprk_project`).</step>
+    <step order="10">Clean up test records. Write `notes/task-047-live-provisioning-validation.md` with the evidence, and state plainly what remains unproven (document isolation; FR-28's share). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the provisioned container id EQUALS any business unit's container or the configured default, STOP. Provisioning is recording shared storage on a secure project — the disclosure the whole design exists to prevent — and it outranks finishing this task.</trigger>
+    <trigger>If ownership assignment succeeds but the read-back verification is what failed (or vice versa), STOP and report which. That distinction is the difference between "Dataverse refused" and "Dataverse silently ignored the bind", and task 021's whole read-back mechanism exists to tell them apart.</trigger>
+    <trigger>If provisioning cannot be exercised because deployment is unavailable, STOP and report it as BLOCKED rather than substituting a local run. A local test host does not exercise Graph, Dataverse OBO, or the deployed configuration — which is the entire point of this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 021 built the mechanism and its offline tests; task 034 owns live RPA verification. Neither covers "does secure-project provisioning work end-to-end", and nothing else does.</existing>
+    <extension>No new surface — this is verification of shipped code, plus repair of the existing e2e spec.</extension>
+    <cost-of-doing-nothing>Provisioning has NEVER run successfully in any environment, and zero secure projects exist. Without this, the isolation mechanism ships on the strength of offline doubles alone — and the specific thing most likely to be wrong (a container id that is populated but shared) is invisible to every offline test, because the double supplies the id.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/unified-access-control-r2/notes/task-047-live-provisioning-validation.md</output>
+    <output type="test">tests/e2e/specs/secure-project-creation/secure-project-creation.spec.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A real secure project in dev carries a container id that differs from EVERY business unit's container and from `SharePointEmbedded__DefaultContainerId`.</criterion>
+    <criterion>That container exists in Graph.</criterion>
+    <criterion>The project is owned by the Secure Project default owner team, verified by reading `_owningteam_value`.</criterion>
+    <criterion>`sprk_externalaccount` is unchanged; no business unit and no account were created.</criterion>
+    <criterion>Re-provisioning returns 409 `sdap.provision.already_provisioned` and creates no second container.</criterion>
+    <criterion>An absent configured BU fails closed with `sdap.provision.secure_bu_not_found`, creating nothing.</criterion>
+    <criterion>A project that carried a wizard-cascaded container id at create time still provisioned — the live proof the 409 regression is closed.</criterion>
+    <criterion>The e2e spec's skipped cases are re-authored and its three staleness bugs fixed.</criterion>
+    <criterion>The notes state explicitly what remains unproven (document isolation, FR-28's share).</criterion>
+  </acceptance-criteria>
+
+  <notes>Assert INEQUALITY against the shared container, not presence of a value — the cascade populates the field with shared storage, so "a container id is set" is exactly the false positive to avoid. Depends on 046 for the ownership half to mean anything.</notes>
+</task>

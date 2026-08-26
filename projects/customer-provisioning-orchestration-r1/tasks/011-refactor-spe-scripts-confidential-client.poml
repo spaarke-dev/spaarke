@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Refactor SPE scripts (Create-NewContainerType, Register-*, New-BusinessUnitContainer) to confidential-client (app-only) token</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell scripts; not BFF code; tags include auth (SPE token acquisition). Per root CLAUDE.md §8, non-BFF auth-adjacent script work = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped refactor with a clear canonical target (confidential-client cert from KV per T6 fix); no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, auth, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Refactor scripts/Create-NewContainerType.ps1 + related Register-*.ps1 + scripts/New-BusinessUnitContainer.ps1 to use confidential-client (app-only) token with cert bootstrapped from KV per spec.md FR-11 + T6 + R10. Current SPE container-type creation uses delegated tokens and fails with 403 "public client not allowed" (silent-fail trap T6). The fix per §4B: acquire token via cert-based app-only auth, cert stored in KV, bootstrap ceremony documented as H0 preflight prerequisite (24h SPE cert replication).
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with SharePoint Embedded (SPE) container-type + container APIs, cert-based confidential-client Microsoft Identity flows, KV cert bootstrap patterns, and PowerShell 7.4+. Follow ADR-028 21 MUSTs.</role>
+
+  <goal>scripts/Create-NewContainerType.ps1 + relevant Register-*.ps1 + scripts/New-BusinessUnitContainer.ps1 all acquire their SPE-facing token via confidential-client (cert-based app-only) flow with cert loaded from KV; the delegated-token path is removed; container-type/container creation succeeds against a live SPE tenant using ONLY the cert-based auth; the T6 silent-fail (public client not allowed 403) is documented as cleared.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-11 + § MUST rules + §4B T6 + design.md § handlers H8 + notes/graph-spe-2026-08-standards-spike.md. Delegated SPE container-type calls return 403 "public client not allowed" — Microsoft's Graph SPE APIs for container-type creation require confidential-client (app-only) authentication. Fix: cert-based auth, cert stored in KV (bootstrapped as prerequisite; 24h replication is H0 lead-time item per FR-01).
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Create-NewContainerType.ps1</file>
+      <file role="modify">scripts/New-BusinessUnitContainer.ps1</file>
+      <file role="modify">scripts/Register-EventsPage.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/graph-spe-2026-08-standards-spike.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Any script performing SPE container-type / container creation in this task MUST use confidential-client (app-only) cert-based token — delegated flow is a defect (T6 silent-fail).</constraint>
+    <constraint source="ADR-028">SCOPE: Cert MUST come from KV (URI reference or `az keyvault secret download`) — no hard-coded cert path, no PFX committed to repo.</constraint>
+    <constraint source="spec.md">SCOPE: 24h SPE cert replication is H0 preflight lead-time item (FR-01); this task does NOT create the cert (that's a customer-prereq / Bicep-side concern), it CONSUMES cert from KV.</constraint>
+    <constraint source="project">SCOPE: Refactor scope is the 3 named scripts + any Register-*.ps1 that currently invokes SPE container-type/container creation. Do NOT sweep other scripts as "adjacent hygiene" (per Sonnet-5 literal-execution rule — no gold-plating).</constraint>
+    <constraint source="project">SCOPE: The T6 trap-cleared verification is a script-emitted log line at end of successful run (e.g., "T6 cleared: container-type ID {id} created via confidential-client"). Handler H8 (Wave C4) will assert this at post-condition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE cert-based auth + KV cert bootstrap</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/graph-spe-2026-08-standards-spike.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="Confidential-client cert flow (PS)" location=".claude/patterns/auth/">Load cert from KV via `az keyvault secret show` (with --file for pfx) → build ClientCertificateCredential → acquire token for Graph scope `https://graph.microsoft.com/.default`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load ADR-028 + auth constraint + graph-spe-standards-spike + design.md T6 trap definition.</step>
+    <step order="1" name="Baseline">Read the 3 scripts; identify every SPE token-acquisition site; catalog the current delegated-flow calls.</step>
+    <step order="2" name="Design cert bootstrap pattern">Define reusable PS function that: (a) reads cert URI from param OR KV secret ref, (b) downloads via `az keyvault secret show --file`, (c) constructs ClientCertificateCredential, (d) acquires token, (e) returns for reuse.</step>
+    <step order="3" name="Refactor Create-NewContainerType">Replace delegated-token acquisition with confidential-client flow using the reusable function.</step>
+    <step order="4" name="Refactor Register-*.ps1 + New-BusinessUnitContainer">Same replacement in each script.</step>
+    <step order="5" name="Add T6 verification log">Emit "T6 cleared: {details}" log line on successful container-type / container operation.</step>
+    <step order="6" name="Test">Run each refactored script against dev SPE tenant with cert bootstrapped in dev KV; verify container-type ID + container operations succeed and produce T6-cleared log line.</step>
+    <step order="7" name="Delegated-flow removal check">Grep the 3 refactored scripts for any remaining `InteractiveBrowserCredential` / `DeviceCodeCredential` / delegated-flow indicators — none should remain in SPE code paths.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 011 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If confidential-client cert-based auth returns unexpected errors (e.g., cert not found in KV, container-type API still returns 403 despite app-only token, or Graph SPE contract has drifted since 2026-08 spike), STOP and escalate per CLAUDE.md §6 rather than falling back to delegated flow. Silent fallback re-introduces T6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI for keyvault cert download + Graph token</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Create-NewContainerType.ps1 (refactored)</output>
+    <output type="code">scripts/New-BusinessUnitContainer.ps1 (refactored)</output>
+    <output type="code">scripts/Register-EventsPage.ps1 (refactored, if it invokes SPE)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each refactored script, when scanning code, then SPE token acquisition uses ClientCertificateCredential (or equivalent confidential-client) — no delegated-flow credential types remain in SPE paths.</criterion>
+    <criterion testable="true">Given each script, when the cert-bootstrap step runs, then cert is read from KV (URI ref or `az keyvault secret show`) — no hardcoded PFX path.</criterion>
+    <criterion testable="true">Given a successful run against dev SPE tenant, when reading stdout, then the "T6 cleared: {container-type-id}" log line appears.</criterion>
+    <criterion testable="true">Given the refactored scripts, when running under app-only auth against Graph SPE container-type endpoint, then 403 "public client not allowed" does NOT occur.</criterion>
+    <criterion testable="true">Negative: git diff scope is limited to the 3 named scripts (+ Register-*.ps1 if it invokes SPE) — no drift into unrelated files.</criterion>
+    <criterion testable="true">Negative: no cert or secret material appears in stdout, log file, or committed files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11 + T6 + R10 + graph-spe-2026-08 spike. Wave C4 H8 handler consumes these scripts.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

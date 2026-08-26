@@ -23,6 +23,7 @@ import type {
   SpeContainerTypeConfigUpsert,
   ContainerType,
   ContainerTypePermission,
+  ContainerTypeOwner,
   Container,
   ContainerCustomProperty,
   ContainerPermission,
@@ -56,6 +57,120 @@ import type {
 
 // Re-export error types for consumer convenience
 export { ApiError, AuthError };
+
+// ---------------------------------------------------------------------------
+// Error description
+// ---------------------------------------------------------------------------
+
+/** Reads a ProblemDetails extension as a non-empty string, or undefined. */
+function extension(problem: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  const value = problem?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Describes a caught error for display, preserving everything the BFF sent.
+ *
+ * `ApiError.message` is already the RFC 7807 `detail` (authenticatedFetch puts it there), and since
+ * task 001 that detail carries the real Graph/Dataverse error rather than a hardcoded guess. What was
+ * still being dropped is the diagnostic set in `problemDetails` — the Graph error code and, most
+ * importantly, the **request id**, which is the value an admin quotes to Microsoft support. This appends
+ * them.
+ *
+ * @param err       The caught value. Anything — ApiError, Error, or a non-Error throw.
+ * @param fallback  Used ONLY when nothing descriptive can be recovered. Never overrides a real message.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 001 (spec FR-A01).
+ */
+export function describeApiError(err: unknown, fallback = ""): string {
+  if (err instanceof ApiError) {
+    const problem = err.problemDetails as Record<string, unknown> | null;
+    const base = err.message || extension(problem, "title") || fallback;
+
+    const graphCode = extension(problem, "graphErrorCode");
+    const requestId = extension(problem, "graphRequestId");
+    const traceId = extension(problem, "traceId");
+
+    const diagnostics = [
+      graphCode ? `Graph code ${graphCode}` : undefined,
+      requestId ? `request id ${requestId}` : undefined,
+      !requestId && traceId ? `trace id ${traceId}` : undefined,
+    ].filter(Boolean);
+
+    return diagnostics.length > 0 ? `${base} (${diagnostics.join(" · ")})` : base;
+  }
+
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+
+  const text = String(err ?? "");
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Authorization prerequisites
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable codes the BFF uses to report an authorization prerequisite. SPE Admin has **two independent
+ * authorization layers**, and telling them apart is the whole point — see
+ * `SpeAdminAuthorizationFilter` for the full description.
+ */
+export const PERMISSION_CODES = {
+  /** Not signed in / session expired. Nothing is known about this caller's permissions. */
+  unauthenticated: "sdap.access.deny.unauthenticated",
+  /** Layer 1 — signed in, but without the Spaarke admin app role. Granted by a Spaarke admin. */
+  spaarkeAdmin: "sdap.access.deny.role_insufficient",
+  /** Layer 2 — Microsoft Graph refused a container-type operation. Granted by an Entra admin. */
+  entraDirectoryRole: "spe.containertypes.entra_role_required",
+} as const;
+
+/** How a screen should present an authorization prerequisite. */
+export interface PermissionPrerequisite {
+  /** Banner heading — states the nature of the problem, not a guess at its cause. */
+  title: string;
+  /** Fluent `MessageBar` intent. `warning` where the user can obtain access; `error` otherwise. */
+  intent: "warning" | "error";
+}
+
+/**
+ * Classifies a caught error as one of the authorization prerequisites the BFF reports.
+ *
+ * Screens use this to title the banner accurately. Without it every prerequisite renders under
+ * "Failed to load container types", which reads as a malfunction and sends the admin looking for a
+ * bug instead of a permission.
+ *
+ * The **body text always comes from {@link describeApiError}** — the BFF is the only party that knows
+ * which layer denied the request and what grants it, so the client must not compose its own
+ * explanation here. This function chooses a heading and nothing more.
+ *
+ * @returns The presentation, or `null` when the error is not an authorization prerequisite.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 012 (spec FR-B03).
+ */
+export function describePermissionPrerequisite(err: unknown): PermissionPrerequisite | null {
+  if (!(err instanceof ApiError)) return null;
+
+  const problem = err.problemDetails as Record<string, unknown> | null;
+  const code = extension(problem, "errorCode") ?? extension(problem, "reasonCode");
+
+  switch (code) {
+    case PERMISSION_CODES.entraDirectoryRole:
+      // Graph refused. The role is the prerequisite — but the user may already hold it and be
+      // blocked by something else, so this is a "warning", not a verdict.
+      return { title: "Additional permission required", intent: "warning" };
+
+    case PERMISSION_CODES.spaarkeAdmin:
+      return { title: "Spaarke administrator permission required", intent: "warning" };
+
+    case PERMISSION_CODES.unauthenticated:
+      return { title: "Sign in to continue", intent: "warning" };
+
+    default:
+      return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Typed HTTP helpers
@@ -340,6 +455,47 @@ export const speApiClient = {
       ).then(r => r.items);
     },
 
+    /*
+     * ── Container-type OWNERS (spec FR-C09, task 027) ──
+     *
+     * 🔑 `/owners`, NOT `/permissions`. `listPermissions` above returns which APPLICATIONS may access
+     * containers of this type; these return which PEOPLE administer the type. Orthogonal surfaces
+     * that happen to share a Graph word — task 027's own POML conflated them, and the separate route
+     * is what keeps that mistake from being easy to repeat.
+     *
+     * Server-side these run delegated against Graph BETA: container types reject app-only auth (403),
+     * and the `permissions` relationship does not exist on v1.0 (400 "Resource not found for the
+     * segment 'permissions'"). No `configId` — the delegated path derives the tenant from the caller.
+     */
+
+    /** GET /api/spe/containertypes/{typeId}/owners — the people who administer this container type. */
+    listOwners(typeId: string): Promise<ContainerTypeOwner[]> {
+      return get<{ items: ContainerTypeOwner[] }>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+      ).then(r => r.items ?? []);
+    },
+
+    /**
+     * POST /api/spe/containertypes/{typeId}/owners — grant ownership.
+     *
+     * `userIdentifier` is an email/UPN or a directory object id, passed to Graph as given. An unknown
+     * user surfaces Graph's own error rather than appearing to succeed.
+     */
+    addOwner(typeId: string, userIdentifier: string): Promise<ContainerTypeOwner> {
+      return post<{ userIdentifier: string }, ContainerTypeOwner>(
+        "/spe/containertypes/" + encodeURIComponent(typeId) + "/owners",
+        { userIdentifier },
+      );
+    },
+
+    /** DELETE /api/spe/containertypes/{typeId}/owners/{permissionId} — revoke an ownership grant. */
+    removeOwner(typeId: string, permissionId: string): Promise<void> {
+      return del(
+        "/spe/containertypes/" + encodeURIComponent(typeId) +
+        "/owners/" + encodeURIComponent(permissionId),
+      );
+    },
+
     /**
      * GET /api/spe/containertypes/{typeId}/consumers?configId={id}
      * List consuming application registrations for a container type (SPE-082).
@@ -508,10 +664,23 @@ export const speApiClient = {
      * GET /api/spe/containers/{containerId}/permissions?configId={id}
      * List all permission entries on a container.
      */
-    list(containerId: string, configId: string): Promise<ContainerPermission[]> {
-      return get<ContainerPermission[]>(
+    async list(
+      containerId: string,
+      configId: string,
+    ): Promise<ContainerPermission[]> {
+      // Envelope: `{ items, count }` (ContainerPermissionListResponse), not a bare array. This one
+      // had not surfaced in UAT yet only because nobody had opened Manage Permissions.
+      const page = await get<{ items?: ContainerPermission[] }>(
         "/spe/containers/" + containerId + "/permissions" + qs({ configId }),
       );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The permissions service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). Permissions could not be read; this is NOT a report that the " +
+            "container has none.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -761,27 +930,101 @@ export const speApiClient = {
   // Search
   // =========================================================================
 
+  /**
+   * Both search calls answer with a paged envelope of FLAT DTOs, while the results grids consume a
+   * NESTED shape (`{ container }` / `{ item }`). Two mismatches at once, and both were silent:
+   * TypeScript believed the old `Promise<…[]>` annotation, so the page stored an object where it
+   * expected an array and died on `.filter` — the "i.filter is not a function" seen in UAT
+   * 2026-08-25. Adapting here keeps the grids untouched and puts the wire-to-view translation in the
+   * one layer whose job it is.
+   */
   search: {
     /**
      * POST /api/spe/search/containers?configId={id}
      * Search for containers matching a query.
      */
-    containers(configId: string, body: SearchRequest): Promise<ContainerSearchResult[]> {
-      return post<SearchRequest, ContainerSearchResult[]>(
-        "/spe/search/containers" + qs({ configId }),
-        body,
-      );
+    async containers(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<ContainerSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            displayName: string;
+            description?: string;
+            containerTypeId?: string;
+          }>;
+        }
+      >("/spe/search/containers" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The container search service returned an unrecognized response shape (expected an " +
+            "object with an 'items' array). No results could be read, which is not the same as " +
+            "there being no matches.",
+        );
+      }
+
+      // status / createdDateTime / storageUsedInBytes are deliberately left undefined — search does
+      // not report them, and defaulting them here would put invented values on an admin screen.
+      return page.items.map((c) => ({
+        container: {
+          id: c.id,
+          displayName: c.displayName,
+          description: c.description,
+          containerTypeId: c.containerTypeId,
+        },
+      }));
     },
 
     /**
      * POST /api/spe/search/items?configId={id}
      * Search for drive items matching a query.
      */
-    items(configId: string, body: SearchRequest): Promise<DriveItemSearchResult[]> {
-      return post<SearchRequest, DriveItemSearchResult[]>(
-        "/spe/search/items" + qs({ configId }),
-        body,
-      );
+    async items(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<DriveItemSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            name: string;
+            size?: number;
+            lastModifiedDateTime?: string;
+            containerId?: string;
+            containerName?: string;
+            webUrl?: string;
+            mimeType?: string;
+          }>;
+        }
+      >("/spe/search/items" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The item search service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). No results could be read, which is not the same as there " +
+            "being no matches.",
+        );
+      }
+
+      return page.items.map((i) => ({
+        item: {
+          id: i.id,
+          name: i.name,
+          size: i.size,
+          lastModifiedDateTime: i.lastModifiedDateTime,
+          webUrl: i.webUrl,
+          // A drive item is a FILE when search reported a mime type, and a folder otherwise. This is
+          // the only signal the search projection carries, and the grid uses it to pick the icon.
+          ...(i.mimeType ? { file: { mimeType: i.mimeType } } : {}),
+        },
+        containerId: i.containerId ?? "",
+        containerName: i.containerName,
+      }));
     },
   },
 
@@ -828,8 +1071,18 @@ export const speApiClient = {
      * GET /api/spe/security/alerts?configId={id}
      * List security alerts for the tenant.
      */
-    listAlerts(configId: string): Promise<SecurityAlert[]> {
-      return get<SecurityAlert[]>("/spe/security/alerts" + qs({ configId }));
+    async listAlerts(configId: string): Promise<SecurityAlert[]> {
+      // Envelope: `{ items, count }` (SecurityAlertsResponse), not a bare array.
+      const page = await get<{ items?: SecurityAlert[] }>(
+        "/spe/security/alerts" + qs({ configId }),
+      );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The security service returned an unrecognized response shape (expected an object with " +
+            "an 'items' array). Alerts could not be read — do not read this as 'no alerts'.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -873,8 +1126,15 @@ export const speApiClient = {
     /**
      * GET /api/spe/audit?configId={id}&from={date}&to={date}&category={cat}
      * Query the audit log with optional date/category filters.
+     *
+     * The endpoint answers with a paged ENVELOPE — `{ items, count, top, skip }` — not a bare array.
+     * This call previously declared `Promise<AuditLogEntry[]>` and handed the envelope object straight
+     * to the page, which stored it in an array-typed state and then called `.slice()` on it. That threw
+     * `TypeError: entries.slice is not a function` during render, and with no error boundary above it
+     * the whole app unmounted — the white screen reported in UAT on 2026-08-25. TypeScript could not
+     * catch it: the declared return type was simply an assertion about JSON that nothing verified.
      */
-    query(options: {
+    async query(options: {
       configId: string;
       from?: string;
       to?: string;
@@ -882,7 +1142,7 @@ export const speApiClient = {
       top?: number;
       skip?: number;
     }): Promise<AuditLogEntry[]> {
-      return get<AuditLogEntry[]>(
+      const page = await get<{ items?: AuditLogEntry[] }>(
         "/spe/audit" + qs({
           configId: options.configId,
           from: options.from,
@@ -892,6 +1152,18 @@ export const speApiClient = {
           skip: options.skip,
         }),
       );
+
+      // Verify the shape rather than trusting the type parameter. An unexpected body must surface as a
+      // visible error, NOT as an empty array — "no audit entries" is a claim about the tenant's history
+      // that this client is in no position to make just because it failed to understand the response.
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The audit log service returned an unrecognized response shape (expected an object with an " +
+            "'items' array). The entries could not be read, and this is not the same as there being none.",
+        );
+      }
+
+      return page.items;
     },
   },
 

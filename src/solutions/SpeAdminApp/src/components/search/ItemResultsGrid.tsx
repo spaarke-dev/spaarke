@@ -337,14 +337,22 @@ export const ItemResultsGrid: React.FC<ItemResultsGridProps> = ({
       }),
       createTableColumn<DriveItemSearchResult>({
         columnId: "modified",
+        // Search may omit the modified date; NaN from `new Date(undefined)` makes a sort
+        // non-deterministic rather than merely wrong, so absent dates sort as 0 and render "—".
         compare: (a, b) =>
-          new Date(a.item.lastModifiedDateTime).getTime() -
-          new Date(b.item.lastModifiedDateTime).getTime(),
+          (a.item.lastModifiedDateTime
+            ? new Date(a.item.lastModifiedDateTime).getTime()
+            : 0) -
+          (b.item.lastModifiedDateTime
+            ? new Date(b.item.lastModifiedDateTime).getTime()
+            : 0),
         renderHeaderCell: () => "Modified",
         renderCell: (row) => (
           <TableCellLayout>
             <Text size={200} style={{ whiteSpace: "nowrap" }}>
-              {formatDateTime(row.item.lastModifiedDateTime)}
+              {row.item.lastModifiedDateTime
+                ? formatDateTime(row.item.lastModifiedDateTime)
+                : "—"}
             </Text>
           </TableCellLayout>
         ),
@@ -583,7 +591,7 @@ export const ItemResultsGrid: React.FC<ItemResultsGridProps> = ({
     const rows = results.map((r) => [
       csvEscape(r.item.name),
       csvEscape(String(r.item.size ?? "")),
-      csvEscape(r.item.lastModifiedDateTime),
+      csvEscape(r.item.lastModifiedDateTime ?? ""),
       csvEscape(r.item.lastModifiedBy?.user?.displayName ?? ""),
       csvEscape(r.containerId),
       csvEscape(r.hitHighlightedSummary ?? ""),
@@ -629,8 +637,9 @@ export const ItemResultsGrid: React.FC<ItemResultsGridProps> = ({
       `Name: ${item.name}`,
       `ID: ${item.id}`,
       `Size: ${formatBytes(item.size)}`,
-      `Created: ${formatDateTime(item.createdDateTime)}`,
-      `Modified: ${formatDateTime(item.lastModifiedDateTime)}`,
+      // "—" distinguishes "search did not report this" from a real but unparseable date.
+      `Created: ${item.createdDateTime ? formatDateTime(item.createdDateTime) : "—"}`,
+      `Modified: ${item.lastModifiedDateTime ? formatDateTime(item.lastModifiedDateTime) : "—"}`,
       `Modified By: ${item.lastModifiedBy?.user?.displayName ?? "—"}`,
       `Container ID: ${contextItem.containerId}`,
       `Web URL: ${item.webUrl ?? "—"}`,

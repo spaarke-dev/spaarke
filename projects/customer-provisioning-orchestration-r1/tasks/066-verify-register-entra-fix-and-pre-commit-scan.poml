@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Verify Register-EntraAppRegistrations.ps1:63 fix (v3.3, commit 1834b77bc) + add ArchTest scanning provisioning scripts for tenant-shaped GUID defaults</title>
+    <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'testing','integration-test','auth'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also I1 tenant-isolation invariant enforcement.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused verification of an already-committed fix + adjacent ArchTest hardening. Well-specified, no architectural design. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>064</deps>
+    <tags>testing, integration-test, auth, azure-deployment</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Verify the Register-EntraAppRegistrations.ps1:63 fix committed in v3.3 (SHA 1834b77bc) — the `-TenantId` parameter is now Mandatory with no tenant-shaped default. Then add a pre-commit ArchTest that scans EVERY .ps1 under scripts/ for Param() defaults matching the tenant-shaped GUID regex ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ and fails with file:line. This is the I1 enforcement hardening beyond the initial task 064 I1 ArchTest — coverage of every provisioning script, not just the currently known offender.</prompt>
+
+  <role>SPAARKE platform test engineer. Expert in PowerShell parameter-block parsing (Param() with defaults), Roslyn/regex-based static scans, and git verification of prior-commit fixes. Follow ADRs strictly.</role>
+
+  <goal>Verification report at projects/customer-provisioning-orchestration-r1/notes/register-entra-fix-verification-2026-XX.md confirms commit 1834b77bc made `-TenantId` Mandatory with no default in Register-EntraAppRegistrations.ps1:63. The task-064 I1 ArchTest is generalized to cover every .ps1 under scripts/ (not only Register-EntraAppRegistrations.ps1). Test suite exits 0 on current codebase.</goal>
+
+  <context>
+    <background>Per spec.md v3.3 + commit 1834b77bc: the Spaarke tenant GUID was hardcoded as a Param() default on line 63 of Register-EntraAppRegistrations.ps1 — a silent cross-tenant risk. The commit removed the default + made `-TenantId` Mandatory. This task VERIFIES the fix is in the current branch AND hardens the I1 ArchTest so any future .ps1 with a similar shape is caught pre-merge.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/register-entra-fix-verification-2026-XX.md</file>
+      <file role="modify">tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs</file>
+      <file role="canonical-reference">scripts/Register-EntraAppRegistrations.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">I1_NoHardcodedTenantTests.cs exists (initial predicate)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-28">SCOPE (I1 generalized): Every .ps1 under scripts/ MUST NOT have a Param() default matching the tenant-shaped GUID regex — the check is generic, not tied to a single script.</constraint>
+    <constraint source="spec.md v3.3">SCOPE: `-TenantId` in Register-EntraAppRegistrations.ps1 MUST be [Parameter(Mandatory=$true)] with NO default value.</constraint>
+    <constraint source="ADR-038">SCOPE: Test-modifying tasks trigger unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override row.</constraint>
+    <constraint source="project">SCOPE: Verification report cites the git commit SHA + the exact line of the fixed file; does NOT re-apply the fix (already committed).</constraint>
+    <constraint source="project">SCOPE: If verification shows the fix is NOT present in the current branch, STOP and escalate per CLAUDE.md §6.5 — do NOT silently re-apply; the fix might have been reverted for a reason.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pre-commit ArchTest scanning provisioning scripts for tenant-shaped GUID defaults</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="File-glob source scan for scripts" location="tests/Spaarke.ArchTests/">See task 064's I1 test — extend the pattern from Register-EntraAppRegistrations.ps1-specific to all .ps1 under scripts/.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-28 + v3.3 code-fix note + this project's CLAUDE.md.</step>
+    <step order="1" name="Git verify">Run `git log -1 --format='%H %s' scripts/Register-EntraAppRegistrations.ps1` and `git show 1834b77bc -- scripts/Register-EntraAppRegistrations.ps1` to verify the -TenantId Mandatory conversion is present in the current branch.</step>
+    <step order="2" name="Line inspect">Read scripts/Register-EntraAppRegistrations.ps1:60-70 — verify -TenantId is [Parameter(Mandatory=$true)] with no default value.</step>
+    <step order="3" name="Report">Write notes/register-entra-fix-verification-2026-XX.md citing commit SHA + line ranges + inspection result.</step>
+    <step order="4" name="Generalize I1">Modify tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs to scan EVERY .ps1 under scripts/ (not just the one file) for Param() defaults matching the tenant-shaped regex.</step>
+    <step order="5" name="Baseline verify">Run dotnet test tests/Spaarke.ArchTests/ — I1 test PASSES against current codebase.</step>
+    <step order="6" name="Regression seed">Author a temporary .ps1 with a tenant-shaped Param default, verify I1 fails; remove the temp file.</step>
+    <step order="7" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 066 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the ArchTests project</tool>
+    <tool name="git">Verify commit history</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/register-entra-fix-verification-2026-XX.md</output>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs (generalized)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification report cites commit SHA 1834b77bc and confirms Register-EntraAppRegistrations.ps1:63 has -TenantId as Mandatory with no default.</criterion>
+    <criterion testable="true">I1_NoHardcodedTenantTests scans EVERY .ps1 under scripts/ (verified by test coverage: run against a temp .ps1 with a tenant-shaped default → test fails; remove temp file).</criterion>
+    <criterion testable="true">All 5 ArchTests (I1-I5) PASS against current codebase; dotnet test tests/Spaarke.ArchTests/ exits 0.</criterion>
+    <criterion testable="true">Negative: if the fix is NOT present in the current branch (e.g., reverted), the task STOPS and escalates per CLAUDE.md §6.5 rather than silently re-applying.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-28 + I1 + v3.3 code-fix (commit 1834b77bc). Together with task 064's initial I1 test, this hardens I1 coverage to every .ps1 under scripts/.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

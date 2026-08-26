@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Wire Service Bus client for L2 — handler enqueue path per §4.2 (reuse BFF IJobHandler infrastructure patterns)</title>
+    <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>l2-controlplane tag + auth-adjacent (UAMI Service Bus Data Sender role) + FR-22 handler-execution-model foundation (fire-and-forget via Service Bus is the R20 mitigation). task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream reconciler + all handler dispatch depend).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: L2 scaffold + reconciler tier. Getting the Service Bus client shape (UAMI credential + MessageId dedup for 3-level idempotency + reconciler-friendly enqueue contract) right is architectural — every handler dispatch flows through this. "Opus 4.8 / Fable 5 for L2 scaffold + UAMI migration + reconciler".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC3-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on task 036 (project scaffold + Program.cs). Touches Program.cs — sequential with tasks 037/039 to avoid merge conflict.</parallel-reason>
+    <deps>036</deps>
+    <tags>l2-controlplane, azure, worker, job, background, auth, api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the Service Bus client into src/server/services/Sprk.Provisioning.ControlPlane/ via a new ServiceBusModule.cs: register ServiceBusClient (Azure.Messaging.ServiceBus SDK) using DefaultAzureCredential resolving to L2's bound UAMI (task 028/029/030 grants Azure Service Bus Data Sender on the env-scope Service Bus namespace); register an IHandlerEnqueuer abstraction that produces ServiceBusMessage with (a) MessageId = deterministic idempotency key per handler+params (3-level idempotency per FR-22 / ADR-036); (b) SessionId = customerId for FIFO ordering per customer; (c) TimeToLive matching the handler's max-runtime tolerance. Reuse the BFF's existing Services/Jobs/ infrastructure patterns (IJobHandler contract, IdempotencyService approach) as canonical READ-ONLY reference.</prompt>
+  <role>SPAARKE platform developer with Azure.Messaging.ServiceBus SDK + Managed Identity credential expertise + IJobHandler pattern familiarity (ADR-036 background-job infrastructure). Understand FR-22: L2 REST endpoints ENQUEUE via Service Bus + return 202 &lt;100ms; state-reconciler polls Cosmos to advance DAG; actual handlers run in the BFF's IJobHandler infrastructure (spec.md FR-22 "handlers run in BFF's existing IJobHandler infrastructure").</role>
+  <goal>src/server/services/Sprk.Provisioning.ControlPlane/Modules/ServiceBusModule.cs + Enqueue/IHandlerEnqueuer.cs + Enqueue/ServiceBusHandlerEnqueuer.cs exist; ServiceBusClient registered with UAMI credential; the enqueuer produces ServiceBusMessage with correct MessageId (idempotency), SessionId (customerId), and typed handler-envelope payload (JSON — handlerId + runId + customerId + parameters). dotnet build passes; a smoke test enqueues a test message and asserts it lands in the queue.</goal>
+
+  <context>
+    <background>Spec FR-22 + design.md §4.2 (fire-and-forget execution model): L2 REST endpoints must return 202 Accepted &lt;100ms to avoid App Service 230s HTTP timeout on 30-min handlers (R20). The mechanism: L2 endpoint enqueues a Service Bus message; the reconciler (Wave C5) picks it up and coordinates DAG advancement; the actual handler execution reuses BFF's IJobHandler infrastructure (ADR-036). Without this wiring, no handler can be dispatched from L2; the whole execution model is inoperative.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Modules/ServiceBusModule.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/IHandlerEnqueuer.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/ServiceBusHandlerEnqueuer.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/HandlerEnvelope.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ (13 production IJobHandler implementations)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs (3-level idempotency pattern)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/service-bus.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold + Program.cs + module composition.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: Service Bus client MUST use UAMI credential (DefaultAzureCredential resolves to bound UAMI in-App-Service). Grant Azure Service Bus Data Sender role to UAMI in a follow-on RBAC bicep edit if not already covered by task 030 (verify + report).</constraint>
+    <constraint source="ADR-036">Scope: reuse BFF's IJobHandler PATTERNS via canonical reference reading — MessageId dedup, Redis idempotency lock, deterministic idempotency key — but do NOT compile-depend on Sprk.Bff.Api. The actual handlers run in BFF's infra per FR-22; L2 owns the enqueue path only.</constraint>
+    <constraint source="project">FR-22 3-level idempotency: MessageId is the FIRST level (Service Bus dedup within a rolling window); Redis IdempotencyService is the SECOND level (BFF-side, existing); Dataverse alt-key upsert is the THIRD level (handler-body-side). This task implements the FIRST level correctly — deterministic key per (handlerId, runId, customerId, paramHash).</constraint>
+    <constraint source="project">FR-22 SessionId: MUST be customerId — enables Service Bus FIFO ordering per customer, which pairs with §4D I5 same-customer serialization.</constraint>
+    <constraint source="project">Scope (this task only): Service Bus client + enqueuer. Do NOT wire Cosmos (task 037) or App Insights (task 039). Do NOT implement receiving-side (BFF's IJobHandler consumes) or reconciler (Wave C5).</constraint>
+    <constraint source="project">MUST use a per-handler queue OR a shared queue with per-handler subscription — verify the current Service Bus topology in infrastructure/bicep/modules/service-bus.bicep + adapt.</constraint>
+    <constraint source="project">MUST NOT log the full HandlerEnvelope payload if it contains parameter secrets (KV URI refs are OK; scan for cleartext-secret patterns per task 025 ArchTest discipline).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure.Messaging.ServiceBus SDK; UAMI credential; ADR-036 IJobHandler contract; 3-level idempotency</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF IJobHandler infrastructure" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Read for reference — 13 production handlers show the MessageId dedup + Redis idempotency lock + Dataverse alt-key upsert 3-level idempotency shape.</pattern>
+      <pattern name="IdempotencyService" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">The deterministic-key generation approach — mirror in L2's enqueuer for level-1 (Service Bus MessageId).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — l2-controlplane + auth + FR-22 foundation). Load spec.md FR-22, design.md §4.2, ADR-036, BFF Services/Jobs/ patterns.</step>
+    <step order="1">Inspect infrastructure/bicep/modules/service-bus.bicep for the current Service Bus namespace + queue/topic topology; determine whether to enqueue to a per-handler queue or a shared queue with property-based routing.</step>
+    <step order="2">Add PackageReference for Azure.Messaging.ServiceBus (latest stable — verify zero HIGH CVE) + Azure.Identity to Sprk.Provisioning.ControlPlane.csproj.</step>
+    <step order="3">Author Enqueue/HandlerEnvelope.cs — record type with (HandlerId, RunId, CustomerId, ParametersJson, EnqueuedAt).</step>
+    <step order="4">Author Enqueue/IHandlerEnqueuer.cs with method EnqueueAsync(HandlerEnvelope envelope, CancellationToken).</step>
+    <step order="5">Author Enqueue/ServiceBusHandlerEnqueuer.cs implementing the interface: (a) compute MessageId = SHA256(handlerId + "|" + runId + "|" + customerId + "|" + paramHash) — deterministic per FR-22 level-1 idempotency; (b) set SessionId = customerId; (c) set TimeToLive from a per-handler config map (default 30 min); (d) send via ServiceBusSender.</step>
+    <step order="6">Author Modules/ServiceBusModule.cs extension method AddServiceBusModule(this IServiceCollection services) registering ServiceBusClient singleton with DefaultAzureCredential + fully-qualified-namespace from IConfiguration.</step>
+    <step order="7">Register the enqueuer + Service Bus module in Program.cs (extending task 036).</step>
+    <step order="8">Author a smoke test at src/server/services/Sprk.Provisioning.ControlPlane.Tests/ServiceBusSmokeTests.cs that enqueues a test HandlerEnvelope against a dev SB namespace + asserts landing (skipped under an env-guard by default).</step>
+    <step order="9">Run dotnet build + dotnet list package --vulnerable — verify 0 errors + 0 HIGH CVEs.</step>
+    <step order="10">Verify UAMI has Azure Service Bus Data Sender on the SB namespace — cross-check with task 030 RBAC coverage; file a follow-up if not covered.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document deviation (e.g. per-handler-queue vs shared-queue-with-routing decision, TTL nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If DI registration for IJobHandler collides with BFF's registration in a shared assembly OR the L2 Service Bus client accidentally receives messages intended for BFF, STOP and escalate per CLAUDE.md §6 — L2 enqueues; BFF receives. The two roles must not blur.</trigger>
+    <trigger>If Azure.Messaging.ServiceBus has a HIGH-severity CVE at the version chosen, STOP and escalate per NFR-02.</trigger>
+    <trigger>If UAMI does not have Azure Service Bus Data Sender within 15 min of task 030 deploy, STOP and escalate — SB data-plane RBAC propagation delay is a known class of "silent 403" traps.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Modules/ServiceBusModule.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/IHandlerEnqueuer.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/ServiceBusHandlerEnqueuer.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/HandlerEnvelope.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (updated composition)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/ServiceBusSmokeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given dotnet build, 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given the enqueuer implementation, MessageId is deterministic per (HandlerId, RunId, CustomerId, ParamHash) — two calls with identical inputs produce identical MessageId.</criterion>
+    <criterion testable="true">Given a HandlerEnvelope enqueued to a dev SB namespace, the message lands with SessionId == customerId, MessageId matching the computed hash, and TimeToLive per per-handler config.</criterion>
+    <criterion testable="true">Given re-enqueue with the same envelope within the SB dedup window, only ONE message is retained (level-1 idempotency).</criterion>
+    <criterion testable="true">Negative: no account-key credential; DefaultAzureCredential (UAMI at runtime) only.</criterion>
+    <criterion testable="true">Negative: no Cosmos or App Insights wiring in this task.</criterion>
+    <criterion testable="true">Given dotnet list package --vulnerable, 0 HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-22 + ADR-036. The enqueuer is the L2-side of the fire-and-forget model; the receiving side is BFF's existing IJobHandler infrastructure (per FR-22 acceptance). The state-reconciler (Wave C5) reads Cosmos + coordinates but does NOT itself run handlers. Coordinate with Wave C5 for the endpoint layer that consumes IHandlerEnqueuer.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

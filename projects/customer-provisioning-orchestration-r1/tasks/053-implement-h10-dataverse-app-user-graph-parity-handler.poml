@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H10 Dataverse App User + Graph App-Role Parity Handler (T2 + T3 owner)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','dataverse'; modifies .cs files; owns T2 + T3 silent-fail traps; touches App User registration + Graph app-role parity — auth-sensitive.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler consumes GraphAppRoles.cs compile-time constant; complete spec (FR-13 + T2 + T3); dual-trap ownership + escalation gate (10-of-14 GUIDs) lift effort to xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 015 (Phase B Grant-GraphAppRoles.ps1 script) + task 005 (Phase A GraphAppRoles.cs GUID completion) — H10 escalation gate requires 11 of 14 null GUIDs completed BEFORE first production customer. Serial after Phase A.</parallel-reason>
+    <deps>036, 049, 015, 005</deps>
+    <tags>l2-controlplane, job-handler, auth, dataverse, powershell</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H10 Dataverse Application User + Graph app-role parity handler as an IJobHandler in the L2 control-plane. H10 registers 2 App Users (BFF app-reg + UAMI) as System Administrator on the target Dataverse env, then syncs Graph app-role parity from Infrastructure/Auth/GraphAppRoles.cs constant onto the UAMI service principal. Interim uses PPAC UI + Graph SDK (design target TF powerplatform_user deferred per M-10). H10 escalation gate: 11 of 14 null AppRoleId GUIDs in GraphAppRoles.cs MUST be completed BEFORE first production customer. Idempotency key: appuser-{customerId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Microsoft Graph SDK v6 / Kiota 2.0 (ODataError), Dataverse Application User registration via Web API systemusers upsert, GraphAppRoles.cs 14-role compile-time constant (r3 task 062), T2 + T3 silent-fail trap verification. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H10DataverseAppUserGraphParityHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) registers BFF app-reg AND UAMI as System Administrator App Users on target Dataverse env; (b) reads all 14 role IDs from GraphAppRoles.cs constant and grants them onto UAMI SP via Graph API; (c) verifies T2: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1; (d) verifies T3: UAMI SP appRoleAssignments includes ALL 14 role IDs from GraphAppRoles.cs (fails deploy with trap-T3 code otherwise); (e) H10 escalation: if any AppRoleId in GraphAppRoles.cs is null (indicating Phase A GUID completion incomplete), fail deploy with distinct escalation code BEFORE granting; (f) asserts idempotency key appuser-{customerId}. Unit tests cover happy path, T2 verify fail, T3 verify fail (partial roles), H10 escalation on null GUID, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-13 + FR-33 (T2 + T3) + design.md §4.1 H10 + §4B T2/T3: H10 owns two silent-fail traps. T2 = MI not registered as Dataverse App User (leads to fleet-wide 403 on Dataverse calls). T3 = UAMI Graph app-role parity broken (leads to silent 403 on app-only Graph calls). GraphAppRoles.cs r3 task 062 is the compile-time constant for 14 roles; 11 of 14 GUIDs are null pending Phase A az-enumeration completion. TF migration deferred per M-10.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H10DataverseAppUserGraphParityHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H10DataverseAppUserGraphParityHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (r3 task 062 constant)</file>
+      <file role="canonical-reference">scripts/Grant-GraphAppRoles.ps1 (Phase B — task 015)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="049" status="pending">H6 solution import — solutions must exist before App User registration</dependency>
+      <dependency task="015" status="pending">Phase B Grant-GraphAppRoles.ps1 script</dependency>
+      <dependency task="005" status="pending">Phase A GraphAppRoles.cs GUID completion (11 of 14 null AppRoleIds via `az` enumeration)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">Auth ceremony 21 MUSTs; Dataverse App User registration for both BFF app-reg + UAMI + Graph parity are specific MUSTs.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">systemuserid + applicationid + role IDs written to Cosmos follow GUID canonicalization (lowercase, no braces).</constraint>
+    <constraint source="project">Idempotency key: appuser-{customerId} — App User registration is per-customer + version-independent.</constraint>
+    <constraint source="project">H10 owns T2 (spec.md FR-33): `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1.</constraint>
+    <constraint source="project">H10 owns T3 (spec.md FR-33): UAMI SP `appRoleAssignments` includes ALL 14 role IDs from GraphAppRoles.cs; fails deploy with trap-T3 code on any missing role.</constraint>
+    <constraint source="project">H10 escalation gate (spec.md MUST rule): if any AppRoleId GUID in GraphAppRoles.cs is null (Phase A incomplete), fail deploy with "H10EscalationGate" BEFORE granting; do NOT grant with null GUIDs.</constraint>
+    <constraint source="project">Interim implementation uses PPAC UI + Graph SDK per M-10; TF migration is NOT r1 acceptance.</constraint>
+    <constraint source="spec.md §4D I1">-TenantId flows explicitly to all Graph + Dataverse calls; no default tenant fallback.</constraint>
+    <constraint source="spec.md §4D I5">Graph token acquisition per-tenant scoped: app-only calls use .default scope with target tenant's tid explicitly; NOT MI credential default tenant.</constraint>
+    <constraint source="spec.md NFR-09">Graph SDK calls catch ODataError (not ServiceException); ResponseStatusCode is int; ResponseHeaders is dict.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler for Dataverse App User + Graph app-role parity with T2 + T3 trap ownership</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="dataverse-token-cache" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs">Cross-env token cache pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H10DataverseAppUserGraphParityHandler.cs — inject IDataverseWebApiClient, IGraphAppOnlyClient, IPowerShellRunner, IIdempotencyService, ICosmosRunStore, plus IGraphAppRolesRegistry (reads GraphAppRoles.cs constant).</step>
+    <step order="2">H10 escalation gate: iterate GraphAppRoles.cs entries; if any AppRoleId is null (default Guid.Empty), fail deploy with "H10EscalationGate" BEFORE any Graph or Dataverse write.</step>
+    <step order="3">Register BFF app-reg AND UAMI as Dataverse System Administrator App Users via Dataverse Web API systemusers upsert on target env.</step>
+    <step order="4">Grant all 14 roles from GraphAppRoles.cs onto UAMI SP via Graph API; wrap Graph SDK calls in try/catch ODataError (NFR-09).</step>
+    <step order="5">Verify T2: query `systemusers?$filter=applicationid eq {uami-app-id}`; fail with trap-T2 code if count != 1.</step>
+    <step order="6">Verify T3: query UAMI SP appRoleAssignments; assert ALL 14 role IDs from GraphAppRoles.cs are present; fail with trap-T3 code on any missing role (name the missing roles in diagnostic).</step>
+    <step order="7">Write systemUserId (UAMI + BFF app-reg) to Cosmos interStepState.</step>
+    <step order="8">Author unit tests: (a) happy path — T2 + T3 both verified, (b) T2 verify fail — App User not registered, (c) T3 verify fail — 13 of 14 roles present, (d) H10 escalation — GraphAppRoles.cs has null AppRoleId, (e) idempotency.</step>
+    <step order="9">Register in L2 Program.cs DI.</step>
+    <step order="10">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="11">Update TASK-INDEX.md: change task 053 status from 🔲 to ✅.</step>
+    <step order="12">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Graph app-role sync returns PARTIAL roles (T3 fails despite `az` enumeration completing — indicates one or more GUID values in GraphAppRoles.cs are WRONG, not just null), STOP and escalate per CLAUDE.md §6 — do NOT retry; operator must diagnose which GUID is incorrect via `az ad sp show --id 00000003-0000-0000-c000-000000000000` role enumeration.</trigger>
+    <trigger>If Phase A GraphAppRoles.cs GUID completion (task 005) is not merged, DEFER this task — do NOT run H10 with null AppRoleIds under any circumstances (H10 escalation gate is BINDING).</trigger>
+    <trigger>If T2 verification fails but Dataverse Web API systemusers upsert returned 200 (silent Dataverse write success + query miss), STOP and escalate — could indicate Dataverse env is not fully replicated post-H5.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: Infrastructure/Auth/GraphAppRoles.cs (r3 task 062 constant — 14-role compile-time list). No existing L2 handler for Dataverse App User + Graph parity.</existing>
+    <extension>No — H10 needs to own T2 + T3 trap post-conditions and the H10 escalation gate (null-GUID check). PS script alone can't provide DAG advancement + trap verification + escalation-gate branching.</extension>
+    <cost-of-doing-nothing>Without H10 owning T2 + T3, MI-Dataverse-App-User missing = fleet-wide 403 on every BFF → Dataverse call (T2 silent fail per §4B). UAMI Graph app-role parity broken = app-only Graph calls silently 403 (T3 silent fail per §4B). Both are CATASTROPHIC in production and were the exact traps §4B catalog was created to enforce.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">az CLI for role enumeration</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H10DataverseAppUserGraphParityHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H10DataverseAppUserGraphParityHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all 14 AppRoleId GUIDs in GraphAppRoles.cs are populated (Phase A complete), when HandleAsync runs, then BFF app-reg + UAMI are both registered as System Administrator App Users on target Dataverse env AND all 14 Graph app-roles are granted onto UAMI SP.</criterion>
+    <criterion testable="true">T2 (spec.md FR-33): `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1; H10 fails with trap-T2 code if not.</criterion>
+    <criterion testable="true">T3 (spec.md FR-33): UAMI SP appRoleAssignments includes all 14 role IDs from GraphAppRoles.cs; H10 fails with trap-T3 code + diagnostic naming missing roles.</criterion>
+    <criterion testable="true">H10 escalation (spec.md MUST rule): given any AppRoleId in GraphAppRoles.cs is null (default Guid.Empty), when HandleAsync runs, then it fails with "H10EscalationGate" BEFORE any Graph or Dataverse write.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId — second call is a no-op (appuser-{customerId} match); systemusers upsert alt-key + Graph role grant idempotent per role.</criterion>
+    <criterion testable="true">Negative: H10 invoked without tenantId parameter returns failure (§4D I1 + I5); Graph tokens acquired with explicit tenantId, not MI default tenant.</criterion>
+    <criterion testable="true">Graph SDK calls catch ODataError (NFR-09 Kiota 2.0).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-13 + FR-33 (T2 + T3) + MUST rules + NFR-09; design.md §4.1 H10 + §4B T2/T3 + M-10 TF deferral. Phase A completion of 11 of 14 null GUIDs is a BINDING escalation gate BEFORE first production customer provisioning.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-08-17 (Batch 3E, parallel sibling of tasks 050/051).
+    H10DataverseAppUserGraphParityHandler.cs implements IProvisioningHandler with
+    5 collaborator seams (IGraphAppRolesRegistry/L2GraphAppRolesRegistry — compiled
+    mirror of GraphAppRoles.cs since L2 cannot reference the BFF assembly;
+    IDataverseAppUserCreator/DataverseWebApiAppUserCreator — real Dataverse Web API
+    systemusers upsert for both BFF app-reg + UAMI; IDataverseAppUserVerifier
+    /DataverseWebApiAppUserVerifier — T2 independent post-condition re-query;
+    IGraphAppRoleGranter/GraphRestAppRoleGranter — real Graph REST grant calls
+    mirroring scripts/Grant-GraphAppRoles.ps1's endpoint shapes;
+    IGraphAppRoleParityVerifier/GraphRestAppRoleParityVerifier — T3 independent
+    post-grant re-query). H10 escalation gate fires BEFORE any Dataverse/Graph
+    write on any null AppRoleId. T2 mismatch + T3 partial both classify
+    QuarantineRequired; a raw Graph grant-call failure classifies
+    RetryableWithCleanup (deliberately distinct — grants are individually
+    idempotent). Extended InterStepState with BffAppRegSystemUserId (controlled
+    schema extension, parity with task 049/050 precedent). 17 new unit tests, all
+    passing (352 total L2 tests, 0 failures). Zero new NuGet packages / zero new
+    CVEs. 4 deviations documented in
+    projects/customer-provisioning-orchestration-r1/notes/task-053-h10-deviations.md
+    (test-file location Path C; InterStepState extension; NFR-09 raw-HTTP Path C;
+    App-User-creation-mechanism POML-literal-over-ambiguous-design-footnote).
+    Program.cs DI block added as a narrow hunk after siblings' (050 H7, 051 H8)
+    blocks — no conflicts, both siblings' registrations read + preserved intact
+    before this task's own edit.
+  </notes>
+</task>

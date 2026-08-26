@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Phase F E2E acceptance — provision fresh trial-{yyyymmdd} customer stamp using Model 2 (dedicated) profile via new pipeline [SPLIT: subagent scaffolding + owner invocation]</title>
+    <phase>F E2E Acceptance</phase>
+    <gate>blocked</gate>
+    <status>scaffolding-complete-owner-invocation-pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'deploy','integration-test','testing','bff-api'; final project acceptance gate; verifies ALL 6 §4B traps + ALL 5 §4D invariants + naming-conformance + cost envelope. FR-18 + SC #5 + SC #6 scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Full E2E dry-run against dev subscription orchestrating every prior phase's deliverables. Step 3.5.5b sonnet @ xhigh justified (broad-impact validation gate).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>057, 058, 059, 060, 061, 062, 064, 065, 066, 067, 069, 070, 071, 072, 073, 075, 076, 077, 078, 080, 081, 082, 084, 085, 086, 087, 088</deps>
+    <tags>deploy, integration-test, testing, bff-api, azure-deployment, dataverse, auth, l2-controlplane</tags>
+    <estimated-effort>8-16 hours</estimated-effort>
+  </metadata>
+
+  <prompt>SPLIT-MODE EXECUTION (amended 2026-08-18 per owner decision). This task now executes in two halves: (1) a scaffolding-only subagent authors the verification harness, report skeleton, and operator runbook (this half — see notes/phase-f-verification-harness.md, notes/phase-f-report-skeleton.md, notes/phase-f-operator-runbook.md); (2) the owner (interactive main-session, real AAD identity) invokes /provision-environment against dev to actually provision the stamp and fills the report. The subagent half MUST NOT invoke /provision-environment or mutate any live Azure/Dataverse resource. Per spec.md FR-18 + SC #5 + design.md §15 + the 2026-08-18 Path A exception (see &lt;constraints&gt;): provision a fresh trial-{yyyymmdd} customer stamp using the Model 2 (dedicated) profile via the new pipeline invoked through /provision-environment skill. Verify: (a) Setup Status transitions to Ready; (b) all 6 §4B silent-fail traps (T1-T6) cleared by owning handler post-conditions; (c) all 5 §4D tenant-isolation invariants (I1-I5) sample-verified; (d) scripts/naming-conformance-check.ps1 exits 0 on r1-owned surfaces; (e) cost envelope conforms per §15 #14 targets (Model 2 empty-environment Azure floor ≤ $400/mo); (f) Model 1/2 handler behavior differences per §4.1a verified (Model 2 dry-run/full-run mandatory; Model 1 discretionary). Publish full E2E verification report at projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md (owner fills from the skeleton at notes/phase-f-report-skeleton.md).</prompt>
+
+  <role>SPAARKE platform senior engineer + operator. Expert in the full 19-handler pipeline (H0..H14), L2 REST + reconciler operation, §4B trap catalog + §4D invariant enforcement, cost envelope measurement via Azure Cost Management, and E2E verification-report authoring. Follow ADRs strictly.</role>
+
+  <goal>A fresh trial-{yyyymmdd} customer stamp exists in dev Azure with Model 2 (dedicated) profile; Setup Status = Ready in Dataverse; all 6 §4B traps verified cleared; all 5 §4D invariants sample-verified; naming-conformance-check.ps1 exits 0; cost envelope report shows conformance to §15 #14 targets. Verification report at projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md documents every check + verdict + supporting evidence. SCAFFOLDING HALF (this dispatch) delivers the verification harness, report skeleton, and operator runbook that make the owner's live invocation mechanical and auditable; it does not itself produce the live evidence.</goal>
+
+  <context>
+    <background>Per spec.md FR-18 + SC #5 + design.md §15 north-star + plan.md Phase F: this is the project's final acceptance gate. Fresh trial-{yyyymmdd} customer using Model 2 (dedicated) profile invoked via the L3 /provision-environment skill (task 075) exercises the entire pipeline end-to-end, including the dedicated-stamp code paths (fresh App Service, fresh OpenAI, fresh AI Search, H0.5 consent-callback) that carry the highest first-live-run surprise probability. Trap + invariant + naming + cost verification confirms the pipeline delivers a customer environment that meets binding acceptance criteria. Any failure blocks project completion (task 090). SPLIT APPROACH (2026-08-18): a scaffolding-only subagent (Sub-Agent Write Boundary-compliant; does not invoke /provision-environment or touch live Azure/Dataverse) authors the verification harness + report skeleton + operator runbook; the owner performs the actual live invocation interactively and fills in the report from the skeleton.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-f-verification-harness.md</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-f-report-skeleton.md</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-f-operator-runbook.md</file>
+      <file role="new" status="owner-pending">projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md</file>
+      <file role="canonical-reference">scripts/Validate-DeployedEnvironment.ps1</file>
+      <file role="canonical-reference">scripts/naming-conformance-check.ps1</file>
+      <file role="canonical-reference">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="057" status="pending">L2 REST endpoints</dependency>
+      <dependency task="058" status="pending">State-reconciler</dependency>
+      <dependency task="059" status="pending">I5 concurrency guard</dependency>
+      <dependency task="060" status="pending">I6 crash recovery</dependency>
+      <dependency task="061" status="pending">§4C rollback semantics</dependency>
+      <dependency task="062" status="pending">L2 load test verified</dependency>
+      <dependency task="064" status="pending">ArchTests I1-I5</dependency>
+      <dependency task="065" status="pending">Tenant-isolation audit sweep</dependency>
+      <dependency task="066" status="pending">I1 generalized coverage</dependency>
+      <dependency task="067" status="pending">Nightly Graph parity</dependency>
+      <dependency task="069" status="pending">Seed manifest</dependency>
+      <dependency task="070" status="pending">H12a handler</dependency>
+      <dependency task="071" status="pending">H12b handler</dependency>
+      <dependency task="072" status="pending">H12c handler</dependency>
+      <dependency task="073" status="pending">H14 handler</dependency>
+      <dependency task="075" status="pending">/provision-environment skill</dependency>
+      <dependency task="076" status="pending">Fallback matrix</dependency>
+      <dependency task="077" status="pending">Per-tenant metering</dependency>
+      <dependency task="078" status="pending">Consent-callback E2E</dependency>
+      <dependency task="080" status="pending">DemoExpirationService refactor</dependency>
+      <dependency task="081" status="pending">RegistrationEndpoints refactor</dependency>
+      <dependency task="082" status="pending">Legacy config deleted</dependency>
+      <dependency task="084" status="pending">Canonical secret-catalog manifest</dependency>
+      <dependency task="085" status="pending">Alias collapse</dependency>
+      <dependency task="086" status="pending">IaC alignment</dependency>
+      <dependency task="087" status="pending">/config.json endpoint</dependency>
+      <dependency task="088" status="pending">CI wiring coord PR</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-18">SCOPE: H13 acceptance gate exits 0 AND registry Setup Status = Ready; both required.</constraint>
+    <constraint source="spec.md SC #5">SCOPE: E2E acceptance target = trial-{yyyymmdd} Model 1 stamp reaches Ready via new pipeline (not manual invocation).</constraint>
+    <constraint source="spec.md SC #6">SCOPE: All 6 §4B T1-T6 traps verified cleared by owning handler post-conditions.</constraint>
+    <constraint source="spec.md §4D">SCOPE: All 5 I1-I5 invariants sample-verified — I1 (no hardcoded tenant), I2 (tenantId filter on AI Search), I3 (Cosmos partition key), I4 (SPE container-id resolver), I5 (Graph per-tenant token).</constraint>
+    <constraint source="spec.md FR-35">SCOPE: naming-conformance-check.ps1 exits 0 on r1-owned surfaces post-provisioning.</constraint>
+    <constraint source="spec.md §15 #14">SCOPE: Cost envelope — Model 2 empty-environment Azure floor ≤ $400/mo (primary path); Model 1 marginal ≤ $430/mo + shared platform floor ≤ $400/mo (if Model 1 discretionary run performed); deviations &gt;20% flagged.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: If E2E surfaces a BFF issue, remediation follows §10 BFF Hygiene; /conflict-check before any fix PR.</constraint>
+    <constraint source="project">SCOPE: E2E provisioning uses REAL L3 skill invocation via /provision-environment against dev L2 — NOT a scripted bypass. Skill invocation is the acceptance path.</constraint>
+    <constraint source="project">SCOPE (AMENDED 2026-08-18): Model 2 (dedicated) full-run is now MANDATORY as the primary acceptance path (customerId=trial-2026-08-18, tenancyModel=Model2Dedicated, profile=trial). Model 1 dry-run is now discretionary; document Model 1 result or explicit skip rationale if not performed. This is the inverse of the original mandatoriness assignment — see the Path A exception constraint below for rationale.</constraint>
+    <constraint source="CLAUDE.md-§6.5">ADR Tension / Path A Exception (2026-08-18, owner-authorized): Path A exception: Model 2 mandatory (was discretionary); Model 1 discretionary (was mandatory). Rationale: dedicated stamp exercises fresh App Service + OpenAI + AI Search — higher first-live-run surprise probability = higher acceptance value. Documented in POML amendment 2026-08-18 per owner decision. Alternative considered (and rejected): keep Model 1 mandatory as originally scoped in plan.md §4 Phase F — rejected because Model 1 shares the already-daily-exercised platform floor (App Service Plan, AI Search, OpenAI) and would validate little that isn't already covered by ongoing dev usage; Model 2's fully-dedicated stamp (new UAMI, KV, Cosmos, Storage, dedicated App Service Plan + AI Search + OpenAI + mandatory H0.5 consent-callback) is the higher-value first real invocation of the pipeline. Impact: acceptance evidence for Model 1's shared-tier path is deferred to a discretionary run or a future customer onboarding; Model 2's dedicated-stamp path becomes the binding SC #5/#6 evidence trail for task 090 wrap-up.</constraint>
+    <constraint source="project">SCOPE (SPLIT MODE, added 2026-08-18): This task executes in two halves. The scaffolding half (subagent, Sub-Agent Write Boundary-compliant) authors: notes/phase-f-verification-harness.md, notes/phase-f-report-skeleton.md, notes/phase-f-operator-runbook.md. It MUST NOT invoke /provision-environment, MUST NOT run any `az`/`pac`/MCP command that mutates a live Azure or Dataverse resource, and MUST NOT deploy to spaarke-bff-dev. The owner-invocation half (interactive main-session, operator's own AAD identity) runs the actual /provision-environment skill invocation per the operator runbook and fills the final report at notes/phase-f-e2e-acceptance-2026-08-18.md from the skeleton.</constraint>
+    <constraint source="project">SCOPE: If ANY trap OR invariant OR cost check fails, STOP + escalate per CLAUDE.md §6.5 rather than lowering the threshold.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>E2E acceptance orchestration — 19-handler pipeline via /provision-environment skill</topic>
+    <files>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Validate-DeployedEnvironment invocation" location="scripts/Validate-DeployedEnvironment.ps1">Extended by H13 handler; also invocable standalone for acceptance verification.</pattern>
+      <pattern name="Cost Management report" location="docs/architecture/">Azure Cost Management API for per-resource-group cost — invoke against the trial stamp's RG.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-18 + SC #5 + SC #6 + §4B + §4D + §15 #14 + design.md §15 + §4.1a.</step>
+    <step order="0.5" name="SCAFFOLDING HALF (subagent, this dispatch)">Author notes/phase-f-verification-harness.md (per-trap T1-T6 + per-invariant I1-I5 verification queries + naming-conformance runner + cost envelope query), notes/phase-f-report-skeleton.md (owner fill-in template), notes/phase-f-operator-runbook.md (step-by-step operator commands wrapping /provision-environment). Amend this POML for the Model 1/2 mandatoriness swap. Update TASK-INDEX.md row 089 to 🟡 in-progress. Do NOT proceed past this step in the scaffolding dispatch.</step>
+    <step order="1" name="Prereq check (OWNER HALF)">Verify all dep tasks (057-088) status = ✅ in TASK-INDEX.md; verify /provision-environment skill is invocable. Owner runs via operator runbook Step 1.</step>
+    <step order="2" name="Model 2 provision (OWNER HALF, PRIMARY PATH)">Invoke /provision-environment with customerId=trial-2026-08-18, tenancyModel=Model2Dedicated, profile=trial. Walk through skill Step 0 → completion (H0.5 consent-callback fires — see operator runbook); capture handoff report.</step>
+    <step order="3" name="Setup Status check (OWNER HALF)">Query sprk_dataverseenvironment for the trial customer; verify sprk_provisioning_setupstatus = Ready.</step>
+    <step order="4" name="Trap verification (OWNER HALF)">For each of T1-T6, run the trap-verification query (per notes/phase-f-verification-harness.md, sourced from §4B) against the trial stamp; document result per trap.</step>
+    <step order="5" name="Invariant verification (OWNER HALF)">Sample-verify each of I1-I5 per notes/phase-f-verification-harness.md: (I1) grep provisioning scripts for tenant-shaped defaults; (I2) sample AI Search query on the DEDICATED index; (I3) sample Cosmos query; (I4) verify SPE container-ID resolution; (I5) verify Graph token per-tenant scope.</step>
+    <step order="6" name="Naming conformance (OWNER HALF)">Run `pwsh -File scripts/naming-conformance-check.ps1 -Scope r1-owned`; expect exit 0.</step>
+    <step order="7" name="Cost envelope (OWNER HALF)">Query Azure Cost Management API for the trial stamp's dedicated RG; compare against §15 #14 Model 2 ≤$400/mo target.</step>
+    <step order="8" name="Model 1 dry-run (OWNER HALF, now DISCRETIONARY)">Discretionary — if reasonable in dev budget, provision or dry-run a second stamp with tenancyModel=Model1Shared + verify §4.1a differences hold; else document skip rationale.</step>
+    <step order="9" name="Report (OWNER HALF)">Fill notes/phase-f-report-skeleton.md into notes/phase-f-e2e-acceptance-2026-08-18.md with per-check verdict + evidence + Setup Status confirmation + cost report + Model 1 result-or-skip.</step>
+    <step order="10" name="Cleanup (OWNER HALF)">Discretionary teardown OR leave trial stamp for reference (per plan.md Phase F Deliverables); see operator runbook teardown checklist.</step>
+    <step order="11" name="Index update (OWNER HALF)">Update TASK-INDEX.md: task 089 → ✅ once owner invocation + report are complete.</step>
+    <step order="12" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY trap OR ANY invariant OR cost drift &gt;20% fails, STOP and escalate per CLAUDE.md §6.5 rather than lowering the threshold or silently proceeding. Phase F acceptance is BINDING — a fail here blocks task 090 wrap-up. Owner input required on remediation path (path A exception documented; path B ADR amendment; path C fix + re-run).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Invoke skill + scripts</tool>
+    <tool name="az">Query Azure resources + Cost Management</tool>
+    <tool name="dotnet">Verify BFF + L2 build/test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-f-verification-harness.md</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-f-report-skeleton.md</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-f-operator-runbook.md</output>
+    <output type="docs" status="owner-pending">projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SCAFFOLDING HALF: notes/phase-f-verification-harness.md exists — per-trap (T1-T6) + per-invariant (I1-I5) verification queries + naming-conformance runner + cost envelope query, each with what/how/expected/failure-mode.</criterion>
+    <criterion testable="true">SCAFFOLDING HALF: notes/phase-f-report-skeleton.md exists — owner fill-in template matching the POML &lt;outputs&gt; report shape.</criterion>
+    <criterion testable="true">SCAFFOLDING HALF: notes/phase-f-operator-runbook.md exists — step-by-step commands wrapping /provision-environment for Model 2 primary path.</criterion>
+    <criterion testable="true">SCAFFOLDING HALF: this POML amended with Path A exception constraint + Model 1/2 mandatoriness swap; TASK-INDEX.md row 089 updated to 🟡.</criterion>
+    <criterion testable="true">OWNER HALF (pending): Fresh trial-2026-08-18 customer stamp exists in dev Azure with Model 2 (dedicated) profile; sprk_dataverseenvironment.sprk_provisioning_setupstatus = Ready.</criterion>
+    <criterion testable="true">OWNER HALF (pending): All 6 §4B traps (T1-T6) verified cleared; per-trap query documented + result cited in report.</criterion>
+    <criterion testable="true">OWNER HALF (pending): All 5 §4D invariants (I1-I5) sample-verified; per-invariant sample-query documented + result cited.</criterion>
+    <criterion testable="true">OWNER HALF (pending): scripts/naming-conformance-check.ps1 -Scope r1-owned exits 0.</criterion>
+    <criterion testable="true">OWNER HALF (pending): Cost envelope report shows Model 2 empty-environment floor ≤ $400/mo (primary); Model 1 figures only if discretionary run performed; deviations &gt;20% flagged.</criterion>
+    <criterion testable="true">OWNER HALF (pending): Model 2 provisioning invoked via /provision-environment skill (not manual REST/script bypass).</criterion>
+    <criterion testable="true">OWNER HALF (pending): Model 1 dry-run documented — either performed with §4.1a differences verified, OR explicit skip rationale (now discretionary).</criterion>
+    <criterion testable="true">OWNER HALF (pending): Report notes/phase-f-e2e-acceptance-2026-08-18.md exists with per-check verdict + evidence.</criterion>
+    <criterion testable="true">Negative: any failure triggers escalation, NOT silent proceed to task 090.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-18 + SC #5 + SC #6 + §15 #14 + design.md §15 + §4.1a. Final acceptance gate before 090 wrap-up. AMENDED 2026-08-18: Model 2 (dedicated) is now the mandatory primary acceptance path (Path A exception per CLAUDE.md §6.5, owner-authorized); Model 1 is now discretionary. Task executes split: scaffolding subagent (harness + skeleton + runbook, this dispatch) + owner interactive invocation (live /provision-environment run + report fill-in, next).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

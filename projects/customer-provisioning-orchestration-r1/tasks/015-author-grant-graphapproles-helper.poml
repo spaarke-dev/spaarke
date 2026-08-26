@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author scripts/Grant-GraphAppRoles.ps1 helper — reads GraphAppRoles.cs constant + syncs UAMI SP via az</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>NEW PowerShell script (creates new surface — §11 justification required); auth-tagged; reads a C# constant to derive grants. Per root CLAUDE.md §8, new file creation with explicit constraints = STANDARD. Auth tag would normally trigger FULL for BFF code, but this is a script (not BFF code) reading a BFF constant.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped script authoring with two clear inputs (GraphAppRoles.cs constant + `az ad app permission grant`). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 005 completing (needs GraphAppRoles.cs fully populated with all 14 GUIDs); would produce wrong grants if GUIDs still null.</parallel-reason>
+    <deps>005</deps>
+    <tags>powershell, auth, deploy</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Author scripts/Grant-GraphAppRoles.ps1: read the 14-role constant from src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (r3 task 062 + task 005 completion) and sync those app-role grants onto the UAMI Service Principal via `az ad app permission grant` / Graph API. This is the H10 handler's Graph app-role parity mechanism per spec.md FR-13 + T3. Alternative acceptable form: a small C# helper if PS reading of the .cs constant is fragile — decide based on parse reliability.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with PowerShell 7.4+ (or C# CLI), Microsoft Graph appRoleAssignments, Azure CLI (`az ad app permission grant`), and the r3-landed GraphAppRoles.cs constant. Follow ADR-028 auth ceremony.</role>
+
+  <goal>scripts/Grant-GraphAppRoles.ps1 (or equivalent C# helper) exists that: (a) reads the 14 role-id GUIDs from GraphAppRoles.cs (source of truth per r3 task 062 + task 005), (b) accepts -TenantId + -UamiPrincipalId mandatory params, (c) grants each of the 14 app-roles onto the specified UAMI SP via `az` / Graph API idempotently, (d) verifies each grant took effect (T3 parity check), (e) exits 0 only when all 14 grants confirmed present.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-13 + T3 + § MUST rules + design.md § handlers H10 + notes/r3-handoff.md. r3 task 062 landed GraphAppRoles.cs as the compile-time constant (source of truth for 14 roles); task 005 populates the 10 null GUIDs. H10 handler needs a script that reads this constant and syncs it onto the UAMI SP. Alternative form (small C# CLI tool): acceptable if PowerShell parsing of C# constant is fragile — the important invariant is "single source of truth = GraphAppRoles.cs".
+    </background>
+    <relevant-files>
+      <file role="new">scripts/Grant-GraphAppRoles.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">GraphAppRoles.cs must have all 14 AppRoleId GUIDs populated before this script has a valid source-of-truth to read from</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Source of truth for the 14 role IDs MUST be src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (r3 task 062). Do NOT hardcode the 14 GUIDs in the script — that reintroduces drift.</constraint>
+    <constraint source="spec.md">SCOPE: -TenantId AND -UamiPrincipalId are Mandatory. No default; no fallback tenant (§4D I1 / FR-28).</constraint>
+    <constraint source="ADR-028">SCOPE: Grants must be app-role assignments on the UAMI SP (not delegated permissions on a user). Follow ADR-028 21 MUSTs.</constraint>
+    <constraint source="project">SCOPE: Idempotent — re-run produces "no changes" on fully-granted UAMI, applies exact delta on partially-granted.</constraint>
+    <constraint source="project">SCOPE: T3 parity verification: after grant loop, verify UAMI SP `appRoleAssignments` includes all 14 GUIDs; report "T3 cleared" on success; exit non-zero if any missing.</constraint>
+    <constraint source="project">SCOPE: If a C# CLI helper is chosen instead of PS (per prompt alternative), it MUST live under scripts/ (NOT under src/) — this is tooling, not BFF code. If C# is chosen, still ship a small PS wrapper for consistency with other H-handler scripts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph app-role assignments + PS/az flow + reading a C# constant</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent app-role grant" location=".claude/patterns/auth/">Enumerate current UAMI SP appRoleAssignments → diff vs required 14 → apply missing via `az ad app permission grant` OR Graph POST → verify → summarize.</pattern>
+      <pattern name="Read C# constant from PS" location="scripts/">Regex-parse GraphAppRoles.cs for the 14 (role-name, GUID) pairs — OR invoke a small `dotnet run --project scripts/GraphAppRolesReader` if regex is fragile.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load ADR-028 + auth constraint + r3-handoff §62 notes.</step>
+    <step order="1" name="Verify prereq">Confirm task 005 complete (all 14 GraphAppRoles.cs AppRoleId GUIDs populated). If not, STOP (this task depends on 005).</step>
+    <step order="2" name="Choose form (PS vs C# helper)">Attempt PS regex parse of GraphAppRoles.cs. If regex is fragile (multi-line class, whitespace variance), fall back to small `scripts/GraphAppRolesReader/` C# project that emits JSON. Document decision in step notes.</step>
+    <step order="3" name="Design grant loop">Enumerate UAMI SP current appRoleAssignments; diff vs required 14; apply missing via Graph POST or az CLI; verify each.</step>
+    <step order="4" name="Design idempotency">Ensure re-run against fully-granted UAMI emits "no changes"; against partially-granted, applies exact delta.</step>
+    <step order="5" name="Design T3 verification">Post-loop, verify all 14 grants present; emit "T3 cleared: {14 grants confirmed on UAMI {principal-id}}"; exit non-zero if missing.</step>
+    <step order="6" name="Test — happy path">Run against dev UAMI (with test tenant + test UAMI principal id); verify all 14 grants applied.</step>
+    <step order="7" name="Test — idempotency">Re-run; verify "no changes".</step>
+    <step order="8" name="Test — partial state">Delete 1 grant; re-run; verify exact delta applied.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: set task 015 status to ✅.</step>
+    <step order="10" name="Deviations">Document PS-vs-C# decision + any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If PS parsing of GraphAppRoles.cs is fragile AND C# CLI helper option is chosen but requires adding new .NET project to solution (blast-radius question), STOP and escalate per CLAUDE.md §6 to confirm scope. A small standalone dotnet script under scripts/ is preferred over inserting into src/.</trigger>
+    <trigger>If any of the 14 grants cannot be applied (e.g., Graph API returns 403 on the operator's auth), STOP and escalate — silent skip re-introduces T3 silent-failure.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No prior helper reads GraphAppRoles.cs into a grant loop. Register-EntraAppRegistrations.ps1 (task 010) manages the app-reg permissions but does NOT grant app-roles onto the UAMI SP — different surface (BFF app-reg vs UAMI SP).</existing>
+    <extension>No — Register-EntraAppRegistrations.ps1 targets the BFF app-reg's grants; this script targets the UAMI SP's app-role assignments. Different Graph endpoints, different auth ceremony, different failure mode (T3 vs Gap 3). Extending the app-reg script would conflate two orthogonal grant surfaces.</extension>
+    <cost-of-doing-nothing>Without this helper, H10 (Wave C4) has no mechanism to sync the 14-role constant onto UAMI SP; T3 silent-fail (UAMI missing app-role assignments) produces app-only Graph 403s in production per plan.md § High-Risk Items ("Wrong GUID silently fails T3"). The 14-role source-of-truth constant remains code-only with no runtime enforcement path.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI for Graph app-role operations</tool>
+    <tool name="dotnet">Only if C# helper form chosen (scripts/GraphAppRolesReader/)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Grant-GraphAppRoles.ps1</output>
+    <output type="code" ephemeral="true">scripts/GraphAppRolesReader/ (only if C# helper form chosen)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the script, when invoked without -TenantId OR -UamiPrincipalId, then it exits non-zero with a mandatory-parameter diagnostic.</criterion>
+    <criterion testable="true">Given `Grant-GraphAppRoles.ps1 -TenantId {tid} -UamiPrincipalId {pid}` against a dev UAMI with zero prior grants, when run, then all 14 role IDs from GraphAppRoles.cs are granted + verified; log line "T3 cleared: 14 grants confirmed" emitted; exit 0.</criterion>
+    <criterion testable="true">Given a re-run against the fully-granted UAMI, when run, then log emits "no changes" and exits 0.</criterion>
+    <criterion testable="true">Given 1 grant deleted and re-run, when run, then the missing grant is applied + verified; exits 0.</criterion>
+    <criterion testable="true">Given the script's source, when grepping for hardcoded role GUIDs, then zero occurrences (all reads from GraphAppRoles.cs).</criterion>
+    <criterion testable="true">Negative: script does NOT touch the BFF app-reg's grants (that's task 010 surface). Scope stays on UAMI SP.</criterion>
+    <criterion testable="true">Negative: if 1 grant cannot be applied due to Graph 403 or similar real error, script exits non-zero with diagnostic (does NOT silent-skip).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13 + T3 + § MUST rules. Wave C4 H10 handler invokes this script. Depends on task 005 completing.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

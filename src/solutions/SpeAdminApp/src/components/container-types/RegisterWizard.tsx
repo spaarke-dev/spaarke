@@ -41,7 +41,7 @@ import type {
   IWizardSuccessConfig,
 } from "@spaarke/ui-components";
 import type { ContainerType } from "../../types/spe";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import { useBuContext } from "../../contexts/BuContext";
 
 // Step components
@@ -142,9 +142,7 @@ export const RegisterWizard: React.FC<RegisterWizardProps> = ({
       );
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to register container type. Please try again.";
+        describeApiError(err, "Failed to register container type. Please try again.");
       throw new Error(message);
     }
 

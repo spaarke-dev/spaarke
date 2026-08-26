@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Fix C4.5: dual Newtonsoft StringEnumConverter on RunStatus/GateState/QuarantineState + serializer-contract test + Cosmos seam test</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
+    <rigor-reason>Touches tests/** and is tagged testing/integration-test -- root CLAUDE.md §8 override table forces unconditional FULL (code-review + adr-check) regardless of the change's small LOC size.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One-line-per-enum attribute fix with a well-specified regression test -- small, precisely scoped; Sonnet @ high given its load-bearing correctness impact (task instructions flag xhigh only for complex brownfield, this is not that).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, testing, integration-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the confirmed C4.5 defect: RunStatus (Models/ProvisioningRun.cs:177-178), GateState (Models/GateState.cs:26), and QuarantineState (ProvisioningRun.cs:287) carry System.Text.Json [JsonConverter(typeof(JsonStringEnumConverter))] ONLY. The Cosmos client is built with the SDK's default Newtonsoft-based serializer (CosmosModule.cs:140,155-157 sets CosmosSerializationOptions.PropertyNamingPolicy=CamelCase but does NOT install a custom STJ serializer), so Newtonsoft silently ignores the STJ attribute and writes status as an INTEGER. CosmosActiveRunScanner.cs:46's query 'SELECT * FROM c WHERE c.status IN (\'Running\', \'WaitingOnGate\')' compares against strings and returns ZERO rows forever -- blinding BOTH StateReconcilerService (DAG advance) and CrashRecoveryStartupService (I6 boot scan). Add [Newtonsoft.Json.JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))] alongside the existing STJ attribute on all THREE enums, mirroring the already-landed #20 precedent (dual-attributed 'id' property). Fix the two misleading comments at CosmosModule.cs:140 and CosmosActiveRunScanner.cs:40-44 that falsely claim the STJ attribute is sufficient.</prompt>
+
+  <role>SPAARKE platform developer. Expert in System.Text.Json vs Newtonsoft.Json dual-attribute serialization patterns for the Cosmos SDK's default serializer, and in writing serializer-contract regression tests.</role>
+
+  <goal>RunStatus, GateState, and QuarantineState carry both STJ and Newtonsoft StringEnumConverter attributes. A new serializer-contract unit test serializes a fully-populated ProvisioningRun through Newtonsoft with CamelCasePropertyNamesContractResolver (the observable equivalent of the Cosmos default serializer) and asserts: 'id' present (not 'runId'), 'status':'Running' as a STRING (not an int), 'gateStates' values as strings, no 'ttl' member. A new integration seam test (Cosmos emulator or live-dev container) writes a Running run via the repository then asserts CosmosActiveRunScanner.ScanAsync returns it -- this is the test that would have caught the defect. The one stale Cosmos doc (runs/65109e91-...) is deleted or PATCHed to the string form as a documented runbook step.</goal>
+
+  <context>
+    <background>DS-5 §C4.5 (grep-verified against the live worktree) confirms this exact defect: the same serializer-mismatch class already produced bugs #19 (Ttl null-serialization) and #20 (RunId id-property-name), both now fixed with the identical dual-attribute pattern this task extends to the three enums. DS-5's ordering analysis (§'Ordering / dependencies vs the dispatcher build') calls this 'the single most-blocking item' for the whole Wave G-1 foundation: a perfect dispatcher (task 102) still produces an E2E that SILENTLY HANGS after H0 with this defect unfixed, because the reconciler and crash-recovery scanners see zero eligible runs -- indistinguishable from a broken dispatcher. It must land before any dispatcher smoke test is trusted.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProvisioningRun.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/GateState.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/CosmosModule.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/CosmosActiveRunScanner.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/ProvisioningRunSerializerContractTests.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/CosmosActiveRunScannerSeamTests.cs</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md MUST rules (post-line-254 block)">RunStatus, GateState, and QuarantineState MUST carry BOTH System.Text.Json [JsonConverter(typeof(JsonStringEnumConverter))] AND Newtonsoft.Json [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))] -- the Cosmos SDK's default serializer is Newtonsoft-based (CosmosModule.cs:140) and silently ignores STJ-only attributes, writing enums as integers.</constraint>
+    <constraint source="DS-5 §C4.5">Rejected alternatives (do not implement): (a) a custom STJ CosmosSerializer on CosmosClientOptions -- cleaner long-term but re-opens every serialization behavior at once and invalidates the already-shipped #19/#20 fixes' rationale, defer as a possible follow-on; (b) changing the scanner to query integers -- leaves live Cosmos docs unreadable by humans and leaves GateState/QuarantineState divergent.</constraint>
+    <constraint source="DS-5 §C4.5">Exactly 1 live Cosmos doc exists today (runs/65109e91-..., NotStarted, a dead test run) -- delete it or PATCH status to the string form as a runbook step; no migration tooling is warranted for a single document.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RunStatus/GateState/QuarantineState serializer fix</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dual-attribute Cosmos serialization" location="Models/ProvisioningRun.cs:46-47">The already-landed #20 fix: [JsonPropertyName("id")] + [Newtonsoft.Json.JsonProperty("id")] on the same property -- this task's enum fix is the same pattern applied to StringEnumConverter instead of JsonProperty.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (TEST-MODIFYING, unconditional FULL). Read DS-5 §C4.5 in full plus the existing #19/#20 fix diffs in ProvisioningRun.cs for pattern parity.</step>
+    <step order="1" name="RunStatus">Add [Newtonsoft.Json.JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))] alongside the existing STJ attribute on the RunStatus enum (or on the property, matching whichever placement the #20 precedent used).</step>
+    <step order="2" name="GateState + QuarantineState">Apply the identical dual-attribute fix to GateState.cs:26 and QuarantineState (ProvisioningRun.cs:287).</step>
+    <step order="3" name="Fix comments">Correct the misleading comments at CosmosModule.cs:140 ('every POCO... carries explicit...') and CosmosActiveRunScanner.cs:40-44 ('courtesy of the JsonStringEnumConverter attribute') to state the real mechanism: Newtonsoft StringEnumConverter, not STJ.</step>
+    <step order="4" name="Serializer-contract test">Author ProvisioningRunSerializerContractTests: serialize a fully-populated ProvisioningRun via Newtonsoft.Json with CamelCasePropertyNamesContractResolver; assert 'id' present, 'status' is a JSON string equal to 'Running' (not a number), gateStates values are strings, no 'ttl' member.</step>
+    <step order="5" name="Seam test">Author CosmosActiveRunScannerSeamTests against the Cosmos emulator/test container (pattern-match the L2 test project's existing Cosmos smoke tests): write a Running run via the repository, call CosmosActiveRunScanner.ScanAsync, assert the run is returned.</step>
+    <step order="6" name="Live cleanup runbook note">Document the one-time delete/PATCH of runs/65109e91-... in this task's notes as a manual runbook step (NOT automated tooling).</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green including the two new test files.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the serializer-contract test reveals ADDITIONAL properties beyond the three known enums that also diverge between STJ and Newtonsoft output (e.g., a DateTimeOffset format mismatch), STOP and escalate — do not silently expand this task's scope; file it as a new Cat-4-class defect per DS-5's cataloging convention.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="az cosmosdb">optional live-dev verification of the stale doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProvisioningRun.cs (modified)</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/GateState.cs (modified)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/ProvisioningRunSerializerContractTests.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/CosmosActiveRunScannerSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'StringEnumConverter' Models/ProvisioningRun.cs Models/GateState.cs returns matches for all THREE enums (RunStatus, GateState, QuarantineState).</criterion>
+    <criterion testable="true">ProvisioningRunSerializerContractTests: serialized payload's 'status' field is JSON type string (not number) -- test fails against the pre-fix code (regression-proof).</criterion>
+    <criterion testable="true">CosmosActiveRunScannerSeamTests: a Running run written via the repository IS returned by CosmosActiveRunScanner.ScanAsync (Cosmos emulator or live-dev container) -- this test would have caught the original defect.</criterion>
+    <criterion testable="true">grep -A2 'CosmosSerializationOptions' CosmosModule.cs shows the corrected comment (no longer claims STJ attributes suffice).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0 including both new test files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the dual-attribute pattern already exists for the 'id' property fix (#20); this task extends the SAME established pattern to three enums, it is not a new pattern. Extension -- extending the existing pattern is strictly correct per DS-5's own recommendation (rejects both alternatives). Cost-of-doing-nothing -- DS-5 calls this the single most-blocking item in the whole foundation wave: without it, the reconciler and crash-recovery scanners are permanently blind, producing an E2E that silently hangs after H0 no matter how correct the dispatcher (task 102) is.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    COMPLETED 2026-08-19. Actual file paths differed from this POML's authored
+    paths (POML said `Sprk.Provisioning.ControlPlane.Core` for source files
+    before that project existed on disk; task 100's project split — running
+    concurrently in the same worktree — completed the Core/Api/Worker split
+    mid-task, landing my earlier edits safely via its git-mv rename). Final
+    real paths:
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProvisioningRun.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/GateState.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/CosmosModule.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/CosmosActiveRunScanner.cs
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/ProvisioningRunSerializerContractTests.cs (new)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/CosmosActiveRunScannerSeamTests.cs (new)
+
+    Seam-test location deviation (documented per CLAUDE.md §6.5 Path C): the
+    dispatch instructions named `tests/integration/seam/**` (root-level) as
+    the target. Verified against docs/adr/ADR-038-testing-strategy.md line 61
+    + tests/integration/seam/README.md that this category is scoped
+    specifically to the BFF AI dispatch-spine vertical slice
+    (SessionDispatchOrchestrator/OutputRouter/ContextBinder/ChatSessionManager,
+    compiled into Sprk.Bff.Api.Tests) — structurally incompatible with the L2
+    control-plane project. Placed the seam test instead at the L2 project's
+    own already-adjudicated integration-test location (mirroring
+    CosmosSmokeTests.cs, task 037's precedent, self-documented as the
+    "ADR-038 KEEP category equivalent, project-owned integration path").
+
+    Verification: dotnet build 0/0 across Core+Api+Tests; dotnet test 8/8
+    new tests pass (5 serializer-contract unit tests + 3 env-guarded seam
+    tests, skip-pass without COSMOS_L2_SMOKE_ENDPOINT set, matching the
+    CosmosSmokeTests.cs pattern). Regression-proof manually verified: reverted
+    the Newtonsoft attribute on RunStatus, confirmed
+    Serialize_ViaNewtonsoftCosmosDefaultEquivalent_StatusIsJsonStringNotNumber
+    fails with the exact DS-5 §C4.5 symptom (JTokenType.Integer instead of
+    String), then restored the fix and reconfirmed green.
+
+    Runbook note for the stale live Cosmos doc (runs/65109e91-...):
+    projects/customer-provisioning-orchestration-r1/notes/task-106-c4-5-serializer-fix-runbook.md
+
+    Concurrency note: task 100 (project split) executed in the SAME working
+    directory concurrently with this task, moving/renaming my 4 target files
+    mid-edit and temporarily breaking the Core.csproj build (194 pre-existing
+    CS0246 errors, unrelated to this task's changes — missing implicit usings
+    after the Sdk.Web → Sdk split, root-caused and reported to task 100's
+    agent, who landed the fix independently). No data loss; all edits
+    survived the git-mv. Full solution build was blocked for a period during
+    execution; resolved before task completion.
+  </notes>
+</task>

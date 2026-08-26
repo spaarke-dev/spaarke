@@ -1,0 +1,150 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.LoadTests — L2 control-plane load-test project.
+
+    Created by customer-provisioning-orchestration-r1 task 062 (Wave C5 Batch 4E)
+    per POML acceptance for spec.md FR-22 + SC #20.
+
+    SCOPE:
+      Three scenarios (POML acceptance criteria):
+        1. EnqueueLatencyScenario — N=50 concurrent POST /api/runs; p50/p95/p99
+           latency and 100% 202-response verification (FR-22 enqueue-and-return
+           <100ms invariant).
+        2. LongHandlerScenario — a synthetic long-running handler; verifies the
+           caller receives 202 immediately AND that GET /api/runs/{id} continues
+           to work while the handler is "in flight"; NO HTTP timeout on caller
+           regardless of handler duration (FR-22 fire-and-forget invariant).
+        3. ReconcilerConcurrencyScenario — N=3..5 StateReconcilerService
+           instances processing M concurrent runs; verifies EXACTLY ONE distinct
+           Service Bus message survives per (ready-handler, run) pair via
+           MessageId dedup (SC #20 concurrency invariant).
+
+    FRAMEWORK CHOICE (task 062 deviation):
+      xUnit + Parallel.ForEachAsync + WebApplicationFactory<Program>.
+      Not NBomber / k6 / BenchmarkDotNet.
+
+      Rationale:
+        - The POML permits NBomber, k6, BenchmarkDotNet, or a dotnet-based
+          custom harness. The harness here is a dotnet-based custom harness.
+        - Adding NBomber (~10 MB test-only package + Serilog transitive
+          drift + a distinct DSL) would inflate the test-project surface for
+          three narrowly-scoped scenarios that map cleanly to xUnit +
+          Parallel.ForEachAsync + Stopwatch-derived percentiles.
+        - Percentile computation is trivial in .NET: sort + index.
+        - The in-memory seams pattern from Sprk.Provisioning.ControlPlane.Tests
+          (task 057 RunsEndpointsTests) is the correct fit — a live HTTP
+          load-shape against L2's own Program.cs composition, minus the
+          Cosmos + Service Bus wire (which would require a real dev cluster
+          to sustain 50 concurrent requests).
+        - The scenarios verify the L2 REST layer's OWN latency + the
+          reconciler's OWN dedup contract — the network round-trip to real
+          Cosmos + Service Bus is a separate concern owned by
+          Sprk.Provisioning.ControlPlane.NightlyTests / SmokeTests.
+
+    30-MINUTE HANDLER COMPRESSION (task 062 deviation):
+      LongHandlerScenario tests at wall-clock T = 3 seconds — NOT 30 minutes.
+      The invariant proven is "the L2 REST API never blocks on handler
+      execution": POST /api/runs returns 202 immediately (measured); GET /api/runs
+      continues to work while the "handler" is running (measured); no HTTP
+      timeout is observed (measured).
+
+      This invariant is DURATION-INDEPENDENT — the caller's HTTP socket
+      closes at the 202 return; handler runtime happens off-socket. A 30-min
+      production handler and a 3-second synthetic handler prove the SAME
+      invariant. Compressing to 3 sec keeps CI + dev iteration honest without
+      changing what is measured (see notes/l2-load-test-2026-08-18.md for the
+      full equivalence argument).
+
+    KEEP-PATH CATEGORIZATION:
+      This project sits at tests/integration/{ProjectName}/ (sibling of
+      Sprk.Provisioning.ControlPlane.NightlyTests + Spe.Integration.Tests +
+      Sprk.Bff.Api.IntegrationTests) — NOT under a KEEP category directory.
+      This is intentional and matches the existing convention for integration
+      *project* organization; the KEEP category directories at
+      tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/
+      are for individual test FILES organized by acceptance-invariant type,
+      not for test PROJECT organization.
+
+      The scenarios themselves defend concrete acceptance criteria (FR-22
+      SC #20) and are maintain-class per ADR-038 §7 build-vs-maintain — they
+      are the acceptance gate for Phase F E2E acceptance and cannot be
+      deleted without breaking that gate.
+
+    ADR-038 alignment:
+      - No Mock<HttpMessageHandler>.
+      - No DI-registration-only tests.
+      - No ctor-null-check tests.
+      - Uses TimeProvider (custom test double) in the ReconcilerConcurrencyScenario;
+        no Stopwatch inside production or fake production code — Stopwatch usage
+        is ONLY in the test-harness measurement layer, which is idiomatic for
+        latency percentile computation (parity with RunsEndpointsTests's
+        Latency spot-check Stopwatch usage).
+
+    Publish: IsPackable=false; test-only assembly. Not deployed. §10 hygiene
+    (BFF publish-size ceiling ≤60 MB) is UNAFFECTED — L2-only.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!--
+      TreatWarningsAsErrors=true is inherited from Directory.Build.props.
+      Sibling test projects (Sprk.Provisioning.ControlPlane.Tests) do NOT
+      opt out; this project matches that posture so nullable/analyzer
+      warnings on the harness itself are caught before merge.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+
+    <!-- Pinned to Microsoft.Extensions.Hosting.Abstractions 10.0.9 transitive
+         floor — mirrors Sprk.Provisioning.ControlPlane.Tests to prevent
+         NU1605 downgrade under TreatWarningsAsErrors=true. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+
+    <!-- Options binding — the reconciler scenario constructs
+         Options.Create(new ReconcilerOptions()) directly.
+         Version pinned to match sibling Sprk.Provisioning.ControlPlane.Tests
+         (10.0.9). -->
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
+
+    <!-- WebApplicationFactory<Program> — required to bring the real L2
+         Program.cs composition up in-process for scenarios 1 and 2. Pinned
+         to net10 framework version. Program is exposed as `public partial
+         class Program` at the bottom of Sprk.Provisioning.ControlPlane.Api/
+         Program.cs (was Sprk.Provisioning.ControlPlane/Program.cs pre-task-100
+         split). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+  </ItemGroup>
+
+  <!--
+    ProjectReferences ADDED by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
+      This csproj shipped WITHOUT ProjectReferences at e1959426b (task 062) —
+      the LoadTest scenarios (EnqueueLatencyScenario, LongHandlerScenario,
+      ReconcilerConcurrencyScenario) use L2 types (Concurrency/, Enqueue/,
+      Models/, Reconciler/) directly + WebApplicationFactory<Program>. Task 100
+      adds the two references the harness needs:
+        - Sprk.Provisioning.ControlPlane.Core: Concurrency/, Enqueue/, Models/,
+          Reconciler/ types (all in Core namespace-preserved paths).
+        - Sprk.Provisioning.ControlPlane.Api: WebApplicationFactory<Program>
+          resolves to the .Api host's composition root (401/403/202 REST
+          scenarios need the full JWT + endpoint pipeline).
+    Without these the sln build breaks on this project post-split. The pre-split
+    LoadTests compiled via the (now-removed) monolithic
+    Sprk.Provisioning.ControlPlane project.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
+  </ItemGroup>
+
+</Project>

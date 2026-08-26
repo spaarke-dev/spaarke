@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Per-container item recycle bin — list, restore (207 handled), permanent delete</title>
+    <phase>5 Workstream E — New capabilities</phase>
+    <gate>022 complete, 041 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New capability with irreversible operations (permanent delete); .cs endpoints + .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-documented Graph capability; the 207 partial-success handling is the only subtle part and is specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W17</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>022, 040, 041</deps>
+    <tags>bff-api, api, endpoints, frontend, fluent-ui, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the per-container item recycle bin at /storage/fileStorage/containers/{containerId}/recycleBin/items with restore and permanent delete. This is likely what admins actually wanted from a screen called "Recycle Bin" — it is a different feature from the deleted-CONTAINERS view that task 022 fixed, and spec D3 keeps both.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph SPE recycle-bin APIs, HTTP 207 Multi-Status semantics, and irreversible-action UX. Follow ADRs strictly.</role>
+
+  <goal>Items can be listed, restored, and permanently deleted against a throwaway container, with 207 partial success reported per item.</goal>
+
+  <context>
+    <background>Spec FR-E03 / §3.3, decision D3 (both recycle bins). Restore returns 207 Multi-Status — a partial-success response where some items restore and others do not. Collapsing that to a binary pass/fail would silently lose the failures, which is precisely the defect class this project exists to correct.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/RecycleBinEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/recycle-bin</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">The deleted-containers fix — this feature sits alongside it, not instead of it.</dependency>
+      <dependency task="040" status="pending">WireMock fixture — needed to test the 207 response mapping.</dependency>
+      <dependency task="041" status="pending">Throwaway-container fixture — permanent delete must never target real content.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: 207 handling. Partial success MUST be reported per item. Collapsing 207 to a single pass/fail is forbidden — the whole point is that some items failed and the admin must know which.</constraint>
+    <constraint source="NFR-07">Scope: permanent delete. Irreversible. Verification MUST use a throwaway container provisioned by the task-041 fixture. NEVER a container holding real documents.</constraint>
+    <constraint source="project">Scope: permanent-delete UX. Require explicit confirmation naming what will be irrecoverably destroyed. A single-click permanent delete is unacceptable.</constraint>
+    <constraint source="project">Scope: feature separation. This is the per-container ITEM recycle bin. Do NOT merge it with the deleted-CONTAINERS view — spec D3 keeps both as distinct features serving distinct admin needs.</constraint>
+    <constraint source="ADR-001">Scope: new endpoints. Minimal API pattern.</constraint>
+    <constraint source="ADR-008">Scope: authorization via the existing endpoint filter.</constraint>
+    <constraint source="ADR-050">Scope: confirmation dialogs. Canonical SprkModal / ConfirmModal.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF addition. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE per-container recycle bin + 207 Multi-Status</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">Partial-success reporting.</pattern>
+      <pattern name="modal-shell" location=".claude/patterns/ui/modal-shell.md">ConfirmModal for irreversible actions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §3.3 and D3.</step>
+    <step order="1">Verify the recycleBin/items API shape, its restore 207 response, and permanent-delete semantics against current docs.</step>
+    <step order="2">Implement list, restore, and permanent delete in the service plus endpoints under the existing group.</step>
+    <step order="3">Model the 207 response as a per-item outcome collection, not a boolean.</step>
+    <step order="4">Render the item recycle bin as a surface distinct from the deleted-containers view.</step>
+    <step order="5">Report per-item restore outcomes in the UI — successes and failures both named.</step>
+    <step order="6">Add ConfirmModal for permanent delete, naming what will be irrecoverably destroyed.</step>
+    <step order="7">Add WireMock coverage including a 207 response with mixed outcomes.</step>
+    <step order="8">Build BFF and code page; run tests.</step>
+    <step order="9">Verify against Spaarke Dev using a task-041 throwaway container: delete items, list them, restore some, permanently delete others.</step>
+    <step order="10">Measure publish size; record. Update TASK-INDEX.md: task 052 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If verification cannot be performed against a throwaway container, STOP. Do NOT test permanent delete against any container that may hold real documents — this is irreversible and is the one failure in this project that cannot be undone.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RecycleBinEndpoints.cs exists but serves /storage/fileStorage/deletedContainers — deleted CONTAINERS, a different Graph resource and a different admin need.</existing>
+    <extension>Extends the existing recycle-bin endpoint file with the item-level resource rather than creating a parallel surface. Both features coexist per spec D3.</extension>
+    <cost-of-doing-nothing>Deleted ITEMS are unrecoverable through the admin tool; an admin must fall back to PowerShell for what a screen named "Recycle Bin" implies it already does.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="List, restore, permanent delete">
+      <steps>
+        <step>On a throwaway container with deleted items, open the item recycle bin</step>
+        <step>Restore one item; permanently delete another</step>
+      </steps>
+      <expected>Items list; restore returns the item; permanent delete removes it irrecoverably after confirmation.</expected>
+    </test>
+    <test name="207 partial success reported per item">
+      <steps><step>Restore a multi-item selection where some items cannot be restored</step></steps>
+      <expected>Per-item outcomes are shown — successes and failures both named. The result is NOT collapsed to a single pass/fail.</expected>
+    </test>
+    <test name="Permanent delete confirmation">
+      <steps><step>Initiate permanent delete</step></steps>
+      <expected>A ConfirmModal names what will be irrecoverably destroyed before proceeding.</expected>
+    </test>
+    <test name="Distinct from deleted containers">
+      <steps><step>Compare the item recycle bin and the deleted-containers view</step></steps>
+      <expected>Two distinct surfaces; neither replaces the other (spec D3).</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the recycle-bin surfaces and modal</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; modal per ADR-050; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/RecycleBinEndpoints.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/recycle-bin</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ (207 mapping coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Items in a throwaway container's recycle bin can be listed, restored, and permanently deleted against Spaarke Dev.</criterion>
+    <criterion testable="true">Given a 207 Multi-Status restore, when the result renders, then per-item outcomes are shown — not a single collapsed pass/fail.</criterion>
+    <criterion testable="true">Permanent delete requires a confirmation naming what will be irrecoverably destroyed.</criterion>
+    <criterion testable="true">The item recycle bin and the deleted-containers view remain distinct surfaces (spec D3).</criterion>
+    <criterion testable="true">Negative: verification used a throwaway container only — no container holding real documents was targeted (NFR-07).</criterion>
+    <criterion testable="true">Negative: an empty recycle bin renders an empty state distinguishable from a failure.</criterion>
+    <criterion testable="true">Negative: an unauthorized caller receives 403 ProblemDetails.</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E03. Satisfies spec success criterion 8. The 207 handling is the acceptance-critical detail.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author declarative seed manifest at scripts/seed-data/manifest.yaml + generator that fans out to seeder scripts</title>
+    <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','dataverse'; introduces authoritative source for AI seed chain resolving R14 two-source drift; blast-radius = every future customer environment's seed correctness.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Design of the declarative seed-manifest schema + generator that becomes the single-source-of-truth resolving two-source drift; requires reasoning across scripts/seed-data MVP and infra/dataverse R7 to design a schema that covers both. Step 3.5.5b Opus-tier work per project CLAUDE.md model-tier defaults.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>l2-controlplane, dataverse, ai, azure-deployment</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the declarative seed manifest at scripts/seed-data/manifest.yaml that becomes the authoritative source per artifact for the AI seed chain (per spec.md FR-15). The manifest resolves R14 two-source drift between scripts/seed-data MVP and infra/dataverse R7. Also author a generator script (PowerShell) that reads the manifest + fans out to the existing seeder scripts (Deploy-All-AI-SeedData.ps1, Seed-PlaybookConsumers.ps1) so callers invoke ONE entrypoint and get consistent behavior.</prompt>
+
+  <role>SPAARKE platform developer. Expert in YAML schema design, declarative-manifest patterns, PowerShell wrapper/orchestration scripts, and the current AI seed chain (type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers per ADR-039). Follow ADRs strictly.</role>
+
+  <goal>File scripts/seed-data/manifest.yaml exists as the authoritative declarative source enumerating every AI-seed artifact with its authoritative source location (scripts/seed-data/... OR infra/dataverse/...); generator at scripts/seed-data/Invoke-SeedManifest.ps1 reads the manifest + invokes Deploy-All-AI-SeedData.ps1 + Seed-PlaybookConsumers.ps1 in the correct order with per-artifact filters. Task 004's Phase A drift resolution is applied (each artifact has ONE canonical source, not two).</goal>
+
+  <context>
+    <background>Per spec.md FR-15 + R14 + design.md §5.4 seed-drift narrative: today's AI seed chain lives in TWO places — scripts/seed-data (MVP shape) and infra/dataverse (R7 addition). Each artifact was accidentally authored in one OR the other with no manifest declaring which is canonical. Task 004 in Phase A resolved the drift per-artifact (which source wins); this task encodes that resolution as a YAML manifest + generator so H12a can consume ONE source of truth going forward.</background>
+    <relevant-files>
+      <file role="new">scripts/seed-data/manifest.yaml</file>
+      <file role="new">scripts/seed-data/Invoke-SeedManifest.ps1</file>
+      <file role="canonical-reference">scripts/seed-data/Deploy-All-AI-SeedData.ps1</file>
+      <file role="canonical-reference">scripts/seed-data/Seed-PlaybookConsumers.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">Phase A two-source drift resolution — per-artifact canonical-source decision</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-15">SCOPE: Manifest declares authoritative source per AI-seed artifact; single AI routing surface per ADR-039 (playbook consumers end state); spaarke-playbook-embeddings retired.</constraint>
+    <constraint source="ADR-039">SCOPE: The seed chain ends at `playbook consumers` (dispatcher retired); manifest MUST NOT reference retired artifacts (spaarke-playbook-embeddings index, dispatcher outputs).</constraint>
+    <constraint source="project">SCOPE: Manifest is declarative YAML; generator is a thin PowerShell orchestrator — no seeding logic in the generator itself; it fans out to the existing seeder scripts.</constraint>
+    <constraint source="project">SCOPE: Manifest schema MUST include per-artifact: name, type (type-lookup/action/tool/knowledge/skill/playbook/output-type/playbook-consumer), authoritative-source (file path), and dependencies (which artifacts must seed first).</constraint>
+    <constraint source="project">SCOPE: Generator MUST support --dry-run mode that prints planned invocations without executing.</constraint>
+    <constraint source="project">SCOPE: Generator MUST be idempotent — a second run against the same target Dataverse environment is a no-op (existing seeder scripts already handle this; verify).</constraint>
+    <constraint source="CLAUDE.md-§11">SCOPE: This is a NEW component (manifest + generator) — justification field completed per §11 three-question gate.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: ADR-039 Path C compliance — this manifest formalizes the single-AI-routing-surface end state; do NOT re-introduce dispatcher artifacts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Declarative seed manifest + generator for AI seed chain resolving R14 two-source drift</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing AI seeder script" location="scripts/seed-data/Deploy-All-AI-SeedData.ps1">Current MVP seeder — generator invokes this.</pattern>
+      <pattern name="Existing playbook consumer seeder" location="scripts/seed-data/Seed-PlaybookConsumers.ps1">Current MVP seeder — generator invokes this.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-15 + design.md §5.4 + task 004 drift-resolution report.</step>
+    <step order="1" name="Inventory">Enumerate every AI-seed artifact under scripts/seed-data/ + infra/dataverse/**; cross-reference against task 004's per-artifact canonical-source decision.</step>
+    <step order="2" name="Schema">Design manifest.yaml schema: name + type + authoritative-source + dependencies + notes.</step>
+    <step order="3" name="Author">Write scripts/seed-data/manifest.yaml with every artifact enumerated per task 004 resolution.</step>
+    <step order="4" name="Generator">Write scripts/seed-data/Invoke-SeedManifest.ps1 that: (a) parses manifest.yaml; (b) computes seed order per dependencies; (c) invokes Deploy-All-AI-SeedData.ps1 + Seed-PlaybookConsumers.ps1 with per-artifact filters; (d) supports --dry-run.</step>
+    <step order="5" name="Retired check">Grep manifest.yaml for `spaarke-playbook-embeddings` or `dispatcher` — verify zero matches (ADR-039 end state).</step>
+    <step order="6" name="Dry-run test">Invoke `pwsh -File scripts/seed-data/Invoke-SeedManifest.ps1 -DryRun` against a dev env; verify planned invocation output matches expectations.</step>
+    <step order="7" name="Idempotency">Invoke against dev env twice; verify second run is a no-op per existing seeder-script semantics.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 069 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest neighbors: scripts/seed-data/Deploy-All-AI-SeedData.ps1 + Seed-PlaybookConsumers.ps1 (imperative seeders, no manifest). infra/dataverse/** has parallel definitions with no authoritative-source declaration. Grep for `manifest.yaml` under scripts/seed-data returns none.</existing>
+    <extension>No — the drift is precisely that two imperative sources coexist with no declarative authority to pick between them. Extending either script would perpetuate the drift; a declarative manifest is the design intent per FR-15.</extension>
+    <cost-of-doing-nothing>Without the manifest, R14 two-source AI seed drift persists indefinitely (spec.md § New Components table row 7 explicitly cites this failure mode). Every new customer stands up with an ambiguous seed set — some artifacts from scripts/seed-data, some from infra/dataverse, no verification of consistency. Next artifact addition compounds the drift. Manifest is the single source that closes it.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Author and test PowerShell scripts</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">scripts/seed-data/manifest.yaml</output>
+    <output type="code">scripts/seed-data/Invoke-SeedManifest.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/seed-data/manifest.yaml exists and enumerates every AI-seed artifact with name + type + authoritative-source + dependencies.</criterion>
+    <criterion testable="true">scripts/seed-data/Invoke-SeedManifest.ps1 parses the manifest and invokes Deploy-All-AI-SeedData.ps1 + Seed-PlaybookConsumers.ps1 in dependency-topological order.</criterion>
+    <criterion testable="true">Invoke-SeedManifest.ps1 -DryRun prints the planned invocations without executing.</criterion>
+    <criterion testable="true">Running Invoke-SeedManifest.ps1 twice against the same dev env produces zero net changes (idempotency verified).</criterion>
+    <criterion testable="true">Manifest contains ZERO references to retired artifacts (spaarke-playbook-embeddings, dispatcher).</criterion>
+    <criterion testable="true">Negative: manifest with a missing dependency (cyclic or referring to unknown artifact) causes the generator to exit with a clear diagnostic — not silent success.</criterion>
+    <criterion testable="true">PSScriptAnalyzer green on Invoke-SeedManifest.ps1 (per r3-era script standards).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-15 + R14 + ADR-039 + design.md §5.4. Consumed by task 070 (H12a handler invokes this manifest).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

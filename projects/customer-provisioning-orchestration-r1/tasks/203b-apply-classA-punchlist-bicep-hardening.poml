@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="203b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Apply Class-A punch list — Sub-phase 203b bicep hardening (12 bicep/script rows: SB RBAC + config aliases + artifacts storage + ACR + L2 UAMI RBAC + shared UAMI grants + FromBicepOutput + KV clobber fix + Model 1 KV grant + queue recreate + CustomerRunGuard)</title>
+    <phase>Phase Pre-Live-Fire — Class-A punch list bicep hardening</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Per project CLAUDE.md rigor table: any task tagged `deploy` (bicep) → FULL. These changes will fire live against Azure resources during task 186; wrong RBAC assignments or clobbered KV secrets are correctness-adjacent regressions per §Human Escalation Triggers (BINDING never-delete BFF-API/Dataverse-ClientSecret). Also touches `.claude/constraints/azure-deployment.md` publish-size verification obligation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified from task 202 punch list rows A13..A27 + design-study-ds5 + audit-gap notes. Mechanical bicep authoring + module wiring + PowerShell runbook execution — no root-cause reasoning needed. Sonnet @ high per project CLAUDE.md's default tier for "mechanical Bicep authoring + PowerShell hardening".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>203-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches ONLY `infrastructure/bicep/**` + `scripts/**` + operator runbook (`notes/queue-recreate-runbook-2026-08.md`) — no `.claude/**` writes. Can run in parallel with 203a (which touches `.claude/**` in main session) provided commit ordering respects the dependency graph.</parallel-reason>
+    <deps>202</deps>
+    <tags>provisioning, bicep, azure-deployment, l2-controlplane, deploy, powershell</tags>
+    <estimated-effort>30-40 hours (per task 202 punch list: A13(3) + A14(4) + A17(4) + A18(5) + A19(3) + A20(4) + A21(1) + A22(8) + A23(4) + A25(2) + A26(2) + A27(4) = 44h — user directive states 30-40h reflecting some rows landed via Wave G-8)</estimated-effort>
+  </metadata>
+
+  <prompt>Apply Class-A rows A13, A14, A17, A18, A19, A20, A21, A22, A23, A25, A26, A27 from `notes/task-202-punch-list.md` — the bicep hardening sub-phase of task 203. All rows are bicep-module authoring, module wiring, or a PowerShell operator runbook execution (A26). Row-by-row: (a) grep-verify current repo state BEFORE applying (many rows may have landed via Wave G-8 batch 155-198+); (b) if `already-applied`, annotate row + skip; (c) if `open`, apply per row landing-spot + effort; (d) `az bicep build` dry-run + `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` sanity after every 3 rows; (e) checkpoint via context-handoff after every 3 rows. Scope: SB Data Receiver RBAC on L2 UAMI (A13); Bicep config-key aliases (`Cosmos:AccountEndpoint`, `ServiceBus:FullyQualifiedNamespace`, `ManagedIdentity:ClientId`) matching code readers (A14); NEW `controlplane-artifacts-storage.bicep` module wired into `platform-controlplane.bicep` (A17); NEW `controlplane-acr.bicep` module + `acrImageTag`/`sidecarAuthType` params (A18); L2 UAMI sub Contributor + Storage Blob Data Reader + AcrPull (A19); H4-shared handler 5-6 UAMI role assignments on shared source services (A20); L2 UAMI Website Contributor on target BFF App Service (A21); FromBicepOutput KV wire-up (A22 — MAJOR GAP, one of three approaches per row); kv-secrets.generated.bicep unconditional-ternary → skip-if-exists fix protecting BFF-API-ClientSecret + Dataverse-ClientSecret (A23); sharedBffUami KV Secrets User grant in model1-shared.bicep (A25); execute queue-recreate runbook (A26); CustomerRunGuard config provisioning (A27). Amend punch list annotations. Do NOT commit — main session handles commit after review. NFR-01 publish-size check: these changes do NOT touch `src/server/api/Sprk.Bff.Api/**`, so no publish-size delta report needed (confirm in task summary).</prompt>
+
+  <role>SPAARKE bicep infrastructure engineer + Azure RBAC specialist. Expert in: L2 control-plane bicep topology (`infrastructure/bicep/platform-controlplane.bicep` + child modules); UAMI role-assignment patterns (Website Contributor, Storage Blob Data Reader, AcrPull, Service Bus Data Receiver, Cognitive Services User, Search Service Contributor, SB Data Owner, Storage Contributor, Redis Cache Contributor, KV Secrets User); ACR sidecar image chain (per audit-gap-10 + sidecar-ci-workflow); KV secret provisioning + never-delete BFF-API/Dataverse-ClientSecret contract (BINDING per r3 handoff + project CLAUDE.md MUST rules); Service Bus session-receiver queue creation semantics (requiresSession + requiresDuplicateDetection creation-time-only per DS-2).</role>
+
+  <goal>All 12 in-scope Class-A rows annotated with `last_known_status_after_execution` in `notes/task-202-punch-list.md`. Two new bicep modules exist and are wired: `infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` (A17) + `infrastructure/bicep/modules/controlplane-acr.bicep` (A18). L2 UAMI role assignments landed: Service Bus Data Receiver (A13), sub Contributor + Storage Blob Data Reader + AcrPull (A19), Website Contributor on target BFF App Service (A21). H4-shared handler 5-6 UAMI role assignments landed on shared source services (A20). Bicep app-setting keys emitted match code readers exactly per DS-5 c5.1 + T113 (A14). FromBicepOutput KV wire-up path chosen from A22's three options + implemented + regression-checked against H4 quarantine scenario. `kv-secrets.generated.bicep` protects BFF-API-ClientSecret + Dataverse-ClientSecret via skip-if-exists guard (A23). `model1-shared.bicep` grants sharedBffUami KV Secrets User (A25). Queue-recreate runbook executed per DS-2 with requiresSession + requiresDuplicateDetection creation-time properties (A26). CustomerRunGuard config provisioned (A27). All bicep `az bicep build` dry-runs succeed. `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` succeeds. NFR-01 confirmed non-applicable (zero BFF touch).</goal>
+
+  <context>
+    <background>Task 202 punch list §A-blocks-E2E YES lists 12 bicep-hardening rows spanning: L2 UAMI RBAC gaps (post-authoring-audit gaps 02/03/04 — sub Contributor, Storage Blob Data Reader, AcrPull), missing bicep modules (audit-gap-05 artifacts-storage, audit-gap-10 ACR), config-key alias drifts (DS-5 c5.1 + T113 deviations — Bicep emits `Cosmos__Endpoint` when code reads `Cosmos:AccountEndpoint`), a MAJOR gap on FromBicepOutput KV wire-up (T126 — H4 quarantines fresh customers today), a BINDING never-delete violation in `kv-secrets.generated.bicep` (audit-gap-15 — unconditional ternary clobbers BFF-API-ClientSecret + Dataverse-ClientSecret on re-deploy), and an authored-but-not-executed queue-recreate ceremony (T108). All fire during a live E2E run (task 186), so applying them upstream avoids fail-cycle iteration during the ceremony. NFR-01 publish-size ≤60 MB does NOT apply to this sub-phase (no BFF code touched).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-126-deviations.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/post-authoring-audit-2026-08-20.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/wave-4-drift-5.md</file>
+      <file role="target-modify">infrastructure/bicep/modules/platform-controlplane.bicep</file>
+      <file role="target-new">infrastructure/bicep/modules/controlplane-artifacts-storage.bicep</file>
+      <file role="target-new">infrastructure/bicep/modules/controlplane-acr.bicep</file>
+      <file role="target-modify">infrastructure/bicep/customer.bicep</file>
+      <file role="target-modify">infrastructure/bicep/model1-shared.bicep</file>
+      <file role="target-modify">infrastructure/bicep/kv-secrets.generated.bicep</file>
+      <file role="target-modify">infrastructure/bicep/modules/redis.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored; row-verify obligation set</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each row's actual bicep state BEFORE applying to prevent double-fixing. Wave G-8 batch (tasks 155-198+) may have landed rows out of order.</constraint>
+    <constraint source="project CLAUDE.md MUST rules — BINDING never-delete">A23 fix MUST protect BFF-API-ClientSecret + Dataverse-ClientSecret with skip-if-exists guard (per BINDING pre-check gate). A single wrong ternary in `kv-secrets.generated.bicep` will clobber these on the next re-deploy. Verify BEFORE and AFTER the edit that both secrets survive.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF Hygiene">These bicep changes do NOT touch `src/server/api/Sprk.Bff.Api/**`. NFR-01 publish-size ≤60 MB verification is non-applicable — confirm zero BFF touch in task summary; no publish-size delta report needed.</constraint>
+    <constraint source="root CLAUDE.md §11 component justification">Both NEW bicep modules (`controlplane-artifacts-storage.bicep`, `controlplane-acr.bicep`) MUST cite their punch list origin (A17 / A18) in module header comments. Answer Existing/Extension/Cost-of-doing-nothing per row.</constraint>
+    <constraint source="A22 FromBicepOutput gap — MAJOR">Row A22 offers THREE approaches: (i) wire `kv-secrets.generated.bicep` into `customer.bicep`/`model{1,2}-*.bicep`; (ii) extend InterStepState with H2a outputs so `KvSecretValueResolver` can resolve them; (iii) pre-seed via generated seeder. PICK ONE and cite the rejected alternatives per CLAUDE.md §6.5 (this is a design decision within a bicep-hardening row).</constraint>
+    <constraint source="A26 queue-recreate ceremony — creation-time-only properties">`sprk-provisioning-jobs` queue `requiresSession=true` + `requiresDuplicateDetection=true` are CREATION-TIME-ONLY per DS-2. Live queue MUST be deleted + recreated per `notes/queue-recreate-runbook-2026-08.md`; in-flight message loss IS EXPECTED at re-create time (per runbook).</constraint>
+    <constraint source="model1/model2 tenancy split">A25 applies to `model1-shared.bicep` ONLY (Model 1 shared tier). Model 2 dedicated tier uses `customer.bicep` and already routes KV secrets per Model 2's `keyVaultReferenceIdentity` UAMI (unchanged).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-A punch list execution — bicep hardening (12 modules/wiring/runbook rows)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-126-deviations.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-108-deviations.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-200-completion-notes.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-201-completion-notes.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/post-authoring-audit-2026-08-20.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/wave-4-drift-5.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r1-gap-analysis-2026-08-18.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL block (FULL, high effort). Read `notes/task-202-punch-list.md` §CLASS A rows A13..A27 in scope. Read design-study-ds5 (A13, A14 sources), audit-gaps 05/10/15/16 (A17, A18, A23, A24), T126 deviations (A22), T108 deviations + queue-recreate runbook (A26), wave-4-drift-5 (A25).</step>
+    <step order="1" name="Grep-verify each row BEFORE applying">For each row A13..A27: run row-specific grep against `infrastructure/bicep/**` (module presence, role-assignment names, app-setting keys, KV secret ternary shape, queue property values). Record verified status in a scratchpad table BEFORE any edit.</step>
+    <step order="2" name="A14 apply (config-key aliases — highest impact)">EDIT `platform-controlplane.bicep` (and child modules as needed) to emit `Cosmos:AccountEndpoint`, `ServiceBus:FullyQualifiedNamespace`, `ManagedIdentity:ClientId` — matching code readers per DS-5 c5.1 + T113. Confirm no `Cosmos__Endpoint` / `ServiceBus__ConnectionString` regressions remain.</step>
+    <step order="3" name="A12 (recheck if not applied in 203a)">This row lands in 203a but confirm no regression here.</step>
+    <step order="4" name="A17 apply">Author `infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` with punch list row A17 cited in header. Wire module into `platform-controlplane.bicep`.</step>
+    <step order="5" name="A18 apply">Author `infrastructure/bicep/modules/controlplane-acr.bicep` with punch list row A18 cited in header. Wire into `platform-controlplane.bicep` + surface `acrImageTag` + `sidecarAuthType` params.</step>
+    <step order="6" name="Checkpoint (after 3 rows)">Run `context-handoff` + `az bicep build` dry-run on modified files.</step>
+    <step order="7" name="A13 apply">Add Service Bus Data Receiver role assignment for L2 UAMI on SB namespace via `platform-controlplane.bicep` (or dedicated role-assignments module).</step>
+    <step order="8" name="A19 apply (3 role assignments)">Add L2 UAMI sub Contributor + Storage Blob Data Reader on artifacts storage (from A17) + AcrPull on ACR (from A18).</step>
+    <step order="9" name="A20 apply (H4-shared 5-6 role assignments)">Add UAMI role assignments on shared source services per row A20: Cognitive Services User × 2 (OpenAI + DocIntel), Search Service Contributor, SB Data Owner, Storage Contributor, Redis Cache Contributor.</step>
+    <step order="10" name="A21 apply (Website Contributor on BFF App Service)">Add L2 UAMI Website Contributor role assignment on target BFF App Service (enables Kudu docker-log fetch).</step>
+    <step order="11" name="Checkpoint (after 4 rows)">Run `context-handoff` + `az bicep build` dry-run.</step>
+    <step order="12" name="A22 apply — FromBicepOutput KV wire-up (choose approach)">CHOOSE ONE of the 3 A22 approaches; document choice + rejected alternatives per CLAUDE.md §6.5. Implement the chosen approach. Regression-check: H4 must NOT quarantine a fresh customer after this change (validate via unit test if available, otherwise document manual test recipe).</step>
+    <step order="13" name="A23 apply — kv-secrets.generated.bicep skip-if-exists fix">Rewrite the unconditional ternary in `kv-secrets.generated.bicep` to genuinely skip when the secret exists (using `existing` keyword + conditional resource declaration). BEFORE + AFTER: confirm BFF-API-ClientSecret + Dataverse-ClientSecret survive a re-deploy (via `az bicep what-if` or unit test).</step>
+    <step order="14" name="A25 apply (sharedBffUami KV Secrets User)">Add KV Secrets User grant to `sharedBffUami` in `model1-shared.bicep`. Confirm Model 2 `customer.bicep` unaffected.</step>
+    <step order="15" name="Checkpoint (after 3 rows)">Run `context-handoff` + `az bicep build` dry-run.</step>
+    <step order="16" name="A26 apply — queue-recreate ceremony">Execute `notes/queue-recreate-runbook-2026-08.md` against dev L2 stamp. Verify post-recreate queue properties via `az servicebus queue show`: `requiresSession=true` + `requiresDuplicateDetection=true`. Update runbook execution log within the runbook file.</step>
+    <step order="17" name="A27 apply — CustomerRunGuard config">Add `CustomerRunGuard` config (TargetDataverseUrl / TenantId / ClientId / ClientSecret / Enabled=true) via bicep app-settings + KV secret bindings. Verify I5 serialization enforced at runtime (via unit test if available).</step>
+    <step order="18" name="Build sanity">Run `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` — must succeed. Run `az bicep build` on ALL modified/new bicep files — must all succeed.</step>
+    <step order="19" name="Amend punch list annotations">EDIT `notes/task-202-punch-list.md` — add `last_known_status_after_execution: applied|already-applied|deferred-because-X` per in-scope row A13..A27. Append §203b execution results subsection with any A22 approach-choice decision + A26 execution log summary.</step>
+    <step order="20" name="Report">Emit concise summary: rows applied, rows already-applied, rows deferred (with reason), bicep dry-run results, dotnet build result, A22 approach chosen, A26 queue-recreate outcome, NFR-01 non-applicability confirmed (zero BFF touch). Do NOT commit — main session handles commit after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If A23 grep-verify BEFORE the edit shows BFF-API-ClientSecret or Dataverse-ClientSecret has ALREADY been clobbered from a prior re-deploy, STOP and escalate per project CLAUDE.md §Human Escalation Triggers (BINDING never-delete violation) — do not silently regenerate from KV backup; owner must approve the recovery path.</trigger>
+    <trigger>If A22's 3 approaches all fail regression-check (H4 still quarantines), STOP and escalate — this row is flagged MAJOR GAP per T126; a fourth architectural approach may be needed and requires design-doc amendment per CLAUDE.md §6.5 path B (ADR amendment).</trigger>
+    <trigger>If A26 queue-recreate ceremony encounters in-flight messages the runbook doesn't cover, STOP and escalate — session receiver + in-flight message loss combination is a known edge case per DS-2 §5.</trigger>
+    <trigger>If any bicep `az bicep build` dry-run fails after a role-assignment edit (A13/A19/A20/A21/A25), the role-assignment principal ID or scope path is likely wrong. Re-verify UAMI resource IDs before proceeding.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every in-scope Class-A row (A13, A14, A17, A18, A19, A20, A21, A22, A23, A25, A26, A27) has `last_known_status_after_execution` annotated in `notes/task-202-punch-list.md`.</criterion>
+    <criterion testable="true">`infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` + `controlplane-acr.bicep` both exist and are referenced from `platform-controlplane.bicep`.</criterion>
+    <criterion testable="true">Bicep emits `Cosmos:AccountEndpoint`, `ServiceBus:FullyQualifiedNamespace`, `ManagedIdentity:ClientId` — grep confirms zero `Cosmos__Endpoint` / `ServiceBus__ConnectionString` residue in emitted modules.</criterion>
+    <criterion testable="true">L2 UAMI role-assignment resources exist for: Service Bus Data Receiver (A13), sub Contributor (A19), Storage Blob Data Reader on artifacts storage (A19), AcrPull on ACR (A19), Website Contributor on target BFF App Service (A21).</criterion>
+    <criterion testable="true">H4-shared UAMI role-assignment resources exist for 5-6 shared source services per A20.</criterion>
+    <criterion testable="true">A22 chosen approach implemented + rationale documented in punch list annotation.</criterion>
+    <criterion testable="true">`kv-secrets.generated.bicep` protects BFF-API-ClientSecret + Dataverse-ClientSecret via skip-if-exists guard verified by `az bicep what-if` or unit-test regression.</criterion>
+    <criterion testable="true">`model1-shared.bicep` grants sharedBffUami KV Secrets User.</criterion>
+    <criterion testable="true">Dev L2 stamp queue `sprk-provisioning-jobs` shows `requiresSession=true` + `requiresDuplicateDetection=true` post-recreate.</criterion>
+    <criterion testable="true">CustomerRunGuard config provisioned via bicep + verified via I5 runtime check.</criterion>
+    <criterion testable="true">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` succeeds. All bicep `az bicep build` dry-runs succeed.</criterion>
+    <criterion testable="true">Task summary confirms zero BFF touch (NFR-01 publish-size verification non-applicable).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing — task 202's punch list identifies 12 bicep-hardening rows; task 202 also authored punch list verification obligation. Extension — 203b applies bicep changes systematically; two NEW bicep modules extend existing `platform-controlplane.bicep` per audit-gap-05/10. Cost-of-doing-nothing — task 186 E2E fires against a live customer stamp; without A17/A18 the H2a + H14a pipelines cannot complete; without A19/A20/A21 the UAMI cannot execute its RBAC-scoped operations; without A22 fix H4 quarantines every fresh customer; without A23 fix a re-deploy will clobber BFF-API-ClientSecret + Dataverse-ClientSecret (BINDING violation); without A26 the queue rejects session-scoped messages. Any single missing row blocks task 186. NFR-01 does NOT apply (zero BFF touch).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

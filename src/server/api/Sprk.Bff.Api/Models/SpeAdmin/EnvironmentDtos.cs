@@ -32,9 +32,11 @@ public sealed record EnvironmentSummaryDto
     [JsonPropertyName("rootSiteUrl")]
     public string RootSiteUrl { get; init; } = string.Empty;
 
-    /// <summary>Microsoft Graph API endpoint override — sprk_graphapibaseurl</summary>
-    [JsonPropertyName("graphEndpoint")]
-    public string? GraphEndpoint { get; init; }
+    // A `graphEndpoint` property lived here until 2026-08-23. It was stored, HTTPS-validated on
+    // create and update, and round-tripped to the Settings screen — and NOTHING ever read it. No
+    // Graph client was ever built from it. Removed by task 021 (spec FR-C02); do not reintroduce
+    // one without reading notes/graph-endpoint-decision.md first, which explains why an unvalidated
+    // per-environment Graph host is a token-exfiltration vector rather than a convenience.
 
     /// <summary>Whether this is the default environment — sprk_isdefault</summary>
     [JsonPropertyName("isDefault")]
@@ -79,13 +81,6 @@ public sealed record EnvironmentDetailDto
     /// <summary>SharePoint root site URL for this tenant environment — sprk_rootsiteurl</summary>
     [JsonPropertyName("rootSiteUrl")]
     public string RootSiteUrl { get; init; } = string.Empty;
-
-    /// <summary>
-    /// Microsoft Graph API endpoint override (if non-standard).
-    /// Defaults to https://graph.microsoft.com/v1.0 when null — sprk_graphapibaseurl
-    /// </summary>
-    [JsonPropertyName("graphEndpoint")]
-    public string? GraphEndpoint { get; init; }
 
     /// <summary>Optional description for administrators — sprk_description</summary>
     [JsonPropertyName("description")]
@@ -136,13 +131,6 @@ public sealed record CreateEnvironmentRequest
     [JsonPropertyName("rootSiteUrl")]
     public string RootSiteUrl { get; init; } = string.Empty;
 
-    /// <summary>
-    /// Microsoft Graph API endpoint override. Optional.
-    /// Must be a valid HTTPS URL when provided.
-    /// </summary>
-    [JsonPropertyName("graphEndpoint")]
-    public string? GraphEndpoint { get; init; }
-
     /// <summary>Optional description for administrators.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; init; }
@@ -185,13 +173,6 @@ public sealed record UpdateEnvironmentRequest
     /// </summary>
     [JsonPropertyName("rootSiteUrl")]
     public string? RootSiteUrl { get; init; }
-
-    /// <summary>
-    /// Microsoft Graph API endpoint override. Optional.
-    /// Must be a valid HTTPS URL when provided.
-    /// </summary>
-    [JsonPropertyName("graphEndpoint")]
-    public string? GraphEndpoint { get; init; }
 
     /// <summary>Optional description for administrators.</summary>
     [JsonPropertyName("description")]
@@ -251,8 +232,6 @@ internal sealed class EnvironmentDataverseRow
     [JsonPropertyName("sprk_rootsiteurl")]
     public string? RootSiteUrl { get; set; }
 
-    [JsonPropertyName("sprk_graphendpoint")]
-    public string? GraphApiBaseUrl { get; set; }
 
     [JsonPropertyName("sprk_description")]
     public string? Description { get; set; }
@@ -281,7 +260,6 @@ internal sealed class EnvironmentDataverseRow
         TenantId = TenantId,
         TenantName = TenantName,
         RootSiteUrl = RootSiteUrl ?? string.Empty,
-        GraphEndpoint = GraphApiBaseUrl,
         IsDefault = IsDefault,
         Status = MappedStatus,
         CreatedOn = CreatedOn,
@@ -295,7 +273,6 @@ internal sealed class EnvironmentDataverseRow
         TenantId = TenantId,
         TenantName = TenantName,
         RootSiteUrl = RootSiteUrl ?? string.Empty,
-        GraphEndpoint = GraphApiBaseUrl,
         Description = Description,
         IsDefault = IsDefault,
         Status = MappedStatus,

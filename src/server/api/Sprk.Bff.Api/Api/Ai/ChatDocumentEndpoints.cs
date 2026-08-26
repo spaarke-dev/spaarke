@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Spaarke.Dataverse;
 using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -992,7 +993,8 @@ public static class ChatDocumentEndpoints
             UserId = callerUserId,
             ResourceId = document.Id,
             Operation = "read",
-            CorrelationId = httpContext.TraceIdentifier
+            CorrelationId = httpContext.TraceIdentifier,
+            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
         }, ct);
         if (!authz.IsAllowed)
         {

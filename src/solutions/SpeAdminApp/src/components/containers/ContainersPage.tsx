@@ -69,17 +69,36 @@ import {
   CheckmarkCircle20Regular,
   Storage20Regular,
   FolderOpen20Regular,
+  Copy16Regular,
+  CheckmarkCircle16Filled,
+  Link16Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
+import { copyToClipboard } from "../../services/clipboard";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
+import {
+  CONTAINER_URL_LABEL,
+  CONTAINER_URL_ABSENT_LABEL,
+  CONTAINER_URL_ABSENT_TOOLTIP,
+  CONTAINER_URL_ON_DEMAND_TOOLTIP,
+  type ContainerUrlState,
+} from "./containerCompliance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Format bytes to a human-readable size string (e.g. "1.2 GB"). */
+/**
+ * Format a byte count. Callers MUST handle absence themselves — see the Storage Used column.
+ *
+ * This deliberately does NOT map absence to an em-dash any more. Until 2026-08-24 every container
+ * returned null here (the BFF fetched the value from Graph and discarded it), so this column showed
+ * "—" for every row, and an operator had no way to tell "we did not measure" from "nothing stored"
+ * (spec NFR-06).
+ */
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined || bytes === null) return "—";
   if (bytes === 0) return "0 B";
@@ -243,9 +262,121 @@ const useStyles = makeStyles({
 // Column Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Per-row container URL (FR-C10) — resolved on demand, then copyable.
+ *
+ * 🔑 WHY ON DEMAND, AND WHY THIS IS NOT A SHORTCUT. Microsoft Graph cannot return container URLs on
+ * a LIST at all. `fileStorageContainer` has no URL property in either API version; the value lives on
+ * the `drive` navigation property, and on the containers COLLECTION Graph accepts
+ * `$expand=drive($select=webUrl)`, answers 200, echoes `drive(webUrl)` back in `@odata.context` — and
+ * omits `drive` from every row. Measured 2026-08-24 across both versions and every expand shape
+ * (notes/task-028-findings.md §1).
+ *
+ * So an eagerly-populated column is not available at any price short of N extra Graph calls on every
+ * grid load. Resolving the one container the admin actually asks about costs one call, matches the
+ * real workflow (find a container → copy its URL → paste into a Purview eDiscovery search), and —
+ * decisively — cannot render a false absent state: there is no point at which this cell claims a
+ * container has no URL because nobody asked Graph for it.
+ */
+const ContainerUrlCell: React.FC<{ container: Container; configId?: string }> = ({
+  container,
+  configId,
+}) => {
+  const [state, setState] = React.useState<ContainerUrlState>({ kind: "idle" });
+  const [copied, setCopied] = React.useState(false);
+
+  const resolveAndCopy = React.useCallback(async () => {
+    if (!configId) return;
+    setState({ kind: "loading" });
+    try {
+      const detail = await speApiClient.containers.get(container.id, configId);
+      if (!detail.webUrl) {
+        // Asked, and Graph reported none — a real state (e.g. a container still provisioning
+        // has no drive yet), distinct from "not asked". Never synthesise a URL to fill it.
+        setState({ kind: "absent" });
+        return;
+      }
+      setState({ kind: "resolved", url: detail.webUrl });
+      const ok = await copyToClipboard(detail.webUrl);
+      setCopied(ok);
+      if (ok) setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: describeApiError(err, "Could not retrieve the container URL."),
+      });
+    }
+  }, [container.id, configId]);
+
+  if (state.kind === "loading") {
+    return <Spinner size="tiny" label="" aria-label="Retrieving container URL" />;
+  }
+
+  if (state.kind === "absent") {
+    return (
+      <Tooltip content={CONTAINER_URL_ABSENT_TOOLTIP} relationship="label">
+        <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+          {CONTAINER_URL_ABSENT_LABEL}
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <Tooltip content={state.message} relationship="label">
+        <Text italic style={{ color: tokens.colorPaletteRedForeground1 }}>
+          Unavailable
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "resolved") {
+    return (
+      <Tooltip content={decodeURIComponent(state.url)} relationship="label">
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={copied ? <CheckmarkCircle16Filled /> : <Copy16Regular />}
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyToClipboard(state.url).then((ok) => {
+              setCopied(ok);
+              if (ok) setTimeout(() => setCopied(false), 2000);
+            });
+          }}
+          aria-label={`Copy the URL for ${container.displayName}`}
+        >
+          {copied ? "Copied" : "Copy URL"}
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip content={CONTAINER_URL_ON_DEMAND_TOOLTIP} relationship="label">
+      <Button
+        appearance="subtle"
+        size="small"
+        icon={<Link16Regular />}
+        disabled={!configId}
+        onClick={(e) => {
+          e.stopPropagation();
+          void resolveAndCopy();
+        }}
+        aria-label={`Get and copy the URL for ${container.displayName}`}
+      >
+        Get URL
+      </Button>
+    </Tooltip>
+  );
+};
+
 /** Build typed Fluent DataGrid column definitions for Container rows. */
 function buildColumns(
   onBrowse?: (containerId: string, containerName?: string) => void,
+  configId?: string,
 ): TableColumnDefinition<Container>[] {
   return [
     createTableColumn<Container>({
@@ -283,8 +414,31 @@ function buildColumns(
     createTableColumn<Container>({
       columnId: "storageUsedInBytes",
       renderHeaderCell: () => "Storage Used",
+      /*
+       * Three states, not two. Graph reports consumption only on the LIST surface, so a container
+       * can legitimately have no figure — and "not reported" is a different fact from "0 B". An
+       * em-dash conveyed neither; it just looked like the column was broken (which it was).
+       */
+      renderCell: (container) =>
+        container.storageUsedInBytes === undefined ||
+        container.storageUsedInBytes === null ? (
+          <Tooltip
+            content="Microsoft Graph did not report a storage figure for this container. This is not the same as zero."
+            relationship="label"
+          >
+            <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+              Not reported
+            </Text>
+          </Tooltip>
+        ) : (
+          <Text>{formatBytes(container.storageUsedInBytes)}</Text>
+        ),
+    }),
+    createTableColumn<Container>({
+      columnId: "webUrl",
+      renderHeaderCell: () => CONTAINER_URL_LABEL,
       renderCell: (container) => (
-        <Text>{formatBytes(container.storageUsedInBytes)}</Text>
+        <ContainerUrlCell container={container} configId={configId} />
       ),
     }),
     createTableColumn<Container>({
@@ -417,9 +571,20 @@ const CreateContainerDialog: React.FC<CreateContainerDialogProps> = ({
  */
 interface ContainersPageProps {
   onOpenContainer?: (containerId: string, containerName?: string) => void;
+  /**
+   * Container whose detail panel should be open on first render, from a deep link
+   * (`?page=containers&containerId=…` — Search's "Manage Permissions" builds exactly this).
+   *
+   * Applied once, as the initial state, deliberately: making it a controlled prop would re-open the
+   * panel every time the user closed it, because the URL still names the container.
+   */
+  initialDetailContainerId?: string | null;
 }
 
-export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer }) => {
+export const ContainersPage: React.FC<ContainersPageProps> = ({
+  onOpenContainer,
+  initialDetailContainerId,
+}) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
 
@@ -432,7 +597,9 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
   // ── Detail Panel State ──────────────────────────────────────────────────────
 
   /** ID of the container whose detail panel is open, or null when closed. */
-  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(null);
+  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(
+    initialDetailContainerId ?? null,
+  );
 
   // ── Action State ────────────────────────────────────────────────────────────
 
@@ -457,7 +624,10 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
 
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
-  const columns = React.useMemo(() => buildColumns(onOpenContainer), [onOpenContainer]);
+  const columns = React.useMemo(
+    () => buildColumns(onOpenContainer, selectedConfig?.id),
+    [onOpenContainer, selectedConfig],
+  );
 
   // ── Derived: Selected Container Objects ────────────────────────────────────
 
@@ -482,9 +652,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       setContainers(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load containers. Please try again.";
+        describeApiError(err, "Failed to load containers. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -552,9 +720,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       if (failed.length > 0) {
         const firstError = (failed[0] as PromiseRejectedResult).reason;
         const msg =
-          firstError instanceof ApiError
-            ? firstError.message
-            : "One or more operations failed.";
+          describeApiError(firstError, "One or more operations failed.");
         setActionError(
           failed.length === ids.length
             ? msg
@@ -565,7 +731,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       }
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Operation failed. Please try again.";
+        describeApiError(err, "Operation failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -632,7 +798,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       );
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Delete failed. Please try again.";
+        describeApiError(err, "Delete failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -657,7 +823,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
         await loadContainers();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to create container.";
+          describeApiError(err, "Failed to create container.");
         setActionError(message);
       } finally {
         setCreateSaving(false);

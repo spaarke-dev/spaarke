@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Fix the deleted-containers $select (deletedDateTime is not declared on fileStorageContainer)</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <!-- 2026-08-24: the POML's premise did not hold - there was no OData error and no
+         contradicting comment. Real defect was a failed type check dropping a delivered value.
+         See notes/task-022-findings.md. AC-1 not live-verified (az session expired). -->
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF Graph hot path; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow, well-specified defect at a known line with a documented correct shape.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs. One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>020, 040</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The Recycle Bin screen fails with "Could not find a property named 'deletedDateTime' on type 'microsoft.graph.fileStorageContainer'". The $select at SpeAdminGraphService.cs:4351 requests a property the entity type does not declare — and a comment 11 lines below at :4362 already says so. Fix it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in OData $select semantics and the Graph SPE entity model. Follow ADRs strictly.</role>
+
+  <goal>The deleted-containers view lists deleted containers against Spaarke Dev without an OData parsing error.</goal>
+
+  <context>
+    <background>Spec FR-C03 / §3.2. One of three verified instances of the same defect class: code written against an API surface that does not exist. This one is self-documenting — the code contradicts itself within the same method. Note the deleted-CONTAINERS view (this task) is distinct from the per-container ITEM recycle bin (task 052); spec D3 keeps both.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/DeletedContainerDto.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">v1.0 migration — the correct entity shape depends on the endpoint version.</dependency>
+      <dependency task="040" status="pending">WireMock fixture for the $select assertion.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the $select field set at :4351. Every requested field MUST be verified as declared on the entity type for the endpoint version in use. Do not guess replacements.</constraint>
+    <constraint source="project">Scope: the deletion timestamp. If the entity genuinely does not expose a deletion timestamp, the UI MUST NOT display an empty or fabricated date column — remove the column rather than render a blank, per the never-a-silent-null rule (NFR-06).</constraint>
+    <constraint source="project">Scope: the contradicting comment at :4362. Resolve it — either the comment is now wrong and should go, or it is right and the code follows it. Leaving both is how this defect survived.</constraint>
+    <constraint source="ADR-019">Scope: failure paths. Errors surface as ProblemDetails with the real Graph error.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OData $select + Graph SPE container entity model</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">Request construction and $select handling.</pattern>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Where the mock boundary belongs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §3.2 and read :4351 alongside the comment at :4362.</step>
+    <step order="1">Verify against current Graph docs which fields the deleted-containers surface actually declares.</step>
+    <step order="2">Correct the $select to the verified field set. If a deletion timestamp is available under a different name, use it; if none exists, drop the field.</step>
+    <step order="3">Align DeletedContainerDto and the UI column set with what is actually returned — no blank date column if no timestamp exists.</step>
+    <step order="4">Resolve the contradicting comment at :4362.</step>
+    <step order="5">Add a WireMock test asserting the exact $select field set — this is the regression guard for the whole defect class.</step>
+    <step order="6">Build and test — 0 errors, green.</step>
+    <step order="7">Verify against Spaarke Dev: the Recycle Bin deleted-containers view lists without an OData error.</step>
+    <step order="8">Measure publish size; record. Update TASK-INDEX.md: task 022 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deleted-containers surface does not exist on v1.0 in a usable form, STOP and escalate — removing the view is a scope decision (spec D3 committed to keeping it), not a task-level choice.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/DeletedContainerDto.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ ($select assertion)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given deleted containers exist, when the Recycle Bin loads against Spaarke Dev, then they list without an OData parsing error.</criterion>
+    <criterion testable="true">Every field in the corrected $select is verified as declared on the entity type for the endpoint version in use.</criterion>
+    <criterion testable="true">Negative: no blank or fabricated deletion-date column renders if the entity exposes no such timestamp.</criterion>
+    <criterion testable="true">Negative: when no containers are deleted, an empty state renders that is distinguishable from a failure.</criterion>
+    <criterion testable="true">A WireMock test asserts the exact $select field set and fails if a property name is wrong.</criterion>
+    <criterion testable="true">The contradicting comment at :4362 is resolved — code and comment now agree.</criterion>
+    <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-C03. Distinct from task 052 (per-container ITEM recycle bin) — spec D3 keeps both features.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

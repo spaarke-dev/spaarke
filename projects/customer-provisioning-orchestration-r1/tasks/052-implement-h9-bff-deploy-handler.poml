@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H9 BFF Deploy Handler (blue-green slot-swap; hardened Deploy-Release.ps1 Phase 4)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','deploy'; modifies .cs files; owns BFF deploy handler with blue-green slot-swap semantics; deployment-touching (irreversible during swap window).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps hardened Deploy-BffApi.ps1 + Deploy-Release.ps1 Phase 4 (post-Phase B customerId-driven); complete spec (FR-12); slot-swap + r3-era gate verification lifts effort to xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on H4 KV secrets population (task 047) — needs KV secrets ready before slot-swap smoke test can verify KV-ref resolution. Serial after H4.</parallel-reason>
+    <deps>036, 044, 047</deps>
+    <tags>l2-controlplane, job-handler, deploy, azure-deployment, powershell</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H9 BFF-deploy handler as an IJobHandler in the L2 control-plane. H9 invokes scripts/Deploy-BffApi.ps1 + hardened scripts/Deploy-Release.ps1 Phase 4 (post-Phase B: customerId-driven, no spaarkedev1 hardcode). Deploy is blue-green via staging slot in upgrade mode with rollback via re-swap on failure. r3-era gates (analyzers-as-errors + god-class ratchet + 4 new ArchTests + naming-conformance + Graph app-role parity) MUST all pass before slot-swap. Idempotency key: bff-{customerId}-{buildId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Azure App Service slot-swap ARM API, blue-green deploy semantics with re-swap rollback, r3-era forcing-functions ecosystem (analyzers-as-errors, god-class ratchet, 4 ArchTests, naming-conformance, Graph app-role parity), and hardened Deploy-Release.ps1 Phase 4 semantics. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H9BffDeployHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes hardened Deploy-BffApi.ps1 with customerId-driven target (no spaarkedev1 fallback); (b) invokes hardened Deploy-Release.ps1 Phase 4; (c) runs r3-era gates and blocks slot-swap on any failure; (d) executes blue-green slot-swap; (e) smoke tests /health returns 200 + KV-ref resolution succeeds; (f) rolls back via re-swap on smoke-test failure; (g) reports BFF publish size + delta per NFR-01; (h) asserts idempotency key bff-{customerId}-{buildId}. Unit tests cover happy path (slot-swap + smoke test succeed), r3-gate failure blocks swap, smoke-test failure triggers rollback re-swap, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-12 + design.md §4.1 H9 + §5.5 r3-era gates + Gap 2 (Deploy-Release.ps1 Phase 4 hardened): H9 is deployment gate. Current Phase 4 hardcodes spaarkedev1; Phase B hardening makes it customerId-driven. r3-era gates (task 040 god-class ratchet, task 041 analyzers-as-errors, task 061 config fail-fast, task 062 Graph app-role parity, task 063 naming-conformance) all gate the deploy. Blue-green semantics via staging slot; rollback = re-swap.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H9BffDeployHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H9BffDeployHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-Release.ps1 (Phase 4 — hardened in Phase B)</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="pending">H2a Bicep — App Service + slots must exist</dependency>
+      <dependency task="047" status="pending">H4 KV secrets — must complete for slot-swap smoke test to succeed on KV-ref resolution</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">21 MUSTs — KV-ref resolution via UAMI is a specific MUST verified by slot-swap smoke test.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="project">Idempotency key: bff-{customerId}-{buildId} — buildId is BFF CI build number (deterministic per §4.1 preamble).</constraint>
+    <constraint source="project">Blue-green via staging slot; rollback via re-swap on smoke-test failure. NO forward-only deploys.</constraint>
+    <constraint source="project">r3-era gates (spec.md §5.5) block slot-swap: analyzers-as-errors (task 041), god-class ratchet (task 040), 4 new ArchTests (task 040), naming-conformance (task 063), Graph app-role parity from GraphAppRoles.cs (task 062). ALL must be green.</constraint>
+    <constraint source="spec.md NFR-01">Report BFF publish size + delta in PR description. Baseline 44.96 MB incl PDBs; combined H0.5 + Phase E + Phase C UAMI delta &lt; ~0.5 MB.</constraint>
+    <constraint source="spec.md NFR-05">Post-deploy: BFF /health returns 200 resolving all Tier-1 IOptions KV refs (r3 task 061 ValidateOnStart).</constraint>
+    <constraint source="spec.md §4D I1">tenantId flows explicitly to Deploy-BffApi.ps1; no spaarkedev1 fallback (Gap 2 hardening).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler orchestrating blue-green BFF deploy with r3-era gate verification</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">BFF deploy reference model for slot-swap.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H9BffDeployHandler.cs — inject IPowerShellRunner, IAppServiceSlotClient, IHealthProbe, IR3GateVerifier, IIdempotencyService, ICosmosRunStore.</step>
+    <step order="2">Invoke r3-era gate verifier: analyzers-as-errors + god-class ratchet + 4 ArchTests + naming-conformance + Graph app-role parity. Block on any failure with distinct code per failing gate.</step>
+    <step order="3">Invoke hardened Deploy-BffApi.ps1 with customerId-driven target.</step>
+    <step order="4">Invoke hardened Deploy-Release.ps1 Phase 4 (customerId-driven, no spaarkedev1).</step>
+    <step order="5">Report BFF publish size + delta to Cosmos + PR description per NFR-01.</step>
+    <step order="6">Execute slot-swap staging → production via ARM.</step>
+    <step order="7">Smoke test: BFF /health returns 200 AND resolves all Tier-1 KV refs (NFR-05 via ValidateOnStart).</step>
+    <step order="8">On smoke-test failure: re-swap production → staging (rollback); fail deploy with distinct code "SmokeTestFailedRolledBack".</step>
+    <step order="9">Author unit tests: happy path (all gates + swap + smoke test succeed), gate-failure blocks swap (per gate), smoke-test-failure triggers rollback re-swap, publish-size delta &gt; 5 MB flagged, idempotency.</step>
+    <step order="10">Register in L2 Program.cs DI.</step>
+    <step order="11">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="12">Update TASK-INDEX.md: change task 052 status from 🔲 to ✅.</step>
+    <step order="13">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If publish-size delta &gt; 5 MB single-task (NFR-01 threshold), STOP and escalate per CLAUDE.md §6 rather than deploying.</trigger>
+    <trigger>If slot-swap smoke test fails and re-swap rollback ALSO fails (rare but catastrophic — both slots in bad state), STOP and escalate — do NOT retry; operator must diagnose.</trigger>
+    <trigger>If any r3-era gate flags a NEW warning (was zero-baseline; now non-zero), STOP and escalate — do NOT accept the delta.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: scripts/Deploy-BffApi.ps1 + Deploy-Release.ps1 (both hardened in Phase B). Existing bff-deploy skill (.claude/skills/bff-deploy/SKILL.md) is a reference model for slot-swap.</existing>
+    <extension>No — deploy needs r3-era gate verification + slot-swap + smoke-test + rollback in a single idempotent handler. The skill and scripts are operator-invocable; the L2 handler adds automated DAG advancement + rollback semantics.</extension>
+    <cost-of-doing-nothing>Without H9 as a handler, deploy lacks automated rollback on smoke-test failure (operator must manually re-swap under time pressure); r3-era gates could be silently skipped; NFR-01 publish-size delta reporting is by-hand. All three break the r1 "single systematic process" promise.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">az CLI for slot-swap</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H9BffDeployHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H9BffDeployHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all r3-era gates green and hardened Deploy-Release.ps1 Phase 4 customerId-driven, when HandleAsync runs, then slot-swap staging → production succeeds and /health returns 200 with Tier-1 KV refs resolving.</criterion>
+    <criterion testable="true">Negative: any r3-era gate fails (analyzers, god-class ratchet, ArchTests, naming-conformance, Graph app-role parity) — slot-swap is BLOCKED with distinct rejection code per failing gate.</criterion>
+    <criterion testable="true">Rollback: given post-swap /health returns non-200 OR KV-ref resolution fails, when smoke test fails, then production is re-swapped back to prior slot and deploy fails with "SmokeTestFailedRolledBack".</criterion>
+    <criterion testable="true">Publish-size (NFR-01): PR description reports absolute + delta; delta &gt; 5 MB fails deploy with explicit justification requirement.</criterion>
+    <criterion testable="true">Negative: hardened Deploy-Release.ps1 with spaarkedev1 hardcode remaining (Phase B regression) — deploy fails with "Spaarkedev1HardcodeDetected" (Gap 2 assertion).</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + buildId — second call is a no-op (bff-{customerId}-{buildId} match); no re-swap.</criterion>
+    <criterion testable="true">Negative: H9 invoked without tenantId parameter returns failure (§4D I1).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-12 + §5.5 inherited r3-era gates + NFR-01 + NFR-05; design.md §4.1 H9 + Gap 2 (Phase 4 hardening). Depends on H4 KV secrets ready.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Microsoft.Graph.Models.ODataErrors;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -273,8 +273,12 @@ public sealed class BulkOperationService : BackgroundService
 
             try
             {
-                // Soft-delete: move to recycle bin (not permanent delete)
-                await _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct);
+                // Soft-delete: move to recycle bin (not permanent delete).
+                // GraphCallScope translates ODataError -> SpaarkeStorageException inside
+                // Infrastructure.Graph, so this file catches a Spaarke-domain type (ADR-007 §1).
+                await GraphCallScope.Run(
+                    () => _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct),
+                    $"SoftDeleteContainer({containerId})");
 
                 status.Completed++;
 
@@ -286,10 +290,10 @@ public sealed class BulkOperationService : BackgroundService
             {
                 throw;
             }
-            catch (ODataError odataError)
+            catch (SpaarkeStorageException storageEx)
             {
-                var msg = odataError.Error?.Message
-                    ?? $"Graph API error (HTTP {odataError.ResponseStatusCode})";
+                var msg = ProblemDetailsHelper.Redact(storageEx.Message)
+                    ?? $"Graph API error (HTTP {storageEx.StatusCode})";
 
                 _logger.LogWarning(
                     "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed: {Error}",
@@ -372,8 +376,12 @@ public sealed class BulkOperationService : BackgroundService
 
             try
             {
-                await _graphService.GrantContainerPermissionAsync(
-                    graphClient, containerId, request.UserId, request.GroupId, request.Role, ct);
+                // See the delete path above — GraphCallScope keeps the ODataError inside
+                // Infrastructure.Graph so this file stays ADR-007 §1 clean.
+                await GraphCallScope.Run(
+                    () => _graphService.GrantContainerPermissionAsync(
+                        graphClient, containerId, request.UserId, request.GroupId, request.Role, ct),
+                    $"GrantContainerPermission({containerId})");
 
                 status.Completed++;
 
@@ -385,10 +393,10 @@ public sealed class BulkOperationService : BackgroundService
             {
                 throw;
             }
-            catch (ODataError odataError)
+            catch (SpaarkeStorageException storageEx)
             {
-                var msg = odataError.Error?.Message
-                    ?? $"Graph API error (HTTP {odataError.ResponseStatusCode})";
+                var msg = ProblemDetailsHelper.Redact(storageEx.Message)
+                    ?? $"Graph API error (HTTP {storageEx.StatusCode})";
 
                 _logger.LogWarning(
                     "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed: {Error}",

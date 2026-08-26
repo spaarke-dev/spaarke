@@ -7,6 +7,7 @@ import {
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { BuProvider, useBuContext } from "./contexts/BuContext";
 import { AppShell, type SpeAdminPage } from "./components/layout/AppShell";
+import { PageErrorBoundary } from "./components/layout/PageErrorBoundary";
 import { DashboardPage } from "./components/dashboard/DashboardPage";
 import { FileBrowserPage } from "./components/files/FileBrowserPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -35,6 +36,43 @@ export interface SpeAdminParams {
   configId: string | null;
   /** Pre-selected Business Unit ID (GUID) — narrows the container scope */
   buId: string | null;
+  /**
+   * Page to open on load, when the app is deep-linked rather than launched cold.
+   *
+   * 🔴 Added 2026-08-24 to fix a real defect: Search's "Manage Permissions" opened a new tab at
+   * `?page=containers&containerId=…`, but nothing ever read either parameter — `activePage` was
+   * hard-initialised to "dashboard". A tab DID open, so the action looked like it worked; it just
+   * silently landed on the Dashboard every time. Same shape as the rest of this project's defects:
+   * an upper layer reading a dropped value as a benign default.
+   */
+  page: SpeAdminPage | null;
+  /** Container whose detail panel should be open on load. Pairs with `page: "containers"`. */
+  containerId: string | null;
+}
+
+/** The pages a deep link may target — the runtime guard behind the `SpeAdminPage` type. */
+const DEEP_LINKABLE_PAGES: readonly SpeAdminPage[] = [
+  "dashboard",
+  "containers",
+  "container-types",
+  "file-browser",
+  "search",
+  "recycle-bin",
+  "security",
+  "audit-log",
+  "settings",
+];
+
+/**
+ * Narrows an arbitrary string to a `SpeAdminPage`.
+ *
+ * An unrecognised value falls back to null (→ Dashboard) rather than being cast through. A bad
+ * `?page=` in a hand-edited URL is not worth a blank screen.
+ */
+function toSpeAdminPage(value: string | null | undefined): SpeAdminPage | null {
+  if (!value) return null;
+  const match = DEEP_LINKABLE_PAGES.find((p) => p === value);
+  return match ?? null;
 }
 
 /**
@@ -69,9 +107,26 @@ function parseDataParams(): Record<string, string> {
  */
 function parseSpeAdminParams(): SpeAdminParams {
   const data = parseDataParams();
+
+  /*
+   * `page` / `containerId` are read from BOTH sources, top-level query string first.
+   *
+   * Dataverse launches the app with everything packed into the `data` param, but in-app deep links
+   * (Search → Manage Permissions) build a plain `?page=…&containerId=…` on the current URL. Reading
+   * only the `data` bag is precisely why those links did nothing.
+   */
+  let query: URLSearchParams;
+  try {
+    query = new URLSearchParams(window.location.search);
+  } catch {
+    query = new URLSearchParams();
+  }
+
   return {
     configId: data["configId"] ?? null,
     buId: data["buId"] ?? null,
+    page: toSpeAdminPage(query.get("page") ?? data["page"]),
+    containerId: query.get("containerId") ?? data["containerId"] ?? null,
   };
 }
 
@@ -146,6 +201,13 @@ const AppContent: React.FC<AppContentProps> = ({
        * ContainersPage:       task SPE-033 (placeholder still shown)
        * ContainerTypesPage:   task SPE-061
        */}
+      {/*
+       * Wraps the routed page only — never the shell. A render crash inside one page must not take
+       * the nav rail and pickers down with it, because navigating away is the operator's escape
+       * hatch. Before this boundary existed, any such crash unmounted the entire app and showed a
+       * blank white page (UAT 2026-08-25, Audit Log).
+       */}
+      <PageErrorBoundary pageKey={activePage}>
       {activePage === "dashboard" ? (
         <DashboardPage />
       ) : activePage === "file-browser" ? (
@@ -165,7 +227,11 @@ const AppContent: React.FC<AppContentProps> = ({
       ) : activePage === "recycle-bin" ? (
         <RecycleBinPage />
       ) : activePage === "containers" ? (
-        <ContainersPage onOpenContainer={handleOpenContainerInBrowser} />
+        <ContainersPage
+          onOpenContainer={handleOpenContainerInBrowser}
+          // Deep link (e.g. Search → Manage Permissions) names the container to open.
+          initialDetailContainerId={params.containerId}
+        />
       ) : activePage === "container-types" ? (
         <>
           <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
@@ -197,6 +263,7 @@ const AppContent: React.FC<AppContentProps> = ({
           </Text>
         </div>
       )}
+      </PageErrorBoundary>
     </AppShell>
   );
 };
@@ -211,8 +278,10 @@ export const App: React.FC = () => {
   // Parse URL parameters once on mount (stable across renders)
   const params = React.useMemo(() => parseSpeAdminParams(), []);
 
-  // Active navigation page
-  const [activePage, setActivePage] = React.useState<SpeAdminPage>("dashboard");
+  // Active navigation page — seeded from `?page=` so a deep link lands where it says it will.
+  const [activePage, setActivePage] = React.useState<SpeAdminPage>(
+    params.page ?? "dashboard",
+  );
 
   // Theme listener — responds to Dataverse theme changes and system changes
   React.useEffect(() => {

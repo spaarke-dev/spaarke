@@ -1,0 +1,366 @@
+# =============================================================================
+# manifest.yaml — Declarative AI seed manifest for the Spaarke platform
+# =============================================================================
+#
+# Purpose (spec.md FR-15, R14, ADR-039):
+#   The authoritative, single-source-of-truth declaration of every AI-seed
+#   artifact deployed to a customer's Dataverse environment. Resolves the R14
+#   two-source drift between scripts/seed-data (MVP) and infra/dataverse (R7).
+#
+# Consumers:
+#   - scripts/seed-data/Invoke-SeedManifest.ps1  (this task, 069) — thin
+#     orchestrator that reads this file and fans out to existing seeder scripts
+#     in dependency-topological order.
+#   - projects/customer-provisioning-orchestration-r1 task 070 (H12a handler)
+#     — reads this manifest to know WHAT to seed for a new customer environment
+#     and WHICH files/scripts are the canonical source per artifact.
+#
+# Governing invariants (see task 004 drift-resolution note §2):
+#   - ADR-039: single AI routing surface = sprk_playbookconsumer (Binding).
+#   - ADR-039: spaarke-playbook-embeddings index is retired.
+#   - ADR-039 amendment 2026-07-05: no new capability on the frozen node-graph
+#     engine — the multi-node target-state playbook is UNDEPLOYED BY DECISION.
+#   - spec.md FR-15: seed chain terminates at playbook consumers;
+#     sprk_aimodeldeployment is a H12c-owned placeholder.
+#   - Root CLAUDE.md §11: default to reuse — no NEW seed sources; every
+#     "authoritative" pick is one of the two existing trees (task 004 §4a).
+#
+# Provenance:
+#   projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md
+#     — the per-artifact canonical-source decision matrix (§4a). Every entry
+#       below traces to a numbered row in that matrix.
+#
+# Editing rules:
+#   - This is DATA. Deploy logic lives in the individual seeder scripts.
+#   - New AI-seed artifacts: add an entry here first, then have the H12a
+#     handler pick it up on next customer provision. Do NOT add ad-hoc seeders
+#     that bypass this manifest.
+#   - Never re-introduce dispatcher / spaarke-playbook-embeddings — the
+#     retiredArtifacts list is enforced by the generator's --retired-check.
+# =============================================================================
+
+schemaVersion: 1
+manifestName: spaarke-ai-seed
+manifestDescription: >-
+  Authoritative AI seed catalog for a Spaarke customer environment. Enumerates
+  every artifact (type-lookup / knowledge / skill / playbook / output-type /
+  action / tool / playbook-consumer / model-deployment) with its canonical
+  source path, dependencies, and the seeder script that owns deployment.
+
+# ----------------------------------------------------------------------------
+# ARTIFACTS — enumerated in a logical (NOT execution) order for readability.
+# Execution order is derived by the generator via topological sort over
+# `dependsOn`. Each artifact appears EXACTLY ONCE (no dual-source declarations).
+# ----------------------------------------------------------------------------
+artifacts:
+
+  # ----- FR-15 AI seed chain — task 004 drift resolution §4a --------------
+
+  - id: type-lookups
+    type: type-lookup
+    scope: ai-seed
+    authoritativeSource: scripts/seed-data/type-lookups.json
+    driftMatrixRef: "§4a #1"
+    deployer:
+      script: scripts/seed-data/Deploy-TypeLookups.ps1
+      parameters: {}
+      idempotencyMode: existence-check-then-insert
+      idempotencyKey: sprk_name
+    dependsOn: []
+    tags: [ai-seed, mvp, foundational]
+    notes: >-
+      ONLY source. 4 typed lookup sets (action / tool / skill / knowledge
+      types) backing global option-set values. Neither ADR-039 nor R7
+      redefined the option sets. Foundational — everything else depends on it.
+
+  - id: knowledge
+    type: knowledge
+    scope: ai-seed
+    authoritativeSource: scripts/seed-data/knowledge.json
+    additionalArtifacts:
+      - scripts/seed-data/knowledge-content/
+    driftMatrixRef: "§4a #4"
+    deployer:
+      script: scripts/seed-data/Deploy-Knowledge.ps1
+      parameters: {}
+      idempotencyMode: existence-check-then-insert
+      idempotencyKey: sprk_name
+    dependsOn: [type-lookups]
+    tags: [ai-seed, mvp]
+    notes: >-
+      ONLY source. 5 knowledge records + attached content files. R7 catalog
+      governance did not re-authoritize knowledge — H12a passes through.
+      Attachment binary handling is a downstream H12a concern.
+
+  - id: skills
+    type: skill
+    scope: ai-seed
+    authoritativeSource: scripts/seed-data/skills.json
+    driftMatrixRef: "§4a #5"
+    deployer:
+      script: scripts/seed-data/Deploy-Skills.ps1
+      parameters: {}
+      idempotencyMode: existence-check-then-insert
+      idempotencyKey: sprk_name
+    dependsOn: [type-lookups]
+    tags: [ai-seed, mvp]
+    notes: >-
+      ONLY source. 3 skills (SKL-001 SKL-006 SKL-008). R7 did not re-authoritize
+      skills — H12a passes through.
+
+  # ----- R7 actions + schemas + tools (source = infra/dataverse) ----------
+  # Note: these entries declare the AUTHORITATIVE SOURCE per drift resolution;
+  # H12a (task 070) implements the per-file deployer loop. The generator's
+  # role is to record the declaration + skip the invocation with a PENDING
+  # marker — this is intentional per POML constraint "no seeding logic in
+  # the generator itself".
+
+  - id: input-schemas
+    type: input-schema
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/inputschemas/
+    authoritativeSourcePattern: "infra/dataverse/inputschemas/*.input.schema.json"
+    driftMatrixRef: "§3b input schemas"
+    deployer: null
+    deployerOwnedBy: H12a
+    deployerNotes: >-
+      Per-file loader; H12a reuses Deploy-Playbook.ps1 schema-loading path.
+      Ordering: schemas load BEFORE actions consume them.
+    dependsOn: [type-lookups]
+    tags: [ai-seed, r7]
+
+  - id: output-schemas
+    type: output-schema
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/outputschemas/
+    authoritativeSourcePattern: "infra/dataverse/outputschemas/*.schema.json"
+    driftMatrixRef: "§3b output schemas"
+    deployer: null
+    deployerOwnedBy: H12a
+    deployerNotes: >-
+      Per-file loader; H12a reuses Deploy-Playbook.ps1 schema-loading path.
+      Ordering: schemas load BEFORE actions consume them.
+    dependsOn: [type-lookups]
+    tags: [ai-seed, r7]
+
+  - id: actions-r7
+    type: action
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/actions/
+    authoritativeSourcePattern: "infra/dataverse/actions/*.action.json"
+    driftMatrixRef: "§4a #2"
+    deployer: null
+    deployerOwnedBy: H12a
+    deployerNotes: >-
+      17 action files. Per-file loader; H12a reuses Deploy-Playbook.ps1
+      action-loading path. Idempotency key: sprk_actioncode (portable across
+      environments). MVP monolith actions.json (6 rows, 2026-02-13) is
+      superseded — action names renamed and catalog completed post-ADR-039.
+    dependsOn: [type-lookups, input-schemas, output-schemas]
+    tags: [ai-seed, r7]
+
+  - id: tools-r7
+    type: tool
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/
+    authoritativeSourcePattern: "infra/dataverse/sprk_analysistool-*-row.json"
+    expectedFileCount: 39
+    driftMatrixRef: "§4a #3"
+    deployer: null
+    deployerOwnedBy: H12a
+    deployerNotes: >-
+      39 per-row tool files. Per-file loader upsert-by-sprk_name.
+      MVP tools.json is MISSING (dead-code prereq in Deploy-All-AI-SeedData.ps1
+      — see retiredArtifacts below). Real tool source is exclusively R7.
+    dependsOn: [type-lookups]
+    tags: [ai-seed, r7]
+
+  # ----- Playbooks (HYBRID resolution per §4a #6) --------------------------
+
+  - id: playbooks-mvp
+    type: playbook
+    scope: ai-seed
+    authoritativeSource: scripts/seed-data/playbooks.json
+    playbookIds: [PB-001, PB-002, PB-011, PB-004]
+    driftMatrixRef: "§4a #6"
+    deployer:
+      script: scripts/seed-data/Deploy-Playbooks.ps1
+      parameters: {}
+      idempotencyMode: existence-check-then-insert
+      idempotencyKey: sprk_name
+    dependsOn: [actions-r7, tools-r7, knowledge, skills]
+    tags: [ai-seed, mvp]
+    notes: >-
+      4 MVP playbooks: Quick Document Review (PB-001), Contract Analysis
+      (PB-002), Document Profile (PB-011), Risk Scan (PB-004). Document Profile
+      is consumed by UniversalQuickCreate PCF and CANNOT be dropped. R7
+      catalog deliberately did not export every playbook to a repo file (live
+      env is truth per FR-P4-02 round-trip principle); MVP file remains the
+      H12a source for new-customer stand-up until a Phase C'-post export
+      produces per-playbook R7-shape mirrors.
+
+  - id: output-types
+    type: output-type
+    scope: ai-seed
+    authoritativeSource: scripts/seed-data/output-types.json
+    driftMatrixRef: "§4a #7"
+    deployer:
+      script: scripts/seed-data/Deploy-OutputTypes.ps1
+      parameters: {}
+      idempotencyMode: existence-check-then-insert
+      idempotencyKey: sprk_name
+    dependsOn: [playbooks-mvp]
+    tags: [ai-seed, mvp]
+    notes: >-
+      5 output-type rows for the Document Profile playbook path
+      (sprk_tldr / sprk_summary / sprk_keywords / sprk_documenttype /
+      sprk_entities). Backs UniversalQuickCreate PCF auto-summary — CANNOT
+      be deleted. Coexists with the R7 outputSchema-intrinsic-to-action patch
+      (see action-outputschema-patches below); the two are complementary,
+      not competing.
+
+  - id: action-outputschema-patches
+    type: action-outputschema-patch
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/sprk_analysisaction-outputschemajson.json
+    driftMatrixRef: "§3b action outputSchema patches / §4a #7 R7 principle"
+    deployer: null
+    deployerOwnedBy: H12a
+    deployerNotes: >-
+      PATCH loop keyed on sprk_actioncode; sets sprk_analysisaction.sprk_outputschemajson
+      column for each row. Runs AFTER actions-r7 exist in target env.
+    dependsOn: [actions-r7]
+    tags: [ai-seed, r7]
+
+  # ----- Playbook consumers (single AI routing surface, ADR-039) ----------
+
+  - id: playbook-consumers
+    type: playbook-consumer
+    scope: ai-seed
+    authoritativeSource: infra/dataverse/sprk_playbookconsumer-rows.json
+    driftMatrixRef: "§4a #8"
+    deployer:
+      script: scripts/dataverse/Seed-PlaybookConsumers.ps1
+      parameters:
+        SkipConfirm: true
+      idempotencyMode: alt-key-upsert
+      idempotencyKey: sprk_ConsumerTypeCodeEnvironment
+      verifyMode:
+        script: scripts/dataverse/Seed-PlaybookConsumers.ps1
+        parameters:
+          DiffOnly: true
+    dependsOn: [actions-r7, playbooks-mvp]
+    tags: [ai-seed, r7, single-routing-surface]
+    notes: >-
+      Terminal step of the AI seed chain. THE single routing surface per
+      ADR-039 line 69. Deployer already implements the FR-P4-02 round-trip
+      contract (-Export / -DiffOnly / Seed default mode). Mirror is the
+      projection OF the live table, never a second source of truth.
+      -DiffOnly is the H12a idempotency proof (exit 0 = zero drift).
+
+  # ----- Placeholder (H12c owns, NOT H12a) --------------------------------
+
+  - id: aimodeldeployment
+    type: model-deployment
+    scope: ai-seed
+    authoritativeSource: null
+    driftMatrixRef: "§4a #9"
+    deployer: null
+    deployerOwnedBy: H12c
+    deployerNotes: >-
+      PLACEHOLDER — H12c populates from customer-specific Bicep output
+      (Azure OpenAI endpoint + deployment names). H12a MUST NOT populate.
+    dependsOn: []
+    tags: [ai-seed, placeholder, cross-handler-boundary]
+    notes: >-
+      Enforces spec.md FR-15 acceptance boundary + FR-17 handler ownership.
+      Declared here so the manifest schema is complete; the generator emits
+      a PLACEHOLDER marker instead of invoking a deployer.
+
+# ----------------------------------------------------------------------------
+# RETIRED / EXCLUDED ARTIFACTS
+# The generator's --retired-check verifies that none of these appear in the
+# active `artifacts` list above. Adding a row here is how the platform records
+# an ADR-driven deprecation without forgetting it.
+# ----------------------------------------------------------------------------
+retiredArtifacts:
+
+  - id: multinode-summarize-playbook
+    path: infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json
+    reason: >-
+      UNDEPLOYED BY DECISION per $comment-051-ruling in the file itself.
+      Deploying this would extend the frozen node-graph engine, which is
+      forbidden by the ADR-039 amendment 2026-07-05 ("MUST NOT land new
+      capability on the frozen node-graph engine"). Kept in-tree as target-state
+      documentation; explicitly excluded from every seed run.
+    binding: ADR-039
+    driftMatrixRef: "§5a M5"
+
+  - id: spaarke-playbook-embeddings-index
+    kind: azure-ai-search-index
+    name: spaarke-playbook-embeddings
+    reason: >-
+      Retired per ADR-039 (single AI routing surface = sprk_playbookconsumer).
+      The prior "embedding lookup then dispatch" mechanism was one of the four
+      routing config surfaces that ADR-039 collapsed. MUST NOT be re-created.
+    binding: ADR-039
+    driftMatrixRef: "task 004 §2 governing invariants"
+
+  - id: mvp-tools-phantom
+    path: scripts/seed-data/tools.json
+    reason: >-
+      Dead-code MVP reference. Deploy-All-AI-SeedData.ps1 declares this file as
+      a prereq (lines 58-83) but the file does not exist. Real tool source is
+      infra/dataverse/sprk_analysistool-*-row.json (39 files, per artifact
+      tools-r7 above). Guard prevents accidental resurrection.
+    binding: task-004-drift-resolution
+    driftMatrixRef: "§4a #3, §5a M1"
+
+  - id: mvp-actions-monolith
+    path: scripts/seed-data/actions.json
+    reason: >-
+      MVP monolith (6 rows, 2026-02-13) superseded by R7 per-file actions in
+      infra/dataverse/actions/ (17 files, 2026-08-07). MVP names
+      ("Extract Entities", "Classify Document") were renamed and refined
+      post-ADR-039. The file is retained on disk for MVP audit trail but MUST
+      NOT be deployed via this manifest — the generator errors if it is
+      re-added to `artifacts`.
+    binding: task-004-drift-resolution
+    driftMatrixRef: "§4a #2"
+
+  - id: dispatcher-any
+    kind: appsettings-key
+    keyPattern: '(dispatcher|routingMap|playbookMap|capabilityMap)'
+    reason: >-
+      ADR-039 MUST NOT: no routing config surface outside the sprk_playbookconsumer
+      Binding table (line 69 — "the audit found four"). Manifest MUST NOT
+      declare any dispatcher-shaped appsettings key or config-table row.
+    binding: ADR-039
+
+# ----------------------------------------------------------------------------
+# ORCHESTRATION HINTS
+# Read by the generator to compute dry-run output and parallelism opportunities.
+# ----------------------------------------------------------------------------
+orchestration:
+  parallelizable:
+    # These groups have no inter-dependency and may execute concurrently
+    # (H12a handler may parallelize them; the wrapper script is serial for
+    # readability of dry-run output).
+    - [input-schemas, output-schemas]
+    - [knowledge, skills]
+  serialAfter:
+    playbook-consumers: [actions-r7, playbooks-mvp, action-outputschema-patches]
+
+# ----------------------------------------------------------------------------
+# TRACEABILITY
+# ----------------------------------------------------------------------------
+traceability:
+  specSections: [FR-15, FR-16, FR-17, R14, "Success Criterion 15"]
+  designSections: ["§5.4", "§11.3", "§12 R14 amendment 1420"]
+  adrs: [ADR-039, ADR-013, ADR-014]
+  driftResolutionNote: projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md
+  downstreamTasks:
+    - 070  # H12a AI seed chain handler (consumes this manifest)
+    - 071  # H12b app-config seed handler (separate manifest scope)
+    - 072  # H12c runtime references handler (populates aimodeldeployment placeholder)
+    - 073  # H14 post-deploy integration wiring

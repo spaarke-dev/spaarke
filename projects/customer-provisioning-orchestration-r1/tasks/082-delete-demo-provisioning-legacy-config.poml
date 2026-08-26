@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Delete DemoProvisioning__Environments__* + __DefaultEnvironment from Azure App Service config post-verification + publish-size delta report</title>
+    <phase>E DemoExpirationService Migration</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','deploy','azure-deployment'; deletes LIVE Azure App Service config keys — reversible only via explicit re-add; requires post-verification. NFR-01 publish-size + SC #7 acceptance scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped Azure config deletion + verification; requires careful `az webapp config appsettings list` inspection but no design. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 081</deps>
+    <tags>bff-api, deploy, azure-deployment, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete the DemoProvisioning__Environments__* + DemoProvisioning__DefaultEnvironment keys from the Azure App Service configuration for BFF (per Azure environment: dev-only in r1 scope per owner directive #3). Perform verification BEFORE deletion: (a) confirm no BFF code references these keys (post tasks 080 + 081); (b) confirm no live consumer via `az webapp config appsettings list` + code grep. Deploy the BFF post-deletion; verify /health returns 200 and no runtime break. Report BFF publish-size delta (target &lt;~0.5 MB combined with Phase C/D per NFR-01).</prompt>
+
+  <role>SPAARKE platform DevOps engineer. Expert in Azure App Service configuration management (az webapp config appsettings delete), BFF /health probe interpretation, publish-size measurement, and pre-deletion verification protocols. Follow ADRs strictly.</role>
+
+  <goal>Azure App Service config keys DemoProvisioning__Environments__* + DemoProvisioning__DefaultEnvironment are DELETED from dev environment; BFF post-deployment /health returns 200; publish-size delta reported at projects/customer-provisioning-orchestration-r1/notes/phase-e-publish-size-2026-XX.md; SC #7 verified via `az webapp config appsettings list | Select-String DemoProvisioning__Environments` returns zero matches.</goal>
+
+  <context>
+    <background>Per spec.md SC #7 + R5 + plan.md Phase E: after tasks 080 + 081 refactor off the [Obsolete] options, the underlying Azure App Service config keys become dead. This task deletes them from Azure — cleaning up the last live reference. Owner directive #3: r1 scope is dev only (do NOT remediate other envs; new-customer provisioning bakes in canonical patterns).</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-e-publish-size-2026-XX.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningOptions.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">DemoExpirationService refactor complete — no consumer</dependency>
+      <dependency task="081" status="pending">RegistrationEndpoints refactor complete — no consumer</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md SC #7">SCOPE: `az webapp config appsettings list` shows no DemoProvisioning__Environments* keys post-deletion.</constraint>
+    <constraint source="NFR-01">SCOPE: BFF publish size ≤60 MB compressed; Phase E delta combined with Phase C/D &lt;~0.5 MB; report absolute + delta per PR.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching + deploy-touching task — /conflict-check before PR; publish-size report per NFR-01.</constraint>
+    <constraint source="project">SCOPE: Pre-deletion verification GATE — MUST confirm zero references via grep AND `az webapp config appsettings list` inspection BEFORE running `az webapp config appsettings delete`.</constraint>
+    <constraint source="project">SCOPE: Owner directive #3 — r1 dev-only. Do NOT delete keys from other environments (staging/prod) in this task.</constraint>
+    <constraint source="project">SCOPE: Rollback plan documented in the report — if BFF /health fails post-deletion, re-add via `az webapp config appsettings set` with placeholder values.</constraint>
+    <constraint source="NFR-05">SCOPE: Post-deletion, BFF /health startup verification catches misconfig; r3 task 061 ValidateOnStart infrastructure protects against silent regressions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure App Service config deletion with pre-verification gate</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size measurement" location=".claude/constraints/azure-deployment.md">BFF Publish-Size Per-Task Verification Rule (NFR-01) — the exact commands + reporting shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md SC #7 + NFR-01 + azure-deployment.md.</step>
+    <step order="1" name="Pre-verify code">Grep src/server/** for DemoProvisioning__Environments AND DemoProvisioning__DefaultEnvironment — expect ZERO matches (post tasks 080 + 081).</step>
+    <step order="2" name="Pre-verify Azure">`az webapp config appsettings list --name {bff-app-service} --resource-group {rg} --subscription {sub} | jq '.[] | select(.name | test("^DemoProvisioning__"))'` — list current keys.</step>
+    <step order="3" name="Snapshot">Save the pre-deletion Azure config snapshot for rollback (jq output to notes/phase-e-config-snapshot.json).</step>
+    <step order="4" name="Delete">`az webapp config appsettings delete --name {bff-app-service} --resource-group {rg} --setting-names DemoProvisioning__Environments__0 DemoProvisioning__Environments__1 ... DemoProvisioning__DefaultEnvironment` (enumerate exact keys).</step>
+    <step order="5" name="Publish">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; report delta.</step>
+    <step order="6" name="Deploy">Deploy the BFF to dev App Service.</step>
+    <step order="7" name="Verify /health">Curl BFF /health — verify 200 response; if 500 or startup error, execute rollback (re-add keys via saved snapshot) + STOP + escalate.</step>
+    <step order="8" name="Post-verify">Re-run `az webapp config appsettings list | Select-String DemoProvisioning__Environments` — expect zero matches (SC #7).</step>
+    <step order="9" name="Report">Write notes/phase-e-publish-size-2026-XX.md with pre/post size, delta, deletion command, /health verification, cumulative Phase C+D+E delta vs the ~0.5 MB budget.</step>
+    <step order="10" name="Index update">Update TASK-INDEX.md: task 082 → ✅.</step>
+    <step order="11" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If BFF /health returns 500 post-deletion, OR if pre-verification grep shows any remaining consumer that tasks 080/081 missed, STOP and escalate per CLAUDE.md §6 rather than deleting silently. Rollback via saved snapshot is the safe path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and publish BFF</tool>
+    <tool name="az">Manage Azure App Service config</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-e-publish-size-2026-XX.md</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-e-config-snapshot.json (rollback safety)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pre-verification confirms zero code references to DemoProvisioning__Environments/DefaultEnvironment post tasks 080+081.</criterion>
+    <criterion testable="true">Azure config snapshot saved before deletion (rollback safety).</criterion>
+    <criterion testable="true">Post-deletion `az webapp config appsettings list | Select-String DemoProvisioning__Environments` returns zero matches (SC #7).</criterion>
+    <criterion testable="true">BFF /health returns 200 post-deployment; startup validation succeeds.</criterion>
+    <criterion testable="true">Publish-size delta reported per NFR-01; combined Phase C+D+E delta &lt;~0.5 MB.</criterion>
+    <criterion testable="true">Report notes/phase-e-publish-size-2026-XX.md exists with pre/post size + rollback plan.</criterion>
+    <criterion testable="true">Negative: if /health fails post-deletion, rollback executed and issue escalated (not silently redeployed).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md SC #7 + NFR-01 + R5 + owner directive #3 (dev-only). Wraps up Phase E.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

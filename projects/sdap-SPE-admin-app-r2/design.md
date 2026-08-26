@@ -404,9 +404,10 @@ Per [D4](#6-open-decisions). Ordered by value.
   storage tile mean something.
 - **Per-container item recycle bin** — `/containers/{id}/recycleBin/items` with restore + permanent delete
   (§3.3, [D3](#6-open-decisions)). Likely what admins actually wanted from a screen called "Recycle Bin."
-- **Information barriers** — best legal fit: ethical walls / conflict-of-interest screens, which map cleanly
-  onto a container-per-matter model (§4.3). **Beta-API caveat applies** — conditional scope, held to the same
-  bar R1 applied to SPE-080/081.
+- ~~**Information barriers**~~ — **REMOVED from scope 2026-08-21 by owner decision** (`/design-to-spec`
+  interview: *"we don't need ethical walls or conflict of interest functionality"*). Not deferred and not
+  filed as a follow-on; the conditional beta-API risk review this bullet called for is moot. See
+  [`spec.md`](spec.md) Owner Clarifications OC-03.
 - **Explicitly NOT built**: legal hold / retention / eDiscovery management — Purview's surface (§4.2c).
 
 ### Workstream F — Decomposition — SPLIT OUT of R2 per [D5](#6-open-decisions)
@@ -459,6 +460,15 @@ This is not advisory. A task that implements delegated auth without having run t
   (`project_spaarke-auth-v4-dataverse-MI`), ADR-028 **has no OBO exception documented** — meaning even the
   *status quo* app-only posture sits uneasily with it, and a move to hybrid delegated certainly requires an
   explicit decision rather than an assumption.
+
+  > ⚠️ **CORRECTION (2026-08-21, `/design-to-spec`)** — this premise is **stale**. ADR-028 **Amendment A4
+  > (2026-08-17)**, published four days after this design was written, both specifies the OBO credential
+  > shape *and* retains exception **E-1 "SpeAdmin per-tenant container-type ops"**, explicitly exempting
+  > *"per-customer owning apps, which are other applications' identities"* from the no-client-secret rule.
+  > `spaarke-auth-v4-dataverse-MI` has correspondingly scoped `SpeAdminTokenProvider` /
+  > `SpeAdminGraphService` **out** of its migration on exactly that basis (its `design.md:149`). The gate
+  > below still fires — but it resolves as **§6.5 path C (comply under E-1)** rather than the path A/B this
+  > paragraph anticipates. Completed block: [`spec.md`](spec.md) → ADR Tensions.
 - **ADR-008** governs the authorization-filter pattern that `SpeAdminAuthorizationFilter` implements across
   the whole `/api/spe` route group. Introducing a second auth path through that group touches the pattern.
 - R1 recorded the current posture as a deliberate decision and self-graded it **"Correct"** (§3.1). It was
@@ -503,7 +513,7 @@ substitute for making it.
 | **D1** | Container Types / Register screens | (a) Rebuild on delegated auth · (b) Defer entirely to the SharePoint admin center · (c) Read-only + deep-link | ✅ **RESOLVED 2026-08-20 → (a) rebuild.** Operator rationale: since D2 builds the delegated path regardless, the marginal cost is small. Reinforced by §4.2b — list is ownership-filtered rather than admin-gated, and Graph create is delegated-only with **no admin role required**, so the screen is materially cheaper to restore than the first pass assumed. Billing-profile attach still deep-links out (§4.2b). |
 | **D2** | Auth model | (a) **Hybrid** — delegated for the calls that require it, app-only where supported · (b) Full delegated · (c) Stay app-only and descope | ✅ **RESOLVED → (a) hybrid.** Architectural; gates B and D1. ADR-028 / ADR-008 check required per §6.5. |
 | **D3** | Recycle bin semantics | (a) Deleted **containers** (current) · (b) Per-container **item** recycle bin · (c) Both | ✅ **RESOLVED → (c) both.** (b) is the likelier admin intent; (a) already exists and needs only the §3.2 one-line fix. |
-| **D4** | New capabilities in R2 | Archival · Quota · Item recycle bin · Information barriers | ✅ **RESOLVED → all four**, with **information barriers conditional on beta-API risk review** at spec time (same bar R1 applied to SPE-080/081). Legal hold / retention / eDiscovery explicitly excluded — Purview's surface (§4.2c). |
+| **D4** | New capabilities in R2 | Archival · Quota · Item recycle bin · Information barriers | ✅ **RESOLVED → three of four.** Archival + quota + item recycle bin ship. **Information barriers REMOVED from scope entirely (owner decision, 2026-08-21 `/design-to-spec` interview: *"we don't need ethical walls or conflict of interest functionality"*)** — not deferred, no follow-on filed; the beta-API risk review D4 called for at spec time is therefore moot. Legal hold / retention / eDiscovery explicitly excluded — Purview's surface (§4.2c). |
 | **D5** | **Does Workstream F — splitting the 4,911-LOC `SpeAdminGraphService.cs` — ship inside R2, or as its own follow-on project?** | (a) Workstream F in R2 · (b) Ship A–E as R2, decompose in a follow-on | ✅ **RESOLVED 2026-08-21 → (b) split out.** Three reasons: (1) scope grew materially with D1 + D4 — A–E is already a full project; (2) F is a large rewrite in a BFF hot path where 13 of 17 active worktrees are working (§8), so one combined PR is heavy merge exposure; (3) **F is better work after A–E** — the seams are currently inferred from a method census, but rebuilding Container Types, splitting quota from consumption, and adding archival means having worked inside most of the 14 concerns, and the Workstream D harness will exist to make the refactor safe. Precedent: `chatendpoints-decomposition-r1` is a standalone sibling. Cheap to flip if the operator disagrees. |
 
 ---
@@ -516,10 +526,11 @@ Per the three-question template, for the only genuinely *new* surface in this pr
   token exchange with per-`(configId + userTokenHash)` caching. *Extension*: yes — extend it to the
   admin-role call sites rather than adding a parallel path. *Cost of doing nothing*: Container Types
   returns 403 permanently; the API does not support application permissions at all (§3.1).
-- **New capabilities (Workstream E)** — *Existing*: none. Archival, per-container quota ceilings, the item
-  recycle bin, and information barriers have no Spaarke equivalent and cannot be expressed through any
-  current surface. *Cost of doing nothing*: archival is a standing, compounding storage bill on cold matter
-  containers; without a quota ceiling there is no per-matter storage control at all.
+- **New capabilities (Workstream E)** — *Existing*: none. Archival, per-container quota ceilings, and the
+  item recycle bin have no Spaarke equivalent and cannot be expressed through any current surface.
+  *Cost of doing nothing*: archival is a standing, compounding storage bill on cold matter
+  containers; without a quota ceiling there is no per-matter storage control at all. *(Information
+  barriers were part of this justification until 2026-08-21, when the owner removed them from scope — D4.)*
 - **Legal hold / retention / eDiscovery — rejected on the extension test.** Purview already delivers this
   for SPE containers (§4.2c). Building it here would duplicate an audited compliance surface with a
   narrower, unauditable one. R2 routes admins to Purview and exposes the container URL they need instead.
@@ -539,7 +550,7 @@ Per the three-question template, for the only genuinely *new* surface in this pr
 | **No test safety net exists today** — the refactor is unprotected, contrary to the prior design's premise | Workstream D precedes Workstream F. Non-negotiable ordering. |
 | **BFF hot path with heavy merge contention** — 13 of 17 active worktrees touch BFF; `chatendpoints-decomposition-r1` is sequenced behind this project | `/conflict-check` before each PR. Prefer several small PRs (A, B, C, D) over one atomic mega-PR; if D5(a), land F as its own tightly-scoped PR in a quiet window. |
 | **Auth change conflicts with ADR-028 / ADR-008** | 🔔 **Binding gate — see [§5.1](#51--binding--adr-conflict-check-gates-workstream-b).** §6.5 protocol, explicit path A/B/C with a named human decision, completed at `/design-to-spec` and cited in the PR. Silent implementation is a §6.5 violation and a Critical code-review finding. |
-| **Information barriers are beta** | Treat as conditional scope. R1 deferred SPE-080/081 for exactly this reason — apply the same bar. |
+| ~~**Information barriers are beta**~~ | **Risk retired 2026-08-21** — information barriers removed from scope by owner decision (D4), so the beta-API exposure no longer applies to R2. |
 | **Live SPE admin path** — container/permission operations affect real tenant state | `[Category("LiveIntegration")]` runs against a dedicated dev container type, never a shared/production one. |
 | **Two parallel SPE stacks** — `SpeFileStore`/`DriveItemOperations`/`UploadSessionManager` (user-OBO runtime, ~3,000 LOC) duplicate admin-stack Graph operations and DTOs (`FileHandleDto` vs `SpeContainerItemSummary`, etc.) | Convergence is **out of scope**; recorded as a named follow-on. R2 must not deepen the split (§7). |
 
@@ -563,7 +574,7 @@ Per the three-question template, for the only genuinely *new* surface in this pr
 - [ ] `billingClassification` + `billingStatus` surfaced, with a warning when billing is not valid (§4.2d).
 - [ ] Billing *attach* raised as a requirement on `customer-provisioning-orchestration-r1` (cross-project handoff recorded, §4.2d).
 - [ ] Container-type settings show replication-pending state and consuming-tenant overrides.
-- [ ] Information barriers: shipped, or deferred with the beta-risk rationale recorded.
+- [x] ~~Information barriers: shipped, or deferred with the beta-risk rationale recorded.~~ **Withdrawn 2026-08-21 — out of scope by owner decision (D4).**
 
 **Platform currency**
 - [ ] GA'd container-type surfaces call **v1.0**, not `/beta`. Container-type **create** may remain on beta (no v1.0 equivalent) — record that as a deliberate, isolated exception.

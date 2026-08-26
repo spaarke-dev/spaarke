@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author Grant-ControlPlaneIdentity.ps1 (Path X Dataverse App User + scoped custom role + C5.8 Graph app-role grants)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Registers the L2 UAMI's identity + privilege on the ADMIN Dataverse environment and grants Graph app-roles -- security-sensitive per root CLAUDE.md §6 (auth/secrets) even though no secret is created (Path X is secretless by design); FULL + human-escalation-aware.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius per parent task instructions (Path X grant script explicitly named as an Opus-tier item); wrong scoped-role privileges surface as loud 403s but wrong Graph app-role grants surface as silent T3 failures -- security-sensitive identity bootstrap.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, auth, path-x, deploy</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author scripts/Grant-ControlPlaneIdentity.ps1 per DS-8 §4+§8 rollout plan: (1) create a scoped custom Dataverse security role 'Spaarke Provisioning Registry' on the admin env (spaarkedev1.crm.dynamics.com) with org-level Read/Write/Create/Append on sprk_dataverseenvironment + minimal prvReadUser-class basics -- explicitly NOT System Administrator; (2) idempotently register the L2 UAMI as a Dataverse Application User via the H10 Web-API idiom (GET systemusers?$filter=applicationid eq {uamiClientId} -&gt; if absent POST /systemusers with businessunitid@odata.bind to root BU -&gt; POST systemuserroles_association/$ref, check-then-add per DataverseWebApiAppUserCreator.cs:89-91,241-248) OR `pac admin assign-user --application-user`; (3) fold in C5.8's Graph app-role grants for the SAME L2 UAMI (POST servicePrincipals/{uamiSpId}/appRoleAssignments, mirroring H10's customer-UAMI grant pattern) for the role set GraphAppRoles.cs's 11-completed-GUID catalog implies the control plane itself needs (H10/H11-class Application.ReadWrite.OwnedBy + user-management roles). One idempotent script, two grant families, runbook-invoked (NOT Bicep -- Dataverse app-user creation and Graph app-role assignment are both data-plane, not ARM-expressible).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API systemuser/security-role provisioning, Microsoft Graph appRoleAssignments, and idempotent PowerShell script authoring against DefaultAzureCredential-acquired tokens.</role>
+
+  <goal>Grant-ControlPlaneIdentity.ps1 exists, is idempotent (safe to re-run every provisioning cycle per DS-8 §4.3), and performs: role-ensure (create-if-absent the Spaarke Provisioning Registry role) -&gt; app-user-ensure (find-by-applicationid, create if absent) -&gt; role-associate (check-then-add) -&gt; WhoAmI verify against the admin env; PLUS the Graph app-role grant sequence for the L2 UAMI's service principal. Running it against spaarkedev1 succeeds and a canary registry-row upsert attributed to the UAMI's systemuser succeeds.</goal>
+
+  <context>
+    <background>DS-8 (owner-locked recommendation, Path X) found the repo already ships the exact registration code Path X needs -- H10's DataverseWebApiAppUserCreator implements the full idempotent UAMI-App-User registration pattern, just pointed at CUSTOMER envs; the admin env is the same operation with a different URL. DS-8 §4 confirms NO admin consent ceremony exists for this path (Dataverse authorizes via security roles, not Entra permission grants -- creating the systemuser row IS the authorization act); the only privilege needed is that the CALLER creating the app user is a Dataverse admin (operator identity bootstrap, same requirement Path Y's secret-seeding would have had). DS-8 §8 explicitly recommends folding C5.8's Graph grants into this SAME script ('one identity script for the control plane').</background>
+    <relevant-files>
+      <file role="new">scripts/Grant-ControlPlaneIdentity.ps1</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/DataverseWebApiAppUserCreator.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file role="canonical-reference">scripts/Grant-GraphAppRoles.ps1</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-38">L2's admin-env Dataverse credential model is Path X: L2 UAMI registered as a Dataverse Application User via DefaultAzureCredential pinned to the UAMI (DS-8). MUST NOT provision a new client-secret for L2. The Dataverse-ClientSecret KV secret itself MUST NOT be deleted (BFF still consumes it) -- only L2's dependency on it is removed.</constraint>
+    <constraint source="design.md §9.6">Path X mechanics: L2 UAMI is registered as a Dataverse Application User on the ADMIN environment only, with a scoped custom security role ("Spaarke Provisioning Registry") -- NOT System Administrator. Registration is idempotent (find-by-applicationid, then check-then-add role association), matching the H10 DataverseWebApiAppUserCreator idiom (DS-8 Sec.4).</constraint>
+    <constraint source="DS-8 §4">Do NOT default to System Administrator (pac's own default) -- author the scoped 'Spaarke Provisioning Registry' role with the minimum privilege set: org-level Read/Write/Create/Append on sprk_dataverseenvironment + prvReadUser-class basics. Least privilege is cheap here and this is the control plane's own identity.</constraint>
+    <constraint source="DS-8 §5">MI tokens are home-tenant-only -- this script targets ONLY the Spaarke-tenant admin env (spaarkedev1); it MUST NOT attempt to run against a customer-owned-tenant Dataverse. That is out of scope for Path X by design (registry lives only in the admin env).</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Path X Grant-ControlPlaneIdentity.ps1</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds8-uami-dv-appuser-maturity.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent App User registration" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/DataverseWebApiAppUserCreator.cs:89-91,241-248">find-by-applicationid then check-then-add role association -- the exact idiom this script reuses verbatim for the admin env.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-8 §4 and §8 in full plus DataverseWebApiAppUserCreator.cs in full.</step>
+    <step order="1" name="Security role">Author or script-create the 'Spaarke Provisioning Registry' scoped custom security role on spaarkedev1 -- ship in a small managed solution OR a one-shot metadata script step within this same .ps1 (decide + document the choice).</step>
+    <step order="2" name="App-user ensure">Implement the find-by-applicationid -&gt; create-if-absent -&gt; role-associate sequence against spaarkedev1, using DefaultAzureCredential(ManagedIdentityClientId) token acquisition scoped to {adminEnvUrl}/.default, mirroring the H10 idiom exactly.</step>
+    <step order="3" name="WhoAmI verify">After registration, call WhoAmI against the admin env under the UAMI's identity (or an operator token acting on its behalf for the verify step) to confirm the systemuser resolves correctly.</step>
+    <step order="4" name="Graph app-role grants (C5.8)">Fold in the Graph appRoleAssignments POST sequence for the L2 UAMI's service principal, sourced from GraphAppRoles.cs's completed catalog (11-of-14 landed per task 005) -- mirror scripts/Grant-GraphAppRoles.ps1's existing pattern rather than reinventing it.</step>
+    <step order="5" name="Idempotency test">Run the script twice against spaarkedev1 (dev) -- second run makes zero changes (all steps are find-then-create/check-then-add).</step>
+    <step order="6" name="Canary upsert">As a manual verification (not part of the script itself), attempt a registry-row upsert (e.g., via the C1.4 client from task 112, or a raw Web API call) attributed to the UAMI's systemuser and confirm it succeeds + audit-attributes correctly to the UAMI's identity (not the BFF's).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 2's app-user creation requires an operator/admin identity this script cannot itself hold (a bootstrap chicken-and-egg: SOMEONE with Dataverse SysAdmin rights must run this script once), STOP and document the bootstrap requirement explicitly in the script's header + this task's notes rather than silently assuming an ambient admin session — this is the SAME bootstrap dependency Path Y's secret-seeding would have had (DS-8 §5), not a new blocker, but it must be stated for the operator running this script.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">script execution</tool>
+    <tool name="az account">get-access-token for admin bootstrap identity</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Grant-ControlPlaneIdentity.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Grant-ControlPlaneIdentity.ps1 exists and running it against spaarkedev1 exits 0.</criterion>
+    <criterion testable="true">Running the script TWICE in succession produces zero net changes on the second run (idempotency verified via output diff or a --WhatIf-style dry-run flag).</criterion>
+    <criterion testable="true">Post-run: a systemusers?$filter=applicationid eq {uamiClientId} query against spaarkedev1 returns exactly 1 row with the Spaarke Provisioning Registry role associated (not System Administrator).</criterion>
+    <criterion testable="true">Post-run: a Graph GET /servicePrincipals/{uamiSpId}/appRoleAssignments query shows the expected role set from GraphAppRoles.cs's completed catalog.</criterion>
+    <criterion testable="true">A canary registry-row upsert attributed to the UAMI's systemuser succeeds and audit-attributes to the UAMI identity, not the BFF app-reg's systemuser.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- H10's DataverseWebApiAppUserCreator already implements this exact registration idiom for customer envs; Grant-GraphAppRoles.ps1 already implements the Graph grant pattern. Extension -- this script REUSES both idioms verbatim, pointed at the admin env + the control plane's own UAMI, rather than inventing new mechanics. Cost-of-doing-nothing -- without this script, task 112's C1.4 registry client has no authorized identity to write with; H0.5 (registry swap, task 122), H13 (Ready writer, task 184), and the I5 concurrency guard all fail with 401/403 the moment their DI-swaps land.
+
+COMPLETION SUMMARY (2026-08-19):
+  Output: scripts/provisioning/Grant-ControlPlaneIdentity.ps1 (~590 LOC).
+  Path deviation from POML output (scripts/Grant-ControlPlaneIdentity.ps1) to
+  scripts/provisioning/ per parent-agent explicit path guidance. Directory
+  created; no other scripts moved.
+  Auth idiom: az account get-access-token (parity with sibling grant scripts;
+  operator's own az context, per POML bootstrap-requirement doc).
+  Sections implemented:
+    A.1 Ensure scoped custom security role (SkipRoleCreation opt-out for
+        managed-solution path).
+    A.1b Ensure minimum privileges (5 sprk_dataverseenvironment + 3 basics;
+        Global depth for registry table, Basic for user/BU/role). Missing
+        privilege = HARD FAIL per POML acceptance-criteria #3.
+    A.2 Ensure Application User (find-by-applicationid; H10 idiom verbatim).
+    A.2b Ensure role association (check-then-add; H10 idiom verbatim).
+    A.3 WhoAmI verify (operator identity; UAMI-identity verify is Wave G-7
+        task 177 T2 probe).
+    B   C5.8 Graph app-role grants -- DELEGATED to scripts/Grant-GraphAppRoles.ps1
+        (no duplication; single-source-of-truth for GraphAppRoles.cs catalog
+        stays in the sibling script per CLAUDE.md §11).
+  Live-exec verification: DEFERRED (parent instruction). Script authored +
+  syntax-valid + PSSA-clean (28 findings, all matching sibling
+  Grant-GraphAppRoles.ps1 baseline: PSAvoidUsingWriteHost + PSUseBOMForUnicodeEncodedFile
+  -- both accepted-as-convention across the repo's operator-console scripts).
+  Idempotency: DryRun switch implemented; find-then-create/check-then-add at
+  every mutation.
+  Escalation trigger: NOT fired -- bootstrap requirement documented in header
+  as a first-class .DESCRIPTION section per POML instruction.
+  Quality gates: code-review (self, no auto-hook for .ps1) + adr-check both
+  PASS. ADR-028 alignment verified (Path X = MI-outbound secretless);
+  CLAUDE.md §11 justification cited above; §10 BFF Hygiene N/A (zero BFF
+  surface added).
+  Blast radius: additive only. scripts/provisioning/ is a new directory; no
+  existing scripts modified. TASK-INDEX row 111 -> ✅.
+  Downstream unblock: task 112 (C1.4 registry client) can now proceed.
+  Owner action to actually cut over: run this script once against spaarkedev1
+  (bootstrap identity = Dataverse SysAdmin caller); one-time per env.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

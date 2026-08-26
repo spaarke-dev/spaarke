@@ -91,6 +91,27 @@ public static class ExternalAccessModule
         // SPE container membership — manages Graph API permissions for external users.
         services.AddScoped<SpeContainerMembershipService>();
 
+        // Caller-scoped record-rights probe (unified-access-control-r2 task 008, FR-07, finding A-6) —
+        // the OBO evaluation behind DelegationRuleFilter's Write-on-target rule.
+        //
+        // UNCONDITIONAL, and it must stay that way: every route on /api/v1/external-access carries the
+        // delegation filter, and those routes map unconditionally. A conditional registration here would
+        // be the asymmetric-registration anti-pattern (CLAUDE.md §10 F.1 / ADR-032) with the worst
+        // possible blast radius — the six mutation endpoints would throw at request time instead of
+        // authorizing. Note this is fail-CLOSED rather than fail-open when misconfigured: the probe
+        // denies (returns AccessRights.None) when OBO configuration is absent, it does not fall back to
+        // app-only. A Null-Object peer is therefore neither needed nor desirable.
+        //
+        // Typed HttpClient (transient) matching the ExternalParticipationService / ModuleEntitlementResolver
+        // precedent above; the MSAL confidential client is static-cached inside the type so the transient
+        // lifetime does not discard MSAL's per-user OBO token cache. No BaseAddress is configured — the
+        // probe issues absolute URLs so its two calls (WhoAmI, RetrievePrincipalAccess) are readable at
+        // the call site.
+        services.AddHttpClient<CallerRecordAccessProbe>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
         // with the AAD-oid/verified-email→contact conversion (IIdentityNormalizationService) into one

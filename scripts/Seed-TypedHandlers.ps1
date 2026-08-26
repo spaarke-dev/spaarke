@@ -254,6 +254,19 @@ $RowFiles = @{
     # gate bypass. Namespaced tool id: memory.write. LIVE seeding is deferred to the task 069
     # gate-deploy prep (mirror-first here).
     "MEMORY-WRITE"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-memory-write-row.json"
+
+    # spaarke-auth-v4-dataverse-MI task 090 (2026-08-24) — REGISTRATION REPAIR, not new scope.
+    # Both row JSONs already existed in infra/dataverse/ but were never added to THIS map, so
+    # the seed never created their rows. Because $RowFiles is a hardcoded map (not a glob over
+    # infra/dataverse/), an unregistered JSON is silently invisible to the seed — the file on
+    # disk looks like the work is done.
+    # Consequence: since the FR-P2-01 cutover the catalog is the ONLY tool projection, so a
+    # registered handler with no sprk_analysistool row CANNOT BE INVOKED. Both tools were dead
+    # in dev, and RoutingConsumerTypeHealthCheck was reporting exactly that at /healthz/catalog
+    # ("registered handlers without a sprk_analysistool row"). grid_overview was dead even
+    # though fb06291c0 had just fixed its grounding for R4 UAT.
+    "SPAARKE-GRID-OVERVIEW"            = "$RepoRoot/infra/dataverse/sprk_analysistool-grid-overview-row.json"
+    "SPAARKE-DAILY-BRIEFING-OVERVIEW"  = "$RepoRoot/infra/dataverse/sprk_analysistool-daily-briefing-overview-row.json"
 }
 
 # -----------------------------------------------------------------------------

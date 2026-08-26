@@ -94,6 +94,8 @@ public class ExternalDataService
         [JsonPropertyName("statuscode")] public int? Statuscode { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
@@ -168,7 +170,12 @@ public class ExternalDataService
 
         var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var idFilter = string.Join(" or ", ids.Select(id => $"sprk_projectid eq {id}"));
-        var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_name asc";
+        // H5 (task 022, 2026-08-24): $orderby said `sprk_name`, which does NOT exist on sprk_project
+        // (live metadata: the display name is sprk_projectname — the $select above already had it right).
+        // Dataverse answered 400, GetCollectionAsync caught it and returned an empty list, so the
+        // external SPA rendered "you have no grants" for every caller WITH grants. Sixth instance of the
+        // stale-column class in this project; the select/orderby split is why it survived review.
+        var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_projectname asc";
 
         var rows = await GetCollectionAsync<ProjectRow>(url, ct);
         return rows.Select(MapProject).ToList();
@@ -222,10 +229,97 @@ public class ExternalDataService
     // To Do queries and mutations (smart-todo-decoupling-r3 FR-29)
     //
     // Replaces the legacy event-based to-do surface. To-dos are scoped
-    // to a project via sprk_regardingproject (one of the 11 regarding lookups
-    // on sprk_todo). When a create writes a project association, the four
-    // resolver fields are applied atomically per ADR-024.
+    // to a project via sprk_regardingproject (one of the 13 regarding-parent
+    // lookups on sprk_todo — count corrected from "11" against live metadata
+    // 2026-08-24, unified-access-control-r2 task 009). When a create writes a
+    // project association, the four resolver fields are applied atomically per
+    // ADR-024.
     // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Which of the three A-9 accessible-root types a to-do is parented to, as resolved by
+    /// <see cref="ExternalDataService.GetTodoRootAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>None</c> covers three distinct situations that all deny identically: the to-do is absent,
+    /// the to-do could not be read, or it is parented to one of the ten regarding types that have no
+    /// accessible set. <c>Ambiguous</c> means more than one root lookup was populated — also a deny.
+    /// </remarks>
+    public enum TodoRootKind
+    {
+        None = 0,
+        Project = 1,
+        Matter = 2,
+        WorkAssignment = 3,
+        Ambiguous = 4,
+    }
+
+    /// <summary>
+    /// Returns the to-do's regarding-ROOT (project, matter, or work assignment), its id, and its
+    /// display name — used by the external PATCH endpoint (task 009 / FR-08 / finding A-7) to scope
+    /// a to-do write to the caller's accessible root set BEFORE any mutation. App-only Dataverse
+    /// read. Deliberately mirrors <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which
+    /// solves the same child-record-to-root authorization problem for documents.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>ADR-003 fail-closed contract.</b> <c>GetSingleAsync</c> collapses HTTP 404,
+    /// any non-success status, AND thrown exceptions all to <c>null</c>. A <c>None</c> kind with a
+    /// null name therefore means "absent OR unreadable" — the two are not distinguishable here. The
+    /// caller MUST treat both as DENY, never as "no restriction applies". That is the required
+    /// behaviour for an authorization pre-check; the cost is that a transient Dataverse fault
+    /// surfaces to the client as not-found rather than as a server error.</para>
+    ///
+    /// <para><b>Which of the 13 parents are scopeable.</b> <c>sprk_todo</c> carries 13
+    /// regarding-parent lookups (live metadata 2026-08-24: analysis, budget, communication, contact,
+    /// document, event, invoice, matter, organization, project, reportcard, servicerequest,
+    /// workassignment). Exactly THREE have a corresponding accessible set on
+    /// <see cref="CallerPrincipal"/> — project, matter, work assignment (the A-9 root sets) — and all
+    /// three are projected here per the 2026-08-24 owner decision that matter and work assignment get
+    /// the same functionality as project. The other ten resolve to <see cref="TodoRootKind.None"/>
+    /// and are denied.</para>
+    ///
+    /// <para><b>Ambiguity is denied.</b> ADR-024 says a to-do has ONE parent, but the lookups are
+    /// physically independent columns and nothing in Dataverse enforces that. If more than one root
+    /// lookup is populated the result is <see cref="TodoRootKind.Ambiguous"/> and the caller must
+    /// deny: honouring whichever root the caller happens to hold would let them write a record that
+    /// is also parented somewhere they do not.</para>
+    /// </remarks>
+    public virtual async Task<(TodoRootKind Kind, Guid? RootId, string? TodoName)> GetTodoRootAsync(
+        Guid todoId, CancellationToken ct = default)
+    {
+        // Columns verified against live Dataverse metadata 2026-08-24 (sprk_todo):
+        // sprk_todoid GUID · sprk_name NVARCHAR(200) NOT NULL · sprk_regardingproject,
+        // sprk_regardingmatter, sprk_regardingworkassignment all LOOKUP.
+        var select = "sprk_todoid,sprk_name,_sprk_regardingproject_value," +
+                     "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value";
+        var url = $"{GetApiUrl()}/sprk_todos({todoId})?$select={select}";
+
+        var row = await GetSingleAsync<TodoRow>(url, ct);
+        if (row is null) return (TodoRootKind.None, null, null);
+
+        static Guid? Parse(string? v) => Guid.TryParse(v, out var g) ? g : (Guid?)null;
+
+        var project = Parse(row.SprkRegardingprojectValue);
+        var matter = Parse(row.SprkRegardingmatterValue);
+        var workAssignment = Parse(row.SprkRegardingworkassignmentValue);
+
+        // sprk_name is NOT NULL in Dataverse, so a non-null name is a reliable existence signal.
+        var name = row.SprkName;
+
+        var populated = new (TodoRootKind Kind, Guid? Id)[]
+        {
+            (TodoRootKind.Project, project),
+            (TodoRootKind.Matter, matter),
+            (TodoRootKind.WorkAssignment, workAssignment),
+        }.Where(x => x.Id is not null).ToArray();
+
+        return populated.Length switch
+        {
+            0 => (TodoRootKind.None, null, name),
+            1 => (populated[0].Kind, populated[0].Id, name),
+            _ => (TodoRootKind.Ambiguous, null, name),
+        };
+    }
 
     /// <summary>
     /// Retrieves all <c>sprk_todo</c> records whose regarding-project equals the supplied project id.
@@ -324,7 +418,10 @@ public class ExternalDataService
     /// Regarding context cannot be changed via this surface — to re-parent a to-do, use the
     /// internal model-driven-app form which applies the resolver fields atomically per ADR-024.
     /// </remarks>
-    public async Task UpdateTodoAsync(
+    // `virtual` per ADR-038 §4 (substitution seam), added by task 009: the FR-08 scope check is only
+    // meaningfully verifiable if a test can assert the write DID NOT HAPPEN on a deny. Asserting the
+    // 403/404 status alone would pass even if the PATCH were still issued before the check.
+    public virtual async Task UpdateTodoAsync(
         Guid todoId, UpdateExternalTodoRequest request, CancellationToken ct = default)
     {
         var token = await GetAppOnlyTokenAsync(ct);
@@ -525,9 +622,24 @@ public class ExternalDataService
     // Private helpers
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// The Contacts holding an ACTIVE, UNEXPIRED grant on a project.
+    /// </summary>
+    /// <remarks>
+    /// Carries the same expiry predicate as the enforcement paths (task 007 / FR-06, finding A-5),
+    /// sharing <see cref="ExternalParticipationService.ExpiryPredicate"/> so the two cannot drift.
+    ///
+    /// <para>This one is a DISPLAY path, not an enforcement path — it answers "who is on this project",
+    /// and <see cref="ExternalParticipationService"/> is what actually gates access. It is filtered
+    /// anyway because the method's contract says "active access": listing someone whose grant lapsed
+    /// last month tells an operator they still have access when they do not, which is how a revocation
+    /// gets skipped. A participant list that disagrees with the enforcement path is its own hazard.</para>
+    /// </remarks>
     private async Task<IReadOnlyList<string>> GetProjectContactIdsAsync(Guid projectId, CancellationToken ct)
     {
-        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId} and statecode eq 0");
+        var expiry = ExternalParticipationService.ExpiryPredicate(DateOnly.FromDateTime(DateTime.UtcNow));
+        var filter = Uri.EscapeDataString(
+            $"_sprk_project_value eq {projectId} and statecode eq 0 and {expiry}");
         var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contact_value&$top=200";
 
         var rows = await GetCollectionAsync<AccessLinkRow>(url, ct);

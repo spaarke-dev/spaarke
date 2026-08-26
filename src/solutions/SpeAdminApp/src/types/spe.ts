@@ -63,8 +63,6 @@ export interface SpeEnvironment {
   tenantName: string;
   /** SharePoint root site URL (sprk_rootsiteurl) */
   rootSiteUrl: string;
-  /** Microsoft Graph API endpoint (sprk_graphendpoint) */
-  graphEndpoint: string;
   /** Whether this is the default environment (sprk_isdefault) */
   isDefault: boolean;
   /** Active / inactive status (sprk_status) */
@@ -77,7 +75,6 @@ export interface SpeEnvironmentUpsert {
   tenantId: string;
   tenantName: string;
   rootSiteUrl: string;
-  graphEndpoint: string;
   isDefault: boolean;
   status: ActiveStatus;
 }
@@ -176,26 +173,136 @@ export interface SpeContainerTypeConfigUpsert {
 export type ContainerTypeStatus = "trial" | "standard" | "directToCustomer";
 
 /**
+ * Billing standing of a container type, from Graph's `fileStorageContainerBillingStatus` enum.
+ *
+ * Graph declares exactly `invalid | valid | unknownFutureValue` on both v1.0 and beta (verified
+ * against `https://graph.microsoft.com/v1.0/$metadata`). `unknownFutureValue` is Graph's forward-
+ * compatibility sentinel, never a real value, so it is deliberately not modelled here — an actual
+ * future member would arrive as an unrecognised string and must land in the UNKNOWN branch rather
+ * than being silently typed away.
+ */
+export type BillingStatus = "valid" | "invalid";
+
+/**
  * SPE Container Type — returned by the Graph API and proxied through
  * GET /api/spe/containertypes?configId={id}.
  */
+/**
+ * A person who owns (administers) a container type — spec FR-C09, task 027.
+ *
+ * 🔑 NOT the same thing as `ContainerTypePermission`. That describes which APPLICATIONS may access
+ * containers of a type (Graph `applicationPermissions`); this describes which PEOPLE administer the
+ * type itself (Graph `fileStorageContainerType.permissions`). They share a Graph word and nothing
+ * else — neither supersedes the other, and they are served by different routes (`/owners` vs
+ * `/permissions`) precisely so the distinction survives a glance at the network tab.
+ */
+export interface ContainerTypeOwner {
+  /** Graph permission id — the handle needed to revoke this grant. */
+  permissionId: string;
+  /**
+   * Display name, or undefined when Graph did not report one.
+   * `undefined` means UNKNOWN — render it as such, never as a blank that reads as "no name".
+   */
+  displayName?: string;
+  /** Email / UPN, or undefined when Graph did not report one. */
+  email?: string;
+  /** Directory object id, or undefined when Graph did not report one. */
+  userId?: string;
+  /** Roles carried by the grant (e.g. "owner"). Empty means Graph reported none. */
+  roles: string[];
+}
+
 export interface ContainerType {
   /** Container Type ID (GUID from Graph) */
   containerTypeId: string;
   /** Display name */
   displayName: string;
-  /** Owning Azure App Registration Client ID */
-  owningAppId: string;
-  /** Billing classification (trial / standard / directToCustomer) */
-  billingClassification: ContainerTypeStatus;
-  /** Azure AD tenant ID of the owning tenant */
-  azureTenantId: string;
-  /** Whether the container type is registered on the consuming tenant */
+  /**
+   * Owning Azure App Registration Client ID.
+   *
+   * Optional because Graph may not return it — and `undefined` means UNKNOWN, not "none". Rendering
+   * an absent owning app as a blank cell (as this screen did until 2026-08-23) reads as "there
+   * isn't one", which is a different and wrong claim.
+   */
+  owningAppId?: string;
+  /**
+   * Billing classification (trial / standard / directToCustomer).
+   *
+   * Optional since 2026-08-24 (task 029). The BFF has always sent this nullable (`string?`), but
+   * declaring it required here made the client type assert something the wire never guaranteed — and
+   * because responses are cast rather than parsed, TypeScript could not catch the difference. It
+   * mattered: the value was null for **every** container type between the Graph 6 upgrade
+   * (2026-08-13) and task 030's fix (2026-08-23), during which the grid rendered an empty badge
+   * rather than saying "unknown". `undefined` means UNKNOWN, never "standard".
+   */
+  billingClassification?: ContainerTypeStatus;
+  /**
+   * Whether billing for this container type is in good standing.
+   *
+   * `undefined` means NOT REPORTED and MUST NOT be rendered as valid (NFR-06). Read together with
+   * `billingClassification`: only a `standard` type requires a billing profile in the developer
+   * tenant, so an `invalid` status is actionable there and not necessarily elsewhere
+   * (`knowledge/sharepoint-embedded/docs/learn-containertypes.md` :61, :79-:80).
+   *
+   * READ-ONLY — attaching a billing profile belongs to provisioning (spec §4.2d).
+   */
+  billingStatus?: BillingStatus;
+  /** Azure AD tenant ID of the owning tenant. Not currently returned by the BFF. */
+  azureTenantId?: string;
+  /**
+   * Whether the container type is registered on the consuming tenant.
+   *
+   * Sourced from the containerTypeRegistrations endpoint, NOT from the container-type list — so on
+   * the list screen it is `undefined`, meaning **not yet determined**. Treating that as `false`
+   * makes the grid state "No" for every row, which is an assertion the data does not support.
+   */
   isRegistered?: boolean;
   /** Creation date ISO string */
   createdDateTime?: string;
   /** Expiry date for trial container types */
   expiryDateTime?: string;
+  /**
+   * The container type's settings, or undefined when Graph did not return them.
+   * Added by task 025 — before it, no settings value reached the client at all.
+   */
+  settings?: ContainerTypeSettings;
+}
+
+/**
+ * Container-type settings as returned by the BFF — the nine v1.0 properties plus the beta-only
+ * `isOfficeRestricted`.
+ *
+ * Verified against Graph's own OData metadata (notes/task-025-schema-verification.md), not docs prose.
+ * FR-C07 named `agent.chatEmbedAllowedHosts`, which exists in neither API version, and omitted
+ * `sharingCapability`, which does.
+ *
+ * Every member is optional and `undefined` means NOT REPORTED, never a default. A settings block that
+ * could not be read must not present as "search is off".
+ */
+export interface ContainerTypeSettings {
+  /** Which external sharing is permitted (Graph SharingCapabilities). */
+  sharingCapability?: SharingCapability;
+  isItemVersioningEnabled?: boolean;
+  itemMajorVersionLimit?: number;
+  /** Per-container CEILING in bytes — a limit, never a usage figure (task 023's split). */
+  maxStoragePerContainerInBytes?: number;
+  /** Whether container content is indexed for search. */
+  isSearchEnabled?: boolean;
+  /** Whether containers of this type are discoverable. */
+  isDiscoverabilityEnabled?: boolean;
+  /** Distinct from `sharingCapability` — a separate restriction flag. */
+  isSharingRestricted?: boolean;
+  urlTemplate?: string;
+  /**
+   * Which settings a consuming tenant may override, as the raw comma-delimited flag string
+   * (e.g. "sharingCapability,itemMajorVersionLimit,isOfficeRestricted").
+   *
+   * Override METADATA, not a value. Kept as a string because the live tenant uses flags that are not
+   * members of the SDK's typed enum. Task 026 renders its meaning.
+   */
+  consumingTenantOverridables?: string;
+  /** Beta-only and READ-ONLY — absent from the v1.0 schema and the SDK's typed model. */
+  isOfficeRestricted?: boolean;
 }
 
 /** Application permissions entry for a container type registration */
@@ -292,6 +399,21 @@ export interface Container {
   lastModifiedDateTime?: string;
   /** Storage used in bytes */
   storageUsedInBytes?: number;
+  /**
+   * The container's SharePoint URL — the scoping key for a Purview eDiscovery search (FR-C10).
+   *
+   * 🔑 Present on a DETAIL response only. The BFF omits the key entirely from LIST rows, because
+   * Graph structurally cannot supply it there: the containers collection accepts
+   * `$expand=drive($select=webUrl)`, answers 200, echoes it in `@odata.context`, and returns no
+   * `drive` on any row (measured 2026-08-24 on both API versions — notes/task-028-findings.md §1).
+   *
+   * So `undefined` here means one of two things depending on WHERE the object came from, and only
+   * the detail case is renderable:
+   *   • from `containers.list(...)` → NOT ASKED. Never render an absent state from a list row.
+   *   • from `containers.get(...)`  → asked, and Graph reported none → render the explicit absent
+   *     state (NFR-06), never a blank.
+   */
+  webUrl?: string;
   /** Custom properties (key-value pairs) */
   customProperties?: Record<string, ContainerCustomProperty>;
   /** Storage settings */
@@ -563,34 +685,49 @@ export type AuditCategory =
 
 /**
  * Audit log entry from the sprk_speauditlog Dataverse table.
- * Returned by GET /api/spe/audit.
+ * Returned inside the `items` array of GET /api/spe/audit.
+ *
+ * Corrected 2026-08-25. This interface used to declare thirteen required fields, seven of which the
+ * endpoint has never sent — it described the Dataverse table rather than the response. The required
+ * markers were doing real harm: they told every reader that `businessUnitId` would be there, so a
+ * consumer could reach for it and get `undefined` with no type error anywhere. Optional now means
+ * "this endpoint does not return it", which is a fact about the wire, not a wish about the schema.
  */
 export interface AuditLogEntry {
   /** Primary key GUID (sprk_speauditlogid) */
   id: string;
   /** Operation name, e.g. "CreateContainer" (sprk_operation) */
   operation: string;
-  /** Category of the operation (sprk_category) */
-  category: AuditCategory;
+  /**
+   * Human-readable category LABEL resolved server-side from the `sprk_category` option set —
+   * e.g. "Container type", not the `AuditCategory` filter value "ContainerType". The two are
+   * deliberately different: this one is for display, `AuditCategory` is what the filter sends.
+   */
+  category: string;
   /** ID of the affected resource (sprk_targetresourceid) */
   targetResourceId: string;
   /** Name of the affected resource (sprk_targetresourcename) */
   targetResourceName: string;
   /** HTTP status code of the operation response (sprk_responsestatus) */
   responseStatus: number;
-  /** Response summary or error message (sprk_responsesummary) */
-  responseSummary: string;
-  /** Environment context ID (sprk_environmentid) */
-  environmentId: string;
-  /** Environment display name (denormalized) */
+  /**
+   * Response summary or error message (sprk_responsesummary).
+   * NOT currently returned — the column is absent from the endpoint's `$select` because it has not
+   * been verified against the live Dataverse schema, and naming a column that does not exist 400s
+   * the entire query (task 005 found exactly that with `sprk_targetresource`).
+   */
+  responseSummary?: string;
+  /** Environment context ID (sprk_environmentid). Not returned by GET /api/spe/audit. */
+  environmentId?: string;
+  /** Environment display name (denormalized). Not returned by GET /api/spe/audit. */
   environmentName?: string;
-  /** Container type config context ID (sprk_containertypeconfigid) */
-  containerTypeConfigId: string;
-  /** Config display name (denormalized) */
+  /** Container type config context ID. Not returned — it is the query's input, not its output. */
+  containerTypeConfigId?: string;
+  /** Config display name (denormalized). Not returned by GET /api/spe/audit. */
   containerTypeConfigName?: string;
-  /** Business Unit context ID (sprk_businessunitid) */
-  businessUnitId: string;
-  /** Business Unit display name (denormalized) */
+  /** Business Unit context ID (sprk_businessunitid). Not returned by GET /api/spe/audit. */
+  businessUnitId?: string;
+  /** Business Unit display name (denormalized). Not returned by GET /api/spe/audit. */
   businessUnitName?: string;
   /** User who performed the operation (sprk_performedby) */
   performedBy: string;
@@ -631,14 +768,41 @@ export interface DashboardMetrics {
   totalContainerCount: number;
   /** Total storage used in bytes across all containers */
   totalStorageUsedInBytes: number;
+  /**
+   * How many containers actually reported a storage figure, out of totalContainerCount.
+   *
+   * Graph returns consumption only on the beta LIST surface, so coverage can be partial. When this
+   * is below the total, totalStorageUsedInBytes is a FLOOR, not a total — present it as such.
+   * Optional so an older cached metrics payload still deserializes.
+   */
+  storageReportingContainerCount?: number;
   /** Container count keyed by container type config ID (Guid string) */
   containerCountByConfig: Record<string, number>;
   /** UTC timestamp when these metrics were last synced from Graph (ISO string) */
   lastSyncedAt: string;
-  /** True if the most recent sync completed without errors */
+  /** True if the most recent sync completed without errors. Mirrors `syncHealth === "Healthy"`. */
   syncSucceeded: boolean;
-  /** Human-readable sync status message */
+  /** Human-readable sync status message — names the failing concern(s) when any failed */
   syncStatus: string;
+  /** Overall sync health, derived server-side from `concerns`. Never optimistic. */
+  syncHealth: SyncHealth;
+  /** Per-concern outcome for every concern the sync pass attempted */
+  concerns: ConcernOutcome[];
+}
+
+/** Overall dashboard sync health (server: SpeDashboardSyncService.SyncHealth). */
+export type SyncHealth = "Healthy" | "Degraded" | "Failed";
+
+/**
+ * The outcome of one concern in a dashboard sync pass.
+ * Lets the dashboard NAME what failed instead of showing an opaque "Partial".
+ */
+export interface ConcernOutcome {
+  /** What was attempted — e.g. "Dataverse container-type configs" */
+  concern: string;
+  succeeded: boolean;
+  /** Redacted failure reason; null/absent when succeeded */
+  reason?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,20 +844,38 @@ export interface SearchRequest {
 }
 
 /** Search result item for container search */
+/**
+ * A container that matched a search.
+ *
+ * Corrected 2026-08-25. `container` used to be typed as a full `Container`, which was never true:
+ * Graph Search returns a projection, and the endpoint's `SearchContainerDto` carries only id,
+ * displayName, description and containerTypeId. `status`, `createdDateTime` and
+ * `storageUsedInBytes` are NOT available on a search result — the grid renders them as "—" rather
+ * than inventing an "active"/epoch default, because a fabricated status on a security-admin screen
+ * is worse than a visible blank.
+ */
 export interface ContainerSearchResult {
-  /** Container that matched the search */
-  container: Container;
-  /** Relevance score */
+  /** Container that matched the search — a PROJECTION, not a full container record. */
+  container: Partial<Container> & Pick<Container, "id" | "displayName">;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
 }
 
-/** Search result item for drive item search */
+/**
+ * A drive item that matched a search.
+ *
+ * Same correction as {@link ContainerSearchResult}: the endpoint's `SearchItemDto` returns id, name,
+ * size, lastModifiedDateTime, containerId, containerName, webUrl and mimeType — so `createdDateTime`
+ * and `lastModifiedBy` are absent here even though a fully-read `DriveItem` has them.
+ */
 export interface DriveItemSearchResult {
-  /** Drive item that matched */
-  item: DriveItem;
+  /** Drive item that matched — a PROJECTION, not a full drive item. */
+  item: Partial<DriveItem> & Pick<DriveItem, "id" | "name">;
   /** Container the item belongs to */
   containerId: string;
-  /** Relevance score */
+  /** Display name of the owning container, when search reported one. */
+  containerName?: string;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
   /** Search result hit highlights */
   hitHighlightedSummary?: string;
@@ -797,16 +979,21 @@ export interface BulkPermissionsRequest {
 
 /** Secure score from GET /api/spe/security/score */
 export interface SecureScore {
-  /** Score ID */
-  id: string;
+  /** Score ID. NOT returned by GET /api/spe/security/score. */
+  id?: string;
   /** Current score */
   currentScore: number;
   /** Maximum possible score */
   maxScore: number;
-  /** Percentage (currentScore / maxScore * 100) */
-  percentage: number;
-  /** Date of this score snapshot */
-  createdDateTime: string;
+  /**
+   * Percentage (currentScore / maxScore * 100).
+   * NOT returned by the endpoint — `SecureScoreDto` carries only currentScore, maxScore and
+   * averageComparativeScores. Marked optional 2026-08-25 after the card rendered "NaN%" for reading
+   * a field that was never on the wire; the card now derives it from the two scores.
+   */
+  percentage?: number;
+  /** Date of this score snapshot. NOT returned by the endpoint. */
+  createdDateTime?: string;
   /** Individual control scores */
   controlScores?: Array<{
     controlName: string;

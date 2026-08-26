@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H6 Solution Import Handler (Package Deployer, 8 solutions dependency-ordered)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; modifies .cs files; long-running (5–15 min); imports 8 authoritative solutions with Tier dependency ordering.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps existing scripts/Deploy-DataverseSolutions.ps1 + Package Deployer; complete spec (FR-09); Tier ordering is deterministic; not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 048</deps>
+    <tags>l2-controlplane, job-handler, dataverse, powershell</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H6 solution-import handler as an IJobHandler in the L2 control-plane. H6 invokes Package Deployer via the Phase-B extended scripts/Deploy-DataverseSolutions.ps1 for the 8 authoritative solutions per §11.1a with dependency ordering: Tier 1 (SpaarkeCore), Tier 2 (webresources), then Tier 3 parallel (CalendarSidePane, DocumentUploadWizard, EventCommands, EventDetailSidePane, EventsPage, LegalWorkspace). Upgrade mode retires the holding solution. Idempotency key: solimport-{customerId}-{solutionVer}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Microsoft.PowerPlatform.Dataverse.Client Package Deployer, dependency-ordered solution import, ADR-039 single AI routing surface (H12a downstream will consume playbook consumer solution). Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H6SolutionImportHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes Deploy-DataverseSolutions.ps1 with $SolutionImportOrder honoring Tier 1 → Tier 2 → Tier 3 (6 parallel); (b) verifies all 8 solutions imported at correct versions via Dataverse Web API `solutions` query; (c) upgrade mode retires the holding solution; (d) writes imported-solution manifest to Cosmos interStepState; (e) asserts idempotency key solimport-{customerId}-{solutionVer}. Unit tests cover fresh-import happy path, upgrade-mode retire-holding branch, dependency-order violation = fail, and idempotency (skipped by Package Deployer on version match).</goal>
+
+  <context>
+    <background>Per spec.md FR-09 + design.md §4.1 H6 row + §11.1a: v3 correction from "~10" to 8 authoritative solutions per Deploy-DataverseSolutions.ps1 $SolutionImportOrder. Phase B extends the script to invoke Package Deployer for dependency-ordered import. Other ~28 items in src/solutions/ are code pages via Deploy-Release.ps1 Phase 4 (not r1 H6 scope; Phase A audits).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H6SolutionImportHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H6SolutionImportHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Deploy-DataverseSolutions.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="048" status="pending">H5 Dataverse env creation — env must exist for solution import</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget (5–15 min).</constraint>
+    <constraint source="ADR-039">Solutions that participate in AI routing (playbook consumers) MUST NOT re-introduce the retired spaarke-playbook-embeddings dispatcher; single AI routing surface only.</constraint>
+    <constraint source="ADR-044">Solution IDs written to Cosmos interStepState follow GUID canonicalization.</constraint>
+    <constraint source="project">Idempotency key: solimport-{customerId}-{solutionVer} — solutionVer is solution version manifest hash.</constraint>
+    <constraint source="project">8 authoritative solutions per §11.1a (SpaarkeCore + webresources + 6 Tier-3 features); do NOT drift to "~10".</constraint>
+    <constraint source="project">Upgrade mode (spec.md FR-34): retires the holding solution; additive-only unless explicit U-CB breaking-change class.</constraint>
+    <constraint source="spec.md §4D I3">Dataverse writes include partition-key predicates where applicable (Cosmos writes for interStepState use /customerId per §6.2).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping Package Deployer with dependency-ordered import</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H6SolutionImportHandler.cs — inject IPowerShellRunner, IDataverseSolutionsClient, IIdempotencyService, ICosmosRunStore.</step>
+    <step order="2">Invoke Deploy-DataverseSolutions.ps1 with $SolutionImportOrder (Tier 1: SpaarkeCore; Tier 2: webresources; Tier 3: 6 parallel).</step>
+    <step order="3">Verify all 8 solutions imported at correct versions via Dataverse Web API `solutions` query.</step>
+    <step order="4">Upgrade mode: retire the holding solution (Package Deployer holding-solution semantic).</step>
+    <step order="5">Write imported-solution manifest (name + version + solutionId) to Cosmos interStepState.</step>
+    <step order="6">Author unit tests: fresh-import happy, upgrade-mode retire-holding, dependency-order violation, retired-index-reintroduction guard (spaarke-playbook-embeddings), idempotency.</step>
+    <step order="7">Register in L2 Program.cs DI.</step>
+    <step order="8">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="9">Update TASK-INDEX.md: change task 049 status from 🔲 to ✅.</step>
+    <step order="10">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>scripts/Deploy-DataverseSolutions.ps1 exists but is not addressable as an L2 handler. No existing IJobHandler for solution import.</existing>
+    <extension>No — the PS script must be invocable as an idempotent handler with upgrade-mode retire-holding semantics + Cosmos state writes. Extending the PS script alone can't provide DAG advancement.</extension>
+    <cost-of-doing-nothing>Without H6 as a handler, solution import lacks upgrade-mode retire-holding semantics (accidentally leaves holding solution behind → Dataverse solution-layer noise) and lacks the guard against retired-index reintroduction. H7 (env-var values) depends on Cosmos interStepState of imported solutions.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H6SolutionImportHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H6SolutionImportHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fresh Dataverse env, when HandleAsync runs, then all 8 authoritative solutions import successfully with Tier ordering (SpaarkeCore first, webresources second, 6 Tier-3 parallel) and Dataverse Web API confirms each at expected version.</criterion>
+    <criterion testable="true">Negative: given a corrupted $SolutionImportOrder that puts a Tier-3 solution before SpaarkeCore, when HandleAsync runs, then it fails with distinct code "DependencyOrderViolation" (Package Deployer returns error).</criterion>
+    <criterion testable="true">Upgrade mode: given an existing customer with a holding solution present, when HandleAsync runs, then the holding solution is retired post-import (verified via Dataverse Web API).</criterion>
+    <criterion testable="true">Negative: given the retired spaarke-playbook-embeddings solution accidentally in the import list, when HandleAsync runs, then it fails with "RetiredArtifactForbidden" per ADR-039.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + solutionVer — second call is a no-op (solimport-{customerId}-{solutionVer} match); Package Deployer skips solutions at matching version.</criterion>
+    <criterion testable="true">Cosmos interStepState contains manifest of 8 imported solutions with name + version + solutionId.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-09 + §11.1a; design.md §4.1 H6. Phase B extension of Deploy-DataverseSolutions.ps1 to Package Deployer is a prerequisite.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

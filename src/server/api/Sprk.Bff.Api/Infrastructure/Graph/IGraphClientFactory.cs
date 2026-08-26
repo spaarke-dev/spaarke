@@ -29,6 +29,18 @@ public interface IGraphClientFactory
     Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default);
 
     /// <summary>
+    /// Delegated (on-behalf-of) client pointed at the Graph <b>beta</b> endpoint.
+    /// </summary>
+    /// <remarks>
+    /// Use ONLY where v1.0 genuinely cannot serve the request. Today that is exactly one surface:
+    /// <c>fileStorageContainerType/{id}/permissions</c> (container-type owners), which is absent from
+    /// the v1.0 schema while container types simultaneously reject app-only auth — so neither
+    /// delegated-v1.0 nor app-only-beta can reach it. Same OBO exchange, same cached token, same
+    /// version-agnostic scope as <see cref="ForUserAsync"/>; only the base address differs.
+    /// </remarks>
+    Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default);
+
+    /// <summary>
     /// Creates a Graph client using app-only authentication (Managed Identity or Client Secret).
     /// </summary>
     /// <returns>GraphServiceClient authenticated with application permissions</returns>

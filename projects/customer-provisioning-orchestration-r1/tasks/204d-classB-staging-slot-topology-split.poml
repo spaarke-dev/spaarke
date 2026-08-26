@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204d" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B11 staging-slot shadow-worker defect — verify `.Api` split status + complete `.Core/.Api/.Worker` split OR slot-sticky Enabled flags (DS-3 §5)</title>
+    <phase>Pre-Live-Fire — Class-B architectural refactor (post-186 safe)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Structural refactor of L2 control-plane topology — high blast radius (touches project structure, deploy topology, Bicep slot config). Per root CLAUDE.md §8: `l2-controlplane` + `deploy` + architectural-refactor = FULL rigor. Publish-slot semantic changes are irreversible-adjacent (wrong split can silently double-process on production traffic).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per root CLAUDE.md §8.5: structural refactor + high-blast-radius = Opus/Fable. The choice between "complete `.Core/.Api/.Worker` split" vs "add slot-sticky Enabled flags per DS-3 §5" is architectural — depends on judgment about deploy-topology invariants + operational-simplicity trade-offs. Sonnet insufficient for this architectural judgment call.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches project-file boundaries (`.csproj`, `Program.cs`, Bicep slot config). Concurrent 204a/b/c edits to Worker + Core would race with any reorganization.</parallel-reason>
+    <deps>202</deps>
+    <tags>l2-controlplane, architectural-refactor, deploy, class-b-verified-open, staging-slot-topology</tags>
+    <estimated-effort>16 hours (per punch list B11 estimate — may split into verify-then-refactor if `.Api` already split)</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve the B11 staging-slot shadow-worker defect surfaced in DS-3: one-process L2 topology has structural defect where reconciler + crash-recovery + dispatcher run against PRODUCTION Cosmos+SB while a pre-production build is deployed to the staging slot (both slots share config). FIRST STEP: verify `.Api` project split status (Task 202 verification matrix says `Sprk.Provisioning.ControlPlane.Core` + `Sprk.Provisioning.ControlPlane.Worker` are separate; `.Api` split status unverified). Two paths:
+- **Path SPLIT** (preferred if not done): Complete `.Core+.Api+.Worker` split per DS-3 pattern — `.Api` hosts REST endpoints only (public-facing, ok on both slots), `.Worker` hosts dispatcher+reconciler+crash-recovery (deployed to production slot only, staging slot has no Worker).
+- **Path FLAGS**: If split proves impractical, add three permanent slot-sticky `Enabled` config flags (per DS-3 §5 alternative) to Worker: `Dispatcher:Enabled` / `Reconciler:Enabled` / `CrashRecovery:Enabled` — set true on production slot, false on staging slot; startup gate checks flags before instantiating background services.
+
+Choose Path SPLIT if `.Api` is close to done; Path FLAGS if split is heavier than punch list's 16h estimate.</prompt>
+
+  <role>SPAARKE platform architect. Expert in: DS-3 staging-slot topology analysis + §5 alternatives; ASP.NET Core BackgroundService lifecycle + IHostedService startup gates; App Service slot configuration (`slotSetting: true` semantics); Bicep slot configuration; L2 control-plane project structure (`Sprk.Provisioning.ControlPlane.Core` + `.Worker` + potentially `.Api`); dispatcher + reconciler + crash-recovery service registrations (`Worker/Program.cs` + `DispatchModule` + `StateReconcilerService`).</role>
+
+  <goal>Either:
+- Path SPLIT: `Sprk.Provisioning.ControlPlane.Api` project exists, hosts REST endpoints only; `Sprk.Provisioning.ControlPlane.Worker` hosts dispatcher + reconciler + crash-recovery only; Bicep deploys `.Api` to both slots + `.Worker` to production slot only (or `.Api` includes `.Worker` as optional dep with slot-sticky flag); staging slot startup does NOT instantiate Worker background services; existing tests pass; deploy topology documented in `design.md` §Deploy Topology.
+- Path FLAGS: three slot-sticky `Enabled` flags added to Worker configuration; `Program.cs` startup gate checks flags before `.AddHostedService()`; Bicep `slotSetting: true` markers on all three flags with production=true / staging=false; existing tests pass; startup gate has unit tests covering "flag=false skips service" behavior; deploy topology documented.
+
+Either path: staging slot deployment does NOT process production SB messages or Cosmos writes; punch list B11 annotated `applied — Path SPLIT|FLAGS — <evidence>`.</goal>
+
+  <context>
+    <background>DS-3 (design-study-3, staging-slot topology) surfaced this defect: L2's one-process topology has reconciler polling Cosmos on a timer + crash-recovery scanning SB dead-letters on startup + dispatcher consuming SB session messages. When staging slot is deployed for a pre-production build test, its process ALSO connects to production Cosmos + SB (both slots share `sprk-provisioning-jobs` queue + `sprk-provisioning-state` Cosmos), producing:
+- Reconciler double-writes (staging + production both apply the same Cosmos updates on the same timer)
+- Crash-recovery false triggers (staging startup thinks production runs crashed)
+- Dispatcher double-consume (staging + production both compete for SB session locks — one wins, other silently fails)
+
+**Why post-186 safe (per punch list)**: task 186 first-real-run uses production slot only — no staging slot deployment planned during acceptance. Defect is ACCEPTED for first run + MUST-FIX before ongoing production traffic (staging deploys will start racing production data).
+
+**Path SPLIT is architecturally cleaner** — `.Worker` only in one slot means no runtime flag gymnastics.
+
+**Path FLAGS is operationally simpler** — no project restructure, one process everywhere, config-driven.
+
+**Owner choice may apply**: this is judgment. Task 202 amendment defers to executor's grep-verify: if `.Api` split is close to done (Worker already split), finish it (Path SPLIT); if starting from scratch, Path FLAGS may be pragmatic.</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B11 row + verification matrix</file>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/design-study-ds3-*.md (staging-slot topology deep-dive)</file>
+      <file role="verify">src/server/services/Sprk.Provisioning.ControlPlane.Worker/*.csproj (confirm Worker split from Core)</file>
+      <file role="verify">src/server/services/Sprk.Provisioning.ControlPlane.Api/*.csproj (confirm `.Api` split status — MAY NOT EXIST YET)</file>
+      <file role="modify-path-SPLIT">src/server/services/ (project restructure: create .Api if missing; move REST endpoints from Worker/Core to .Api)</file>
+      <file role="modify-path-FLAGS">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (add startup-gate flag reads before AddHostedService)</file>
+      <file role="modify-path-FLAGS">src/server/services/Sprk.Provisioning.ControlPlane.Worker/appsettings.json (add Dispatcher:Enabled / Reconciler:Enabled / CrashRecovery:Enabled defaults)</file>
+      <file role="modify-both">infrastructure/bicep/modules/l2-worker-appservice.bicep OR platform-controlplane.bicep (slot-sticky flags OR slot-only deploy)</file>
+      <file role="modify-both">projects/customer-provisioning-orchestration-r1/design.md §Deploy Topology (document chosen path)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B11 row (annotate outcome)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list B11 row + verification matrix — this task's scope authority</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify `.Api` project split status BEFORE choosing path. If `.Api` already exists + wired → Path SPLIT is ~4-6h (finish wiring); if `.Api` does NOT exist → Path SPLIT is full 16h (create project + move endpoints). Path FLAGS is ~4-6h regardless. Choose based on evidence, not assumption.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">N/A — L2 changes only. But any Bicep change that alters App Service slot configuration MUST pre-check LIVE App Service + KV state per project CLAUDE.md § MUST rules pre-check gate (FR-35).</constraint>
+    <constraint source="DS-3 §5 alternatives">Both paths are architecturally acceptable per DS-3. Don't invent a THIRD path — the design study evaluated alternatives, these two are the survivors. If executor sees a compelling third path, escalate rather than invent.</constraint>
+    <constraint source="ADR-032 asymmetric-registration governance">Path FLAGS uses `if (flag) { services.AddHostedService(...) }` pattern. If any UNCONDITIONALLY-registered service in Core depends on the flag-gated background service (e.g., a REST endpoint that requires the dispatcher be running to enqueue), apply ADR-032 F.1 Null-Object kill-switch pattern (P1/P2/P3) per `.claude/constraints/bff-extensions.md` § F.1. Startup should not fail; dependent surface should return sensible degraded response.</constraint>
+    <constraint source="project CLAUDE.md § MUST rules pre-check">MUST pre-check LIVE App Service + KV + Dataverse before removing any alias (FR-35 pre-check gate). If Bicep changes rename/remove any slot config, run the pre-check.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">Path SPLIT introduces NEW project (`.Api`). Justify per §11: (1) Existing overlap — `.Worker` currently hosts everything; (2) Extension — could keep everything in Worker + use Path FLAGS instead (that's Path FLAGS's whole point); (3) Cost-of-doing-nothing — staging slot double-processes production SB/Cosmos (concrete failure mode). Path SPLIT wins on architectural cleanliness; Path FLAGS wins on §11 minimalism. Choose based on grep evidence of `.Api` status.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B11 staging-slot topology split</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, opus/xhigh). Read `notes/task-202-punch-list.md` B11 + verification matrix. Read DS-3 notes (staging-slot topology deep-dive). Read `.claude/constraints/azure-deployment.md`.</step>
+    <step order="1" name="Verify `.Api` split status">Enumerate `src/server/services/Sprk.Provisioning.ControlPlane.*/*.csproj`. Read `Sprk.Provisioning.ControlPlane.Worker/Program.cs` end-to-end — identify all REST endpoint mappings + background service registrations. Determine:
+- Does `Sprk.Provisioning.ControlPlane.Api` project exist?
+- If yes: what's wired vs unwired?
+- If no: how much REST-endpoint code lives in Worker today?</step>
+    <step order="2" name="Choose path + document">Based on Step 1 evidence:
+- If `.Api` exists + close to done → **Path SPLIT** (~4-6h)
+- If `.Api` doesn't exist + Worker has significant REST code → **Path FLAGS** (~4-6h) UNLESS strong architectural argument for full split (~16h)
+- If ambiguous → escalate to owner for path choice
+Document chosen path + rationale in `notes/task-204d-path-decision.md`.</step>
+    <step order="3a" name="Path SPLIT execute">Create/complete `Sprk.Provisioning.ControlPlane.Api` project. Move REST endpoint mappings from Worker to `.Api`. `.Api` references `.Core` for domain types. `.Worker` retains BackgroundServices only (dispatcher / reconciler / crash-recovery). Update Bicep to deploy `.Api` to both slots + `.Worker` to production slot only (or Worker as separate App Service). Update `design.md` §Deploy Topology.</step>
+    <step order="3b" name="Path FLAGS execute">Add three config flags to `Worker/appsettings.json`: `Dispatcher:Enabled`, `Reconciler:Enabled`, `CrashRecovery:Enabled` (all default true — flags EXPRESS staging behavior, defaults are safe-on for production). Add startup gate in `Program.cs` reading each flag BEFORE `.AddHostedService()` calls. Update Bicep `slotSetting: true` markers on all three flags in `l2-worker-appservice.bicep` or `platform-controlplane.bicep`; production slot values = true, staging slot values = false. Apply ADR-032 F.1 Null-Object kill-switch pattern for any unconditional consumer of the gated services.</step>
+    <step order="4" name="Bicep pre-check + apply">Run FR-35 pre-check against LIVE App Service state (dev L2 slot config). Apply Bicep changes. Verify staging slot deploys with flags=false (Path FLAGS) or without Worker (Path SPLIT).</step>
+    <step order="5" name="Tests">Unit tests for startup-gate behavior (Path FLAGS: flag=false skips service). Integration tests: staging slot deploy does NOT consume SB messages / does NOT write Cosmos updates. Add ArchTest asserting no BackgroundService is registered without gate check (Path FLAGS) OR asserting `.Api` project has no BackgroundService references (Path SPLIT).</step>
+    <step order="6" name="Build + verify">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.*/` — 0 warnings 0 errors. `dotnet test` green.</step>
+    <step order="6.5" name="Quality gates">FULL rigor → invoke `code-review` + `adr-check` skills. Address any Critical findings.</step>
+    <step order="7" name="Report">Update `current-task.md` + `TASK-INDEX.md` + `notes/task-202-punch-list.md` B11 row: `applied — Path SPLIT|FLAGS — <evidence>`. Update `design.md` §Deploy Topology with the chosen topology diagram.</step>
+  </steps>
+
+  <escalation>
+    <trigger name="deferred-post-186" phase="Step 0">**GATE (BINDING per task 202 amendment)**: Task 202 amendment classifies 204d as POST-186 SAFE — staging-slot defect is ACCEPTED risk for first real run (task 186 uses production slot only). If owner directs this task run PRE-186, proceed. Otherwise DEFER this task until AFTER task 186's E2E acceptance completes. Do NOT start this task without confirming owner intent.</trigger>
+    <trigger>If Step 2 evidence is ambiguous (`.Api` partially exists, unclear whether split intended vs incidental), STOP and escalate to owner for path choice — do NOT self-select on architectural judgment call.</trigger>
+    <trigger>If Path SPLIT reveals hidden Worker→.Api circular dependency (REST endpoint needs dispatcher runtime access), STOP and escalate — the split boundary may need redesign.</trigger>
+    <trigger>If any Bicep change would delete/rename a live-in-use slot setting, apply FR-35 pre-check gate FIRST + escalate per project CLAUDE.md § Human Escalation Triggers ("KV secret rename/delete without prior LIVE pre-check").</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="grep">project structure enumeration</tool>
+    <tool name="az">LIVE App Service slot config read for FR-35 pre-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code-path-SPLIT">src/server/services/Sprk.Provisioning.ControlPlane.Api/ (new project OR completed wiring)</output>
+    <output type="code-path-FLAGS">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (startup-gate additions) + appsettings.json (flag defaults)</output>
+    <output type="bicep">infrastructure/bicep/modules/l2-worker-appservice.bicep OR platform-controlplane.bicep (slot config)</output>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/design.md §Deploy Topology</output>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/notes/task-204d-path-decision.md</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B11 row outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.Api` project split status verified in Step 1; path (SPLIT or FLAGS) chosen with documented rationale.</criterion>
+    <criterion testable="true">Either: `.Api` project exists + hosts REST endpoints only + `.Worker` hosts BackgroundServices only + Bicep deploys them per topology (Path SPLIT); OR three slot-sticky flags added + startup gate implemented + Bicep slot config sets production=true/staging=false (Path FLAGS).</criterion>
+    <criterion testable="true">Test confirms staging slot deploy does NOT consume SB messages or write Cosmos updates (integration or dry-run test).</criterion>
+    <criterion testable="true">ArchTest asserts BackgroundService registration invariant (Path FLAGS: gated; Path SPLIT: absent from .Api).</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` green.</criterion>
+    <criterion testable="true">`design.md` §Deploy Topology updated with chosen topology.</criterion>
+    <criterion testable="true">`notes/task-202-punch-list.md` B11 row annotated with `applied — Path SPLIT|FLAGS — <evidence>`.</criterion>
+    <criterion testable="true">Step 6.5 quality gates (code-review + adr-check) invoked.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): See constraints §11 row — Path SPLIT introduces new project + fails §11 minimalism narrowly; Path FLAGS is §11-compliant (extends existing Worker with config flags). Cost-of-doing-nothing named: staging slot double-processes production data.
+
+**Post-186 safe**: this task's `deferred-post-186` gate defaults to DEFER unless owner explicitly directs PRE-186 execution. Staging-slot defect is ACCEPTED risk for first-real-run (production slot only); MUST-FIX before ongoing production traffic.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

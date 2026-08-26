@@ -1,5 +1,8 @@
 using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -11,7 +14,7 @@ public static class EntityAccessFilterExtensions
     /// <summary>
     /// Adds entity access filter that validates user has access to referenced entities in save requests.
     /// Returns 403 Forbidden if user lacks access to the target entity.
-    /// Returns 404 Not Found if entity does not exist.
+    /// Returns 400 Bad Request if the association target type is not supported.
     /// </summary>
     /// <param name="builder">The endpoint convention builder.</param>
     /// <returns>The builder for chaining.</returns>
@@ -24,9 +27,10 @@ public static class EntityAccessFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var logger = context.HttpContext.RequestServices.GetService<ILogger<EntityAccessFilter>>();
-            var authService = context.HttpContext.RequestServices.GetRequiredService<AuthorizationService>();
-            var filter = new EntityAccessFilter(authService, logger);
+            var services = context.HttpContext.RequestServices;
+            var logger = services.GetService<ILogger<EntityAccessFilter>>();
+            var probe = services.GetRequiredService<CallerRecordAccessProbe>();
+            var filter = new EntityAccessFilter(probe, logger);
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -54,20 +58,61 @@ public static class EntityAccessFilterExtensions
 /// - sprk_project (Spaarke custom)
 /// - sprk_invoice (Spaarke custom)
 /// </para>
+///
+/// <para><b>FIXED 2026-08-23 (unified-access-control-r2, task 008 follow-up, owner-authorised).</b>
+/// This filter used to build a resource id of the form <c>"{entityType}:{entityId}"</c> and pass it to
+/// <see cref="AuthorizationService"/>. That bottoms out in <c>DataverseAccessDataSource</c>, which
+/// substitutes the value into <c>sprk_documents({resourceId})</c> in BOTH its
+/// <c>RetrievePrincipalAccess</c> target and its fallback read probe — so the emitted URL was
+/// <c>sprk_documents(sprk_matter:8f3a…)</c>, which is not a document id and not even a GUID. Dataverse
+/// rejected it, the lookup failed closed to <see cref="AccessRights.None"/>, and since
+/// <c>entity.associate_document</c> requires <see cref="AccessRights.AppendTo"/> the save was refused
+/// for EVERY caller. Filing a document against a matter from the Office add-in could not succeed.</para>
+///
+/// <para>The rights now come from <see cref="CallerRecordAccessProbe"/>, which asks Dataverse about the
+/// TARGET ENTITY's own collection (<c>sprk_matters</c>, <c>accounts</c>, …) as the caller (OBO).
+/// <see cref="OperationAccessPolicy"/> remains the single authority for WHICH right the operation
+/// needs — only the source of the rights changed, so there is still one place that decides what
+/// <c>entity.associate_document</c> costs.</para>
+///
+/// <para>When <c>IAccessDataSource</c> is generalized beyond documents (task 032), this filter should
+/// go back through <see cref="AuthorizationService"/> so there is one access path again.</para>
 /// </remarks>
 public class EntityAccessFilter : IEndpointFilter
 {
-    private readonly AuthorizationService _authorizationService;
+    private readonly CallerRecordAccessProbe _probe;
     private readonly ILogger<EntityAccessFilter>? _logger;
 
     // Operation constant for entity association
     private const string AssociateOperation = "entity.associate_document";
 
+    /// <summary>
+    /// Association target type → Dataverse entity SET (plural collection) name.
+    /// </summary>
+    /// <remarks>
+    /// A closed map with a fail-closed miss, replacing the previous <c>IsValidEntityType</c> boolean:
+    /// validating a type and then resolving its collection are the same question, and keeping them in
+    /// one table means a type can never be accepted without a collection to check it against. Short
+    /// aliases are retained because the previous implementation accepted them.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> EntitySetByType =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["account"] = "accounts",
+            ["contact"] = "contacts",
+            ["sprk_matter"] = "sprk_matters",
+            ["matter"] = "sprk_matters",
+            ["sprk_project"] = "sprk_projects",
+            ["project"] = "sprk_projects",
+            ["sprk_invoice"] = "sprk_invoices",
+            ["invoice"] = "sprk_invoices"
+        };
+
     public EntityAccessFilter(
-        AuthorizationService authorizationService,
+        CallerRecordAccessProbe probe,
         ILogger<EntityAccessFilter>? logger = null)
     {
-        _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _logger = logger;
     }
 
@@ -113,8 +158,9 @@ public class EntityAccessFilter : IEndpointFilter
             return await next(context);
         }
 
-        // Validate entity type
-        if (!IsValidEntityType(targetEntity.EntityType))
+        // Resolve the target's Dataverse collection. A type with no entry is rejected — validating the
+        // type and knowing where to look it up are the same question (see EntitySetByType).
+        if (!EntitySetByType.TryGetValue(targetEntity.EntityType, out var entitySet))
         {
             _logger?.LogWarning(
                 "Entity access check failed: Invalid entity type '{EntityType}'. " +
@@ -138,42 +184,35 @@ public class EntityAccessFilter : IEndpointFilter
             "CorrelationId: {CorrelationId}",
             userId, targetEntity.EntityType, targetEntity.EntityId, httpContext.TraceIdentifier);
 
-        // Build resource ID combining entity type and ID for authorization context
-        var resourceId = $"{targetEntity.EntityType}:{targetEntity.EntityId}";
-
-        var authContext = new AuthorizationContext
-        {
-            UserId = userId,
-            ResourceId = resourceId,
-            Operation = AssociateOperation,
-            CorrelationId = httpContext.TraceIdentifier
-        };
-
         try
         {
-            var result = await _authorizationService.AuthorizeAsync(authContext, httpContext.RequestAborted);
+            // Ask Dataverse what this CALLER may do to the TARGET ENTITY — in its own collection, not
+            // sprk_documents. OperationAccessPolicy still decides which right that buys.
+            var rights = await _probe.GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                entitySet,
+                targetEntity.EntityId,
+                httpContext.RequestAborted);
 
-            if (!result.IsAllowed)
+            if (!OperationAccessPolicy.HasRequiredRights(rights, AssociateOperation))
             {
-                // Determine appropriate error based on reason
-                var (statusCode, errorCode, detail) = MapAuthorizationDenial(result.ReasonCode);
+                var (statusCode, errorCode, detail) = MapAuthorizationDenial("insufficient_rights");
 
                 _logger?.LogWarning(
-                    "Entity access denied: User {UserId} cannot associate documents with {EntityType} {EntityId}. " +
-                    "Reason: {Reason}. CorrelationId: {CorrelationId}",
-                    userId, targetEntity.EntityType, targetEntity.EntityId, result.ReasonCode, httpContext.TraceIdentifier);
+                    "Entity access denied: User {UserId} cannot associate documents with {EntityType} {EntityId} " +
+                    "({EntitySet}). Holds {Rights}; requires {Required}. CorrelationId: {CorrelationId}",
+                    userId, targetEntity.EntityType, targetEntity.EntityId, entitySet, rights,
+                    OperationAccessPolicy.GetRequiredRights(AssociateOperation), httpContext.TraceIdentifier);
 
                 return Results.Problem(
                     statusCode: statusCode,
-                    title: statusCode == 404 ? "Not Found" : "Forbidden",
+                    title: "Forbidden",
                     detail: detail,
-                    type: statusCode == 404
-                        ? "https://tools.ietf.org/html/rfc7231#section-6.5.4"
-                        : "https://tools.ietf.org/html/rfc7231#section-6.5.3",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.3",
                     extensions: new Dictionary<string, object?>
                     {
                         ["errorCode"] = errorCode,
-                        ["reasonCode"] = result.ReasonCode,
+                        ["reasonCode"] = "insufficient_rights",
                         ["entityType"] = targetEntity.EntityType,
                         ["correlationId"] = httpContext.TraceIdentifier
                     });
@@ -225,26 +264,6 @@ public class EntityAccessFilter : IEndpointFilter
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Validates the entity type is a supported association target.
-    /// </summary>
-    private static bool IsValidEntityType(string entityType)
-    {
-        // Supported entity types per spec
-        return entityType.ToLowerInvariant() switch
-        {
-            "account" => true,
-            "contact" => true,
-            "sprk_matter" => true,
-            "matter" => true,  // Allow short name
-            "sprk_project" => true,
-            "project" => true,  // Allow short name
-            "sprk_invoice" => true,
-            "invoice" => true,  // Allow short name
-            _ => false
-        };
     }
 
     /// <summary>

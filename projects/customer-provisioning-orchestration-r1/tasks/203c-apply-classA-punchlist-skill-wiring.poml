@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="203c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Apply Class-A punch list — Sub-phase 203c skill wiring (5 rows: Step 0.5 prereqs reader + --batch flag + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs)</title>
+    <phase>Phase Pre-Live-Fire — Class-A punch list skill wiring</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Per project CLAUDE.md rigor table: A16 (GraphAppRoles.cs completion) touches `src/server/shared/Spaarke.*/**` (BFF-consumed shared code) → tag `bff-api` → FULL. Also skill-directive edits to `.claude/skills/provision-environment/SKILL.md` (A02, A03, A04) fire against live L3 operator surface. Explicit escalation trigger per project CLAUDE.md §Human Escalation Triggers: "Any GraphAppRoles.cs az enumeration returning unexpected role IDs (11 of 14 null must be verified before completing)".</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Explicit user directive per parent task's Model-tier per sub-phase table: "203c: sonnet @ xhigh (BFF-touching + complex skill wiring)". Complex skill-wiring (Step 0.5 external prereqs iteration loop + JSON Schema + Step 7 postmortem authoring) + BFF-adjacent GraphAppRoles.cs completion via live az enumeration justifies xhigh effort.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to `.claude/skills/provision-environment/SKILL.md` (A02, A03, A04) AND `src/server/shared/Spaarke.*/**` (A16). Sub-Agent Write Boundary (root CLAUDE.md §3) forbids sub-agents from editing `.claude/**`; must run in main session.</parallel-reason>
+    <deps>202, 203a</deps>
+    <tags>provisioning, skill-directive, root-claude, powershell, bff-api, auth, l3-skill</tags>
+    <estimated-effort>15-20 hours (per task 202 punch list: A02(6) + A03(4) + A04(3) + A15(8) + A16(3) = 24h — user directive states 15-20h reflecting some overlap between A02+A03 skill Step 0.5 wiring)</estimated-effort>
+  </metadata>
+
+  <prompt>Apply Class-A rows A02, A03, A04, A15, A16 from `notes/task-202-punch-list.md` — the skill wiring sub-phase of task 203. Row-by-row: (a) grep-verify current repo state BEFORE applying; (b) if `already-applied`, annotate row + skip; (c) if `open`, apply per row landing-spot + effort; (d) checkpoint via context-handoff after every 2 rows. Scope: extend `/provision-environment` Step 0.5 to READ `scripts/provisioning-prereqs/prereqs.yaml` (from task 202) + iterate check recipes + HARD STOP on failure (A02); add `--batch` flag + author `scripts/provisioning-prereqs/intake.schema.json` (A03); author mandatory skill Step 7 postmortem that writes `lessons-learned.md` per run (A04 — depends on 203a's provisioning-runs structure); author `scripts/Grant-ControlPlaneIdentity.ps1` — grants L2 UAMI Graph app-role assignments + Path X Dataverse App User + scoped `Spaarke Provisioning Registry` role (A15 — depends on A16 completion); complete 11 of 14 null `AppRoleId` GUIDs in `src/server/shared/Spaarke.Dataverse/GraphAppRoles.cs` via live `az` enumeration (A16 — per project CLAUDE.md escalation trigger: any unexpected role-ID enumeration MUST escalate). Publish-size verification: A16 touches BFF-consumed shared code → NFR-01 publish-size ≤60 MB verification REQUIRED per root CLAUDE.md §10 (baseline: 44.96 MB incl. PDBs per 2026-08-13 net10). Amend punch list annotations. Do NOT commit — main session handles commit after review.</prompt>
+
+  <role>SPAARKE L3 operator skill author + Graph app-role expert + PowerShell hardening specialist. Expert in: `/provision-environment` SKILL.md Step 0-7 flow + task 202's PROVISIONING-PREREQUISITES.md + prereqs.yaml contract; JSON Schema authoring for CLI intake validation; two-level lessons process (in-flight direct-apply vs project-close lessons-learned.md per root CLAUDE.md §7 wrap-up + task-execute Step 11); Path X Dataverse App User creation via Web API PATCH (per DS-8); Graph app-role assignment via `az rest servicePrincipals/{spId}/appRoleAssignments`; the 14-slot GraphAppRoles.cs contract (per project CLAUDE.md MUST rules — 11 null GUIDs before first production customer); NFR-01 publish-size baseline (44.96 MB incl. PDBs, 2026-08-13 net10 framework-dependent linux-x64).</role>
+
+  <goal>All 5 in-scope Class-A rows annotated with `last_known_status_after_execution` in `notes/task-202-punch-list.md`. `/provision-environment` SKILL.md Step 0.5 reads `scripts/provisioning-prereqs/prereqs.yaml`, iterates every check recipe (per prereqs.yaml schema from task 202), HARD STOPS on any failure with actionable operator remediation link. SKILL.md Step 1 (or dedicated Step 0.6) accepts `--batch` flag consuming a JSON intake file per `scripts/provisioning-prereqs/intake.schema.json` (JSON Schema Draft 2020-12). SKILL.md Step 7 (mandatory) writes `lessons-learned.md` per run into `provisioning-runs/{customerId}-{runId}/lessons-learned.md` (per 203a's provisioning-runs structure). `scripts/Grant-ControlPlaneIdentity.ps1` exists and correctly grants: (a) L2 UAMI Graph app-role assignments for all 14 GraphAppRoles.cs entries, (b) Path X Dataverse App User creation, (c) scoped `Spaarke Provisioning Registry` role. All 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` are completed via live `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query "appRoles[?value=='<value>']"` enumeration (unexpected role IDs → escalate; do NOT silently accept). `dotnet build src/server/api/Sprk.Bff.Api/` succeeds after A16 edit. Publish-size re-baseline: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` compressed output reported with delta vs 44.96 MB baseline — MUST stay ≤60 MB ceiling per NFR-01 (expected delta: ≈0 MB since A16 adds only GUID literal string constants).</goal>
+
+  <context>
+    <background>Task 202 punch list §A-blocks-E2E YES lists 5 skill-wiring + adjacent rows: three touching `/provision-environment` SKILL.md (A02 external prereqs reader, A03 `--batch` + JSON Schema, A04 postmortem Step 7), one authoring a new operator-bootstrap PowerShell script (A15 `Grant-ControlPlaneIdentity.ps1`), and one completing the 11 null AppRoleId GUIDs in `GraphAppRoles.cs` (A16 — per project CLAUDE.md escalation trigger, unexpected role IDs MUST escalate before proceeding). A15 depends on A16 completion because the script grants role assignments referencing those GUIDs. A02+A03 depend on task 202's `scripts/provisioning-prereqs/prereqs.yaml` (already authored per punch list row A01 ✅). A04 depends on 203a's `provisioning-runs/_templates/lessons-learned.md` (populated by 203a A06). A16 touches BFF-consumed shared code (`src/server/shared/Spaarke.Dataverse/GraphAppRoles.cs`), so NFR-01 publish-size ≤60 MB verification is REQUIRED per root CLAUDE.md §10 (baseline: 44.96 MB incl. PDBs per 2026-08-13 net10 framework-dependent linux-x64; expected delta ≈0 MB since only GUID string constants are added).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/design-study-ds8-uami-dv-appuser-maturity.md</file>
+      <file role="input">docs/guides/PROVISIONING-PREREQUISITES.md</file>
+      <file role="input">scripts/provisioning-prereqs/prereqs.yaml</file>
+      <file role="target-modify">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="target-new">scripts/provisioning-prereqs/intake.schema.json</file>
+      <file role="target-new">scripts/Grant-ControlPlaneIdentity.ps1</file>
+      <file role="target-modify">src/server/shared/Spaarke.Dataverse/GraphAppRoles.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored; prereqs.yaml exists per row A01</dependency>
+      <dependency task="203a" status="required-if-parallel-not-safe">203a authors `provisioning-runs/_templates/lessons-learned.md` (A06). A04 requires that template to exist. If 203a has not landed, defer A04 within this task and note.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each row's actual state BEFORE applying. GraphAppRoles.cs in particular may have partial completions from prior batches — count null AppRoleId slots BEFORE editing.</constraint>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary">Edits to `.claude/skills/provision-environment/SKILL.md` (A02, A03, A04) MUST occur in the MAIN SESSION. Sub-agents cannot Write/Edit these paths.</constraint>
+    <constraint source="project CLAUDE.md §Human Escalation Triggers (BINDING)">A16: any `az ad sp show` enumeration returning unexpected role IDs (mismatch vs OSS GraphAppRoles.cs precedent from Microsoft docs) MUST escalate BEFORE completing. Do NOT silently accept unexpected GUIDs.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF Hygiene NFR-01">A16 touches BFF-consumed shared code. MUST run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + measure compressed output + report absolute size + delta vs 44.96 MB baseline in task summary. Threshold: ≥+5 MB single-task delta → explicit justification; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP. Expected delta ≈0 MB.</constraint>
+    <constraint source="root CLAUDE.md §11 component justification">Both NEW files (`Grant-ControlPlaneIdentity.ps1`, `intake.schema.json`) MUST cite punch list row A15 / A03 in file header + answer Existing/Extension/Cost-of-doing-nothing.</constraint>
+    <constraint source="A02 prereqs.yaml contract">SKILL.md Step 0.5 MUST iterate every check-recipe key in `prereqs.yaml` (not a hardcoded subset) — new prereqs added by future task 202 amendments must be picked up automatically.</constraint>
+    <constraint source="A03 JSON Schema — Draft 2020-12">`intake.schema.json` uses Draft 2020-12 (`$schema: https://json-schema.org/draft/2020-12/schema`) for consistency with existing Spaarke schema authoring conventions.</constraint>
+    <constraint source="A04 dependency on 203a">A04's Step 7 postmortem writes into `provisioning-runs/{customerId}-{runId}/lessons-learned.md` — this path convention MUST match 203a's provisioning-runs structure. If 203a has not landed, MARK A04 as `deferred-because-203a-not-yet-landed` and skip; do NOT invent a divergent path.</constraint>
+    <constraint source="A15 dependency on A16">Grant-ControlPlaneIdentity.ps1 references all 14 GraphAppRoles GUIDs. Do A16 FIRST; then A15. If A16 escalates unexpected role IDs, A15 is BLOCKED.</constraint>
+    <constraint source="A16 az enumeration recipe">For each of 11 null slots: `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query "appRoles[?value=='<value>']" -o json`. Cross-check enumerated GUID against Microsoft-documented Graph app-role catalog (or against `docs/architecture/AI-ARCHITECTURE.md` if it references) BEFORE committing to the code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-A punch list execution — skill wiring (Step 0.5 + --batch + Step 7 + Grant script + GraphAppRoles)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds8-uami-dv-appuser-maturity.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/guides/PROVISIONING-PREREQUISITES.md</file>
+      <file>src/server/shared/Spaarke.Dataverse/GraphAppRoles.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL block (FULL, xhigh effort). Read `notes/task-202-punch-list.md` §CLASS A rows A02, A03, A04, A15, A16. Read `.claude/skills/provision-environment/SKILL.md` current Step 0-7 flow. Read `docs/guides/PROVISIONING-PREREQUISITES.md` + `scripts/provisioning-prereqs/prereqs.yaml`. Read `GraphAppRoles.cs` and count null slots.</step>
+    <step order="1" name="Grep-verify each row BEFORE applying">For each row A02, A03, A04, A15, A16: run row-specific grep against target files. Record verified status in scratchpad table BEFORE any edit. Count null AppRoleId slots in GraphAppRoles.cs; if not 11 (already partially filled), reconcile against source-of-truth before proceeding with A16.</step>
+    <step order="2" name="Verify 203a dependency for A04">Grep for `provisioning-runs/_templates/lessons-learned.md` — if absent, MARK A04 `deferred-because-203a-not-yet-landed` + skip A04. Otherwise proceed.</step>
+    <step order="3" name="A16 apply — GraphAppRoles.cs 11 null GUIDs (do FIRST, blocks A15)">Read GraphAppRoles.cs; enumerate 11 null slots. For each, run `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query "appRoles[?value=='<value>']" -o json` and record enumerated GUID + cross-check against Microsoft-documented Graph app-role catalog. If ALL 11 enumerate cleanly + match precedent, EDIT GraphAppRoles.cs to fill in the GUIDs. If ANY unexpected → STOP + escalate per project CLAUDE.md §Human Escalation Triggers.</step>
+    <step order="4" name="Publish-size verification post-A16">Run `dotnet build src/server/api/Sprk.Bff.Api/` (must succeed) then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output + record absolute size + delta vs 44.96 MB baseline. Expected delta ≈0 MB.</step>
+    <step order="5" name="Checkpoint (after 1 row + build/publish)">Run `context-handoff`.</step>
+    <step order="6" name="A15 apply — Grant-ControlPlaneIdentity.ps1">Author `scripts/Grant-ControlPlaneIdentity.ps1` with header citing punch list row A15 + §11 justification. Reference all 14 GraphAppRoles GUIDs (now filled from A16). Include: (a) `az rest servicePrincipals/{spId}/appRoleAssignments` calls for Graph app-role assignments to L2 UAMI, (b) Path X Dataverse App User creation via Web API PATCH per DS-8, (c) scoped `Spaarke Provisioning Registry` role assignment. Add `-WhatIf` support + dry-run mode.</step>
+    <step order="7" name="A03 apply — --batch + intake.schema.json">Author `scripts/provisioning-prereqs/intake.schema.json` (JSON Schema Draft 2020-12) covering profile enum, customerId, tenantId, environmentId, region, tier. EDIT SKILL.md Step 1 to accept `--batch <path-to-json>` bypassing interactive intake — value MUST validate against the JSON Schema before proceeding.</step>
+    <step order="8" name="A02 apply — Step 0.5 external prereqs reader">EDIT SKILL.md Step 0.5 to READ `scripts/provisioning-prereqs/prereqs.yaml` + iterate every check-recipe key + execute each check + HARD STOP on any failure with actionable operator remediation link (link INTO `docs/guides/PROVISIONING-PREREQUISITES.md` fragment).</step>
+    <step order="9" name="Checkpoint (after 3 rows)">Run `context-handoff`.</step>
+    <step order="10" name="A04 apply — Step 7 postmortem (conditional on 203a)">IF 203a landed (per Step 2 check): EDIT SKILL.md to author mandatory Step 7 that writes `provisioning-runs/{customerId}-{runId}/lessons-learned.md` per run. Template MUST reference 203a's per-run lessons-learned.md template. Include triggering conditions (Ready reached / gate failure / abort). Otherwise skip + annotate.</step>
+    <step order="11" name="Build + test">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed. Run any existing GraphAppRoles unit tests (if present).</step>
+    <step order="12" name="Amend punch list annotations">EDIT `notes/task-202-punch-list.md` — add `last_known_status_after_execution` per row A02, A03, A04, A15, A16. Append §203c execution results subsection with GraphAppRoles enumerated GUID list + BFF publish-size delta report + A04 deferral status (if any).</step>
+    <step order="13" name="Report">Emit concise summary: rows applied, rows already-applied, rows deferred (with reason), publish-size + delta reported, GraphAppRoles enumeration outcomes (all matched / any escalated), A04 deferral status. Do NOT commit — main session handles commit after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger name="graphapproles-unexpected-guid" source="project CLAUDE.md">A16: ANY of the 11 `az ad sp show` enumerations returning a role ID that does NOT match the OSS GraphAppRoles.cs precedent (Microsoft-documented catalog) MUST escalate — do NOT silently accept. Owner directive: 11 null GUIDs MUST be verified before completing.</trigger>
+    <trigger>If BFF publish-size delta after A16 exceeds +1 MB (well above expected ≈0 MB), STOP — GUID string constants should not materially affect publish size; a larger delta indicates something else regressed.</trigger>
+    <trigger>If BFF publish size after A16 exceeds 55 MB cumulative, STOP and escalate per root CLAUDE.md §10 (architecture review threshold).</trigger>
+    <trigger>If 203a's `provisioning-runs/_templates/lessons-learned.md` is missing at A04 time AND 203a is claimed complete, STOP — this is a 203a completion audit failure, not a route-around opportunity.</trigger>
+    <trigger>If Path X Dataverse App User creation via Web API PATCH fails in A15 dry-run (`-WhatIf`), STOP — DS-8 documents multiple maturity states; verify current live state before authoring script.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every in-scope Class-A row (A02, A03, A04, A15, A16) has `last_known_status_after_execution` annotated in `notes/task-202-punch-list.md`.</criterion>
+    <criterion testable="true">SKILL.md Step 0.5 references `scripts/provisioning-prereqs/prereqs.yaml` + describes iteration loop + HARD STOP on failure (grep for both terms).</criterion>
+    <criterion testable="true">`scripts/provisioning-prereqs/intake.schema.json` exists as valid JSON Schema Draft 2020-12. SKILL.md Step 1 references `--batch` flag + this schema.</criterion>
+    <criterion testable="true">SKILL.md Step 7 exists AND writes `provisioning-runs/{customerId}-{runId}/lessons-learned.md` (OR row annotated `deferred-because-203a-not-yet-landed`).</criterion>
+    <criterion testable="true">`scripts/Grant-ControlPlaneIdentity.ps1` exists AND references all 14 GraphAppRoles GUIDs AND supports `-WhatIf`.</criterion>
+    <criterion testable="true">`src/server/shared/Spaarke.Dataverse/GraphAppRoles.cs`: zero `null` AppRoleId literal remain (grep confirms 0 matches of `AppRoleId = null` or equivalent).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds.</criterion>
+    <criterion testable="true">BFF publish size + delta reported in task summary. Delta ≤+1 MB expected; absolute ≤60 MB (NFR-01).</criterion>
+    <criterion testable="true">All 11 A16 GUID enumerations cross-checked against Microsoft-documented Graph app-role catalog; unexpected → escalated per §Escalation Triggers.</criterion>
+    <criterion testable="true">Any newly created files justified per CLAUDE.md §11 by punch list row citation in file header.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing — task 202 authored the punch list + prereqs.yaml + PROVISIONING-PREREQUISITES.md; 203a authored `provisioning-runs/_templates/`. This task consumes all three. Extension — 203c wires the skill to the codified prereqs (Step 0.5), enables batch mode (Step 1 flag), enforces mandatory postmortem (Step 7), and provides operator-bootstrap script (A15) + completes the long-standing GraphAppRoles null GUIDs (A16). Cost-of-doing-nothing — without Step 0.5 the operator manually verifies prereqs each run (SESSION 5 failure mode); without --batch the skill cannot be automated; without Step 7 the two-level lessons process is one-level only (no per-run postmortem); without Grant-ControlPlaneIdentity.ps1 operator bootstrap remains manual `az` toil; without GraphAppRoles GUIDs H10 cannot complete for the first production customer (BINDING per project CLAUDE.md MUST rules). NFR-01 publish-size verification REQUIRED per §10 (baseline 44.96 MB; expected delta ≈0 MB).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

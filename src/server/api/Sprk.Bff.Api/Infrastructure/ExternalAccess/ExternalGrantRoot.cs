@@ -41,6 +41,21 @@ internal static class ExternalGrantRoot
     };
 
     /// <summary>
+    /// The Dataverse lookup VALUE column for a grant root — the form used when FILTERING or SELECTING
+    /// (<c>_sprk_project_value</c>), as opposed to the PascalCase navigation property used when BINDING
+    /// on write (<see cref="BindFor"/>). Mixing the two is a silent-failure class: an
+    /// <c>@odata.bind</c> name in a <c>$filter</c> matches nothing and returns an empty set, which on the
+    /// revoke path would read as "no sibling rows to sweep".
+    /// </summary>
+    public static string ValueColumnFor(ExternalGrantRootType type) => type switch
+    {
+        ExternalGrantRootType.Project => "_sprk_project_value",
+        ExternalGrantRootType.Matter => "_sprk_matter_value",
+        ExternalGrantRootType.WorkAssignment => "_sprk_workassignment_value",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown external grant root type.")
+    };
+
+    /// <summary>
     /// Parses a wire <c>recordType</c> token (case-insensitive) into an <see cref="ExternalGrantRootType"/>.
     /// Accepts <c>project</c> | <c>matter</c> | <c>workassignment</c> (hyphen/underscore spellings of the
     /// last are also accepted). Returns <c>false</c> for null/empty/unknown so callers reject fail-closed.

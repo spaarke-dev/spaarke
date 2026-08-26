@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-24 — explicit access-conferring column registry (contact-typed AND organization-typed) replaces the sprk_assigned* prefix convention</title>
+    <phase>2 One definition of member</phase>
+    <gate>after-040</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-policy .cs change in the membership resolver (security-load-bearing NFR-05 predicate); tags auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified predicate replacement with a named reference implementation and closed acceptance; default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>p2-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Files confined to Services/Ai/Membership/** + its tests — disjoint from the ExternalAccess evaluator spine; safe alongside other parallel-safe tasks whose files do not touch the membership service.</parallel-reason>
+    <deps>040</deps>
+    <tags>auth, security, bff-api, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the sprk_assigned* PREFIX CONVENTION in the membership resolver's access-conferring policy with an EXPLICIT column registry covering contact-typed AND organization-typed lookups (spec FR-24). A naming convention silently admits sprk_assignedmonitor and silently denies sprk_leadcontact (design §4.5); the registry makes conferral a reviewed edit. The registry must be seeded with exactly today's effective conferring set (no behavior change at cutover) plus the org-typed conferring columns (sprk_assignedlawfirm1/2 per ADR-034 M4 + the inventory from task 039's notes). Adding a conferring column becomes a registry edit, not a rename.</prompt>
+  <role>SPAARKE platform developer, C#/.NET + membership resolver internals. Follow ADRs strictly.</role>
+  <goal>MembershipOptions.AccessConferringRoles redefined as an explicit registry (per-entity column lists, each entry typed contact|organization); FilterToAccessConferringContactRoles generalized to FilterToAccessConferringRoles consulting the registry for BOTH identity types; a MembershipResolveOptions switch (e.g. AccessConferringOnly) letting ANY entry point request registry-filtered resolution (consumed by task 043 for the systemuser fallback path); migration-seeded config; full test coverage.</goal>
+
+  <context>
+    <background>Investigation 02 §3: the contact path applies the allowlist predicate (Contact-typed ∧ sprk_assigned* prefix ∧ not excluded — MembershipResolverService FilterToAccessConferringContactRoles, marked security-load-bearing NFR-05); the systemuser path applies NO allowlist. Investigation 02 §4.2: UAC-r2 MUST define the systemuser-plane conferring policy explicitly. Register B-12: org expansion would otherwise confer access from ANY organization on the record, including opposing counsel. The existing test ResolveByContactAsync_NewlyAddedAssignedConventionField_AutoQualifiesWithoutCodeChange locks the CONVENTION — it must be inverted: a new field NOT in the registry must NOT qualify.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file role="canonical-reference">.claude/adr/ADR-034-user-record-membership.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">ADR-034 amendment sanctioning the registry + per-surface policy (cite in PR).</dependency>
+      <dependency task="039 (soft)" status="pending">The org-typed column inventory recorded in notes/ — if 039 has not landed, derive the inventory from live metadata directly and record it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034 (as amended by task 040)">Scope: the predicate. Conferral = registry membership ONLY: entry (entityType, columnLogicalName, identityType ∈ {Contact, Organization}). The prefix check is DELETED, not layered under the registry. Per-surface rule holds: discovery/scoping output is untouched — only the access-conferring filter consults the registry.</constraint>
+    <constraint source="spec FR-24">Scope: seeding. The initial registry MUST reproduce today's effective conferring set exactly (enumerate live sprk_assigned* contact-typed lookups per entity and list them literally) plus the org-typed conferring columns; the cutover commit shows zero behavior change on the contact path (existing resolution tests green with only the convention-lock test inverted).</constraint>
+    <constraint source="spec NFR-01">Scope: config handling. An entity with NO registry entries confers NOTHING via the derived-member term (fail-closed default); a malformed registry entry (unknown column/type) is logged and IGNORED as non-conferring — never widened.</constraint>
+    <constraint source="ADR-032">Scope: rollout. Registry lives in configuration bound via MembershipOptions post-configure (existing pattern) with the code-seeded default = the migration seed, so absent config keeps today's behavior.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>membership allow-list policy, options-pattern config</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/investigation/02-membership-spine.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="security-load-bearing predicate" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs">FilterToAccessConferringContactRoles (":511-558") is the predicate being generalized — keep its structure (filter BEFORE FetchXml construction; excluded fields never reach the query) and its NFR-05 header discipline.</pattern>
+      <pattern name="seeded defaults" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs">MembershipOptionsDefaults post-configure seeding (":241-277") is the config-with-code-default pattern for the registry seed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the predicate, MembershipOptions, the convention-lock test, investigation 02 §3.</step>
+    <step order="1">Enumerate the migration seed: live sprk_assigned* contact-typed lookups per root/child entity (metadata query) + org-typed conferring columns (sprk_assignedlawfirm1/2 + 039's inventory if present). Write the seed list to notes/ for review.</step>
+    <step order="2">Define the registry type on MembershipOptions + seeded defaults; bind from config section Membership:AccessConferringRoles (superseding ConventionPrefix/ExcludedFields — retire both with a config-migration note).</step>
+    <step order="3">Generalize the predicate to consult the registry for Contact AND Organization descriptors; add the AccessConferringOnly option on MembershipResolveOptions applying the same predicate on the ResolveAsync (systemuser) path when requested; default false (scoping behavior untouched).</step>
+    <step order="4">Tests per the closed set; invert the convention-lock test into a registry-lock test.</step>
+    <step order="5">Build + tests; publish-size measurement per §10.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the seed list + any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If enumerating live metadata reveals conferring-candidate columns whose inclusion is a judgment call (e.g. sprk_assignedmonitor-style fields that the convention admits today but that look non-conferring), STOP and present the seed list for owner review before cutover — the seed IS the access policy.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FilterToAccessConferringContactRoles (MembershipResolverService.cs, contact path only) + MembershipOptions.AccessConferringRoles (ConventionPrefix default "sprk_assigned", MembershipOptions.cs:115-132) — the convention-based predecessor, verified by investigation 02 §3.</existing>
+    <extension>Yes — this task EXTENDS the existing predicate + options type in place (registry replaces prefix inside the same seam); no new service, no new file surface beyond config shape.</extension>
+    <cost-of-doing-nothing>Org expansion (task 043) would confer access from ANY organization referenced on a record — including opposing counsel (register B-12); and the convention keeps silently admitting/denying columns by name (design §4.5), which FR-24's acceptance explicitly forbids.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A registry-listed contact-typed column confers membership on the contact path; a registry-listed org-typed column produces an Organization descriptor surviving the filter.</criterion>
+    <criterion testable="true">FR-24 negative: an organization referenced in a NON-registry lookup (e.g. sprk_opposingcounsel) confers nothing — the field never reaches the emitted FetchXml (query-shape assertion, mirroring the existing adverse-field tests).</criterion>
+    <criterion testable="true">FR-24 negative: a NEW sprk_assigned*-named column NOT in the registry does NOT qualify (inversion of the old convention-lock test) — adding it to the registry (config only, no code) makes it qualify.</criterion>
+    <criterion testable="true">Negative: an entity with zero registry entries yields zero conferring descriptors (fail-closed); a malformed entry is ignored and logged, never widened.</criterion>
+    <criterion testable="true">AccessConferringOnly=true on ResolveAsync applies the registry filter on the systemuser path; default false leaves scoping output byte-identical (both pinned).</criterion>
+    <criterion testable="true">Migration: with seeded defaults and no config, every pre-existing contact-path resolution test passes unchanged (except the inverted lock test).</criterion>
+    <criterion testable="true">Build green; publish size reported and ≤60 MB; PR cites the ADR-034 amendment.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-24; design §4.5; investigation 02 §3/§4.2; register B-12. The evaluator-side CONSUMPTION of AccessConferringOnly (systemuser fallback path) and the org-expansion term are task 043 — do not touch Infrastructure/ExternalAccess/** here.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

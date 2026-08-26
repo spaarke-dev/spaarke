@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B04 multi-tenant Dataverse routing — ADR tension resolution FIRST, then apply chosen path</title>
+    <phase>Pre-Live-Fire — Class-B foundational architectural resolution</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architectural / ADR-adjacent — high blast radius. Root CLAUDE.md §8 rigor decision tree explicitly cites `bff-api` + ADR-migration-adjacent + high-blast-radius as FULL triggers. Terminal decision touches Model 1 tenancy design (D3, ADR-027 exception territory).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Root CLAUDE.md §8.5: Opus/Fable required for high-blast-radius / architectural / ADR-migration / security work. This task authors an ADR-tension row under CLAUDE.md §6.5 protocol AND (on Path B) authors an ADR amendment + implements runtime multi-tenant routing in a foundational DI seam (`DataverseServiceClientImpl.cs:37-39` is DI-setup config-read that other services depend on). Sonnet not sufficient for ADR-amendment authoring.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial: this task must PAUSE at Step 2 for owner path-choice escalation; downstream code changes (Path B) touch `DataverseServiceClientImpl` used by many services. Also gates 204c (H13 probes reference registry client behavior) and any Model 1 acceptance work. Cannot run alongside other 204* rows that touch Dataverse client wiring.</parallel-reason>
+    <deps>202</deps>
+    <tags>bff-api, l2-controlplane, adr-tension, escalation, foundational, architectural</tags>
+    <estimated-effort>1-40 hours (path-dependent: Path A ~1h doc; Path B ~16-40h amendment+refactor; Path C scope-uncertain)</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve the B04 multi-tenant Dataverse routing gap surfaced by task 202 SESSION 5 Lesson 3: `DataverseServiceClientImpl.cs:37-39` reads ONE `Dataverse:ServiceUrl` from config at DI-setup time, contradicting Model 1's per-tenant Dataverse design intent. FIRST STEP: author an ADR Tension row in `projects/customer-provisioning-orchestration-r1/spec.md` §ADR Tensions per root CLAUDE.md §6.5 three-path protocol (Path A documented exception / Path B ADR amendment / Path C pivot to comply). STOP and escalate to owner for path choice — this is a legitimate stopping condition per §6.5, not a skill failure. On owner decision: apply chosen path (Path A ≈ 1h doc-only, Path B ≈ 16-40h ADR amendment + `DataverseServiceClientImpl` refactor for runtime multi-tenant routing + I5 ArchTest extension + tests, Path C scope-uncertain — may spawn additional tasks for Model 1 architectural refactor).</prompt>
+
+  <role>SPAARKE platform architect. Expert in: root CLAUDE.md §6.5 ADR Conflict Resolution Protocol (mandatory three-path template + escalation format); ADR-027 subscription-isolation-and-dataverse-solution-management + Model 1 shared-tier documented exception (per project spec.md §ADR Tensions Path A rows); project design.md D3 tenancy model + §5.2 handler placement rules; `DataverseServiceClientImpl` + `DataverseServiceClient` factory + token cache patterns (`RegistrationDataverseService` cross-env token cache reference); Model 1 vs Model 2 Dataverse topology (Model 1 shared tier: one BFF, N tenants; Model 2 dedicated: one BFF per env).</role>
+
+  <goal>ONE of the three §6.5 paths is chosen by the owner and fully executed:
+- **Path A**: `projects/customer-provisioning-orchestration-r1/spec.md` §ADR Tensions has a new row documenting the multi-tenant DV routing exception with concrete rationale + impact + rejected alternatives; `design.md` §Placement Justification references the exception; PR description explicitly cites path A + code-review approves; NO code change to `DataverseServiceClientImpl`.
+- **Path B**: A new ADR-XXX amendment file exists (concise + full versions), extending prior DV-client scoping guidance to permit runtime multi-tenant routing; `DataverseServiceClientImpl` refactored to accept per-request/per-tenant `ServiceUrl` (via `ITenantContextAccessor` or equivalent seam); token cache adapted for per-tenant scoping; I5 ArchTest (`Spaarke.ArchTests.TenantIsolation.I5_*`) extended to cover the new routing surface; unit + integration tests green; publish size + delta reported.
+- **Path C**: Model 1 architecture refactored to comply with single-DV-per-tier assumption; additional POMLs spawned for scope beyond this task; `DataverseServiceClientImpl` left unchanged; H5 handler behavior amended to NOT create per-tenant Dataverse envs in Model 1.
+
+Regardless of path: the ADR-tension row exists in `spec.md` per §6.5 mandatory-format; task 202's punch list B04 row is annotated with `applied — Path X`.</goal>
+
+  <context>
+    <background>SESSION 5 (2026-08-24) surfaced this during Model 1 Prod BFF standup: `src/server/api/Sprk.Bff.Api/Services/Registration/DataverseServiceClientImpl.cs:37-39` reads a single `Dataverse:ServiceUrl` from `IConfiguration` at DI-setup time via `IOptions<DataverseOptions>`. This is fine for Model 2 (one BFF per dedicated env — env=1:1 with URL). For Model 1 (shared tier: one BFF serves N tenants), it contradicts the spec.md D3 tenancy design intent that each tenant has its OWN Dataverse environment created by H5. Either:
+- **Path A reality**: Model 1 shared BFF actually serves ONE shared Dataverse per tier (all Model 1 customers share `sprksharedstartus2` for now), and the multi-tenant story is a future goal not a v3.6 reality. Document the exception.
+- **Path B reality**: H5 DOES create per-tenant Dataverse envs in Model 1 (per current spec), so `DataverseServiceClientImpl` genuinely needs runtime routing. Requires ADR amendment (which ADR? candidates: ADR-027 sub-isolation, ADR-028 spaarke-auth-architecture — DV client scoping is auth-adjacent).
+- **Path C reality**: The spec's Model 1 per-tenant DV design is wrong; walk it back; shared DV IS the Model 1 design.
+
+**Why this must go through §6.5**: silent compliance (leaving single-URL wiring) may produce a Model 1 tenant-isolation bug at runtime; silent extension (patching `DataverseServiceClientImpl` for multi-tenant without ADR amendment) may violate implicit ADR-027/ADR-028 assumptions. Neither is acceptable per §6.5 — the choice must be surfaced explicitly.
+
+**Owner input is load-bearing**: only the project owner can choose between "Model 1 shared DV is the design, spec should walk back the per-tenant claim" (Path C) vs "Model 1 per-tenant DV is the design, extend the client" (Path B) vs "narrow exception for v3.6" (Path A).</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (B04 row + Class-B verification matrix)</file>
+      <file role="input">projects/customer-provisioning-orchestration-r1/spec.md §ADR Tensions section (this task ADDS a row here per §6.5)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseServiceClientImpl.cs (Path B only)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs (cross-env token cache + multi-URL ops precedent)</file>
+      <file role="reference">.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file role="reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/design.md §D3 tenancy model + §5.2 handler placement</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/CLAUDE.md §Applicable ADRs + §ADR Tensions</file>
+      <file role="ceremony">CLAUDE.md §6.5 (root — ADR Conflict Resolution Protocol; the mandatory template lives here)</file>
+      <file role="target-new-path-B">docs/adr/ADR-XXX-multi-tenant-dataverse-routing.md (only if Path B — full ADR)</file>
+      <file role="target-new-path-B">.claude/adr/ADR-XXX-multi-tenant-dataverse-routing.md (only if Path B — concise ADR)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (annotate B04 row outcome)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored; verification matrix landed 2026-08-24 SESSION 7 — B04 row is foundational to this task's scope</dependency>
+    </dependencies>
+    <blocks>
+      <blocked-task task="204c" reason="H13 probes reference registry client behavior; multi-tenant routing decision informs probe design" optional="true" />
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify B04's actual code state BEFORE authoring the ADR tension. Confirm `DataverseServiceClientImpl.cs:37-39` still reads single `Dataverse:ServiceUrl` (verification matrix says yes as of 2026-08-24). If code changed since verification pass, adjust tension row scope accordingly.</constraint>
+    <constraint source="root CLAUDE.md §6.5 ADR Conflict Resolution Protocol (BINDING since 2026-06-29)">MUST author the ADR tension row using the exact template in §6.5: ADR + specific rule + conflict + proposed path A/B/C + rationale + impact + alternative-considered. Silent compliance or silent violation are BOTH forbidden. Owner-decision path picks; do NOT self-select without escalation.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">Path B refactor of `DataverseServiceClientImpl` touches src/server/api/Sprk.Bff.Api/ MUST report publish-size + delta in PR per CLAUDE.md §10; ceiling ≤60 MB compressed; current baseline 44.96 MB incl. PDBs. Path B likely no NuGet adds so publish size delta should be small; verify anyway.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md § F test update obligation">Path B refactor MUST have accompanying unit tests (multi-tenant routing behavior) + integration test (cross-env token cache still functions per-tenant scoped) + ArchTest extension covering the new routing surface.</constraint>
+    <constraint source="project CLAUDE.md § MUST rules">MUST NOT re-introduce Dataverse S2S app-reg (r3 task 060 dropped it). Path B multi-tenant routing MUST use per-tenant Managed Identity + `ManagedIdentityCredentialFactory` scoped tokens (per §4D I5). Do NOT introduce per-tenant client secrets stored in KV for DV auth.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">Path B introduces NEW seam (per-tenant routing accessor). Justify per §11 three-question template: (1) Existing overlap (`ITenantContextAccessor` if exists? `ITenantContainerResolver`?); (2) Can extend existing DV client instead? (answer likely no — that's the whole point of Path B); (3) Concrete failure without? (Model 1 shared BFF returns wrong tenant's Dataverse data on cross-tenant request).</constraint>
+    <constraint source="project spec.md § ADR Tensions Path A rows precedent">If Path A chosen, follow the existing Path A row format used for ADR-027 Model 1 shared-tier exception (that row is the reference example).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B04 multi-tenant Dataverse routing ADR tension</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, opus/xhigh). Read root CLAUDE.md §6.5 in full (ADR Conflict Resolution Protocol — the format is mandatory). Read `.claude/adr/ADR-027` + `ADR-028`. Read `notes/task-202-punch-list.md` B04 row + Class-B verification matrix entry.</step>
+    <step order="1" name="Verify current state">Grep-verify `DataverseServiceClientImpl.cs:37-39` still reads single `Dataverse:ServiceUrl` via `IOptions<DataverseOptions>`. Read the full file. Read `DataverseOptions.cs`. Enumerate all injection sites (services that receive `DataverseServiceClientImpl` or its interface) — this scope determines the blast radius for Path B refactor.</step>
+    <step order="2" name="Author ADR tension row + ESCALATE">Add a new row to `projects/customer-provisioning-orchestration-r1/spec.md` §ADR Tensions section using the exact §6.5 template:
+
+🔔 **ADR Conflict — Resolution Required**
+- **ADR in question**: ADR-027 (sub-isolation) + ADR-028 (auth) — DV client scoping is auth-adjacent
+- **Specific rule**: [quote the relevant MUST from the chosen ADR — likely ADR-027's per-tenant DV isolation intent OR ADR-028's per-tenant auth scope]
+- **Conflict**: `DataverseServiceClientImpl.cs:37-39` reads ONE `Dataverse:ServiceUrl` at DI-setup, contradicts Model 1 per-tenant DV design (D3)
+- **Proposed path**: request owner input — this task cannot self-select
+- **Rationale for each path**: A (documented exception if shared-DV is v3.6 reality), B (ADR amendment + runtime routing if per-tenant is true design), C (walk back spec if shared-DV is the intended design)
+- **Impact if A**: none (documentation-only); if B: ~16-40h refactor + I5 ArchTest extension + amendment authoring; if C: additional spec/design amendments + potentially H5 behavior change
+- **Alternative considered (and rejected)**: silent single-URL wiring (produces cross-tenant data-leak potential in Model 1)
+
+**STOP HERE**. Escalation trigger fires: `owner-decision-required`. Notify owner via chat + set task status to `paused-awaiting-owner-decision`. Do NOT proceed to Step 3 without owner path selection.</step>
+    <step order="3" name="Path A execute (only if chosen)">Author documented-exception content in `design.md` §Placement Justification citing rationale + concrete v3.6 scope. Update PR description with §6.5 exception citation. Annotate `notes/task-202-punch-list.md` B04 row: `applied — Path A — see spec.md §ADR Tensions row X`. NO code change to `DataverseServiceClientImpl`.</step>
+    <step order="4" name="Path B execute (only if chosen)">Author `.claude/adr/ADR-XXX-multi-tenant-dataverse-routing.md` (concise) + `docs/adr/ADR-XXX-...` (full). Refactor `DataverseServiceClientImpl` to accept per-request/per-tenant `ServiceUrl` via new seam (`ITenantDataverseUrlResolver` or extend existing `ITenantContextAccessor`). Adapt token cache for per-tenant scoping (reuse `RegistrationDataverseService` cross-env pattern). Extend `Spaarke.ArchTests.TenantIsolation.I5_*` ArchTest to cover new routing surface. Unit + integration tests. Report BFF publish size + delta. Annotate B04 row: `applied — Path B — ADR-XXX + code refactor`.</step>
+    <step order="5" name="Path C execute (only if chosen)">Amend spec.md D3 tenancy model to walk back per-tenant DV claim for Model 1. Amend H5 handler behavior via a new POML in this project. Annotate B04 row: `applied — Path C — spec walked back; see amendment + spawn tasks`. Notify owner that Path C spawns additional work.</step>
+    <step order="6" name="Build + verify (Path B only)">`dotnet build src/server/api/Sprk.Bff.Api/` — 0 warnings 0 errors. `dotnet test` green. `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — record compressed size + delta vs 44.96 MB baseline.</step>
+    <step order="6.5" name="Quality gates">FULL rigor + BFF-touched (Path B) → invoke `code-review` + `adr-check` skills per root CLAUDE.md §8. Address any Critical findings. `adr-check` should FIND the new ADR-XXX and validate the amendment format.</step>
+    <step order="7" name="Report">Update `current-task.md` + `TASK-INDEX.md` + `notes/task-202-punch-list.md` verification matrix B04 outcome. Cross-reference the spec.md ADR-tension row + chosen path from PR description.</step>
+  </steps>
+
+  <escalation>
+    <trigger name="owner-decision-required" phase="Step 2">**MANDATORY PAUSE POINT**. After authoring the §6.5 ADR-tension row in `spec.md`, this task MUST pause + escalate to owner for Path A/B/C selection. This is a legitimate stopping condition per root CLAUDE.md §6.5, NOT a skill failure. Do NOT self-select or default to any path. Escalation format: notify chat "🔔 ADR Conflict — Resolution Required — task 204b B04 multi-tenant DV routing paused pending owner path choice; see spec.md §ADR Tensions row X". Task status → `paused-awaiting-owner-decision`.</trigger>
+    <trigger>If Path B is chosen and the refactor blast radius exceeds ~40h (e.g., cross-env token cache needs full redesign, not just per-tenant scoping), STOP and re-scope. Path B was estimated 16-40h; exceeding this suggests Path C conditions apply and the owner should be re-consulted.</trigger>
+    <trigger>If BFF publish-size delta (Path B) ≥+5 MB, escalate per §10 threshold rule with explicit justification. New DI seam should be lightweight; large delta suggests unnecessary NuGet adds.</trigger>
+    <trigger>If any test surfaces a cross-tenant data leak or auth cross-contamination during Path B refactor, STOP and escalate per project CLAUDE.md § Human Escalation Triggers ("tenant-isolation invariant failure outside expected ArchTest work").</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="grep">DI injection-site enumeration for blast radius</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/spec.md §ADR Tensions (new B04 row — ALWAYS)</output>
+    <output type="doc-path-A">projects/customer-provisioning-orchestration-r1/design.md §Placement Justification (Path A only)</output>
+    <output type="adr-path-B">.claude/adr/ADR-XXX-multi-tenant-dataverse-routing.md + docs/adr/ADR-XXX-... (Path B only)</output>
+    <output type="code-path-B">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseServiceClientImpl.cs + new seam + I5 ArchTest extension (Path B only)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B04 row outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`spec.md` §ADR Tensions has a new B04 row formatted per root CLAUDE.md §6.5 mandatory template (ADR + rule + conflict + path + rationale + impact + alternative).</criterion>
+    <criterion testable="true">Task paused at Step 2 for owner path choice; task status reflected `paused-awaiting-owner-decision` at some point.</criterion>
+    <criterion testable="true">Owner-chosen path (A, B, or C) executed to completion; `notes/task-202-punch-list.md` B04 row annotated with `applied — Path X — <evidence>`.</criterion>
+    <criterion testable="true">If Path B: new ADR-XXX file exists (concise + full); `DataverseServiceClientImpl` refactored + tests + I5 ArchTest extension; `dotnet build` + `dotnet test` green; publish size + delta reported.</criterion>
+    <criterion testable="true">If Path A: PR description explicitly cites the §ADR Tensions row; NO code change to `DataverseServiceClientImpl`.</criterion>
+    <criterion testable="true">If Path C: spec.md D3 amended; additional POMLs spawned for downstream work.</criterion>
+    <criterion testable="true">Step 6.5 quality gates (code-review + adr-check) invoked; adr-check validates any new ADR-XXX (Path B).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing overlap — `DataverseServiceClientImpl` already exists; this task modifies it (Path B) OR documents an exception (Path A) OR amends spec (Path C). Extension — Path B introduces new tenant-URL-resolver seam; alternative was in-place per-tenant tokens per-tenant which fails the extension test (that IS the refactor). Cost-of-doing-nothing — silent single-URL wiring in Model 1 shared BFF produces cross-tenant Dataverse-data-leak potential at runtime; concrete failure mode named.
+
+This task is INTENTIONALLY foundational + serial + owner-gated. The value is NOT in code shipped — it's in the ADR-tension resolution ceremony being followed correctly. Silent compliance with a MUST rule that produces cross-tenant data leaks would itself be a §6.5 protocol violation.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

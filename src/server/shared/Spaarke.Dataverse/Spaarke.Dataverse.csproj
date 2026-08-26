@@ -31,4 +31,15 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Expose internal members to the test assembly (unified-access-control-r2 task 005, FR-04).
+         Matches the established Sprk.Bff.Api.csproj convention: the rights mapper is `internal` rather
+         than `private` so it can be exercised directly, WITHOUT reflection into a private member
+         (banned by ADR-038 §7 / tests CLAUDE.md ban B8). Its acceptance criterion — "the snapshot never
+         exceeds the caller's actual Dataverse rights, asserted by test with a mocked Dataverse answer" —
+         is not satisfiable any other way: the surrounding call is an HTTP request, and mocking that
+         transport is banned by B1. -->
+    <InternalsVisibleTo Include="Sprk.Bff.Api.Tests" />
+  </ItemGroup>
+
 </Project>

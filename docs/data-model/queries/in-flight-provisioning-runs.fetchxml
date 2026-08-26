@@ -1,0 +1,60 @@
+<!--
+  In-Flight Provisioning Runs — MDA fleet-visibility view (SC #9)
+
+  Project:    customer-provisioning-orchestration-r1
+  Table:      sprk_dataverseenvironment (entity set: sprk_dataverseenvironments)
+  Purpose:    Fleet visibility — every sprk_dataverseenvironment row whose provisioning
+              is NOT complete, i.e. sprk_setupstatus is InProgress (1) or Issue (3).
+              NotStarted (0) is intentionally excluded (not yet in flight); Ready (2)
+              is excluded (the whole point of the view).
+  Option-set: sprk_setupstatus — NotStarted=0, InProgress=1, Ready=2, Issue=3
+              (MCP-verified integer mapping, task 184 / DataverseRegistrySetupStatusUpdater).
+
+  Deployment note (why this is a standalone FetchXML doc, not a solution-packaged
+  SavedQuery XML): per notes/registry-column-audit-2026-08.md §3, the
+  sprk_dataverseenvironment table has NEVER been unpacked as a Dataverse solution in
+  this repo — src/dataverse/solutions/spaarke_core/** contains only .gitkeep
+  placeholders, and the table's schema is deployed operationally via
+  scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 (Web API, not solution import).
+  There is no existing Entities/sprk_dataverseenvironment/SavedQueries/ convention to
+  extend without fabricating a partial, non-round-trippable solution fragment.
+  This FetchXML is the sanctioned fallback (per Wave G-8 Batch 12 dispatch): it
+  documents the exact query pattern; an operator (or a future solution-authoring
+  task, once spaarke_core IS unpacked) imports it into a real MDA "Advanced Find"
+  saved view or a SavedQuery XML using the same fetchxml payload verbatim.
+
+  Manual-import procedure (until a packaged MDA view lands):
+    1. In the Model-Driven App, open the sprk_dataverseenvironment (Environment
+       Registry) grid → Edit Columns / Advanced Find → "Download FetchXML" is not
+       needed; instead use "Edit Columns" → switch to FetchXML mode if available,
+       OR create a new personal/system view and paste the <fetch>...</fetch> block
+       below into the view's FetchXML via the classic Advanced Find "Edit Columns"
+       > "Download Fetch XML" reverse path (import via XrmToolBox FetchXML Builder,
+       or PAC CLI / Dataverse MCP `create_record` against `savedqueries` with
+       `fetchxml` set to the block below and `returnedtypecode` = sprk_dataverseenvironment).
+    2. Set the view name to "In-Flight Provisioning Runs" and add it to the
+       sprk_dataverseenvironment sitemap / grid's view-picker.
+    3. Verify columns render: sprk_name, sprk_setupstatus, sprk_currentrunid,
+       sprk_customerid, createdon, modifiedon.
+
+  Columns (per Wave G-8 Batch 12 dispatch spec): sprk_name, sprk_setupstatus,
+  sprk_currentrunid, sprk_customerid, createdon, modifiedon.
+-->
+<fetch version="1.0" mapping="logical" no-lock="true">
+  <entity name="sprk_dataverseenvironment">
+    <attribute name="sprk_dataverseenvironmentid" />
+    <attribute name="sprk_name" />
+    <attribute name="sprk_setupstatus" />
+    <attribute name="sprk_currentrunid" />
+    <attribute name="sprk_customerid" />
+    <attribute name="createdon" />
+    <attribute name="modifiedon" />
+    <order attribute="modifiedon" descending="true" />
+    <filter type="and">
+      <condition attribute="sprk_setupstatus" operator="in">
+        <value>1</value>
+        <value>3</value>
+      </condition>
+    </filter>
+  </entity>
+</fetch>

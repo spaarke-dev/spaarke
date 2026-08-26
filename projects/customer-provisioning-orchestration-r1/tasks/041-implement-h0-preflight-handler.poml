@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H0 Preflight Handler (Quota + Cert-Bootstrap Checks)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; implements upstream gating handler that blocks the entire pipeline; FR-01/R19 scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component handler implementation following the canonical Services/Jobs/**/*Handler.cs pattern; complete spec (FR-01, §4.1 H0 row); no cross-cutting refactor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036</deps>
+    <tags>l2-controlplane, job-handler, azure-deployment</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H0 preflight handler as an IJobHandler in the L2 control-plane scaffold (task 036). H0 validates all run parameters and queries four quota/readiness sources — Azure OpenAI regional TPM headroom, Dataverse env-creation rate, subscription vCPU, SPE cert-bootstrap status — and BLOCKS the run before H1 starts if any headroom is insufficient. Idempotency key: preflight-{customerId}-{paramHash}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract (ADR-004), Azure Resource Manager quota APIs, Azure OpenAI cognitiveservices REST endpoints, pac admin quota, and 3-level idempotency (Service Bus MessageId + Redis IdempotencyService + Dataverse alt-key). Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H0PreflightHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) validates all run parameters against ProvisioningRun schema, (b) queries Azure OpenAI regional TPM headroom (150+200+30+350 sum per model), Dataverse env-creation rate (~4/hour typical), subscription vCPU quota, SPE cert-bootstrap presence, (c) returns success only if ALL headroom checks pass for +1 provisioning target, (d) writes an explicit rejection reason to Cosmos runNotes on failure, (e) asserts idempotency key preflight-{customerId}-{paramHash}. Unit tests cover both happy path and each individual quota-fail path.</goal>
+
+  <context>
+    <background>Per spec.md FR-01 and design.md §4.1 H0 row + §12 R19: prior generations of provisioning saw silent regional TPM clashes because H1 fired before quota was validated. H0 exists to surface lead-time items (quota bumps take 1–3 days) BEFORE the 30-min Bicep step. Design.md §15 north-star: quota gate blocks run before H1 if insufficient headroom.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H0PreflightHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H0PreflightHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold (DI + JWT bearer + Cosmos + Service Bus wiring) — Wave C3</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">This handler is a single IJobHandler implementation — one message, one handler, one outcome (see design.md §5.1 individual-handlers row).</constraint>
+    <constraint source="ADR-010">H0 registers in the L2 control-plane DI container, NOT the BFF (per spec.md §5.2 + D3/D8/D12).</constraint>
+    <constraint source="ADR-036">Handler uses the shared background-job infrastructure (Service Bus enqueue + Redis IdempotencyService); do NOT re-implement idempotency locally.</constraint>
+    <constraint source="ADR-044">Any Dataverse GUID references in H0 (e.g., sprk_dataverseenvironment key) follow the canonicalization contract (lowercase, no braces).</constraint>
+    <constraint source="project">Idempotency key format `preflight-{customerId}-{paramHash}` — paramHash is a deterministic content hash of the ProvisioningRun.parameters object, NOT an attempt counter (design.md §4.1 preamble on {schemaVer} semantics).</constraint>
+    <constraint source="project">H0 MUST block on ANY quota shortfall (spec.md FR-01 acceptance) — return a distinct rejection reason per failing check so the operator can act on it. No "advisory" quota results.</constraint>
+    <constraint source="project">SPE cert-bootstrap check is presence-only (verifies a bootstrap cert exists in Spaarke platform KV) — 24h SPE replication itself is customer-prereq lead-time, NOT an in-pipeline wait (design.md §4.1 H8 row + §9 north star).</constraint>
+    <constraint source="spec.md NFR-12">Regional TPM headroom check MUST fail run before H1 if projected +1-tenant capacity exceeds the 150+200+30+350 sum per-model regional quota — prevents cross-customer concurrency clashes per R19.</constraint>
+    <constraint source="spec.md §4D I1">H0 MUST NOT hardcode default tenant — accepts tenantId from run parameters and passes explicitly to every Azure API call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 control-plane IJobHandler implementation with quota-gate pattern</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="IJobHandler-3-level-idempotency" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">Service Bus MessageId dedup + Redis IdempotencyService check/lock + deterministic idempotency key; H0 reuses this stack in L2.</pattern>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Any of the 13 production handlers is a shape exemplar — copy the constructor injection, HandleAsync signature, exception → failed-job telemetry pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files listed above.</step>
+    <step order="1">Read the L2 scaffold from task 036 (Program.cs + DI) to understand IJobHandler wiring in L2. Grep-verify no existing H0*Handler.cs exists.</step>
+    <step order="2">Author H0PreflightHandler.cs — implement IJobHandler; inject IIdempotencyService, ICosmosRunStore, IAzureQuotaProbe, IDataverseAdminClient, ISpeCertBootstrapProbe.</step>
+    <step order="3">Implement four sub-checks: (a) Azure OpenAI regional TPM headroom via cognitiveservices, (b) Dataverse env-creation rate via `pac admin quota` wrapper, (c) subscription vCPU quota via `az vm list-usage` wrapper, (d) SPE cert presence in platform KV.</step>
+    <step order="4">Author idempotency-key generator: preflight-{customerId}-{SHA256(parameters)}.</step>
+    <step order="5">Author Cosmos state writes for each failure branch — distinct rejection code per check.</step>
+    <step order="6">Author unit tests: happy path + 4 quota-fail paths + idempotency (second call = no-op).</step>
+    <step order="7">Register H0PreflightHandler in L2 Program.cs DI as scoped/singleton per IJobHandler contract.</step>
+    <step order="8">Run dotnet build + dotnet test targeting the L2 project; verify green.</step>
+    <step order="9">Run dotnet format on the new file. Verify zero analyzer warnings (analyzers-as-errors per spec.md NFR-06).</step>
+    <step order="10">Update TASK-INDEX.md: change task 041 status from 🔲 to ✅.</step>
+    <step order="11">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest exemplar: any of the 13 production handlers under src/server/api/Sprk.Bff.Api/Services/Jobs/**/*Handler.cs (canonical IJobHandler shape). No existing preflight handler — grep for "PreflightHandler" returns none.</existing>
+    <extension>No — L2 handlers register in the L2 DI container, not BFF DI (per design.md D3/D8/D12 + §5.2 BFF Hygiene rule). Extending a BFF handler would violate CLAUDE.md §10 BFF Hygiene binding rule.</extension>
+    <cost-of-doing-nothing>Without H0, the pipeline starts H1 (subscription readiness) and H2a (30-min Bicep deploy) BEFORE knowing whether regional Azure OpenAI TPM has +1 headroom. Result: 30-min Bicep succeeds, model deployment fails at H2a step ~24, requiring 1–3 day quota bump AND leaving a corrupt half-provisioned environment (per §4C Quarantine-required class). Spec.md NFR-12 + design.md §15 north-star explicitly cite this failure mode.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H0PreflightHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H0PreflightHandler.Tests.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (DI registration edit)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid run parameters and sufficient headroom on all four sources, when HandleAsync is invoked, then handler returns success and writes preflight-{customerId}-{paramHash} to IdempotencyService.</criterion>
+    <criterion testable="true">Given the same customerId + parameters invoked a second time, when HandleAsync runs, then it is a no-op (idempotency key match; Cosmos state unchanged).</criterion>
+    <criterion testable="true">Given Azure OpenAI regional TPM headroom insufficient for +1 tenant, when HandleAsync runs, then it returns failure with distinct rejection code and Cosmos runNotes carries the quota diagnostic.</criterion>
+    <criterion testable="true">Given Dataverse env-creation rate quota exhausted, when HandleAsync runs, then it returns failure with a distinct rejection code (different from the TPM failure).</criterion>
+    <criterion testable="true">Given subscription vCPU quota insufficient, when HandleAsync runs, then it returns failure with a distinct rejection code.</criterion>
+    <criterion testable="true">Given SPE cert-bootstrap missing in platform KV, when HandleAsync runs, then it returns failure with a distinct rejection code.</criterion>
+    <criterion testable="true">Concurrency (§4.2 I5): two concurrent H0 invocations for the same customerId — Cosmos optimistic-concurrency on sprk_currentrunid returns 409 for the losing invocation with the winning run ID in the response body.</criterion>
+    <criterion testable="true">Negative: H0 invoked with missing tenantId parameter returns failure (§4D I1 no-hardcoded-tenant); no Azure API call fired with a default tenant.</criterion>
+    <criterion testable="true">Handler registers in L2 DI container; dotnet build exits 0; dotnet test for the L2 project exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-01 + NFR-12; design.md §4.1 H0 row + §4B trap column (H0 owns no post-Bicep trap but is upstream of ALL); design.md §15 north-star (lead-time items surfaced by H0). This handler is the FIRST gate; downstream handlers assume H0 passed.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="unified-access-control-r2">
+  <metadata>
+    <title>NFR-05 standing assertion: no role depth reaches the Secure Projects BU (FR-28)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>startable after Phase 1 merges; LIVE evaluation self-gates on the UAT BU existing</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override); the assertion is itself a security control.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The assertion logic (role-privilege depth query) is fully specified by design §5.2's live query; environment-gating pattern exists in the integration suite.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches tests/** only — file-disjoint from 061 (src/**) in the same wave.</parallel-reason>
+    <deps>034</deps>
+    <tags>testing, integration-test, auth, dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement NFR-05 as a STANDING assertion, not a one-time audit: an integration test that queries live role privileges and FAILS the build if any security role grants a read depth on sprk_project / sprk_matter that reaches the `Secure Projects` BU (i.e. Deep-from-an-ancestor-of-Secure-Projects or Global held by a non-platform, non-admin role). A future role edit that silently re-opens secure projects must turn CI red, not ship.</prompt>
+  <role>SPAARKE platform developer. Dataverse security-role metadata (roleprivileges, privilege depth), environment-gated integration tests. Follow ADRs strictly.</role>
+  <goal>A live-environment-gated test in the integration suite that (a) SKIPS with an explicit HARD-WARNING message when the `Secure Projects` BU does not exist (pre-UAT state), (b) when it exists, enumerates roles holding prvReadsprk_Project / prvReadsprk_Matter and asserts none grants a depth whose BU scope covers Secure Projects, with the documented allow-list (System Administrator/Customizer, `#`-prefixed platform accounts' roles) excluded and pinned.</goal>
+
+  <context>
+    <background>spec.md NFR-05 + design §5.2 ("must be verified as a standing assertion, not a one-time check"): Spaarke Basic User held Deep-from-root — every secure project was silently visible. The BU restructure is UAT scope, so the test must be meaningful both before (skip loudly) and after (assert hard). Global-read holders (admins, platform accounts) are an ACCEPTED, documented exception (spec Unresolved Questions — Global read constraint); the assertion's allow-list encodes exactly that list so drift in it is visible.</background>
+    <relevant-files>
+      <file role="new">tests/integration/ (role-depth standing assertion — place per the suite's live-gated convention; name it so its purpose is grep-obvious, e.g. SecureBuRoleDepthAssertionTests)</file>
+      <file role="canonical-reference">tests/integration/ (existing live-environment-gated tests as the skip/config pattern)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md (§5.2 role table + root-cause)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="034" status="pending">FR-20/NFR-04 negative-canary merge gate — the live-gated CI wiring pattern this assertion reuses.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">The assertion runs in CI wherever the live-gated suite runs; a role edit that re-opens Secure Projects fails the build. Scope: test placement + CI inclusion, verified in the PR.</constraint>
+    <constraint source="project">Skip is LOUD: the pre-UAT skip message states "Secure Projects BU not found — NFR-05 assertion inert; UAT environment setup pending" so the inert state is visible in every test run. Scope: skip path.</constraint>
+    <constraint source="project">The admin/platform allow-list is a literal pinned constant with a comment citing the spec's accepted-risk decision; adding to it requires editing the test (deliberate friction). Scope: allow-list.</constraint>
+    <constraint source="ADR-038">Live-gated integration test at a KEEP path; no mocked Dataverse role metadata (a mocked version asserts nothing). Scope: test design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse role-privilege depth verification</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Environment-gated test structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Reproduce design §5.2's role query programmatically (roles -> roleprivileges -> privilege depth for prvReadsprk_Project / prvReadsprk_Matter, joined to each role's BU).</step>
+    <step order="2">Implement reachability: a role's depth reaches Secure Projects iff (Global) or (Deep and the role's assigned BU is an ancestor of Secure Projects). Encode the allow-list.</step>
+    <step order="3">Implement the loud-skip (BU absent) and the hard-fail (violation found, message names the role + privilege + depth).</step>
+    <step order="4">Run against dev; expect loud-skip today (or real findings if the BU already exists — report them, do not suppress).</step>
+    <step order="5">Update TASK-INDEX.md; record the allow-list rationale in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the query surfaces a VIOLATION in an environment where the BU exists (a live role reaching Secure Projects), STOP and escalate immediately per CLAUDE.md §6 — that is a live isolation failure, not a test-authoring detail.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>NFR-04 negative canary (Phase 1) is the closest live-gated assertion — same gating pattern, different subject; no role-depth assertion exists (grep tests/ for roleprivileges).</existing>
+    <extension>No — the canary asserts impersonation liveness; this asserts role topology. Different failure modes, both standing.</extension>
+    <cost-of-doing-nothing>A future role edit (e.g. re-granting Deep at root) silently re-opens every secure project to every basic user — the exact empirically-confirmed §5.2 hole, with no detection until a disclosure.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/ (SecureBuRoleDepthAssertionTests or suite-convention equivalent)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With no `Secure Projects` BU in the target environment, the test SKIPS with the exact loud-warning message (visible in test output).</criterion>
+    <criterion testable="true">With the BU present and a synthetic violating role (or fixture simulation at the query layer), the test FAILS naming the role, privilege and depth.</criterion>
+    <criterion testable="true">With the BU present and only allow-listed roles holding Global, the test PASSES.</criterion>
+    <criterion testable="true">Negative: the test never passes due to a query error — query failure is a test FAILURE (fail-closed), not a skip.</criterion>
+    <criterion testable="true">The test is included in the live-gated CI job (cite the workflow line in the PR).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md NFR-05; design.md §5.2. Success criterion 4 of the project maps to this test being green post-UAT.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -429,34 +429,94 @@ base shared layer, widening publish size and CVE surface for every downstream co
 
 ## Success Criteria
 
-1. [ ] Phase 0 spike proves OBO under MI-FIC — Verify: FR-C1 checklist green on the dev slot.
-2. [ ] MI-flag gating defect fixed — Verify: seam test matrix (FR-A1).
-3. [ ] DI lifetimes fixed — Verify: same CCA instance across two DI resolutions (FR-A2).
-4. [ ] Every BFF-identity confidential client uses the provider — Verify: credential census (FR-F2) lists each
-       site with its credential source; no inline credential construction remains.
-5. [ ] `Spaarke.Dataverse` gains no ProjectReference and no new package — Verify: `LayerDependencyTests` FR-14
-       passes unmodified; `git diff Spaarke.Dataverse.csproj` shows no `ProjectReference` and no `PackageReference` add.
-6. [ ] Rollback is configuration-only — Verify: reorder the credential list, restart, confirm the selected
-       credential changed, with no code change (FR-B2).
-7. [ ] `BFF-API-ClientSecret` removed from app settings and Key Vault, **all six paths incl. the lowercase alias** —
-       Verify: `az keyvault secret list`; Office add-in deploy succeeds.
-8. [ ] Config validators relaxed consistently — Verify: BFF starts with no secret configured; still fails fast
-       with no credential at all (FR-B5).
-9. [ ] Local `dotnet run` works, including OBO, via the documented fallback.
+> **WRAP-UP WALK (task 090, 2026-08-24).** Every criterion below carries its evidence. Per 090's negative-case
+> rule, **nothing is checked without it** — two criteria (#9, #15) are marked NOT MET rather than quietly ticked,
+> and #10's waiver was re-verified rather than assumed. Live proof that MI is in actual use (Dataverse `createdby`
+> + Entra sign-in logs, independent of the no-fallback argument) is in
+> [`notes/decisions/mi-proof-dataverse-side.md`](notes/decisions/mi-proof-dataverse-side.md).
+
+1. [x] **VERIFIED** Phase 0 spike proves OBO under MI-FIC — task 031 proved it live; **Office add-in UAT PASSED
+       2026-08-24** (Outlook save + the created `.eml` opens; Word record + file profile). Evidence:
+       `notes/uat-findings-2026-08-24.md`.
+2. [x] **VERIFIED** MI-flag gating defect fixed (FR-A1) — tasks 020–024; `IdentityConflationSeamTests` +
+       `CredentialSelectionSeamTests` under `tests/integration/seam/Auth/`.
+3. [x] **VERIFIED** DI lifetimes fixed (FR-A2) — static CCA cache reused across resolutions; task 021.
+4. [x] **VERIFIED** Every BFF-identity confidential client uses the provider — `CredentialCensusTests` (FR-F2)
+       enumerates every construction site with its credential source; **census fails if the count drifts**.
+5. [x] **VERIFIED** `Spaarke.Dataverse` gains no ProjectReference and no package — `LayerDependencyTests` FR-14
+       passes unmodified; **ArchTests 56/56 green** as of 2026-08-24.
+6. [x] **VERIFIED** Rollback is configuration-only — exercised in 031 §5.6 (credential reorder → restart →
+       selected credential changed, no code change).
+7. [x] **VERIFIED** `BFF-API-ClientSecret` removed from app settings **and** Key Vault, all six paths incl. the
+       lowercase alias — task 033; soft-deleted (recoverable to 2026-11-22), **not purged**.
+8. [x] **VERIFIED** Config validators relaxed consistently (FR-B5) — BFF boots with no secret configured; still
+       fails fast with no credential at all. `CredentialOrderingSeamTests` holds both halves.
+9. [~] ⚠️ **DOCUMENTED, NOT YET PROVISIONED — no longer an undefined gap.**
+       **Closed at task 090 (2026-08-25)** with [`docs/guides/local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md):
+       the constraint is stated (a workstation has no route to IMDS, so MI-FIC cannot work locally, and neither
+       `az login` nor `DefaultAzureCredential` can perform an OBO exchange), the exact config keys are named
+       (`AzureAd:ClientSecret` → `API_CLIENT_SECRET` → `AZURE_CLIENT_SECRET` — **not** the `Graph:ClientSecret` /
+       `Dataverse:ClientSecret` a retired doc told people to set, which have zero consumers), four options are
+       compared, and **option D is recommended**: one *local-dev-only* app registration, separate from every
+       deployed identity, with its secret in `dotnet user-secrets`.
+       **Residual**: the option-D app registration is not yet created — a one-time Azure action, with the exact
+       commands in the guide. The property that mattered is preserved either way: **no deployed identity holds a
+       secret**; a workstation is not a deployed identity.
 10. [⏭️] ~~Power BI runs as a managed-identity principal; `PowerBi:ClientSecret` removed~~ — **WAIVED 2026-08-19
         (owner): Power BI is not yet in use at Spaarke; Workstream D deferred.** Instead verify at wrap-up that
         the deferral is *visible, not silent*: the Power BI sites are named in the FR-F1 allowlist with the
         deferral reason AND appear in the FR-F2 census as still-secret-backed. Re-open with FR-D when Power BI
         is adopted.
-11. [ ] Group 2 credentials migrated, or each documented with a reason not to — Verify: per-credential acceptance
-        in FR-E1..E7.
-12. [ ] **Forcing functions merged and failing correctly** — Verify: introduce a deliberate ninth secret-bearing
-        confidential client on a scratch branch; **the build fails** (FR-F1 + FR-F2). *This is the criterion that
-        distinguishes auth-v4 from its predecessors.*
-13. [ ] Inbound token validation unaffected — Verify: NFR-05 check after each config change.
-14. [ ] Operational estate reconciled — Verify: the 11 scripts and referencing docs (FR-C3).
-15. [ ] Provisioning coordination closed — Verify: `notes/PROVISIONING-CHANGE-REQUEST.md` §5.1–5.3 answered.
-16. [ ] `/test-diet` run at wrap-up; publish size reported against the 44.96 MB baseline.
+        ✅ **Wrap-up re-verification DONE (2026-08-24) — checked, not assumed.** The Power BI sites are present
+        in **both** guards with the deferral reason inline: `CredentialGuardTests.cs:96–106` (FR-F1 allowlist)
+        and `CredentialCensusTests.cs:113–123` (FR-F2 census), the latter recording
+        `CredentialSource: "PowerBi:ClientSecret — STILL SECRET-BEARING"`. The deferral is therefore **visible
+        in a failing-by-default test surface**, not silent: if someone deletes the allowlist entry without
+        migrating Power BI, FR-F1 fails.
+11. [x] **VERIFIED** Group 2 credentials migrated or documented — tasks 051 (Service Bus → MI) and 053 (AI Search
+        → MI) cut over live, each **proven by removing the fallback**; the retained KV rollback secrets were
+        deleted at wrap-up (2026-08-25, soft-delete to 2026-11-23). Per-credential acceptance in FR-E1..E7.
+12. [x] ✅ **VERIFIED — EXERCISED, not asserted.** A deliberate ninth secret-bearing confidential client was
+        seeded on a scratch branch; **FR-F1 and FR-F2 both fired**, naming the exact `file:line` and telling the
+        reader what to do instead. Scratch branch deleted; 56/56 green after. Evidence + exact failure output:
+        `notes/lessons-learned.md` §3. *This is the criterion that distinguishes auth-v4 from its predecessors.*
+        Precise claim: **`dotnet build` succeeds; the ArchTests fail** — the gate is CI, not the compiler.
+13. [x] **VERIFIED** Inbound token validation unaffected (NFR-05) — `AddMicrosoftIdentityWebApi` untouched
+        throughout; re-confirmed by the add-in **authenticating successfully** during UAT.
+14. [x] **VERIFIED** Operational estate reconciled — task 033 §4/§5. Note the count was wrong in this spec:
+        **15 scripts and 33 docs**, not "11 scripts and ~25 docs". Re-derived, not inherited (see §4 of
+        lessons-learned on systematic under-counting).
+15. [x] ✅ **CLOSED 2026-08-25 — owner decided.**
+        §5.1 asked which app registration the shared Model 1 BFF acts as. **Answer: Reading 1 — ONE shared
+        multitenant app registration for Model 1**, recorded in `notes/PROVISIONING-CHANGE-REQUEST.md` §5.1.
+        Consequence for provisioning: **one FIC created once; customer onboarding creates no federated
+        credential at all**, and the BFF never selects an app registration per request. Rests on three
+        verifiable facts — the live app registration is already `AzureADMultipleOrgs`; Model 1 deploys a
+        single shared BFF App Service; and onboarding gets simpler, not harder.
+        **Residual (theirs, one edit)**: `spec.md:236` / `design.md:57` say "per-customer app registrations in
+        both models" — now scoped to **Model 2 only**. §5.2's `design.md:1006` doc fix and §9.2's Model-2 FIC
+        issuer question remain open on the provisioning side (#779); neither blocks this project.
+16. [x] **VERIFIED** `/test-diet` run at wrap-up — `notes/test-diet-report.md` (73 methods added, **0
+        SCAFFOLDING**, 8 path-violation-protected, 1 ambiguous). Publish size **45.04 MB incl. PDBs** vs the
+        **44.96 MB** baseline = **+0.08 MB**; ceiling 60 MB (NFR-01). PDB convention stated. No new HIGH CVE.
+
+### Walk result
+
+> **UPDATED 2026-08-25.** The walk originally closed at *14 verified · 1 waived · **2 NOT MET***. The operator
+> challenged the deferrals — *"we generally do not defer work to other projects unless it cannot be handled in
+> this project"* — and the challenge was right. **#15 was closed by an owner decision** (Reading 1) and **#9 was
+> closed to a documented procedure** rather than left undefined. Final: **14 verified · 1 waived · 1 partial
+> (#9 — documented, one one-time Azure action remaining) · 0 not-met.**
+
+| Criterion | Result |
+|---|---|
+| 1–8, 11–16 | ✅ **verified with evidence** (14) |
+| 10 — Power BI | ⏭️ **waived**, and the waiver re-verified as *visible* in both guards, not silent |
+| 9 — local-dev OBO | ⚠️ **documented** ([`local-dev-obo-setup.md`](../../docs/guides/local-dev-obo-setup.md)); one one-time Azure action remains |
+| — | ❌ **none not-met** |
+
+The remaining #9 action does not weaken the objective: **no deployed identity holds a secret**, and a developer
+workstation is not a deployed identity.
 
 ---
 

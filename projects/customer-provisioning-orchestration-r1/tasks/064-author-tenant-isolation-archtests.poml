@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author 5 new ArchTests for §4D I1-I5 tenant-isolation invariants</title>
+    <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'testing','integration-test'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Enforces 5 binding tenant-isolation invariants; blast-radius = entire BFF (a wrong assertion breaks every PR).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Requires reasoning through EVERY BFF service call site touching AI Search / Cosmos / Graph / SPE to author ArchTest predicates that fail on violation without false positives. Step 3.5.5b sonnet @ xhigh justified per complex-brownfield criteria (per project CLAUDE.md model-tier defaults).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>042</deps>
+    <tags>testing, integration-test, l2-controlplane, auth</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author 5 new ArchTests under tests/Spaarke.ArchTests/** enforcing the §4D I1–I5 tenant-isolation invariants per spec.md FR-28..FR-32. I1: static scan of provisioning scripts for tenant-shaped GUID defaults (regex ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ as parameter default) — fail on hit. I2: unconditional `tenantId eq` filter on every AI Search .Search(...) call. I3: /tenantId or /customerId partition-key predicate on every Cosmos SDK .ReadItemAsync/.CreateItemAsync/.QueryAsync call. I4: SPE container-ID string literal detection in BFF services (any `b!...` literal) — fail on hit. I5: GraphClientFactory token acquisition with explicit tenantId parameter — fail if `.default` scope used without explicit tenant. Each test carries a clear failure message pointing at the violation file:line.</prompt>
+
+  <role>SPAARKE platform test engineer. Expert in ArchUnitNet-style architectural predicate testing over Roslyn/NRefactory, static-scan patterns for source-code-shape enforcement, and the BFF service surface inventory. Follow ADRs strictly.</role>
+
+  <goal>Files tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs through I5_GraphPerTenantTokenTests.cs exist; each test enforces the specified invariant per FR-28..FR-32; tests fail cleanly on violation with the offending file:line in the failure message; test suite exits 0 on the current codebase (post-1834b77bc fix). Tests are Roslyn-based or reflection-based (not runtime probes) so they run in CI in &lt;10s.</goal>
+
+  <context>
+    <background>Per spec.md FR-28..FR-32 + §4D + Q6 owner clarification: cross-tenant data bleed is CATASTROPHIC (per plan.md §8 risk register). 5 binding invariants I1–I5 are enforced via ArchTests that fail PR-time — the ArchTest suite is the load-bearing forcing function that prevents any future PR from re-introducing cross-tenant leaks. Sequenced into r3 forcing-functions ecosystem via coord PR (task 088) with `ci-cd-unit-test-remediation-r1`.</background>
+    <relevant-files>
+      <file role="new">tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/TenantIsolation/I2_AiSearchTenantIdFilterTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/TenantIsolation/I3_CosmosPartitionKeyTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/TenantIsolation/I4_SpeContainerIdLiteralTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/TenantIsolation/I5_GraphPerTenantTokenTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="pending">GraphAppRoles.cs GUID completion via `az` enumeration (Phase A) — ArchTest I5 depends on stable Graph client shape</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-28">SCOPE (I1): Regex ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ as parameter default value in .ps1 files under scripts/ = fail. Do NOT scan variable initializers inside function bodies (too many false positives) — only Param() defaults.</constraint>
+    <constraint source="spec.md FR-29">SCOPE (I2): Every call site to AI Search client Search/SearchAsync/SearchDocumentsAsync in src/server/** MUST have a filter string containing "tenantId eq " (Roslyn or IL scan of SearchOptions.Filter string literals + concatenations). Existing 2 Fable-spot-checked services (ReferenceRetrievalService line 316, RecordSearchService line 257) are the baseline compliant examples.</constraint>
+    <constraint source="spec.md FR-30">SCOPE (I3): Every call to Container.ReadItemAsync/CreateItemAsync/UpsertItemAsync/GetItemQueryIterator in src/server/** MUST pass an explicit PartitionKey argument (not PartitionKey.None). Cross-partition queries permitted ONLY on the reconciler startup scan (task 060) — annotate with [AllowCrossPartitionScan] attribute for waiver.</constraint>
+    <constraint source="spec.md FR-31">SCOPE (I4): Any string literal in src/server/api/Sprk.Bff.Api/Services/** matching regex ^b![A-Za-z0-9_-]{20,}$ (SPE container-ID shape) = fail. Constants derived from IOptions or ITenantContainerResolver are compliant.</constraint>
+    <constraint source="spec.md FR-32">SCOPE (I5): GraphClientFactory (and any Graph token acquisition path) MUST NOT invoke DefaultAzureCredential.GetTokenAsync or ClientCredential flow with only `.default` scope — MUST pass an explicit tenant parameter. Scan for Graph client construction shapes.</constraint>
+    <constraint source="ADR-038">SCOPE: These are ArchTests (not runtime tests) — sequence into r3 KEEP paths per ADR-038 §7. Test-modifying tasks trigger unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override row.</constraint>
+    <constraint source="project">SCOPE: Each test failure message MUST include the offending file:line so the developer can locate + fix without re-running with more verbose logging.</constraint>
+    <constraint source="project">SCOPE: Tests MUST run in &lt;10s in CI — no runtime probes, no network calls; static Roslyn analysis or reflection.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: These ArchTests protect BFF (§10 hot path); every BFF PR must pass them. Coord PR (task 088) wires them into CI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ArchTest suite authoring for tenant-isolation invariants (Roslyn-based static scans)</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Roslyn-based ArchTest" location=".claude/patterns/testing/god-class-ratchet.md">Existing GodClassGuardTests uses Roslyn to enumerate source files + line counts; the same syntax-tree walker pattern applies for string-literal + method-invocation scans (I2/I3/I4/I5).</pattern>
+      <pattern name="File-glob source scan for scripts" location="tests/Spaarke.ArchTests/">For I1 (.ps1 scan), use a File.ReadAllText + Regex approach — no need for Roslyn; PowerShell has no Roslyn parser in the .NET SDK.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-28..FR-32 + design.md §4D + this project's CLAUDE.md.</step>
+    <step order="1" name="Inventory">Read existing tests/Spaarke.ArchTests/ to understand harness + baseline test shape (GodClassGuardTests + ADR-013 injection guards).</step>
+    <step order="2" name="I1">Author I1_NoHardcodedTenantTests.cs — scan every .ps1 under scripts/ for Param() blocks with GUID-regex defaults; fail with file:line.</step>
+    <step order="3" name="I2">Author I2_AiSearchTenantIdFilterTests.cs — Roslyn walker over src/server/** finds all invocations of Search*Async on AI Search client types; assert Filter argument (string literal or concat root) contains "tenantId eq ".</step>
+    <step order="4" name="I3">Author I3_CosmosPartitionKeyTests.cs — Roslyn walker finds Container.ReadItemAsync/CreateItemAsync/UpsertItemAsync/GetItemQueryIterator calls; assert PartitionKey arg is present + not PartitionKey.None. Honor [AllowCrossPartitionScan] attribute (add attribute definition to Sprk.Provisioning.ControlPlane or Spaarke.Core).</step>
+    <step order="5" name="I4">Author I4_SpeContainerIdLiteralTests.cs — Roslyn walker over src/server/api/Sprk.Bff.Api/Services/** finds string literals matching ^b![A-Za-z0-9_-]{20,}$; fail with file:line.</step>
+    <step order="6" name="I5">Author I5_GraphPerTenantTokenTests.cs — Roslyn walker finds Graph client construction / token acquisition sites in GraphClientFactory + adjacent; assert explicit tenantId parameter present, not only `.default` scope.</step>
+    <step order="7" name="Baseline verify">Run dotnet test tests/Spaarke.ArchTests/; verify all 5 tests PASS against current codebase (post-1834b77bc fix). Any pre-existing violation → filed against task 065 audit sweep.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 064 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an ArchTest introduces a false positive against existing BFF code that is genuinely compliant (e.g., a Filter built via a helper that Roslyn cannot resolve), STOP and escalate per CLAUDE.md §6 rather than adding a broad exclusion list that would weaken the invariant. Refine the predicate; if the invariant genuinely cannot be statically verified, escalate to owner for path A/B/C resolution per §6.5.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: tests/Spaarke.ArchTests/ existing suite (GodClassGuardTests per r3 task 040 + ADR-013 injection guards). Grep for "TenantIsolation" or "I1_" returns none.</existing>
+    <extension>Extending the existing ArchTest suite IS the pattern — 5 net-new tests join alongside existing predicates. Not a new suite; new tests within the suite.</extension>
+    <cost-of-doing-nothing>Without these ArchTests, §4D I1–I5 tenant-isolation invariants drift silently. Next BFF PR could add an AI Search call site without a tenantId filter — cross-tenant data bleed. Plan.md §8 risk register classifies this as CATASTROPHIC severity. Spec.md § New Components table row 12 lists these 5 tests as required components.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the ArchTests project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I1_NoHardcodedTenantTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I2_AiSearchTenantIdFilterTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I3_CosmosPartitionKeyTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I4_SpeContainerIdLiteralTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/TenantIsolation/I5_GraphPerTenantTokenTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">I1: introducing a Param([string]$TenantId = 'a1b2c3d4-e5f6-7890-abcd-1234567890ab') into any .ps1 under scripts/ causes I1 test to fail with file:line.</criterion>
+    <criterion testable="true">I2: introducing a Search*Async call in src/server/** with a Filter that lacks "tenantId eq " causes I2 test to fail with file:line.</criterion>
+    <criterion testable="true">I3: introducing a Container.ReadItemAsync call in src/server/** without an explicit PartitionKey argument causes I3 test to fail with file:line; existing [AllowCrossPartitionScan]-annotated call sites do NOT fail.</criterion>
+    <criterion testable="true">I4: introducing a string literal "b!ABCD..." in src/server/api/Sprk.Bff.Api/Services/** causes I4 test to fail with file:line.</criterion>
+    <criterion testable="true">I5: introducing a Graph client construction with `.default` scope and no explicit tenantId parameter causes I5 test to fail with file:line.</criterion>
+    <criterion testable="true">All 5 tests PASS against the current codebase (post-1834b77bc script fix); any pre-existing violation is filed as a task-065 finding.</criterion>
+    <criterion testable="true">Test suite runtime &lt;10s in CI (verified locally via `dotnet test --logger console` timing).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-28..FR-32 + §4D + Q6 owner clarification. Consumed by task 065 (audit sweep) + task 088 (CI wiring coord PR).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

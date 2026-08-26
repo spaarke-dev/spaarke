@@ -12,8 +12,11 @@ param location string = resourceGroup().location
 @description('Name of the database to create')
 param databaseName string = 'spaarke-ai'
 
-@description('Principal ID of the App Service managed identity (granted Cosmos DB Built-in Data Contributor)')
+@description('Principal ID of the App Service managed identity (granted Cosmos DB Built-in Data Contributor). HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep`. Task 030 canonical replacement is `userAssignedIdentityPrincipalId` below. Retained for legacy callers as interim safety net per plan.md §3 — remove post-Phase F acceptance.')
 param appServicePrincipalId string = ''
+
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cosmos DB Built-in Data Contributor (built-in DATA-PLANE role `00000000-0000-0000-0000-000000000002`) via `Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments` on this account. Task 030 canonical target per ADR-028 (all outbound = DefaultAzureCredential over UAMI) + spec.md §4D I3 (every Cosmos read/write includes `/tenantId` partition-key predicate — the grant is data-plane, the predicate is code-plane). Empty default skips the assignment. NOTE: Cosmos data-plane RBAC is NOT visible via ARM control-plane `az role assignment list` — verify with `az cosmosdb sql role assignment list` at the account scope.')
+param userAssignedIdentityPrincipalId string = ''
 
 @description('Tags for the resource')
 param tags object = {}
@@ -329,12 +332,36 @@ resource feedbackContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/c
 
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'
 
+// interim per plan.md §3 — remove post-Phase F acceptance (UAMI grants proven).
+// Cosmos data-plane RBAC via `sqlRoleAssignments` (NOT `Microsoft.Authorization/roleAssignments`
+// — Cosmos uses its own data-plane RBAC system, separate from ARM control-plane RBAC).
+// See `key-vault.bicep` "interim" comment for full rationale (task 029 removed SA-MI).
 resource cosmosRbac 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(appServicePrincipalId)) {
   parent: cosmosAccount
   name: guid(cosmosAccount.id, appServicePrincipalId, cosmosDataContributorRoleId)
   properties: {
     roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/${cosmosDataContributorRoleId}'
     principalId: appServicePrincipalId
+    scope: cosmosAccount.id
+  }
+}
+
+// Canonical Phase-C grant per task 030 + ADR-028: UAMI is granted Cosmos DB Built-in Data
+// Contributor via `sqlRoleAssignments` (data-plane RBAC — the ONLY way Cosmos accepts
+// DefaultAzureCredential-backed reads/writes on a NoSQL account with `disableLocalAuth: false`).
+// Idempotent guid() name. This grant does NOT show up in `az role assignment list` — verify
+// with `az cosmosdb sql role assignment list --account-name <name> --resource-group <rg>`.
+// NOTE (per POML escalation trigger): Cosmos data-plane RBAC has a 5-15 min propagation
+// window inside the account; the deployment succeeds immediately but runtime data-plane
+// calls (`CosmosClient` reads/writes) will 403 for a brief window. If propagation exceeds
+// 15 min the escalation trigger fires — check for cross-region replication delay or
+// data-plane RBAC service throttling.
+resource uamiCosmosRbac 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(userAssignedIdentityPrincipalId)) {
+  parent: cosmosAccount
+  name: guid(cosmosAccount.id, userAssignedIdentityPrincipalId, cosmosDataContributorRoleId)
+  properties: {
+    roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/${cosmosDataContributorRoleId}'
+    principalId: userAssignedIdentityPrincipalId
     scope: cosmosAccount.id
   }
 }

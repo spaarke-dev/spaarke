@@ -1,0 +1,102 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.NightlyTests — nightly (NOT per-PR) integration
+    project. Created by customer-provisioning-orchestration-r1 task 067 (Wave C6
+    Batch 4E) per POML deliverable + coord-PR spec at
+    projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md.
+
+    Scope:
+      - GraphAppRoleParityTest.cs: reflectively reads Sprk.Bff.Api.Infrastructure.Auth
+        .GraphAppRoles (14-role canonical catalog, r3 task 062 + r1 task 005) AND
+        queries the UAMI service principal's appRoleAssignments via Microsoft.Graph
+        SDK v6 with an explicit tenantId (§4D I5 no-hardcoded-default-tenant). Fails
+        with a diff-formatted message on missing OR extra roles. T3 silent-fail-trap
+        safety net (spec.md FR-13 + FR-33 + design.md §4B) — catches drift within
+        24h that H10's own post-condition can only catch at provisioning-time.
+      - L2 mirror drift-guard: the same test class also asserts that
+        Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity
+        .L2GraphAppRolesRegistry is a byte-for-byte mirror of GraphAppRoles.All —
+        this is the drift-guard the L2 mirror's own file header explicitly delegates
+        to "task 067" (see IGraphAppRolesRegistry.cs header). Compiles pure — no
+        Graph credentials needed; runs unconditionally on the nightly workflow.
+
+    Cadence:
+      - NIGHTLY only, not per-PR (POML SCOPE constraint; ADR-038 rationale: live
+        Graph API latency + rate limits make per-PR untenable, and the drift signal
+        this test catches is slow-moving).
+      - Live check SKIPS cleanly (Xunit.SkippableFact) when env vars
+        AZURE_TENANT_ID or UAMI_SP_OBJECT_ID are not set — so dev machines and
+        per-PR runs (if this project is ever accidentally included) never fail red
+        for missing creds. The BFF↔L2 mirror test runs unconditionally.
+      - CI wiring is authored as a coordinated PR spec (notes/graph-app-role-
+        parity-coord-pr.md) for the ci-cd-unit-test-remediation-r1 worktree to
+        apply — this task does NOT edit .github/workflows/** in isolation per
+        r3 task-042-063-ci-gate-wiring-deferral.md.
+
+    Project references:
+      - Sprk.Bff.Api.csproj — canonical GraphAppRoles.cs constant lives here.
+      - Sprk.Provisioning.ControlPlane.csproj — L2GraphAppRolesRegistry mirror
+        lives here; testing the mirror-vs-source drift is the L2 mirror's own
+        file-header contract with task 067.
+        NOTE: the L2 assembly is deliberately BFF-free at runtime (per
+        Sprk.Provisioning.ControlPlane's ADR-010 posture). This TEST assembly
+        referencing both is fine — it is not deployed and does not participate
+        in the runtime isolation invariant.
+
+    Publish: IsPackable=false; test-only assembly. Not deployed to any App Service.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- Test project does NOT opt-in to TreatWarningsAsErrors=true (Directory.Build.props
+         default) — matches sibling Sprk.Provisioning.ControlPlane.Tests posture. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- SkippableFact: env-guarded skip when AZURE_TENANT_ID / UAMI_SP_OBJECT_ID
+         are absent (dev machine + accidental per-PR runs). Same pattern as
+         tests/integration/Spe.Integration.Tests. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+
+    <!-- Microsoft.Graph SDK v6 (NFR-09): catch ODataError (not ServiceException);
+         ResponseStatusCode is int; ResponseHeaders is dict. Version pinned to
+         match Sprk.Bff.Api.csproj (the source of GraphAppRoles.cs). -->
+    <PackageReference Include="Microsoft.Graph" Version="6.5.0" />
+
+    <!-- Azure.Identity — DefaultAzureCredential with explicit TenantId option
+         (§4D I5 no-hardcoded-default-tenant). Pinned to match sibling test
+         projects to avoid transitive version drift. -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+
+    <!-- Aligned with Azure.Core 1.60.0's transitive floor via
+         Microsoft.Extensions.Hosting.Abstractions 10.0.11. Pinned to prevent
+         NU1605 downgrade — mirrors sibling Sprk.Provisioning.ControlPlane.Tests
+         (which pins to 10.0.9; we track the same floor here). -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
+    <!--
+      Reference updated by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
+        Pre-split this project referenced the monolithic
+        Sprk.Provisioning.ControlPlane.csproj. Post-split, L2GraphAppRolesRegistry
+        (used by GraphAppRoleParityTest.L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant)
+        lives under Sprk.Provisioning.ControlPlane.Core (namespace preserved:
+        Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity).
+    -->
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+  </ItemGroup>
+
+</Project>

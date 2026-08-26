@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Wire Cosmos client for L2 — partition /customerId, partition-key predicate on every read/write (§4D I3)</title>
+    <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-adjacent (UAMI Cosmos data-plane RBAC per task 030) + l2-controlplane tag + enforces §4D I3 tenant-isolation invariant. task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream reconciler + all 19 handlers depend).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: L2 scaffold + reconciler tier. Getting the Cosmos client shape right (UAMI credential + partition-key discipline + optimistic concurrency for I5) is architectural — the whole state store hinges on this wiring. "Opus 4.8 / Fable 5 for L2 scaffold + UAMI migration + reconciler".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC3-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on task 024 (POCO shape) and task 036 (project scaffold + DI + Program.cs). Also touches Program.cs which is shared with tasks 038/039 — sequential to avoid merge conflict.</parallel-reason>
+    <deps>024, 036</deps>
+    <tags>l2-controlplane, azure, auth, api, cache</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the Cosmos client into src/server/services/Sprk.Provisioning.ControlPlane/ via a new CosmosModule.cs: register CosmosClient (Azure.Cosmos SDK) using DefaultAzureCredential (which resolves to the L2 App Service's bound UAMI at runtime — task 028/029/030) OR ManagedIdentityCredential with explicit clientId; register an IProvisioningRunRepository abstraction that (a) enforces partition key = /customerId on every ReadItemAsync / CreateItemAsync / ReplaceItemAsync per §4D I3, (b) uses ETag-based optimistic concurrency for the same-customer-serialization guard per FR-23 I5. Reference the existing BFF Cosmos client patterns as canonical (read-only reference; do NOT compile-depend).</prompt>
+  <role>SPAARKE platform developer with Azure.Cosmos SDK + Managed Identity credential expertise. Understand §4D I3: every Cosmos operation MUST include partition-key predicate; ArchTest (Wave C6) will fail the build if a call lacks it. Understand FR-23 I5: same-customer runs serialized via optimistic concurrency (409 on conflict with winning run ID).</role>
+  <goal>src/server/services/Sprk.Provisioning.ControlPlane/Modules/CosmosModule.cs + Repositories/IProvisioningRunRepository.cs + Repositories/CosmosProvisioningRunRepository.cs exist; CosmosClient is registered in DI with UAMI credential; the repository interface exposes ReadRunAsync(customerId, runId), CreateRunAsync(run), ReplaceRunAsync(run, etag), each requiring PartitionKey(customerId); dotnet build passes; a smoke test against a dev Cosmos account verifies CRUD round-trip.</goal>
+
+  <context>
+    <background>Spec FR-27 + FR-30 (§4D I3) + FR-23 (I5 concurrency): the L2 control plane reads/writes ProvisioningRun documents in the spaarke-provisioning/runs container (task 024). Partition key /customerId; every read/write MUST include the partition-key predicate — no cross-partition queries. Same-customer runs serialize via optimistic concurrency on sprk_currentrunid (Dataverse side, task 023) AND on the ProvisioningRun document ETag (Cosmos side, this task). Without this wiring, no handler can persist state; no reconciler can advance the DAG.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Modules/CosmosModule.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Repositories/IProvisioningRunRepository.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Repositories/CosmosProvisioningRunRepository.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ (BFF Cosmos client patterns — read for reference, do NOT compile-depend)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Models/ProvisioningRun.cs (task 024)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="024" status="pending">ProvisioningRun POCO + database/container schema — the type shape this repository persists.</dependency>
+      <dependency task="036" status="pending">L2 project scaffold + Program.cs + module composition pattern.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: Cosmos client MUST use UAMI credential (DefaultAzureCredential resolves to bound UAMI in-App-Service; ManagedIdentityCredential with explicit clientId is the more explicit variant). Do NOT use account-key credential — task 030 grants Cosmos DB Built-in Data Contributor to UAMI principal.</constraint>
+    <constraint source="ADR-036">Scope: reuse existing BFF Cosmos client PATTERNS (naming, exception handling, retry policy) via canonical reference reading; do NOT reference Sprk.Bff.Api assemblies.</constraint>
+    <constraint source="project">§4D I3 acceptance: EVERY ReadItemAsync / CreateItemAsync / ReplaceItemAsync / UpsertItemAsync / DeleteItemAsync call MUST include explicit PartitionKey. Task 025 ArchTest (or a paired I3 ArchTest in Wave C6) will fail the build if a call lacks it — write compliant code from day 1.</constraint>
+    <constraint source="project">FR-23 I5 acceptance: same-customer serialization uses optimistic concurrency. ReplaceRunAsync signature MUST accept ETag; on ETagPreconditionFailedException the repo returns a typed 409 result NOT an exception — the endpoint layer maps this to HTTP 409 with the winning runId.</constraint>
+    <constraint source="project">Scope (this task only): Cosmos client + repository interface + implementation. Do NOT wire Service Bus (task 038) or App Insights (task 039). Do NOT implement any handler; do NOT implement the state-reconciler (Wave C5).</constraint>
+    <constraint source="project">MUST enable Cosmos client-level telemetry via ITelemetryClient (App Insights wiring in task 039 will pick this up); do NOT log secrets or full parameter dumps (KV URI refs OK; scan for cleartext-secret patterns per task 025 ArchTest).</constraint>
+    <constraint source="project">Publish-size impact reported per L2's own baseline (not BFF NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure.Cosmos SDK; UAMI credential; partition-key discipline; optimistic concurrency</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/caching/</file>
+    </files>
+    <patterns>
+      <pattern name="Existing BFF Cosmos client wiring" location="src/server/api/Sprk.Bff.Api/Services/">Read for reference — mirror the client construction, retry policy, exception handling; do NOT compile-depend.</pattern>
+      <pattern name="Optimistic concurrency (ETag)" location="Azure.Cosmos SDK docs">Use ItemRequestOptions.IfMatchEtag on ReplaceItemAsync; catch CosmosException with StatusCode == PreconditionFailed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — l2-controlplane + auth + §4D I3 enforcement). Load spec.md FR-27 + FR-30 + FR-23, ADR-028, ADR-036, task 024 POCO shape.</step>
+    <step order="1">Add PackageReference for Microsoft.Azure.Cosmos (latest stable — verify zero HIGH CVE) + Azure.Identity to Sprk.Provisioning.ControlPlane.csproj.</step>
+    <step order="2">Author Modules/CosmosModule.cs: extension method AddCosmosModule(this IServiceCollection services) registering CosmosClient singleton using DefaultAzureCredential (bound to UAMI at runtime) with the account endpoint from IConfiguration.</step>
+    <step order="3">Author Repositories/IProvisioningRunRepository.cs with methods ReadRunAsync(string customerId, string runId, CancellationToken), CreateRunAsync(ProvisioningRun run, CancellationToken), ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken) returning a typed Result&lt;ProvisioningRun, ConcurrencyConflict&gt;.</step>
+    <step order="4">Author Repositories/CosmosProvisioningRunRepository.cs implementing the interface — every call passes new PartitionKey(customerId); ReplaceRunAsync catches CosmosException StatusCode == PreconditionFailed and returns ConcurrencyConflict with the current stored run's ID (I5).</step>
+    <step order="5">Register the repository + Cosmos module in Program.cs (extending task 036's composition).</step>
+    <step order="6">Author a smoke test at src/server/services/Sprk.Provisioning.ControlPlane.Tests/CosmosSmokeTests.cs (create the Tests project if not present) that hits a dev Cosmos account (skipped by default under an env-guard) verifying CRUD round-trip.</step>
+    <step order="7">Run dotnet build src/server/services/ — verify 0 errors, 0 warnings.</step>
+    <step order="8">Run dotnet list package --vulnerable --include-transitive — verify 0 HIGH CVEs.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document deviation (e.g. DefaultAzureCredential vs explicit ManagedIdentityCredential, retry policy nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If DI registration for CosmosClient collides with the BFF's Cosmos client registration in a shared assembly OR causes a captive-dependency graph error, STOP and escalate per CLAUDE.md §6 — L2 must own its own Cosmos client lifecycle.</trigger>
+    <trigger>If Microsoft.Azure.Cosmos has a HIGH-severity CVE at the version chosen, STOP and escalate — do NOT introduce a package with an open HIGH per NFR-02.</trigger>
+    <trigger>If §4D I3 partition-key discipline cannot be enforced at the repository interface level (e.g. Cosmos SDK forces a code path without partition key), STOP and escalate — the ArchTest wave (C6) will fail the build otherwise.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Modules/CosmosModule.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Repositories/IProvisioningRunRepository.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Repositories/CosmosProvisioningRunRepository.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (updated composition)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/CosmosSmokeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given dotnet build, 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given a code inspection of CosmosProvisioningRunRepository.cs, every Cosmos SDK call (Read/Create/Replace/Upsert/Delete) includes an explicit new PartitionKey(customerId) — §4D I3 compliant.</criterion>
+    <criterion testable="true">Given a ReplaceRunAsync call with a stale etag, the repository returns Result.ConcurrencyConflict with the current stored runId — NOT an exception (I5 serialization signal).</criterion>
+    <criterion testable="true">Given a smoke test against dev Cosmos, CRUD round-trip succeeds and reads return the same ProvisioningRun document.</criterion>
+    <criterion testable="true">Negative: no account-key credential used; Azure.Identity DefaultAzureCredential (which resolves to UAMI at runtime) is the ONLY credential path.</criterion>
+    <criterion testable="true">Negative: no Service Bus or App Insights wiring in this task.</criterion>
+    <criterion testable="true">Given dotnet list package --vulnerable --include-transitive, 0 HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-27 + FR-30 (§4D I3) + FR-23 (I5). The typed ConcurrencyConflict return signal is what enables Wave C5's endpoint layer to return HTTP 409 with the winning runId (per FR-23 acceptance). Coordinate with task 025 (ArchTest) — a paired I3 ArchTest may be authored in Wave C6 that verifies partition-key discipline; write this code to pass such an ArchTest by construction.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -339,6 +339,8 @@ internal sealed class StubGraphClientFactory : IGraphClientFactory
     private readonly GraphServiceClient _client;
     public StubGraphClientFactory(GraphServiceClient client) => _client = client;
     public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default) => Task.FromResult(_client);
+    // Beta delegated variant (SPE container-type owners) — same stub; this test never uses beta.
+    public Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default) => Task.FromResult(_client);
     public GraphServiceClient ForApp() => _client;
 }
 

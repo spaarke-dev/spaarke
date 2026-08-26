@@ -1,0 +1,75 @@
+# Spaarke-authored customizations to OOB Dataverse entities
+#
+# Purpose:
+#   Manifest of every OOB Dataverse entity that Spaarke has extended with custom
+#   sprk_ columns/relationships. This file is the AUTHORITATIVE input to
+#   Assemble-SpaarkeMasterSolution.ps1 for including OOB entity customizations
+#   in the packaged managed solution.
+#
+# Also consumed by Test-SolutionCompleteness.ps1 for drift detection: if
+# spaarkedev1 has sprk_ columns on an OOB entity NOT listed here, CI flags it.
+#
+# How to update:
+#   1. Add a new sprk_ column on an OOB entity in spaarkedev1
+#   2. Add the column here in the same PR as the schema change
+#   3. Test-SolutionCompleteness.ps1 in CI will catch omissions
+#
+# Publisher: Spaarke (publisherid: 6aeef721-ba73-f011-b4cb-6045bdd6a665, prefix: sprk)
+# Baseline verified: 2026-08-20 via spaarkedev1 audit
+# Total: 21 custom columns across 4 OOB entities
+# ---------------------------------------------------------------------------
+
+publisher:
+  uniqueName: Spaarke
+  id: 6aeef721-ba73-f011-b4cb-6045bdd6a665
+  prefix: sprk
+
+# OOB entities Spaarke has customized. Each entry MUST be added as a component
+# to the packaged managed solution with its listed custom_columns.
+# team + annotation have zero direct customizations (they only host relationships
+# to sprk_ entities, which are packaged separately) so they are NOT listed here.
+oob_entities:
+
+  contact:
+    custom_columns:
+      - sprk_accesspermissiongrant   # CHOICE: View Only / Collaborate / Full Access
+      - sprk_communicationuserid     # NVARCHAR(1000)
+      - sprk_contacttype             # LOOKUP -> sprk_contacttype_ref
+      - sprk_containerid             # NVARCHAR(100)
+      - sprk_externalobjectid        # NVARCHAR(100)
+      - sprk_invoice                 # LOOKUP -> sprk_invoice
+      - sprk_organization            # LOOKUP -> sprk_organization
+      - sprk_standinggrant           # BIT
+      - sprk_systemuser              # LOOKUP -> systemuser
+
+  systemuser:
+    custom_columns:
+      - sprk_communicationuserid     # NVARCHAR(1000)
+      - sprk_containerid             # NVARCHAR(100)
+      - sprk_isexternal              # BIT
+      - sprk_primarycontact          # LOOKUP -> contact
+      - sprk_primaryworkoffice       # LOOKUP -> sprk_workoffice
+      - sprk_userprofile             # LOOKUP -> sprk_userprofile
+      - sprk_usertype                # LOOKUP -> sprk_usertype_ref
+
+  businessunit:
+    custom_columns:
+      - sprk_ai_search_index         # LOOKUP -> sprk_aisearchindex
+      - sprk_containerid             # NVARCHAR(100)
+      - sprk_searchindexname         # NVARCHAR(100)
+
+  account:
+    custom_columns:
+      - sprk_containerid             # NVARCHAR(100)
+      - sprk_domain                  # NVARCHAR(100)
+
+# OOB entities checked and confirmed to have ZERO Spaarke direct customizations
+# (kept here so Test-SolutionCompleteness can also verify these stay clean):
+oob_entities_verified_clean:
+  - team          # hosts regarding lookups to sprk_ entities, but zero own columns
+  - annotation    # hosts objectid lookups to sprk_analysis + sprk_event, but zero own columns
+
+# OOB entities NOT YET AUDITED (candidates to check in next audit pass):
+# activities (email, appointment, task, phonecall), letter, fax, queue, sla,
+# duplicaterule, mailbox, socialactivity, kbarticle, knowledgearticle
+oob_entities_pending_audit: []

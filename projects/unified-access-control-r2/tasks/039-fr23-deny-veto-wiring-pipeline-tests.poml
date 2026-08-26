@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-23 — wire the deny veto into the evaluator + full ordered-veto pipeline tests (deny → Restricted, Secure pre-max)</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-037-038</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs implementation completing the veto pipeline; tags bff-api/auth; modifies tests (TEST-MODIFYING override also applies).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified wiring over seams built by 032/037/038 with exact ordering + negative cases enumerated; default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list).</parallel-reason>
+    <deps>032, 037, 038</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Complete Phase 1's veto pipeline: wire INoAccessListReader (task 038) into the evaluator's FIRST post-max veto slot, keyed (contact | organization) × (record | record's organization), and prove the WHOLE ordered pipeline with pipeline-level tests: additive max → deny-list veto → Restricted veto, with Secure suppression pre-max. The load-bearing negative: "No Access" is NEVER a level — a Full Access grant plus a deny entry yields None, because the veto runs after the max and max() can therefore never resurrect it.</prompt>
+  <role>SPAARKE platform developer, C#/.NET authorization internals. Follow ADRs strictly.</role>
+  <goal>ComposeAsync (both planes) resolves each candidate record's referenced organizations, queries the deny-list reader batched, and removes denied entries in the first post-max veto slot; pipeline-order tests cover every term × veto interaction in the closed set below; all existing suites green.</goal>
+
+  <context>
+    <background>Spec FR-19 fixes the order "deny-list → Restricted" for post-max vetoes; FR-23 keys the deny veto and states the acceptance: a contact on the No Access List for organization X is denied on every record referencing X, even holding Full Access. Register B-9/B-10. Record→org resolution: the deny match uses ANY organization reference on the record (over-match is specified — the conferral allow-list of FR-24 does NOT constrain denial). For Phase 1 the candidate records are the three root types; per-child entries become fully effective when Phase 3 makes children scoped, but the record-keyed veto must already work for root-typed records now.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Veto slots on the evaluator.</dependency>
+      <dependency task="037" status="pending">Restricted veto + Secure suppression occupying their slots (ordering is tested against them).</dependency>
+      <dependency task="038" status="pending">INoAccessListReader + the sprk_noaccessentry store.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 (as amended by task 030)">Scope: veto ordering. Deny-list evaluates FIRST among post-max vetoes, then Restricted; Secure remains pre-max. The order must be structural (slot sequence), not incidental — a test pins it.</constraint>
+    <constraint source="spec FR-23">Scope: veto keying. All four key shapes honored: contact×org, contact×record, org×org, org×record. The record-side org match uses EVERY organization referenced by the record (any org-typed lookup), deliberately broader than the FR-24 conferral registry.</constraint>
+    <constraint source="spec NFR-01">Scope: failure handling. The reader's deny-all-on-fault answer flows through as denial of the queried candidates; an exception from the reader fails the composition (deny), never skips the veto.</constraint>
+    <constraint source="spec NFR-02">Scope: request cost. One batched org-reference resolution per root entity type + one batched deny query per composition — no per-record round trips.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>veto pipeline completion, deny-list matching</topic>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="batched or-filter read" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">Shape for the record→referenced-orgs batched resolution query.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the post-037 evaluator and the task-038 reader contract.</step>
+    <step order="1">Implement record→referenced-organizations resolution for the candidate root records (batched $select of org-typed lookups per root entity type; enumerate the org-typed columns from live metadata and record the list in notes — this list feeds task 041's registry work too).</step>
+    <step order="2">Wire the deny veto: subject identities = the principal's contactId + active org ids (reuse the existing sprk_contactorganization resolution); candidates = the composed map's record ids + their referenced orgs; denied ids removed from Rights AND RecordIds in the first post-max slot.</step>
+    <step order="3">Pipeline tests per the closed set below; include the veto-order pin and the max-cannot-resurrect proof.</step>
+    <step order="4">Build + all suites; publish-size measurement per §10.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document the org-typed column inventory + any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If resolving referenced organizations for candidate records would exceed the NFR-02 round-trip budget (e.g. root sets near the cap make the batched read exceed in-clause bounds), STOP and escalate the batching strategy rather than silently sampling or skipping records — a skipped record is an unevaluated wall.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-23 acceptance: a contact holding a Full Access grant on record R, with a contact×orgX deny entry and R referencing orgX, gets RightsFor(R) == None — proving the veto runs after the max and "No Access" is never a level.</criterion>
+    <criterion testable="true">A contact×record deny entry removes exactly that record; sibling records referencing the same orgs are unaffected.</criterion>
+    <criterion testable="true">Organization-subject entries (org×org, org×record) deny for every contact whose active org set contains the subject org.</criterion>
+    <criterion testable="true">Over-match asymmetry: a deny keyed on an org referenced ONLY via a non-conferring lookup (e.g. opposing counsel) still denies (pinned by test).</criterion>
+    <criterion testable="true">Ordering: deny evaluates before Restricted (slot-order test); Secure suppression still occurs pre-max with the deny veto active.</criterion>
+    <criterion testable="true">Negative: reader fault ⇒ queried candidates denied / composition fails closed; the veto is never skipped (throwing-reader test).</criterion>
+    <criterion testable="true">Negative: a principal with no deny entries and unrestricted records: pipeline output identical to pre-task behavior (regression suite green).</criterion>
+    <criterion testable="true">Build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19 (order) + FR-23 (keying, acceptance); register B-9/B-10/B-11. The org-typed column inventory produced in step 1 is input for task 041 — write it to notes/ deliberately. Per-child deny entries become end-to-end effective in Phase 3; the keying must already support them.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="unified-access-control-r2">
+  <metadata>
+    <title>Phases 1-2 closure — unified-evaluator seam suite: one closed behavioral contract for terms, max, vetoes and member definition</title>
+    <phase>2 One definition of member</phase>
+    <gate>after-039-041-042-043</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override (tests/**, tags testing/integration-test) — code-review + adr-check unconditional; pins the authorization contract.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified: every behavior it pins is an already-implemented acceptance criterion from tasks 032-043; literal, exhaustive execution wanted.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>p2-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New test files only under tests/integration/seam/** — disjoint from all source files; runs last in the phase by dependency.</parallel-reason>
+    <deps>039, 041, 042, 043</deps>
+    <tags>testing, integration-test, auth, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the seam-level behavioral suite that pins the ENTIRE Phase 1+2 evaluator contract in one place — the vertical-slice-seam category ADR-038 names as the DoD for dispatch-spine-class changes. Individual tasks carry unit tests; this suite proves the COMPOSED behavior end-to-end at the evaluator seam (real composition, substituted Dataverse reads), so a future refactor of any single term cannot silently break the pipeline contract. It is also the characterization baseline Phase 3 (child inheritance) builds on.</prompt>
+  <role>SPAARKE platform developer, integration/seam testing. Follow ADRs strictly (ADR-038 KEEP path).</role>
+  <goal>tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs (+ fixtures) covering the closed scenario matrix below, green in CI alongside the existing seam suites.</goal>
+
+  <context>
+    <background>Spec NFR-07 requires the access path to carry a behavioral suite before/while behavior changes; StandingGrantRuntimeUnionSeamTests is the proven house pattern (real service composition over substituted data reads, enable→access / disable→revoke pairs). The scenario matrix is the union of the acceptance criteria of tasks 032, 033, 036, 037, 039, 041, 042, 043 — this task RESTATES them as one seam-level contract; any scenario that cannot be expressed at the seam is listed in notes with the unit test that covers it instead.</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="039" status="pending">Complete veto pipeline.</dependency>
+      <dependency task="041" status="pending">Column registry.</dependency>
+      <dependency task="042" status="pending">Baseline levels.</dependency>
+      <dependency task="043" status="pending">Org-expansion term + fallback filter.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: suite style and placement. tests/integration/seam/** KEEP path; behavioral vertical-slice tests over the real composition; no Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no coverage gates — the suite is a contract, not a number.</constraint>
+    <constraint source="spec NFR-01">Scope: scenario selection. Every veto and failure scenario asserts DENIAL as the observed outcome (absence from Rights/RecordIds or gate-false), never just an exception type.</constraint>
+    <constraint source="project">Scope: this task. Test files ONLY — zero src/server/** changes. A pipeline defect found here is filed against the owning task (reopen or defer-issue), not patched from this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>seam testing, authorization contract pinning</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="seam suite" location="tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs">The composition-over-substituted-reads harness and naming conventions to copy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the post-043 evaluator and the existing seam suite harness.</step>
+    <step order="1">Build the scenario fixtures: one canonical world (orgs, contacts, systemusers, records with flags/lookups, grants, standing flags, deny entries) expressing every matrix row.</step>
+    <step order="2">Implement the matrix (closed set below), one test per row, named after the FR it pins.</step>
+    <step order="3">Wire into the same CI lane as the existing seam suites; verify green.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any matrix rows delegated to unit tests (with pointers) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a matrix row FAILS against the composed pipeline (a real defect in 032-043's integration), STOP adding tests, file the defect against the owning task per CLAUDE.md §6, and do not mask it with an adjusted expectation.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs pins ONE term (standing-grant union); tasks 032-043 carry per-term unit tests. No suite pins the composed max→veto pipeline across terms (grep of tests/integration/seam/ExternalAccess during authoring).</existing>
+    <extension>No — extending StandingGrantRuntimeUnionSeamTests would bury a 30+-scenario contract inside a single-term suite; ADR-038's vertical-slice-seam category calls for a suite per spine contract.</extension>
+    <cost-of-doing-nothing>A refactor of any single term (e.g. Phase 3 inheritance touching the max) can silently break veto ordering with every per-term unit test still green — exactly the class of silent authorization regression spec NFR-07 exists to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Additive max: multi-term same-record scenarios resolve to the highest mapped rights (grant vs standing vs org-derived), for each of the three root types.</criterion>
+    <criterion testable="true">FR-19: ViewOnly-grant-only caller has exactly Read; levels present for matters and work assignments.</criterion>
+    <criterion testable="true">FR-21: FullAccess-granted contact on a Restricted record ⇒ None; dual-identity systemuser keeps only non-contact-sourced rights there.</criterion>
+    <criterion testable="true">FR-22: secure record — standing-derived and org-derived contributions absent for ContactOnly AND SystemUser principals; direct personal grant survives; suppressed-Collaborate-cannot-outbid-surviving-ViewOnly ordering proof.</criterion>
+    <criterion testable="true">FR-23: deny entries (all four key shapes) remove records after the max — FullAccess + deny ⇒ None; deny keyed on a non-conferring org reference still denies; deactivated entry denies nothing.</criterion>
+    <criterion testable="true">FR-24: opposing-counsel org reference confers nothing; registry-listed column confers; non-registry sprk_assigned* column does not.</criterion>
+    <criterion testable="true">FR-25: baseline View Only + standing ⇒ exactly Read; org baseline governs org-derived contributions.</criterion>
+    <criterion testable="true">Fail-closed family: faulted flag read, faulted deny-list read, faulted junction read each yield denial/no-widening as their owning task defined.</criterion>
+    <criterion testable="true">Zero src/server/** modifications; suite green in CI.</criterion>
+  </acceptance-criteria>
+
+  <notes>ADR-038 seam category + spec NFR-07. This suite is the Phase 3 characterization baseline: child-inheritance tasks extend the same world with child records. Impersonation (FR-20) is deliberately excluded — its contract lives in tests/integration/auth/ImpersonationNegativeCanaryTests.cs (task 034) against live Dataverse.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

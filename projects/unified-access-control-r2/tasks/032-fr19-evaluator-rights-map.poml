@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-19 spine — AccessibleRecordSet carries (recordId → rights): additive-max composition + veto pipeline seam</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-030</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs implementation; tags bff-api/auth; the shape change every Phase 1/2 task depends on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The shape change ripples through every consumer of AccessibleRecordSet (orchestrator directive); wrong composition semantics here silently corrupt every downstream veto.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Infrastructure/ExternalAccess/AccessibleRecordSetService.cs — the most contended file in the project (orchestrator hot-file list).</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Change the evaluator's return shape from a set of ids to (recordId → rights), for every principal kind and all three root types. AccessibleRecordSet.RecordIds is a HashSet&lt;Guid&gt; today and STRUCTURALLY cannot carry a level — which is why matters and work assignments have no level at all (design register B-8, A-8). Introduce the additive-max composition (each term contributes rights per record; highest wins) and the ORDERED veto pipeline seam (pre-max suppression hook + post-max veto slots, wired as no-ops in this task and filled by tasks 037/039). Behavior must be preserved except where a grant's own level is now honored instead of being flattened.</prompt>
+  <role>SPAARKE platform developer, C#/.NET authorization internals. Follow ADRs strictly.</role>
+  <goal>AccessibleRecordSet exposes Rights: IReadOnlyDictionary&lt;Guid, AccessRights&gt; (RecordIds retained as a derived view for scope injection) plus RightsFor(Guid) returning AccessRights.None for absent ids; ComposeForSystemUserAsync and ComposeForContactAsync compose per-term rights via max; ExternalGrantSet carries levels for matters and work assignments (the level is already fetched — sprk_accesslevel is in the $select — and currently dropped at partitioning); a single tested ExternalAccessLevel → AccessRights mapping exists; all existing unit tests updated and green.</goal>
+
+  <context>
+    <background>Spec FR-19: the evaluator returns (recordId → rights) composed as additive terms (highest wins) followed by ordered vetoes deny-list → Restricted, with Secure suppressing terms BEFORE the max (FR-22). Design §4.5 is the authoritative term order. Register A-8: today the workforce strategy blanket-stamps Collaborate over every accessible project, elevating deliberate ViewOnly grants — carrying per-record rights is the structural fix (the stamp itself is deleted in task 033). ExternalParticipationService.QueryGrantSetAsync ($select includes sprk_accesslevel for ALL rows) already dedupes project grants by highest level — generalize that rule to the evaluator.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IAccessDataSource.cs</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">ADR-003 amendment sanctioning the (recordId → rights) shape and the veto ordering.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 (as amended by task 030)">Scope: the composition in AccessibleRecordSetService. The evaluator MUST compose additive terms via highest-wins max and expose ordered veto slots evaluated AFTER the max (deny-list, then Restricted) plus a pre-max suppression hook (Secure). "No Access" MUST NOT be representable as a level anywhere in the type system — vetoes remove entries; they never contribute a value to the max.</constraint>
+    <constraint source="spec NFR-01">Scope: every code path in this task. Fail closed: an unknown principal kind, an unmapped level value, or a failed term read yields no contribution (or a throw at the top-level gate) — never a widened rights value.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: the rights type. Reuse Spaarke.Dataverse.AccessRights (IAccessDataSource.cs:72, [Flags]) — do NOT introduce a new rights enum. Level mapping is exactly: ViewOnly(100000000)→Read; Collaborate(100000001)→Read|Write|Create; FullAccess(100000002)→Read|Write|Create|Delete. One internal static mapping function, unit-tested, no duplicates.</constraint>
+    <constraint source="project">Scope: this task's behavior envelope. Behavior-preserving except level fidelity: the systemuser MEMBERSHIP term contributes at Collaborate-equivalent rights (relocating today's documented stamp INTO the evaluator as an explicit term level — see CallerPrincipalResolver.cs:354-360 rationale); grant terms contribute at their row's own level. Do NOT add flag reads (sprk_issecure/sprk_accesspermission — task 037), deny-list reads (038/039), or the impersonated source (035/036) here.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md (extend-in-place per spec Placement table row 1); run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+    <constraint source="task-006">BINDING INVARIANT to preserve. After task 006, AuthorizationService has EXACTLY ONE member touching _accessDataSource -- GetCallerAccessAsync(userId, resourceId, userAccessToken, ct) -- and AuthorizeAsync routes through it. That is what makes "capabilities derive from the same snapshot as enforcement" (FR-05 acceptance) checkable by grep rather than by trusting two code paths to agree. The evaluator spine replaces this method's body; it MUST NOT reintroduce a second access path, and the token parameter MUST NOT acquire a default value (A-4's root cause was the `= null` DEFAULT on IAccessDataSource.GetUserAccessAsync, not a missing null check -- a default lets the next caller inherit app-only evaluation by forgetting). The test AuthorizeAsync_AndGetCallerAccessAsync_PresentIdenticalArgumentsToTheDataSource pins this; it must stay green or be replaced by an equivalent that pins the same property. Consumer: Api/PermissionsEndpoints.cs. Rationale: notes/task-006-capability-rights-mapping.md section 3. Scope: the evaluator's access-resolution path.</constraint>
+    <constraint source="task-005">Two carry-overs from lifting the Read ceiling. (1) Rights MUST keep being derived from Dataverse's PER-PRINCIPAL answer (RetrievePrincipalAccess names the principal in the URL), never inferred from what the application can see -- inferring from app visibility is finding A-2's defect and task 005 removed it from this path. AppendTo MUST stay mapped (task 003 gates POST /api/office/save on it). (2) KNOWN LIMITATION to fix here: TryRetrievePrincipalAccessAsync hard-codes the Target entity set as sprk_documents({id}). That is not a regression -- the probe it replaced hard-coded the same -- but this task answers (recordId -> rights) for ANY entity, so the entity-set name MUST be threaded through the IAccessDataSource seam. Until it is, a non-document caller silently resolves against the wrong entity set. Rationale: notes/task-005-rights-mapping.md sections 3 and 8. Scope: the evaluator's rights-derivation path.</constraint>
+    <constraint source="task-008">TWO THINGS TO ABSORB when you generalize the evaluator. (1) CallerRecordAccessProbe (Infrastructure/ExternalAccess/) exists ONLY because IAccessDataSource is document-only: DataverseAccessDataSource hard-codes sprk_documents({resourceId}) in BOTH its RetrievePrincipalAccess target (:387) and its fallback read probe (:461), so asking it about a project returns None for every caller. Once your rights map answers (recordId -> rights) for arbitrary entity types AS THE CALLER, the probe should collapse into it -- do not leave two caller-scoped rights paths that can drift, which is the same divergence class as A-11. Preserve its properties when you do: entity-generic target, OBO WhoAmI-derived principal (the identity must stay a CREDENTIAL, never an id passed as data -- that is the A-2 shape), and NO read-probe fallback on the delegation path. (2) INVARIANT, not a defect: IAccessDataSource is registered SCOPED (SpaarkeCore.cs:59) over a TRANSIENT typed HttpClient, which is the only reason DataverseAccessDataSource mutating _httpClient.DefaultRequestHeaders.Authorization with a per-caller OBO token is safe. Making that registration a singleton would turn it into a cross-user OBO-token bleed. If you touch that registration, switch to per-request HttpRequestMessage headers first (CallerRecordAccessProbe shows the shape). Rationale: notes/task-008-delegation-rule.md sections 3 and 9. Scope: the evaluator's caller-scoped rights path.</constraint>
+    <constraint source="task-008-followup">THIRD CONSUMER TO ABSORB. Api/Filters/EntityAccessFilter.cs (the Office save entity-association gate) now also calls CallerRecordAccessProbe directly, because it hit the SAME document-only limitation: it was passing "{entityType}:{entityId}" into DataverseAccessDataSource, which can only resolve None, so POST /api/office/save with a targetEntity returned 403 for EVERY caller (confirmed empirically 2026-08-23, then fixed). That filter deliberately still uses OperationAccessPolicy for WHICH right entity.associate_document costs -- only the rights SOURCE was swapped -- so when your generalized (recordId -> rights) map lands, route EntityAccessFilter back through AuthorizationService and delete its direct probe use. Leaving two caller-scoped rights paths is the divergence class this project exists to remove. Its coverage is tests/integration/auth/UnifiedAccessControl/EntityAccessFilterCharacterizationTests.cs -- those tests assert the PROBED TARGET (sprk_matters, accounts, ...), not just the status code, so they will catch a regression to sprk_documents. Rationale: notes/task-008-delegation-rule.md section 10.1. Scope: the evaluator's caller-scoped rights path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>access evaluator composition, additive-max + veto model</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="highest-wins dedupe" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">QueryGrantSetAsync's GroupBy(...).Max(AccessLevel) is the existing highest-wins precedent — the evaluator generalizes it across terms.</pattern>
+      <pattern name="sources provenance" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">AccessibleRecordSetSources is the audit-provenance struct — extend it (do not drop it) as terms gain identity; FR-30 later consumes provenance.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read AccessibleRecordSetService.cs, ExternalCallerContext.cs (ExternalGrantSet, ExternalAccessLevel, ExternalParticipation), ExternalParticipationService.QueryGrantSetAsync, design §4.5.</step>
+    <step order="1">Extend ExternalGrantSet so Matters and WorkAssignments carry (id, level) like Projects does (ExternalParticipation or an equivalent per-root shape); update QueryGrantSetAsync partitioning to keep the already-fetched sprk_accesslevel for matter/WA rows, preserving the org-grant union and highest-wins dedupe for all three root types.</step>
+    <step order="2">Add the ExternalAccessLevel → AccessRights mapping (internal static, exact table from the constraint) + unit tests including the unmapped-value fail-closed case.</step>
+    <step order="3">Reshape AccessibleRecordSet: add Rights map + RightsFor; keep RecordIds/Contains as derived views so Tier2ScopeFilterInjector and module predicates are unaffected in this task.</step>
+    <step order="4">Restructure both compose paths into explicit terms contributing IReadOnlyDictionary&lt;Guid, AccessRights&gt;, combined via per-record max; wire the pre-max suppression hook and the ordered post-max veto slots as no-ops with named seams (e.g. delegates or virtual partial methods) that tasks 037/039 fill.</step>
+    <step order="5">Update AccessibleRecordSetServiceTests: all 14 existing behaviors preserved; add rights-fidelity tests (closed set below).</step>
+    <step order="6">Build + full unit test run; publish-size measurement per §10.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If keeping RecordIds as a derived view proves impossible without changing IAccessibleRecordSetService consumers beyond the named files (grep first: CallerPrincipalResolver.cs, GrantExternalAccessEndpoint.cs, AccessibleRecordSetAuthorizationFilter.cs — note Phase 0 FR-17 may have deleted the filter), STOP and escalate with the consumer list rather than expanding scope into task 033's files.</trigger>
+    <trigger>If the sprk_externalrecordaccess matter/WA rows turn out NOT to carry sprk_accesslevel in live data (null level), STOP and escalate — do not invent a default level for a grant row.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a contact with a ViewOnly project grant, ComposeAsync yields Rights[projectId] == AccessRights.Read exactly (no Write/Create/Delete bit).</criterion>
+    <criterion testable="true">Given a matter grant and a work-assignment grant with levels, Rights carries the mapped rights for those ids — levels are carried for matters and work assignments, not projects alone (FR-19 acceptance).</criterion>
+    <criterion testable="true">Given the same record contributed by two terms at different levels (e.g. direct ViewOnly grant + org-grant Collaborate), Rights[record] is the max (Read|Write|Create).</criterion>
+    <criterion testable="true">Given a systemuser with ADR-034 membership on record R, Rights[R] == Read|Write|Create (relocated Collaborate term level — status quo preserved).</criterion>
+    <criterion testable="true">Negative: RightsFor(recordId not in any term) == AccessRights.None; IsRecordAccessibleAsync(empty Guid) remains false without composing.</criterion>
+    <criterion testable="true">Negative: an unrecognized ExternalAccessLevel value contributes AccessRights.None (fail-closed), covered by a unit test.</criterion>
+    <criterion testable="true">Negative: no code path converts a veto into a level — the veto seams remove map entries and are covered by a test proving a vetoed id is absent from Rights AND RecordIds (using a test double veto).</criterion>
+    <criterion testable="true">All pre-existing AccessibleRecordSetServiceTests behaviors pass unchanged (deny-false family intact); full solution build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19; design §4.5; register B-8/B-9/B-10/A-8. Do not touch CallerPrincipalResolver.cs here — task 033 owns consumer propagation and the stamp deletion. The membership-term Collaborate level is itself replaced on the systemuser plane when the FR-20 swap (036) supplies Dataverse's answer.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

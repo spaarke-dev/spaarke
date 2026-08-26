@@ -164,11 +164,18 @@ public class BatchPermissionsRequest
     /// </summary>
     public required List<string> DocumentIds { get; init; }
 
-    /// <summary>
-    /// Optional: User ID to check permissions for
-    /// If not provided, uses current authenticated user
-    /// </summary>
-    public string? UserId { get; init; }
+    // There is deliberately NO UserId member.
+    //
+    // unified-access-control-r2 task 006 (spec FR-05, finding A-4) removed one. The handler previously
+    // let the request body override the caller's identity, which is incompatible with a caller-scoped
+    // answer — and not merely cosmetic: DataverseAccessDataSource.cs:184-199 treats `userId` and
+    // `userAccessToken` as INDEPENDENT inputs, so a body-supplied id would query a DIFFERENT principal
+    // under the caller's own OBO token and write task 014's cache key
+    // `sdap:auth:access:obo:{userId}:{resourceId}` under the victim's oid.
+    //
+    // Identity for these endpoints comes from the validated token's claims and nowhere else. Removing
+    // the member is wire-compatible (System.Text.Json ignores unknown properties), so a stale client
+    // still sending it is ignored rather than silently served someone else's capabilities.
 }
 
 /// <summary>

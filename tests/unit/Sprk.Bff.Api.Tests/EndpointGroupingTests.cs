@@ -67,33 +67,11 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
-    public async Task DocumentsEndpoints_ListContainersRequiresValidContainerTypeId()
-    {
-        // Must include auth header to pass RequireAuthorization() gate first,
-        // then the endpoint handler validates the containerTypeId parameter.
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
-
-        // Missing containerTypeId parameter
-        var response = await _client.GetAsync("/api/containers");
-
-        // Auth gate may still reject (authorization policy "canmanagecontainers" may fail)
-        // so accept either 400 (validation) or 401/403 (auth policy)
-        response.StatusCode.Should().BeOneOf(
-            HttpStatusCode.BadRequest,
-            HttpStatusCode.Unauthorized,
-            HttpStatusCode.Forbidden);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        if (response.StatusCode == HttpStatusCode.BadRequest)
-        {
-            problemDetails.TryGetProperty("detail", out var detail).Should().BeTrue();
-            detail.GetString().Should().Contain("containerTypeId");
-        }
-    }
-
+    // DocumentsEndpoints_ListContainersRequiresValidContainerTypeId REMOVED 2026-08-25
+    // (spaarke-auth-v4-dataverse-MI task 090): it exercised GET /api/containers, one of the six
+    // dead endpoints deleted with obligation 031-A. It was already [Fact(Skip=...)], so it was
+    // proving nothing — a skipped test against a route that no longer exists is worse than no test,
+    // because it reads as coverage.
     [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
     public async Task UploadEndpoints_RequiresValidPath()
     {

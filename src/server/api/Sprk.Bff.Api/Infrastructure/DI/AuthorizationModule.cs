@@ -295,8 +295,12 @@ public static class AuthorizationModule
                 p.Requirements.Add(new ResourceAccessRequirement("preview_file")));
             options.AddPolicy("canwritefiles", p =>
                 p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
-            options.AddPolicy("canmanagecontainers", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("create_container")));
+            // "canmanagecontainers" REMOVED 2026-08-25 (spaarke-auth-v4-dataverse-MI task 090,
+            // obligation 031-A) together with its only six consumers in DocumentsEndpoints.
+            // It bound ResourceAccessRequirement("create_container") — a PER-RESOURCE requirement —
+            // onto COLLECTION endpoints that carry no resource, so it could never be satisfied and
+            // returned 403 to every caller. Leaving an unsatisfiable policy registered after its
+            // consumers are gone is a trap: the next endpoint to reference it inherits a permanent 403.
 
             // Named API key policies (task AUTHV2-045).
             // Each policy is bound to a single auth scheme so the matching ApiKey handler runs

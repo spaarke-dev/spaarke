@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-16b: an organization-grant revoke cleans up every active member's SPE container permission</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-017</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the revocation path; the current behaviour leaves container ACLs in place for an unbounded set of people while the caller is told access was revoked. FULL per root CLAUDE.md 8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The mechanism is fully specified below (junction schema live-verified, reference impl named, response shape decided). No architectural judgement required beyond the placement justification.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Api/ExternalAccess/RevokeExternalAccessEndpoint.cs and Infrastructure/ExternalAccess/** — the known-contended authorization directory, and the same files as 010/016/017. Merge serially; run /conflict-check first.</parallel-reason>
+    <deps>017</deps>
+    <tags>bff-api, auth, security, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the gap task 017 filed rather than fixed. An ORGANIZATION-grant revoke deactivates the org grant row for every member in Dataverse, but attempts NO SPE container cleanup at all: the request carries ContactId = Guid.Empty, so there is no single grantee email to match a permission on, and RemoveSpeContainerPermissionAsync returns NotAttempted. Expand the organization to its active member contacts and remove each one's container permission, reporting per-member outcome honestly.</prompt>
+  <role>SPAARKE platform developer. Expert in the external-access grant schema, the sprk_contactorganization junction, SharePoint Embedded container permissions, and revocation cascades. Follow ADRs strictly.</role>
+  <goal>Revoking an organization grant removes the SPE container permission of every ACTIVE member of that organization, and the response distinguishes "all members cleaned up" from "some members retain file access" from "we could not tell". No caller is ever told an org revoke succeeded while a member still holds container permission.</goal>
+
+  <context>
+    <background>
+      Task 017 fixed the per-CONTACT SPE revoke (finding A-13) by deleting the endpoint's forked GUID-based
+      matcher and calling SpeContainerMembershipService.RevokeMembershipAsync, which matches on the contact's
+      email — the key membership is written with. It could not do the same for ORGANIZATION grants: an org
+      revoke passes ContactId = Guid.Empty (task 073 #7), so there is no single grantee and therefore no email
+      key. RemoveSpeContainerPermissionAsync returns SpeContainerRevokeOutcome.NotAttempted, which is honest
+      but incomplete. Task 010's constraint had asked 017 to "assess and either fix or file it"; 017 filed it.
+      Owner decision 2026-08-24: this must be SCOPED INTO this project, not deferred.
+
+      WHAT BOUNDS THE EXPOSURE (read this before deciding the fix is urgent-but-simple): Spaarke is
+      broker-only. Nothing in this codebase ADDS a container permission — SpeContainerMembershipService
+      .GrantMembershipAsync has zero callers (verified repo-wide, task 017), GrantExternalAccessEndpoint
+      returns SpeContainerMembershipGranted:false, and neither invite endpoint touches SPE. So in a
+      clean-history environment there are no member ACLs to clean. The exposure is LEGACY: ACLs created by a
+      pre-broker version of the product, or added by an administrator outside Spaarke. That is exactly the
+      population nothing else will ever clean up, which is why the path must work.
+
+      LIVE-VERIFIED SCHEMA (Dataverse MCP describe, 2026-08-24 — do NOT re-derive, but DO re-verify before
+      writing a query, per the lesson of A-12): sprk_contactorganization is the membership junction. Its
+      collection is sprk_contactorganizations. Lookups: sprk_contact (-&gt; contact) and sprk_organization
+      (-&gt; sprk_organization), projected by OData as _sprk_contact_value and _sprk_organization_value. It also
+      carries statecode (Active 0 / Inactive 1) AND sprk_enddate (DATE ONLY). This confirms the "assumes the
+      junction's lookup logical names are sprk_contact / sprk_organization — confirm against the created
+      junction schema" caveat standing in ExternalParticipationService.QueryActiveOrgIdsAsync: the assumption
+      is CORRECT. Delete that caveat comment as part of this task.
+
+      REFERENCE IMPLEMENTATION TO MIRROR (the inverse direction of exactly this query):
+      ExternalParticipationService.QueryActiveOrgIdsAsync — contact -&gt; organizations, filtering
+      _sprk_contact_value eq {id} and statecode eq 0. You need organization -&gt; contacts:
+      _sprk_organization_value eq {id} and statecode eq 0.
+
+      NOTE ON sprk_enddate: QueryActiveOrgIdsAsync considers statecode ONLY and ignores sprk_enddate, so a
+      membership that has ended by date but was never deactivated still confers inherited access on the READ
+      side today. Do not silently diverge from that on the revoke side — over-including members on a REVOKE is
+      fail-closed (it removes more access) whereas under-including is not, so revoke SHOULD sweep by statecode
+      alone to stay at least as aggressive as the read path. Record the read-side asymmetry as a finding for
+      the Phase 1 evaluator (FR-24/FR-25) rather than fixing the read path here; changing who has access on
+      the read side is out of scope and would be a behaviour change beyond this task.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/RevokeAccessResponse.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="completed">Delivered the per-contact email matcher, the four-state SpeContainerRevokeOutcome, and the honest-reporting contract this task extends to the many-member case.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed on REPORTING, at member granularity. If any active member's container permission cannot be confirmed removed, the response MUST NOT say the org revoke cleaned up SPE. "All members clean", "some members retain access" and "we could not enumerate the members" are three DIFFERENT answers and the caller must be able to tell them apart — the same rule task 017 applied per-contact. Scope: the SPE result path of RevokeAccessAsync.</constraint>
+    <constraint source="task-017">Do NOT regress the per-contact path. SpeRevokeMatcherTests pins it: the key passed to RevokeMembershipAsync must remain the contact's EMAIL (Revoke_MatchesTheSpePermissionOnTheContactEmail), no-match must remain NoPermissionFound rather than success, and a Graph error must remain Failed rather than absent. Those tests must stay green or be replaced by equivalents pinning the same properties. Scope: RevokeExternalAccessEndpoint.cs.</constraint>
+    <constraint source="task-010">Do NOT weaken the Dataverse sweep. Revoke derives a logical grant key (root x Contact-XOR-Organization) and deactivates EVERY active row on that key; the "_sprk_contact_value eq null" clause in ExternalGrantKey is what stops an organization revoke from sweeping every member's PERSONAL grant. This task adds SPE cleanup for org members and MUST NOT change which Dataverse rows are swept — a member's personal grant on the same root is a DIFFERENT logical grant and must survive. Add a test asserting the org SPE cleanup does not deactivate personal grant rows. Scope: the sweep is read-only for this task.</constraint>
+    <constraint source="project">Per-member partial failure must not abort the loop. Mirror tasks 016 and 017: keep removing the other members' permissions (stopping early leaves strictly MORE access in place), count the failures, and report them. Scope: the member-cleanup loop.</constraint>
+    <constraint source="project">CLAUDE.md 11 justification REQUIRED for the organization-to-members reader, answering all three questions in the POML notes or the PR. Expected answer: ExternalParticipationService.QueryActiveOrgIdsAsync is the inverse direction but is PRIVATE and sits on a different client seam (raw HttpClient + its own OBO token flow) than the revoke path (DataverseWebApiClient), so it cannot be called directly; cost-of-doing-nothing is that an org revoke leaves every member's container ACL in place while reporting revocation. Prefer the SMALLEST new surface that Phase 1 (FR-24/FR-25 org expansion) can extend rather than a general-purpose membership service. Scope: the new reader.</constraint>
+    <constraint source="project">Re-verify the junction schema live before writing the query even though it is recorded in the background above. Three Phase 0 tasks turned on this (070 project lookup, 016 contact lookup, 017 e2e helper): a stale column name in a revocation query reads as "nothing to revoke" and is silent. Scope: the org-to-members query.</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md 10): state the Placement Justification, verify publish size vs the 43.69 MB current baseline (ceiling 60 MB, NFR-06), and check dotnet list package --vulnerable. Run /conflict-check BEFORE starting — this surface is shared with shipped SPA-external-access-platform-r1/r2 and teams-app-r1. Scope: this task's PR.</constraint>
+    <constraint source="task-016">Tests go at tests/integration/auth/** (the ADR-038 KEEP path), extending the existing SpeRevokeMatcherTests rather than creating a parallel file. Mock at the DataverseWebApiClient and SpeContainerMembershipService virtual seams (ADR-038 4); Mock&lt;HttpMessageHandler&gt; stays banned (B1). LESSON FROM 017, APPLIES DIRECTLY: mocking at a seam proves the CALLER handles a failure, never that the CALLEE reports one — if this task changes any callee's error contract, test that callee directly. Scope: this task's test deliverable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>organization-grant revocation and SPE cleanup</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/notes/task-017-spe-revoke-matcher.md</file>
+      <file>projects/unified-access-control-r2/notes/task-010-grant-lifecycle.md</file>
+    </files>
+    <patterns>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Substitute at the virtual seam; assert the KEY passed, not merely that a call happened</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor; run /conflict-check on RevokeExternalAccessEndpoint.cs + Infrastructure/ExternalAccess/**.</step>
+    <step order="1">Re-verify the sprk_contactorganization lookup logical names and statecode against live Dataverse metadata. Confirm _sprk_organization_value and _sprk_contact_value.</step>
+    <step order="2">Add the organization-to-active-member-contacts reader, mirroring ExternalParticipationService.QueryActiveOrgIdsAsync in the inverse direction but on the DataverseWebApiClient seam. Smallest surface that Phase 1 can extend. Answer the three CLAUDE.md 11 questions in the PR.</step>
+    <step order="3">Resolve each member's emailaddress1 and call SpeContainerMembershipService.RevokeMembershipAsync per member. Continue on per-member failure; count Removed / NotFound / Failed.</step>
+    <step order="4">Extend the response so an org revoke's SPE outcome is legible at member granularity — at minimum: how many members were enumerated, how many permissions removed, how many failed. Decide whether SpeContainerRevokeOutcome gains a value or whether counts carry it; whichever you choose, "some members retain access" MUST NOT be reportable as success. Document the choice.</step>
+    <step order="5">Delete the now-resolved "confirm against the created junction schema" caveat in ExternalParticipationService.QueryActiveOrgIdsAsync (this task verified it).</step>
+    <step order="6">Extend SpeRevokeMatcherTests: org revoke with 3 members removes 3 permissions; a member whose removal fails yields a non-success outcome; enumeration failure yields a non-success outcome and attempts no removals; the org cleanup does NOT deactivate a member's personal grant row (task-010 invariant); the per-contact path is unchanged.</step>
+    <step order="7">Perturb the fix at least four ways (skip enumeration, ignore per-member failures, report partial as success, match on something other than the member email) and record how many tests fail for each. A perturbation that fails ZERO tests means the test is at the wrong level — fix the test, per the 017 lesson.</step>
+    <step order="8">Run ALL SEVEN .NET test projects (dotnet test at root covers 4; ArchTests, Spaarke.Core.Tests and RecordSyncJob.IsolatedTests need explicit invocation). Build green. Report publish size COMPRESSED.</step>
+    <step order="9">Record the read-side sprk_enddate asymmetry as a finding for the Phase 1 evaluator (constraint onto task 043) rather than changing read behaviour here.</step>
+    <step order="10">Update TASK-INDEX.md to ✅ and write projects/unified-access-control-r2/notes/task-020-org-grant-spe-cleanup.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If organization membership turns out NOT to be derivable from sprk_contactorganization alone — for example if members are also implied by contact.parentcustomerid, or if the junction is empty in the dev environment while org grants exist — STOP. Sweeping the wrong member set is either a privilege-retention bug (too few) or a privilege-loss bug affecting people whose access was never revoked (too many), and choosing between those is an owner decision, not an implementation detail.</trigger>
+    <trigger>If an organization can have more members than a single revoke request can reasonably process (say &gt;200), STOP and escalate rather than silently truncating or silently looping unbounded. A truncated sweep that reports success is the exact failure class this project exists to remove.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ExternalParticipationService.QueryActiveOrgIdsAsync reads the same junction in the inverse direction (contact -&gt; orgs), but it is private and built on a raw HttpClient + its own OBO token flow, not the DataverseWebApiClient seam the revoke path uses.</existing>
+    <extension>Partly. The QUERY SHAPE is copied rather than the code, because crossing the two client seams would drag the participation service's token flow into the revoke path. The new surface must be the smallest thing that answers "who are this organization's active members", so Phase 1's FR-24/FR-25 org expansion extends it instead of writing a third one.</extension>
+    <cost-of-doing-nothing>An organization-grant revoke deactivates the grant for every member in Dataverse and reports success, while every one of those members keeps their SPE container permission and therefore continued access to the project's files. Legacy and admin-created ACLs are the only population affected, and they are also the only population no other code path will ever clean up.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/RevokeAccessResponse.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-020-org-grant-spe-cleanup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Revoking an organization grant removes the SPE container permission of every ACTIVE member of that organization, matched on each member's email — verified by test.</criterion>
+    <criterion testable="true">Negative: when one member's permission cannot be removed, the response does NOT report the org SPE cleanup as successful, and the other members' permissions are still removed.</criterion>
+    <criterion testable="true">Negative: when the member list cannot be enumerated, the response reports a non-success SPE outcome and attempts no removals.</criterion>
+    <criterion testable="true">Negative: an organization with zero active members revokes cleanly — no error, and no permission removal attempted.</criterion>
+    <criterion testable="true">Negative: the org SPE cleanup does NOT deactivate any member's PERSONAL grant row on the same root (task-010 isolation invariant).</criterion>
+    <criterion testable="true">The per-contact revoke path is unchanged: the existing SpeRevokeMatcherTests assertions on email matching, NoPermissionFound and Failed all stay green.</criterion>
+    <criterion testable="true">Every perturbation in step 7 fails at least one test; any that fails zero is fixed by improving the test, not by dropping the perturbation.</criterion>
+    <criterion testable="true">All seven .NET test projects pass; build green; publish size reported COMPRESSED and ≤60 MB; no new vulnerable package.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-16 (extension — recorded as FR-16b); filed by task 017 §6 and escalated to in-scope by owner
+    decision 2026-08-24. Related: task 043 (FR-24/FR-25 org expansion) will need the same organization-to-members
+    reader — build it so 043 extends rather than duplicates. The sprk_enddate read-side asymmetry found while
+    scoping this task is recorded for 043, not fixed here.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

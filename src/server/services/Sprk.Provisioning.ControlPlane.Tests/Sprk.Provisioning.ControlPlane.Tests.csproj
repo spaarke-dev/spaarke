@@ -1,0 +1,119 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Tests — L2 unit + smoke test project.
+
+    Scope (created by task 037):
+      - CosmosSmokeTests: env-guarded (`COSMOS_L2_SMOKE_ENDPOINT`) CRUD
+        round-trip against a real dev Cosmos account. Skipped by default so
+        the CI unit suite never depends on a live Cosmos endpoint. When set,
+        exercises the IProvisioningRunRepository contract end-to-end
+        (create -> read -> replace with ETag -> stale-ETag conflict).
+
+    ADR-038 alignment:
+      - The smoke test is an INTEGRATION test (KEEP path — real Cosmos, no
+        mocks). ADR-038 §2 path #3 (external-integration boundary).
+      - No unit tests over the CosmosClient wire — the SDK is a boundary
+        we do not double-mock (matches BFF Sprk.Bff.Api.Tests posture).
+
+    Publish: IsPackable=false; test-only assembly. Not deployed to any
+    App Service; not referenced by production projects.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- Aligned with Azure.Core 1.60.0's transitive floor via
+         Microsoft.Extensions.Hosting.Abstractions 10.0.9. Pinned to prevent
+         NU1605 downgrade (TreatWarningsAsErrors is inherited from
+         Directory.Build.props). -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <!-- Cosmos SDK is transitively available via the SUT project reference,
+         but the smoke test constructs the CosmosClient directly (bypassing
+         DI so the env-guard skip is a single conditional in one test file). -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <!-- Service Bus SDK — smoke test constructs ServiceBusClient + receiver
+         directly (task 038 pattern parity with CosmosSmokeTests). Pinned to
+         the same 7.20.2 as the SUT project for a single version across the
+         whole L2 test surface. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+    <!-- Options binding — the smoke test wraps ServiceBusModuleOptions in
+         Options.Create(...) to instantiate the enqueuer directly (bypassing
+         DI so the env-guard skip is a single conditional). Pinned to 10.0.9
+         to match Azure.Core 1.60.0's transitive floor (via
+         Microsoft.Extensions.Hosting.Abstractions -> Diagnostics.Abstractions)
+         — same reason Microsoft.Extensions.Logging.Abstractions is pinned
+         to 10.0.9 above. Prevents NU1605 downgrade (TreatWarningsAsErrors
+         inherited from Directory.Build.props). -->
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
+
+    <!-- WebApplicationFactory + TestServer — required by task 057
+         RunsEndpoints.Tests.cs to exercise the auth pipeline (401 no-bearer /
+         403 wrong-role / 202 Operator) + partition-key + audit-log paths
+         end-to-end against the real Program.cs composition. Pinned to net10
+         framework version. Program is exposed via `public partial class Program`
+         at the bottom of Sprk.Provisioning.ControlPlane.Api/Program.cs (task
+         100 split — was Sprk.Provisioning.ControlPlane/Program.cs pre-split). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+  </ItemGroup>
+
+  <!--
+    ProjectReferences updated by task 100 (DS-3 Option 2 split, 2026-08-19):
+      - Sprk.Provisioning.ControlPlane.Core: primary reference — handler /
+        reconciler / concurrency / enqueue / rollback / models / registry /
+        repositories / infrastructure / modules types all live here. Consumed
+        by Handlers/**, Reconciler/**, Rollback/**, Concurrency/**,
+        CosmosSmokeTests.cs, ServiceBusSmokeTests.cs,
+        AuditLogMiddlewareTests.cs and the majority of the 41-file test suite.
+      - Sprk.Provisioning.ControlPlane.Api: WebApplicationFactory consumer
+        Api/RunsEndpointsTests.cs uses `public partial class Program` from
+        the .Api project's composition root. Also brings AuditLogMiddleware
+        (Api-side) into scope for AuditLogMiddlewareTests.cs.
+    The .Api project transitively references .Core, so referencing both here
+    is explicit intent (per POML: ".Core for the 41-file test project, .Api
+    for the single WebApplicationFactory consumer").
+
+    Added by task 103 (Phase C'' Wave G-1):
+      - Sprk.Provisioning.ControlPlane.Worker: WebApplicationFactory
+        consumer Dispatch/HandlerRegistrationCompletenessTests.cs uses
+        `public partial class Program` from the .Worker project's
+        composition root — the REAL DI container all 19 dispatchable
+        handlers' concrete-type registrations live in (14 inline in
+        Program.cs, 4 via per-handler *Module.cs extension methods, 1 —
+        H0 — via HandlersModule.cs). Building the real container (rather
+        than duplicating its registration calls in the test) is the only
+        way the test proves task 103's keyed registrations actually
+        resolve against production wiring, not a test-only stand-in.
+
+        `Aliases="WorkerHost"` — BOTH .Api and .Worker generate an
+        implicit top-level-statement `Program` class in the GLOBAL
+        namespace (a RootNamespace/AssemblyName setting does NOT change
+        where that generated type lands); referencing both assemblies
+        unaliased makes every `WebApplicationFactory<Program>` usage in
+        the whole test project ambiguous (CS0433), including the
+        pre-existing Api/RunsEndpointsTests.cs usage. The Worker reference
+        is aliased so only Dispatch/HandlerRegistrationCompletenessTests.cs
+        (via `extern alias WorkerHost;` + `WorkerHost::Program`) resolves
+        it explicitly; every other file's bare `Program` keeps resolving
+        to .Api's unaliased reference unchanged.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Worker\Sprk.Provisioning.ControlPlane.Worker.csproj" Aliases="WorkerHost" />
+  </ItemGroup>
+
+</Project>
