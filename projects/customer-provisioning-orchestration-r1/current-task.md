@@ -16,6 +16,36 @@
 
 - `0185a7071` — feat(provisioning): SESSION 12 prerequisite wave — I4 REPLACE + 204b/c/d results (10 files, +1706/-14)
 - `abe16465a` — feat(provisioning): task 203c SKILL.md wiring — A02/A03/A04 applied + A15/A16 confirmed already-done (4 files, +351/-7)
+- `445286de7` — docs(provisioning): A26 queue-recreate ceremony executed 2026-08-26 SESSION 12 (1 file, +2/-2)
+- `37c0e4bad` — feat(provisioning): OpenAI region gap fix bundle — customer.bicep openAiLocation param + openai.bicep pin bump + PRQ-E-14 preflight + intake schema + Step 0.5 classifier tighten (6 files, +366/-38)
+
+### 🎯 SESSION 12.5 addendum — OpenAI region gap catch + bundle fix
+
+**What surfaced**: Bicep what-if for trial1 validated cleanly, but the operator's own pre-check rule (`az cognitiveservices model list` per user memory `reference_openai_model_pins_stale_fast`) revealed that **sub 484bc857 has ZERO OpenAI models available in westus2**. customer.bicep bound OpenAI to top-level `location=westus2` → H2a would have aborted mid-run with model-not-available.
+
+**Root cause**: the process gap. PRQ-C-02 (existing OpenAI model check) is scoped `once_per_customer` (fires at Step 2 preflight, AFTER operator confirms run). It also had a silent-pass classification defect — empty query result was interpreted as pass.
+
+**Bundle-fix landed** (`37c0e4bad`):
+- customer.bicep: new `openAiLocation` param (default `westus3` per canonical Spaarke strategy); openAi module invocation swapped from `location: location` to `location: openAiLocation`
+- openai.bicep: version pin bumps — gpt-4o `2024-08-06 → 2024-11-20 (Legacy)`; gpt-4o-mini `2024-07-18` RETAINED (no newer version in westus3 for this sub); text-embedding-3-large `1 (GA)` unchanged. TPM budgets preserved byte-for-byte (150/200/30/350).
+- prereqs.yaml: new PRQ-E-14 preflight (scope=`once_per_env`, fires at Step 0.5 BEFORE confirmation). Recipe iterates openai.bicep-pinned pairs + `az cognitiveservices model list` + exits 1 on Deprecated or NOT_AVAILABLE. Id-collision handled (E-13 already occupied → E-14 assigned to preserve cross-refs).
+- intake.schema.json: new `openAiRegion` field (default westus3) + examples updated.
+- SKILL.md Step 0.5 classifier: exit-code-first pass/fail (not output-shape); recipe execution via `bash -c` (handles for/if/exit shell syntax); defense-in-depth expect-pattern match; `{openAiRegion}` placeholder substitution; recipe-author contract added.
+- notes/bicep-whatif-trial1-2026-08-26.md — 265-line operator-review report authored by workflow wf_e3c35ea9-c9e.
+
+**Verification**: PRQ-E-14 recipe manually run against westus3 → EXIT 0 PASS. Bicep compile clean on both files. What-if is stale; would benefit from a re-run against updated template but the delta is param default + module invocation string (structure identical).
+
+**Task 186 blocker status**: REGION GAP FIXED. Task 186 can dispatch with `openAiLocation=westus3` (or default). PRQ-E-14 will pre-verify pins before every run.
+
+### Deferred follow-on discovery — gpt-5 migration path
+
+Broader `az cognitiveservices model list` scan revealed:
+- **gpt-5** (2025-08-07, GenerallyAvailable) + **gpt-5-mini** (2025-08-07, GA) + **gpt-5-nano** (GA) all in westus3
+- **TPM quota already granted** in sub 484bc857: `gpt-5: 3000 GlobalStandard TPM (10 in-use)`, `gpt-5-mini: 2000 TPM`, `gpt-5-nano: 16000 TPM`
+- Someone in this sub is ALREADY consuming gpt-5 (10 TPM active) — infrastructure warm
+- **gpt-4.1** family (Legacy) also available
+
+**Follow-on to file (post-186 or parallel r2 scope)**: migrate customer.bicep model pins from gpt-4o family (Legacy + Deprecating) to gpt-5 family (GA). Estimated 1-2 days for validation — chat prompts, tool calls, JPS schemas, cost recalculation. Trial1 works fine with current pins for months; not urgent, but the trial1 env is KEEP-PERMANENT (SESSION 11 Q4) so eventually needed.
 
 ### Critical Context (2-3 sentences)
 
