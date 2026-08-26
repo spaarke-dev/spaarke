@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none in progress** — 052 · 053 · 053b · 061 · 064 all landed |
-| **Status** | Builds clean · BFF **11,277 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **102 suites / 1,298** · SpaarkeAi **121 / 1,121** |
-| **Progress** | **39 of 56 complete**, 10 open, 1 blocked |
-| **Next Action** | **062** then **063** — SEQUENTIALLY (their `parallel-safe: ✅` flag is wrong; see the parallelism section). Before dispatching 063, read the TASK-INDEX 061 row: it adds the delete surface to `SessionFileBlobStore` (which today has only `WriteAsync`/`ReadAsync` — **no delete, no list**), at which point `SessionFilesCleanupScopeTests` becomes the load-bearing guard — **do not weaken it**. Erasure MUST enumerate by **tenant PREFIX** (`{tenantId}/session-files/{sessionId}/`), not by walking the Cosmos manifest: that container has `DefaultTimeToLive = 7776000` (90d), so the manifest expires while the blobs do not, and a manifest walk would orphan bytes permanently. |
+| **Task** | **none in progress** — **062 + 047b** landed (047b built in an isolated worktree, cherry-picked back) |
+| **Status** | Builds clean · BFF **11,321 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **102 / 1,298** · SpaarkeAi **121 / 1,121** |
+| **Progress** | **41 of 56 complete**, 8 open, 1 blocked |
+| **Next Action** | **063** — Track B erasure, the LAST gate before the durable store may be armed. 062 already built the primitives (`ListAsync` / `ListAllForRetentionAsync` / `DeleteAsync`), so **063 adds a CALLER, not store surface**: erase-a-session = list its prefix + delete each. Do NOT weaken `SessionFilesCleanupScopeTests` — now that a delete surface exists it is load-bearing, not belt-and-braces. |
 
 ### Files modified this session
 All committed. Nothing uncommitted, nothing at risk.
@@ -82,13 +82,12 @@ retention and erasure for a persisted store, and the empty endpoint is the only 
 
 ---
 
-## Remaining queue (10 open, 1 blocked)
+## Remaining queue (8 open, 1 blocked)
 
 | # | Task | Gate |
 |---|---|---|
-| **062 · 063** | Track B retention/TTL · erasure | 061 ✅ — **062 then 063, sequentially** |
+| **063** | Track B **erasure** — the last gate before `BlobEndpoint` may be set | 062 ✅ — **dispatch next** |
 | **052b** | Stale-target DETECTION durability (052's answer is ledger-durable; the question is `sessionStorage`) | 052 ✅ |
-| **047b** | Never-silent hole (unpaired block reports no loss) | 056 ✅ |
 | **058** | Nested / conditional merge fields | 049 ✅ 057 ✅ |
 | **059** | SECURITY — `X-Tenant-Id` spoofable fallback; human sign-off required | 060 ✅ |
 | **070–073** | Track D decomposition | ready; same files as Track A/C — sequence carefully |
@@ -210,7 +209,11 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
   44.96 MB baseline at +0.07 MB). Always report the **raw dir sum (~137.41 MB) + file count (215 / 4 `.pdb`)**
   alongside the zip — those are shell-independent and are the only reason this was diagnosable.
 - **Line endings**: `.gitattributes` sets `*.cs text eol=crlf`, and edits can silently produce pure LF.
-  **`grep -c $'\r$'` reports those files as CRLF and is WRONG.** Use `od -An -tx1 | grep -c '^0d$'`.
+  **`grep -c $'\r$'` reports those files as CRLF and is WRONG.** The reliable check needs the `tr`:
+  `od -An -tx1 <file> | tr ' ' '\n' | grep -c '^0d$'` — non-zero means CRLF.
+  ⚠️ **Without `| tr ' ' '\n'` it returns 0 for CORRECT files too** (od prints 16 bytes per line, so no line
+  ever equals `0d`) — i.e. it silently reports every file as broken. Task 047b caught exactly that error in a
+  brief written from this note; the note is now correct.
 - **`dotnet format` before committing**, scoped: `dotnet format whitespace <csproj> --no-restore --include
   <your paths>`. CI auto-formats and pushes, which rejects the next push. A project-wide run also "fixes"
   ~22 pre-existing IDE1006 violations in unrelated files.
@@ -226,3 +229,46 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
 - **Verify every agent report.** This session that caught: a wrong publish number already committed to a
   note, a stale test fixture, a misleading `parallel-safe` flag, and two of an agent's own tests that its
   mutation pass proved were passing vacuously.
+
+---
+
+## 🚨 047b found more than a reporting bug — read this before touching the merge
+
+Task 047b was filed as "an edited block with no base counterpart reports no loss". It was **not only** that.
+On `interior-text-boxes.docx`, blocks 1 and 2 project to **byte-identical** models (the text box's prose is
+accept-flattened; the shape is not carried), so `ComposeBlockMerge.Plan`'s LCS was **ambiguous** — and the
+traceback's tie-break skipped the *posted* block, producing:
+
+```
+posted 1 -> Render base=-1   <- the EDITED block, no counterpart -> nothing reported
+posted 2 -> Clone  base=1    <- the UNTOUCHED twin, cloned from the WRONG base
+              base 2 stranded, never written
+```
+
+The saved package held block 1's `v:shape` at position 2 and block 2's not at all. **ADR-049 invariant 2
+("untouched blocks are preserved") was being breached by a clone.** The remark on `Plan` asserted this could
+not happen — equality there is over the *projected model*, not the OOXML — and that comment is why nobody
+looked. Fourth stale-comment defect this project has hit.
+
+Corpus sweep, 24 docs × every block position = **294 single-block edits: unpaired blocks 5 → 0.** Four of the
+five were in a **real signed NDA** (`AppligentNDA_Signed.docx`), on consecutive empty paragraphs.
+
+**Why the fidelity gate never caught it**: the gate edits block 0 of that document. Every other parity row
+sits in a document whose blocks all read differently. 047b added a `pictTextBoxTwin` parity row so the
+published list is now measured **at a duplicate-key block position** — that is the gap that let this survive
+four runs of a check built to catch it.
+
+`COMPOSE-WRITE-RESIDUAL-LOSS.md` changed but **no row changed** — the signed five losses are identical. What
+changed is that §2's promise ("reported by name … none is silent") is now *true* where it wasn't.
+
+### Recorded by 047b, not fixed (deliberate)
+- `BaselineUnavailable` / `BaselineUnaligned` fall back to R6's whole-document rebuild with no base side — a
+  different failure CLASS (document-level, not per-edited-block), whose honest signal needs a new degradation
+  code + client copy + banner state, which this project's CLAUDE.md forbids adding here. Reachability
+  measured: **0 of 24** corpus documents. Both already on `ComposeMergeStats`; only a consumer is missing.
+- LCS cannot see a MOVED block (matches never cross) — 0 of 294 after the fix.
+
+## Doc drift to fix (not urgent, main-session only — hot path)
+Root `CLAUDE.md`'s ADR-049 pointer says the save "pairs blocks by **document order**". It has paired by
+**LCS** since task 040 — loosely true (matches are monotone) but imprecise, and 047b showed the imprecision
+is where a real defect hid. Touching root CLAUDE.md needs `/conflict-check` + a `.claude/CHANGELOG.md` entry.
