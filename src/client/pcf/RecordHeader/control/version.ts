@@ -87,5 +87,35 @@
  *   `data-testid`s, and `IHeaderToolbarProps.aiSummary` forwards `emptyText`.
  *   The refresh icon stays UNWIRED (DEF-01) - and is now absent rather than
  *   inert, since the shared popover offers only copy-to-clipboard.
+ *
+ * 1.1.5 (2026-08-26) - second-UAT defect fixes. Three defects, ONE root cause:
+ *   the CLIENT API attribute payload is narrower than the Web API's, and two
+ *   fields the header depends on are missing from it.
+ *     DEF-3 every DateOnly column rendered `type="datetime-local"`, and
+ *       committing its `yyyy-MM-ddTHH:mm` value into a DateOnly field errored.
+ *       `projectAttribute` accepted only a STRING `Format`; the Client API
+ *       returns a NUMBER, so `format` was always undefined and the resolver's
+ *       `format === 'DateOnly'` test could never be true.
+ *     DEF-4 lookups were not clickable. `RecordHeaderLookupField` computes
+ *       `editable = onSave && hasTargets`, and `Targets` does not appear in
+ *       Microsoft's documented Client-API attribute metadata at all.
+ *   Both are now filled from the LIVE FORM by `applyFormControlHints`:
+ *   `attribute.getFormat()` returns a documented STRING (`"date"` /
+ *   `"datetime"`) and `control.getEntityTypes()` returns the lookup's targets.
+ *   Zero extra round trips, host-context only, and no enum table to guess -
+ *   the metadata `Format` integer is deliberately NOT decoded, because its
+ *   meaning depends on the attribute type (0 is DateOnly for a DateTime but
+ *   Email for a String). Metadata still WINS wherever it supplied a value; the
+ *   form only fills blanks, and the merge never mutates the page-session cache.
+ *   These are the third and fourth instances of FAILURE-MODES G-13 (after
+ *   `AttributeType` and `DisplayName` in v1.1.1).
+ *     DEF-5 `BooleanField`'s Switch is now ALWAYS VISIBLE while editable
+ *       instead of hidden behind a click-to-edit step. An unset flag rendered
+ *       as a grey cell containing an em-dash, which reads as broken rather
+ *       than settable; a Switch's position IS its value, so it has no
+ *       display/edit distinction to make. Draft/commit semantics are unchanged
+ *       (toggle stages, Enter/blur commits, Escape reverts) - only the reveal
+ *       is gone. The FR-10 contract suite gains an explicit `alwaysEditing`
+ *       carve-out relaxing exactly three assertions; the other 88 still apply.
  */
-export const CONTROL_VERSION = '1.1.4';
+export const CONTROL_VERSION = '1.1.5';

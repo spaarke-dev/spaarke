@@ -162,38 +162,50 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
   const displayLabel = isEmpty ? EMPTY_VALUE_PLACEHOLDER : committedValue ? trueLabel : falseLabel;
   const editable = typeof onSave === 'function' && disabled !== true;
 
-  // Edit-mode state
-  const [editing, setEditing] = React.useState(false);
+  // ══════════════════════════════════════════════════════════════════════════
+  // The Switch is ALWAYS VISIBLE when editable — no click-to-edit step.
+  // ══════════════════════════════════════════════════════════════════════════
+  // Its five siblings hide their editor until the value is clicked, which is
+  // right for text: a grid of always-live inputs reads as a form, not a header.
+  // A boolean is the exception, and UAT said so — an unset flag rendered as a
+  // grey cell containing an em-dash, which looks like a broken or read-only
+  // field rather than something you can set.
+  //
+  // A Switch has no display/edit distinction to make: its position IS its
+  // value, and it is self-evidently interactive in a way an em-dash is not.
+  // Requiring a click to reveal it also means two clicks to flip one flag.
+  // This mirrors OOB Dataverse, where a two-option field is a live toggle.
+  //
+  // Draft/commit semantics are UNCHANGED (FR-10): toggling stages the draft,
+  // Enter or blur commits via `onSave`, Escape reverts. Only the reveal step is
+  // gone — so the renderer is "permanently in edit mode" while editable, and
+  // reports `data-editing="true"` to say so. The contract suite holds this
+  // renderer out of the three click-to-edit assertions and applies the other
+  // eighty-eight unchanged; see `rendererContract.test.tsx` `alwaysEditing`.
+  const showSwitch = editable;
+
   const [draft, setDraft] = React.useState<boolean>(committedValue);
   const [saving, setSaving] = React.useState(false);
 
-  // Reset draft when the external value changes (so an external refresh
-  // doesn't drop an in-progress toggle — only sync on entry / outside edit).
+  // Re-sync the draft whenever the committed value changes underneath us —
+  // a record navigation, a form reload, or our own successful commit. Skipped
+  // mid-save so an in-flight toggle is not clobbered by a re-render. Cannot key
+  // off "not editing" any more, because editable cells never leave edit mode.
   React.useEffect(() => {
-    if (!editing) {
+    if (!saving) {
       setDraft(committedValue);
     }
-  }, [committedValue, editing]);
-
-  const enterEdit = React.useCallback(() => {
-    if (!editable) return;
-    setDraft(committedValue);
-    setEditing(true);
-  }, [editable, committedValue]);
+  }, [committedValue, saving]);
 
   const commit = React.useCallback(async () => {
     if (!onSave) return;
-    if (draft === committedValue) {
-      setEditing(false);
-      return;
-    }
+    if (draft === committedValue) return;
     setSaving(true);
     try {
       await onSave(draft);
-      setEditing(false);
     } catch {
-      // Revert draft to last-known value on error; stay in edit mode so the
-      // user can retry or cancel.
+      // Revert to the last-known value on error. The Switch stays live, so the
+      // user can simply toggle again to retry.
       setDraft(committedValue);
     } finally {
       setSaving(false);
@@ -202,7 +214,6 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
 
   const cancel = React.useCallback(() => {
     setDraft(committedValue);
-    setEditing(false);
   }, [committedValue]);
 
   const onKeyDown = React.useCallback(
@@ -225,12 +236,12 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
       data-testid="record-header-boolean-field"
       data-span={span}
       data-editable={editable ? 'true' : 'false'}
-      data-editing={editing ? 'true' : 'false'}
+      data-editing={showSwitch ? 'true' : 'false'}
     >
       <div className={styles.label} data-testid="record-header-boolean-field-label">
         {label}
       </div>
-      {editing ? (
+      {showSwitch ? (
         <div className={styles.editRow}>
           <Switch
             checked={draft}
@@ -238,7 +249,6 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
             onBlur={() => void commit()}
             onKeyDown={onKeyDown}
             disabled={saving}
-            autoFocus
             labelPosition="after"
             label={draft ? trueLabel : falseLabel}
             data-testid="record-header-boolean-field-switch"
@@ -248,22 +258,12 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
           ) : null}
         </div>
       ) : (
+        // Read-only cell — no `onSave`, or explicitly `disabled`. Keeps the
+        // em-dash empty state (FR-11) that the contract suite asserts, and
+        // deliberately carries no `role="button"`: there is nothing to click.
         <div
-          className={mergeClasses(styles.value, editable ? styles.valueEditable : undefined)}
+          className={styles.value}
           title={displayLabel}
-          onClick={editable ? enterEdit : undefined}
-          role={editable ? 'button' : undefined}
-          tabIndex={editable ? 0 : undefined}
-          onKeyDown={
-            editable
-              ? ev => {
-                  if (ev.key === 'Enter' || ev.key === ' ') {
-                    ev.preventDefault();
-                    enterEdit();
-                  }
-                }
-              : undefined
-          }
           data-testid="record-header-boolean-field-value"
         >
           {displayLabel}

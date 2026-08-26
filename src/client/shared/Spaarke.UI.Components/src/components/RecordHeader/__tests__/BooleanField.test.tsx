@@ -115,17 +115,13 @@ describe('BooleanField', () => {
     expect(root.getAttribute('data-editable')).toBe('false');
   });
 
-  it('with onSave alone, clicking the value enters edit mode showing a Fluent Switch checked per the current value', async () => {
+  it('with onSave alone, the Switch is rendered immediately, checked per the current value', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
     renderWithProviders(<BooleanField span={1} label="High Priority" value={true} onSave={onSave} />);
 
     const root = screen.getByTestId('record-header-boolean-field');
     expect(root.getAttribute('data-editable')).toBe('true');
 
-    const valueEl = screen.getByTestId('record-header-boolean-field-value');
-    await act(async () => {
-      await userEvent.click(valueEl);
-    });
 
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     expect(switchEl).toBeInTheDocument();
@@ -133,14 +129,10 @@ describe('BooleanField', () => {
     expect(screen.getByTestId('record-header-boolean-field').getAttribute('data-editing')).toBe('true');
   });
 
-  it('entering edit with a false value shows the Switch unchecked', async () => {
+  it('renders the Switch unchecked for a false value', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
     renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-    const valueEl = screen.getByTestId('record-header-boolean-field-value');
-    await act(async () => {
-      await userEvent.click(valueEl);
-    });
 
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     expect(switchEl.checked).toBe(false);
@@ -155,10 +147,6 @@ describe('BooleanField', () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -173,10 +161,6 @@ describe('BooleanField', () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -190,14 +174,10 @@ describe('BooleanField', () => {
       expect(onSave).toHaveBeenCalledWith(true);
     });
 
-    it('Escape cancels with zero onSave calls and exits edit mode', async () => {
+    it('Escape cancels with zero onSave calls and reverts the Switch', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -210,20 +190,19 @@ describe('BooleanField', () => {
       });
 
       expect(onSave).not.toHaveBeenCalled();
+      // The Switch stays mounted — there is no read-mode slot to fall back to.
+      // "Cancelled" is observable as the toggle snapping back to the committed
+      // value and its label returning to `falseLabel`.
       const root = screen.getByTestId('record-header-boolean-field');
-      expect(root.getAttribute('data-editing')).toBe('false');
-      // Reverted display — back to "No" (the original committed value).
-      expect(screen.getByTestId('record-header-boolean-field-value')).toHaveTextContent('No');
+      expect(root.getAttribute('data-editing')).toBe('true');
+      expect(switchEl.checked).toBe(false);
+      expect(screen.getByText('No')).toBeInTheDocument();
     });
 
     it('blur commits the draft', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -241,10 +220,6 @@ describe('BooleanField', () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -264,10 +239,6 @@ describe('BooleanField', () => {
       );
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-      const valueEl = screen.getByTestId('record-header-boolean-field-value');
-      await act(async () => {
-        await userEvent.click(valueEl);
-      });
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -298,10 +269,6 @@ describe('BooleanField', () => {
     const onSave = jest.fn().mockRejectedValue(new Error('save failed'));
     renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-    const valueEl = screen.getByTestId('record-header-boolean-field-value');
-    await act(async () => {
-      await userEvent.click(valueEl);
-    });
 
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     await act(async () => {

@@ -61,12 +61,21 @@ import { getXrmPage } from '@spaarke/ui-components/dist/utils/xrmContext';
 
 interface IFormAttributeLike {
   getRequiredLevel?(): string;
+  /**
+   * `"date"` | `"datetime"` for a DateTime attribute (also `"text"`,
+   * `"email"`, `"textarea"`, … for String). Documented to return a STRING —
+   * which is exactly why it is preferred over the metadata `Format`. See
+   * {@link normalizeFormFormat}.
+   */
+  getFormat?(): string;
 }
 
 interface IFormControlLike {
   getName?(): string;
   getLabel?(): string;
   getAttribute?(): IFormAttributeLike | null | undefined;
+  /** Lookup controls only — the entity logical names the picker may search. */
+  getEntityTypes?(): string[];
 }
 
 interface IFormControlCollectionLike {
@@ -84,6 +93,105 @@ export interface IFormControlProjection {
   name: string;
   label?: string;
   requiredLevel?: string;
+  /** Already normalized to the metadata vocabulary — see {@link normalizeFormFormat}. */
+  format?: string;
+  /** Lookup targets read from the form control (`getEntityTypes()`). */
+  entityTypes?: string[];
+}
+
+/**
+ * Translate `attribute.getFormat()` into the vocabulary the resolver speaks.
+ *
+ * ══════════════════════════════════════════════════════════════════════════
+ * WHY THE FORM, AND NOT THE METADATA `Format`
+ * ══════════════════════════════════════════════════════════════════════════
+ * `resolveHeaderConfig` distinguishes a date cell from a datetime cell on
+ * `format === 'DateOnly'` — the WEB API spelling. But the header's metadata
+ * comes from `Xrm.Utility.getEntityMetadata`, the CLIENT API, which returns
+ * `Format` as a NUMBER. `projectAttribute` accepts only a string, so `format`
+ * arrived `undefined` and EVERY DateOnly column rendered as
+ * `<Input type="datetime-local">` — the "Opened Date shows a time picker"
+ * defect, and the third instance of the Client-API-shape trap (FAILURE-MODES
+ * G-13, after `AttributeType` and `DisplayName`).
+ *
+ * The numeric enum is NOT decoded here on purpose. `Format` is scoped by
+ * attribute type — `0` means `DateOnly` for a DateTime but `Email` for a
+ * String — and this project has already shipped three broken builds on
+ * confidently-guessed platform details. `attribute.getFormat()` is documented
+ * to return a STRING (`"date"` / `"datetime"`), needs no enum table, and is
+ * zero-network. The form is already the authority for `label` and
+ * `requiredLevel` here for the same reason.
+ *
+ * Non-date formats pass through untouched: the resolver consults only
+ * `'DateOnly'`, so `"text"` or `"email"` is inert rather than wrong.
+ */
+export function normalizeFormFormat(rawFormat: unknown): string | undefined {
+  if (typeof rawFormat !== 'string' || rawFormat.length === 0) return undefined;
+  switch (rawFormat.toLowerCase()) {
+    case 'date':
+      return 'DateOnly';
+    case 'datetime':
+      return 'DateAndTime';
+    default:
+      return rawFormat;
+  }
+}
+
+/**
+ * Fill gaps in the Client-API metadata payload from the live form.
+ *
+ * Returns a NEW object — `retrieveEntityMetadata` results are page-session
+ * cached and shared across every header on the page, so mutating them in place
+ * would leak one form's controls into another's metadata.
+ *
+ * Two gaps, both because the Client API's attribute payload is narrower than
+ * the Web API's:
+ *
+ *  - **`format`** — see {@link normalizeFormFormat}.
+ *  - **`targets`** — Microsoft's documented Client-API attribute metadata
+ *    (AttributeType, DisplayName, LogicalName, OptionSet, SchemaName,
+ *    IsPrimaryId/Name, IsValidFor*) does **not** include `Targets`. Without it
+ *    `RecordHeaderLookupField` computes `editable = onSave && hasTargets` as
+ *    FALSE, so the cell renders its value and clicking does nothing — the
+ *    "Project Type lookup does not work" defect. `control.getEntityTypes()` is
+ *    the documented Client-API source for exactly this and costs no round trip.
+ *
+ * Metadata WINS wherever it already supplied a value; the form only fills
+ * blanks. A field that is not on the form contributes nothing, which is the
+ * pre-existing behaviour.
+ */
+export function applyFormControlHints(
+  entityMetadata: EntityMetadata,
+  formControls: ReadonlyArray<IFormControlProjection>
+): EntityMetadata {
+  if (formControls.length === 0) return entityMetadata;
+
+  let changed = false;
+  const attributes: EntityMetadata['attributes'] = { ...entityMetadata.attributes };
+
+  for (const control of formControls) {
+    const existing = Object.prototype.hasOwnProperty.call(attributes, control.name)
+      ? attributes[control.name]
+      : undefined;
+    if (!existing) continue;
+
+    const needsFormat = !existing.format && !!control.format;
+    const needsTargets =
+      (!Array.isArray(existing.targets) || existing.targets.length === 0) &&
+      Array.isArray(control.entityTypes) &&
+      control.entityTypes.length > 0;
+
+    if (!needsFormat && !needsTargets) continue;
+
+    attributes[control.name] = {
+      ...existing,
+      ...(needsFormat ? { format: control.format } : {}),
+      ...(needsTargets ? { targets: control.entityTypes } : {}),
+    };
+    changed = true;
+  }
+
+  return changed ? { ...entityMetadata, attributes } : entityMetadata;
 }
 
 /**
@@ -117,6 +225,8 @@ export function readFormControlOrder(): IFormControlProjection[] {
     let name: string | undefined;
     let label: string | undefined;
     let requiredLevel: string | undefined;
+    let format: string | undefined;
+    let entityTypes: string[] | undefined;
 
     try {
       name = typeof control?.getName === 'function' ? control.getName() : undefined;
@@ -136,12 +246,27 @@ export function readFormControlOrder(): IFormControlProjection[] {
       const attribute =
         typeof control?.getAttribute === 'function' ? control.getAttribute() : page?.getAttribute?.(name);
       requiredLevel = typeof attribute?.getRequiredLevel === 'function' ? attribute.getRequiredLevel() : undefined;
+      // `"date"` / `"datetime"` — the string the Client API metadata does NOT
+      // give us. Normalized here so downstream only ever sees the Web-API
+      // vocabulary the resolver compares against.
+      format =
+        typeof attribute?.getFormat === 'function' ? normalizeFormFormat(attribute.getFormat()) : undefined;
     } catch {
       requiredLevel = undefined;
+      format = undefined;
+    }
+
+    try {
+      // Lookup controls only; every other control type lacks the method, so
+      // this stays `undefined` rather than throwing.
+      const types = typeof control?.getEntityTypes === 'function' ? control.getEntityTypes() : undefined;
+      entityTypes = Array.isArray(types) && types.length > 0 ? types : undefined;
+    } catch {
+      entityTypes = undefined;
     }
 
     seen.add(name);
-    projections.push({ name, label, requiredLevel });
+    projections.push({ name, label, requiredLevel, format, entityTypes });
   }
 
   return projections;
@@ -356,7 +481,10 @@ export function useHeaderFormMetadata(
         metadata => {
           if (cancelled) return;
           setFormControls(controls);
-          setEntityMetadata(metadata);
+          // Fill the Client-API payload's two gaps (DateTime `format`, lookup
+          // `targets`) from the live form BEFORE anything downstream sees it,
+          // so both the resolver and the view read one already-complete object.
+          setEntityMetadata(applyFormControlHints(metadata, controls));
           setLoading(false);
         },
         (err: unknown) => {

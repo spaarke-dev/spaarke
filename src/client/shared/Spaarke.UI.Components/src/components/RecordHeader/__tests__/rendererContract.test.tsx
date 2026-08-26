@@ -48,7 +48,13 @@
  *    calendar-day selection committed immediately; that special case retired
  *    with the picker.)
  *  - `BooleanField` stages its draft by toggling the Switch, then commits on
- *    Enter/blur.
+ *    Enter/blur — and its Switch is **permanently visible** while editable
+ *    (`alwaysEditing`), so it has no click-to-edit reveal and never returns to
+ *    a read-mode value slot. UAT drove that: a hidden editor rendered an unset
+ *    flag as a grey cell containing an em-dash, which reads as broken rather
+ *    than settable, and a Switch's position IS its value. The flag relaxes
+ *    exactly three assertions (the reveal, and the two post-commit/cancel
+ *    "left edit mode" checks); the other eighty-eight apply unchanged.
  *  - Per **D-10**, all six ACCEPT `required` but only `TextField` renders the
  *    `*` marker — asserted as a negative for the other five.
  *
@@ -128,8 +134,26 @@ interface IContractAdapter {
   valueEl(): HTMLElement;
   /** A non-empty sample value and the text it must render. */
   sample: { value: unknown; text: string };
-  /** Click-to-edit. */
+  /** Click-to-edit. A no-op for {@link IContractAdapter.alwaysEditing} renderers. */
   enterEdit(): Promise<void>;
+  /**
+   * This renderer's editor is PERMANENTLY VISIBLE while editable — there is no
+   * reveal step, so it reports `data-editing="true"` for as long as it is
+   * editable and never returns to a read-mode value slot.
+   *
+   * `BooleanField` only. A Switch's position IS its value, so "enter edit mode"
+   * has no meaning for it, and UAT showed the hidden-editor treatment reading as
+   * a broken field: an unset flag rendered as a grey cell containing an em-dash.
+   *
+   * This flag relaxes exactly THREE assertions — the click-to-edit reveal, and
+   * the two "left edit mode" checks after commit and cancel. Everything else in
+   * this contract still applies to `BooleanField` unchanged, including the
+   * read-only gates, the em-dash empty triple, span self-application, the
+   * commit payload, single-invocation, the save spinner, and Escape reverting
+   * the draft. It is a narrower carve-out than `RecordHeaderLookupField`, which
+   * is excluded from this suite entirely.
+   */
+  alwaysEditing?: boolean;
   /**
    * Stages a draft that differs from the committed value WITHOUT committing.
    * `undefined` for immediate-commit renderers (OptionSetField) whose
@@ -401,10 +425,12 @@ const booleanFieldAdapter: IContractAdapter = {
   root: () => byId('record-header-boolean-field'),
   valueEl: () => byId('record-header-boolean-field-value'),
   sample: { value: true, text: 'Yes' },
+  alwaysEditing: true,
+  // No-op: the Switch is already live whenever the cell is editable. Kept as a
+  // satisfied method (rather than made optional) so every other shared
+  // assertion can call it unconditionally.
   enterEdit: async () => {
-    await act(async () => {
-      await userEvent.click(byId('record-header-boolean-field-value'));
-    });
+    /* nothing to reveal */
   },
   stageDraft: async () => {
     await act(async () => {
@@ -460,6 +486,18 @@ describe('FR-10 renderer contract', () => {
 
     const valueText = (): string => adapter.valueEl().textContent?.trim() ?? '';
 
+    /**
+     * Assert the renderer is no longer in edit mode.
+     *
+     * An `alwaysEditing` renderer never leaves it — its editor is the whole
+     * cell — so the contract's real requirement ("the commit/cancel gesture
+     * resolved and the renderer settled") is expressed as its steady state
+     * rather than by weakening the assertion to a no-op.
+     */
+    const expectSettledOutOfEditMode = (): void => {
+      expect(adapter.root().getAttribute('data-editing')).toBe(adapter.alwaysEditing ? 'true' : 'false');
+    };
+
     // ── (a) label + value ────────────────────────────────────────────────
     it('renders its label and its value', () => {
       renderSample();
@@ -498,10 +536,17 @@ describe('FR-10 renderer contract', () => {
       expect(adapter.valueEl()).not.toHaveAttribute('role', 'button');
     });
 
-    it('becomes click-to-edit when onSave is supplied alone', async () => {
+    it('exposes a live editor when onSave is supplied alone', async () => {
       renderSample({ onSave: makeSave() });
       expect(adapter.root().getAttribute('data-editable')).toBe('true');
-      expect(adapter.valueEl()).toHaveAttribute('role', 'button');
+
+      if (adapter.alwaysEditing) {
+        // No reveal step and no read-mode value slot — the editor is already
+        // mounted, which is the entire point of the carve-out.
+        expect(adapter.root().getAttribute('data-editing')).toBe('true');
+      } else {
+        expect(adapter.valueEl()).toHaveAttribute('role', 'button');
+      }
 
       await adapter.enterEdit();
       expect(adapter.root().getAttribute('data-editing')).toBe('true');
@@ -518,7 +563,7 @@ describe('FR-10 renderer contract', () => {
 
       await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
       adapter.assertPayload(onSave.mock.calls[0][0]);
-      await waitFor(() => expect(adapter.root().getAttribute('data-editing')).toBe('false'));
+      await waitFor(() => expectSettledOutOfEditMode());
     });
 
     // ── (g) cancel ───────────────────────────────────────────────────────
@@ -531,8 +576,15 @@ describe('FR-10 renderer contract', () => {
       await adapter.escapeEditor();
 
       expect(onSave).not.toHaveBeenCalled();
-      expect(adapter.root().getAttribute('data-editing')).toBe('false');
-      expect(valueText()).toBe(adapter.sample.text);
+      expectSettledOutOfEditMode();
+      if (adapter.alwaysEditing) {
+        // No read-mode slot to fall back to — "prior value restored" is
+        // observable as the live editor's own state reverting. Same guarantee,
+        // different surface.
+        expect(adapter.draftText()).toBe(adapter.revertedDraftText);
+      } else {
+        expect(valueText()).toBe(adapter.sample.text);
+      }
     });
 
     // ── (h) blur ─────────────────────────────────────────────────────────
@@ -555,9 +607,9 @@ describe('FR-10 renderer contract', () => {
         await adapter.blurEditor();
 
         expect(onSave).not.toHaveBeenCalled();
-        await waitFor(() => expect(adapter.root().getAttribute('data-editing')).toBe('false'));
+        await waitFor(() => expectSettledOutOfEditMode());
       }
-      await waitFor(() => expect(adapter.root().getAttribute('data-editing')).toBe('false'));
+      await waitFor(() => expectSettledOutOfEditMode());
     });
 
     // ── (i) NEGATIVE: rejected save reverts the draft AND stays in edit ──

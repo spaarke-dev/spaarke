@@ -50,8 +50,10 @@ import {
 } from '../control/RecordHeaderView';
 import { resolveEntityContext } from '../control/entityContext';
 import {
+  applyFormControlHints,
   buildHeaderFormMetadata,
   buildRequestedAttributeNames,
+  normalizeFormFormat,
   readFormControlOrder,
 } from '../control/useHeaderFormMetadata';
 import { CONTROL_VERSION } from '../control/version';
@@ -107,7 +109,20 @@ const RECORD = {
 let retrieveRecord: jest.Mock;
 let lastSelect: string | undefined;
 
-function installXrm(formControlNames: string[] = Object.keys(ENTITY_METADATA.attributes)): void {
+/**
+ * Per-control hints the LIVE FORM supplies but the Client-API metadata payload
+ * does not — `attribute.getFormat()` and, for lookups, `control.getEntityTypes()`.
+ * Both default to absent so every pre-existing test is unaffected.
+ */
+interface IFormHints {
+  formats?: Record<string, string>;
+  entityTypes?: Record<string, string[]>;
+}
+
+function installXrm(
+  formControlNames: string[] = Object.keys(ENTITY_METADATA.attributes),
+  hints: IFormHints = {}
+): void {
   retrieveRecord = jest.fn((_entity: string, _id: string, options?: string) => {
     lastSelect = options;
     return Promise.resolve({ ...RECORD });
@@ -121,7 +136,13 @@ function installXrm(formControlNames: string[] = Object.keys(ENTITY_METADATA.att
   const controls = formControlNames.map(name => ({
     getName: () => name,
     getLabel: () => `Form ${name}`,
-    getAttribute: () => ({ getRequiredLevel: () => (name === 'sprk_projectnumber' ? 'required' : 'none') }),
+    getAttribute: () => ({
+      getRequiredLevel: () => (name === 'sprk_projectnumber' ? 'required' : 'none'),
+      getFormat: () => hints.formats?.[name],
+    }),
+    // Only lookup controls expose this; everything else omits the method
+    // entirely, which is what the production guard probes for.
+    getEntityTypes: hints.entityTypes?.[name] ? () => hints.entityTypes![name] : undefined,
   }));
 
   (window as unknown as { Xrm: unknown }).Xrm = {
@@ -928,5 +949,194 @@ describe('DEF-01 — the sparkle refresh icon stays unwired', () => {
     // (NFR-06: this control never leaves the Xrm host context).
     const xrm = (window as unknown as { Xrm: { WebApi: { retrieveRecord: jest.Mock } } }).Xrm;
     expect(xrm.WebApi.retrieveRecord).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UAT round 2 — the Client-API metadata payload is NARROWER than the Web API's
+//
+// Two fields it does not supply, both of which the header depends on:
+//   `Format`  — returned as a NUMBER, so the string-only parse yielded
+//               undefined and EVERY DateOnly column rendered a time picker.
+//   `Targets` — not in Microsoft's documented Client-API attribute metadata at
+//               all, so lookups computed `editable === false` and clicking a
+//               lookup cell did nothing.
+//
+// Both are now filled from the LIVE FORM, which returns documented strings and
+// costs no round trip. Third and fourth instances of FAILURE-MODES G-13.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('normalizeFormFormat', () => {
+  it('maps the DateTime form formats onto the metadata vocabulary the resolver reads', () => {
+    expect(normalizeFormFormat('date')).toBe('DateOnly');
+    expect(normalizeFormFormat('datetime')).toBe('DateAndTime');
+  });
+
+  it('is case-insensitive — the Client API is not contractually lower-case', () => {
+    expect(normalizeFormFormat('Date')).toBe('DateOnly');
+    expect(normalizeFormFormat('DateTime')).toBe('DateAndTime');
+  });
+
+  it('passes non-date formats through untouched (inert — the resolver reads only DateOnly)', () => {
+    expect(normalizeFormFormat('text')).toBe('text');
+    expect(normalizeFormFormat('email')).toBe('email');
+    expect(normalizeFormFormat('textarea')).toBe('textarea');
+  });
+
+  it('returns undefined for every non-string, rather than coercing', () => {
+    // Notably a NUMBER: the metadata `Format` enum is deliberately NOT decoded
+    // here, because its meaning depends on the attribute type (0 is DateOnly
+    // for a DateTime but Email for a String).
+    expect(normalizeFormFormat(0)).toBeUndefined();
+    expect(normalizeFormFormat(1)).toBeUndefined();
+    expect(normalizeFormFormat(undefined)).toBeUndefined();
+    expect(normalizeFormFormat(null)).toBeUndefined();
+    expect(normalizeFormFormat('')).toBeUndefined();
+  });
+});
+
+describe('applyFormControlHints', () => {
+  const META = {
+    primaryIdAttribute: 'sprk_projectid',
+    primaryNameAttribute: 'sprk_projectnumber',
+    attributes: {
+      sprk_openeddate: { attributeType: 'DateTime' },
+      sprk_projecttype: { attributeType: 'Lookup' },
+      sprk_projectname: { attributeType: 'String' },
+    },
+  } as never;
+
+  it('fills a missing format from the form control', () => {
+    const out = applyFormControlHints(META, [{ name: 'sprk_openeddate', format: 'DateOnly' }]);
+    expect(out.attributes.sprk_openeddate.format).toBe('DateOnly');
+  });
+
+  it('fills missing lookup targets from getEntityTypes()', () => {
+    const out = applyFormControlHints(META, [
+      { name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] },
+    ]);
+    expect(out.attributes.sprk_projecttype.targets).toEqual(['sprk_projecttype_ref']);
+  });
+
+  it('lets METADATA win — the form only fills blanks', () => {
+    const withMeta = {
+      ...META,
+      attributes: {
+        ...META.attributes,
+        sprk_openeddate: { attributeType: 'DateTime', format: 'DateAndTime' },
+        sprk_projecttype: { attributeType: 'Lookup', targets: ['from_metadata'] },
+      },
+    } as never;
+    const out = applyFormControlHints(withMeta, [
+      { name: 'sprk_openeddate', format: 'DateOnly' },
+      { name: 'sprk_projecttype', entityTypes: ['from_form'] },
+    ]);
+    expect(out.attributes.sprk_openeddate.format).toBe('DateAndTime');
+    expect(out.attributes.sprk_projecttype.targets).toEqual(['from_metadata']);
+  });
+
+  it('treats an EMPTY targets array as a blank worth filling', () => {
+    const withEmpty = {
+      ...META,
+      attributes: { ...META.attributes, sprk_projecttype: { attributeType: 'Lookup', targets: [] } },
+    } as never;
+    const out = applyFormControlHints(withEmpty, [
+      { name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] },
+    ]);
+    expect(out.attributes.sprk_projecttype.targets).toEqual(['sprk_projecttype_ref']);
+  });
+
+  it('never MUTATES the input — metadata is page-session cached and shared', () => {
+    // Mutating in place would leak one form's controls into every other
+    // header's view of the same entity.
+    const before = JSON.stringify(META);
+    const out = applyFormControlHints(META, [{ name: 'sprk_openeddate', format: 'DateOnly' }]);
+    expect(JSON.stringify(META)).toBe(before);
+    expect(out).not.toBe(META);
+  });
+
+  it('returns the SAME object when there is nothing to fill (no needless re-render)', () => {
+    expect(applyFormControlHints(META, [])).toBe(META);
+    expect(applyFormControlHints(META, [{ name: 'sprk_projectname' }])).toBe(META);
+  });
+
+  it('ignores form controls with no matching attribute', () => {
+    const out = applyFormControlHints(META, [{ name: 'not_an_attribute', format: 'DateOnly' }]);
+    expect(out).toBe(META);
+    expect(out.attributes.not_an_attribute).toBeUndefined();
+  });
+});
+
+describe('RecordHeaderView — DateOnly renders a DATE input, not datetime-local', () => {
+  const LAYOUT = JSON.stringify({ _version: '1.0', fields: [{ name: 'sprk_openeddate' }] });
+
+  const META_WITH_DATE = {
+    primaryIdAttribute: 'sprk_projectid',
+    primaryNameAttribute: 'sprk_projectnumber',
+    // `format` ABSENT, exactly as the Client API delivers it.
+    attributes: { sprk_openeddate: { attributeType: 'DateTime', displayName: 'Opened Date' } },
+  };
+
+  /** DateField is click-to-edit; the native input only mounts in edit mode. */
+  const openEditor = async (): Promise<void> => {
+    const cell = await screen.findByTestId('record-header-date-field-value');
+    fireEvent.click(cell);
+    await screen.findByTestId('record-header-date-field-input');
+  };
+
+  it('uses the form format when metadata omits it (the UAT defect)', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(META_WITH_DATE);
+    installXrm(['sprk_openeddate'], { formats: { sprk_openeddate: 'date' } });
+
+    const { container } = renderView(LAYOUT);
+    await openEditor();
+
+    // Before the fix this was `datetime-local` on EVERY DateOnly column, and
+    // committing its `yyyy-MM-ddTHH:mm` value into a DateOnly field errored.
+    expect(container.querySelector('input[type="date"]')).toBeInTheDocument();
+    expect(container.querySelector('input[type="datetime-local"]')).toBeNull();
+  });
+
+  it('still renders datetime-local for a genuine DateAndTime column', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(META_WITH_DATE);
+    installXrm(['sprk_openeddate'], { formats: { sprk_openeddate: 'datetime' } });
+
+    const { container } = renderView(LAYOUT);
+    await openEditor();
+
+    expect(container.querySelector('input[type="datetime-local"]')).toBeInTheDocument();
+    expect(container.querySelector('input[type="date"]')).toBeNull();
+  });
+});
+
+describe('RecordHeaderView — a lookup is editable once targets resolve', () => {
+  const LAYOUT = JSON.stringify({ _version: '1.0', fields: [{ name: 'sprk_projecttype' }] });
+
+  // `targets` ABSENT — Microsoft does not document `Targets` on the Client-API
+  // attribute payload, which is why the picker never opened.
+  const META_NO_TARGETS = {
+    primaryIdAttribute: 'sprk_projectid',
+    primaryNameAttribute: 'sprk_projectnumber',
+    attributes: { sprk_projecttype: { attributeType: 'Lookup', displayName: 'Project Type' } },
+  };
+
+  it('is NOT editable when neither metadata nor the form supplies targets', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(META_NO_TARGETS);
+    installXrm(['sprk_projecttype']);
+
+    renderView(LAYOUT);
+
+    const cell = await screen.findByTestId('record-header-lookup-field');
+    expect(cell.getAttribute('data-editable')).toBe('false');
+  });
+
+  it('becomes editable when the form control supplies them (the UAT fix)', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(META_NO_TARGETS);
+    installXrm(['sprk_projecttype'], { entityTypes: { sprk_projecttype: ['sprk_projecttype_ref'] } });
+
+    renderView(LAYOUT);
+
+    const cell = await screen.findByTestId('record-header-lookup-field');
+    await waitFor(() => expect(cell.getAttribute('data-editable')).toBe('true'));
   });
 });

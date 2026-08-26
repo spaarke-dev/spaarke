@@ -3,7 +3,7 @@
   <!-- NOTE: no attribute VALUE in this file may contain an apostrophe.
        `pac solution import` rejects the solution with noAposStringType.
        Apostrophes inside XML comments (like this one's) are fine. -->
-  <control namespace="Spaarke.Records" constructor="RecordHeader" version="1.1.4"
+  <control namespace="Spaarke.Records" constructor="RecordHeader" version="1.1.5"
            display-name-key="Spaarke Record Header"
            description-key="Configuration-driven record header card plus toolbar for any Dataverse entity. Entity and record are self-detected from the form context. Field layout comes from the layoutJson property, or is derived from entity metadata when that property is blank."
            control-type="virtual">
