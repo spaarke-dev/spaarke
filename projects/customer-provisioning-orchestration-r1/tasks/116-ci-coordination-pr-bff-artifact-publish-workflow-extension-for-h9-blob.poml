@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="116" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>CI coordination PR: BFF artifact publish workflow extension for H9 (blob store + latest.json manifest)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Workflow-content authoring + coordination note, no BFF source .cs modification (the artifact-publish step is additive to the EXISTING deploy-bff-api.yml build job). STANDARD per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified additive CI step (push an already-built artifact + generate a manifest) -- mechanical, Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, deploy, bff-api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Draft the coordinated CI change DS-4 §5 specifies for H9's artifact-based re-scope: extend .github/workflows/deploy-bff-api.yml's EXISTING build job (which already runs dotnet publish at line 82 -&gt; actions/upload-artifact bff-api-build at lines 84-89, retention 7 days) to ALSO push bff-api-{version}.zip + a latest.json manifest (version, sha, size, r3-gate results) to a NEW provisioning-artifacts container on a platform storage account. This is the H9 handler's future artifact source (task 132 consumes it) -- the r3 gates + NFR-01 size check run in CI against the artifact and their results ride in the manifest, replacing the interim DotnetR3GateVerifier shell-out entirely. Because this touches .github/workflows/**, author it as a coordination note + drafted YAML diff, per the same coordinated-PR discipline as task 115.</prompt>
+
+  <role>SPAARKE platform developer. Expert in GitHub Actions artifact-to-blob publishing, versioned manifest generation, and coordinating additive CI changes across worktree boundaries.</role>
+
+  <goal>A coordination note + drafted YAML diff exists, extending deploy-bff-api.yml's build job to push bff-api-{version}.zip + latest.json (containing version, sha, size, and the r3-gate pass/fail results already computed by the existing workflow) to a provisioning-artifacts blob container. H9's handler-side consumption (task 132) can then resolve-by-buildId, verify gate/size metadata from the manifest as a pure-C# check, and download the blob -- with zero dotnet publish or repo checkout at provision time.</goal>
+
+  <context>
+    <background>DS-4 §5 (H9 special case) traces the exact reuse: the existing workflow ALREADY builds the artifact H9 needs, but (1) GitHub Actions artifacts are short-lived (7-day retention) and need a GitHub token to fetch -- wrong store for a fleet control plane, and (2) the workflow is workflow_dispatch-only and targets the platform BFF, not customer stamps. DS-4 §5's re-scope design: CI publishes to a well-known blob (this task); H9 resolves-verify-downloads-deploys-swaps against it (task 132). This is THE prerequisite that lets H9 stop shelling out to `dotnet publish` at provision time (DS-4 calls H9 'the heaviest environment dependency of all' in its current shell-out-broken-by-design state).</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/h9-artifact-publish-ci-coord-pr.md</file>
+      <file role="canonical-reference">.github/workflows/deploy-bff-api.yml</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md Coordination table + §10 BFF Hygiene">.github/workflows/** is coordinated with ci-cd-unit-test-remediation-r1; this workflow touches the BFF's own build job, so BOTH the workflows-ownership coordination AND (if the artifact-push step requires a new BFF dependency) §10 BFF Hygiene apply -- but this task adds a CI step only, no new BFF NuGet package or runtime dependency, so §10's publish-size verification is NOT triggered by this task itself.</constraint>
+    <constraint source="DS-4 §5">The manifest MUST carry the r3-gate pass/fail results computed by the EXISTING workflow (do not re-invent gate logic in the manifest generator) so H9's handler-side check becomes a pure-C# metadata read, never a re-run of the gates at provision time.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H9 artifact-publish CI coordination</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="Artifact-then-manifest publish" location="design-study-ds4-handler-audit.md §5">dotnet publish (existing) -&gt; zip -&gt; push to blob with a versioned name + generate latest.json alongside it, atomically enough that a reader never sees a manifest pointing at a not-yet-uploaded blob.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read DS-4 §5 in full plus the existing deploy-bff-api.yml build job (lines ~82-89).</step>
+    <step order="1" name="Draft blob-push step">Add a step after the existing upload-artifact step: az storage blob upload of the built zip as bff-api-{version}.zip (version from the existing build's version source) to the provisioning-artifacts container, OIDC-authenticated.</step>
+    <step order="2" name="Draft manifest generation">Generate latest.json containing {version, sha, size, gateResults: {...}} sourced from values already computed earlier in the SAME job (git sha, artifact size, r3-gate step outcomes) -- upload it alongside the zip, ideally in the same atomic-enough step sequence (upload zip first, THEN manifest, so a manifest never points at a missing blob).</step>
+    <step order="3" name="Runbook note">Document the runbook implication DS-4 §5 point 4 specifies: releases customer provisioning may consume MUST run this workflow (or a workflow_run follow-on) so the blob stays current; sprk_bffversion registry column records the deployed artifact version; H9 refuses to deploy if the manifest's gate results are missing or red.</step>
+    <step order="4" name="Coordination note">Author notes/h9-artifact-publish-ci-coord-pr.md with the full drafted YAML diff, addressed to ci-cd-unit-test-remediation-r1's owner.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing workflow's version source is not deterministic/stable enough to serve as a blob-key (e.g., it is a timestamp rather than a semantic version or git-sha-derived value), STOP and escalate to determine the correct versioning scheme with the workflow's owner before drafting the blob-push step — an unstable version scheme breaks H9's resolve-by-buildId contract at the design level, not just the CI level.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="actionlint">offline YAML validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">projects/customer-provisioning-orchestration-r1/notes/h9-artifact-publish-ci-coord-pr.md (contains the drafted workflow diff)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A coordination note exists containing the full drafted YAML diff for deploy-bff-api.yml's build job extension.</criterion>
+    <criterion testable="true">The drafted diff pushes bff-api-{version}.zip AND latest.json to a provisioning-artifacts blob container, both OIDC-authenticated (no stored secret).</criterion>
+    <criterion testable="true">latest.json's documented schema includes version, sha, size, and gateResults fields sourced from the SAME job's existing computed values (not a re-run).</criterion>
+    <criterion testable="true">The coordination note explicitly documents the runbook implication (releases customer provisioning may consume MUST run this workflow) and the sprk_bffversion registry-column consumption point.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- deploy-bff-api.yml already builds the exact artifact H9 needs (dotnet publish + upload-artifact); nothing new to build from scratch. Extension -- extending the EXISTING build job with an additive blob-push + manifest step is strictly cheaper and more correct than authoring a parallel build pipeline (avoids two sources of truth for the same binary). Cost-of-doing-nothing -- H9 (task 132) has no artifact source to resolve against; it either stays broken-by-design (shelling out to dotnet publish at provision time, DS-4's stated defect) or blocks indefinitely on a CI mechanism that was never built.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <completion-notes date="2026-08-19">
+    <deviation path="C">POML's literal acceptance criteria describe a "coordination note + drafted YAML diff" for a separate coord-PR owner (the discipline task 115 followed). By execution time, r1's CLAUDE.md (commit 8281045052) had formally taken DIRECT-COMMIT ownership of .github/workflows/** for Phase C'' scope -- the same governance shift under which tasks 067/088/115's queued coord-notes were applied directly on 2026-08-19. Per CLAUDE.md §6.5 Path C, this task pivoted to comply with the current (already-adopted) direct-commit posture: the extension was authored DIRECTLY into .github/workflows/deploy-bff-api.yml + a new .github/workflows/schemas/bff-artifact-manifest.json, rather than producing a draft-only note. Full rationale: notes/h9-artifact-publish-ci-coord-pr.md § 0.</deviation>
+    <output-actual>
+      Committed: .github/workflows/deploy-bff-api.yml (extended build job, 11 new steps: buildId/sha compute, 3 r3 gates, gate-status translation, zip, OIDC login, 2 blob pushes, red-gate job-fail check).
+      Committed: .github/workflows/schemas/bff-artifact-manifest.json (new -- draft-07 JSON Schema for latest.json).
+      Committed: notes/h9-artifact-publish-ci-coord-pr.md (rewritten as design-rationale + escalation record, not a pending diff).
+    </output-actual>
+    <escalation-fired>Yes -- platform storage account for the provisioning-artifacts container does not exist in infrastructure/bicep/platform-controlplane.bicep. Documented as a live-ceremony item (NOT created by this task) in notes/h9-artifact-publish-ci-coord-pr.md § 3. The new workflow steps fail cleanly (missing account name) until it lands; the rest of the existing deploy-bff-api.yml pipeline is unaffected.</escalation-fired>
+    <design-note>graphAppRoleParity manifest key is always recorded "Skipped" by design (not computed in this job) -- it is a deployment-target property (per-customer UAMI vs GraphAppRoles.cs), not an artifact property; nightly-health.yml's own job-level continue-on-error masks its conclusion so scraping it would be a fragile, wrong-layer signal. Documented in notes/h9-artifact-publish-ci-coord-pr.md § 2.3 and in the schema's field description so task 132 (H9 handler) is not surprised.</design-note>
+    <version-source>buildId = {UTC yyyy.MM.dd}-{github.run_number} (matches build-provisioning-sidecar.yml's semver_tag convention); sha = github.sha carried separately. Deterministic + monotonic + git-anchored -- the POML's escalation trigger (unstable/timestamp-only version source) did NOT fire.</version-source>
+    <validation>YAML + JSON parsed cleanly via python3 -c "import yaml/json" (actionlint unavailable in this environment, consistent with tasks 088/115's documented environment limitation).</validation>
+  </completion-notes>
+</task>

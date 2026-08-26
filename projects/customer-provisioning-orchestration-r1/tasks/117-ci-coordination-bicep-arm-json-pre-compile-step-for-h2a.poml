@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>CI coordination: Bicep-&gt;ARM-JSON pre-compile step for H2a</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Single additive CI step (az bicep build as a workflow step, output as an artifact), no existing .cs modification. STANDARD per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One-step, well-specified CI addition -- mechanical, Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, azure-deployment, deploy</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Draft the coordinated CI change H2a's ARM SDK port (task 123) needs: a workflow step (or a small new workflow) that runs `az bicep build` against infrastructure/bicep/customer.bicep (or the specific stamp templates H2a deploys), producing ARM JSON as a versioned build artifact H2a's handler downloads and passes to Azure.ResourceManager.Resources.ArmDeploymentResource.CreateOrUpdateAsync at provision time -- because the ARM SDK deploys ARM JSON, not raw .bicep, and the L2 runtime has no `bicep` CLI/binary available under Option D's zero-shell constraint.</prompt>
+
+  <role>SPAARKE platform developer. Expert in az bicep build artifact pipelines and coordinating small additive CI steps across worktree ownership boundaries.</role>
+
+  <goal>A coordination note + drafted YAML step exists that runs az bicep build against the customer-stamp Bicep template(s) H2a deploys, uploads the resulting ARM JSON as a versioned artifact (blob or GitHub Actions artifact, matching whichever store task 116 establishes for consistency), consumable by H2a's handler-side ArmDeploymentResource.CreateOrUpdateAsync call (task 123).</goal>
+
+  <context>
+    <background>DS-1b §1 (H2a collaborator #5) flags this as a hard caveat on H2a's ARM SDK port: 'the ARM SDK deploys ARM JSON, not .bicep -- CI pre-compiles customer.bicep -&gt; JSON artifact (one workflow step), or bundle the self-contained bicep binary.' DS-4 §4 explicitly lists this CI coordination as part of Wave G-1's foundation content, opened alongside the H9 artifact-publish coordination (task 116).</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/h2a-bicep-precompile-ci-coord-pr.md</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-1b §1 H2a row">The ARM SDK path is chosen over bundling a self-contained bicep binary into the L2 runtime, to preserve Option D's zero-shell/zero-extra-binary constraint on the main site -- do NOT propose bundling the bicep CLI as an alternative in this task's draft.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H2a Bicep-&gt;ARM-JSON CI pre-compile</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read DS-1b §1 H2a row + DS-4 §4 Wave G-1 content.</step>
+    <step order="1" name="Identify template scope">Confirm exactly which Bicep template(s) H2a deploys at provision time (customer.bicep and any stack variants per Model 1/Model 2) -- the pre-compile step must cover all of them.</step>
+    <step order="2" name="Draft compile step">az bicep build &lt;template&gt; --outfile &lt;name&gt;.json for each identified template; upload as a versioned artifact consistent with task 116's storage choice (reuse the SAME provisioning-artifacts container if that keeps the consumption story simple for H2a's handler).</step>
+    <step order="3" name="Versioning">Tie the ARM-JSON artifact's version to the same git-sha/semver scheme task 116 establishes, so H2a's handler can resolve-by-buildId analogously to H9.</step>
+    <step order="4" name="Coordination note">Author notes/h2a-bicep-precompile-ci-coord-pr.md with the drafted step, addressed to the workflow owner.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the customer-stamp Bicep templates include modules/child-resources that az bicep build cannot fully flatten into a single ARM-JSON artifact (e.g., a module referencing a template spec by id rather than inline), STOP and escalate to task 123's owner — this determines whether H2a's ARM SDK deployment call needs a nested-template strategy, which changes the handler design, not just the CI step.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az bicep">build (local verification of the drafted step)</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">projects/customer-provisioning-orchestration-r1/notes/h2a-bicep-precompile-ci-coord-pr.md (contains the drafted workflow step)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A coordination note exists with the drafted az bicep build step covering every Bicep template H2a deploys.</criterion>
+    <criterion testable="true">The drafted artifact versioning scheme matches task 116's established scheme (same storage container/versioning convention) for consumption-story consistency.</criterion>
+    <criterion testable="true">Local az bicep build against the identified template(s) succeeds with 0 errors as a pre-authoring sanity check (documented in this task's notes).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- az bicep build already exists as a CLI capability; no new tooling to invent. Extension -- adding one CI step reusing an existing az CLI capability is strictly simpler than the rejected alternative (bundling the bicep binary into L2's runtime, which DS-1b's zero-shell constraint forbids). Cost-of-doing-nothing -- H2a's ARM SDK port (task 123) has no artifact to deploy; Azure.ResourceManager.Resources cannot accept raw .bicep source.
+
+COMPLETION (2026-08-19): Governance deviation per CLAUDE.md §6.5 Path C (same as task 116) -- authored directly as a NEW workflow `.github/workflows/publish-provisioning-arm-artifacts.yml` + `.github/workflows/schemas/provisioning-arm-manifest.json`, rather than a coordination-note-only draft, per r1's 2026-08-19 direct-ownership governance (commit 8281045052). Template scope resolved from FileBicepTemplateInspector.ResolveTemplatePath (authoritative C# source): exactly customer.bicep (default) + stacks/model1-shared.bicep (Model1Shared). Escalation trigger checked and did NOT fire -- both templates compose only local relative-path module references (no template-spec-by-id), confirmed by local `az bicep build` (exit 0, 0 errors both templates) whose compiled output shows 7 and 16 nested Microsoft.Resources/deployments resources respectively. Reused task 116's exact provisioning-artifacts container + PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT repo variable + buildId versioning scheme. Storage-account live-ceremony gap re-flagged (not created) -- same gap task 116 already filed, not duplicated as a new ask. actionlint clean (both the new file and full workflow suite). Full rationale: notes/h2a-bicep-precompile-ci-coord-pr.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

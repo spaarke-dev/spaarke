@@ -23,8 +23,9 @@
 | [testing/](testing/INDEX.md) | 4 | Unit tests, mocking, integration/arch tests (god-class LOC ratchet RETIRED → `docs/standards/COMPONENT-COMPLEXITY.md`) | 2026-08-20 | Verified |
 | [webresource/](webresource/INDEX.md) | 4 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup | 2026-04-05 | Verified |
 | [ui/](ui/INDEX.md) | 9 | Choice dialog + **Fluent v9 component authoring / theming / portal-gotcha / React-version boundaries / host-visual-fit / embedded-widget-sizing** + **OOB form-dialog chrome** + **thin scrollbar** | 2026-08-18 | Verified + 8 Current |
+| [provisioning/](provisioning/INDEX.md) | 9 | Customer-provisioning L2/L3 handlers, prereqs, RBAC bootstrap, secret-catalog, KV-ref invariant, OpenAI quota composition, ADR-032 asymmetric-registration, BFF/provisioning boundary | 2026-08-24 | Filled 2026-08-25 (task 203a: 108-145 lines each) |
 
-**Total**: 55 pointer files across 9 subdirectories (8 added 2026-05-26..06-09 for Fluent v9 + host-visual-fit + embedded-widget-sizing; +2 2026-08-18 OOB form-dialog chrome + thin scrollbar)
+**Total**: 64 pointer files across 10 subdirectories (9 added 2026-08-24 for provisioning + filled 2026-08-25 by task 203a; +2 added 2026-08-18 for OOB form-dialog chrome + thin scrollbar; 8 added 2026-05-26..06-09 for Fluent v9 + host-visual-fit + embedded-widget-sizing)
 
 ---
 

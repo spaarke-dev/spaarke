@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="144" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H11: live verification post C5.8 grants (Graph REST + B2B invitation + consent verifier, code already real)</title>
+    <phase>C'' Wave G-4 -- Dataverse chain</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H11 is the terminal handler in the Dataverse chain and its consent-gate correctness matters for the acceptance-target run; live verification before Wave G-7 trusts it.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification-only task against already-real code -- Sonnet @ high, no new implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>111, 143</deps>
+    <tags>l2-controlplane, job-handler, path-x, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>H11UserProvisioningHandler.cs is ALREADY REAL per DS-4 ('✅ REAL -- Graph REST provisioner + B2B invitation + consent verifier'). The ONLY blocker is C5.8's Graph app-role grants (User.ReadWrite.All, User.Invite.All etc. per DS-5 §C5.8) for the L2 UAMI, delivered by task 111. This task performs LIVE VERIFICATION against a dev target that H11's user-provisioning flow (NativeAccount and B2BGuest branches per design D6) function correctly now that the grants exist.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Graph REST user provisioning, B2B guest invitation flows, and consent-gate verification against a live tenant.</role>
+
+  <goal>A live verification run confirms H11's user-provisioning collaborators function correctly for BOTH the NativeAccount and B2BGuest identity-preset branches (per design.md D6) against a dev target, now that the L2 UAMI holds the necessary Graph grants (User.ReadWrite.All, User.Invite.All). The B2B consent gate is confirmed to correctly produce a WaitingOnGate outcome when consent is pending (external, session-free wait), not a false Pass.</goal>
+
+  <context>
+    <background>DS-4 §2 (H11 row): '✅ REAL -- Graph REST provisioner + B2B invitation + consent verifier. ~0 code. C5.8 grants (User.ReadWrite.All, User.Invite.All etc.). Tests exist.' DS-2b §1.2 notes H11's wall-clock includes '3-10 min (+ B2B consent gate for that preset)' -- confirming the consent-gate branch is a real, externally-latent path this verification must specifically exercise, not skip.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/UserProvisioning/H11UserProvisioningHandler.cs</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/h11-live-verification-2026-08.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="111" status="pending">The C5.8 Graph grants for the L2 UAMI must exist</dependency>
+      <dependency task="143" status="pending">Sequenced after H10's live verification per the Dataverse chain's DAG order (H10 -&gt; H11)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-38">L2's admin-env Dataverse credential model is Path X: L2 UAMI registered as a Dataverse Application User via DefaultAzureCredential pinned to the UAMI (DS-8). MUST NOT provision a new client-secret for L2. The Dataverse-ClientSecret KV secret itself MUST NOT be deleted (BFF still consumes it) -- only L2's dependency on it is removed.</constraint>
+    <constraint source="DS-4 §2 H11 row">This is VERIFICATION, not re-implementation -- document any deviation found rather than silently patching.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H11 live verification (post C5.8)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2b-concurrency-safety-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read H11UserProvisioningHandler.cs's existing implementation + design.md D6's identity-preset branching in full.</step>
+    <step order="1" name="Confirm grants">Verify the L2 UAMI holds User.ReadWrite.All + User.Invite.All (task 111's C5.8 grants) before proceeding.</step>
+    <step order="2" name="NativeAccount branch">Live-invoke H11 with a NativeAccount preset against a dev target; confirm a real user is provisioned via Graph REST.</step>
+    <step order="3" name="B2BGuest branch">Live-invoke H11 with a B2BGuest preset; confirm a real invitation is sent and the consent verifier correctly produces WaitingOnGate for pending consent (not a false Pass).</step>
+    <step order="4" name="Report">File a verification report documenting both branches' live outcomes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If EITHER identity-preset branch fails live verification, STOP and escalate — DS-4's fully-real classification makes any live failure a signal that either task 111's grant scope is wrong or the classification needs correction.</trigger>
+    <trigger>If the B2B consent verifier reports Pass for a genuinely-pending consent (a false positive), STOP immediately and escalate as a HIGH-severity finding — this is exactly the consent-gate-advances-on-fiction class of defect this project's whole H13 acceptance-gate rebuild exists to eliminate (per DS-4's H3 finding of the same class).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az account">get-access-token for live verification</tool>
+    <tool name="dotnet">test (existing suite re-run)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/customer-provisioning-orchestration-r1/notes/h11-live-verification-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A live NativeAccount-preset invocation of H11 against a dev target succeeds -- a real Graph user is provisioned.</criterion>
+    <criterion testable="true">A live B2BGuest-preset invocation succeeds -- a real invitation is sent.</criterion>
+    <criterion testable="true">The consent verifier correctly reports WaitingOnGate (not Pass) for a genuinely-pending B2B consent.</criterion>
+    <criterion testable="true">A verification report exists in notes/ documenting both branches' live outcomes.</criterion>
+    <criterion testable="true">H11's existing test suite (per DS-4, already passing) continues to pass unmodified.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- H11's Graph REST provisioner, B2B invitation flow, and consent verifier are ALREADY fully implemented per DS-4's audit. Extension -- N/A, this is verification. Cost-of-doing-nothing -- without live verification, a false-Pass consent-gate defect (the same class DS-4 found in H3) could ship undetected into Wave G-7's acceptance run, where it would be far more expensive to diagnose.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes-completion date="2026-08-20">
+    Live verification of H11's 3 REST/Graph seams (GraphRestUserProvisioner, GraphRestB2BInvitationClient,
+    GraphRestB2BConsentVerifier). The consent verifier (fully read-only, the escalation-trigger-relevant
+    seam) was fully live-verified end-to-end -- both Verified and Pending branches -- via new durable
+    xUnit smoke tests (H11SeamsSmokeTests.cs) run genuinely live in-sandbox (unlike H10's equivalent
+    tests, which soft-skipped). The two WRITE-capable seams (POST /users, POST /assignLicense, POST
+    /invitations) had their REST shapes ground-truthed against Microsoft Learn (exact field-name match);
+    the actual writes are deferred to live-ceremony (real Entra user creation / real invitation email --
+    no safe automated undo), same precedent as task 143 (H10).
+
+    BONUS CATCH (MAJOR, fixed same commit): cross-referencing GraphRestB2BInvitationClient's POST
+    /invitations against Microsoft Learn's own least-privileged-permission table found the pre-existing
+    14-role GraphAppRoles.cs / L2GraphAppRolesRegistry.cs catalog (task 005) was missing User.Invite.All
+    entirely -- once task 111's C5.8 grants are live-executed, every B2BGuest-preset H11 run would have
+    received a permanent 403 on the invitation POST. Fixed by adding a 15th catalog role (GUID
+    ground-truthed live: 09850681-111b-4a89-9bed-3f2cae46d706), mirrored to L2, with every stale "14"
+    reference across 8 files (+ spec.md FR-33 + the customer deployment guide) updated. Mirror-parity
+    test (L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant) re-confirmed byte-identical post-fix.
+
+    Consent-verifier reuse check (CLAUDE.md §11): confirmed H11's GraphRestB2BConsentVerifier (checks a
+    guest user's externalUserState) and H3's GraphAdminConsentVerifier (checks app-registration
+    oauth2PermissionGrants) answer genuinely different questions against different Graph resources -- no
+    consolidation opportunity; H11 correctly owns its own verifier.
+
+    Deferred, documented (not fixed): H11UserProvisioningOptions has zero Bicep wiring and its
+    AccountDomain default ("spaarke.onmicrosoft.com") is the Spaarke tenant's own domain, not a
+    customer's -- assessed as fail-loud (Graph rejects an unverified UPN domain), not fail-silent, but a
+    genuine deployment-completeness gap. Recommended as a follow-up task; out of proportion to this
+    verification-scoped task's boundary.
+
+    Escalation triggers: both cleared. Trigger 1 (branch failure) did not fire -- the one genuine defect
+    found was a catalog-completeness gap, fixed in-commit per task 143's own precedent, not a live
+    orchestration failure. Trigger 2 (false-Pass on pending consent) was directly tested and NOT
+    observed -- the Pending-branch smoke test proves an unknown/unaccepted guest id is never reported as
+    Verified.
+
+    Tests: 1003 -> 1005/1005 (+2, H11SeamsSmokeTests.cs). Full report: notes/h11-live-verification-2026-08.md.
+  </notes-completion>
+</task>

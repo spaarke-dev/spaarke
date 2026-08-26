@@ -392,7 +392,16 @@ public sealed class FeedbackService : IFeedbackService
             if (to.HasValue)
                 query = query.WithParameter("@to", to.Value.ToString("O"));
 
-            using var iterator = container.GetItemQueryIterator<int>(query);
+            // customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I3 / FR-30
+            // (task 065): scope the query to the tenant's logical partition. The `feedback`
+            // container's partition key is `/tenantId` (see class remarks) — passing
+            // QueryRequestOptions.PartitionKey turns what was a cross-partition scan (with a
+            // SQL-level tenant filter as sole defense) into a single-partition query.
+            // Belt-and-suspenders: the SQL WHERE clause still binds @tenantId as a second
+            // layer of tenant scoping (defense in depth).
+            var requestOptions = new QueryRequestOptions { PartitionKey = new PartitionKey(tenantId) };
+
+            using var iterator = container.GetItemQueryIterator<int>(query, requestOptions: requestOptions);
             if (iterator.HasMoreResults)
             {
                 var page = await iterator.ReadNextAsync(ct);
@@ -443,7 +452,13 @@ public sealed class FeedbackService : IFeedbackService
             if (to.HasValue)
                 query = query.WithParameter("@to", to.Value.ToString("O"));
 
-            using var iterator = container.GetItemQueryIterator<string>(query);
+            // customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I3 / FR-30
+            // (task 065): scope the query to the tenant's logical partition. Partition key is
+            // `/tenantId` (see class remarks); SQL WHERE clause still binds @tenantId as
+            // defense in depth.
+            var requestOptions = new QueryRequestOptions { PartitionKey = new PartitionKey(tenantId) };
+
+            using var iterator = container.GetItemQueryIterator<string>(query, requestOptions: requestOptions);
             while (iterator.HasMoreResults)
             {
                 var page = await iterator.ReadNextAsync(ct);

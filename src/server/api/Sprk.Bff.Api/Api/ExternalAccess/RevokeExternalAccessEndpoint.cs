@@ -1,14 +1,11 @@
-using System.Net.Http.Headers;
-using System.Text.Json.Serialization;
-using Azure.Core;
-using Azure.Identity;
-using Microsoft.Graph.Models;
+// Graph, Azure.Identity and HTTP-header usings were dropped by task 017: this endpoint no longer talks to
+// Graph at all. Its forked SPE matcher (finding A-13) was deleted in favour of
+// SpeContainerMembershipService, which owns that conversation.
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
-using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -63,10 +60,16 @@ public static class RevokeExternalAccessEndpoint
     // Handler
     // =========================================================================
 
-    private static async Task<IResult> RevokeAccessAsync(
+    /// <summary>
+    /// Internal (not private) so the test assembly can exercise the PRODUCTION handler directly per
+    /// <c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c> — the same convention used across this codebase,
+    /// and no reflection into a private member (ADR-038 §7 ban B8). The revoke sweep's correctness is a
+    /// privilege-retention question; it must be tested against the real handler, not a re-implementation.
+    /// </summary>
+    internal static async Task<IResult> RevokeAccessAsync(
         RevokeAccessRequest request,
         DataverseWebApiClient dataverseClient,
-        IGraphClientFactory graphClientFactory,
+        SpeContainerMembershipService speContainerMembership,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -90,14 +93,61 @@ public static class RevokeExternalAccessEndpoint
             "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId}",
             request.AccessRecordId, request.ContactId);
 
-        // ── Step 1: Deactivate the sprk_externalrecordaccess record ──────────
+        // ── Step 1: Deactivate EVERY active row for this logical grant ───────
+        //
+        // Revoke used to deactivate exactly ONE row, by AccessRecordId (finding A-11). Because /grant
+        // created unconditionally, two identical grants produced two active rows — so revoking "the"
+        // grant left a sibling standing and access survived revocation. The participation surface could
+        // not reveal it either: QueryGrantSetAsync collapses duplicates with GroupBy(root).Max(level) and
+        // never returns access-record ids.
+        //
+        // The revocation target now identifies a LOGICAL grant (root × grantee), and every active row on
+        // that key is deactivated. Task 010 / spec FR-09.
+        int deactivatedCount;
         try
         {
-            var deactivatePayload = new { statecode = 1, statuscode = 2 };
-            await dataverseClient.UpdateAsync(AccessEntitySet, request.AccessRecordId, deactivatePayload, ct);
+            var targetRow = await ExternalGrantLifecycle.RetrieveRowAsync(dataverseClient, request.AccessRecordId, ct);
+
+            if (targetRow is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Not Found",
+                    detail: $"Access record '{request.AccessRecordId}' was not found.");
+            }
+
+            var key = ExternalGrantLifecycle.DeriveKey(targetRow);
+
+            if (key is null)
+            {
+                // FAIL LOUDLY. Per this task's ADR-003 constraint, /revoke must never report success
+                // while any matching active row remains unqueried — and a row with no derivable root or
+                // grantee has no queryable siblings. Deactivating only the target would be precisely the
+                // silent partial revocation A-11 describes, so refusing is the fail-closed answer.
+                logger.LogError(
+                    "[EXT-REVOKE] Access record {AccessRecordId} has no derivable grant key (no root " +
+                    "and/or no grantee lookup). Refusing to revoke: sibling rows cannot be identified, so " +
+                    "success cannot be guaranteed.", request.AccessRecordId);
+
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Internal Server Error",
+                    detail: $"Access record '{request.AccessRecordId}' is missing the root or grantee lookup " +
+                            "needed to identify every row of this grant. No rows were deactivated.",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+            }
+
+            // Sweep by KEY, not by id — this is what makes the revoke complete. Note the target row is
+            // swept too when active, and that an ALREADY-INACTIVE target still sweeps live siblings:
+            // "the row you named is already off" is not the same as "this grant confers nothing".
+            var activeRows = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key.Value, ct);
+
+            deactivatedCount = await ExternalGrantLifecycle.DeactivateAsync(
+                dataverseClient, activeRows.Select(r => r.Id), logger, ct);
 
             logger.LogInformation(
-                "[EXT-REVOKE] Deactivated access record {AccessRecordId}", request.AccessRecordId);
+                "[EXT-REVOKE] Revoked grant {Key}: deactivated {Count} active row(s) (target {AccessRecordId}).",
+                key.Value, deactivatedCount, request.AccessRecordId);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -108,8 +158,11 @@ public static class RevokeExternalAccessEndpoint
         }
         catch (Exception ex)
         {
+            // Covers the sibling-row query AND any partial sweep. Reporting success here would be the
+            // worst outcome available: the caller believes access is gone while rows remain active.
             logger.LogError(ex,
-                "[EXT-REVOKE] Failed to deactivate access record {AccessRecordId}", request.AccessRecordId);
+                "[EXT-REVOKE] Failed to revoke grant for access record {AccessRecordId}. Some rows may " +
+                "remain active.", request.AccessRecordId);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -117,34 +170,9 @@ public static class RevokeExternalAccessEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        // ── Step 2: Remove Contact from SPE container ─────────────────────────
-        var speRevoked = false;
-        if (request.ContainerId.HasValue)
-        {
-            try
-            {
-                speRevoked = await RemoveContactFromSpeContainerAsync(
-                    graphClientFactory,
-                    request.ContainerId.Value.ToString(),
-                    request.ContactId,
-                    logger,
-                    ct);
-            }
-            catch (Exception ex)
-            {
-                // Non-fatal: Dataverse record was deactivated, log and continue
-                logger.LogError(ex,
-                    "[EXT-REVOKE] Failed to remove Contact {ContactId} from SPE container {ContainerId}. " +
-                    "Access record {AccessRecordId} was deactivated.",
-                    request.ContactId, request.ContainerId, request.AccessRecordId);
-            }
-        }
-        else
-        {
-            logger.LogInformation(
-                "[EXT-REVOKE] No ContainerId provided — skipping SPE container membership removal for Contact {ContactId}",
-                request.ContactId);
-        }
+        // ── Step 2: Remove the Contact's SPE container permission ─────────────
+        var speOutcome = await RemoveSpeContainerPermissionAsync(
+            speContainerMembership, dataverseClient, request, logger, ct);
 
         // ── Step 3: Invalidate Redis cache ────────────────────────────────────
         try
@@ -179,7 +207,13 @@ public static class RevokeExternalAccessEndpoint
                 request.ContactId);
         }
 
-        return TypedResults.Ok(new RevokeAccessResponse(speRevoked, WebRoleRemoved: false));
+        // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
+        // already fully inactive (a safe no-op), >1 means duplicates existed and were swept — the exact
+        // condition that used to leave access standing after a "successful" revoke.
+        return TypedResults.Ok(new RevokeAccessResponse(
+            SpeContainerMembershipRevoked: speOutcome == SpeContainerRevokeOutcome.PermissionRemoved,
+            SpeContainerOutcome: speOutcome,
+            DeactivatedCount: deactivatedCount));
     }
 
     // =========================================================================
@@ -194,73 +228,128 @@ public static class RevokeExternalAccessEndpoint
         => httpContext.User.FindFirst("tid")?.Value
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
-    private static async Task<bool> RemoveContactFromSpeContainerAsync(
-        IGraphClientFactory graphClientFactory,
-        string containerId,
-        Guid contactId,
+    /// <summary>
+    /// Removes the revoked Contact's SPE container permission, and reports honestly what happened.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Finding A-13 (task 017).</b> This used to be a private re-implementation of
+    /// <see cref="SpeContainerMembershipService.RevokeMembershipAsync"/> that matched a permission by
+    /// looking for the contact's <b>GUID</b> inside <c>userPrincipalName</c>. But membership is written
+    /// with <c>userPrincipalName</c> = the contact's <b>email</b>, and an email never contains a GUID — so
+    /// the predicate matched nothing, ever. It then returned <c>true</c> on no-match ("may have already
+    /// been removed"), so <c>/revoke</c> reported SPE success while the ACL entry stayed in place.</para>
+    ///
+    /// <para>The fix is deletion, not repair: the service already had a correct email matcher with zero
+    /// callers (CLAUDE.md §11 — reuse, don't fork). What remains here is the endpoint's own job — turning
+    /// a contact id into the email key, and mapping the result to an honest outcome.</para>
+    ///
+    /// <para><b>Broker-only context.</b> Nothing in this codebase ADDS a container permission
+    /// (<c>GrantMembershipAsync</c> has no callers; <c>/grant</c> reports
+    /// <c>SpeContainerMembershipGranted: false</c>). So this is a CLEANUP path for ACLs created by legacy
+    /// versions or by admins outside Spaarke — not the counterpart of a grant-time write. That is why
+    /// <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> is the ordinary, healthy answer rather
+    /// than a problem.</para>
+    /// </remarks>
+    private static async Task<SpeContainerRevokeOutcome> RemoveSpeContainerPermissionAsync(
+        SpeContainerMembershipService speContainerMembership,
+        DataverseWebApiClient dataverseClient,
+        RevokeAccessRequest request,
         ILogger logger,
         CancellationToken ct)
     {
+        if (!request.ContainerId.HasValue)
+        {
+            logger.LogInformation(
+                "[EXT-REVOKE] No ContainerId provided — no SPE container permission to remove.");
+            return SpeContainerRevokeOutcome.NotAttempted;
+        }
+
+        // An ORGANIZATION-grant revoke passes an empty ContactId (task 073 #7) — there is no single
+        // grantee, so no single email, so no permission to match. Saying NotAttempted is the honest
+        // answer; claiming success would repeat A-13's mistake in a new place. See the org-expansion
+        // follow-up in notes/task-017-spe-revoke-matcher.md.
+        if (request.ContactId == Guid.Empty)
+        {
+            logger.LogInformation(
+                "[EXT-REVOKE] Organization-grant revoke (no single grantee contact) — SPE container " +
+                "permission removal not attempted for container {ContainerId}.", request.ContainerId);
+            return SpeContainerRevokeOutcome.NotAttempted;
+        }
+
+        var containerId = request.ContainerId.Value.ToString();
+
+        string? contactEmail;
         try
         {
-            var graphClient = graphClientFactory.ForApp();
-
-            // Step 2a: List container permissions to find the Contact's entry
-            var permissions = await graphClient.Storage.FileStorage.Containers[containerId].Permissions
-                .GetAsync(cancellationToken: ct);
-
-            if (permissions?.Value == null || permissions.Value.Count == 0)
-            {
-                logger.LogInformation(
-                    "[EXT-REVOKE] No permissions found on container {ContainerId}", containerId);
-                return false;
-            }
-
-            // Step 2b: Find the Contact's permission entry by matching the contact ID in the
-            // user's email or userPrincipalName (AdditionalData). The SPE Graph API stores
-            // external user identity in GrantedToV2.User.Email or AdditionalData["userPrincipalName"].
-            var contactIdStr = contactId.ToString();
-            var contactPermission = permissions.Value.FirstOrDefault(p =>
-            {
-                var user = p.GrantedToV2?.User;
-                if (user == null) return false;
-
-                // Graph SDK 5.x Identity type does not expose Email or LoginName directly.
-                // Try AdditionalData["userPrincipalName"]
-                if (user.AdditionalData?.TryGetValue("userPrincipalName", out var upn) == true &&
-                    upn?.ToString()?.Contains(contactIdStr, StringComparison.OrdinalIgnoreCase) == true)
-                    return true;
-
-                return false;
-            });
-
-            if (contactPermission?.Id == null)
-            {
-                logger.LogInformation(
-                    "[EXT-REVOKE] No permission entry found for Contact {ContactId} on container {ContainerId}",
-                    contactId, containerId);
-                // Not a failure — the permission may have already been removed
-                return true;
-            }
-
-            // Step 2c: Delete the permission entry
-            await graphClient.Storage.FileStorage.Containers[containerId]
-                .Permissions[contactPermission.Id]
-                .DeleteAsync(cancellationToken: ct);
-
-            logger.LogInformation(
-                "[EXT-REVOKE] Removed Contact {ContactId} (permission {PermissionId}) from SPE container {ContainerId}",
-                contactId, contactPermission.Id, containerId);
-
-            return true;
+            contactEmail = await ResolveContactEmailAsync(dataverseClient, request.ContactId, ct);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex,
-                "[EXT-REVOKE] Failed to remove Contact {ContactId} from SPE container {ContainerId}",
-                contactId, containerId);
-            return false;
+            logger.LogError(ex,
+                "[EXT-REVOKE] Could not read the email for Contact {ContactId}; the SPE container " +
+                "permission on {ContainerId} could NOT be matched and may remain.",
+                request.ContactId, containerId);
+            return SpeContainerRevokeOutcome.Failed;
         }
+
+        if (string.IsNullOrWhiteSpace(contactEmail))
+        {
+            // No email means no way to identify their ACL entry. If one exists we cannot find it, so this
+            // is an unknown state, not an absence — report Failed rather than NoPermissionFound.
+            logger.LogWarning(
+                "[EXT-REVOKE] Contact {ContactId} has no emailaddress1, which is the key SPE membership " +
+                "is written with — any container permission on {ContainerId} cannot be matched.",
+                request.ContactId, containerId);
+            return SpeContainerRevokeOutcome.Failed;
+        }
+
+        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactEmail, ct);
+
+        if (result.Success)
+        {
+            logger.LogInformation(
+                "[EXT-REVOKE] Removed SPE container permission {PermissionId} for Contact {ContactId} on {ContainerId}",
+                result.PermissionId, request.ContactId, containerId);
+            return SpeContainerRevokeOutcome.PermissionRemoved;
+        }
+
+        // The service distinguishes "nobody matched" from "Graph refused". Only the former is benign:
+        // under the broker-only model most contacts have no container ACL at all.
+        if (result.Error?.StartsWith("No permission found", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            logger.LogInformation(
+                "[EXT-REVOKE] No SPE container permission exists for Contact {ContactId} on {ContainerId} " +
+                "— nothing to remove (expected under the broker-only model).",
+                request.ContactId, containerId);
+            return SpeContainerRevokeOutcome.NoPermissionFound;
+        }
+
+        logger.LogError(
+            "[EXT-REVOKE] Failed to remove the SPE container permission for Contact {ContactId} on " +
+            "{ContainerId}: {Error}. They may RETAIN file access.",
+            request.ContactId, containerId, result.Error);
+        return SpeContainerRevokeOutcome.Failed;
     }
 
+    /// <summary>
+    /// Reads a contact's <c>emailaddress1</c> — the key SPE membership is written with.
+    /// </summary>
+    /// <remarks>
+    /// Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
+    /// contact-email service: one column on one row, and the client is already injected (CLAUDE.md §11).
+    /// </remarks>
+    private static async Task<string?> ResolveContactEmailAsync(
+        DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
+    {
+        var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(
+            "contacts", contactId, "emailaddress1", ct);
+
+        return row?.emailaddress1;
+    }
+
+    /// <summary>Minimal projection of <c>contacts</c> for SPE identity matching.</summary>
+    internal sealed class ContactEmailRow
+    {
+        public string? emailaddress1 { get; set; }
+    }
 }

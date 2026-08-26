@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="unified-access-control-r2">
+  <metadata>
+    <title>e2e tier reconciliation (M6) -- or an explicit decision to retire a tier no workflow runs</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies test specs but no production code; a tier no workflow currently runs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical contract reconciliation, or a documented retirement decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>tests/e2e/** is not touched by other active tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, e2e, documentation</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>The e2e tier pins stale contracts and cannot run: no workflow executes tests/e2e/**. Either reconcile it with current behaviour or retire it deliberately -- but do not leave a suite that looks like coverage and is not.</prompt>
+  <role>SPAARKE platform developer. Playwright and TypeScript fluency plus knowledge of the current external-access HTTP contracts.</role>
+  <goal>Either the e2e specs match current contracts and a workflow runs them, or the tier is retired with the decision and its rationale recorded. No third state.</goal>
+
+  <context>
+    <background>Review finding M6 (Medium). project-closure-cascade.spec.ts targets routes without the /v1 prefix, asserts a response shape whose four fields have never existed, and filters on sprk_projectid / sprk_contactid -- stale-column instances four and five. revocation.spec.ts still expects 400/404 where the delegation rule now answers 403; that file was edited twice during task 017 and the error-case block was missed both times. Both suites' arrange steps create projects using sprk_name and sprk_issecureproject, neither of which exists in live metadata. Critically, tests/e2e/** runs in NO workflow, so none of this ever failed visibly. A suite that cannot run is not coverage; it is a liability that reads as coverage.</background>
+    <relevant-files>
+      <file role="modify">tests/e2e/specs/secure-project/project-closure-cascade.spec.ts</file>
+      <file role="modify">tests/e2e/specs/secure-project/revocation.spec.ts</file>
+      <file role="modify">.github/workflows/ci-tier2-advisory.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">VERIFY EVERY COLUMN AND NAVIGATION PROPERTY against live Dataverse metadata (Dataverse MCP describe) before writing any $select, $filter, $orderby or @odata.bind. Five stale-column instances have been found in this project and the fifth was introduced by the same session that fixed three -- fixing one instance does not inoculate the next line you write. An @odata.bind navigation property is case-sensitive PascalCase and is NOT derivable from the attribute name.</constraint>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="project">DECIDE FIRST, then act: reconcile or retire. Both are acceptable outcomes; leaving it in the current state is not. Record the decision and its rationale before editing specs.</constraint>
+    <constraint source="project">If reconciling: the tier must actually RUN somewhere, or the reconciliation decays immediately. Wiring it into a workflow touches .github/workflows/** -- coordinate per the 2026-08-24 CI decision, which is to rely on CI / Router; prefer a Tier 2 advisory job over a new workflow.</constraint>
+    <constraint source="project">If retiring: delete the specs, remove any scaffolding that implies they run, and record what coverage is lost and which tier now owns it. A retirement that leaves orphaned fixtures is not a retirement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/notes/ci-router-gate-repair-2026-08-24.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Decide reconcile versus retire and record the rationale in the notes before touching any spec.</step>
+    <step order="1">If reconciling: verify every route, response shape and column in both specs against current code and live metadata.</step>
+    <step order="2">If reconciling: wire the tier into a job that actually runs, preferring a Tier 2 advisory job under the existing Router.</step>
+    <step order="3">If retiring: delete the specs and their scaffolding, and record the coverage lost plus which tier now owns it.</step>
+    <step order="4">Verify with tsc --noEmit that no new TypeScript errors are introduced; note that 9 pre-existing window.__* TS2339 errors are known.</step>
+    <step order="5">Update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reconciling requires a live environment the CI runner cannot reach, that argues for retirement -- surface it as a decision rather than leaving a suite that can only ever pass locally.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Both spec files exist. This is reconciliation or removal, not new authoring.</existing>
+    <extension>No new component either way.</extension>
+    <cost-of-doing-nothing>A suite that reads as end-to-end coverage, pins four contracts that no longer exist, contains two of the five stale-column instances, and cannot run. It is the only tier that could have caught the closure-cascade contract drift, and it caught nothing.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/e2e/specs/secure-project/project-closure-cascade.spec.ts</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-027-e2e-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes record an explicit reconcile-or-retire decision with rationale.</criterion>
+    <criterion testable="true">If reconciled: every route, response shape and column in both specs matches current code and live metadata, and the tier runs in a job.</criterion>
+    <criterion testable="true">If retired: the specs and their scaffolding are gone, and the notes record the coverage lost and its new owner.</criterion>
+    <criterion testable="true">tsc --noEmit introduces no new errors beyond the 9 known pre-existing window.__* TS2339 ones.</criterion>
+    <criterion testable="true">No stale column name (sprk_projectid, sprk_contactid, sprk_name on project, sprk_issecureproject) remains in tests/e2e/**.</criterion>
+  </acceptance-criteria>
+
+  <notes>Review finding M6. Note the CI decision of 2026-08-24: rely on CI / Router, so prefer a Tier 2 advisory job over a new workflow.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

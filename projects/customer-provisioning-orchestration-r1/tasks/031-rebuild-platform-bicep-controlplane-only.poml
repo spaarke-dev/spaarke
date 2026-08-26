@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Rebuild platform.bicep — shrink to control-plane-only (per D12)</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment-touching structural rebuild of the platform stack; blast radius spans every environment. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope; structural refactor).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: high-blast-radius Bicep rebuild that must exactly implement D12 (control-plane-only), removing per-customer AI resources that have already been moved to customer.bicep. Getting the boundary right is the whole point — Opus for D12 compliance judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on task 027 — customer.bicep must be the confirmed home for per-customer AI resources (Cosmos + OpenAI + AI Search + Doc Intelligence + App Insights/Log Analytics + SignalR) before platform.bicep can safely delete them.</parallel-reason>
+    <deps>027</deps>
+    <tags>azure, bicep, azure-deployment, deploy, l2-controlplane</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rebuild infrastructure/bicep/platform.bicep to declare ONLY control-plane resources per D12: L2 App Service (or delegate to platform-controlplane.bicep from task 033), platform Cosmos DB (or delegate to task 033), platform Key Vault, monitoring (App Insights + Log Analytics). Remove all per-customer AI resources (OpenAI, AI Search, Doc Intelligence, per-customer App Insights, per-customer Cosmos) — these already live in customer.bicep after task 027. Preserve any true environment-scoped resources (Redis per Q-E FR-12 lives in env scope not customer scope, service-bus, VNet).</prompt>
+  <role>SPAARKE platform developer with Bicep + Azure resource scope-boundary expertise. Understand D12: platform.bicep is control-plane-only; customer.bicep is per-customer stamp; env-scope scripts (Deploy-RedisCache.ps1) handle env resources.</role>
+  <goal>infrastructure/bicep/platform.bicep declares ONLY control-plane resources (or delegates to platform-controlplane.bicep task 033); NO per-customer AI resources remain; az bicep build passes; az deployment group what-if against a dev platform RG surfaces only control-plane resource changes.</goal>
+
+  <context>
+    <background>Spec FR-04 + D12 + spec.md § New Components row 6: platform.bicep v2 held per-customer AI resources (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos). D12 mandates moving these to customer.bicep — done for OpenAI + AI Search per prior tasks; task 027 confirms the migration for Cosmos + optional SignalR. This task removes them from platform.bicep to align with D12 explicitly. Without this rebuild, per-customer AI resources stay in platform.bicep, violating D3 dedication + D12 control-plane placement.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/platform.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep (task 027 output — the migration target)</file>
+      <file role="canonical-reference">infrastructure/bicep/platform-controlplane.bicep (task 033 output — L2 orchestrator infra)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="027" status="pending">customer.bicep must have Cosmos + optional SignalR added — task 031 removes the platform-scope duplicates.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: D12 — platform.bicep is control-plane-only. Per-customer AI resources (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos, per-customer App Insights, per-customer SignalR) do NOT belong in platform.bicep.</constraint>
+    <constraint source="project">Scope: env-scope resources (Redis via Q-E FR-12 lives in env, service-bus if platform-scope in current bicep, VNet, private endpoints if platform-scope) can STAY if their scope is genuinely control-plane / env. Do NOT delete without confirming scope-boundary.</constraint>
+    <constraint source="project">MUST coordinate with task 033 — if platform-controlplane.bicep (task 033) will own the L2 App Service + platform Cosmos + platform KV + monitoring, platform.bicep either delegates to it or the two are consolidated. Confirm topology with task 033 before deleting from platform.bicep.</constraint>
+    <constraint source="project">MUST NOT touch stacks/*.bicep (Model 1 shared, Model 2 full compositions — those consume customer.bicep and platform.bicep as modules; upstream module surface changes propagate).</constraint>
+    <constraint source="project">MUST report absolute + delta publish-size impact = 0 (bicep-only, no BFF code).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Platform vs customer vs env-scope bicep boundaries (D12)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Current platform.bicep composition" location="infrastructure/bicep/platform.bicep">316 lines; enumerate current module invocations to catalog what to keep vs remove.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md FR-04, design.md §7.2 + D12, task 027's customer.bicep additions.</step>
+    <step order="1">Read platform.bicep (all 316 lines) — enumerate current module invocations + classify each: [KEEP: control-plane / env-scope] vs [REMOVE: per-customer, already in customer.bicep].</step>
+    <step order="2">Coordinate topology with task 033 — determine whether platform.bicep delegates to platform-controlplane.bicep OR is consolidated with it. Prefer delegation (keeps concerns separated).</step>
+    <step order="3">Remove per-customer AI module invocations from platform.bicep (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos, per-customer App Insights). Preserve control-plane KV + monitoring + env-scope service-bus / VNet.</step>
+    <step order="4">Confirm no downstream stacks/*.bicep breaks from the removed module outputs — if the stacks read platform.bicep outputs of removed resources, coordinate signature update.</step>
+    <step order="5">Run az bicep build platform.bicep — verify 0 errors, 0 warnings.</step>
+    <step order="6">Run az deployment group what-if against dev platform RG — surface removed resources; confirm no unintended add/delete.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document deviation (e.g. topology decision vs task 033, scope-boundary judgment for a specific module) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing a per-customer module from platform.bicep would leave a live-deployed environment orphaned (i.e. the platform-scope resource is currently the SOURCE for a customer-scope config value), STOP and escalate per CLAUDE.md §6 — do NOT delete without a migration path.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/platform.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the modified platform.bicep, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev platform RG, only control-plane / env-scope resources remain; per-customer AI resources are absent.</criterion>
+    <criterion testable="true">Given the file, no reference to modules/openai.bicep, modules/ai-search.bicep, modules/doc-intelligence.bicep for per-customer contexts remains.</criterion>
+    <criterion testable="true">Negative: no stacks/*.bicep breaks — verify stacks/model2-full.bicep + stacks/model1-shared.bicep + stacks/model1-customer.bicep still build.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-04 / D12 acceptance. Coordinate with task 033 for platform-controlplane.bicep placement. Existing platform.bicep is 316 lines — expect substantial shrink after per-customer removals.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

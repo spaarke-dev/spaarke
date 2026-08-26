@@ -65,6 +65,20 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Public runtime config (FR-36 — customer-provisioning-orchestration-r1 task 087).
+        // Tier-1 fail-fast in DEPLOYED envs: PublicConfigOptionsValidator enforces
+        // BffUrl + MsalClientId + TenantId at startup for Production / Staging / Demo / QA;
+        // Development + Testing envs short-circuit (per .claude/constraints/bff-extensions.md
+        // §F.2.1 Testing allow-list stance) so the 30+ per-endpoint test fixtures don't each
+        // need to add PublicConfig:* entries. FeatureFlags is optional (empty dict is valid).
+        // Consumed by GET /api/config (ConfigEndpoints.MapPublicConfigEndpoint). NO
+        // .ValidateDataAnnotations() — the validator is the single source of truth for
+        // requiredness semantics (mirrors the AgentServiceOptions r3 task 061 pattern).
+        services
+            .AddOptions<PublicConfigOptions>()
+            .Bind(configuration.GetSection(PublicConfigOptions.SectionName))
+            .ValidateOnStart();
+
         // Document Intelligence Options - conditional validation (only when Enabled=true)
         services
             .AddOptions<DocumentIntelligenceOptions>()
@@ -152,6 +166,10 @@ public static class ConfigurationModule
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
         // task 061: Enabled→Endpoint cross-property invariant for the gated Foundry Agent option.
         services.AddSingleton<IValidateOptions<AgentServiceOptions>, AgentServiceOptionsValidator>();
+        // customer-provisioning-orchestration-r1 task 087 (FR-36): env-aware fail-fast for
+        // PublicConfigOptions — enforce in Production / Staging / Demo / QA; short-circuit
+        // in Development / Testing envs so test fixtures don't need PublicConfig:* entries.
+        services.AddSingleton<IValidateOptions<PublicConfigOptions>, PublicConfigOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

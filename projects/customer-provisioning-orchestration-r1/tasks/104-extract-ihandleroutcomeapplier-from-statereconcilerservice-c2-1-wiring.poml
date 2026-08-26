@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactors the reconciler's most safety-critical method (§4C taxonomy + quarantine + auto-re-enqueue) into a new seam consumed by both the reconciler and the dispatcher; a mistake here silently breaks either caller's outcome handling.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Move-only extraction (verbatim body relocation + thin delegating shim) with well-defined before/after test parity -- Sonnet @ high, not the dispatcher-class-level Opus escalation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100</deps>
+    <tags>l2-controlplane, dispatcher, job-handler, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extract StateReconcilerService's internal ApplyHandlerOutcomeAsync method (currently the dispatcher's designed wiring hook per its own header comment, DS-2 §5) verbatim into a new Scoped class HandlerOutcomeApplier : IHandlerOutcomeApplier in namespace Reconciler, registered in ReconcilerModule. StateReconcilerService keeps a thin delegating internal method so its existing tests stay green. The HandlerOutcomeApplied record moves with it. This resolves gap C2.1 (zero production callers) as a byproduct and gives task 102's dispatcher its step-6 consumption point.</prompt>
+
+  <role>SPAARKE platform developer. Expert in safe method-extraction refactors that preserve existing test coverage while adding a new consumer seam.</role>
+
+  <goal>IHandlerOutcomeApplier / HandlerOutcomeApplier exist in Reconciler/, registered Scoped in ReconcilerModule. StateReconcilerService's own ApplyHandlerOutcomeAsync callers are re-pointed to the extracted class via a thin delegating shim; all EXISTING StateReconcilerServiceTests still pass unmodified (verifying the extraction is behavior-preserving). ProvisioningHandlerDispatcher (task 102) consumes IHandlerOutcomeApplier from its per-message scope for step 6 of its dispatch flow.</goal>
+
+  <context>
+    <background>DS-2 §5 confirms the shipped architecture's intent is outcome-write + reconciler-advance (option A): the dispatcher never computes ready-sets, only applies outcomes; StateReconcilerService.cs:49-56 documents this is deliberately Cosmos-write-free and ETag-race-free on the enqueue side BECAUSE handlers own state-transition writes. ApplyHandlerOutcomeAsync (:331-476) already exists 'precisely as the dispatcher's hook' per its own header comment (':352-357 -- the wiring hook lives here so the classifier + transition table are the SINGLE source of truth for any future consumer') but today has zero production callers (gap C2.1) -- it is internal to the BackgroundService class. Extracting it is the one mechanical refactor DS-2 requires before the dispatcher can consume it without duplicating §4C logic.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/StateReconcilerService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/IHandlerOutcomeApplier.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerOutcomeApplier.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/ReconcilerModule.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Rollback/RollbackTransitions.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Rollback/IFailureClassifier.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Reconciler code must live in .Core before the extraction</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.2b">The dispatcher owns dequeue + handler invocation + outcome-apply wiring; it MUST NOT compute DAG ready-sets itself. StateReconcilerService/DagAdvancer remain the single source of truth for ready-set computation (DS-2 Sec.5) -- the dispatcher calls IHandlerOutcomeApplier.ApplyHandlerOutcomeAsync and nothing else.</constraint>
+    <constraint source="DS-2 §5">The extracted applier MUST remain the ONLY place §4C RollbackTransitions logic runs -- no re-implementation in the dispatcher, no duplicate quarantine/re-enqueue logic. ETag-Conflict on the applier's write MUST stay conflict-tolerant (no re-enqueue on Conflict; next reconciler tick reconciles, per the existing :439-445 behavior).</constraint>
+    <constraint source="DS-2 §2.7">ShouldReleaseCustomerGuard is currently only wired in endpoints -- note in the extraction whether the applier should ALSO call ICustomerRunGuard.ReleaseAsync on guard-releasing transitions (DS-2 flags this as a gap the implementation should close, not defer silently).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>HandlerOutcomeApplier extraction</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Verbatim move + delegating shim" location="design-study-ds2-dispatcher-design.md §5">Extract method body unchanged; leave a thin StateReconcilerService method that calls the new class, so existing tests exercising the old signature keep passing.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read StateReconcilerService.cs's ApplyHandlerOutcomeAsync (:331-476) and its existing test coverage in full.</step>
+    <step order="1" name="Interface">Author IHandlerOutcomeApplier with a single method matching ApplyHandlerOutcomeAsync's existing signature (run, etag, outcome, handlerId, ct).</step>
+    <step order="2" name="Extract">Move the method body verbatim into HandlerOutcomeApplier; move the HandlerOutcomeApplied record with it.</step>
+    <step order="3" name="Shim">Leave StateReconcilerService with a thin internal method delegating to the injected IHandlerOutcomeApplier so its own call sites and existing tests compile and pass unmodified.</step>
+    <step order="4" name="Guard release">Evaluate and, if in-scope per DS-2's note, wire ICustomerRunGuard.ReleaseAsync into the applier for guard-releasing §4C transitions.</step>
+    <step order="5" name="Register">Register HandlerOutcomeApplier as Scoped in ReconcilerModule.</step>
+    <step order="6" name="Verify parity">Run the FULL existing StateReconcilerServiceTests suite -- zero regressions (same pass count before/after).</step>
+    <step order="7" name="Build">dotnet build 0 errors; dotnet format.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If moving the guard-release wiring (step 4) changes observable behavior for the EXISTING endpoint call sites (double-release, or a release that previously didn't happen now happening), STOP and escalate -- this task is scoped as a behavior-preserving extraction plus ONE explicitly-flagged gap closure, not a broader guard-semantics redesign.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/IHandlerOutcomeApplier.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerOutcomeApplier.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IHandlerOutcomeApplier.ApplyHandlerOutcomeAsync is registered Scoped and resolvable from a per-message DI scope in the .Worker project.</criterion>
+    <criterion testable="true">Existing StateReconcilerServiceTests pass with the SAME count as pre-extraction (grep test output totals before/after the change).</criterion>
+    <criterion testable="true">grep 'ApplyHandlerOutcomeAsync' StateReconcilerService.cs shows the delegating shim (not the full 4C logic) after extraction.</criterion>
+    <criterion testable="true">A new unit test constructs HandlerOutcomeApplier directly (not via StateReconcilerService) and exercises Success-no-op, Failure-transition+quarantine, and ETag-Conflict-tolerant paths independently of the reconciler.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- ApplyHandlerOutcomeAsync already implements the full §4C taxonomy correctly; nothing new needs designing. Extension -- the method's own header comment already declares itself as the wiring hook for exactly this purpose; extraction (not reimplementation) is the correct move. Cost-of-doing-nothing -- without this extraction, task 102's dispatcher would either duplicate the §4C classifier/transition-table logic (a second source of truth, drift-prone) or have no way to apply outcomes at all.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

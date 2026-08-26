@@ -106,9 +106,24 @@ public static class ExternalAccessEndpoints
 
     private static void MapInternalManagementEndpoints(WebApplication app)
     {
+        // FR-07 / finding A-6 (task 008): RequireAuthorization() alone asks only "are you anyone?".
+        // Until this filter landed, every write on this group — mint a grant, revoke one, onboard a
+        // CIAM identity, cascade-close a project, provision a business unit — was reachable by ANY
+        // authenticated caller and then executed app-only. AddDelegationRuleFilter enforces owner
+        // decision B-14: you may change who can access a record only if YOU hold Write on it,
+        // evaluated as the caller (OBO), before the handler runs.
+        //
+        // Group-level, not per-route, deliberately: DelegationRuleFilter denies any request whose
+        // target record it cannot identify, so a route added to this group later is gated from its
+        // first request rather than inheriting the hole this filter exists to close. See
+        // DelegationRuleFilter's remarks for the request-type → target-record map.
+        //
+        // design.md §6 marks this the blocking prerequisite for the Manage Access PCF (task 065):
+        // without it the "+ User" button is one-click privilege escalation on a confidential matter.
         var adminGroup = app.MapGroup("/api/v1/external-access")
             .WithTags("External Access Management")
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .AddDelegationRuleFilter();
 
         // POST /api/v1/external-access/grant — Grant Contact access to a Secure Project
         adminGroup.MapGrantExternalAccessEndpoint();

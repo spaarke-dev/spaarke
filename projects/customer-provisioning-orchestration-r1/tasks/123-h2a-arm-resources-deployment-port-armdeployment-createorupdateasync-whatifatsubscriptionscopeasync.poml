@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H2a: ARM.Resources deployment port (ArmDeployment.CreateOrUpdateAsync + WhatIfAtSubscriptionScopeAsync) + T1 KV-ref probe port</title>
+    <phase>C'' Wave G-2 -- Entry + resources</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H2a gates the entire resource fan-out (H2b, H4-chain, H5-chain) per DS-4; a mistake here blocks the widest downstream surface in Wave G-2/G-3/G-4. Effective ~450-800 LOC port. FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Named in the task instructions' xhigh-effort exception list (H4 real-values, H3, H6 heavy ports) is NOT H2a, but H2a is a substantial brownfield ARM-deployment port with a discount analysis already done by DS-4 -- Sonnet @ xhigh given the effective-scope discovery work (13-step script, only steps 1-3 apply).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>waveG2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 117</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port</tags>
+    <estimated-effort>10-16 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H2aBicepInfraDeployHandler.cs's 3 collaborators: (1) ProvisionCustomerScriptBicepDeployRunner (pwsh Provision-Customer.ps1, 1,632 lines) -&gt; Azure.ResourceManager.Resources SubscriptionResource.GetArmDeployments().CreateOrUpdateAsync() against the ARM-JSON artifact task 117's CI coordination produces (NOT raw .bicep -- the ARM SDK has no .bicep deploy primitive) + GetResourceGroups().CreateOrUpdateAsync() for RG-ensure + SecretClient for the 3 az keyvault secret call sites; CRITICAL DISCOUNT per DS-4/DS-1b: the script's 13 steps only need steps 1-3 ported (validate/RG/bicep-deploy, lines 318-500, ~450 effective lines) -- steps 4-10 (lines 501-1150) DUPLICATE H4/H5/H6/H7/H8's own handlers and MUST NOT be re-ported here (would create two sources of truth for those handlers' work); (2) AzCliArmKeyVaultRefProbe (az webapp [deployment slot] show --query keyVaultReferenceIdentity) -&gt; Azure.ResourceManager.AppService WebSiteResource.Data.KeyVaultReferenceIdentity / WebSiteSlotResource (this is the T1 post-condition probe H2a owns); (3) AzCliUpgradeDriftDetector (az deployment sub what-if) -&gt; ArmDeploymentResource.WhatIfAtSubscriptionScopeAsync() returning typed WhatIfChange[] (a strict upgrade over stdout-parsed drift classification).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.ResourceManager.Resources ARM deployment orchestration, subscription-scope what-if analysis, and Azure.ResourceManager.AppService KeyVaultReferenceIdentity reads.</role>
+
+  <goal>H2aBicepInfraDeployHandler.cs's 3 collaborators are pure .NET SDK implementations. The deployment collaborator deploys ONLY the effective ~450-line scope (validate/RG-ensure/bicep-deploy) against the CI-precompiled ARM-JSON artifact (task 117) -- it does NOT attempt to replicate Provision-Customer.ps1's steps 4-10 (those remain H4/H5/H6/H7/H8's exclusive responsibility). The T1 KV-ref probe reads Data.KeyVaultReferenceIdentity via the ARM SDK. The drift detector produces typed WhatIfChange[] results, not parsed stdout.</goal>
+
+  <context>
+    <background>DS-4 §2 (H2a row) explicitly discounts the port scope: 'Effective port = script steps 1-3 only (~450 script L; steps 4-10 duplicate H4/H5/H6/H7/H8's handlers -- the effective port surface is ~450 lines, not 1,632).' DS-1b §1 (H2a row) confirms the SDK mapping with the SAME caveat, and flags the ARM-JSON artifact dependency (task 117) as the hard prerequisite. DS-4 §4 places H2a in Wave G-2 alongside H2b/H4 because it 'gates the entire resource fan-out.'</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/H2aBicepInfraDeployHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmKeyVaultRefProbe.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmWhatIfDriftDetector.cs</file>
+      <file role="canonical-reference">scripts/Provision-Customer.ps1 (lines 318-500 ONLY -- do not port lines 501-1150)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing: dispatchable end-to-end only once the dispatcher exists</dependency>
+      <dependency task="103" status="pending">H2a keyed registration</dependency>
+      <dependency task="117" status="pending">ARM-JSON pre-compiled artifact this handler downloads and deploys</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-4 §2 H2a row / DS-1b §1">MUST NOT port Provision-Customer.ps1's steps 4-10 (lines 501-1150) -- they duplicate H4/H5/H6/H7/H8's own handler logic. Porting them here creates two independent sources of truth for the same provisioning steps, a direct violation of CLAUDE.md §11's component-justification principle.</constraint>
+    <constraint source="Provision-Customer.ps1 (script itself)">The ARM SDK deploys ARM JSON, not raw .bicep -- this handler MUST consume the CI-precompiled artifact from task 117, it MUST NOT bundle the bicep CLI/binary into the L2 runtime (would violate Option D's zero-shell constraint).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H2a ARM deployment SDK port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read Provision-Customer.ps1 lines 318-500 IN FULL (and skim 501-1150 only enough to confirm the H4/H5/H6/H7/H8 overlap, not to port it).</step>
+    <step order="1" name="ArmDeploymentRunner">Author the collaborator: resolve the ARM-JSON artifact (task 117's output, versioned), RG-ensure via GetResourceGroups().CreateOrUpdateAsync(), deploy via GetArmDeployments().CreateOrUpdateAsync() under DefaultAzureCredential pinned to the L2 UAMI scoped to the CUSTOMER subscription (not L2's own).</step>
+    <step order="2" name="KV secret writes">Port the 3 az keyvault secret call sites to SecretClient (these 3 are H2a's own scoped writes within steps 1-3, distinct from H4's full KV population).</step>
+    <step order="3" name="T1 probe">Author ArmKeyVaultRefProbe reading Data.KeyVaultReferenceIdentity on the site + slot resources via WebSiteResource/WebSiteSlotResource.</step>
+    <step order="4" name="Drift detector">Author ArmWhatIfDriftDetector calling WhatIfAtSubscriptionScopeAsync(), classifying the typed WhatIfChange[] result into the handler's existing drift-classification shape.</step>
+    <step order="5" name="Wire up">Replace the 3 old collaborators in H2a's owning module with the new SDK implementations.</step>
+    <step order="6" name="Tests">Deploy-runner fake matrix (success/failure/partial) + what-if drift-classification tests against typed WhatIfChange[] fakes, per DS-4 §7's test-effort note.</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reviewing Provision-Customer.ps1 lines 501-1150 reveals a step that does NOT actually correspond 1:1 to an existing H4/H5/H6/H7/H8 handler (a gap in the discount analysis DS-4 performed), STOP and escalate — do not silently port the orphaned step into H2a (which would violate the no-duplication constraint) and do not silently drop it either; flag the specific step + line range for a design decision on which handler should own it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmKeyVaultRefProbe.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmWhatIfDriftDetector.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo\|Provision-Customer.ps1' in H2a's 3 new collaborator files returns 0 matches.</criterion>
+    <criterion testable="true">ArmDeploymentRunner's deploy call targets the CI-precompiled ARM-JSON artifact from task 117, not a raw .bicep file path (grep confirms no '.bicep' file reference in the collaborator).</criterion>
+    <criterion testable="true">T1 probe test: given a site whose KeyVaultReferenceIdentity is NOT the UAMI resource id, the probe returns a Fail/InfraFault outcome (not silently Pass) -- proving it is a real read, not a stub.</criterion>
+    <criterion testable="true">Drift detector test: a fake WhatIfChange[] containing a Delete-class change is classified as a drift-Fail outcome, matching the handler's existing severity mapping.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Provision-Customer.ps1 already implements the full 13-step sequence, but 10 of those 13 steps ALREADY have dedicated handler homes (H4/H5/H6/H7/H8); H2a's job is exactly the 3 steps that don't. Extension -- this task extends the ALREADY-CORRECT step-1-3 scope to a pure-.NET implementation; it deliberately does NOT extend into the other handlers' territory. Cost-of-doing-nothing -- H2a gates the entire post-deploy resource fan-out (H2b, H4-chain, H5-chain per DS-4 §4); without a working H2a, nothing past it in the DAG can even be attempted, live or in test.
+
+COMPLETION NOTES (2026-08-19, commit 225fb4192):
+- Delivered ArmDeploymentRunner.cs, ArmKeyVaultRefProbe.cs, ArmWhatIfDriftDetector.cs exactly as scoped. Retired (not deleted) ProvisionCustomerScriptBicepDeployRunner.cs / AzCliArmKeyVaultRefProbe.cs / AzCliUpgradeDriftDetector.cs -- no test referenced them by concrete type, and deleting risked breaking ~10 unrelated `<see cref>` doc-comment mentions under TreatWarningsAsErrors.
+- ARM JSON consumption: blob-download-at-runtime (BicepInfraDeployOptions.ProvisioningArtifactsContainerUri -> manifest `provisioning-arm-latest.json` -> tenancy-model-keyed template blob), matching task 117's actual CI artifact shape exactly.
+- Ground-truthed via a throwaway reflection/spike console app (not guessed): (1) the public what-if surface is ArmDeploymentResource.WhatIfAsync -- there is no standalone "WhatIfAtSubscriptionScopeAsync" public method in Azure.ResourceManager.Resources 1.11.2 (that REST op name is an INTERNAL DeploymentsRestOperations member); (2) WhatIfOperationResult.Changes only deserializes when the fake response wraps `changes` under `properties` -- the flat shape a naive REST-doc read suggests silently yields zero changes.
+- Deviation (documented, not silent): the POML <prompt> mentions "SecretClient for the 3 az keyvault secret call sites" as in-scope; code inspection found all 3 real call sites (grep `az keyvault` in the retired PS1 script) fall within the SAME POML's <constraints>-forbidden lines 501-1150 (H4 territory). Followed the binding <constraints> over the imprecise <prompt> text -- zero KV writes added.
+- BLOCKING DISCOVERY for a follow-on Bicep task (flagged per the escalation trigger's spirit, not a hard stop): infrastructure/bicep/customer.bicep -- the template actually selected for Model2Dedicated (the only branch exercised in production) -- does NOT deploy a UAMI, App Service, Azure OpenAI, or Azure AI Search resource. It only deploys KeyVault/Storage/ServiceBus/Cosmos/membership-topic/optional-ACS/optional-SignalR. `userAssignedIdentityResourceId` is a pass-through parameter only (customer.bicep line 67-68's own comment: "no resource in THIS module binds to it yet"). BicepDeployOutputs therefore cannot be populated for UserAssignedIdentityObjectId/ClientId, AppServiceName, AppServiceStagingSlotName, OpenAiEndpoint, or AiSearchEndpoint from a REAL deploy today -- ArmDeploymentRunner honestly leaves those fields blank (triggering the handler's existing BicepDeployOutputsIncomplete failure) rather than fabricating values. This gap PRE-DATES this task (the retired runner's own header comment already flagged the pre-Phase-B script as unable to produce a matching outputs block). A follow-on Bicep-authoring task must add the missing UAMI/App Service/OpenAI/AI Search modules to customer.bicep (or wire modules/uami.bicep + app-service.bicep in) before H2a can report Success against a live subscription.
+- Quality gates: code-review (self-applied per Step 9.5) found + fixed one AI-code-smell (catch-log-rethrow in ArmKeyVaultRefProbe/ArmWhatIfDriftDetector, redundant with the handler's own richer-context logging). adr-check found zero violations against ADR-004/010/028/032/038.
+- 867/867 L2 tests pass (16 new from this task).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

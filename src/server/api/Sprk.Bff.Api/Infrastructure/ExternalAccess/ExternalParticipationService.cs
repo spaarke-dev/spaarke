@@ -33,6 +33,70 @@ public class ExternalParticipationService
     // TTL) so no stale pre-org-grant read can occur.
     public const int CacheVersion = 3;
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Grant-query construction (extracted by task 007 / FR-06, finding A-5)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // These were inline string interpolations immediately before _httpClient.SendAsync, which is why
+    // task 001 could not pin A-5 at all: the only way to observe the emitted $filter was to intercept
+    // the transport, and Mock<HttpMessageHandler> is banned (ADR-038 §7 ban B1). Extracting them as
+    // PURE members makes the predicate assertable directly — and the predicate is the whole fix, so
+    // "does the query actually carry it" is the question that has to be answerable.
+    //
+    // internal + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the convention already used across this
+    // assembly. No reflection into privates (ban B8).
+
+    /// <summary>Columns every grant read needs to partition a row into its root bucket.</summary>
+    internal const string GrantRowSelect =
+        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
+
+    /// <summary>
+    /// The <c>$filter</c> selecting a Contact's own ACTIVE, UNEXPIRED grants.
+    /// </summary>
+    internal static string BuildContactGrantFilter(Guid contactId, DateOnly today)
+        => $"_sprk_contact_value eq {contactId} and statecode eq 0 and {ExpiryPredicate(today)}";
+
+    /// <summary>
+    /// The <c>$filter</c> selecting ACTIVE, UNEXPIRED ORGANIZATION grants (contact empty — the
+    /// org-grant marker) for any of the organizations a Contact actively belongs to.
+    /// </summary>
+    internal static string BuildOrganizationGrantFilter(IEnumerable<Guid> organizationIds, DateOnly today)
+    {
+        var orgFilter = string.Join(" or ", organizationIds.Select(id => $"_sprk_organization_value eq {id}"));
+        return $"({orgFilter}) and _sprk_contact_value eq null and statecode eq 0 and {ExpiryPredicate(today)}";
+    }
+
+    /// <summary>
+    /// Excludes grants whose expiry has passed — finding A-5 (spec FR-06).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What was wrong.</b> <c>sprk_expiresdate</c> was written at grant time and read
+    /// <i>nowhere</i>: it appeared in no <c>$filter</c> and no <c>$select</c> on any path, and there is
+    /// no sweep job. A grant whose expiry had passed conferred full access forever, while the Manage
+    /// Access UI presented expiry as a working control. A promise-shaped no-op.</para>
+    ///
+    /// <para><b>The null branch is load-bearing.</b> In OData, <c>field ge X</c> excludes nulls — so
+    /// without <c>eq null</c> this predicate would silently revoke every grant that has NO expiry,
+    /// which is most of them. That failure would look like a total outage of external access rather
+    /// than an expiry bug.</para>
+    ///
+    /// <para><b>Why <c>ge</c> and not <c>gt</c>.</b> <c>sprk_expiresdate</c> is <b>Date Only</b>
+    /// (verified against live Dataverse metadata, 2026-08-23 — the task's own escalation trigger
+    /// required checking rather than trusting the docs). A date-only expiry of "30 June" means access
+    /// works ON 30 June; <c>gt</c> would kill it at 00:00 that morning, silently shortening every
+    /// grant in the system by a day. <c>ge</c> keeps the grant live through its expiry date and still
+    /// satisfies FR-06, whose acceptance is about an expiry <i>in the past</i>.</para>
+    ///
+    /// <para><b>Server-side, deliberately.</b> Filtering after materialization would mean the rows
+    /// crossed the wire and any later code path that forgot to re-filter would see them. The predicate
+    /// belongs where the set is defined.</para>
+    /// </remarks>
+    internal static string ExpiryPredicate(DateOnly today)
+        => $"(sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})";
+
+    /// <summary>Today in UTC — the reference date every expiry comparison uses.</summary>
+    private static DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+
     private readonly HttpClient _httpClient;
     private readonly ITenantCache _cache;
     private readonly IConfiguration _configuration;
@@ -402,9 +466,10 @@ public class ExternalParticipationService
             // (Dataverse projects lookups as _sprk_{name}_value; the contact FK is _sprk_contact_value —
             // verified against live Dataverse.) sprk_invoice grants are intentionally NOT read (design §6
             // — child access derives from an accessible root, not a direct child grant).
+            // Expiry is enforced HERE, in the $filter (task 007 / FR-06) — see ExpiryPredicate.
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
-                        $"?$filter=_sprk_contact_value eq {contactId} and statecode eq 0" +
-                        $"&$select=_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
+                        $"?$filter={BuildContactGrantFilter(contactId, TodayUtc)}" +
+                        $"&$select={GrantRowSelect}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -505,11 +570,13 @@ public class ExternalParticipationService
 
         try
         {
-            // Active org grants (sprk_Contact EMPTY — the org-grant marker) for any of the contact's orgs.
-            var orgFilter = string.Join(" or ", orgIds.Select(id => $"_sprk_organization_value eq {id}"));
+            // Active, UNEXPIRED org grants (sprk_Contact EMPTY — the org-grant marker) for any of the
+            // contact's orgs. An org grant expires exactly like a person grant: leaving the predicate off
+            // this second path would let every contact keep expired access simply by holding it through
+            // their firm, which is the same finding wearing a different lookup.
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
-                        $"?$filter=({orgFilter}) and _sprk_contact_value eq null and statecode eq 0" +
-                        $"&$select=_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
+                        $"?$filter={BuildOrganizationGrantFilter(orgIds, TodayUtc)}" +
+                        $"&$select={GrantRowSelect}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Infrastructure.Authorization;
 
@@ -66,7 +67,8 @@ public class ResourceAccessHandler : AuthorizationHandler<ResourceAccessRequirem
                 UserId = userId,
                 ResourceId = resourceId,
                 Operation = requirement.RequiredOperation,
-                CorrelationId = Activity.Current?.Id
+                CorrelationId = Activity.Current?.Id,
+                UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
             };
 
             // Check access via AuthorizationService

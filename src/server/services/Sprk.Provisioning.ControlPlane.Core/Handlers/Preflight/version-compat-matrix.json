@@ -1,0 +1,14 @@
+{
+  "$comment": "RUNTIME MIRROR of docs/deployment/version-compatibility-matrix.md — the authoritative human-maintained matrix (FR-34 / design.md §14A.3). OPS OBLIGATION: every release-tag that bumps sprk_bffversion and/or sprk_solutionversion MUST append the new cell(s) HERE in the SAME commit/PR that updates the .md doc (doc §6 update cadence). A pair absent from this file is treated as RED (unsupported) by H0 upgrade-mode preflight. Verdict values: Green | Yellow | Red (doc §4 legend). ucbClasses per doc §5 (U-CB-1..U-CB-6). Never delete historical cells — customers on old versions rely on them.",
+  "matrixVersion": "v1",
+  "sourceDocument": "docs/deployment/version-compatibility-matrix.md",
+  "cells": [
+    {
+      "bffVersion": "1.0.0-net10",
+      "solutionVersion": "S2026.08",
+      "verdict": "Green",
+      "ucbClasses": [],
+      "note": "Baseline pair — BFF 1.0.0-net10 (post dotnet-10-upgrade-r1) x S2026.08 8-solution shipped set. v1 is a legitimate 1x1 matrix per doc §4 single-cell-honesty caveat; it expands at each release-tag milestone."
+    }
+  ]
+}

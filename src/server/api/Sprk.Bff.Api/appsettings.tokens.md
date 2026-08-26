@@ -52,7 +52,6 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{INSIGHTS_INDEX_NAME}#` | AI Search derived-intelligence index (AllowedIndexes) | `spaarke-insights-index` |
 | `#{SESSION_FILES_INDEX_NAME}#` | AI Search session-scoped chat-upload index (AllowedIndexes) | `spaarke-session-files` |
 | `#{INVOICES_INDEX_NAME}#` | AI Search invoices index (AllowedIndexes) | `spaarke-invoices-index` |
-| `#{PLAYBOOK_EMBEDDINGS_INDEX_NAME}#` | AI Search playbook-embeddings index (AllowedIndexes) | `spaarke-playbook-embeddings` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -137,7 +136,6 @@ RAG_REFERENCES_INDEX_NAME=spaarke-rag-references
 INSIGHTS_INDEX_NAME=spaarke-insights-index
 SESSION_FILES_INDEX_NAME=spaarke-session-files
 INVOICES_INDEX_NAME=spaarke-invoices-index
-PLAYBOOK_EMBEDDINGS_INDEX_NAME=spaarke-playbook-embeddings
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

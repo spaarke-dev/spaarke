@@ -1,0 +1,160 @@
+# ============================================================================
+# build-provisioning-sidecar.yml — Build, Trivy-scan, and push the
+# Exchange-policy provisioning sidecar image to the platform ACR.
+# ============================================================================
+#
+# Scope: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/** only.
+# This is the ONE Microsoft-platform-forced PowerShell-only residual in the
+# r1 provisioning pipeline (design.md DS-1b §0/§3) -- a minimal pwsh + one
+# pinned EXO module image, NOT a general tools container. Cadence: monthly
+# rebuild (module-patch cycle), not per-PR.
+#
+# COORDINATION: authored by customer-provisioning-orchestration-r1 task 115
+# as a coord-note draft (projects/customer-provisioning-orchestration-r1/
+# notes/sidecar-ci-workflow-coord-pr.md). ci-cd-unit-test-remediation-r1's
+# 28-day coordination window on .github/workflows/** (started ~2026-06-25)
+# closed ~2026-07-23 and that worktree has shown no commits since 2026-06-28.
+# Owner declared the window expired 2026-08-19 and r1 took direct ownership
+# of .github/workflows/** for Phase C'' scope; this file is applied as a
+# direct commit under that decision rather than a further-deferred coord-PR.
+#
+# Trivy gate: fails the build on any HIGH or CRITICAL finding, fixed or
+# unfixed (ignore-unfixed: false) -- new image, zero grandfathered debt, per
+# the repo's r3-era "no dodging" CVE posture. The severity value (HIGH,CRITICAL)
+# matches the existing nightly-health.yml trivy-fs job for gate consistency;
+# unlike that advisory job this one is a hard build-time gate (exit-code: 1).
+# ============================================================================
+
+name: Build Provisioning Sidecar
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**'
+      - '.github/workflows/build-provisioning-sidecar.yml'
+  workflow_dispatch:
+    inputs:
+      image_tag_suffix:
+        description: 'Optional extra tag suffix (e.g. a manual patch build)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write        # OIDC federated credential for azure/login -- no stored ACR password/secret
+  security-events: write # Upload Trivy SARIF to the GitHub Security tab
+
+concurrency:
+  group: build-provisioning-sidecar-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-flight image push (matches deploy-bff-api.yml convention)
+
+env:
+  IMAGE_NAME: provisioning-sidecar
+  # ACR_LOGIN_SERVER: FQDN of the platform ACR (e.g. sprkplatformacr.azurecr.io).
+  # NOT YET PROVISIONED as of this workflow's authoring -- task 101 (Wave G-1)
+  # authors the ACR resource + sitecontainer Bicep wiring. This is a repo
+  # VARIABLE (not a secret -- a login-server FQDN is not confidential),
+  # populated once task 101 lands. See notes/sidecar-ci-workflow-coord-pr.md § 4.
+  ACR_LOGIN_SERVER: ${{ vars.SIDECAR_ACR_LOGIN_SERVER }}
+
+jobs:
+  build-scan-push:
+    name: Build, Trivy scan, push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compute image tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha_tag="${{ github.sha }}"
+          semver_tag="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          suffix="${{ github.event.inputs.image_tag_suffix }}"
+          if [ -n "$suffix" ]; then
+            semver_tag="${semver_tag}-${suffix}"
+          fi
+          echo "sha_tag=${sha_tag}" >> "$GITHUB_OUTPUT"
+          echo "semver_tag=${semver_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local only -- Trivy scans BEFORE any push)
+        uses: docker/build-push-action@v6
+        with:
+          context: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar
+          file: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile
+          push: false
+          load: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
+
+      - name: Run Trivy vulnerability scanner (image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}'
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: false
+          exit-code: '1'   # FAIL the build on any HIGH/CRITICAL -- hard gate, not advisory
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+      - name: Verify compressed size ceiling (design.md §4.2a target ~200-230 MB, ceiling 250 MB)
+        shell: bash
+        run: |
+          set -euo pipefail
+          size_bytes=$(docker image inspect "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" --format='{{.Size}}')
+          size_mb=$(( size_bytes / 1024 / 1024 ))
+          echo "Local (uncompressed layer) image size: ${size_mb} MB"
+          echo "Note: design.md's 250 MB ceiling is on the COMPRESSED registry size; this is an" \
+               "early sanity check, not the authoritative measurement -- verify against" \
+               "'az acr repository show-manifests' post-push if this step ever needs to gate."
+          echo "Sidecar image size: ${size_mb} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$size_mb" -gt 350 ]; then
+            echo "::error::Uncompressed size ${size_mb} MB is implausibly large relative to the 250 MB compressed ceiling -- investigate before push."
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login (via OIDC-authenticated az session -- no ACR password/secret)
+        run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
+
+      - name: Push image (SHA tag + date-versioned semver tag -- NEVER `latest`)
+        uses: docker/build-push-action@v6
+        with:
+          context: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar
+          file: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.semver_tag }}
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Provisioning sidecar build"
+            echo "- SHA tag: \`${{ steps.tags.outputs.sha_tag }}\`"
+            echo "- Semver tag: \`${{ steps.tags.outputs.semver_tag }}\`"
+            echo "- Pushed to: \`${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -135,7 +135,16 @@ function Add-SolutionComponent {
         ComponentId              = $ComponentId
         ComponentType            = $ComponentType
         SolutionUniqueName       = "SpaarkeMaster"
-        AddRequiredComponents    = $false
+        # customer-provisioning-orchestration-r1 F12 fix (2026-08-23): changed from
+        # $false to $true after diagnostic (105 refs from the "Active" layer in the
+        # exported SpaarkeMaster.zip preventing installs to fresh envs). Root cause:
+        # top-level entities were added without their subcomponents (attributes,
+        # ribbons, forms), producing a "leaky" managed-solution export that
+        # references its own subcomponents as external unmanaged customizations.
+        # Setting to $true auto-includes required subcomponents at solution-add time
+        # so the export is self-contained. See:
+        # projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md F12.
+        AddRequiredComponents    = $true
         DoNotIncludeSubcomponents = $DoNotIncludeSubcomponents
     }
     try {

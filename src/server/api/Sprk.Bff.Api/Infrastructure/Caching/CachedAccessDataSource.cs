@@ -14,12 +14,34 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 /// ADR-009: Redis-first via IDistributedCache; short TTLs for security-sensitive data.
 ///
 /// Cache key scheme:
-/// - User roles:       sdap:auth:roles:{userOid}           TTL 2 min
-/// - Team memberships: sdap:auth:teams:{userOid}           TTL 2 min
-/// - Resource access:  sdap:auth:access:{userOid}:{resId}  TTL 60s
+/// - User roles:       sdap:auth:roles:{userOid}                    TTL 2 min
+/// - Team memberships: sdap:auth:teams:{userOid}                    TTL 2 min
+/// - Resource access:  sdap:auth:access:{authMode}:{userOid}:{resId} TTL 60s
 ///
 /// Performance target: Authorization overhead drops from 50-200ms (Dataverse) to &lt;10ms on cache hit.
 /// Security: Fail-open to inner data source on cache errors (cache is optimization, not requirement).
+///
+/// Auth-mode key segment (finding A-19 / spec FR-13, fixed by task 014): the resource-access key
+/// includes an <c>{authMode}</c> segment ("sp" when <c>userAccessToken</c> is null/empty, "obo"
+/// otherwise) so an app-only (service-principal) snapshot can never be served to a subsequent OBO
+/// caller, or vice versa, within the 60s TTL. The discriminator is a mode flag, never the raw token —
+/// the raw token MUST NOT appear in a cache key or a log line (project constraint on task 014).
+///
+/// <b>Updated by task 006 (2026-08-21).</b> When task 014 wrote this comment,
+/// <c>Spaarke.Core.Auth.AuthorizationService</c> always called with <c>userAccessToken: null</c>
+/// (app-only) and <c>AiAuthorizationService</c> was the only OBO caller. Task 004 (FR-02) made
+/// <c>AuthorizationService</c> caller-scoped, so BOTH now pass the caller's bearer token and the "sp"
+/// branch is reached only by a path that genuinely has no caller credential. The mode flag is still
+/// required: it is what prevents such a path's snapshot from being served to an OBO caller.
+///
+/// A boolean mode flag is sufficient here (no further per-identity hash needed) because <c>userId</c>
+/// (the first parameter of <see cref="GetUserAccessAsync"/>) is already the caller's stable 'oid'
+/// claim — both call sites (<c>AuthorizationService.cs:49</c>, <c>AiAuthorizationService.cs:176-178</c>
+/// via <c>CheckDocumentAccessAsync</c>) extract <c>userId</c> and <c>userAccessToken</c> from the SAME
+/// validated <c>ClaimsPrincipal</c> for a single request, so two different OBO callers already produce
+/// two different <c>userId</c> values and therefore two different keys — the mode flag only needs to
+/// separate SP-mode from OBO-mode for the SAME oid, not disambiguate between distinct OBO identities
+/// that happen to share an oid (there are none: oid IS the identity).
 /// </summary>
 public class CachedAccessDataSource : IAccessDataSource
 {
@@ -61,8 +83,15 @@ public class CachedAccessDataSource : IAccessDataSource
         ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId, nameof(resourceId));
 
+        // Auth-mode discriminator (A-19 / FR-13, task 014): "sp" (service-principal / app-only,
+        // AuthorizationService's userAccessToken:null path) vs "obo" (on-behalf-of, AiAuthorizationService's
+        // caller-bearer path). Fail-closed toward separation: any non-empty token is treated as OBO, so an
+        // SP-mode snapshot is never returned for a request that presented a token. The raw token itself is
+        // NEVER used as (or embedded in) the key — only this two-value mode flag.
+        var authMode = string.IsNullOrEmpty(userAccessToken) ? "sp" : "obo";
+
         // Try to get the full access snapshot from resource-level cache first
-        var resourceCacheKey = $"sdap:auth:access:{userId}:{resourceId}";
+        var resourceCacheKey = $"sdap:auth:access:{authMode}:{userId}:{resourceId}";
         var sw = Stopwatch.StartNew();
 
         try

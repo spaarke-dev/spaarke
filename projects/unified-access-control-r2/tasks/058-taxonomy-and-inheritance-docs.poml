@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="unified-access-control-r2">
+  <metadata>
+    <title>Document the core/child taxonomy and inheritance behaviour (FR-26/FR-27)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires 056 merged (documents shipped behaviour, not intent)</gate>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation only; no code changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Doc drafting from merged code + spec; no judgment boundary.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase3-wave6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches docs/ only — disjoint from task 057 (tests/) in the same wave.</parallel-reason>
+    <deps>056</deps>
+    <tags>documentation</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Update the access-control architecture documentation with the shipped core/child taxonomy, the 1-hop ancestor-stamp mechanism, and — explicitly and prominently — the user-visible behaviour that a Matter associated to a Project does NOT inherit its access. Users WILL notice this; it must read as a documented design decision, not a surprise.</prompt>
+  <role>SPAARKE platform developer / technical writer. Follow the docs-architecture skill conventions.</role>
+  <goal>docs/architecture/uac-access-control.md (or its Phase-1 successor doc) gains: the core/child table from design §4.3; the FR-26 stamp mechanism incl. re-stamp-on-reparent and the backfill runbook pointer; the "Matter does not inherit from Project" callout with rationale; the evaluator term/veto order incl. inheritance; the staleness SLOs from investigation 01 §5 stated as accepted behaviour; the client fetch-column projection requirement for child modules.</goal>
+
+  <context>
+    <background>Code wins, docs lag (CLAUDE.md §2) — Phase 3 changed the access model; the architecture doc must match the merged code. The doc is also the reference the Manage Access provenance work (Phase 4) links to for "why can this person see this child record".</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/uac-access-control.md (verify current canonical path; Phase 1 may have superseded it — update the CANONICAL doc, stub the old one if superseded)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase3-child-modules.md</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase3-derivation-rules.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="056" status="pending">Shipped child modules to document.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§2">Docs describe the merged code, citing file paths — no aspirational content; scope: every mechanism section must name its implementing file.</constraint>
+    <constraint source="project">The Matter/Project non-inheritance callout must state the owner decision and the workaround (grant on the matter directly); scope: the taxonomy section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>architecture documentation</topic>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/01-spa-plane.md</file>
+    </files>
+    <patterns>
+      <pattern name="docs-architecture" location=".claude/skills/docs-architecture/SKILL.md">Architecture-doc conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Locate the canonical access-control architecture doc as of Phase 1/2 merges; read it fully.</step>
+    <step order="2">Write the sections listed in the goal, each citing implementing code paths.</step>
+    <step order="3">Cross-link: spaarke-todo-architecture.md (regarding catalog), the Phase-4 Manage Access doc placeholder, the backfill runbook.</step>
+    <step order="4">Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the doc's Phase-1 successor does not exist and uac-access-control.md still describes the pre-unification model wholesale, limit this task to the Phase-3 sections + a drift banner and file the full rewrite as a deferred item (project-defer-issue-tracking) rather than expanding scope.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">docs/architecture/uac-access-control.md (or canonical successor)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The doc contains the core/child taxonomy table matching the code literals (4 core, 6 child).</criterion>
+    <criterion testable="true">The doc contains an explicit "Matter does not inherit from Project" callout with owner-decision rationale and the direct-grant workaround.</criterion>
+    <criterion testable="true">The stamp mechanism section names PolymorphicResolverService, CoreAncestorResolver, and the backfill script by path.</criterion>
+    <criterion testable="true">The staleness SLOs (60 s grants / 5 min membership / 10 min disabled systemuser) are stated as accepted behaviour.</criterion>
+    <criterion testable="true">Negative: no section describes unshipped behaviour (spot-check every claim against merged code).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26/27; design.md §4.3/§4.5.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,5 +1,6 @@
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -124,7 +125,8 @@ public class OfficeDocumentAccessFilter : IEndpointFilter
                 UserId = userId,
                 ResourceId = documentId.ToString(),
                 Operation = _operation,
-                CorrelationId = httpContext.TraceIdentifier
+                CorrelationId = httpContext.TraceIdentifier,
+                UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
             };
 
             try

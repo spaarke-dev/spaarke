@@ -15,6 +15,8 @@ using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
+using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
+using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -44,6 +46,11 @@ public static class EndpointMappingExtensions
     {
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
         app.MapMsalConfigEndpoints();
+
+        // Anonymous public runtime config endpoint (FR-36 — customer-provisioning-orchestration-r1
+        // task 087). Returns { bffUrl, msalClientId, tenantId, featureFlags } short-cached (60s + ETag)
+        // for external-spa + code-pages, closing the bake-at-build-time pattern.
+        app.MapPublicConfigEndpoint();
 
         // /healthz is the App Service LIVENESS probe — it must not fail on catalog
         // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
@@ -359,6 +366,20 @@ public static class EndpointMappingExtensions
 
         // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
         app.MapRegistrationEndpoints();
+
+        // Onboarding — H0.5 consent-callback (customer-provisioning-orchestration-r1, task 042).
+        // POST /api/onboarding/consent-callback — Anonymous + HMAC-SHA256 signature verified.
+        // Captures the customer admin tid from the Microsoft admin-consent redirect and enqueues
+        // the L2 provisioning pipeline via Service Bus. See Endpoints/Onboarding/OnboardingModule.cs
+        // and design.md D18 + §4.3a.2 for the Anonymous+HMAC exception rationale.
+        app.MapConsentCallbackEndpoint();
+
+        // Diagnostics — I4 tenant-container-resolver (customer-provisioning-orchestration-r1,
+        // G-8 Batch 6 fix #18). GET /api/diagnostics/tenant-container-resolver — JWT-authorized,
+        // READ-ONLY; the L2 H13 I4 invariant probe's BFF-side dependency (without it, live H13
+        // parks I4 at InfraFault via its 404 branch and Ready is unreachable). Contract locked
+        // by SpeContainerResolverInvariantProbe (L2). See Endpoints/Diagnostics/.
+        app.MapTenantContainerResolverEndpoint();
 
         // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
         // GET /api/admin/jobs               — list registered jobs + status summary

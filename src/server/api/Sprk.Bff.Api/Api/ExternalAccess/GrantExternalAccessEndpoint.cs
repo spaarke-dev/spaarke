@@ -122,11 +122,24 @@ public static class GrantExternalAccessEndpoint
     // =========================================================================
 
     /// <summary>
-    /// Creates a <c>sprk_externalrecordaccess</c> grant (grantee = the Contact, audited via
-    /// <c>sprk_grantedby</c>) and invalidates the Contact's Redis participation cache. Throws on the
-    /// Dataverse create failure; cache invalidation failure is non-fatal. Shared by <c>/grant</c> and
-    /// <c>/invite-and-grant</c> (task 029) so both write an identical, audited grant.
+    /// UPSERTS a <c>sprk_externalrecordaccess</c> grant for one logical grant key (root × grantee), and
+    /// invalidates the Contact's Redis participation cache. Throws on Dataverse failure; cache
+    /// invalidation failure is non-fatal. Shared by <c>/grant</c> and <c>/invite-and-grant</c> (task 029)
+    /// so both write an identical, audited grant.
     /// </summary>
+    /// <returns>The id of the single surviving active row for the logical grant.</returns>
+    /// <remarks>
+    /// <para><b>Idempotent since task 010</b> (spec FR-09, finding A-11). This method previously CREATEd
+    /// unconditionally, with no pre-existence check anywhere on the path — so granting the same contact
+    /// the same access on the same root twice produced two active rows. Revoke then deactivated exactly
+    /// one of them by id, leaving the other standing: access survived revocation, and the participation
+    /// surface could not even show it (<c>QueryGrantSetAsync</c> collapses duplicates via
+    /// <c>GroupBy(root).Max(level)</c> and never returns access-record ids).</para>
+    ///
+    /// <para>Now: query the logical key first — no match creates; an exact match is a no-op returning the
+    /// existing id; a match at a different level updates that row IN PLACE. Any surplus active rows on
+    /// the same key (pre-existing duplicates, or a lost create race) are collapsed onto the survivor.</para>
+    /// </remarks>
     internal static async Task<Guid> CreateGrantAsync(
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
@@ -138,6 +151,42 @@ public static class GrantExternalAccessEndpoint
         ILogger logger,
         CancellationToken ct)
     {
+        var key = ResolveGrantKey(request, rootType, rootId);
+        var requestedLevel = (int)request.AccessLevel;
+
+        // ── UPSERT: does this logical grant already exist? ───────────────────
+        // Failures propagate deliberately. Falling back to a blind create on a failed pre-existence
+        // query would reintroduce exactly the duplicate this task removes.
+        var existing = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
+
+        if (existing.Count > 0)
+        {
+            // Deterministic survivor (lowest id) so concurrent grants elect the same row — see
+            // QueryActiveRowsAsync's remarks.
+            var survivor = existing[0];
+
+            if (survivor.AccessLevel == requestedLevel)
+            {
+                logger.LogInformation(
+                    "[EXT-GRANT] Grant {Key} already active at level {Level} — no-op (idempotent).",
+                    key, requestedLevel);
+            }
+            else
+            {
+                await dataverseClient.UpdateAsync(
+                    EntitySet, survivor.Id, new Dictionary<string, object?> { ["sprk_accesslevel"] = requestedLevel }, ct);
+
+                logger.LogInformation(
+                    "[EXT-GRANT] Grant {Key} level changed {Old} → {New} in place on record {AccessRecordId}.",
+                    key, survivor.AccessLevel, requestedLevel, survivor.Id);
+            }
+
+            await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
+            await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+
+            return survivor.Id;
+        }
+
         // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
         // DISTINCT from the caller's Azure AD object id (oid). Resolve the systemuserid from the oid;
         // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
@@ -150,7 +199,95 @@ public static class GrantExternalAccessEndpoint
             "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / {RootType} {RootId}",
             accessRecordId, request.ContactId, rootType, rootId);
 
-        // Invalidate Redis participation cache (non-fatal).
+        // Race window: two concurrent grants on the same key both see zero rows and both create. Re-query
+        // and collapse so the pair converges on one row. Both racers elect the same survivor (lowest id),
+        // so this is safe to run from either — they cannot deactivate each other.
+        try
+        {
+            var afterCreate = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
+            if (afterCreate.Count > 1)
+            {
+                var survivor = afterCreate[0];
+                await CollapseDuplicatesAsync(dataverseClient, afterCreate, survivor.Id, key, logger, ct);
+                accessRecordId = survivor.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: the grant itself succeeded. A surviving duplicate is swept at the next grant or
+            // revoke on this key, both of which sweep by key rather than by id.
+            logger.LogWarning(ex,
+                "[EXT-GRANT] Post-create duplicate check failed for {Key}. The grant succeeded; any " +
+                "duplicate will be collapsed by the next grant or revoke on this key.", key);
+        }
+
+        await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+
+        return accessRecordId;
+    }
+
+    /// <summary>
+    /// Derives the logical grant key this request targets: root × grantee, where the grantee is the
+    /// Contact when one is named and the Organization otherwise.
+    /// </summary>
+    /// <remarks>
+    /// An <c>OrganizationId</c> on a per-contact grant is the contact's firm — association metadata, not
+    /// grantee identity. Treating it as identity would make a person grant and an org grant on the same
+    /// root collide, so one could revoke the other.
+    /// </remarks>
+    internal static ExternalGrantKey ResolveGrantKey(
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId)
+        => request.ContactId != Guid.Empty
+            ? ExternalGrantKey.ForContact(rootType, rootId, request.ContactId)
+            : ExternalGrantKey.ForOrganization(rootType, rootId, request.OrganizationId!.Value);
+
+    /// <summary>
+    /// Deactivates every active row for a logical grant except the elected survivor.
+    /// </summary>
+    /// <remarks>
+    /// Non-fatal by design: the caller's grant has already been applied to the survivor, and a surviving
+    /// duplicate is swept by the next grant or revoke on this key (both sweep by key, not by id). Failing
+    /// the grant here would be worse — the caller's intent was satisfied.
+    /// </remarks>
+    private static async Task CollapseDuplicatesAsync(
+        DataverseWebApiClient dataverseClient,
+        IReadOnlyList<ExternalGrantRow> rows,
+        Guid survivorId,
+        ExternalGrantKey key,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var duplicates = rows.Where(r => r.Id != survivorId).Select(r => r.Id).ToList();
+        if (duplicates.Count == 0)
+            return;
+
+        logger.LogWarning(
+            "[EXT-GRANT] {Count} duplicate active row(s) found for {Key}; collapsing onto {SurvivorId}. " +
+            "Duplicates predate task 010's upsert or lost a create race.",
+            duplicates.Count, key, survivorId);
+
+        try
+        {
+            await ExternalGrantLifecycle.DeactivateAsync(dataverseClient, duplicates, logger, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-GRANT] Failed to collapse duplicates for {Key}. The grant itself succeeded; the " +
+                "next grant or revoke on this key will sweep them.", key);
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the grantee Contact's Redis participation cache. Non-fatal.
+    /// </summary>
+    private static async Task InvalidateGranteeCacheAsync(
+        GrantAccessRequest request,
+        ITenantCache cache,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
         try
         {
             var tenantId = ExtractTenantId(httpContext);
@@ -183,8 +320,6 @@ public static class GrantExternalAccessEndpoint
                 "[EXT-GRANT] Failed to invalidate Redis cache for Contact {ContactId}. Non-critical.",
                 request.ContactId);
         }
-
-        return accessRecordId;
     }
 
     /// <summary>

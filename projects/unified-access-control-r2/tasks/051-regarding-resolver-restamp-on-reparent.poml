@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="unified-access-control-r2">
+  <metadata>
+    <title>RegardingResolver PCF: consume ancestor stamping on set, reparent and clear (FR-26)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires task 050 (shared derivation contract) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>PCF on the authorization write path (the stamp it writes IS the access boundary for child records); tags pcf + auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The re-stamp-on-reparent path (immediate update AND CREATE-mode presave bridge) is where FR-26 correctness actually lands; the presave bridge has a history of subtle staging bugs (SRFR-032/040/050).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only src/client/pcf/RegardingResolver/** + its webresource bridge — file-disjoint from task 053 (scripts/) in the same wave.</parallel-reason>
+    <deps>050</deps>
+    <tags>pcf, frontend, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the RegardingResolver PCF (the sole set-regarding UI) to the task-050 shared ancestor-derivation contract so every set, reparent and clear of a regarding target correctly stamps / re-stamps / clears the ultimate core-record ancestor on the host record — in both UPDATE mode (existing record) and CREATE mode (presave staging bridge).</prompt>
+  <role>SPAARKE platform developer. PCF controls, Fluent v9, Xrm.WebApi, the ADR-024 resolver pattern. Follow ADRs strictly.</role>
+  <goal>ResolverWriteHandler delegates to the extended shared service (no derivation logic in the PCF); the CREATE-mode presave bridge stages the ancestor stamp fields alongside the existing regarding fields; clearRegarding clears ancestor stamps; PCF version bumped in all 4 locations and built with npm run build:prod.</goal>
+
+  <context>
+    <background>spec.md FR-26 requires re-stamp on reparent. The PCF's clear-and-set flow (ResolverWriteHandler.applyRegardingSelection) pre-clears the other 10 entity-specific lookups then delegates to applyResolverFields — after task 050 the shared payload carries ancestor stamps and the PCF must pass them through unmodified, including the CREATE-mode path where fields are staged via the __sprk_regarding_pending__ presave bridge and sprk_todo_regarding_presave.js.</background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="modify">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+      <file role="modify">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+      <file role="modify">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+      <file role="modify">src/client/pcf/RegardingResolver/__tests__/ResolverWriteHandler.test.ts</file>
+      <file role="modify">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (task 050 output — the contract to consume)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Ancestor-derivation contract + combined payload (stamps survive pre-clear).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">The PCF MUST NOT reimplement derivation or mutual-exclusivity logic; scope: ResolverWriteHandler stays a thin coordinator over the shared service.</constraint>
+    <constraint source="ADR-012">Deep per-module imports from @spaarke/ui-components/dist/... only (no root barrel) — scope: all new imports in the PCF.</constraint>
+    <constraint source="ADR-028">No new auth mechanics: the PCF continues host-context Xrm.WebApi writes (no BFF call, no token props); scope: whole task.</constraint>
+    <constraint source="project">CREATE-mode staging MUST include ancestor stamp fields in the same INSERT transaction (the presave bridge), never a follow-up update — otherwise a crash between create and stamp leaves an unscoped child. Scope: RegardingResolverApp presave bridge + sprk_todo_regarding_presave.js.</constraint>
+    <constraint source="pcf-CLAUDE.md">Version bump in all 4 locations + visible version footer; production build via npm run build:prod (NOT npm run build). Scope: release steps.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF resolver pattern + presave bridge</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/phase3-derivation-rules.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Resolver catalog + write contract.</pattern>
+      <pattern name="control-initialization" location=".claude/patterns/pcf/control-initialization.md">PCF lifecycle conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Consume the task-050 combined payload in applyRegardingSelection; delete any local ordering assumptions that could null a stamp being set (the shared service owns ordering).</step>
+    <step order="2">Extend the CREATE-mode presave bridge: __sprk_regarding_pending__ carries the ancestor stamp fields; sprk_todo_regarding_presave.js stages them onto the form so they ride the INSERT.</step>
+    <step order="3">Verify clearRegarding nulls ancestor stamps (via the shared service's clear payload) on hosts where those lookups exist.</step>
+    <step order="4">Update unit tests: reparent re-stamp, CREATE-mode staging includes stamps, clear removes stamps, no derivation logic present in the PCF (assert delegation).</step>
+    <step order="5">Bump version (4 locations) + footer; npm run build:prod; run jest suite.</step>
+    <step order="6">Update TASK-INDEX.md; note deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the presave bridge cannot stage a lookup column that does not exist on the host form (staging requires a form attribute), STOP and escalate with the concrete host-entity/form gap per CLAUDE.md §6 rather than falling back to a post-create update write.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Reparent re-stamps ancestor">
+      <steps>
+        <step>Open https://{org}.crm.dynamics.com, navigate to an existing To Do whose regarding is Communication C1 (C1 regards Matter M1).</step>
+        <step>Use the RegardingResolver control to reparent the To Do to Communication C2 (C2 regards Matter M2); save.</step>
+        <step>Inspect the To Do row (form or Web API): sprk_regardingmatter.</step>
+      </steps>
+      <expected>sprk_regardingmatter = M2; no residual M1 stamp; regarding display fields show C2.</expected>
+    </test>
+    <test name="CREATE-mode stamp rides the insert">
+      <steps>
+        <step>Open a new To Do form at https://{org}.crm.dynamics.com; pick regarding = an Email regarding Matter M; save (single INSERT).</step>
+        <step>Query the created row via Web API.</step>
+      </steps>
+      <expected>sprk_regardingmatter = M present on the created row without any subsequent update call (verify network trace shows one create).</expected>
+    </test>
+    <test name="ADR-021 dark-mode tokens">
+      <steps>
+        <step>Switch the model-driven app to dark theme; open the RegardingResolver control.</step>
+      </steps>
+      <expected>All control surfaces render with Fluent v9 semantic tokens (no hardcoded light-theme hex); text/background contrast correct in dark mode; version footer visible.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/webresources/js/sprk_todo_regarding_presave.js</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/ResolverWriteHandler.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an existing child record, when the regarding is set to a child-class target with core ancestor M, then one updateRecord call writes both the target lookup and the M stamp.</criterion>
+    <criterion testable="true">Given a reparent between targets with different ancestors, then exactly the new ancestor stamp remains (old one nulled in the same payload).</criterion>
+    <criterion testable="true">Given CREATE mode, the staged form attributes include the ancestor stamp and the record is created with it in one transaction.</criterion>
+    <criterion testable="true">Given clearRegarding, ancestor stamp lookups are nulled along with the 15 regarding fields.</criterion>
+    <criterion testable="true">Negative: if the shared derivation returns an error, the PCF surfaces the error state and writes nothing (no partial stamp).</criterion>
+    <criterion testable="true">Jest suite green; npm run build:prod succeeds; version bumped in all 4 locations.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26. Deployment via pcf-deploy skill at execution time. Do not touch shared-lib service files (task 050 owns them).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

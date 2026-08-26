@@ -102,7 +102,7 @@ $settings = @(
     "DocumentIntelligence__DocIntelEndpoint=$(KVRef 'ai-docintel-endpoint')",
     "DocumentIntelligence__DocIntelKey=$(KVRef 'ai-docintel-key')",
     "DocumentIntelligence__AiSearchEndpoint=$(KVRef 'ai-search-endpoint')",
-    "DocumentIntelligence__AiSearchKey=$(KVRef 'ai-search-key')",
+    "DocumentIntelligence__AiSearchKey=$(KVRef 'AiSearch--AdminKey')",
 
     # --- Analysis ---
     # PromptFlowEndpoint / PromptFlowKey REMOVED 2026-08-21 (auth-v4 task 055, FR-E6): both were bound

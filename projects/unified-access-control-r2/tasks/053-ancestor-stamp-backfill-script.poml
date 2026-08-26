@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="unified-access-control-r2">
+  <metadata>
+    <title>One-time backfill: stamp core ancestors onto existing child records (FR-26)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires 050 + 052 (derivation rules finalized in both stacks) before the script's rules are authoritative</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New script file, no product-code change; data-mutating but idempotent + dry-run gated, executed by the operator, not CI.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified batch script over fixed derivation rules; no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase3-wave2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only scripts/ + notes — disjoint from task 051 (PCF files) in the same wave.</parallel-reason>
+    <deps>050, 052</deps>
+    <tags>scripts, dataverse, auth</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author an idempotent, dry-run-first backfill script that stamps the ultimate core-record ancestor onto EXISTING child records (todo, communication, event, invoice, document, analysis) whose regarding target is itself a child-class record — so FR-27 inheritance works for records created before FR-26 shipped.</prompt>
+  <role>SPAARKE platform developer. PowerShell + Dataverse Web API batch operations. Follow ADRs strictly.</role>
+  <goal>scripts/Backfill-CoreAncestorStamps.ps1: enumerates child rows with a child-class regarding lookup set and the corresponding core-ancestor stamp column null, derives the ancestor from the target row (1 hop), writes the stamp in batches, supports -WhatIf (default) and -Apply, logs every change, and emits a verification summary (counts per entity, unresolvable rows listed, zero rows modified in dry-run).</goal>
+
+  <context>
+    <background>spec.md FR-26/FR-27: acceptance ("a contact with access to Project 1 sees its ... To Dos") includes pre-existing records. Without backfill, only newly-written children carry stamps and the SPA silently hides older records (the exact F1 failure mode from notes/investigation/06-adversarial-critique.md).</background>
+    <relevant-files>
+      <file role="new">scripts/Backfill-CoreAncestorStamps.ps1</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase3-derivation-rules.md</file>
+      <file role="canonical-reference">scripts/ (survey existing Dataverse batch scripts first per script-aware skill; reuse auth/batch helpers if present)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Derivation rules (client contract).</dependency>
+      <dependency task="052" status="pending">C# derivation semantics + writer inventory (which entities/columns actually exist).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dry-run is the DEFAULT; -Apply is explicit. Scope: script parameter contract — the reviewer must be able to run it safely with zero args.</constraint>
+    <constraint source="ADR-034">1 hop only: derive from the immediate target row's stamp columns (which 052 guarantees are populated going forward); rows whose target ALSO lacks a stamp are reported as unresolvable, not chased recursively. Run-to-fixpoint by re-running the script is the documented remedy. Scope: derivation loop.</constraint>
+    <constraint source="project">Idempotent: a second -Apply run over the same data writes zero changes. Never overwrite a non-null stamp (report conflicts instead). Scope: write predicate.</constraint>
+    <constraint source="ADR-044">GUID handling: normalize braces/case before comparison. Scope: all id comparisons.</constraint>
+    <constraint source="security">The script authenticates via the operator's existing PAC/az context — no secrets in the script or repo. Scope: whole file.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse batch data operations</topic>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="script-aware" location=".claude/skills/script-aware/SKILL.md">Survey scripts/ for existing Dataverse batch/auth helpers before writing new ones.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Survey scripts/ for reusable Dataverse Web API helpers (script-aware); cite what was reused.</step>
+    <step order="2">Implement enumeration: for each child entity, FetchXML/OData query for rows where a child-class regarding lookup is set AND the derivable core-ancestor stamp column is null. Page correctly (cookie/nextLink) — no 5,000-row silent truncation.</step>
+    <step order="3">Implement derivation + batched writes (batch size ≤ 100) with per-row log line (entity, id, stamp column, value, action).</step>
+    <step order="4">Implement -WhatIf default / -Apply, idempotency predicate, conflict + unresolvable reporting, final summary table.</step>
+    <step order="5">Test against dev with -WhatIf; capture the summary in notes. Do NOT run -Apply — execution is an operator decision recorded in the deployment runbook.</step>
+    <step order="6">Update TASK-INDEX.md; write run instructions + expected counts to projects/unified-access-control-r2/notes/phase3-backfill-runbook.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the -WhatIf run reports more than 50,000 candidate rows or any entity where over 20 percent of rows are unresolvable (target itself unstamped), STOP before recommending -Apply and escalate per CLAUDE.md §6 — the data may need a staged fixpoint plan.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No existing backfill/stamping script — verify with a grep of scripts/ for "regarding" and cite the result. Reuse of batch/auth helper functions from existing scripts is required where present.</existing>
+    <extension>No — one-time data migration; belongs in scripts/ per repo convention, not in product code.</extension>
+    <cost-of-doing-nothing>Every child record created before FR-26 ships never appears for inheriting principals (FR-27 acceptance fails for all historical data); the SPA under-grants silently, violating NFR-03's no-silent-truncation spirit.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">scripts/Backfill-CoreAncestorStamps.ps1</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase3-backfill-runbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Running the script with no arguments performs a dry-run: zero writes issued (verifiable from the log), full candidate summary emitted.</criterion>
+    <criterion testable="true">Given a todo regarding a communication that regards Matter M (todo stamp null), -Apply writes sprk_regardingmatter = M on the todo; a second -Apply run reports 0 changes.</criterion>
+    <criterion testable="true">Negative: a row whose existing stamp differs from the derived value is reported as a conflict and NOT overwritten.</criterion>
+    <criterion testable="true">Negative: a row whose target has no stamp is listed as unresolvable with entity + id; the script exits 0 with the count.</criterion>
+    <criterion testable="true">Enumeration pages beyond 5,000 rows (verified by paging logic review or a paged dry-run against dev).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26/FR-27. Operator executes -Apply during UAT window; record the execution in the deployment runbook.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204e" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B01 + B02 + B15 regression-prevention ArchTests + Tier-1-IOptions deploy checklist</title>
+    <phase>Pre-Live-Fire — Class-B regression prevention (post-186 safe)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Every sub-row modifies `tests/**` (B01 + B02 = new ArchTests; B15 = CI script). Per root CLAUDE.md §8 TEST-MODIFYING override row (2026-06-26): tasks tagged `testing` / `integration-test` / `archtest` trigger FULL rigor UNCONDITIONALLY. B15 also touches `.claude/constraints/bff-extensions.md` (main-session-only per Sub-Agent Write Boundary).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per root CLAUDE.md §8.5: brownfield/root-cause OR complex-but-fully-specified work → Sonnet @ xhigh. B01's ArchTest must think through every `*Module.cs` DI file for asymmetric-registration patterns; B02's ArchTest must scan every `AddOptions<T>.ValidateOnStart()` site and cross-check against `per_env_settings` manifest. That's "must think through every X" territory — xhigh justified.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>B15 touches `.claude/constraints/bff-extensions.md` — main-session-only per Sub-Agent Write Boundary (root CLAUDE.md §3). Cannot dispatch as sub-agent.</parallel-reason>
+    <deps>202</deps>
+    <tags>testing, integration-test, archtest, constraint, root-claude, class-b-verified-open, regression-prevention</tags>
+    <estimated-effort>11 hours (B01 ~5h + B02 ~6h + B15 checklist ~6h if separately estimated; ArchTest overlap may reduce to ~11h combined)</estimated-effort>
+  </metadata>
+
+  <prompt>Land three regression-prevention deliverables from task 202's Class-B punch list:
+- **B01**: New ArchTest `Spaarke.ArchTests.ADR032.AsymmetricRegistrationTests.UnconditionalConsumerMustHaveUnconditionalDependency` — scans all `*Module.cs` DI files in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/**/*Module.cs` for pattern: service registered inside `if (flag)` block AND some other unconditionally-registered service's ctor injects it → FAIL with specific asymmetric pair. Prevents recurrence of the SESSION 5 `e3a15db91` IActionSeam bug.
+- **B02**: New nightly ArchTest scanning `AddOptions<T>.ValidateOnStart()` in BFF DI and diffing against `per_env_settings` manifest (per task 201 deferred + task 081.5 rollback). Prevents Tier-1 IOptions inventory drift where a `.ValidateOnStart()` call exists but manifest lacks the corresponding config catalog entry.
+- **B15**: Add "Tier-1-IOptions deploy checklist" section to `.claude/constraints/bff-extensions.md`. Systematic checklist reviewers walk when a PR adds `AddOptions<T>.ValidateOnStart()`. Also authors optional CI script that runs B02's ArchTest on PR (main-session-only per Sub-Agent Write Boundary).
+
+All three are REGRESSION-PREVENTION — no production code fix, but critical for preventing recurrence of surfaced bugs.</prompt>
+
+  <role>SPAARKE platform developer. Expert in: ArchUnit / ArchTest patterns (existing `Spaarke.ArchTests.*` reference); ADR-032 F.1 asymmetric-registration anti-pattern (root CLAUDE.md §10 + `.claude/constraints/bff-extensions.md` § F.1); Tier-1 IOptions `AddOptions<T>.ValidateOnStart()` fail-fast pattern (r3 task 061); SESSION 5 `e3a15db91` IActionSeam case study; `per_env_settings` manifest structure (Bicep-generated per-environment config catalog); `.claude/constraints/bff-extensions.md` structure (`§ F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern` reference format).</role>
+
+  <goal>Three deliverables landed:
+- **B01**: `tests/unit/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTests.cs` exists with `UnconditionalConsumerMustHaveUnconditionalDependency` test method. Test scans all `*Module.cs` files in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/**` for the asymmetric pattern. Test PASSES on current codebase (validates existing state clean post-`e3a15db91` fix). Test FAILS if a regression is introduced (asymmetric pair added). Test message names the specific pair (`<UnconditionalService>` ctor-injects `<ConditionalService>` registered inside `<flag>` gate).
+- **B02**: `tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs` exists with `IOptionsInventoryMustMatchManifest` test method. Test enumerates all `AddOptions<T>.ValidateOnStart()` calls in BFF DI, reads `per_env_settings` manifest (or `.claude/constraints/bff-extensions.md` § F.2 catalog), and asserts each `T` has a corresponding manifest entry. Test PASSES on current codebase (unless drift already present — then documents drift as issue).
+- **B15**: `.claude/constraints/bff-extensions.md` has new subsection "§ F.4 Tier-1-IOptions Deploy Checklist" enumerating reviewer steps when a PR adds `AddOptions<T>.ValidateOnStart()`: (a) confirm manifest entry; (b) confirm KV binding provisioned; (c) confirm test coverage for missing-config fail-fast path; (d) run B02 ArchTest locally. Optional CI script at `scripts/ci/check-ioptions-drift.ps1` runs B02 on PR.
+
+`dotnet test` green (new tests pass on current state); B01+B02 wired into CI (nightly for B02).</goal>
+
+  <context>
+    <background>Task 202 SESSION 5 case study analyzed commit `e3a15db91` (IActionSeam ADR-032 F.1 asymmetric-registration bug). Root cause: `IActionSeam` registered inside compound `if (DocIntel && Analysis)` gate at `AnalysisServicesModule.cs:1425`; `CommunicationRiActionService` requires it UNCONDITIONALLY at `CommunicationModule.cs:195`. Fix landed atomically on `work/customer-provisioning-orchestration-r1` (hoisted registration to top-of-module unconditional block ~line 160). SESSION 5 identified missing ArchTest: existing ADR-032 forcing-function catches "kill-switch declared" pattern but NOT "unconditional consumer + conditionally-registered dependency" pattern.
+
+Task 201 (`h4b-bulk-appsettings-handler`) deferred an IOptions inventory-drift ArchTest during Wave G-6 authoring; task 081.5 rollback also documented `.ValidateOnStart()` chains lacking systemic CI/config-catalog cross-check.
+
+**Why "regression prevention" not "code fix"**: the bugs are FIXED (e3a15db91 for B01; various Wave G-6/G-7 wire-ups for B02). ArchTests prevent RECURRENCE — the next time an author adds an asymmetric registration or adds `.ValidateOnStart()` without manifest entry, CI catches it at PR time instead of during E2E acceptance.
+
+**§ F.4 name**: existing `.claude/constraints/bff-extensions.md` § F has F.1 (Asymmetric-Registration Tier 1.5 Anti-Pattern), F.2 (Fixture-Config-FIRST Inspection Protocol), F.3 (Empirical-Reproduction-FIRST Protocol). B15 adds F.4 (Tier-1-IOptions Deploy Checklist) — natural next-slot.</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B01 + B02 + B15 rows + case study</file>
+      <file role="reference-adr">.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file role="reference-constraint">.claude/constraints/bff-extensions.md § F.1 (asymmetric-registration anti-pattern) — B01 ArchTest scope reference</file>
+      <file role="reference-commit-case-study">SESSION 5 commit `e3a15db91` (IActionSeam hoist) — B01 ArchTest test case</file>
+      <file role="reference-archtest-pattern">tests/unit/Spaarke.ArchTests/ (existing ArchTest reference for structure)</file>
+      <file role="reference-manifest">infrastructure/bicep/ (per_env_settings manifest source) OR docs/architecture/ config catalog</file>
+      <file role="reference-validateonstart">src/server/api/Sprk.Bff.Api/Program.cs + Infrastructure/DI/ (enumerate current `AddOptions<T>.ValidateOnStart()` sites)</file>
+      <file role="target-new">tests/unit/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTests.cs (B01 — new ArchTest)</file>
+      <file role="target-new">tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs (B02 — new nightly ArchTest)</file>
+      <file role="target-new-main-session-only">.claude/constraints/bff-extensions.md § F.4 (B15 — new checklist subsection)</file>
+      <file role="target-new-optional">scripts/ci/check-ioptions-drift.ps1 (B15 — optional CI wrapper)</file>
+      <file role="target-modify">.github/workflows/*.yml (wire B02 into nightly run)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B01/B02/B15 row annotations</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored + case study documenting the exact bug B01 prevents</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify each of B01/B02/B15 current state BEFORE authoring. Verification matrix says B01 + B02 + B15 all `OPEN — task 204 scope`. Confirm no ArchTest with those class names + no § F.4 subsection in bff-extensions.md before creating.</constraint>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary">B15 touches `.claude/constraints/bff-extensions.md` — main-session-only. If dispatched as sub-agent, task will FAIL with "Edit denied". Executor MUST be main session for B15 step. Sub-agents CAN handle B01 + B02 (tests/ folder writes allowed).</constraint>
+    <constraint source="root CLAUDE.md §8 test-modifying rigor override">B01 + B02 modify `tests/**` → TEST-MODIFYING row triggers FULL rigor + `code-review` + `adr-check` at Step 9.5 UNCONDITIONALLY.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">N/A code delta (tests + docs + CI only). No BFF publish-size impact expected.</constraint>
+    <constraint source=".claude/constraints/testing.md">B01 + B02 ArchTests MUST validate current codebase state (PASS on clean code) AND fail on synthetic regression. Include a `TestData_AsymmetricRegistrationExample` fixture in B01 that demonstrates the failure mode without requiring an actual production regression.</constraint>
+    <constraint source="ADR-038 §7 build-vs-maintain criteria">B01 + B02 are MAINTAIN-class tests (regression-prevention forcing functions per KEEP path category). They must survive `/test-diet` reconciliation at project close. Document their KEEP path in test file header.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">B01 + B02 introduce NEW test classes. Justify: (1) Existing overlap — existing ADR-032 forcing-function ArchTest catches kill-switch pattern but NOT asymmetric-registration pattern (case-study documented gap); (2) Extension — cannot extend existing test (different predicate); (3) Cost-of-doing-nothing — `e3a15db91`-class bug recurs undetected until E2E acceptance or production. B15 is EXTENSION of existing `bff-extensions.md` § F — §11 not triggered (extension, not new file).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B01 + B02 + B15 regression-prevention ArchTests + IOptions checklist</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load + main-session confirm">Emit RIGOR LEVEL (FULL, sonnet/xhigh, TEST-MODIFYING). Confirm current invocation is MAIN SESSION (not sub-agent) — B15 step will fail otherwise. Read `notes/task-202-punch-list.md` B01/B02/B15 rows + case study. Read `.claude/adr/ADR-032` + `.claude/constraints/bff-extensions.md` § F.1/F.2/F.3.</step>
+    <step order="1" name="Verify no existing tests/subsection">Grep `tests/` for `AsymmetricRegistrationTests` + `IOptionsDriftTests` + `IOptionsInventory` — should return zero. Grep `.claude/constraints/bff-extensions.md` for `F.4` + `Tier-1-IOptions Deploy Checklist` — should return zero. If ANY exist → mark row `already-applied` + skip that sub-row.</step>
+    <step order="2" name="B01 ArchTest author">Author `tests/unit/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTests.cs`:
+- Test method `UnconditionalConsumerMustHaveUnconditionalDependency`
+- Enumerate all `*Module.cs` files in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/**`
+- For each, parse `services.AddSingleton<TInterface, TImpl>()` calls (or similar) grouped by lexical containment inside `if (flag) { ... }` blocks
+- Build UNCONDITIONAL registration set + CONDITIONAL registration set (with flag name)
+- For each UNCONDITIONAL service, use Roslyn or reflection to find its constructor dependencies
+- FAIL if any UNCONDITIONAL service's ctor injects a CONDITIONAL service
+- Message names the pair: `<UnconditionalService>` ctor-injects `<ConditionalService>` registered inside `<flag>` gate; hoist `<ConditionalService>` to unconditional OR apply ADR-032 F.1 Null-Object kill-switch pattern
+- Include fixture demonstrating the `e3a15db91` original bug (IActionSeam inside DocIntel/Analysis compound gate) as test data — assert test would have FAILED on pre-fix code
+- Header comment cites case study + KEEP path per ADR-038 §7</step>
+    <step order="3" name="B01 verify passes on current codebase">`dotnet test --filter FullyQualifiedName~AsymmetricRegistrationTests` — should PASS (post-`e3a15db91` fix state is clean). If FAILS → surfaces NEW asymmetric-registration bug not caught previously; escalate + file separate task.</step>
+    <step order="4" name="Checkpoint">Run context-handoff — B01 complete, B02 + B15 remaining.</step>
+    <step order="5" name="B02 nightly ArchTest author">Author `tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs`:
+- Test method `IOptionsInventoryMustMatchManifest`
+- Enumerate all `AddOptions<T>.ValidateOnStart()` calls in BFF Program.cs + Infrastructure/DI/
+- Read `per_env_settings` manifest (Bicep-generated OR docs/architecture/ config catalog — determine source in Step 1)
+- For each `T`: assert manifest has corresponding entry (config key + KV binding declaration)
+- FAIL naming missing manifest entries
+- Include ArchTest opt-in pattern (nightly tag) — not in PR-blocking suite by default; wired into nightly workflow
+- Header comment cites task 201 deferred + task 081.5 rollback</step>
+    <step order="6" name="B02 verify + wire nightly">`dotnet test --filter FullyQualifiedName~IOptionsDriftTests` — PASS (or report existing drift as separate issue). Add nightly wire-up in `.github/workflows/*.yml` under nightly-tests job (or create new nightly workflow if none).</step>
+    <step order="7" name="B15 § F.4 authoring (MAIN SESSION ONLY)">Add new subsection to `.claude/constraints/bff-extensions.md` after § F.3:
+
+```
+### F.4 Tier-1-IOptions Deploy Checklist (binding, added 2026-08-24 by task 204e per punch list B15 + task 081.5 rollback)
+
+When a PR adds `AddOptions<T>.ValidateOnStart()` in BFF DI, the reviewer applies:
+
+1. **Manifest entry**: confirm `per_env_settings` manifest has corresponding config key + KV binding declaration for T's required fields.
+2. **KV binding provisioned**: confirm Bicep provisions KV secret + App Service reference (`@Microsoft.KeyVault(...)`) for any secret fields in T.
+3. **Fail-fast test coverage**: unit test asserts BFF `/health` returns unhealthy at startup when a required field is missing.
+4. **Local ArchTest run**: reviewer runs `dotnet test --filter FullyQualifiedName~IOptionsDriftTests` locally before approving; nightly CI (B02) catches drift going forward.
+
+Failure to apply this checklist has resulted in production standup false-starts (r3 task 081.5 rollback + SESSION 5 Model 1 Prod BFF gates).
+
+Reference: task 202 punch list B15; ArchTest B02 at `tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs`.
+```
+
+Author optional CI wrapper `scripts/ci/check-ioptions-drift.ps1` that invokes B02 (PR-time opt-in via label).</step>
+    <step order="8" name="Build + verify all three">`dotnet build tests/` — 0 warnings 0 errors. `dotnet test --filter Category=Unit` — B01 green. `dotnet test --filter Category=Nightly` — B02 green (or documents pre-existing drift).</step>
+    <step order="8.5" name="Quality gates">FULL rigor + TEST-MODIFYING → invoke `code-review` + `adr-check` skills per root CLAUDE.md §8. Address any Critical findings.</step>
+    <step order="9" name="Report">Update `current-task.md` + `TASK-INDEX.md`; annotate `notes/task-202-punch-list.md` B01/B02/B15 rows: `applied 2026-XX-XX task 204e — <ArchTest path | § F.4 subsection>`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>B15 step will FAIL with "Edit denied on `.claude/...`" if this task is dispatched as sub-agent. If that error surfaces, main session MUST pick up sequentially for B15 step. B01 + B02 can complete under sub-agent (tests/ writes allowed).</trigger>
+    <trigger>If B01 ArchTest FAILS on current codebase, it means a NEW asymmetric-registration bug exists that wasn't caught by SESSION 5's `e3a15db91` fix. STOP + file new punch-list row + escalate — do not paper over by adjusting ArchTest predicate.</trigger>
+    <trigger>If B02 ArchTest surfaces `AddOptions<T>.ValidateOnStart()` sites with NO manifest entry, document each as new punch-list rows + include in wrap-up notes. Do NOT silently amend manifest without owner review — the drift itself is the surfaced defect.</trigger>
+    <trigger>If B01's Roslyn-based static analysis proves too complex (~&gt;8h) for well-specified sub-scope, consider incremental approach: v1 grep-based heuristic that catches obvious cases + comment noting v2 Roslyn TODO. Do not spend &gt;8h on B01 alone — file remainder as follow-on.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="grep">verify no existing tests/subsection</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests-B01">tests/unit/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTests.cs</output>
+    <output type="tests-B02">tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs</output>
+    <output type="constraint-B15">.claude/constraints/bff-extensions.md § F.4 (main-session-only)</output>
+    <output type="ci-B15-optional">scripts/ci/check-ioptions-drift.ps1</output>
+    <output type="ci-wire-B02">.github/workflows/*.yml (nightly job addition)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B01/B02/B15 row outcomes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">B01: `tests/unit/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTests.cs` exists with `UnconditionalConsumerMustHaveUnconditionalDependency` method; test PASSES on current codebase; includes fixture demonstrating `e3a15db91` case.</criterion>
+    <criterion testable="true">B02: `tests/nightly/Spaarke.ArchTests/IOptionsDriftTests.cs` exists with `IOptionsInventoryMustMatchManifest` method; wired into nightly CI workflow.</criterion>
+    <criterion testable="true">B15: `.claude/constraints/bff-extensions.md` has new § F.4 subsection titled "Tier-1-IOptions Deploy Checklist" with 4 reviewer steps + case-study citation.</criterion>
+    <criterion testable="true">`dotnet build tests/` and `dotnet test` green for both new test classes.</criterion>
+    <criterion testable="true">`notes/task-202-punch-list.md` B01/B02/B15 rows annotated `applied 2026-XX-XX task 204e — <evidence>`.</criterion>
+    <criterion testable="true">Step 8.5 quality gates (code-review + adr-check) invoked; TEST-MODIFYING rigor override honored.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): B01 + B02 new ArchTest classes justified per §11 in constraints section (existing ADR-032 forcing-function catches different pattern; extension impossible; cost-of-doing-nothing = e3a15db91-class recurrence). B15 is § F extension of existing constraint — no new file. Cost-of-doing-nothing: without B01, next asymmetric-registration bug surfaces at E2E acceptance (like `e3a15db91` did in SESSION 5) instead of PR-time. Without B02, Tier-1 IOptions drift causes production standup false-starts (like task 081.5 documented).
+
+**Post-186 safe**: none of these ArchTests block task 186 E2E — they prevent RECURRENCE of already-fixed bugs.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

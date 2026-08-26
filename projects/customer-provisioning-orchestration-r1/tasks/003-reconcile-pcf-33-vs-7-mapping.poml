@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Reconcile 33 PCF folders in src/client/pcf/ against 7 in-use PCFs; publish mapping note</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Read-only inventory/mapping audit; no code changes. Per root CLAUDE.md §8 rigor table, inventory creation is MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard inventory pass; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, audit, pcf</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Enumerate all folders under src/client/pcf/ and classify each as one of: (a) in-use production PCF (per COMPONENT-INVENTORY §12 / deployer scripts), (b) dev-only / retired, (c) shared library not a PCF, (d) unknown-needs-review. Publish projects/customer-provisioning-orchestration-r1/notes/pcf-33-vs-7-mapping-2026-08.md with the full table. This is a Phase A prep audit — remediation happens in later dedicated projects, not here.
+  </prompt>
+
+  <role>SPAARKE platform inventory + audit engineer. Familiar with PCF conventions (control/index.ts, ControlManifest.xml), Spaarke's PCF deployment pattern (npm run build:prod + solution ZIP), and the COMPONENT-INVENTORY.md structure.</role>
+
+  <goal>projects/customer-provisioning-orchestration-r1/notes/pcf-33-vs-7-mapping-2026-08.md exists containing a full table: PCF folder name | classification (a/b/c/d) | evidence (deployer script line, ControlManifest.xml presence, last-touched date) | recommended disposition (out of scope for r1 — advisory only).</goal>
+
+  <context>
+    <background>
+Per spec.md COMPONENT-INVENTORY §12 + plan.md Phase A Objective 3. The r1 project ships 7 authoritative PCFs but src/client/pcf/ contains ~33 folders including experiments, retired controls, and shared library scaffolds. Owner requested Phase A audit so future PCF deployment work is not blocked by folder-vs-shipped ambiguity.
+    </background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/pcf-33-vs-7-mapping-2026-08.md</file>
+      <file role="canonical-reference">src/client/pcf/</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/COMPONENT-INVENTORY.md</file>
+      <file role="canonical-reference">scripts/Deploy-Release.ps1</file>
+      <file role="canonical-reference">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Read-only audit. Do NOT delete/rename/edit any PCF folder or file as part of this task; recommendations are advisory only.</constraint>
+    <constraint source="spec.md">SCOPE: Classification MUST cover all folders under src/client/pcf/; a partial enumeration is a defect.</constraint>
+    <constraint source="project">SCOPE: Evidence for "in-use" classification MUST be a concrete reference (deployer-script line OR ControlManifest.xml + last-commit within 90 days OR explicit COMPONENT-INVENTORY row) — heuristics are not evidence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF conventions + Spaarke component inventory</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/COMPONENT-INVENTORY.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke audit-note structure" location="projects/*/notes/*-audit-*.md">Front-matter → Enumeration table → Classification legend → Recommendations (advisory).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load COMPONENT-INVENTORY §12 + PCF-DEPLOYMENT-GUIDE.</step>
+    <step order="1" name="Enumerate">List every folder under src/client/pcf/ (should be ~33); capture presence of ControlManifest.xml, index.ts, package.json, last-commit date per folder.</step>
+    <step order="2" name="Cross-reference deployers">Grep scripts/ for pac pcf push / solution ZIP references pointing at each folder; capture the referencing script + line.</step>
+    <step order="3" name="Cross-reference COMPONENT-INVENTORY">Read COMPONENT-INVENTORY.md; note which folders are called out as authoritative-shipped.</step>
+    <step order="4" name="Classify">For each folder, apply classification (a/b/c/d) with evidence cited.</step>
+    <step order="5" name="Draft mapping table">Compose the table: folder | class | evidence | recommendation.</step>
+    <step order="6" name="Publish">Write projects/customer-provisioning-orchestration-r1/notes/pcf-33-vs-7-mapping-2026-08.md.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 003 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>COMPONENT-INVENTORY.md §12 mentions the 33-vs-7 mismatch but does not enumerate. No prior pcf-mapping note exists.</existing>
+    <extension>No — COMPONENT-INVENTORY.md is the project-scoped design output; the audit table is an r1-scoped Phase A reconciliation with per-folder evidence that would bloat the design doc.</extension>
+    <cost-of-doing-nothing>Without the mapping, any future PCF-touching project (e.g., 33 folders vs 7 deployed cleanup) cannot start from a shared baseline; the fragmentation persists and PCF deployment guidance stays ambiguous for makers.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">ls / rg / git log across src/client/pcf/</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/pcf-33-vs-7-mapping-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the note, when scanning the table, then every folder under src/client/pcf/ appears exactly once with a classification.</criterion>
+    <criterion testable="true">Given a row classified (a) in-use, when reading its evidence column, then the evidence cites either a deployer-script line, a COMPONENT-INVENTORY row, OR a within-90-days commit.</criterion>
+    <criterion testable="true">Given a row classified (d) unknown-needs-review, when reading recommendation, then the recommendation is advisory only and scoped out of r1.</criterion>
+    <criterion testable="true">Negative: git diff shows only the new notes file — no PCF folder/file touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec COMPONENT-INVENTORY §12. This audit is advisory prep only; no PCF cleanup happens in r1.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

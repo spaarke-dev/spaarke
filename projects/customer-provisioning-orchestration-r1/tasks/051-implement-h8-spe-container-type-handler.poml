@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H8 SPE Container-Type + Root Container Handler (confidential-client cert per T6)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>cleared</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; owns T6 silent-fail trap (confidential-client cert); provisions SPE container-type (24h replication lead-time).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps hardened scripts/Create-NewContainerType.ps1 (post-Phase B confidential-client refactor); complete spec (FR-11 + T6); Graph SPE API stable; 24h replication + cert-bootstrap complexity pushes effort to xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 044, 047</deps>
+    <tags>l2-controlplane, job-handler, auth, powershell</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H8 SPE container-type + root container handler as an IJobHandler in the L2 control-plane. H8 uses the confidential-client (app-only) token with cert bootstrapped from KV (post-Phase B T6 fix — delegated 403s with `public client not allowed`). The 24h container-type replication is a customer-prereq lead-time item, NOT an in-pipeline wait (H0 preflight already verified cert-bootstrap done). Container-type ID persisted to Dataverse env-var + KV secret `customer-{customerId}-spe-container-id`. Idempotency key: spe-{customerId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Microsoft Graph SPE FileStorageContainer / container-type creation, confidential-client (app-only) token with cert from KV, ADR-028 auth ceremony, and T6 silent-fail trap verification. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H8SpeContainerTypeHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) acquires confidential-client (app-only) Graph token using cert loaded from customer KV (T6 fix); (b) invokes hardened Create-NewContainerType.ps1 + Register-*.ps1 + New-BusinessUnitContainer.ps1 to create container-type + root container; (c) container GET via app-only token succeeds; (d) persists container ID to Dataverse env-var sprk_SharePointEmbeddedContainerId AND KV secret customer-{customerId}-spe-container-id; (e) writes containerTypeId to Cosmos interStepState; (f) asserts idempotency key spe-{customerId}. Unit tests cover happy path (T6 verified), delegated-token accidental use = fail, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-11 + FR-33 (T6) + design.md §4.1 H8 row + §4B T6: SPE container creation via DELEGATED token now 403s with "public client not allowed". Phase B refactored the scripts to use confidential-client cert bootstrapped from KV. H8 owns T6 verification. 24h replication is a customer-prereq lead-time item; H0 preflight verifies cert-bootstrap done before pipeline starts.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H8SpeContainerTypeHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H8SpeContainerTypeHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Create-NewContainerType.ps1 (Phase B hardened)</file>
+      <file role="canonical-reference">scripts/Register-*.ps1 + scripts/New-BusinessUnitContainer.ps1 (Phase B hardened)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="pending">H2a Bicep deploy — SPE-related Bicep must exist</dependency>
+      <dependency task="047" status="pending">H4 KV secrets population — cert must be present in KV before H8 acquires token</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">Auth ceremony 21 MUSTs; confidential-client cert loaded from KV is a specific MUST for SPE per T6.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">containerTypeId written to Cosmos + Dataverse follows GUID canonicalization.</constraint>
+    <constraint source="project">Idempotency key: spe-{customerId} — container-type is per-customer + version-independent.</constraint>
+    <constraint source="project">H8 owns T6 (spec.md FR-33): confidential-client cert MUST be used; delegated flow returns 403 "public client not allowed" and MUST fail deploy with trap-T6 code.</constraint>
+    <constraint source="spec.md MUST rule">Use confidential-client (app-only) token for SPE container-type creation (T6 — delegated 403s).</constraint>
+    <constraint source="spec.md §4D I4">Container ID persistence goes through ITenantContainerResolver contract in BFF; H8 writes to the tenant-scoped storage locations (Dataverse env-var + KV secret with customer-scoped name), never to a fallback default.</constraint>
+    <constraint source="spec.md §4D I5">Graph token acquisition is per-tenant scoped: app-only calls use .default scope with target tenant's tid explicitly named — NOT the MI credential's default tenant.</constraint>
+    <constraint source="spec.md NFR-09">Graph v6 / Kiota 2.0 error type: catch ODataError (not ServiceException); ResponseStatusCode is int.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler for SPE container-type creation with confidential-client token + T6 verification</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H8SpeContainerTypeHandler.cs — inject IKeyVaultCertClient, IGraphAppOnlyClient, IPowerShellRunner, IDataverseWebApiClient, ICosmosRunStore, IIdempotencyService.</step>
+    <step order="2">Load confidential-client cert from customer KV (path: customer-{customerId}-spe-bootstrap-cert or platform equivalent).</step>
+    <step order="3">Acquire app-only Graph token with cert; assert public-client token flow is NOT used (§4B T6 verification).</step>
+    <step order="4">Invoke hardened Create-NewContainerType.ps1 + Register-*.ps1 + New-BusinessUnitContainer.ps1 with the app-only token.</step>
+    <step order="5">Verify container GET via app-only token returns 200.</step>
+    <step order="6">Persist containerId to sprk_SharePointEmbeddedContainerId (Dataverse env-var) AND KV secret customer-{customerId}-spe-container-id.</step>
+    <step order="7">Write containerTypeId to Cosmos interStepState.</step>
+    <step order="8">Author unit tests: (a) happy path — T6 verified (confidential-client used), (b) delegated-token accidental use = fail with trap-T6 code, (c) container GET fails post-create = deploy fail, (d) idempotency.</step>
+    <step order="9">Register in L2 Program.cs DI.</step>
+    <step order="10">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="11">Update TASK-INDEX.md: change task 051 status from 🔲 to ✅.</step>
+    <step order="12">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If SPE container-type replication does NOT complete within the customer-declared 24h lead-time window (H0 preflight said cert-bootstrap done, but replication is still pending), STOP and escalate per CLAUDE.md §6 — do NOT retry-loop; this indicates a Microsoft-side incident or a customer-prereq gap.</trigger>
+    <trigger>If confidential-client cert is missing from KV at H8 start (indicates Phase B cert-bootstrap script missed or H4 didn't populate the cert), STOP and escalate — do NOT invent a fallback token acquisition path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: scripts/Create-NewContainerType.ps1 + related scripts (Phase B hardened to confidential-client). No existing L2 handler.</existing>
+    <extension>No — the PS scripts must be invocable with app-only token loaded from KV cert, resumable, and gate-verified per T6 post-condition. Ad-hoc invocation of the scripts breaks T6 trap owner semantics.</extension>
+    <cost-of-doing-nothing>Without H8 owning T6 verification, a delegated-token slip would silently 403 with "public client not allowed" mid-run, leaving the customer environment without a container. H8 without T6 owner = the exact silent-fail that T6 catalogs.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run az CLI for KV cert operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H8SpeContainerTypeHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H8SpeContainerTypeHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given cert present in KV and SPE replication complete (verified in H0 preflight), when HandleAsync runs, then container-type + root container are created and container GET via app-only token returns 200.</criterion>
+    <criterion testable="true">T6 (spec.md FR-33): confidential-client (app-only) token acquisition is used; if any code path attempts delegated-token flow, deploy fails with trap-T6 code.</criterion>
+    <criterion testable="true">Post-condition: containerId persisted to Dataverse env-var sprk_SharePointEmbeddedContainerId AND KV secret customer-{customerId}-spe-container-id (both writes verified).</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId — second call is a no-op (spe-{customerId} match); scripts skip existing container-type.</criterion>
+    <criterion testable="true">Negative: H8 invoked without tenantId parameter returns failure (§4D I5); Graph token acquisition uses target tenant tid explicitly, never MI default tenant.</criterion>
+    <criterion testable="true">Negative: container ID is stored ONLY at the tenant-scoped storage locations (Dataverse env-var + KV secret with customer-scoped name); no fallback default location.</criterion>
+    <criterion testable="true">Graph SDK calls catch ODataError (NFR-09 net10 Kiota 2.0).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-11 + FR-33 (T6) + MUST rules + NFR-09 + §4D I4/I5; design.md §4.1 H8 (v3.3 SPE privilege footnote) + §4B T6. Phase B cert-bootstrap script hardening is a prerequisite.
+
+COMPLETION SUMMARY (2026-08-17):
+Implemented as 9 new C# files under Handlers/SpeContainerType/ (handler + 3 collaborator
+seams: ISpeContainerTypeProvisioner/CreateNewContainerTypeScriptProvisioner,
+ISpeContainerVerifier/SpeContainerAppOnlyVerifier, ISpeContainerIdKvWriter/
+AzCliSpeContainerIdKvWriter + options + rejection codes), 1 new PS script
+(scripts/Get-SpeContainerMetadata-AppOnly.ps1 — T6-compliant app-only GET verification,
+since the existing Get-ContainerMetadata.ps1 uses delegated auth), 1 test file (21 tests,
+all passing), and a narrow Program.cs DI hunk. dotnet build 0/0; full
+Sprk.Provisioning.ControlPlane.Tests suite 335/335 passing. Step 9.5 gates: code-review
+0 Critical/0 Warning, adr-check 0 Violations/0 Warnings (both ADR-004/010/013/028/036/044
+compliant).
+
+3 Path C deviations from literal POML wording (root container via -CreateTestContainer
+not New-BusinessUnitContainer.ps1; Dataverse env-var persistence via Cosmos
+InterStepState.SpeContainerId + H7's existing consumption contract, not a direct
+Dataverse write; KV secret name SPE-ContainerTypeId not customer-{customerId}-spe-
+container-id) — full writeup in notes/task-051-h8-deviations.md. Cross-task discovery:
+sibling task 050 (H7) had already extended InterStepState with a SpeContainerId field
+expecting H8 to populate it; H8 was updated during the ADR-check gate to honor that
+contract.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

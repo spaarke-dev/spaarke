@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="115" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New workflow file authoring, no existing .cs/Bicep modification; STANDARD per root CLAUDE.md §8, but coordination-flagged because it touches .github/workflows/**.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical CI workflow authoring following the repo's existing Trivy-gated build patterns -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>114</deps>
+    <tags>l2-controlplane, sidecar, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a GitHub Actions workflow (.github/workflows/build-provisioning-sidecar.yml) that builds task 114's Exchange sidecar Dockerfile, pushes to the platform ACR with a versioned tag, and gates on Trivy per the repo's existing image-scanning convention (same pattern as any other Spaarke container image build). This workflow is COORDINATED, not independently mergeable: `ci-cd-unit-test-remediation-r1` owns `.github/workflows/**` for a 28-day window per this project's CLAUDE.md Coordination table -- author the workflow content in THIS project's worktree/notes, then open the coordinated PR against ci-cd-unit-test-remediation-r1 per the existing task-042-063-ci-gate-wiring-deferral.md pattern (or reconstitute an equivalent coordination note if that artifact does not exist, per TASK-INDEX.md's existing note on task 088).</prompt>
+
+  <role>SPAARKE platform developer. Expert in GitHub Actions container-build workflows, ACR push authentication (OIDC federated credential, no stored secret), and Trivy vulnerability gating.</role>
+
+  <goal>A workflow YAML exists (authored, tested via workflow_dispatch on a feature branch if permitted, or validated via actionlint/yamllint if live-run is blocked by the coordination window) that: builds task 114's Dockerfile, tags the image with the git SHA + a semantic version, pushes to the platform ACR via OIDC (no stored secret), and runs Trivy with the repo's existing severity gate (fails the build on HIGH+ per the repo's CVE-cleanup convention). A coordination note is filed for the ci-cd-unit-test-remediation-r1 handoff.</goal>
+
+  <context>
+    <background>This project's CLAUDE.md Coordination table names ci-cd-unit-test-remediation-r1 as the exclusive owner of .github/workflows/** for a 28-day window, requiring a coordinated PR (the existing task-042-063-ci-gate-wiring-deferral.md pattern, or task 088's equivalent reconstitution). DS-1b §3's sidecar design explicitly calls for 'built in the SAME GitHub Actions workflow as the main image (both ACR-pushed, Trivy-gated); monthly rebuild cadence -- but the rebuild loop covers pwsh + one module, not az CLI's ~100-package Python tree' -- i.e., this workflow should be lightweight and low-noise by design.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/sidecar-ci-workflow-coord-pr.md</file>
+      <file role="canonical-reference">.github/workflows/deploy-bff-api.yml</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="114" status="pending">The Dockerfile this workflow builds must exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md Coordination table">.github/workflows/** is owned exclusively by ci-cd-unit-test-remediation-r1 for its 28-day window -- this task authors the workflow CONTENT + coordination note in this project's notes/, it does NOT commit directly to .github/workflows/** without an explicit coordinated PR against that worktree.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Sidecar CI workflow (coordinated)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="Trivy-gated container build" location=".github/workflows/ (existing Spaarke container workflows)">Reuse the repo's existing OIDC-to-ACR + Trivy-severity-gate shape verbatim; this sidecar's low package count should make the gate quieter than any az-CLI-based image would be.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read this project's CLAUDE.md Coordination table + the existing task 088 coordination-PR pattern.</step>
+    <step order="1" name="Draft workflow">Author the YAML content: on push to sidecar Dockerfile path + workflow_dispatch; steps: checkout, az login (OIDC), docker build, docker push to ACR with git-sha + semver tag, Trivy scan action with the repo's existing severity threshold.</step>
+    <step order="2" name="Validate offline">actionlint (or equivalent) against the drafted YAML for syntax correctness without committing to .github/workflows/**.</step>
+    <step order="3" name="Coordination note">Author notes/sidecar-ci-workflow-coord-pr.md describing the workflow's purpose, trigger conditions, and the exact file to add, addressed to ci-cd-unit-test-remediation-r1's owner per the existing coordination pattern.</step>
+    <step order="4" name="File the coordination">Open (or queue for main-session opening, if sub-agent permissions block cross-worktree PRs) the coordinated PR / issue against ci-cd-unit-test-remediation-r1 referencing this note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the coordination window has already closed (28 days from ci-cd-unit-test-remediation-r1's start) OR that worktree no longer exists, STOP and escalate to determine the current owner of .github/workflows/** per CLAUDE.md §6 rather than committing directly — this rule is binding regardless of whether the original coordination artifact is easy to find.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="actionlint">offline YAML validation</tool>
+    <tool name="gh">coordination PR/issue filing if permitted</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">projects/customer-provisioning-orchestration-r1/notes/sidecar-ci-workflow-coord-pr.md (contains the drafted workflow YAML)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A coordination note exists at notes/sidecar-ci-workflow-coord-pr.md containing the full drafted workflow YAML.</criterion>
+    <criterion testable="true">The drafted YAML passes actionlint (or equivalent) with zero syntax errors.</criterion>
+    <criterion testable="true">The workflow's Trivy step uses the SAME severity-gate convention as the repo's other container-build workflows (grep for the severity threshold value matches an existing workflow's value).</criterion>
+    <criterion testable="true">The coordination note explicitly cites this project's CLAUDE.md Coordination table entry for ci-cd-unit-test-remediation-r1.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the repo already has Trivy-gated container build workflows for other images; this reuses that exact shape. Extension -- extending an existing workflow file to also build the sidecar was considered and rejected because the sidecar's trigger path (Dockerfile changes under Sprk.Provisioning.ControlPlane.Sidecar/) and cadence (monthly, low-noise) differ from the BFF's per-push publish workflow. Cost-of-doing-nothing -- without CI-built+pushed images, task 101's sitecontainer resource has no image to reference beyond a manual docker push, which is exactly the ad-hoc-deploy drift this project exists to eliminate.
+
+Completion summary (2026-08-19): Escalation trigger FIRED. Verified ci-cd-unit-test-remediation-r1 (nominal 28-day owner of .github/workflows/**) started 2026-06-25 (window closed ~2026-07-23) and its worktree HEAD is dated 2026-06-28 -- dormant ~52 days, no activity reclaiming the window. Per the POML's binding escalation instruction, did NOT commit .github/workflows/build-provisioning-sidecar.yml directly. Instead drafted the full workflow YAML (OIDC-to-ACR via azure/login@v2 reusing deploy-bff-api.yml's secrets, docker buildx build -> Trivy image scan HARD gate severity HIGH,CRITICAL ignore-unfixed:false exit-code:1 matching nightly-health.yml's severity value -> push with SHA + date-versioned semver tags, never latest -> compressed-size sanity check) into notes/sidecar-ci-workflow-coord-pr.md, validated via python-yaml parse (actionlint unavailable in this environment), and flagged the closed-window finding for owner decision (3 r1 coord-notes -- 067, 088, 115 -- now queued unapplied against the same dormant worktree). Noted ACR resource itself does not exist yet (task 101, running in parallel, owns that Bicep); workflow uses placeholder vars.SIDECAR_ACR_LOGIN_SERVER. All 4 POML acceptance criteria met via the coord-note artifact. TASK-INDEX.md row 115 + Coordination Signals section updated.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Spe.Integration.Tests;
 
@@ -235,6 +236,22 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();
             services.AddSingleton<IMemoryCache, MemoryCache>(sp =>
                 new MemoryCache(Options.Create(new MemoryCacheOptions())));
+
+            // ---------------------------------------------------------------
+            // DELEGATION RULE (unified-access-control-r2 task 008, FR-07):
+            // every /api/v1/external-access route now requires Write on the target
+            // record, evaluated as the caller via an OBO probe. These are endpoint
+            // CONTRACT tests — they assert validation and error shapes for an
+            // ENTITLED caller, not who is entitled — so the fixture's caller holds
+            // Write. Without this the real probe has no Dataverse offline, correctly
+            // answers "no rights", and every case 403s before the behaviour under
+            // test is reached.
+            //
+            // Who is entitled is asserted in
+            // tests/integration/auth/UnifiedAccessControl/, not here.
+            // ---------------------------------------------------------------
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new EntitledCallerProbe());
 
             // ---------------------------------------------------------------
             // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
@@ -513,4 +530,26 @@ internal sealed class ReportingRoleFakeAuthHandler : AuthenticationHandler<Authe
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
+}
+
+/// <summary>
+/// A caller who holds Write on whatever record the delegation rule asks about — the caller these
+/// endpoint contract tests are written from the perspective of (task 008, FR-07).
+/// </summary>
+/// <remarks>
+/// Substituted at the <c>virtual</c> seam on <see cref="CallerRecordAccessProbe"/>, so no OBO exchange
+/// or Dataverse call is attempted. Whether an UNENTITLED caller is refused — the actual subject of
+/// FR-07 — is asserted in <c>tests/integration/auth/UnifiedAccessControl/</c>, not here.
+/// </remarks>
+internal sealed class EntitledCallerProbe : CallerRecordAccessProbe
+{
+    public EntitledCallerProbe()
+        : base(new HttpClient(),
+               new ConfigurationBuilder().Build(),
+               Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRecordAccessProbe>.Instance)
+    { }
+
+    public override Task<AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(AccessRights.Read | AccessRights.Write);
 }

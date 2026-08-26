@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Audit ~28 non-deployer-listed items in src/solutions/ per §11.1a; publish reconciliation note</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Read-only inventory + classification audit. No code changes. Per root CLAUDE.md §8 rigor table, inventory creation = MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard inventory pass with a clear authoritative reference (Deploy-DataverseSolutions.ps1 $SolutionImportOrder + Deploy-Release.ps1 Phase 4). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, audit, dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Enumerate items under src/solutions/ and cross-reference against the 8 authoritative Dataverse-managed solutions ($SolutionImportOrder in Deploy-DataverseSolutions.ps1) + code pages deployed via Deploy-Release.ps1 Phase 4. Classify each of the ~28 non-deployer-listed items as: (a) code-page via Deploy-Release.ps1, (b) feature-solution-scoped (part of one of the 8 managed solutions), (c) dev-only/retired, (d) unknown-needs-review. Publish projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md.
+  </prompt>
+
+  <role>SPAARKE platform inventory + audit engineer. Familiar with the two Dataverse deployment pathways (managed solutions via Package Deployer vs code pages via Deploy-Release.ps1), Q2 owner clarification (8 solutions per §11.1a not "~10"), and Spaarke's src/solutions/ conventions.</role>
+
+  <goal>projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md exists containing: (a) enumeration of all items under src/solutions/, (b) authoritative 8 solutions per $SolutionImportOrder, (c) code-pages list per Deploy-Release.ps1 Phase 4, (d) classification table (a/b/c/d) per item with evidence, (e) recommendations (advisory only — remediation is out of r1 scope for classes c/d).</goal>
+
+  <context>
+    <background>
+Per spec.md § 11.1a solutions reconciliation + FR-09 + design.md Q2 owner clarification. Q2 reset the shipped-solutions count from "~10" (design v3.1) to 8 authoritative (per Deploy-DataverseSolutions.ps1 $SolutionImportOrder). The ~28 non-listed items in src/solutions/ include code pages, feature-scoped sub-components, dev experiments, and retirees. Phase A audits so Wave C4 H6 handler (Package Deployer for the 8 solutions) has no folder-vs-shipped ambiguity.
+    </background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md</file>
+      <file role="canonical-reference">src/solutions/</file>
+      <file role="canonical-reference">scripts/Deploy-DataverseSolutions.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-Release.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Read-only audit. Do NOT modify any solution folder, ContentTypes.xml, or deployer script.</constraint>
+    <constraint source="spec.md">SCOPE: The 8 authoritative solutions per $SolutionImportOrder MUST be enumerated verbatim; use of the retired "~10" count is a defect (Q2 owner clarification).</constraint>
+    <constraint source="spec.md">SCOPE: Classification MUST cover every folder under src/solutions/; a partial enumeration is a defect.</constraint>
+    <constraint source="project">SCOPE: Evidence for "code-page (a)" MUST cite the specific Deploy-Release.ps1 Phase 4 reference line; evidence for "feature-solution-scoped (b)" MUST cite the parent-solution folder from $SolutionImportOrder.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse solution + code-page deployment</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Deploy-Release.ps1</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke audit-note structure" location="projects/*/notes/*-audit-*.md">Front-matter → Authority enumeration → Classification table → Recommendations (advisory).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load Deploy-DataverseSolutions.ps1 $SolutionImportOrder + Deploy-Release.ps1 Phase 4.</step>
+    <step order="1" name="Enumerate src/solutions">List every top-level folder under src/solutions/; capture solution.xml / ContentTypes.xml / package.json / last-commit date per folder.</step>
+    <step order="2" name="Extract authoritative 8">Parse Deploy-DataverseSolutions.ps1 $SolutionImportOrder; produce authoritative 8-solution list (SpaarkeCore + webresources + 6 Tier-3 features per design.md §11.1a).</step>
+    <step order="3" name="Extract code-pages">Parse Deploy-Release.ps1 Phase 4; produce code-pages list.</step>
+    <step order="4" name="Classify">For each folder under src/solutions/, apply classification (a/b/c/d) with evidence cited from the deployer scripts or COMPONENT-INVENTORY.</step>
+    <step order="5" name="Draft table + recommendations">Compose reconciliation table + advisory recommendations (out of r1 scope for classes c/d).</step>
+    <step order="6" name="Publish">Write projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 008 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>design.md §11.1a mentions the ~28 non-listed items but does not enumerate/classify. No prior reconciliation note exists.</existing>
+    <extension>No — design.md is scope + rationale; the per-folder audit table is r1-Phase-A prep work that bloats the design doc with implementation-detail.</extension>
+    <cost-of-doing-nothing>Without the audit, Wave C4 H6 handler (Package Deployer for the 8 solutions) has no baseline confirming folder-vs-shipped clarity; any future solutions-touching project starts blind. Ambiguity also risks accidental import of dev-only folders as if managed solutions.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">ls / rg / git log across src/solutions/</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the note, when scanning the authoritative-8 section, then all 8 solutions per $SolutionImportOrder are enumerated verbatim.</criterion>
+    <criterion testable="true">Given the classification table, when scanning, then every folder under src/solutions/ appears exactly once with a class (a/b/c/d).</criterion>
+    <criterion testable="true">Given a row classified (a) code-page, when reading evidence, then it cites the specific Deploy-Release.ps1 Phase 4 line.</criterion>
+    <criterion testable="true">Given a row classified (b) feature-solution-scoped, when reading evidence, then it cites the parent-solution folder from $SolutionImportOrder.</criterion>
+    <criterion testable="true">Negative: the note does NOT use the retired "~10 solutions" count from design v3.1.</criterion>
+    <criterion testable="true">Negative: git diff shows only the new notes file — no code/script/solution folder touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §11.1a + FR-09 + Q2 owner clarification. Feeds Wave C4 H6 handler (Package Deployer). Completed 2026-08-17: 36 folders enumerated, 8 authoritative (per $SolutionImportOrder), 28 non-listed classified as 14 (a) code pages / 0 (b) feature-scoped / 3 (c) dev-only-retired / 11 (d) unknown-needs-review. Reconciliation math matches spec exactly. Output: notes/solutions-reconciliation-2026-08.md. 5 advisory recommendations (R1–R5), only R5 is r1-binding (H6 MUST source from $SolutionImportOrder).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

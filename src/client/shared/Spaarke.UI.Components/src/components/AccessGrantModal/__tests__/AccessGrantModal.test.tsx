@@ -84,7 +84,16 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
       return jsonResponse({ accessRecordId: 'new-2', speContainerMembershipGranted: false });
     }
     if (url.includes('/revoke')) {
-      return jsonResponse({ speRevoked: false, webRoleRemoved: false });
+      // Real RevokeAccessResponse shape as of task 017. The previous stub said
+      // `{ speRevoked, webRoleRemoved }` — neither name ever existed on the DTO, and `webRoleRemoved` is
+      // now gone entirely (a Power Pages relic). The modal ignores this body and only checks that the
+      // call succeeded, but a stub that mirrors the real contract stops the next reader inferring the
+      // wrong one from here.
+      return jsonResponse({
+        speContainerMembershipRevoked: false,
+        speContainerOutcome: 'NotAttempted',
+        deactivatedCount: 1,
+      });
     }
     return jsonResponse({});
   });

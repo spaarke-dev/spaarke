@@ -298,7 +298,7 @@ test.describe('Word Save Flow - Save Document @e2e @word', () => {
     let capturedRequest: any = null;
 
     // Capture the save request
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, async (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, async route => {
       capturedRequest = JSON.parse(route.request().postData() || '{}');
       await route.fulfill({
         status: 202,
@@ -393,7 +393,10 @@ test.describe('Word Save Flow - Size Limits @e2e @word', () => {
     await taskPanePage.waitForDocumentContext();
 
     // Should show warning about large file
-    const warningVisible = await page.getByText(/large file/i).isVisible().catch(() => false);
+    const warningVisible = await page
+      .getByText(/large file/i)
+      .isVisible()
+      .catch(() => false);
     // Note: This is optional UX, test passes either way
   });
 });
@@ -449,7 +452,7 @@ test.describe('Word Save Flow - SSE Status Updates @e2e @word', () => {
 
   test('should fallback to polling when SSE fails', async ({ page }) => {
     // Mock SSE failure
-    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/job-12345/stream`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/api/office/jobs/job-12345/stream`, route => {
       route.abort('failed');
     });
 
@@ -672,7 +675,7 @@ test.describe('Word Save Flow - Error Handling @e2e @word', () => {
   });
 
   test('should handle network error gracefully', async ({ page }) => {
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, route => {
       route.abort('failed');
     });
 
@@ -687,7 +690,7 @@ test.describe('Word Save Flow - Error Handling @e2e @word', () => {
   test('should allow retry after error', async ({ page }) => {
     // First request fails, second succeeds
     let attempts = 0;
-    await page.route(`${testConfig.apiBaseUrl}/office/save`, async (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/save`, async route => {
       attempts++;
       if (attempts === 1) {
         await route.fulfill({

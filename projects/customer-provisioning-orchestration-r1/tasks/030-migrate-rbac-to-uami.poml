@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Migrate all RBAC bicep (KV / Storage / Cognitive / Cosmos) from System-Assigned MI principal to UAMI principal</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth tag + azure-deployment scope + irreversible RBAC changes on production-shape resources. Blast radius: every per-customer BFF's ability to reach KV secrets, Blob storage, Cognitive Services endpoints, and Cosmos data plane. task-create Step 3.5.5 FULL (auth tag; deploy tag).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: high-blast-radius Bicep refactor (all 4 role-assignment bicep files need coordinated migration to a new principal). Getting the roleDefinitionId GUIDs + principalType + scope correct across 4 role families is a load-bearing architectural constraint. Rubric row: "Opus 4.8 / Fable 5 for L2 scaffold + UAMI migration + reconciler".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on tasks 028 (UAMI principalId output) and 029 (app-service.bicep now consumes UAMI so RBAC must target the same principal).</parallel-reason>
+    <deps>028, 029</deps>
+    <tags>azure, bicep, azure-deployment, auth, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate all bicep role-assignment declarations across infrastructure/bicep/** from System-Assigned MI principal to UAMI principal (task 028 output principalId). Coverage MUST include: (a) Key Vault Secrets User (4633458b-17de-408a-b874-0445c86b69e6) on KV; (b) Storage Blob Data Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe) on Storage accounts; (c) Cognitive Services User (a97b65f3-24c7-4388-baec-2e87135dc908) on OpenAI + Doc Intelligence + AI Search; (d) Cosmos DB Built-in Data Contributor (00000000-0000-0000-0000-000000000002) on Cosmos accounts. Set principalType: 'ServicePrincipal' on all assignments. Retain existing System-Assigned MI grants as interim only per plan.md §3 — do NOT remove them yet; leave a comment marking them "interim, remove post-Phase F acceptance".</prompt>
+  <role>SPAARKE platform developer with Azure RBAC role-definition + Bicep role-assignment expertise. Follow ADR-028 21-MUSTs; every role assignment carries the correct roleDefinitionId GUID + principalType + scope.</role>
+  <goal>All bicep role-assignment declarations across KV, Storage, Cognitive Services (OpenAI + Doc Intelligence + AI Search), and Cosmos in infrastructure/bicep/** target the UAMI principalId (from task 028) with principalType: 'ServicePrincipal'. Interim System-Assigned MI grants remain (with "interim — remove post-Phase F" comments). az bicep build + az deployment group what-if surface the added UAMI assignments; no roleDefinitionId typo.</goal>
+
+  <context>
+    <background>Spec FR-37 acceptance: T5 elimination requires every role assignment that used to target System-Assigned MI to now target UAMI. Grants: KV Secrets User (BFF reads Dataverse:ClientSecret + other KV refs at startup); Storage Blob Data Contributor (BFF reads customer artifacts + temp-blob); Cognitive Services User (OpenAI + Doc Intelligence + AI Search via MI); Cosmos DB Built-in Data Contributor (both runtime BFF Cosmos and, later, L2 provisioning Cosmos). Leaving System-Assigned MI grants coexisting is the interim safety net per plan.md §3 — the "structural" removal is post-Phase F acceptance in a follow-on hardening PR (not r1 acceptance).</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/modules/role-assignment-keyvault.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/key-vault.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/storage-account.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/openai.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/doc-intelligence.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/ai-search.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/cosmos-db.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028 output)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">uami.bicep principalId output — the target principal for every migrated role assignment.</dependency>
+      <dependency task="029" status="pending">app-service.bicep binding UAMI — the RBAC-consuming resource, so RBAC targets must align.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: every role assignment MUST use the exact roleDefinitionId GUID for its role (KV Secrets User 4633458b-17de-408a-b874-0445c86b69e6; Storage Blob Data Contributor ba92f5b4-2d11-453d-a403-e96b0029c9fe; Cognitive Services User a97b65f3-24c7-4388-baec-2e87135dc908; Cosmos DB Built-in Data Contributor 00000000-0000-0000-0000-000000000002) — a typo silently produces "no permission" 403 at runtime.</constraint>
+    <constraint source="project">Scope (this task only): add UAMI assignments alongside existing SA-MI assignments. Do NOT remove SA-MI assignments — that is a post-Phase F hardening PR. Leaving both in place is the interim safety net per plan.md §3 mitigation.</constraint>
+    <constraint source="project">MUST set principalType: 'ServicePrincipal' on every added assignment (avoids Azure Graph propagation delay causing "principal not found" deploy failures).</constraint>
+    <constraint source="project">MUST NOT alter existing roleAssignments that target other principals (e.g. developer group grants, Owner grants) — this task is scoped to identity migration only.</constraint>
+    <constraint source="project">MUST report absolute + delta publish-size impact = 0 (bicep-only, no BFF code).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure RBAC role-definition GUIDs; bicep role-assignment authoring</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing role-assignment-keyvault.bicep" location="infrastructure/bicep/modules/role-assignment-keyvault.bicep">Mirror its role-assignment shape (roleDefinitionId, principalId, principalType, scope) for the added UAMI grants.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — auth tag + azure-deployment scope). Load spec.md FR-37, ADR-028, task 028's uami.bicep output shape, existing role-assignment-keyvault.bicep pattern.</step>
+    <step order="1">Enumerate every existing bicep role-assignment referencing System-Assigned MI principal — grep for principalType: 'ServicePrincipal' + adjacent identity.principalId references.</step>
+    <step order="2">For each enumerated assignment, add a sibling assignment targeting UAMI principalId with the SAME roleDefinitionId + scope + principalType: 'ServicePrincipal'.</step>
+    <step order="3">Verify each roleDefinitionId GUID matches the canonical list in the constraints section — no typos, no built-in-name shortcuts.</step>
+    <step order="4">Add a comment above each retained SA-MI assignment: "// interim per plan.md §3 — remove post-Phase F acceptance (UAMI grants proven)".</step>
+    <step order="5">Run az bicep build across all touched modules — 0 errors, 0 warnings.</step>
+    <step order="6">Run az deployment group what-if against dev — surface the new UAMI assignments; confirm no SA-MI assignments removed.</step>
+    <step order="7">Sample-verify via az role assignment list --assignee &lt;uami-principalId&gt; on a dev deploy that the assignments propagated within the expected 5-15 min window (per Azure AD propagation).</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document deviation (e.g. custom-role-definition-id nuances, cross-scope assignments) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the UAMI principal does not propagate to Cosmos data-plane within the expected window (~15 min), STOP and escalate per CLAUDE.md §6 — Cosmos data-plane RBAC is not visible via ARM control-plane RBAC listing and needs explicit data-plane role assignment (az cosmosdb sql role assignment create) which may need to move outside bicep.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/role-assignment-keyvault.bicep</output>
+    <output type="code">infrastructure/bicep/modules/key-vault.bicep</output>
+    <output type="code">infrastructure/bicep/modules/storage-account.bicep</output>
+    <output type="code">infrastructure/bicep/modules/openai.bicep</output>
+    <output type="code">infrastructure/bicep/modules/doc-intelligence.bicep</output>
+    <output type="code">infrastructure/bicep/modules/ai-search.bicep</output>
+    <output type="code">infrastructure/bicep/modules/cosmos-db.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the modified modules, az bicep build succeeds with 0 errors + 0 warnings across all files.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev, every previously-SA-MI-targeted role-assignment has a sibling UAMI-targeted assignment with matching roleDefinitionId + scope.</criterion>
+    <criterion testable="true">Given each added assignment, roleDefinitionId matches the canonical GUID list (KV Secrets User / Storage Blob Data Contributor / Cognitive Services User / Cosmos DB Built-in Data Contributor).</criterion>
+    <criterion testable="true">Given a dev deploy + az role assignment list --assignee &lt;uami-principalId&gt;, all 4 role families show up scoped to their expected resource within 15 min.</criterion>
+    <criterion testable="true">Negative: no SA-MI assignments removed; each retained SA-MI assignment carries the interim comment.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-37 acceptance. Post-Phase F hardening PR (not r1) removes SA-MI assignments once UAMI grants proven across all 4 role families. Cosmos DB Built-in Data Contributor grant may need az cosmosdb sql role assignment create rather than bicep-only — verify with the Azure docs current API surface.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
