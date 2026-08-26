@@ -39,6 +39,9 @@ param environmentName string = 'prod'
 @description('Primary Azure region for all customer resources')
 param location string = 'westus2'
 
+@description('Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it.')
+param openAiLocation string = 'westus3'
+
 @description('Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020.')
 param platformKeyVaultName string = 'sprk-${environmentName}-kv'
 
@@ -350,7 +353,7 @@ module openAi 'modules/openai.bicep' = {
   name: 'openAi-${baseName}'
   params: {
     openAiName: openAiName
-    location: location
+    location: openAiLocation
     sku: 'S0'
     userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags

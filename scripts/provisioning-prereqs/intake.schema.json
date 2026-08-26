@@ -52,6 +52,11 @@
       "description": "Azure region for platform resources. Canonical Spaarke strategy: westus2 for platform, westus3 for OpenAI (per user-memory reference_azure_fresh_sub_regional_gotchas). Optional — inferred from tenancyModel default when omitted.",
       "examples": ["westus2", "westus3", "eastus2"]
     },
+    "openAiRegion": {
+      "type": "string",
+      "description": "Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy (westus2 platform + westus3 OpenAI, see operator memory reference_azure_fresh_sub_regional_gotchas). Consumed by customer.bicep openAiLocation param. Override only when data-residency or single-region compliance requires it (co-location typically saves 5-15 dollars per month trial egress but adds ~15-25ms per AI call, negligible vs inference time). Cross-referenced with PRQ-E-13 preflight (scripts/provisioning-prereqs/prereqs.yaml) which verifies pinned model:version pairs are available + non-Deprecated in the chosen region BEFORE dispatch.",
+      "examples": ["westus3", "westus2", "eastus2"]
+    },
     "tier": {
       "type": "string",
       "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
@@ -106,6 +111,7 @@
       "environment": "dev",
       "profile": "spaarke-hosted-model1-trial",
       "region": "westus2",
+      "openAiRegion": "westus3",
       "tier": "shared-trial",
       "operatorUpn": "ralph.schroeder@spaarke.com",
       "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING)."
@@ -117,6 +123,7 @@
       "environment": "prod",
       "profile": "customer-owned-model2",
       "region": "westus2",
+      "openAiRegion": "westus3",
       "tier": "dedicated",
       "operatorUpn": "ralph.schroeder@spaarke.com"
     }

@@ -202,45 +202,62 @@ $results = @()
 foreach ($prereq in $manifest.prereqs) {
   if ($prereq.scope -notin $scopesToCheck) { continue }
 
-  # Substitute {env} placeholder if present in check_recipe.cli
-  $recipe = $prereq.check_recipe.cli -replace '\{env\}', $env
+  # Substitute placeholders in check_recipe.cli. Add more here as needed.
+  $recipe = $prereq.check_recipe.cli `
+    -replace '\{env\}', $env `
+    -replace '\{openAiRegion\}', $openAiRegion  # populated from batch intake or default 'westus3'
 
   Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
-  try {
-    $output = Invoke-Expression $recipe 2>&1 | Out-String
-    # Best-effort compare to check_recipe.expect. Deterministic recipes
-    # (single-value tsv) are exact-match; free-form recipes are non-empty
-    # check only. Extend classification here if false-positives surface.
-    $expected = $prereq.check_recipe.expect
-    $passed = if ($expected -match 'non-empty' -or $expected -match 'HTTP 200') {
-      -not [string]::IsNullOrWhiteSpace($output.Trim())
-    } elseif ($expected -match "``([^``]+)``") {
-      $output -match $Matches[1]
-    } else {
-      -not [string]::IsNullOrWhiteSpace($output.Trim())
+
+  # Run the recipe via `bash -c` (portable across az CLI + shell for-loops that
+  # many recipes use — PRQ-S-03, PRQ-E-06, PRQ-E-13 all include for/if/exit
+  # shell syntax that PowerShell's Invoke-Expression does NOT natively handle).
+  # Git Bash ships with `git` on Windows; `bash` is native on Linux/macOS.
+  #
+  # PASS/FAIL SIGNAL IS THE RECIPE'S EXIT CODE (not output shape).
+  # Recipes MUST explicitly `exit 1` on any failure condition. Silent empty
+  # output no longer implicitly passes — this closes the SESSION 12 gap where
+  # PRQ-C-02 (OpenAI model catalog check) silently passed when westus2 returned
+  # zero models because the empty-result-classification defaulted to non-empty
+  # check which then fell through to the 'output could be anything' branch.
+  # PRQ-E-14 (added SESSION 12; PRQ-E-13 was pre-existing for the
+  # sprk_dataverseenvironment placeholder record — id-collision preserved) uses
+  # explicit `exit 1` and depends on this exit-code-first semantic.
+  $output = & bash -c $recipe 2>&1 | Out-String
+  $exitCode = $LASTEXITCODE
+
+  $passed = ($exitCode -eq 0)
+
+  # DEFENSE-IN-DEPTH: for recipes whose expect field cites a concrete match
+  # pattern, verify output matches even when exit was 0. Guards against
+  # recipes that silently return 0 without producing expected content.
+  $expected = $prereq.check_recipe.expect
+  if ($passed -and $expected -match "``([^``]+)``") {
+    if ($output -notmatch [regex]::Escape($Matches[1])) {
+      $passed = $false
+      $output += "`n[classifier] Recipe exited 0 but output did not contain expected pattern '$($Matches[1])'"
     }
-    $results += @{
-      Id = $prereq.id
-      Name = $prereq.name
-      Scope = $prereq.scope
-      Passed = $passed
-      Output = $output.Trim()
-      Consequence = $prereq.consequence_of_absence
-      Remediation = $prereq.remediation
-    }
-  } catch {
-    $results += @{
-      Id = $prereq.id
-      Name = $prereq.name
-      Scope = $prereq.scope
-      Passed = $false
-      Output = $_.Exception.Message
-      Consequence = $prereq.consequence_of_absence
-      Remediation = $prereq.remediation
-    }
+  }
+
+  $results += @{
+    Id = $prereq.id
+    Name = $prereq.name
+    Scope = $prereq.scope
+    Passed = $passed
+    ExitCode = $exitCode
+    Output = $output.Trim()
+    Consequence = $prereq.consequence_of_absence
+    Remediation = $prereq.remediation
   }
 }
 ```
+
+**Recipe author contract** (BINDING for every entry in `prereqs.yaml`):
+- Recipe MUST explicitly `exit 1` on any failure condition it detects internally (empty query result, unexpected value, missing account, etc.).
+- Recipe MUST NOT rely on the classifier to interpret empty output as failure.
+- `check_recipe.expect` is a HUMAN-readable description AND (optionally) an in-backticks pattern that defense-in-depth verifies. Ambiguous prose expects are still accepted but do NOT provide the second layer of validation.
+- Multi-line shell scripts (`for/if/echo/exit`) are supported natively via the `bash -c` wrapper.
+- Placeholders currently substituted: `{env}`, `{openAiRegion}`. Extend the substitution block above when adding new ones — do NOT bake context-dependent literals into recipe.cli.
 
 #### 0.5c. Report + HARD STOP
 

@@ -366,6 +366,30 @@ prereqs:
     remediation: `pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).
     related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
 
+  - id: PRQ-E-14
+    name: OpenAI region availability + model deployability (pre-H2a Bicep deploy)
+    scope: once_per_env
+    frequency: per env, refresh on openai.bicep deployments-array pin change
+    owner: Spaarke platform admin
+    consequence_of_absence: H2a Bicep deploy fails with model-not-available in region OR silently ships Deprecated version that gets ServiceModelDeprecated rejection mid-run; customer stamp aborts; recovery requires rollback + template change + full re-provision. This is a SILENT-PASS-AT-PLAN + FAIL-AT-DEPLOY class caught by us SESSION 12 when westus2 returned 0 OpenAI models for the sub while the plan still validated cleanly.
+    check_recipe:
+      cli: |
+        # Verify every openai.bicep-pinned model:version pair is AVAILABLE + NON-DEPRECATED in the target OpenAI region.
+        # openAiRegion defaults to westus3 (canonical Spaarke strategy per operator memory).
+        # Pin list MUST stay in sync with infrastructure/bicep/modules/openai.bicep 'deployments' array default.
+        # Bump this list AT THE SAME TIME as any openai.bicep version bump (both artifacts land in the same commit).
+        for pin in gpt-4o:2024-11-20 gpt-4o-mini:2024-07-18 text-embedding-3-large:1; do
+          model=${pin%:*}; ver=${pin#*:}
+          status=$(az cognitiveservices model list --location {openAiRegion} \
+            --query "[?kind=='OpenAI' && model.name=='$model' && model.version=='$ver'].model.lifecycleStatus" -o tsv)
+          if [ -z "$status" ]; then echo "$model:$ver=NOT_AVAILABLE_IN_REGION"; exit 1; fi
+          if [ "$status" = "Deprecated" ]; then echo "$model:$ver=DEPRECATED"; exit 1; fi
+          echo "$model:$ver=$status"
+        done
+      expect: every model reports GenerallyAvailable or Legacy; no NOT_AVAILABLE_IN_REGION or Deprecated entries
+    remediation: (a) change openAiLocation intake parameter to a region where the pinned versions are available (see 'az cognitiveservices model list --location REGION' output); (b) bump version pins in infrastructure/bicep/modules/openai.bicep deployments array to current non-Deprecated versions.
+    related_findings: [session-12-openai-region-gap-catch, gap-caught-by-manual-preflight-not-in-yaml]
+
   # ============================================================================
   # ONCE-PER-CUSTOMER (per customer stamp — validated at Step 2 preflight of each run)
   # ============================================================================

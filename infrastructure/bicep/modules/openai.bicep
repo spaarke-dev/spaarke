@@ -35,17 +35,29 @@ param disablePublicNetworkAccess bool = false
 param allowedIpRanges array = []
 
 @description('Model deployments to create. Capacity is in thousands of tokens per minute (TPM).')
+// SESSION 12 (2026-08-26) version-pin refresh — verified via
+//   az cognitiveservices model list --location westus3 --subscription <sub>
+// Reality in westus3 as of 2026-08-26:
+//   gpt-4o                  2024-05-13  Deprecating
+//   gpt-4o                  2024-08-06  Deprecating (previous pin)
+//   gpt-4o                  2024-11-20  Legacy       (bumped to — newest available)
+//   gpt-4o-mini             2024-07-18  Deprecating (ONLY version in westus3 — cannot bump)
+//   text-embedding-3-large  1           GenerallyAvailable (kept)
+// No GA gpt-4o / gpt-4o-mini exists in westus3 today; 2024-11-20 (Legacy) is the
+// least-bad gpt-4o pin. gpt-4o-mini stays at 2024-07-18 because westus3 offers
+// no newer version. Follow-on: migrate to gpt-4.1 / gpt-5.x family when frontier
+// TPM quota is granted (per MEMORY reference_azure_fresh_sub_openai_tier_gates).
 param deployments array = [
   {
     name: 'gpt-4o'
     model: 'gpt-4o'
-    version: '2024-08-06'
+    version: '2024-11-20' // SESSION 12: bumped from 2024-08-06 (Deprecating) to 2024-11-20 (Legacy, newest in westus3)
     capacity: 150
   }
   {
     name: 'gpt-4o-mini'
     model: 'gpt-4o-mini'
-    version: '2024-07-18'
+    version: '2024-07-18' // SESSION 12: retained — ONLY gpt-4o-mini version available in westus3 (Deprecating). See follow-on above.
     capacity: 200 // Minimum 200 TPM for beta scale (~200 analyses/day)
   }
   {
@@ -59,13 +71,13 @@ param deployments array = [
     // 30K TPM is sufficient for classification workload at dev scale.
     name: 'spaarke-gpt4o-mini'
     model: 'gpt-4o-mini'
-    version: '2024-07-18'
+    version: '2024-07-18' // SESSION 12: retained — ONLY gpt-4o-mini version available in westus3 (Deprecating).
     capacity: 30
   }
   {
     name: 'text-embedding-3-large'
     model: 'text-embedding-3-large'
-    version: '1'
+    version: '1' // SESSION 12: verified GenerallyAvailable in westus3 — kept.
     capacity: 350
   }
   // NOTE: text-embedding-3-small has been removed (deprecated).
