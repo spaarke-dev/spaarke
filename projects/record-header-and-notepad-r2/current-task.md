@@ -11,8 +11,8 @@
 |-------|-------|
 | **Task** | **033** — `Spaarke.Records.RecordHeader` PCF, in UAT on `sprk_project` |
 | **Phase** | 3 done → Phase 5 rollout blocked on UAT closing |
-| **Status** | ⚠️ in UAT · **one fix agent may still be in flight** (see below) |
-| **Next Action** | Check whether the DateField option-B rework landed. If yes: verify bundle <250 KB, repack v1.1.3, hand the zip to the owner for `spaarkedev1` import + re-UAT. If no: read `notes/decisions/033-nfr02-externals-runtime-failure.md` and finish it. |
+| **Status** | ⚠️ awaiting owner re-UAT. **All code work is done and committed.** |
+| **Next Action** | Owner imports `Solution/bin/RecordHeaderPcf_v1.1.3.0.zip` to **`spaarkedev1`** and re-runs UAT on the Project form. Exercise a `DateOnly` **and** a `DateAndTime` field, and click a lookup cell. |
 | **Blocked by** | Owner re-UAT of the RecordHeader control. Nothing else. |
 | **Working tree** | **clean**, 17 commits this session, all pushed to the branch |
 
@@ -25,17 +25,26 @@
 
 **A successful build proves nothing about a PCF's runtime.** Both failures built green.
 
-### The in-flight work
+### ✅ NFR-02 is resolved — option B landed
 
-The owner chose **option B**: replace `@fluentui/react-datepicker-compat` with the Fluent
-`<Input type="date">` pattern **already shipping** at
+`DateField` now edits through Fluent `<Input type="date">` / `type="datetime-local"`, reusing the
+pattern already shipping at
 `Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx:338-340`.
-`Input`/`Field` are in `@fluentui/react-components`, which the platform externalizes → **zero bundle
-bytes**. Expected result ≈ **92,000 B** (the measured "minus DateField" figure) vs the current
-378,457 B against a 250,000 ceiling.
+`Input`/`Field` are in `@fluentui/react-components`, which the platform externalizes → zero bundle cost.
 
-Watch for: `type="date"` wants `yyyy-MM-dd`, `datetime-local` wants `yyyy-MM-ddTHH:mm`, Dataverse
-returns ISO-8601 UTC. A date shifting a day across timezones is the classic failure.
+| | bundle | vs 250,000 ceiling |
+|---|---|---|
+| before | 378,457 B | ❌ +51% |
+| **after (v1.1.3)** | **99,068 B** | ✅ **40%** |
+
+`@fluentui/react-datepicker-compat` removed from the shared lib (`DateField.tsx` was its only
+consumer there; `EventDetailSidePane` keeps its own and is off-limits to R2).
+
+**Timezone handling is the fragile part — do not "simplify" it.** All conversion goes through LOCAL
+calendar fields, never UTC: `toISOString().slice(0,10)` shifts the day, and `new Date('2026-08-21')`
+is UTC midnight per ES2015+. A real bug was fixed here — a bare `yyyy-MM-dd` (what the Web API
+returns for `DateOnly` attributes) previously rendered as the PREVIOUS day west of UTC. Seven tests
+drive the pure converters directly so they hold under any `TZ`; CI is UTC, dev machines are not.
 
 ---
 
