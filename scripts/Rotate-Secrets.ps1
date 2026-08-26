@@ -104,6 +104,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# A38c secret-free marker pre-check gate (see scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header
+# for full rationale + §11 justification). Gates ServiceBus-ConnectionString rotation ONLY.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
+
 # ─────────────────────────────────────────────
 # Constants & Naming
 # ─────────────────────────────────────────────
@@ -583,6 +587,15 @@ function Rotate-PlatformSecrets {
 
     # Service Bus (platform-level)
     if ($SecretType -eq "ServiceBus" -or $SecretType -eq "All") {
+        # ── A38c secret-free marker gate (Model 1 — platform vault) ────────────────────────────
+        # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
+        # 2026-08-24). On a secret-free platform vault, rotating it here would resurrect it and
+        # silently reverse the migration while this run reports Success (§10.5 trap class). Refuse
+        # loudly instead — mirrors the A43 Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape. Model 2
+        # per-customer vaults are gated separately below in Rotate-CustomerSecrets (§10.3 fleet
+        # consistency — this check is per-vault, not per-fleet, so it works identically for both).
+        Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName
+
         $sbName = "sprk-platform-$Environment-sb"
         Rotate-ServiceBusKey `
             -NamespaceName $sbName `
@@ -656,6 +669,13 @@ function Rotate-CustomerSecrets([string]$cid) {
 
     # Service Bus
     if ($SecretType -eq "ServiceBus" -or $SecretType -eq "All") {
+        # ── A38c secret-free marker gate (Model 2 — per-customer vault) ────────────────────────
+        # Same rationale as the platform-vault gate above (Rotate-PlatformSecrets). Under Model 2,
+        # N per-customer vaults each carry their own tag (§10.3 fleet consistency) — this call
+        # checks exactly THIS customer's vault ($vaultName is `Get-CustomerVaultName $cid`), so the
+        # gate is evaluated independently per customer as this function is invoked per customer.
+        Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName -CustomerId $cid
+
         $sbName = Get-ServiceBusName $cid
         Rotate-ServiceBusKey `
             -NamespaceName $sbName `

@@ -90,4 +90,13 @@ public static class SharedKvSecretsPopulationRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H4-shared was in flight.</summary>
     public const string RunDeletedDuringPopulation = "h4shared-run-deleted-during-population";
+
+    /// <summary>
+    /// Row A38a — the positive secret-free migration marker (KV tag +
+    /// registry <c>sprk_credentialmode</c>) could not be applied on a
+    /// RequireSecretFreeIdentity environment. Resumable; FAIL-LOUD by design
+    /// (§5.3 fleet-consistency gap). Parity with
+    /// <see cref="KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed"/>.
+    /// </summary>
+    public const string SecretFreeMarkerApplyFailed = "h4shared-secret-free-marker-apply-failed";
 }

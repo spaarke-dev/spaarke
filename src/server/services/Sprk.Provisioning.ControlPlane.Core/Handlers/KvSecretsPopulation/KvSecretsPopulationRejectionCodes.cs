@@ -145,4 +145,16 @@ public static class KvSecretsPopulationRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H4 was in flight.</summary>
     public const string RunDeletedDuringPopulation = "kvsecrets-run-deleted-during-population";
+
+    /// <summary>
+    /// Row A38a — the positive secret-free migration marker (KV tag
+    /// <c>spaarke-secret-free-identity</c> + registry
+    /// <c>sprk_credentialmode</c>) could not be applied on a
+    /// RequireSecretFreeIdentity environment. Resumable — writes/omits
+    /// succeeded and the marker applier is idempotent, so the operator fixes
+    /// the cause (tag RBAC / registry row / sprk_credentialmode column) and
+    /// resumes. FAIL-LOUD by design: an unmarked secret-free vault is the
+    /// remediation-plan §5.3 fleet-consistency gap.
+    /// </summary>
+    public const string SecretFreeMarkerApplyFailed = "kvsecrets-secret-free-marker-apply-failed";
 }

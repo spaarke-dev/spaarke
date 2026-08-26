@@ -411,6 +411,39 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest!.SignalREnabled.Should().Be(expected);
     }
 
+    // ---------- A38b requireSecretFreeIdentity gate (auth-v4 §9.1) ----------
+
+    [Theory]
+    [InlineData("false", false)]
+    [InlineData("true", true)]
+    public async Task RequireSecretFreeIdentityFlag_FlowsToRunnerRequest(string flagValue, bool expected)
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret[H2aBicepInfraDeployHandler.RequireSecretFreeIdentityParameterKey] = flagValue;
+        var repo = new FakeRepository(run, etag: "etag-a38b");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        runner.LastRequest!.RequireSecretFreeIdentity.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task RequireSecretFreeIdentityFlag_AbsentParameter_DefaultsFalse()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38b-absent");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        runner.LastRequest!.RequireSecretFreeIdentity.Should().BeFalse();
+    }
+
     // ---------- T16 handler-id mismatch ----------
 
     [Fact]

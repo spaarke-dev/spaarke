@@ -208,6 +208,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     private readonly IAppServiceIdentityPatcher _identityPatcher;
     private readonly IArmKeyVaultRefProbe _t1Probe;
     private readonly ISlotIdentityRoleGranter _t5Granter;
+    private readonly ISecretFreeMarkerApplier _markerApplier;
     private readonly KvSecretsPopulationOptions _options;
     private readonly ILogger<H4KvSecretsPopulationHandler> _logger;
 
@@ -232,6 +233,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         IAppServiceIdentityPatcher identityPatcher,
         IArmKeyVaultRefProbe t1Probe,
         ISlotIdentityRoleGranter t5Granter,
+        ISecretFreeMarkerApplier markerApplier,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<H4KvSecretsPopulationHandler> logger)
     {
@@ -241,6 +243,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(identityPatcher);
         ArgumentNullException.ThrowIfNull(t1Probe);
         ArgumentNullException.ThrowIfNull(t5Granter);
+        ArgumentNullException.ThrowIfNull(markerApplier);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -250,6 +253,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         _identityPatcher = identityPatcher;
         _t1Probe = t1Probe;
         _t5Granter = t5Granter;
+        _markerApplier = markerApplier;
         _options = options.Value;
         _logger = logger;
     }
@@ -368,6 +372,28 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 ficOmitRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
+
+        // Row A38a (task 205a, 2026-08-25 — auth-v4 §9.1 OMIT-is-the-signal):
+        // on secret-free environments, union the three A38a targets into the
+        // EXISTING task-126 FR-39 omit seam above (same
+        // KvSecretWriteRequest.OmitCanonicalNames -> KvSecretWriteAction.Omitted
+        // path the operator's ficOmitSecretNames parameter uses — no parallel
+        // seam, per task 125's "no special-casing" commitment). This is
+        // defense-in-depth BEHIND FileKvSecretManifest's served-entry filter:
+        // it also protects the emergency StaticKvSecretManifest DI-revert,
+        // which serves the targets unfiltered. Q3 Path A rollback re-includes
+        // them; Dataverse-ClientSecret is never in the target set (§6.5
+        // record 2026-08-25, sunset 2026-11-23).
+        var secretFreeOmitActive = _options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback;
+        if (secretFreeOmitActive)
+        {
+            omitCanonicalNames.UnionWith(FileKvSecretManifest.SecretFreeIdentityOmitTargets);
+            _logger.LogInformation(
+                "H4 A38a secret-free omit active: runId={RunId} customerId={CustomerId} — unioned " +
+                "{Targets} into the FR-39 OmitCanonicalNames seam (omit-set size now {Size})",
+                envelope.RunId, envelope.CustomerId,
+                string.Join(", ", FileKvSecretManifest.SecretFreeIdentityOmitTargets), omitCanonicalNames.Count);
+        }
 
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, secretsVer);
 
@@ -630,12 +656,60 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
+        // (10.5) Row A38a positive migration marker (auth-v4 §9.1: the marker
+        //        lives OUTSIDE the credential slots — KV resource tag
+        //        spaarke-secret-free-identity=true + registry state field
+        //        sprk_credentialmode=secret-free). Applied once per vault:
+        //        under Model 2 the per-customer dispatch fan-out invokes H4
+        //        once per customer vault, so this single call IS the
+        //        once-per-vault application (no extra iteration pass).
+        //        Idempotent (tag: check-then-apply; registry: value-idempotent
+        //        PATCH; Level-3 idempotency above short-circuits re-runs
+        //        entirely). Failure is Resumable + FAIL-LOUD — an unmarked
+        //        secret-free vault is the §5.3 fleet-consistency gap. NOT
+        //        applied under Q3 Path A rollback (env is not secret-free).
+        if (secretFreeOmitActive)
+        {
+            SecretFreeMarkerApplyOutcome markerOutcome;
+            try
+            {
+                markerOutcome = await _markerApplier.ApplyAsync(
+                    new SecretFreeMarkerApplyRequest(
+                        SubscriptionId: subscriptionId,
+                        ResourceGroupName: resourceGroupName,
+                        KeyVaultName: keyVaultName,
+                        TenantId: tenantId,
+                        CustomerIdForLog: envelope.CustomerId,
+                        RunIdForLog: envelope.RunId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H4 A38a marker applier infrastructure fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    $"A38a marker applier infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "KV writes/omits succeeded; marker application is idempotent — fix cause + resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (markerOutcome is SecretFreeMarkerApplyOutcome.Failure markerFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    markerFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         // (11) All post-conditions cleared — advance Cosmos state. Downstream
         //      reconciler (wave C5) fans out to H7.
         stopwatch.Stop();
         var wroteCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Wrote);
         var skippedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.SkippedRotationSafe);
         var deletedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Deleted);
+        var omittedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Omitted);
         var t5Summary = t5Result switch
         {
             SlotIdentityRoleGrantResult.Granted => "granted-both-slots",
@@ -644,8 +718,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         };
         _logger.LogInformation(
             "H4 KV secrets population succeeded: runId={RunId} customerId={CustomerId} " +
-            "wrote={Wrote} skipped-rotation-safe={Skipped} deleted={Deleted} t1=cleared t5={T5} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, wroteCount, skippedCount, deletedCount, t5Summary, stopwatch.ElapsedMilliseconds);
+            "wrote={Wrote} skipped-rotation-safe={Skipped} deleted={Deleted} omitted-fr39={Omitted} " +
+            "secretFree={SecretFree} t1=cleared t5={T5} durationMs={DurationMs}",
+            envelope.RunId, envelope.CustomerId, wroteCount, skippedCount, deletedCount, omittedCount,
+            secretFreeOmitActive, t5Summary, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, cancellationToken)
             .ConfigureAwait(false);

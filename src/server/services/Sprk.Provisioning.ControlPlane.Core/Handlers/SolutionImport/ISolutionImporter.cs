@@ -79,13 +79,20 @@ public interface ISolutionImporter
 /// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — MUST be explicit, never default).</param>
 /// <param name="ClientId">BFF Entra app registration id (H3 output — populated by upstream H3 into InterStepState.BffAppRegId).</param>
-/// <param name="ClientSecret">Resolved client secret. NEVER logged; passed via env var to the pwsh child process.</param>
+/// <param name="ClientSecret">
+/// Resolved client secret. NEVER logged; passed via env var to the pwsh child
+/// process (retired script path). A44.5 (task 205i): MAY be <c>null</c>/empty
+/// on secret-free environments — <see cref="DataverseWebApiSolutionImporter"/>
+/// then resolves its credential from the FR-39 ordered chain
+/// (<see cref="Credentials.WorkerDataverseCredentialFactory"/>, MI-FIC first).
+/// Empty is the SIGNAL (auth-v4 §9.1); never pass a sentinel value.
+/// </param>
 /// <param name="TargetDataverseUrl">Target customer Dataverse env URL (H5 output — populated by upstream H5 into InterStepState.DataverseEnvUrl).</param>
 public sealed record SolutionImportRequest(
     string CustomerId,
     string TenantId,
     string ClientId,
-    string ClientSecret,
+    string? ClientSecret,
     string TargetDataverseUrl);
 
 /// <summary>

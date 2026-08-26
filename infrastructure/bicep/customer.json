@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4283978128937208579"
+      "templateHash": "17303653074028699348"
     }
   },
   "parameters": {
@@ -132,6 +132,13 @@
       ],
       "metadata": {
         "description": "SignalR SKU (ignored when signalrEnabled=false). Default Free_F1 for scaffold + dev; production customers requiring realtime bump to Standard_S1 (~$48/mo/unit per notes/pricing-research-2026-08-12.md)."
+      }
+    },
+    "requireSecretFreeIdentity": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "When true, OMIT `AiSearch--AdminKey` and `ServiceBus-ConnectionString` from the per-customer KV kvSecretValues map (auth-v4 §9.1 sentinel-free contract; A38b re-scope 2026-08-25; the downstream `kv-secrets.generated.bicep` skip-if-absent guard fires when the key is absent). Default false preserves current behavior for pre-migration envs."
       }
     },
     "deployAcsMessaging": {
@@ -3624,18 +3631,7 @@
             "value": "[parameters('keyVaultName')]"
           },
           "secretValues": {
-            "value": {
-              "AiSearch--AdminKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceAdminKey.value]",
-              "AiSearch-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
-              "AppInsights-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
-              "AzureOpenAI-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
-              "Communication-WebhookUrl": "[format('{0}/api/communications/incoming-webhook', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceUrl.value)]",
-              "DocumentIntelligence-ApiKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceKey.value]",
-              "DocumentIntelligence-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
-              "Redis-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value]",
-              "ServiceBus-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]",
-              "Storage-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]"
-            }
+            "value": "[union(createObject('AiSearch-Endpoint', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value, 'AppInsights-ConnectionString', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value, 'AzureOpenAI-Endpoint', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value, 'Communication-WebhookUrl', format('{0}/api/communications/incoming-webhook', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceUrl.value), 'DocumentIntelligence-ApiKey', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceKey.value, 'DocumentIntelligence-Endpoint', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value, 'Redis-ConnectionString', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value, 'Storage-ConnectionString', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value), if(parameters('requireSecretFreeIdentity'), createObject(), createObject('AiSearch--AdminKey', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceAdminKey.value, 'ServiceBus-ConnectionString', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value)))]"
           }
         },
         "template": {

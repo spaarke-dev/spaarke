@@ -279,13 +279,23 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         //     wires this to a Key Vault reference; wave C4 requires
         //     operator to populate SolutionImportOptions:ClientSecret at
         //     deploy time.
+        //     A44.5 (task 205i): chain-aware — the secret is REQUIRED only
+        //     when the FR-39 ordered credential chain's primary is
+        //     ClientSecret (legacy/unconfigured default — prong-3 unmigrated
+        //     env). Under the MI-FIC-first secret-free chain an EMPTY slot is
+        //     the SIGNAL (auth-v4 §9.1) — the importer/verifier resolve their
+        //     credential via WorkerDataverseCredentialFactory instead.
         var clientSecret = _options.ClientSecret;
-        if (string.IsNullOrWhiteSpace(clientSecret))
+        if (_options.Credentials.ClientSecretIsRequiredFirst(SolutionImportOptions.SectionName)
+            && string.IsNullOrWhiteSpace(clientSecret))
         {
             var diagnostic =
-                "SolutionImportOptions:ClientSecret is not populated. " +
+                "SolutionImportOptions:ClientSecret is not populated and the FR-39 credential chain requires " +
+                "it (primary = ClientSecret — the legacy/unconfigured default). " +
                 "Wave C5 wires this to a Key Vault reference (@Microsoft.KeyVault(SecretUri=...)); " +
                 "wave C4 requires operator to set the app-setting explicitly. " +
+                "Secret-free environments instead configure " +
+                "SolutionImportOptions:Credentials:Order:0=ManagedIdentityFederated (A44.5). " +
                 "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);

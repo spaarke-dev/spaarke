@@ -81,6 +81,11 @@ param signalrEnabled bool = false
 @allowed(['Free_F1', 'Standard_S1', 'Premium_P1'])
 param signalrSku string = 'Free_F1'
 
+// --- Secret-free identity gate (auth-v4 §9.1 / customer-provisioning-orchestration-r1 punch row A38b, 2026-08-25) ---
+
+@description('When true, OMIT `AiSearch--AdminKey` and `ServiceBus-ConnectionString` from the per-customer KV kvSecretValues map (auth-v4 §9.1 sentinel-free contract; A38b re-scope 2026-08-25; the downstream `kv-secrets.generated.bicep` skip-if-absent guard fires when the key is absent). Default false preserves current behavior for pre-migration envs.')
+param requireSecretFreeIdentity bool = false
+
 // --- ACS messaging options (messaging-communication-app-r1, task 012, FR-18) ---
 
 @description('Deploy the per-boundary ACS resource + Event Grid system topic/subscription (messaging). Default false — existing customer provisioning is unchanged until messaging is enabled for the boundary.')
@@ -685,6 +690,15 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //   DocumentIntelligence-Endpoint, Redis-ConnectionString,
 //   ServiceBus-ConnectionString, Storage-ConnectionString
 //
+// Secret-free-gated (2 of the above 10) -- `AiSearch--AdminKey` +
+// `ServiceBus-ConnectionString` are OMITTED (never sentinel-valued) from the
+// map when `requireSecretFreeIdentity=true` (customer-provisioning-orchestration-r1
+// punch row A38b, 2026-08-25; auth-v4 §9.1 sentinel-free contract). Omitting
+// the key -- not writing a placeholder -- is what makes the existing
+// `if (contains(secretValues, ...))` skip-if-absent guard in
+// kv-secrets.generated.bicep effective on secret-free stamps. Default false
+// keeps today's behavior bit-identical for pre-migration environments.
+//
 // Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
 //   SPE-ContainerTypeId, SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
@@ -701,8 +715,7 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //        here. Recommended owner: H3 handler author (Wave G-3, task 130).
 // ============================================================================
 
-var kvSecretValues = {
-  'AiSearch--AdminKey': aiSearch.outputs.searchServiceAdminKey
+var kvSecretValuesBase = {
   'AiSearch-Endpoint': aiSearch.outputs.searchServiceEndpoint
   'AppInsights-ConnectionString': monitoring.outputs.connectionString
   'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
@@ -710,9 +723,18 @@ var kvSecretValues = {
   'DocumentIntelligence-ApiKey': docIntelligence.outputs.docIntelligenceKey
   'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
   'Redis-ConnectionString': redisCache.outputs.redisConnectionString
-  'ServiceBus-ConnectionString': serviceBus.outputs.serviceBusConnectionString
   'Storage-ConnectionString': storage.outputs.connectionString
 }
+
+// requireSecretFreeIdentity=true -> {} (both keys OMITTED, never sentinel-valued);
+// requireSecretFreeIdentity=false (default) -> both keys present, bit-identical
+// to pre-A38b behavior. See requireSecretFreeIdentity param @description above.
+var kvSecretValuesGated = requireSecretFreeIdentity ? {} : {
+  'AiSearch--AdminKey': aiSearch.outputs.searchServiceAdminKey
+  'ServiceBus-ConnectionString': serviceBus.outputs.serviceBusConnectionString
+}
+
+var kvSecretValues = union(kvSecretValuesBase, kvSecretValuesGated)
 
 module kvSecrets '../../scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep' = {
   scope: rg

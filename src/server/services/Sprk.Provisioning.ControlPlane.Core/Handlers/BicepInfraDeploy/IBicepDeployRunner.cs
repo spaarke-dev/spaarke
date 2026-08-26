@@ -78,6 +78,14 @@ public interface IBicepDeployRunner
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c>) — feeds naming per §7.1.</param>
 /// <param name="Location">Azure region for all customer resources (default westus2 per <c>customer.bicep</c>).</param>
 /// <param name="SignalREnabled">Feature-gate for the SignalR resource (ADR-032 Null-Object kill-switch — see §7.2 #13).</param>
+/// <param name="RequireSecretFreeIdentity">
+/// Auth-v4 §9.1 secret-free gate (customer-provisioning-orchestration-r1 punch row A38b,
+/// 2026-08-25). When true, <c>customer.bicep</c> OMITS <c>AiSearch--AdminKey</c> and
+/// <c>ServiceBus-ConnectionString</c> from the per-customer KV <c>kvSecretValues</c> map
+/// (never sentinel-valued), making <c>kv-secrets.generated.bicep</c>'s skip-if-absent guard
+/// effective. Defaults to <c>false</c> — bit-identical to pre-A38b behavior — so existing
+/// callers that do not supply it are unaffected.
+/// </param>
 public sealed record BicepDeployRequest(
     string CustomerId,
     string TenantId,
@@ -86,7 +94,8 @@ public sealed record BicepDeployRequest(
     string BicepVersion,
     string EnvironmentName,
     string Location,
-    bool SignalREnabled);
+    bool SignalREnabled,
+    bool RequireSecretFreeIdentity = false);
 
 /// <summary>
 /// Discriminated result of <see cref="IBicepDeployRunner.DeployAsync"/>.

@@ -92,4 +92,25 @@ public sealed class NullDataverseEnvironmentRegistryClient : IDataverseEnvironme
 
         return Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
     }
+
+    /// <inheritdoc/>
+    public Task<RegistryUpdateOutcome> UpdateCredentialModeAsync(
+        RegistryCredentialModeUpdate update,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        // ADR-032 P2 quiet no-op + WARN — parity with UpdateSetupStatusAsync
+        // above. Row A38a: a Null-Object active while an environment is
+        // secret-free means the sprk_credentialmode marker is NOT persisted;
+        // the WARN makes that visible before the real client swap.
+        _logger.LogWarning(
+            "NullDataverseEnvironmentRegistryClient in use — UpdateCredentialModeAsync returning Success " +
+            "WITHOUT issuing a real Dataverse PATCH. environmentId={EnvironmentId} credentialMode={CredentialMode} " +
+            "customerId={CustomerId} runId={RunId}. The A38a sprk_credentialmode marker is NOT persisted " +
+            "until the real DataverseEnvironmentRegistryClient is the active registration.",
+            update.EnvironmentId, update.CredentialMode, update.CustomerIdForLog, update.RunIdForLog);
+
+        return Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
+    }
 }

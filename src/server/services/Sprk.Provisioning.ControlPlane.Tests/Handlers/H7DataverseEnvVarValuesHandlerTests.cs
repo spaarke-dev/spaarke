@@ -44,6 +44,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -569,21 +570,210 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         failure.RejectionCode.Should().Be(expectedCode);
     }
 
+    // ---------- A44.5 (task 205i): FR-39 ordered credential chain ----------
+    // The H7/task-142 half of A30's sentinel contract. Secret-free envs (§6.5
+    // resolution prong 1) run the Worker with EnvVarValues__ClientSecret
+    // OMITTED (empty is the SIGNAL — auth-v4 §9.1); the chain
+    // EnvVarValues:Credentials:Order:0=ManagedIdentityFederated selects MI-FIC.
+    // Pre-migration (prong-3) envs keep task-142 semantics unchanged — those
+    // are the pre-existing tests above (default legacy chain).
+
+    /// <summary>
+    /// Goal (a)+(d) proxy at the handler boundary: under the MI-FIC-first
+    /// secret-free chain an EMPTY secret slot does NOT fail the run — the
+    /// handler proceeds to the writer (which resolves MI-FIC via
+    /// WorkerDataverseCredentialFactory). No boot-loop, no sentinel.
+    /// </summary>
+    [Fact]
+    public async Task SecretFree_MiFicFirstChain_EmptySecret_ProceedsToWriterAndSucceeds()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a44");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer, clientSecret: null, credentials: SecretFreeChain());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.CallCount.Should().Be(1);
+        // The empty slot flows through EMPTY — never a fabricated placeholder
+        // (§9.1: the ordered selector cannot distinguish a sentinel from a
+        // real secret; AADSTS7000215 otherwise).
+        writer.LastRequest!.ClientSecret.Should().BeNull();
+    }
+
+    /// <summary>Legacy chain + empty secret keeps failing (task-142 semantics preserved — explicit Order variant of T8).</summary>
+    [Fact]
+    public async Task ExplicitSecretFirstChain_EmptySecret_StillFailsMissingClientSecret()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a44b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer, clientSecret: null,
+            credentials: new WorkerCredentialSelectionOptions { Order = { nameof(CredentialKind.ClientSecret) } });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingClientSecret);
+        writer.CallCount.Should().Be(0);
+    }
+
+    // ---------- A44.5: EnvVarValuesOptions.Validate() chain-aware boundary ----------
+
+    /// <summary>Goal (c): the §10.2 secret-free contract boots with an EMPTY secret slot.</summary>
+    [Fact]
+    public void OptionsValidate_Accepts_EmptyClientSecret_When_MiFicFirst()
+    {
+        var options = new EnvVarValuesOptions { ClientSecret = null, Credentials = SecretFreeChain() };
+
+        var act = () => options.Validate();
+
+        act.Should().NotThrow(
+            "on a secret-free environment the EnvVarValues__ClientSecret KV-ref is omitted and empty is " +
+            "the signal (auth-v4 §9.1) — the MI-FIC-first chain authenticates without it");
+    }
+
+    /// <summary>MI-FIC-first with the transitional secret still present is also valid (rollback-capable shape).</summary>
+    [Fact]
+    public void OptionsValidate_Accepts_MiFicFirst_WithTransitionalSecretPresent()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ManagedIdentityFederated),
+                    nameof(CredentialKind.ClientSecret),
+                },
+            },
+        };
+
+        options.Invoking(o => o.Validate()).Should().NotThrow();
+    }
+
+    /// <summary>Fail-fast preserved when a secret-based provider is REQUIRED (explicit secret-first chain, empty slot).</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_ExplicitSecretFirstChain_And_EmptySecret()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = "",
+            Credentials = new WorkerCredentialSelectionOptions { Order = { nameof(CredentialKind.ClientSecret) } },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:ClientSecret*required*");
+    }
+
+    /// <summary>Invalid provider-chain configuration fail-fasts: unknown kind name (incl. the unsupported KeyVaultCertificate).</summary>
+    [Theory]
+    [InlineData("NotARealKind")]
+    [InlineData("KeyVaultCertificate")]
+    public void OptionsValidate_Throws_On_UnknownCredentialKind(string kind)
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions { Order = { kind } },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:Credentials:Order*not a known credential kind*");
+    }
+
+    /// <summary>Invalid provider-chain configuration fail-fasts: duplicate kind.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_On_DuplicateCredentialKind()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ClientSecret),
+                    nameof(CredentialKind.ClientSecret),
+                },
+            },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*more than once*");
+    }
+
+    /// <summary>§10.2 mirror of BFF IdentityConfigurationValidator rule 6: RequireSecretFreeIdentity + secret kind listed → fail-fast.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_RequireSecretFreeIdentity_And_ClientSecretListed()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ManagedIdentityFederated),
+                    nameof(CredentialKind.ClientSecret),
+                },
+                RequireSecretFreeIdentity = true,
+            },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*RequireSecretFreeIdentity*ClientSecret*");
+    }
+
+    /// <summary>RequireSecretFreeIdentity with NO order configured is contradictory (legacy default is secret-based) → fail-fast.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_RequireSecretFreeIdentity_And_NoOrderConfigured()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = null,
+            Credentials = new WorkerCredentialSelectionOptions { RequireSecretFreeIdentity = true },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*RequireSecretFreeIdentity*Order*");
+    }
+
     private static H7DataverseEnvVarValuesHandler BuildHandler(
         IProvisioningRunRepository repo,
         IEnvVarValuesWriter writer,
-        string? clientSecret = ClientSecret)
+        string? clientSecret = ClientSecret,
+        WorkerCredentialSelectionOptions? credentials = null)
     {
         var options = Options.Create(new EnvVarValuesOptions
         {
             ClientSecret = clientSecret,
             RequestTimeout = TimeSpan.FromSeconds(5),
+            // A44.5: default (unconfigured) = legacy [ClientSecret] chain —
+            // every pre-existing test in this file exercises task-142
+            // semantics unchanged.
+            Credentials = credentials ?? new WorkerCredentialSelectionOptions(),
         });
         return new H7DataverseEnvVarValuesHandler(
             repo, writer, options,
             TimeProvider.System,
             NullLogger<H7DataverseEnvVarValuesHandler>.Instance);
     }
+
+    /// <summary>The §10.2 secret-free chain: MI-FIC as the ONLY entry + fail-fast assertion.</summary>
+    private static WorkerCredentialSelectionOptions SecretFreeChain() => new()
+    {
+        Order = { nameof(CredentialKind.ManagedIdentityFederated) },
+        RequireSecretFreeIdentity = true,
+    };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {

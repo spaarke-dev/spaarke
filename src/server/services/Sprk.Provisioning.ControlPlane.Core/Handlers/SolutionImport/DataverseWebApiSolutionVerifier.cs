@@ -22,8 +22,8 @@ using System.Collections.Immutable;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
@@ -43,22 +43,41 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
     private readonly ILogger<DataverseWebApiSolutionVerifier> _logger;
 
-    /// <summary>Constructs the verifier bound to a typed <see cref="HttpClient"/> (production via <c>services.AddSingleton</c> factory in Worker/Program.cs).</summary>
+    /// <summary>
+    /// Constructs the verifier bound to a typed <see cref="HttpClient"/>
+    /// (production via DI typed-client registration in Worker/Program.cs —
+    /// <paramref name="credentialFactory"/> resolves from the container).
+    /// A44.5 (task 205i): the credential is selected by the FR-39 ordered
+    /// chain (MI-FIC first on secret-free envs; ClientSecret only for
+    /// prong-3 unmigrated envs) — raw <c>ClientSecretCredential</c>
+    /// construction lives ONLY in the factory's fallback branch.
+    /// </summary>
     public DataverseWebApiSolutionVerifier(
         HttpClient httpClient,
         IOptions<SolutionImportOptions> options,
+        WorkerDataverseCredentialFactory credentialFactory,
         ILogger<DataverseWebApiSolutionVerifier> logger)
         : this(
             httpClient,
             options,
             logger,
-            (tenantId, clientId, clientSecret) => new ClientSecretCredential(tenantId, clientId, clientSecret))
+            (tenantId, clientId, clientSecret) => credentialFactory
+                .Create(
+                    options.Value.Credentials,
+                    SolutionImportOptions.SectionName,
+                    tenantId,
+                    clientId,
+                    string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret)
+                .Credential)
     {
+        ArgumentNullException.ThrowIfNull(credentialFactory);
     }
 
     /// <summary>
     /// Test seam constructor — injects a <paramref name="credentialFactory"/>
-    /// so tests never invoke the real ClientSecretCredential network path.
+    /// so tests never invoke a real credential network path. The delegate's
+    /// third parameter is the resolved secret slot value — EMPTY STRING on
+    /// secret-free environments (A44.5).
     /// </summary>
     internal DataverseWebApiSolutionVerifier(
         HttpClient httpClient,
@@ -85,7 +104,8 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetDataverseUrl);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientSecret);
+        // A44.5: ClientSecret deliberately NOT required — empty on secret-free
+        // envs (the signal, §9.1); the FR-39 credential factory selects MI-FIC.
         if (request.ExpectedCatalog.IsDefaultOrEmpty)
         {
             throw new ArgumentException(
@@ -100,18 +120,26 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
                 $"Target Dataverse URL '{request.TargetDataverseUrl}' is not a valid absolute URI.");
         }
 
-        var credential = _credentialFactory(request.TenantId, request.ClientId, request.ClientSecret);
         var scope = $"{new Uri(envUri, "/")}".TrimEnd('/') + "/.default";
 
         AccessToken token;
         try
         {
+            // A44.5: credential selection (FR-39 ordered chain in production)
+            // can itself throw on an exhausted chain — same failure boundary
+            // as a failed token acquisition.
+            var credential = _credentialFactory(
+                request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
             token = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "H6 verifier token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
+            // Diagnostic prefix kept as "Token acquisition failed" (task-141
+            // test contract preserved verbatim) — an A44.5 credential-SELECTION
+            // failure is still surfaced distinctly via the inner exception's
+            // own message ("No credential could be selected …").
+            _logger.LogWarning(ex, "H6 verifier credential selection / token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
             return AllMissing(request, $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
         }
 

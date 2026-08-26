@@ -69,15 +69,18 @@ public interface ISolutionVerifier
 /// G-4) for <see cref="DataverseWebApiSolutionVerifier"/> — unlike the retired
 /// PacCliSolutionVerifier (which reused the importer's already-created pac
 /// auth profile), the stateless Web API verifier acquires its OWN bearer
-/// token via <c>Azure.Identity.ClientSecretCredential</c> and therefore needs
-/// this value independently.
+/// token and therefore needs this value independently. A44.5 (task 205i):
+/// MAY be <c>null</c>/empty on secret-free environments — the verifier then
+/// resolves its credential from the FR-39 ordered chain
+/// (<see cref="Credentials.WorkerDataverseCredentialFactory"/>, MI-FIC
+/// first). Empty is the SIGNAL (auth-v4 §9.1); never pass a sentinel value.
 /// </param>
 public sealed record SolutionVerificationRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
     ImmutableArray<CanonicalSolutionEntry> ExpectedCatalog,
-    string ClientSecret);
+    string? ClientSecret);
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionVerifier.VerifyAsync"/>.

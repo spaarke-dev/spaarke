@@ -104,6 +104,18 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the UAMI resource id H4-shared expects as keyVaultReferenceIdentity (T1 probe).</summary>
     public const string UamiResourceIdParameterKey = "userAssignedIdentityResourceId";
 
+    /// <summary>
+    /// Row A38a (task 205a, 2026-08-25) — mirror of
+    /// <see cref="H4KvSecretsPopulationHandler.FicOmitSecretNamesParameterKey"/>
+    /// (task 126 FR-39 seam) for the from-shared-service flow: comma-separated
+    /// canonical names H4-shared MUST omit entirely (no parse / extract /
+    /// read / write). SAME parameter name so one coordinated run-parameter
+    /// value drives both handlers uniformly. Absent OR empty = no omissions.
+    /// This key is DATA, not a hardcoded canonical-name check — parity with
+    /// task 125's FR-39 "no special-casing" commitment.
+    /// </summary>
+    public const string FicOmitSecretNamesParameterKey = "ficOmitSecretNames";
+
     /// <summary>Default staging slot name.</summary>
     private const string DefaultStagingSlotName = "staging";
 
@@ -119,6 +131,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
     private readonly ISharedKvSecretAccessor _accessor;
     private readonly IArmKeyVaultRefProbe _t1Probe;
     private readonly ISourceServiceKeyExtractor _extractor;
+    private readonly ISecretFreeMarkerApplier _markerApplier;
     private readonly KvSecretsPopulationOptions _options;
     private readonly ILogger<H4SharedKvSecretsPopulationHandler> _logger;
 
@@ -137,6 +150,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         ISharedKvSecretAccessor accessor,
         IArmKeyVaultRefProbe t1Probe,
         ISourceServiceKeyExtractor extractor,
+        ISecretFreeMarkerApplier markerApplier,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<H4SharedKvSecretsPopulationHandler> logger)
     {
@@ -145,6 +159,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(accessor);
         ArgumentNullException.ThrowIfNull(t1Probe);
         ArgumentNullException.ThrowIfNull(extractor);
+        ArgumentNullException.ThrowIfNull(markerApplier);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -153,6 +168,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         _accessor = accessor;
         _t1Probe = t1Probe;
         _extractor = extractor;
+        _markerApplier = markerApplier;
         _options = options.Value;
         _logger = logger;
     }
@@ -266,6 +282,31 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
             ? slot
             : DefaultStagingSlotName;
 
+        // Row A38a (task 205a, 2026-08-25) — FR-39 omit seam, mirrored from
+        // H4KvSecretsPopulationHandler (task 126): operator run-parameter set
+        // + (on secret-free envs) the three A38a targets. from-shared-service
+        // entries in the omit set are skipped ENTIRELY (no parse / extract /
+        // read / write) — SB-conn + AiSearch admin-key travel through THIS
+        // handler per manifest.yaml (:255/:433), so omitting them only from
+        // per-tenant H4 would leave them re-seeded here (the exact
+        // h4-shared-omit-path-missing failure the A38a re-scope names).
+        // Defense-in-depth behind FileKvSecretManifest's served-entry filter.
+        var omitCanonicalNames = TryGetNonEmpty(parameters, FicOmitSecretNamesParameterKey, out var ficOmitRaw)
+            ? new HashSet<string>(
+                ficOmitRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        var secretFreeOmitActive = _options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback;
+        if (secretFreeOmitActive)
+        {
+            omitCanonicalNames.UnionWith(FileKvSecretManifest.SecretFreeIdentityOmitTargets);
+            _logger.LogInformation(
+                "H4-shared A38a secret-free omit active: runId={RunId} — unioned {Targets} into the " +
+                "FR-39 omit set (size now {Size})",
+                envelope.RunId,
+                string.Join(", ", FileKvSecretManifest.SecretFreeIdentityOmitTargets), omitCanonicalNames.Count);
+        }
+
         var idempotencyKey = BuildIdempotencyKey(environmentName, secretsVer);
 
         // (3) Level-3 idempotency: durable no-op on duplicate.
@@ -337,6 +378,20 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         var perEntryResults = new List<SharedEntryResult>(sharedEntries.Count);
         foreach (var entry in sharedEntries)
         {
+            // Row A38a FR-39 omit — checked FIRST: an omitted entry gets NO
+            // external call of any kind (no service_ref parse, no extraction,
+            // no KV read, no KV write). §9.1 OMIT-is-the-signal — the entry
+            // is intentionally absent, never sentinel-valued.
+            if (omitCanonicalNames.Contains(entry.CanonicalName))
+            {
+                _logger.LogInformation(
+                    "H4-shared omitted (FR-39) '{Canonical}' on '{Vault}' — omit set contains it " +
+                    "(secretFree={SecretFree}); no extraction or write performed",
+                    entry.CanonicalName, sharedKeyVaultName, secretFreeOmitActive);
+                perEntryResults.Add(new SharedEntryResult(entry.CanonicalName, SharedEntryAction.Omitted, null));
+                continue;
+            }
+
             if (!SharedKvSecretSource.TryParse(entry.ServiceRef, out var source))
             {
                 var diag =
@@ -498,15 +553,64 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
+        // (8.5) Row A38a positive migration marker — parity with H4's step
+        //       (10.5): KV resource tag on the SHARED vault + registry
+        //       sprk_credentialmode. Applied once per vault; H4-shared owns
+        //       exactly one vault (the per-environment shared KV) per run —
+        //       per-customer Model 2 vaults are tagged by their own H4 runs
+        //       (dispatch fan-out). Idempotent; Failure is Resumable +
+        //       FAIL-LOUD (§5.3). Not applied under Q3 Path A rollback.
+        //       NOTE: the shared KV is assumed to live in
+        //       sourceResourceGroupName (the shared-services RG deployed by
+        //       model1-shared.bicep alongside the source services); a wrong
+        //       RG surfaces as a loud ARM 404 Failure, never a silent skip.
+        if (secretFreeOmitActive)
+        {
+            SecretFreeMarkerApplyOutcome markerOutcome;
+            try
+            {
+                markerOutcome = await _markerApplier.ApplyAsync(
+                    new SecretFreeMarkerApplyRequest(
+                        SubscriptionId: subscriptionId,
+                        ResourceGroupName: sourceResourceGroupName,
+                        KeyVaultName: sharedKeyVaultName,
+                        TenantId: tenantId,
+                        CustomerIdForLog: envelope.CustomerId,
+                        RunIdForLog: envelope.RunId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H4-shared A38a marker applier infrastructure fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SharedKvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    $"A38a marker applier infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "Shared-KV writes/omits succeeded; marker application is idempotent — fix cause + resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (markerOutcome is SecretFreeMarkerApplyOutcome.Failure markerFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SharedKvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    markerFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         // (9) All post-conditions cleared — advance Cosmos state.
         stopwatch.Stop();
         var wroteInitial = perEntryResults.Count(r => r.Action == SharedEntryAction.WroteInitial);
         var rotated = perEntryResults.Count(r => r.Action == SharedEntryAction.RotatedOnDrift);
         var noOp = perEntryResults.Count(r => r.Action == SharedEntryAction.NoOpMatched);
+        var omitted = perEntryResults.Count(r => r.Action == SharedEntryAction.Omitted);
         _logger.LogInformation(
             "H4-shared KV secrets population succeeded: runId={RunId} customerId={CustomerId} " +
-            "wrote-initial={Wrote} rotated={Rotated} no-op={NoOp} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, wroteInitial, rotated, noOp, stopwatch.ElapsedMilliseconds);
+            "wrote-initial={Wrote} rotated={Rotated} no-op={NoOp} omitted-fr39={Omitted} " +
+            "secretFree={SecretFree} durationMs={DurationMs}",
+            envelope.RunId, envelope.CustomerId, wroteInitial, rotated, noOp, omitted,
+            secretFreeOmitActive, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, cancellationToken)
             .ConfigureAwait(false);
@@ -657,5 +761,11 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         RotatedOnDrift = 2,
         NoOpMatched = 3,
         Failed = 4,
+
+        /// <summary>
+        /// Row A38a (FR-39 parity with <see cref="KvSecretWriteAction.Omitted"/>):
+        /// entry intentionally NOT processed — no extraction, no KV read/write.
+        /// </summary>
+        Omitted = 5,
     }
 }

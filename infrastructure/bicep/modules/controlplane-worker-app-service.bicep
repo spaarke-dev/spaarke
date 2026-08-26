@@ -156,6 +156,46 @@ param customerRunGuardClientId string = ''
 @description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the admin-env credentials are seeded on the platform KV AND the customerRunGuardTenantId + customerRunGuardClientId params are supplied. Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
 param customerRunGuardEnabled bool = false
 
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25 -- the H7/task-142 half of punch row A30 sentinel contract; param NAME chosen to match the A38b pattern planned for customer.bicep -- introduced HERE first because A38b had not landed at authoring time; A38b executor: adopt this exact name). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): ALL THREE BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret, CustomerRunGuard__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions -- the exact analogue of the BFF Graph__Credentials__* live contract). Gating ALL THREE refs together (not just H7 task-142 one) avoids the A38 partial-omit trap: a secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves current (task 142 / 204a / 203b) behavior byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. CAVEAT: the CustomerRunGuard C# credential seam is a FOLLOW-ON row (A44.5 scope is strictly H7/H6) -- on secret-free envs customerRunGuardEnabled MUST stay false until it lands (CustomerRunGuardOptions.Validate fails loud if enabled with no secret; the ADR-032 null-object default keeps boot safe).')
+param requireSecretFreeIdentity bool = false
+
+// ============================================================================
+// A44.5 -- BFF-app-reg credential app settings (exactly ONE of these two sets
+// is appended to the base appSettings below via concat + ternary):
+//   - legacy (requireSecretFreeIdentity=false): the three KV-refs exactly as
+//     tasks 142 / 204a / 203b wired them (moved verbatim from the inline
+//     array; per-setting rationale comments retained at their original
+//     positions in the base array below).
+//   - secret-free (requireSecretFreeIdentity=true): FR-39 ordered-credential
+//     chain settings consumed by WorkerCredentialSelectionOptions
+//     (Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/**, task
+//     205i) -- MI-FIC via the SAME UAMI this module binds
+//     (ManagedIdentity__ClientId below pins the assertion source; the BFF
+//     app-reg trusts the UAMI via the H3-created FIC).
+// ============================================================================
+
+var legacyClientSecretAppSettings = [
+  {
+    name: 'EnvVarValues__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+  {
+    name: 'SolutionImportOptions__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+  {
+    name: 'CustomerRunGuard__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+]
+
+var secretFreeCredentialAppSettings = [
+  { name: 'EnvVarValues__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'EnvVarValues__Credentials__RequireSecretFreeIdentity', value: 'true' }
+  { name: 'SolutionImportOptions__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
+]
+
 @description('Tags for the resource.')
 param tags object = {}
 
@@ -185,7 +225,10 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: [
+      // A44.5: base settings + EXACTLY ONE credential-mode set (legacy
+      // KV-refs OR FR-39 secret-free chain) -- see the vars above the
+      // resource for the two sets + rationale.
+      appSettings: concat([
         // ---------------------------------------------------------------
         // NOTE: no AzureAd__* settings here -- the Worker has NO auth
         // surface (task 100 Program.cs: only anonymous /healthz + /ping).
@@ -235,17 +278,20 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // writer collaborator authenticates to each customer's Dataverse
         // env using the SAME shared multitenant BFF app-reg credential H6
         // uses for solution import (the MI-Dataverse App User from H10 does
-        // not exist yet at H7's point in the DAG). REQUIRED --
-        // EnvVarValuesOptions.Validate() fails fast at boot (NFR-05) if
-        // this is missing; sourced from the platform KV's canonical
-        // never-delete BFF-API-ClientSecret secret (task 126 real-value
+        // not exist yet at H7's point in the DAG). Sourced from the platform
+        // KV's canonical BFF-API-ClientSecret secret (task 126 real-value
         // population; same secret the .Api site resolves as
         // AzureAd__ClientSecret / Graph__ClientSecret).
+        //
+        // A44.5 (task 205i): the EnvVarValues__ClientSecret KV-ref is NO
+        // LONGER emitted here unconditionally -- it moved to
+        // legacyClientSecretAppSettings (appended via the concat + ternary
+        // at the bottom of this array) and is OMITTED entirely when
+        // requireSecretFreeIdentity=true, where the FR-39 chain settings
+        // (secretFreeCredentialAppSettings) take its place and
+        // EnvVarValuesOptions.Validate() accepts the empty slot (empty is
+        // the signal -- auth-v4 SS9.1; never a sentinel).
         // ---------------------------------------------------------------
-        {
-          name: 'EnvVarValues__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 204a (Wave G-8 Class-B follow-on to task 142): SolutionImport
@@ -266,14 +312,13 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // .Validate() only asserts ProvisioningArtifactsContainerUri +
         // SolutionArtifactManifestBlobName -- H6's ClientSecret is a runtime
         // Resumable failure per §4C rollback classification (H6SolutionImportHandler
-        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret). We
-        // still wire it here so H6 succeeds on the happy path without
-        // per-customer operator intervention (parity with H7 lifecycle).
+        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret).
+        //
+        // A44.5 (task 205i): the SolutionImportOptions__ClientSecret KV-ref
+        // moved to legacyClientSecretAppSettings (concat + ternary at the
+        // bottom of this array) -- OMITTED when requireSecretFreeIdentity=true
+        // (H6's importer/verifier then select MI-FIC via the FR-39 chain).
         // ---------------------------------------------------------------
-        {
-          name: 'SolutionImportOptions__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
@@ -350,13 +395,15 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // secret are all in place -- CustomerRunGuardOptions.Validate()
         // fails fast at boot on missing fields when Enabled=true.
         // ---------------------------------------------------------------
+        // A44.5 (task 205i): the CustomerRunGuard__ClientSecret KV-ref moved
+        // to legacyClientSecretAppSettings (concat + ternary at the bottom of
+        // this array) -- OMITTED when requireSecretFreeIdentity=true. The
+        // guard's own MI-FIC seam is a FOLLOW-ON row; on secret-free envs
+        // customerRunGuardEnabled MUST stay false until it lands (see the
+        // requireSecretFreeIdentity param description).
         { name: 'CustomerRunGuard__TargetDataverseUrl', value: adminDataverseEnvironmentUrl }
         { name: 'CustomerRunGuard__TenantId', value: customerRunGuardTenantId }
         { name: 'CustomerRunGuard__ClientId', value: customerRunGuardClientId }
-        {
-          name: 'CustomerRunGuard__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
         { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
 
         // ---------------------------------------------------------------
@@ -378,7 +425,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
         { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
-      ]
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings)
     }
   }
 }

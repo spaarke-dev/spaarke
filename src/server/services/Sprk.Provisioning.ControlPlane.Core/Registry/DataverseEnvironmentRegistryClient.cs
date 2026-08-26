@@ -132,6 +132,14 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     private const string SetupStatusColumn = "sprk_setupstatus";
     private const string CurrentRunIdColumn = "sprk_currentrunid";
 
+    // Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
+    // state field. SINGLE-LINE-OF-TEXT column (written as a JSON string —
+    // unlike sprk_setupstatus's option-set integer). Schema prerequisite:
+    // column must exist on the admin env's sprk_dataverseenvironment table
+    // BEFORE any environment enables RequireSecretFreeIdentity; a missing
+    // column FAIL-LOUDs here as an HTTP 400 Failure naming the property.
+    private const string CredentialModeColumn = "sprk_credentialmode";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly DataverseEnvironmentRegistryOptions _options;
     private readonly ILogger<DataverseEnvironmentRegistryClient> _logger;
@@ -305,6 +313,93 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<RegistryUpdateOutcome> UpdateCredentialModeAsync(
+        RegistryCredentialModeUpdate update, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.EnvironmentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.CredentialMode);
+
+        // GUID guard — parity with UpdateSetupStatusAsync (the id is
+        // interpolated into an OData URI segment).
+        if (!Guid.TryParse(update.EnvironmentId, out var envRowId))
+        {
+            return new RegistryUpdateOutcome.Failure(
+                $"EnvironmentId '{update.EnvironmentId}' is not a valid GUID — refusing to build an OData URI from it.");
+        }
+
+        var envUri = BuildEnvUri();
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient credential-mode token acquisition failed for env={EnvUrl}",
+                envUri);
+            return new RegistryUpdateOutcome.Failure(
+                $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        var relative = $"/api/data/v9.2/{_options.EntitySetName}({envRowId})";
+        var requestUri = new Uri(envUri, relative);
+        var bodyJson = BuildCredentialModePatchBody(update.CredentialMode);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
+            request.Headers.Add("Prefer", "return=minimal");
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "DataverseEnvironmentRegistryClient credential-mode PATCH ok: environmentId={EnvironmentId} " +
+                    "credentialMode={CredentialMode} customerId={CustomerId} runId={RunId}",
+                    envRowId, update.CredentialMode, update.CustomerIdForLog, update.RunIdForLog);
+                return new RegistryUpdateOutcome.Success();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                return new RegistryUpdateOutcome.NotFound(
+                    $"PATCH {relative} returned 404 NotFound. Body: {Truncate(body, 400)}");
+            }
+
+            var errBody = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH {relative} ({CredentialModeColumn}) returned {(int)response.StatusCode} {response.StatusCode}. " +
+                $"Body: {Truncate(errBody, 400)}. If the body names '{CredentialModeColumn}' as an invalid " +
+                "property, the A38a schema prerequisite (single-line-of-text column on " +
+                "sprk_dataverseenvironment) has not been created on the admin env yet.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient credential-mode PATCH infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
@@ -368,6 +463,24 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             {
                 writer.WriteNull(CurrentRunIdColumn);
             }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // Row A38a — credential-mode PATCH body. UNLIKE sprk_setupstatus (choice/
+    // option-set integer), sprk_credentialmode is a single-line-of-text
+    // column, so the value ships as a JSON STRING verbatim. Internal for
+    // pure-function test coverage (ADR-038 posture — no HttpMessageHandler
+    // mocks).
+    internal static string BuildCredentialModePatchBody(string credentialMode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(credentialMode);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString(CredentialModeColumn, credentialMode);
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());

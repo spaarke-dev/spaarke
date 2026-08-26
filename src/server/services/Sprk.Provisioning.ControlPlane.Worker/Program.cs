@@ -47,6 +47,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
@@ -476,6 +477,25 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSlotIdentityRoleGranter>>();
     return new ArmSlotIdentityRoleGranter(armClient, logger);
 });
+
+// Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
+// applier — KV resource tag (spaarke-secret-free-identity=true, via ArmClient
+// GenericResource — no new package) + sprk_dataverseenvironment.
+// sprk_credentialmode (via the task-112 registry client's A38a
+// UpdateCredentialModeAsync extension). Consumed by BOTH H4 (per-tenant
+// vault; Model 2 dispatch fan-out = once per vault) and H4-shared (shared
+// vault). Inert until KvSecretsPopulationOptions.RequireSecretFreeIdentity
+// is set for an environment (default false). ADR-032: registered
+// UNCONDITIONALLY — no feature-gate branch; the option gates behavior inside
+// the handlers, not the DI graph.
+builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var registryClient = sp.GetRequiredService<Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient>();
+    var logger = sp.GetRequiredService<ILogger<ArmSecretFreeMarkerApplier>>();
+    return new ArmSecretFreeMarkerApplier(armClient, registryClient, logger);
+});
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
 // Task 200: H4-shared handler + two new collaborator seams (source-service
@@ -606,6 +626,15 @@ builder.Services.Configure<SolutionImportOptions>(
 builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
 builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
 builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName);
+// A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
+// OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
+// H6's importer/verifier. Mirrors master's DataverseServiceClientImpl
+// ordered-credential migration (auth-v4 task 022, brought in via A35):
+// MI-FIC first on secret-free envs (EnvVarValues__Credentials__Order__0 /
+// SolutionImportOptions__Credentials__Order__0 = ManagedIdentityFederated),
+// ClientSecret only for prong-3 unmigrated envs. Singleton — stateless over
+// IConfiguration; performs no I/O at selection time.
+builder.Services.AddSingleton<WorkerDataverseCredentialFactory>();
 builder.Services.AddSingleton<ISolutionImporter>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
@@ -614,8 +643,9 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiSolutionImporter.HttpClientName);
     var catalog = sp.GetRequiredService<ISolutionCatalog>();
+    var workerCredentialFactory = sp.GetRequiredService<WorkerDataverseCredentialFactory>();
     var logger = sp.GetRequiredService<ILogger<DataverseWebApiSolutionImporter>>();
-    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, logger);
+    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, workerCredentialFactory, logger);
 });
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the
@@ -645,8 +675,8 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // requires an HttpClient ctor param for typed clients), so H7DataverseEnvVarValuesHandler
 // was NOT actually resolvable — surfaced by task 103's HandlerRegistrationCompletenessTests.
 //
-// Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret is now UNCONDITIONALLY
-// wired via modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
+// Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret wired via
+// modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
 // KV-reference app setting (sourced from the platform KV's canonical
 // BFF-API-ClientSecret, the shared multitenant BFF app-reg secret — same
 // identity H7 authenticates to customer Dataverse envs with). AddOptions +
@@ -656,6 +686,17 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // Configure<T>() call so a config-gap fails loud at startup instead of only
 // surfacing on H7's first dispatch (the handler's own runtime
 // MissingClientSecret guard stays as defense-in-depth).
+//
+// A44.5 (task 205i, 2026-08-25 — closes the H7/task-142 half of A30's
+// sentinel contract): the KV-ref is NO LONGER unconditional — the Bicep
+// module omits it when requireSecretFreeIdentity=true and instead emits the
+// FR-39 chain settings (EnvVarValues__Credentials__Order__0=
+// ManagedIdentityFederated + __RequireSecretFreeIdentity=true, mirror of the
+// BFF's Graph__Credentials__* contract). EnvVarValuesOptions.Validate()
+// accepts an EMPTY ClientSecret under an MI-FIC-first chain (empty is the
+// SIGNAL on secret-free envs — auth-v4 §9.1; never a sentinel) and still
+// fail-fasts on (a) empty secret under the legacy/secret-first chain and
+// (b) any invalid provider-chain configuration.
 builder.Services.AddOptions<EnvVarValuesOptions>()
     .Bind(builder.Configuration.GetSection(EnvVarValuesOptions.SectionName))
     .Validate(o =>

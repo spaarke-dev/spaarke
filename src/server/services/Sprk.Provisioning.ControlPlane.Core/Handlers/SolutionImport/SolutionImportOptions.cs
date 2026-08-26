@@ -8,6 +8,8 @@
 // DataverseEnvCreationOptions + AiSeedChainOptions.
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
+
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
@@ -16,6 +18,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 /// </summary>
 public sealed class SolutionImportOptions
 {
+    /// <summary>Configuration section name (bound via Program.cs <c>GetSection(nameof(SolutionImportOptions))</c>).</summary>
+    public const string SectionName = nameof(SolutionImportOptions);
+
     /// <summary>
     /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
     /// PATH). Parity with <see cref="AiSeedChain.AiSeedChainOptions.PwshExecutable"/>.
@@ -95,6 +100,19 @@ public sealed class SolutionImportOptions
     /// </remarks>
     public string? ClientSecret { get; set; }
 
+    /// <summary>
+    /// FR-39 ordered credential chain for H6's Dataverse auth (A44.5, task
+    /// 205i — SAME seam H7's <see cref="EnvVarValues.EnvVarValuesOptions.Credentials"/>
+    /// carries; both sections are driven from ONE Bicep param so the two
+    /// chains cannot drift). Bound from <c>SolutionImportOptions:Credentials</c>
+    /// (<c>SolutionImportOptions__Credentials__Order__0=ManagedIdentityFederated</c>
+    /// on secret-free environments). Unconfigured = legacy <c>[ClientSecret]</c>
+    /// chain — task-141/204a behavior preserved (empty secret stays a RUNTIME
+    /// Resumable <c>MissingClientSecret</c>, never a boot fail — see
+    /// <see cref="Validate"/> remarks).
+    /// </summary>
+    public WorkerCredentialSelectionOptions Credentials { get; set; } = new();
+
     // ---- task 141 (Wave G-4, Option D hybrid) additions ----
     // The fields above (PwshExecutable/PacCliExecutable/DeployDataverseSolutionsScriptPath/
     // SolutionPath/ImportMode) remain UNCHANGED — they stay load-bearing for the
@@ -168,9 +186,24 @@ public sealed class SolutionImportOptions
     /// with <c>BffDeployOptions.Validate</c> / <c>BicepInfraDeployOptions.Validate</c>).
     /// Wired via <c>PostConfigure&lt;SolutionImportOptions&gt;(o =&gt; o.Validate())</c>
     /// in Worker/Program.cs.
+    ///
+    /// <para><b>A44.5 addition — chain SHAPE only:</b> the FR-39 credential
+    /// chain is validated for shape (unknown kind / duplicate /
+    /// RequireSecretFreeIdentity contradiction fail fast), but an empty
+    /// <see cref="ClientSecret"/> deliberately does NOT fail here even on a
+    /// secret-first chain — H6's missing-secret classification is a RUNTIME
+    /// Resumable failure on the affected run
+    /// (<see cref="SolutionImportRejectionCodes.MissingClientSecret"/>, per
+    /// the §4C rollback classification task 204a documented), unlike H7's
+    /// boot fail-fast. That existing lifecycle difference is preserved.</para>
     /// </summary>
     public void Validate()
     {
+        // A44.5: fail-fast on invalid FR-39 provider-chain configuration
+        // (throws with an actionable message; result discarded — only the
+        // shape check is wanted at this boundary).
+        _ = Credentials.ResolveEffectiveOrder(SectionName);
+
         if (string.IsNullOrWhiteSpace(ProvisioningArtifactsContainerUri))
         {
             throw new InvalidOperationException(

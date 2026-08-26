@@ -7,26 +7,36 @@
 // (expanding its environmentvariablevalues), then PATCH the existing value
 // record or POST a new one bound to the definition.
 //
-// AUTH:
-//   OAuth2 client-credentials (confidential client) via
-//   Azure.Identity.ClientSecretCredential — SAME identity + pattern H6 uses
-//   for solution import (pac auth create --clientSecret against the BFF
-//   Entra app-reg). NOT DefaultAzureCredential/MI: the MI-Dataverse App User
-//   (H10) has not yet been created at H7's point in the DAG (H10 runs AFTER
-//   H7 per design.md §4.1). Token audience is the env URL's origin +
-//   `/.default` — Dataverse Web API's token scope convention (parity with
-//   DataverseWebApiHealthProbe).
+// AUTH (A44.5, task 205i — supersedes the task-050 ClientSecret-only note):
+//   OAuth2 client-credentials (confidential client) as the shared BFF Entra
+//   app-reg — SAME identity + pattern H6 uses for solution import. The
+//   CREDENTIAL is now selected by the FR-39 ordered chain
+//   (WorkerDataverseCredentialFactory over EnvVarValues:Credentials:Order —
+//   MI-FIC first on secret-free envs, ClientSecret fallback for prong-3
+//   unmigrated envs), mirroring master's DataverseServiceClientImpl
+//   migration (auth-v4 task 022, brought in via A35). Raw
+//   `new ClientSecretCredential(...)` construction is confined to the
+//   factory's ClientSecret (pre-migration/fallback) branch — never on the
+//   secret-free branch. NOT DefaultAzureCredential-as-the-Worker: H7
+//   authenticates AS the BFF app-reg (the MI-Dataverse App User (H10) has
+//   not yet been created at H7's point in the DAG; H10 runs AFTER H7 per
+//   design.md §4.1) — under MI-FIC the Worker's UAMI merely MINTS the
+//   federated assertion the app-reg trusts (H3-created FIC). Token audience
+//   is the env URL's origin + `/.default` — Dataverse Web API's token scope
+//   convention (parity with DataverseWebApiHealthProbe).
 //
 // NOT under test in the CI unit suite. Integration coverage lives in an
-// env-guarded smoke test, parity with the H5 health-probe note.
+// env-guarded smoke test, parity with the H5 health-probe note. (The FR-39
+// selection itself IS CI-unit-tested at the factory boundary —
+// WorkerDataverseCredentialFactoryTests.)
 // -----------------------------------------------------------------------------
 
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 
@@ -44,19 +54,28 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EnvVarValuesOptions _options;
+    private readonly WorkerDataverseCredentialFactory _credentialFactory;
     private readonly ILogger<DataverseWebApiEnvVarValuesWriter> _logger;
 
-    /// <summary>Constructs the writer bound to the named HttpClient + configured request timeout.</summary>
+    /// <summary>
+    /// Constructs the writer bound to the named HttpClient + configured
+    /// request timeout + the FR-39 ordered credential factory (A44.5 — the
+    /// factory is injected concretely per ADR-010; it performs no I/O at
+    /// construction or selection time).
+    /// </summary>
     public DataverseWebApiEnvVarValuesWriter(
         IHttpClientFactory httpClientFactory,
         IOptions<EnvVarValuesOptions> options,
+        WorkerDataverseCredentialFactory credentialFactory,
         ILogger<DataverseWebApiEnvVarValuesWriter> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         ArgumentNullException.ThrowIfNull(logger);
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
+        _credentialFactory = credentialFactory;
         _logger = logger;
     }
 
@@ -69,7 +88,9 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetDataverseUrl);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientSecret);
+        // A44.5: request.ClientSecret is deliberately NOT required here — on
+        // secret-free envs it is empty (the signal, §9.1) and the FR-39
+        // factory below selects MI-FIC from the configured chain.
 
         if (!Uri.TryCreate(request.TargetDataverseUrl, UriKind.Absolute, out var envUri))
         {
@@ -81,18 +102,32 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 
         var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
         var scope = $"{scopeBase}/.default";
-        var credential = new ClientSecretCredential(request.TenantId, request.ClientId, request.ClientSecret);
 
         AccessToken token;
         try
         {
-            token = await credential.GetTokenAsync(
+            // FR-39 ordered selection (A44.5): MI-FIC first on secret-free
+            // chains; ClientSecret only for prong-3 unmigrated envs. An
+            // exhausted chain throws (fail-closed) and classifies AuthFailure
+            // → §4C Resumable at the handler — the correct failure boundary
+            // for a per-run collaborator (see factory file header for the
+            // documented narrowing vs the BFF's hot-path provider).
+            var selected = _credentialFactory.Create(
+                _options.Credentials,
+                EnvVarValuesOptions.SectionName,
+                request.TenantId,
+                request.ClientId,
+                request.ClientSecret);
+            token = await selected.Credential.GetTokenAsync(
                 new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Prefix convention preserved across H6/H7 collaborators (task-141
+            // test contract parity); credential-SELECTION failures carry their
+            // own "No credential could be selected …" inner message.
             _logger.LogWarning(ex,
-                "H7 writer token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
+                "H7 writer credential selection / token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
             return new EnvVarValuesWriteOutcome.Failure(
                 EnvVarValuesWriteFailureKind.AuthFailure,
                 SchemaName: null,

@@ -168,6 +168,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A38c secret-free marker pre-check gate (see scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header
+# for full rationale + §11 justification). Gates ServiceBus-ConnectionString at Step 4 ONLY.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
+
+# ============================================================================
+# DEPRECATION NOTICE (§5.2 — this legacy 13-step orchestrator is SUPERSEDED)
+# ============================================================================
+# Provision-Customer.ps1 predates the L2 control-plane (src/server/services/
+# Sprk.Provisioning.ControlPlane.*/**) introduced by customer-provisioning-orchestration-r1. New
+# customer provisioning MUST go through the `/provision-environment` L3 skill
+# (.claude/skills/provision-environment/SKILL.md), which sequences the same work via 19
+# IProvisioningHandler steps + Cosmos state + the A38a/A38b/A38c secret-free credential gates.
+# This script is retained for reference / break-glass use only. It is gated at Step 4 (below)
+# against the same secret-free marker the L2 handlers respect, so it refuses rather than silently
+# reversing an already-completed secret-free migration if it is ever run against one.
+if (-not $env:SPAARKE_SUPPRESS_LEGACY_ORCHESTRATOR_BANNER) {
+    Write-Host ""
+    Write-Host "  ⚠ Provision-Customer.ps1 is the LEGACY 13-step orchestrator (§5.2) — superseded by" -ForegroundColor Yellow
+    Write-Host "    the L2 control-plane. Prefer '/provision-environment' unless you have a specific" -ForegroundColor Yellow
+    Write-Host "    break-glass reason to run this script directly." -ForegroundColor Yellow
+    Write-Host ""
+}
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -528,6 +551,17 @@ function Invoke-Step4_PopulateKeyVault {
     # BINDING pre-check (r3 handoff + spec MUST rule): no code path here deletes/renames
     # `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. Neither is written here; the BFF
     # client secret is owned by Register-EntraAppRegistrations.ps1 (platform KV).
+    # ── A38c secret-free marker gate ────────────────────────────────────────────────────────
+    # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
+    # 2026-08-24). This legacy orchestrator is superseded by the L2 control-plane (§5.2 — see
+    # the deprecation banner at script entry) and predates the secret-free credential-selection
+    # seam. Refuse the ENTIRE Step 4 write batch rather than fragment the hashtable write loop
+    # to skip a single entry — this orchestrator should not be run at all against an environment
+    # that has already migrated off ServiceBus-ConnectionString; the correct action is to use
+    # '/provision-environment' (L2 control-plane) instead. Mirrors the A43
+    # Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape.
+    Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $kvName -CustomerId $CustomerId
+
     $secrets = [ordered]@{
         "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
         "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString

@@ -100,7 +100,58 @@ public interface IDataverseEnvironmentRegistryClient
     Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
         RegistrySetupStatusUpdate update,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Row A38a (task 205a, 2026-08-25) — PATCHes a
+    /// <c>sprk_dataverseenvironment</c> row's <c>sprk_credentialmode</c>
+    /// state field (the registry half of the positive secret-free migration
+    /// marker; auth-v4 §9.1 rules the marker OUT of the credential slots).
+    /// Value-idempotent: PATCHing the same mode twice yields the same row
+    /// state. Consumed by
+    /// <c>Handlers.KvSecretsPopulation.ArmSecretFreeMarkerApplier</c>.
+    ///
+    /// DEFAULT IMPLEMENTATION NOTE (§11 minimal-churn): the default body
+    /// exists ONLY so the six pre-A38a test fakes implementing this interface
+    /// (H05 / H13 / registry-updater / seam tests) keep compiling without
+    /// modification — it FAIL-LOUDS (returns <see cref="RegistryUpdateOutcome.Failure"/>)
+    /// rather than pretending success, so any impl actually reached at
+    /// runtime without an override surfaces immediately. The real client
+    /// (<see cref="DataverseEnvironmentRegistryClient"/>) and the Null
+    /// kill-switch (<see cref="NullDataverseEnvironmentRegistryClient"/>,
+    /// ADR-032 P2 quiet no-op + WARN) both override.
+    /// </summary>
+    /// <param name="update">The PATCH request payload — see <see cref="RegistryCredentialModeUpdate"/>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<RegistryUpdateOutcome> UpdateCredentialModeAsync(
+        RegistryCredentialModeUpdate update,
+        CancellationToken cancellationToken)
+        => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Failure(
+            $"UpdateCredentialModeAsync is not implemented by '{GetType().Name}' — the A38a " +
+            "sprk_credentialmode marker write requires the real DataverseEnvironmentRegistryClient " +
+            "(or an explicit test fake override)."));
 }
+
+/// <summary>
+/// Row A38a — inputs to a single
+/// <see cref="IDataverseEnvironmentRegistryClient.UpdateCredentialModeAsync"/>
+/// PATCH. Immutable record; mirror-shape of <see cref="RegistrySetupStatusUpdate"/>.
+/// </summary>
+/// <param name="EnvironmentId">The Dataverse row id (GUID string) — target of the PATCH. MUST parse as a GUID.</param>
+/// <param name="CredentialMode">
+/// New value for <c>sprk_credentialmode</c>. Canonical value:
+/// <c>secret-free</c> (see <c>SecretFreeMarker.CredentialModeSecretFree</c>).
+/// Written as a STRING — the column is a single-line-of-text column (schema
+/// prerequisite: created on the admin env before any environment enables
+/// RequireSecretFreeIdentity; a missing column FAIL-LOUDs as an HTTP 400
+/// Failure naming the property).
+/// </param>
+/// <param name="CustomerIdForLog">Customer id — log correlation only. Not sent to Dataverse.</param>
+/// <param name="RunIdForLog">Run id — log correlation only. Not sent to Dataverse.</param>
+public sealed record RegistryCredentialModeUpdate(
+    string EnvironmentId,
+    string CredentialMode,
+    string CustomerIdForLog,
+    string RunIdForLog);
 
 /// <summary>
 /// Read-only snapshot of a <c>sprk_dataverseenvironment</c> row for

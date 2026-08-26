@@ -122,6 +122,9 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the SignalR feature flag (ADR-032). Defaults to <c>false</c> when absent.</summary>
     public const string SignalREnabledParameterKey = "signalrEnabled";
 
+    /// <summary>Non-secret parameter key carrying the auth-v4 §9.1 secret-free gate (customer-provisioning-orchestration-r1 punch row A38b). Defaults to <c>false</c> when absent (pre-migration/backwards-compat behavior).</summary>
+    public const string RequireSecretFreeIdentityParameterKey = "requireSecretFreeIdentity";
+
     /// <summary>
     /// Non-secret parameter key carrying an ISO-8601 timestamp for
     /// <c>sprk_dataverseenvironment.sprk_provisionedon</c>. When present +
@@ -276,6 +279,9 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var signalrEnabled = TryGetNonEmpty(parameters, SignalREnabledParameterKey, out var signalRaw)
             && bool.TryParse(signalRaw, out var signalParsed)
             && signalParsed;
+        var requireSecretFreeIdentity = TryGetNonEmpty(parameters, RequireSecretFreeIdentityParameterKey, out var secretFreeRaw)
+            && bool.TryParse(secretFreeRaw, out var secretFreeParsed)
+            && secretFreeParsed;
 
         var request = new BicepDeployRequest(
             CustomerId: envelope.CustomerId,
@@ -285,7 +291,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             BicepVersion: bicepVer,
             EnvironmentName: environmentName,
             Location: location,
-            SignalREnabled: signalrEnabled);
+            SignalREnabled: signalrEnabled,
+            RequireSecretFreeIdentity: requireSecretFreeIdentity);
 
         // (7) Structural pre-flight — Redis presence + model-version pin.
         //     These are cheap file reads; fail fast before ARM traffic.

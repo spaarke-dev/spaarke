@@ -183,8 +183,11 @@ param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
 @description('BFF Entra app-registration client (application) ID used by the CustomerRunGuard concurrency guard to auth against the admin Dataverse env (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__ClientId. SAME app-reg H6/H7 use (bffApiClientSecretName above provides the client-secret side). Empty default keeps CustomerRunGuard__Enabled=false safe -- supply when flipping the guard on.')
 param customerRunGuardClientId string = ''
 
-@description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardClientId + the platform-KV BFF-API-ClientSecret are in place; then CustomerRunGuardOptions.Validate() fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production.')
+@description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardClientId + the platform-KV BFF-API-ClientSecret are in place; then CustomerRunGuardOptions.Validate() fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production. A44.5 note: on a secret-free stack (requireSecretFreeIdentity=true) this MUST stay false until the CustomerRunGuard MI-FIC seam lands (follow-on row).')
 param customerRunGuardEnabled bool = false
+
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the three BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + RequireSecretFreeIdentity=true, same for SolutionImportOptions) are emitted instead; H7/H6 then authenticate as the shared BFF app-reg via the Worker UAMI federated assertion (H3-created FIC). Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record). Same param name planned for customer.bicep by A38b -- keep the two in lockstep.')
+param requireSecretFreeIdentity bool = false
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -486,6 +489,10 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     customerRunGuardTenantId: effectiveJwtTenantId
     customerRunGuardClientId: customerRunGuardClientId
     customerRunGuardEnabled: customerRunGuardEnabled
+    // A44.5 (task 205i): secret-free identity mode -- omits the three
+    // BFF-API-ClientSecret KV-refs + emits the FR-39 chain settings instead
+    // (see the worker module's requireSecretFreeIdentity param description).
+    requireSecretFreeIdentity: requireSecretFreeIdentity
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
     // worker module emits it as the three

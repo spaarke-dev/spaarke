@@ -269,6 +269,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ["environmentName"] = new { value = request.EnvironmentName },
             ["location"] = new { value = request.Location },
             ["signalrEnabled"] = new { value = request.SignalREnabled },
+            ["requireSecretFreeIdentity"] = new { value = request.RequireSecretFreeIdentity },
         };
         return BinaryData.FromObjectAsJson(payload);
     }

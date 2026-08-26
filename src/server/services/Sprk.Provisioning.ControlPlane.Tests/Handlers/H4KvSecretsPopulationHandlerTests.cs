@@ -588,6 +588,246 @@ public sealed class H4KvSecretsPopulationHandlerTests
             $"/subscriptions/{SubscriptionId}/resourceGroups/{ResourceGroupName}/providers/Microsoft.KeyVault/vaults/{KeyVaultName}");
     }
 
+    // =========================================================================
+    // Row A38a (task 205a, 2026-08-25) — secret-free omit via the task-126
+    // FR-39 OmitCanonicalNames seam + positive migration marker
+    // =========================================================================
+
+    private static readonly string[] A38aOmitTargets =
+    {
+        "BFF-API-ClientSecret",
+        "ServiceBus-ConnectionString",
+        "AiSearch--AdminKey",
+    };
+
+    [Fact]
+    public async Task A38a1_SecretFreeTrue_UnionsThreeTargetsIntoExistingOmitSeam()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a1");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        // The omit flows through the SAME KvSecretWriteRequest.OmitCanonicalNames
+        // seam task 126 landed — no parallel mechanism.
+        writer.LastRequest!.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
+        writer.LastRequest.OmitCanonicalNames.Should().NotContain("Dataverse-ClientSecret",
+            "Q3 Path A rollback copy is never omitted (§6.5 record 2026-08-25)");
+    }
+
+    [Fact]
+    public async Task A38a2_DefaultOptions_OmitSetStaysEmpty_NoRegression()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a2");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
+            "client-secret environments are unchanged by A38a (default RequireSecretFreeIdentity=false)");
+    }
+
+    [Fact]
+    public async Task A38a3_OperatorFicOmitParameter_StillWorks_AndUnionsWithSecretFreeTargets()
+    {
+        // Existing FR-39 operator path (task 126): ficOmitSecretNames run
+        // parameter. A38a UNIONS into it — both sources coexist.
+        var run = BuildRun();
+        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.FicOmitSecretNamesParameterKey] =
+            "Some-Operator-Chosen-Secret, Another-One";
+        var repo = new FakeRepository(run, etag: "etag-a38a3");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.OmitCanonicalNames.Should().Contain("Some-Operator-Chosen-Secret");
+        writer.LastRequest.OmitCanonicalNames.Should().Contain("Another-One");
+        writer.LastRequest.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
+        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public async Task A38a4_Q3PathARollback_TargetsNotOmitted_MarkerNotApplied()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a4");
+        var writer = FakeWriter.AllWrote();
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            markerApplier: marker,
+            options: new KvSecretsPopulationOptions
+            {
+                RequireSecretFreeIdentity = true,
+                SecretFreeIdentityRollback = true,
+            });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
+            "Q3 Path A rollback re-includes the three targets (regression path)");
+        marker.CallCount.Should().Be(0,
+            "a rolled-back environment is not secret-free — the positive marker MUST NOT be applied");
+    }
+
+    [Fact]
+    public async Task A38a5_SecretFreeTrue_MarkerAppliedOnceWithVaultAndTenant()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a5");
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(1);
+        marker.LastRequest!.KeyVaultName.Should().Be(KeyVaultName);
+        marker.LastRequest.TenantId.Should().Be(TenantId);
+        marker.LastRequest.SubscriptionId.Should().Be(SubscriptionId);
+        marker.LastRequest.ResourceGroupName.Should().Be(ResourceGroupName);
+    }
+
+    [Fact]
+    public async Task A38a6_SecretFreeFalse_MarkerNotApplied()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a6");
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker);
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        marker.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A38a7_MarkerFailure_FailsResumable_WithMarkerRejectionCode()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a7");
+        var marker = FakeMarkerApplier.Failure(
+            "A38a marker: no sprk_dataverseenvironment registry row found for tenantId");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "marker application is idempotent — operator fixes cause + resumes (FAIL-LOUD, never silent)");
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed);
+        failure.Diagnostic.Should().Contain("registry row");
+    }
+
+    [Fact]
+    public async Task A38a8_Idempotency_SecondInvocation_NoSecondMarkerApply()
+    {
+        // Run-level idempotency: a matching CompletedPhase short-circuits the
+        // ENTIRE handler (including marker application) — the "2nd invocation
+        // is a no-op" contract at handler level. Applier-level idempotency
+        // (tag check-then-apply) is covered by
+        // ArmSecretFreeMarkerApplier.IsVaultTagAlreadyApplied tests.
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H4",
+            IdempotencyKey = H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, SecretsVer),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = "prior-run",
+        });
+        var repo = new FakeRepository(run, etag: "etag-a38a8");
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(0, "Level-3 idempotency short-circuits before any external work");
+    }
+
+    [Fact]
+    public async Task A38a8b_MarkerAlreadyApplied_SecondRunOutcome_StillSuccess()
+    {
+        // Applier reports the tag was already present (idempotent re-apply on
+        // a resumed run) — the handler treats Applied(true) as Success.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a8b");
+        var marker = FakeMarkerApplier.AlreadyApplied();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A38a9_Model2FanOut_ThreeCustomerVaults_MarkerAppliedOncePerVault_Uniform()
+    {
+        // Model 2 fan-out: the per-customer DISPATCH iteration invokes H4
+        // once per customer vault — there is deliberately no N-vault loop
+        // inside a single run. Simulate the fan-out as three H4 invocations
+        // sharing one marker applier and assert once-per-vault uniformity
+        // (the property the §5.3 fleet-consistency detector guards).
+        var marker = FakeMarkerApplier.Success();
+        var customers = new[] { ("acme", "kv-acme-v1"), ("globex", "kv-globex-v1"), ("initech", "kv-initech-v1") };
+
+        foreach (var (customerId, vaultName) in customers)
+        {
+            var run = BuildRun();
+            run.CustomerId = customerId;
+            run.Parameters.NonSecret[H4KvSecretsPopulationHandler.KeyVaultNameParameterKey] = vaultName;
+            var repo = new FakeRepository(run, etag: $"etag-a38a9-{customerId}");
+            var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+                FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+                FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+                options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+            var envelope = new HandlerEnvelope
+            {
+                HandlerId = H4KvSecretsPopulationHandler.HandlerIdentifier,
+                RunId = RunId,
+                CustomerId = customerId,
+                ParametersJson = "{}",
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            };
+
+            var result = await handler.HandleAsync(envelope, CancellationToken.None);
+            result.Should().BeOfType<HandlerResult.Success>();
+        }
+
+        marker.CallCount.Should().Be(3, "one application per customer vault — no vault skipped, none doubled");
+        marker.AppliedVaults.Should().BeEquivalentTo(new[] { "kv-acme-v1", "kv-globex-v1", "kv-initech-v1" },
+            "all N per-customer vaults receive the marker uniformly (remediation plan §5.3)");
+    }
+
     // ---------- AC-30 T1 patcher throws (infrastructure fault) ----------
 
     [Fact]
@@ -659,11 +899,14 @@ public sealed class H4KvSecretsPopulationHandlerTests
         IKvSecretsWriter writer,
         IAppServiceIdentityPatcher patcher,
         IArmKeyVaultRefProbe probe,
-        ISlotIdentityRoleGranter granter)
+        ISlotIdentityRoleGranter granter,
+        FakeMarkerApplier? markerApplier = null,
+        KvSecretsPopulationOptions? options = null)
     {
         return new H4KvSecretsPopulationHandler(
             repo, manifest, writer, patcher, probe, granter,
-            Options.Create(new KvSecretsPopulationOptions()),
+            markerApplier ?? FakeMarkerApplier.Success(),
+            Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }
 
@@ -902,6 +1145,35 @@ public sealed class H4KvSecretsPopulationHandlerTests
             CallCount++;
             LastInput = input;
             return Task.FromResult(_result);
+        }
+    }
+
+    /// <summary>Row A38a — stub ISecretFreeMarkerApplier recording every application (vault list for fan-out uniformity assertions).</summary>
+    private sealed class FakeMarkerApplier : ISecretFreeMarkerApplier
+    {
+        private readonly SecretFreeMarkerApplyOutcome _outcome;
+        public int CallCount { get; private set; }
+        public SecretFreeMarkerApplyRequest? LastRequest { get; private set; }
+        public List<string> AppliedVaults { get; } = new();
+
+        private FakeMarkerApplier(SecretFreeMarkerApplyOutcome outcome) => _outcome = outcome;
+
+        public static FakeMarkerApplier Success()
+            => new(new SecretFreeMarkerApplyOutcome.Applied(VaultTagWasAlreadyPresent: false));
+
+        public static FakeMarkerApplier AlreadyApplied()
+            => new(new SecretFreeMarkerApplyOutcome.Applied(VaultTagWasAlreadyPresent: true));
+
+        public static FakeMarkerApplier Failure(string diagnostic)
+            => new(new SecretFreeMarkerApplyOutcome.Failure(diagnostic));
+
+        public Task<SecretFreeMarkerApplyOutcome> ApplyAsync(
+            SecretFreeMarkerApplyRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            AppliedVaults.Add(request.KeyVaultName);
+            return Task.FromResult(_outcome);
         }
     }
 }

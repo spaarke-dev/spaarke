@@ -284,14 +284,25 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 "complete before H7 dispatches — this is the source for sprk_SharePointEmbeddedContainerId.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (string.IsNullOrWhiteSpace(_options.ClientSecret))
+        // A44.5 (task 205i): chain-aware secret guard. The secret is REQUIRED
+        // only when the FR-39 ordered credential chain's primary is
+        // ClientSecret (legacy/unconfigured default — prong-3 unmigrated env,
+        // preserving task-142 semantics). Under the MI-FIC-first secret-free
+        // chain (§10.2 live contract) an EMPTY slot is the SIGNAL (auth-v4
+        // §9.1) — the writer resolves its credential via the FR-39 factory
+        // (WorkerDataverseCredentialFactory) instead; never fail here, and
+        // NEVER accept a sentinel value as a workaround (opaque AADSTS7000215).
+        if (_options.Credentials.ClientSecretIsRequiredFirst(EnvVarValuesOptions.SectionName)
+            && string.IsNullOrWhiteSpace(_options.ClientSecret))
         {
             var diagnostic =
-                "EnvVarValuesOptions:ClientSecret is not populated. H7 authenticates to the target Dataverse " +
+                "EnvVarValuesOptions:ClientSecret is not populated and the FR-39 credential chain requires it " +
+                "(primary = ClientSecret — the legacy/unconfigured default). H7 authenticates to the target Dataverse " +
                 "env via confidential-client credentials against the BFF app-reg (same pattern H6 uses) — the " +
                 "MI-Dataverse App User (H10) does not exist yet at H7's point in the DAG. Wave C5 wires this to " +
                 "a Key Vault reference; wave C4 requires operator to set the app-setting explicitly. " +
-                "Handler did NOT invoke the writer.";
+                "Secret-free environments instead configure EnvVarValues:Credentials:Order:0=ManagedIdentityFederated " +
+                "(A44.5). Handler did NOT invoke the writer.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 EnvVarValuesRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -341,7 +352,10 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
             TargetDataverseUrl: state.DataverseEnvUrl!,
             TenantId: tenantId,
             ClientId: state.BffAppRegId!,
-            ClientSecret: _options.ClientSecret!,
+            // A44.5: may be null/empty on secret-free envs — the writer's
+            // FR-39 factory (WorkerDataverseCredentialFactory) selects MI-FIC
+            // from the configured chain; empty is the signal, never a sentinel.
+            ClientSecret: _options.ClientSecret,
             Values: values);
 
         EnvVarValuesWriteOutcome writeOutcome;

@@ -36,6 +36,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A38c secret-free marker pre-check gate (see scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header
+# for full rationale + §11 justification). Gates ServiceBus-ConnectionString + AiSearch--AdminKey
+# seeding ONLY — per §6.5 owner-narrowed disposition, this script is "aspirational-not-active until
+# a real prod exists" (no live production environment as of 2026-08-25), so this gate enforces the
+# correct forward-looking behavior for when prod comes online, not against a currently-active estate.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
+
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "  Production Key Vault Secret Seeding" -ForegroundColor Cyan
@@ -120,6 +127,13 @@ Set-VaultSecret -Name "Redis-ConnectionString" `
     -Description "Azure Cache for Redis connection string (update after Redis provisioning)" `
     -IsPlaceholder $true
 
+# ── A38c secret-free marker gate ────────────────────────────────────────────────────────────
+# ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed 2026-08-24).
+# Seeding a placeholder here on a secret-free vault would re-create the exact hazard the migration
+# removed (see the BFF-API-ClientSecret note above this file, lines ~96-107) — an app setting that
+# LOOKS like the credential, inviting an operator to "fix" auth by populating it for real later.
+Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $VaultName
+
 Set-VaultSecret -Name "ServiceBus-ConnectionString" `
     -Value "placeholder-servicebus-not-yet-provisioned" `
     -Description "Azure Service Bus connection string (update after Service Bus provisioning)" `
@@ -174,6 +188,11 @@ Set-VaultSecret -Name "ai-docintel-key" `
 Set-VaultSecret -Name "ai-search-endpoint" `
     -Value "https://spaarke-search-prod.search.windows.net/" `
     -Description "Azure AI Search endpoint"
+
+# ── A38c secret-free marker gate ────────────────────────────────────────────────────────────
+# AiSearch--AdminKey is an auth-v4-retired credential (§10.1 Δ2 — BFF runtime moves to managed-
+# identity AI Search auth). Same rationale as the ServiceBus-ConnectionString gate above.
+Assert-SpaarkeSecretFreeGateNotTripped -SecretName "AiSearch--AdminKey" -KeyVaultName $VaultName
 
 Set-VaultSecret -Name "AiSearch--AdminKey" `
     -Value "placeholder-search-key" `

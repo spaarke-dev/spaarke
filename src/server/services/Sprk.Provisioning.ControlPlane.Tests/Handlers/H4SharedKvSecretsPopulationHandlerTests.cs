@@ -477,6 +477,157 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         failure.RejectionCode.Should().Be(SharedKvSecretsPopulationRejectionCodes.RunNotFound);
     }
 
+    // =========================================================================
+    // Row A38a (task 205a, 2026-08-25) — from-shared-service omit + marker
+    // =========================================================================
+
+    [Fact]
+    public async Task A38aS1_SecretFreeTrue_SbConnAndAdminKey_NeitherExtractedNorWritten_OthersStillWritten()
+    {
+        // The from-shared-service half of the A38a omit: SB-conn + admin-key
+        // travel through H4-shared per manifest.yaml (:255/:433). With a
+        // manifest that (like an emergency StaticKvSecretManifest revert)
+        // still serves them, the handler-level omit MUST hold on its own.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-a38as1");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(new Dictionary<string, string>
+        {
+            ["cognitiveservices:sprksharedprod-openai"] = "extracted-openai-key1",
+            ["cognitiveservices:sprksharedprod-docintel"] = "extracted-docintel-key1",
+            ["redis:sprksharedprod-redis"] = "extracted-redis-conn",
+            ["storage:sprksharedprodsa"] = "extracted-storage-conn",
+            // Deliberately NO canned values for search / servicebus — an
+            // extraction attempt for either would throw in FakeExtractor,
+            // proving the omit short-circuits BEFORE extraction.
+        });
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        extractor.CallCount.Should().Be(4, "the two omitted entries are never extracted");
+        accessor.WrittenSecrets.Keys.Should().BeEquivalentTo(new[]
+        {
+            "AzureOpenAI-ApiKey", "DocumentIntelligence-ApiKey",
+            "Redis-ConnectionString", "Storage-ConnectionString",
+        });
+        accessor.WrittenSecrets.Keys.Should().NotContain("ServiceBus-ConnectionString");
+        accessor.WrittenSecrets.Keys.Should().NotContain("AiSearch--AdminKey");
+    }
+
+    [Fact]
+    public async Task A38aS2_Q3PathARollback_AllSixWrittenAgain()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-a38as2");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(SixF19Entries.ToDictionary(
+            e => e.ServiceRef, e => $"value-{e.Canonical}"));
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor,
+            options: new KvSecretsPopulationOptions
+            {
+                RequireSecretFreeIdentity = true,
+                SecretFreeIdentityRollback = true,
+            });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        accessor.WriteCount.Should().Be(6, "Q3 Path A rollback re-includes the omitted entries");
+    }
+
+    [Fact]
+    public async Task A38aS3_OperatorFicOmitParameter_HonoredForSharedEntries()
+    {
+        // FR-39 parity with H4: the SAME ficOmitSecretNames run parameter
+        // drives the shared flow (task 125 "no special-casing").
+        var run = BuildRun();
+        run.Parameters.NonSecret[H4SharedKvSecretsPopulationHandler.FicOmitSecretNamesParameterKey] =
+            "Redis-ConnectionString";
+        var repo = new FakeRepository(run, "etag-a38as3");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(SixF19Entries
+            .Where(e => e.Canonical != "Redis-ConnectionString")
+            .ToDictionary(e => e.ServiceRef, e => $"value-{e.Canonical}"));
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        extractor.CallCount.Should().Be(5);
+        accessor.WrittenSecrets.Keys.Should().NotContain("Redis-ConnectionString");
+    }
+
+    [Fact]
+    public async Task A38aS4_SecretFreeTrue_MarkerAppliedToSharedVault()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-a38as4");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(SixF19Entries
+            .Where(e => e.Canonical is not ("ServiceBus-ConnectionString" or "AiSearch--AdminKey"))
+            .ToDictionary(e => e.ServiceRef, e => $"value-{e.Canonical}"));
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor,
+            markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(1);
+        marker.LastRequest!.KeyVaultName.Should().Be(SharedKeyVaultName);
+        marker.LastRequest.TenantId.Should().Be(TenantId);
+    }
+
+    [Fact]
+    public async Task A38aS5_MarkerFailure_FailsResumable_WithSharedMarkerRejectionCode()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-a38as5");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(SixF19Entries
+            .Where(e => e.Canonical is not ("ServiceBus-ConnectionString" or "AiSearch--AdminKey"))
+            .ToDictionary(e => e.ServiceRef, e => $"value-{e.Canonical}"));
+        var marker = FakeMarkerApplier.Failure("vault tag read/apply failed (HTTP 403)");
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor,
+            markerApplier: marker,
+            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SharedKvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed);
+    }
+
+    [Fact]
+    public async Task A38aS6_SecretFreeFalse_MarkerNotApplied_AllSixWritten_NoRegression()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-a38as6");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var extractor = FakeExtractor.Static(SixF19Entries.ToDictionary(
+            e => e.ServiceRef, e => $"value-{e.Canonical}"));
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, manifest, accessor, FakeArmProbe.Match(), extractor,
+            markerApplier: marker);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(0);
+        accessor.WriteCount.Should().Be(6);
+    }
+
     // ---------- helpers ----------
 
     private static H4SharedKvSecretsPopulationHandler BuildHandler(
@@ -484,11 +635,14 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         IKvSecretManifest manifest,
         ISharedKvSecretAccessor accessor,
         IArmKeyVaultRefProbe probe,
-        ISourceServiceKeyExtractor extractor)
+        ISourceServiceKeyExtractor extractor,
+        FakeMarkerApplier? markerApplier = null,
+        KvSecretsPopulationOptions? options = null)
     {
         return new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
-            Options.Create(new KvSecretsPopulationOptions()),
+            markerApplier ?? FakeMarkerApplier.Success(),
+            Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4SharedKvSecretsPopulationHandler>.Instance);
     }
 
@@ -503,6 +657,7 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         var logger = new CapturingLogger<H4SharedKvSecretsPopulationHandler>(logs);
         var h = new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
+            FakeMarkerApplier.Success(),
             Options.Create(new KvSecretsPopulationOptions()),
             logger);
         return (h, logs);
@@ -662,6 +817,30 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         {
             CallCount++;
             return Task.FromResult(_result);
+        }
+    }
+
+    /// <summary>Row A38a — stub ISecretFreeMarkerApplier (per-file copy, matching this file's private-fakes convention).</summary>
+    private sealed class FakeMarkerApplier : ISecretFreeMarkerApplier
+    {
+        private readonly SecretFreeMarkerApplyOutcome _outcome;
+        public int CallCount { get; private set; }
+        public SecretFreeMarkerApplyRequest? LastRequest { get; private set; }
+
+        private FakeMarkerApplier(SecretFreeMarkerApplyOutcome outcome) => _outcome = outcome;
+
+        public static FakeMarkerApplier Success()
+            => new(new SecretFreeMarkerApplyOutcome.Applied(VaultTagWasAlreadyPresent: false));
+
+        public static FakeMarkerApplier Failure(string diagnostic)
+            => new(new SecretFreeMarkerApplyOutcome.Failure(diagnostic));
+
+        public Task<SecretFreeMarkerApplyOutcome> ApplyAsync(
+            SecretFreeMarkerApplyRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
         }
     }
 

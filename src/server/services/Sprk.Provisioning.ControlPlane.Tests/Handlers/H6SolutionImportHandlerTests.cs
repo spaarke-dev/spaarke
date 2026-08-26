@@ -233,6 +233,36 @@ public sealed class H6SolutionImportHandlerTests
         importer.CallCount.Should().Be(0);
     }
 
+    // ---------- A44.5 (task 205i): FR-39 secret-free chain ----------
+
+    /// <summary>
+    /// Under the MI-FIC-first secret-free chain (§10.2 live contract:
+    /// SolutionImportOptions:Credentials:Order:0=ManagedIdentityFederated) an
+    /// EMPTY secret slot does NOT fail the run — H6 proceeds to the importer,
+    /// which resolves MI-FIC via WorkerDataverseCredentialFactory. Empty is
+    /// the signal (auth-v4 §9.1); never a sentinel.
+    /// </summary>
+    [Fact]
+    public async Task SecretFree_MiFicFirstChain_EmptySecret_ProceedsToImporterAndSucceeds()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a44");
+        var importer = FakeSolutionImporter.Success();
+        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())),
+            clientSecret: null,
+            credentials: new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions
+            {
+                Order = { nameof(Sprk.Provisioning.ControlPlane.Handlers.Credentials.CredentialKind.ManagedIdentityFederated) },
+                RequireSecretFreeIdentity = true,
+            });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        importer.CallCount.Should().Be(1);
+    }
+
     // ---------- T7 retired-solution catalog match (ADR-039) ----------
 
     [Fact]
@@ -721,13 +751,18 @@ EventsPage               Events Page              1.0.0.0           77777777-888
         ISolutionCatalog catalog,
         ISolutionImporter importer,
         ISolutionVerifier verifier,
-        string? clientSecret = ClientSecret)
+        string? clientSecret = ClientSecret,
+        Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions? credentials = null)
     {
         var options = Options.Create(new SolutionImportOptions
         {
             ClientSecret = clientSecret,
             ImportTimeout = TimeSpan.FromSeconds(10),
             VerifierCallTimeout = TimeSpan.FromSeconds(5),
+            // A44.5: default (unconfigured) = legacy [ClientSecret] chain —
+            // every pre-existing test in this file keeps task-141/204a
+            // semantics unchanged.
+            Credentials = credentials ?? new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions(),
         });
         return new H6SolutionImportHandler(
             repo, catalog, importer, verifier, options,
