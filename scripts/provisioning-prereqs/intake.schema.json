@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/provisioning-intake.schema.json",
+  "title": "Spaarke Provisioning Intake",
+  "description": "Batch-mode intake schema for /provision-environment skill Step 1 (`--batch <path.json>`). Authored by customer-provisioning-orchestration-r1 task 203c per punch-list row A03. Consumed by the skill's Step 1.0 batch-mode path (validated with ajv-cli or equivalent Draft 2020-12 validator BEFORE POST /api/runs). Section 1f (environmentId auto-create) still runs when `environmentId` is omitted / null.",
+  "type": "object",
+  "required": [
+    "customerId",
+    "tenantId",
+    "tenancyModel",
+    "environment",
+    "profile"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "customerId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,31}$",
+      "description": "kebab-case, 3-32 chars, starts with letter (matches skill Step 1a and L2 API validation)"
+    },
+    "tenantId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Customer Entra tenant ID (Model 2) or Spaarke tenant ID (Model 1). NEVER default — enforces §4D I1 (FR-28) tenant-isolation invariant."
+    },
+    "tenancyModel": {
+      "type": "string",
+      "enum": ["Model1Shared", "Model2Dedicated"],
+      "description": "Model1Shared = shared trial/SMB tier; Model2Dedicated = dedicated sub + dedicated Dataverse + admin-consent flow"
+    },
+    "environment": {
+      "type": "string",
+      "enum": ["dev", "demo", "prod"],
+      "description": "Session-level env — determines which L2 API base + which Bicep parameter file (NOT the L2 profile enum below)"
+    },
+    "profile": {
+      "type": "string",
+      "enum": [
+        "spaarke-hosted-model1-trial",
+        "spaarke-hosted-model2",
+        "customer-owned-model2"
+      ],
+      "description": "L2 API profile enum — MUST match L2 accepted values EXACTLY (per DS-5 c6-1). Any drift = L2 400."
+    },
+    "environmentId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "sprk_dataverseenvironment record GUID. Omit or null → skill Step 1f auto-creates the placeholder via Dataverse MCP (primary) or `pac data create` (fallback)."
+    },
+    "region": {
+      "type": "string",
+      "description": "Azure region for platform resources. Canonical Spaarke strategy: westus2 for platform, westus3 for OpenAI (per user-memory reference_azure_fresh_sub_regional_gotchas). Optional — inferred from tenancyModel default when omitted.",
+      "examples": ["westus2", "westus3", "eastus2"]
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
+      "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
+    },
+    "operatorUpn": {
+      "type": "string",
+      "format": "email",
+      "description": "Operator UPN for audit trail. Optional — if omitted, resolved from `az ad signed-in-user show`."
+    },
+    "skipExternalPrereqs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt-in bypass of Step 0.5 (prereqs.yaml iteration). Use ONLY when operator has manually verified every once_per_tenant + once_per_subscription + once_per_env prereq per docs/guides/PROVISIONING-PREREQUISITES.md. Documented in lessons-learned.md when set true."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form intake notes archived to provisioning-runs/{customerId}-{runId}/intake.md. Optional."
+    }
+  },
+  "allOf": [
+    {
+      "description": "tenancyModel × profile invariant — Model1Shared pairs ONLY with spaarke-hosted-model1-trial",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model1Shared" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "profile": { "const": "spaarke-hosted-model1-trial" }
+        }
+      }
+    },
+    {
+      "description": "tenancyModel × profile invariant — Model2Dedicated pairs with spaarke-hosted-model2 or customer-owned-model2",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model2Dedicated" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "profile": { "enum": ["spaarke-hosted-model2", "customer-owned-model2"] }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "customerId": "trial1",
+      "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "tenancyModel": "Model1Shared",
+      "environment": "dev",
+      "profile": "spaarke-hosted-model1-trial",
+      "region": "westus2",
+      "tier": "shared-trial",
+      "operatorUpn": "ralph.schroeder@spaarke.com",
+      "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING)."
+    },
+    {
+      "customerId": "acme-corp",
+      "tenantId": "12345678-1234-1234-1234-123456789012",
+      "tenancyModel": "Model2Dedicated",
+      "environment": "prod",
+      "profile": "customer-owned-model2",
+      "region": "westus2",
+      "tier": "dedicated",
+      "operatorUpn": "ralph.schroeder@spaarke.com"
+    }
+  ]
+}

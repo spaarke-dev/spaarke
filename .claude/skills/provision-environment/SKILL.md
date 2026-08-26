@@ -171,9 +171,159 @@ If any FAIL: report the failure + resolution instructions + HARD STOP.
 
 ---
 
+### Step 0.5: External Prerequisites Iteration (per `scripts/provisioning-prereqs/prereqs.yaml`) — HARD STOP on any failure
+
+Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
+
+#### 0.5a. YAML parser requirement
+
+```powershell
+# One-time install (idempotent); powershell-yaml provides ConvertFrom-Yaml.
+if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
+  Install-Module powershell-yaml -Scope CurrentUser -Force -Confirm:$false
+}
+Import-Module powershell-yaml
+```
+
+If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
+
+#### 0.5b. Iterate the manifest
+
+```powershell
+$repoRoot = git rev-parse --show-toplevel
+$manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
+$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Yaml
+
+# Determine which scopes are checkable this early
+$scopesToCheck = @('once_per_tenant', 'once_per_subscription')
+if ($env) { $scopesToCheck += 'once_per_env' }  # $env from arg or batch intake
+
+$results = @()
+foreach ($prereq in $manifest.prereqs) {
+  if ($prereq.scope -notin $scopesToCheck) { continue }
+
+  # Substitute {env} placeholder if present in check_recipe.cli
+  $recipe = $prereq.check_recipe.cli -replace '\{env\}', $env
+
+  Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
+  try {
+    $output = Invoke-Expression $recipe 2>&1 | Out-String
+    # Best-effort compare to check_recipe.expect. Deterministic recipes
+    # (single-value tsv) are exact-match; free-form recipes are non-empty
+    # check only. Extend classification here if false-positives surface.
+    $expected = $prereq.check_recipe.expect
+    $passed = if ($expected -match 'non-empty' -or $expected -match 'HTTP 200') {
+      -not [string]::IsNullOrWhiteSpace($output.Trim())
+    } elseif ($expected -match "``([^``]+)``") {
+      $output -match $Matches[1]
+    } else {
+      -not [string]::IsNullOrWhiteSpace($output.Trim())
+    }
+    $results += @{
+      Id = $prereq.id
+      Name = $prereq.name
+      Scope = $prereq.scope
+      Passed = $passed
+      Output = $output.Trim()
+      Consequence = $prereq.consequence_of_absence
+      Remediation = $prereq.remediation
+    }
+  } catch {
+    $results += @{
+      Id = $prereq.id
+      Name = $prereq.name
+      Scope = $prereq.scope
+      Passed = $false
+      Output = $_.Exception.Message
+      Consequence = $prereq.consequence_of_absence
+      Remediation = $prereq.remediation
+    }
+  }
+}
+```
+
+#### 0.5c. Report + HARD STOP
+
+Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
+
+```
+EXTERNAL PREREQUISITES (from scripts/provisioning-prereqs/prereqs.yaml)
+  [PASS] PRQ-T-01 SPE container-type registered on Spaarke tenant
+  [PASS] PRQ-T-02 SPE container-type application permissions granted
+  [PASS] PRQ-T-07 Multitenant BFF app-reg (Model 1 tier only)
+  [PASS] PRQ-S-01 Azure subscription billing-agreement type known
+  [PASS] PRQ-S-02 Azure subscription has a Support Plan (Basic or better)
+  [FAIL] PRQ-S-03 Resource-provider registration for required namespaces
+    Output:      Microsoft.CognitiveServices=NotRegistered
+    Consequence: F6 — az deployment sub create fails on unregistered provider even after az provider register reports success.
+    Remediation: az provider register --namespace Microsoft.CognitiveServices, then poll every 30s for 5 min. See docs/guides/PROVISIONING-PREREQUISITES.md#PRQ-S-03.
+    HARD STOP — resolve this prereq before proceeding.
+```
+
+`-SkipStep0_5` flag bypasses iteration entirely (also settable via `"skipExternalPrereqs": true` in batch intake). Use ONLY when operator has manually verified every applicable prereq. The choice is recorded in Step 7 lessons-learned.md.
+
+---
+
 ### Step 1: Interactive Intake
 
 Collect the 4 inputs the L2 REST API requires. If the operator passed `{customerId}` as a slash-command arg, pre-fill it. Otherwise ask.
+
+#### 1.0 Batch mode (`--batch <path.json>`) — added by task 203c per punch-list row A03
+
+For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
+
+```powershell
+# Skill invoked with --batch flag: $BatchIntakeFile is the JSON path
+if ($BatchIntakeFile) {
+  $repoRoot = git rev-parse --show-toplevel
+  $schemaPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/intake.schema.json'
+
+  # Validate against schema. Preferred: ajv-cli (npm i -g ajv-cli ajv-formats).
+  # Fallback: any Draft 2020-12 validator the operator has (e.g., check-jsonschema).
+  $validationOutput = & ajv validate `
+    --spec draft2020 --strict false `
+    -s $schemaPath -d $BatchIntakeFile 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Batch intake failed JSON Schema validation ($schemaPath):`n$validationOutput"
+    exit 1
+  }
+
+  # Pre-fill from validated intake (skips 1a-1e interactive prompts)
+  $intake        = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
+  $customerId    = $intake.customerId
+  $tenantId      = $intake.tenantId
+  $tenancyModel  = $intake.tenancyModel
+  $environment   = $intake.environment
+  $profile       = $intake.profile
+  $environmentId = $intake.environmentId       # may be null → 1f auto-creates
+  $region        = $intake.region              # optional
+  $tier          = $intake.tier                # optional
+  $operatorUpn   = if ($intake.operatorUpn) { $intake.operatorUpn } `
+                   else { az ad signed-in-user show --query userPrincipalName -o tsv }
+  $script:SkipInteractiveIntake = $true        # gates 1a-1e prompts below
+  $script:SkipStep0_5 = [bool]$intake.skipExternalPrereqs  # honors batch opt-in
+
+  Write-Host "Batch intake loaded from $BatchIntakeFile (schema-validated)."
+}
+```
+
+**Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e are non-interactive (values already assigned from the validated JSON). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
+
+Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
+
+```json
+{
+  "customerId": "trial1",
+  "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+  "tenancyModel": "Model1Shared",
+  "environment": "dev",
+  "profile": "spaarke-hosted-model1-trial",
+  "region": "westus2",
+  "tier": "shared-trial"
+}
+```
+
+Interactive-mode operators skip this section entirely — proceed to 1a.
 
 #### 1a. `customerId` (required)
 
@@ -753,6 +903,76 @@ If MCP is disconnected, the fallback matrix triggers `pac data update` OR raw We
     [ ] Confirm cost drift alerts configured in Azure
     [ ] Update project #2 (portfolio board) with the new customer entry
 ```
+
+---
+
+### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
+
+Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Succeeded`, `Failed`, `Quarantined`, `Drifted`, or manual-abort. Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
+
+Trigger conditions (each writes a distinct postmortem):
+- `Succeeded` (Ready reached) — capture what worked + manual gates encountered + recommendations
+- `Failed` (any handler unrecoverable per §4C taxonomy) — capture root cause + fix location + blocks-future-runs flag
+- `Quarantined` (rollback classified `NeedsHumanIntervention`) — capture quarantine reason + owner
+- `Drifted` (H13 detected registry drift post-run) — capture drift shape + reconciliation plan
+- Manual abort (operator stopped mid-run) — capture stop point + rationale
+
+#### 7a. Copy template + prefill run metadata
+
+```powershell
+$runDir       = "provisioning-runs/$customerId-$runId"
+$lessonsPath  = Join-Path $runDir 'lessons-learned.md'
+$templatePath = Join-Path (git rev-parse --show-toplevel) 'provisioning-runs/_templates/lessons-learned.md'
+
+Copy-Item -Path $templatePath -Destination $lessonsPath -Force
+
+# Substitute template placeholders with actual run metadata
+$content = Get-Content $lessonsPath -Raw
+$content = $content -replace '\{customerId\}', $customerId
+$content = $content -replace '\{runId\}', $runId
+$content = $content -replace '\{operatorUpn\}', $operatorUpn
+$content = $content -replace '\{ts\}', (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')
+Set-Content -Path $lessonsPath -Value $content
+```
+
+#### 7b. Interactive postmortem (or batch mode: `--postmortem-file <path.md>`)
+
+Present the operator with each template section and collect responses. In batch mode, read the operator-authored postmortem verbatim + append auto-populated metadata (git-sha, INDEX.md lessons-count).
+
+Sections (per template):
+- **What went right** — 3-5 concrete bullets citing handler + timestamp
+- **What went wrong** — normalized `### Lesson L01/L02/...` shape with Symptom / Root cause / Fix applied / Landing spot / Blocks future runs / Punch-list class
+- **New prereqs to codify** — proposed additions to `PROVISIONING-PREREQUISITES.md` + `prereqs.yaml` (Step 0.5 picks them up automatically on the NEXT run)
+- **New patterns to add** — proposed additions to `.claude/patterns/provisioning/`
+- **Recommendations for next run** — concrete actionable items (avoid vague aspirations)
+- **Cross-run pattern** — first-observed / occurrence-count / recommended-promotion
+- **Sign-off** — author + reviewer + git-sha
+
+The Step 0.5 iteration result (which prereqs PASSed, which were skipped via `-SkipStep0_5` / `skipExternalPrereqs`, which FAILed) MUST be summarized under **What went right** or **What went wrong** as appropriate — this makes Step 0.5 outcomes visible in the cross-run audit corpus.
+
+#### 7c. Update `provisioning-runs/INDEX.md`
+
+Append this run's lesson-count so the cross-run audit slash command `/audit-provisioning-lessons` (planned; task 203-followup) can roll up recurring themes.
+
+```powershell
+$lessonCount = (Select-String -Path $lessonsPath -Pattern '^### Lesson ').Count
+$indexRow = "| $customerId-$runId | $(Get-Date -Format 'yyyy-MM-dd') | $runOutcome | $lessonCount |"
+Add-Content -Path (Join-Path (git rev-parse --show-toplevel) 'provisioning-runs/INDEX.md') -Value $indexRow
+```
+
+#### 7d. Report + commit gate
+
+```
+POSTMORTEM CAPTURED
+
+  Lessons written: provisioning-runs/{customerId}-{runId}/lessons-learned.md
+  Lesson count:    {N}
+  INDEX.md row:    | {customerId}-{runId} | {date} | {outcome} | {N} |
+
+  Next step: commit the entire {customerId}-{runId}/ folder (Step 6b handoff report + this postmortem + all artifacts). Once committed, this run's postmortem contributes to the cross-run audit corpus (/audit-provisioning-lessons roll-up).
+```
+
+**MANDATORY** — skipping is FORBIDDEN even for successful runs. An operator explicitly declining ("no meaningful lessons for this run") still writes a 3-line lessons-learned.md stating that + commits it (audit trail). Silent skip regresses the entire two-level lessons process.
 
 ---
 
