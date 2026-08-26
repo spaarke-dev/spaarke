@@ -279,6 +279,48 @@ function qs(params: Record<string, string | number | boolean | undefined | null>
 // speApiClient - one object containing all endpoint groups
 // ---------------------------------------------------------------------------
 
+/**
+ * A container type exactly as the BFF sends it.
+ *
+ * The wire calls the identifier `id`; the client model calls it `containerTypeId`. Nothing mapped
+ * between them until 2026-08-26, so `ct.containerTypeId` was `undefined` on every container type in
+ * the app. Display survived (`displayName` and the billing fields happen to match), which is why the
+ * list LOOKED correct — but anything keyed on the identifier silently failed. The Register wizard was
+ * the visible casualty: every `<Option value={ct.containerTypeId}>` carried `undefined`, so the
+ * dropdown could not resolve a selection and the operator "could not select a container type".
+ *
+ * Mapping in this layer keeps the wire name where it belongs and lets component code go on using the
+ * domain name.
+ */
+interface WireContainerType {
+  id: string;
+  displayName: string;
+  description?: string;
+  billingClassification?: string;
+  billingStatus?: string;
+  createdDateTime?: string;
+  owningAppId?: string;
+  expiryDateTime?: string;
+  settings?: unknown;
+  /** Present only if a future server revision starts sending the domain name too. */
+  containerTypeId?: string;
+}
+
+/**
+ * Projects the wire shape onto the client model.
+ *
+ * `azureTenantId` and `isRegistered` are NOT set here: the endpoint does not send them. They stay
+ * undefined so the UI can say "Unknown" — which is what the Registered column already does, and is
+ * the honest answer, unlike defaulting to `false` ("this type is not registered") on the strength of
+ * a field the server never sent.
+ */
+function mapContainerType(w: WireContainerType): ContainerType {
+  return {
+    ...(w as unknown as ContainerType),
+    containerTypeId: w.containerTypeId ?? w.id,
+  };
+}
+
 export const speApiClient = {
   // =========================================================================
   // Configuration - Business Units
@@ -392,8 +434,9 @@ export const speApiClient = {
      * List all container types for the given config.
      */
     list(configId: string): Promise<ContainerType[]> {
-      return get<{ items: ContainerType[]; count: number }>("/spe/containertypes" + qs({ configId }))
-        .then(r => r.items);
+      return get<{ items: WireContainerType[]; count: number }>(
+        "/spe/containertypes" + qs({ configId }),
+      ).then((r) => r.items.map(mapContainerType));
     },
 
     /**
@@ -401,7 +444,9 @@ export const speApiClient = {
      * Get details for a single container type.
      */
     get(typeId: string, configId: string): Promise<ContainerType> {
-      return get<ContainerType>("/spe/containertypes/" + typeId + qs({ configId }));
+      return get<WireContainerType>(
+        "/spe/containertypes/" + typeId + qs({ configId }),
+      ).then(mapContainerType);
     },
 
     /**
@@ -412,7 +457,10 @@ export const speApiClient = {
       configId: string,
       body: { displayName: string; billingClassification: string },
     ): Promise<ContainerType> {
-      return post<typeof body, ContainerType>("/spe/containertypes" + qs({ configId }), body);
+      return post<typeof body, WireContainerType>(
+        "/spe/containertypes" + qs({ configId }),
+        body,
+      ).then(mapContainerType);
     },
 
     /**
@@ -424,10 +472,10 @@ export const speApiClient = {
       configId: string,
       body: Record<string, unknown>,
     ): Promise<ContainerType> {
-      return put<Record<string, unknown>, ContainerType>(
+      return put<Record<string, unknown>, WireContainerType>(
         "/spe/containertypes/" + typeId + "/settings" + qs({ configId }),
         body,
-      );
+      ).then(mapContainerType);
     },
 
     /**
