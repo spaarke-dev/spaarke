@@ -113,22 +113,27 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 
 | Status | Task | Wave | Why | Deps | ∥-safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔄 **070** | **Gate `POST /api/ai/search`** — authorize the parent for `scope=entity`, refuse `scope=all`, stop emitting `driveId`/`speFileId` | 1 | **Exploitable NOW.** The filter returns allow for *every* scope incl. `default`. Any authenticated non-admin gets tenant-wide document names, AI summaries, TL;DRs and SPE pointers. Never touches SPE, so container ACLs are irrelevant | 046 | ❌ | **opus** | **xhigh** |
-| 🔲 **071** | **Retire the drive-keyed OBO routes** — delete preferred, gate as fallback | 1 | `AddDocumentAuthorizationFilter` appears **zero** times in `OBOEndpoints.cs`; read, PATCH, **DELETE**, enumerate. Under broker-only they have no legitimate purpose | 046 | ✅ | **opus** | high |
+| ✅ **070** | **Gate `POST /api/ai/search`** — authorize the parent for `scope=entity`, refuse `scope=all`, stop emitting `driveId`/`speFileId` | 1 | **Exploitable NOW.** The filter returns allow for *every* scope incl. `default`. Any authenticated non-admin gets tenant-wide document names, AI summaries, TL;DRs and SPE pointers. Never touches SPE, so container ACLs are irrelevant | 046 | ❌ | **opus** | **xhigh** |
+| ✅ **071** | **Retire the drive-keyed OBO routes** — delete preferred, gate as fallback | 1 | `AddDocumentAuthorizationFilter` appears **zero** times in `OBOEndpoints.cs`; read, PATCH, **DELETE**, enumerate. Under broker-only they have no legitimate purpose | 046 | ✅ | **opus** | high |
 | 🔲 **072** | **Gate `share-link`** + bounded expiry + drop `scope=anonymous` | 1 | The one route on the group with no filter; mints a **non-expiring, anyone-with-the-link** URL. Task 002 closed its eight siblings and missed it | 046 | ❌ | **opus** | high |
 | 🔲 **073** | **Authorize container upload** against the owning record | 1 | **Exploitable NOW.** `PUT /api/containers/{containerId}/files/{*path}` takes the container id off the route and writes **app-only (MI)** — no container ACL needed to abuse it | 046 | ✅ | **opus** | high |
-| 🔲 **074** | **ArchTest forcing function** — an ungated document/Dataverse route fails the build | 1 | ⭐ **Highest-value task in both waves.** Enforcement is by enumeration and the count has been wrong *every* time: ~15 estimated → 22 found → then `/api/ai/search` + `share-link` found *after* that sweep → then 5 more in `OBOEndpoints`. Precedent: CORS-drift gate `34ef54542` | 046 | ✅ | **opus** | **xhigh** |
+| ✅ **074** | **ArchTest forcing function** — an ungated document/Dataverse route fails the build | 1 | ⭐ **Highest-value task in both waves.** Enforcement is by enumeration and the count has been wrong *every* time: ~15 estimated → 22 found → then `/api/ai/search` + `share-link` found *after* that sweep → then 5 more in `OBOEndpoints`. Precedent: CORS-drift gate `34ef54542`. **Has now produced 3 holes: 077, 078, 081** | 046 | ✅ | **opus** | **xhigh** |
 | 🔲 **075** | **Record-aware container resolver** — secure record → its OWN `sprk_containerid`; else BU cascade; **absent secure container FAILS CLOSED** | 2 | Provisioning stamps the container (021) and **nothing reads it**, so secure content lands in shared containers. SPE is **additive-only** — *"you can't break inheritance on arbitrary files"* — so no per-item permission can ever retract that. This seam IS the document guarantee | 046 | ❌ | **opus** | **xhigh** |
 | 🔲 **076** | **Route every call site through the resolver** + stop the wizard stamping secure records | 2 | 7+ client sites plus the server ingest `ArchiveContainerId` (the one easiest to miss — no client, no wizard). One missed site = permanent isolation failure for that path | **075** | ❌ | sonnet | high |
 
 | 🔲 **077** | **Authorize `POST /api/ai/search/records`** — the twin of 070's defect, on the same route group | 1 | **Exploitable NOW.** `RecordSearchAuthorizationFilter` reads `tid`, writes an audit log, calls `next()`. Authorizes nothing. Leaks record **names** tenant-wide — for a secure matter the name is often the sensitive fact | **070** | ❌ | **opus** | **xhigh** |
 | 🔲 **078** | **Authorize `GET /api/v1/containers/{containerId}/documents`** | 1 | Lists **any** container's documents behind `RequireAuthorization()` alone — the read-side twin of 073. Needs 075's container→record mapping | **075** | ✅ | **opus** | high |
+| 🔲 **079** | **Gate the two drive-keyed OBO *version* routes** (`DocumentVersionEndpoints.cs:44,84`) | 1 | Two MORE routes of 071's shape, incl. **prior-version BYTES**. Unlike 071's four these have a **live caller** (`versionHistory.ts:81`), so they must be GATED not deleted. Found by a **caller** inventory, not a route inventory. No shipping dependency (owner, 2026-08-26) | 071 | ✅ | **opus** | high |
+| ✅ **080** | **Restore cross-record search** — `scope=all` FILTERED per row, not refused | 1 | 070 refused `scope=all` on the premise "no caller needs it". **That premise was FALSE** — the code page emits it for the "All" row, for blank-label rows, and for *every* search after the user types a query. Authorizes the PAGE, not the corpus, so no dependency on 031 | **070** | ❌ | **opus** | **xhigh** |
+| 🔲 **081** | **Scope the tenant-container-resolver diagnostic to the caller's own tenant** | 1 | **Live on master.** Takes `tenantId` from the QUERY STRING and treats the caller's JWT `tid` as a mere *fallback* → tenant A resolves tenant B's SPE container id. The 400-vs-200 "not served by this stamp" split is also a **tenant-enumeration oracle**. Found by 074's census forcing a new-file classification | — | ✅ | sonnet | high |
 
 **Wave 1 (070–074) is parallel-capable** — 071/073/074 are `parallel-safe: true`; 070 and 072 touch shared authorization surface and serialize. **Wave 2**: 075 → 076 strictly. Wave 1 and Wave 2 can run concurrently.
 
 **077 and 078 were added mid-wave on 2026-08-25**, both surfaced by task 074's forcing function on its **first run** — on a surface this project had already enumerated by hand four times (~15 estimated → 22 found → +2 → +5). That is the argument for 074 demonstrated rather than asserted. Note 077 in particular: a filter *was* attached to that route, so it looked gated to every prior review and to 074's own first rule; only the second rule — does the filter actually consult an authorization service? — catches it.
 
-> ⚠️ **074 runs in CI but cannot currently FAIL it.** `sdap-ci.yml`'s `code-quality` job carries `continue-on-error: true` at both job and step level, and the only blocking arch job (`ci-tier1-blocking.yml`) selects **7 named facts** by `--filter`. Making 074 binding is a one-line append to that filter — but `.github/workflows/**` is owned by `ci-cd-unit-test-remediation-r1` (see [`projects/INDEX.md`](../../INDEX.md)), so it needs their PR, not ours. **Until that lands, the forcing function is advisory.**
+> ✅ **074 is BLOCKING as of 2026-08-26** (was advisory). Four facts appended to `ci-tier1-blocking.yml`'s `arch-tests` `--filter`: `EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver` · `NoAuthorizationFilterIsDecorative` · `ScannerAccountsForEveryRegistrationInTheGovernedFiles` · `TheEndpointFileCensusIsPinned`. The ownership block is gone — `ci-cd-unit-test-remediation-r1` is not active (owner decision). `sdap-ci.yml` deliberately **not** touched: it carries `continue-on-error` at both job *and* step level so it can never fail a build, and it is open in PR #806.
+>
+> ⚠️ **Do NOT "simplify" the four facts to one.** Rule B (`NoAuthorizationFilterIsDecorative`) is not redundant with Rule A: the route that leaked the tenant's documents *had* a filter attached, so Rule A classified it gated and four separate human sweeps agreed. Only Rule B catches a filter that authorizes nothing. And the census is a *drifting count on purpose* — without it the other three simply would not govern a newly-added endpoint file. It has since fired twice and been right both times (071's deletions; master's 2 new files → finding 081).
 
 **Live end-to-end validation is task 047**, which must assert **INEQUALITY** against every BU container — three existing projects already carry the root BU's container id, so "a container id is set" is precisely the false positive.
 
@@ -557,10 +562,20 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 080 | `sprk_accessevent` schema + data-model doc | FR-32 | 032,038 | — | ✅ | sonnet | medium |
-| 🔲 081 | Append hooks at every grant/deny choke point | FR-32 | 080,060,063,064 | — | ❌ | sonnet | high |
-| 🔲 082 | Evaluator versioning + point-in-time replay | FR-32 | 081,032 | — | ❌ | sonnet | **xhigh** |
-| 🔲 083 | Attestation seam tests + docs | FR-32 | 081,082 | — | ✅ | sonnet | medium |
+> **Renumbered 080–083 → 086–089 on 2026-08-26.** The Phase 0c security insertions filed on 2026-08-25/26
+> took 080 and 081, which were already occupied by this block — the documented insertion room was
+> "070–079 and 084–089" and 080–083 were not in it. That was a filing error in Phase 0c, not here.
+>
+> This block moved rather than the insertions because **this block is entirely unstarted** (no code, no
+> commits, no source comments), whereas Phase 0c task 080 is shipped and referenced by commit
+> `d6d156ac1`, by `notes/task-080-cross-record-search.md`, and by comments in five source files.
+> Renumbering the shipped one would have made the git history point at a task file that no longer exists.
+> Internal deps were rewritten with it (087→086, 088→087, 089→087+088).
+
+| 🔲 086 | `sprk_accessevent` schema + data-model doc | FR-32 | 032,038 | — | ✅ | sonnet | medium |
+| 🔲 087 | Append hooks at every grant/deny choke point | FR-32 | 086,060,063,064 | — | ❌ | sonnet | high |
+| 🔲 088 | Evaluator versioning + point-in-time replay | FR-32 | 087,032 | — | ❌ | sonnet | **xhigh** |
+| 🔲 089 | Attestation seam tests + docs | FR-32 | 087,088 | — | ✅ | sonnet | medium |
 
 ## Wrap-up
 
@@ -597,7 +612,7 @@ Two agents editing an authorization path concurrently produces a silent merge me
 
 | Potential collision | Verdict |
 |---|---|
-| 044 / 057 / 069 / 083 all write `tests/integration/seam` and are all `safe:true` | **Benign** — serialized by phase dependencies, and each creates distinct files. Preserve this ordering if phases are ever resequenced |
+| 044 / 057 / 069 / **089** (was 083) all write `tests/integration/seam` and are all `safe:true` | **Benign** — serialized by phase dependencies, and each creates distinct files. Preserve this ordering if phases are ever resequenced |
 | 015 (P0) and 041 (P2) both touch `MembershipResolverService.cs` | **Safe** — 015 is `parallel-safe:false`, so it never co-runs |
 | 038 (`safe:true`) shares `ExternalAccessModule.cs` with 035/036/042/056 | **Safe** — those are all `safe:false`; 038's only partner is 034 (tests-only) |
 | 065 touches `TrackingFieldTrio`; 050 touches `Spaarke.UI.Components` | **Disjoint** — `components/AccessGrantModal/` vs `src/services/`; no Phase 0 task touches either |
