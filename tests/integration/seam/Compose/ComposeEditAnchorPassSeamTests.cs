@@ -25,6 +25,21 @@
 //   2. The un-anchored case (`EditWithNoAnchor_...`) asserts the POSITIVE outcome of the removal: a
 //      deterministic `NoAnchor` refusal naming the anchors the edit should have supplied — not a search,
 //      and not a silent pass.
+//   3. `VerdictAndRefusalShapes_CannotExpressATextSpan` (task 064) — the OUTPUT half of (1). See below.
+//
+// TASK 064 (owner decision 2026-08-25) UPDATE, and it cuts BOTH ways. The offset vocabulary this pass
+// returned empty (`EditVerdict.Matches`, `EditValidationError.MatchCount`/`.Examples`, and the
+// `ResolvedMatch`/`MatchExample` types themselves) was deleted with the text-OFFSET apply half
+// (`ComposeEditBatch`/`ComposeEditTransaction`) it existed to feed. The three per-test "…and no span was
+// reported" assertions that used to live here are therefore gone, replaced by ONE structural assertion on
+// the shapes — a strengthening for the same reason (1) was: an empty-collection assertion only covers the
+// paths a test happens to exercise, while an absent member covers every path at once.
+//
+// AND THE CAVEAT THAT MUST NOT BE LOST: task 064 also retired `POST /api/compose/edit-batch/validate`,
+// which was this pass's ONLY production caller. These tests are now its only exercise. The pass was kept
+// deliberately — the ADR-043/041 assessment (§7, C-7) designates it the Compose-owned home for closed-set
+// validation — so this file is holding a designated-but-currently-unwired component honest, not a live
+// request path. See projects/spaarkeai-compose-r8/notes/064-orphan-retirement-decisions.md §4.
 //
 // The seam: corpus bytes -> ComposeDocxProjectionBuilder -> real ParaIdMap (closed set + numbering)
 //           -> ProposedEdit envelope -> ComposeEditAnchorPass -> EditVerdict.ResolvedParaId.
@@ -88,6 +103,46 @@ public sealed class ComposeEditAnchorPassSeamTests
             + "nowhere");
     }
 
+    [Fact]
+    public void VerdictAndRefusalShapes_CannotExpressATextSpan()
+    {
+        // The OUTPUT half of the same guarantee, and the replacement for the three per-test assertions
+        // task 064 deleted (`verdict.Matches.Should().BeEmpty()`, `Error.MatchCount == 0`,
+        // `Error.Examples.Should().BeEmpty()`). Those could only ever say "the paths this test exercises
+        // returned no span"; pinning the SHAPES says no path could return one, because there is no member
+        // to return it on and no type to return.
+        //
+        // It fails if anyone re-admits an offset vocabulary to this surface — which, together with the
+        // signature assertion above, is the only way text-offset placement could come back through this
+        // door (ADR-049 I-7).
+        var composeTypes = typeof(ComposeEditAnchorPass).Assembly
+            .GetTypes()
+            .Where(t => t.Namespace == typeof(ComposeEditAnchorPass).Namespace)
+            .Select(t => t.Name)
+            .ToList();
+
+        composeTypes.Should().NotContain("ResolvedMatch",
+            "a character span into document prose is the address the paraId replaced (task 064)");
+        composeTypes.Should().NotContain("MatchExample",
+            "an example occurrence with a context window is a text-search artefact (task 064)");
+
+        static IEnumerable<string> PublicProperties<T>() =>
+            typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name);
+
+        PublicProperties<EditVerdict>().Should().BeEquivalentTo(
+            new[] { "EditIndex", "IsValid", "Error", "ResolvedParaId" },
+            "a verdict reports WHICH PARAGRAPH an edit anchored to, never where in the prose it matched");
+
+        PublicProperties<EditValidationError>().Should().BeEquivalentTo(
+            new[] { "Kind", "Message", "ResolutionHint" },
+            "a refusal names the anchor that would have worked; it cannot offer 'nearest' occurrences");
+
+        PublicProperties<BatchValidationResult>().Should().BeEquivalentTo(
+            new[] { "Verdicts", "IsValid" },
+            "every failure this surface can report belongs to one edit — there is no batch-level channel, "
+            + "because the span collisions it carried died with the apply side (task 064)");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // FR-C01/C03 — an explicit paraId anchor resolves, with zero text matching
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -105,8 +160,10 @@ public sealed class ComposeEditAnchorPassSeamTests
         result.IsValid.Should().BeTrue();
         result.Verdicts.Should().ContainSingle()
             .Which.ResolvedParaId.Should().Be(target, "the anchor names the paragraph outright");
-        result.Verdicts[0].Matches.Should().BeEmpty(
-            "an anchored edit is addressed by paraId; there is no text span to report");
+
+        // The companion "…and reports no text span" half of this assertion is no longer writable: task 064
+        // deleted EditVerdict.Matches along with ResolvedMatch itself. It is now asserted structurally, once,
+        // by VerdictAndRefusalShapes_CannotExpressATextSpan below.
     }
 
     [Fact]
@@ -181,8 +238,9 @@ public sealed class ComposeEditAnchorPassSeamTests
         var verdict = result.Verdicts.Should().ContainSingle().Subject;
         verdict.ResolvedParaId.Should().BeNull();
         verdict.Error!.Kind.Should().Be(EditErrorKind.UnknownParaId);
-        verdict.Error.MatchCount.Should().Be(0);
-        verdict.Error.Examples.Should().BeEmpty("an anchor refusal has no occurrences to show; inventing 'nearest' ones would be guessing");
+        verdict.Error.ResolutionHint.Should().Contain("target_para_id",
+            "the refusal must name the anchor that would have worked — that hint is what replaced the "
+            + "match count and example spans task 064 deleted");
     }
 
     [Fact]
@@ -243,7 +301,6 @@ public sealed class ComposeEditAnchorPassSeamTests
         var verdict = result.Verdicts.Should().ContainSingle().Subject;
         verdict.Error!.Kind.Should().Be(EditErrorKind.NoAnchor);
         verdict.ResolvedParaId.Should().BeNull();
-        verdict.Matches.Should().BeEmpty("nothing was searched, so there is nothing to report a span for");
         verdict.Error.ResolutionHint.Should().Contain("target_para_id")
             .And.Contain("target_ref", "the refusal must tell the caller which anchors would have worked");
     }

@@ -48,10 +48,20 @@ import type { ParaIdMapEntry } from '../types/compose-contracts';
  * {@link AdvisoryCommentInput}) so each boundary keeps its own contract's spelling.
  */
 export interface AnchorRequest {
-  /** The exact `w14:paraId` the object targets. Outranks {@link ref}: it IS the address. */
-  paraId?: string;
+  /**
+   * The exact `w14:paraId` the object targets. Outranks {@link ref}: it IS the address.
+   *
+   * `null` is part of the WIRE shape (r8 task 053b): the compose Action output schemas declare
+   * `target_para_id` as `["string","null"]` and REQUIRE the key, so an unidentified target arrives as
+   * an explicit null. `resolveAnchorParaIds` reads it with `?.trim()`, so a null resolves to
+   * {@link AnchorParaIdResolution} `none` — "this object named no paragraph", which is the correct
+   * answer for THIS function. Deciding what to DO about a null that was ASKED for is a per-consumer
+   * policy and deliberately does not live here (the edit path proposes; the annotation paths fall
+   * back to prose).
+   */
+  paraId?: string | null;
   /** The target named as a legal citation ("clause 4.2", "4.2(b)(iii)", "Sections 4-7"). */
-  ref?: string;
+  ref?: string | null;
 }
 
 /**

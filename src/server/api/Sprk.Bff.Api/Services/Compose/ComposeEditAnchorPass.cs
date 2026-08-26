@@ -24,6 +24,19 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </para>
 ///
 /// <para><b>Pure.</b> No I/O, no DI, no state. Total — every edit takes exactly one branch below.</para>
+///
+/// <para>
+/// <b>Status (task 064) — READ THIS BEFORE ASSUMING THIS RUNS.</b> Task 064 retired
+/// <c>POST /api/compose/edit-batch/validate</c>, which was this pass's ONLY production caller (the
+/// endpoint had never had a client caller of its own: a repo-wide grep for <c>edit-batch</c> returns zero
+/// <c>.ts</c>/<c>.tsx</c> hits, because real placement happens client-side in <c>usePendingRedline</c>,
+/// which enforces the same anchor-first contract in TypeScript). This pass and
+/// <see cref="ComposeAnchorResolver"/> are therefore exercised today only by
+/// <c>ComposeEditAnchorPassSeamTests</c> + <c>ComposeEditActionAnchorContractSeamTests</c>. They were
+/// KEPT deliberately, not overlooked: the ADR-043/041 assessment (§7, C-7) designates this pass as the
+/// Compose-owned home for closed-set validation, so retiring it is an owner decision rather than
+/// cleanup. Recorded in <c>projects/spaarkeai-compose-r8/notes/064-orphan-retirement-decisions.md</c> §4.
+/// </para>
 /// </summary>
 public static class ComposeEditAnchorPass
 {
@@ -51,25 +64,25 @@ public static class ComposeEditAnchorPass
                 ? new EditVerdict(
                     EditIndex: i,
                     IsValid: true,
-                    Matches: Array.Empty<ResolvedMatch>(),
                     Error: null,
                     ResolvedParaId: anchor.ParaId)
                 : new EditVerdict(
                     EditIndex: i,
                     IsValid: false,
-                    Matches: Array.Empty<ResolvedMatch>(),
                     Error: BuildAnchorError(i, anchor)));
         }
 
-        // No batch-level errors are possible here: an anchored verdict carries no span, so two edits have
-        // nothing to collide over. Cross-edit span overlap belongs to the apply side (ComposeEditBatch).
-        return new BatchValidationResult(verdicts, Array.Empty<EditValidationError>());
+        // Every failure this pass can report belongs to ONE edit and rides on that edit's verdict. There
+        // is no batch-level error channel: task 064 removed it with the span-based apply side that was its
+        // only reason to exist (see BatchValidationResult remarks).
+        return new BatchValidationResult(verdicts);
     }
 
     /// <summary>
-    /// Maps an anchor refusal onto the batch's existing structured-error shape. <c>MatchCount</c> is 0 and
-    /// <c>Examples</c> is empty by construction: an anchor refusal has no text occurrences to show, and
-    /// fabricating "nearest" examples would reintroduce exactly the guessing this pass removes.
+    /// Maps an anchor refusal onto the structured-error shape. It carries the kind, the edit it belongs
+    /// to, and a hint naming the anchor that would have worked — and nothing resembling a text
+    /// occurrence, because a refusal that offered "nearest" matches would be guessing (task 064 deleted
+    /// the members in which such a guess could even be expressed).
     /// </summary>
     private static EditValidationError BuildAnchorError(int index, ComposeAnchorResolution anchor)
     {
@@ -109,8 +122,6 @@ public static class ComposeEditAnchorPass
         return new EditValidationError(
             kind,
             $"Edit {index + 1}: {anchor.Reason}",
-            MatchCount: 0,
-            Examples: Array.Empty<MatchExample>(),
             ResolutionHint: hint);
     }
 }

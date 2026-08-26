@@ -192,16 +192,14 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        // (8) POST /api/compose/edit-batch/validate — deterministic ANCHOR-ONLY edit validation
-        // (FR-C01/C02/C03; the text-search leg was retired by task 052 / FR-C04)
-        group.MapPost("/edit-batch/validate", ValidateEditBatch)
-            .WithName("ComposeValidateEditBatch")
-            .WithSummary("Deterministically resolve each edit's paraId/citation anchor against the request's reference map; 422 on an unresolvable, conflicting, or missing anchor")
-            .RequireRateLimiting("ai-context")
-            .Produces<BatchValidationResult>(StatusCodes.Status200OK)
-            .Produces<BatchValidationResult>(StatusCodes.Status422UnprocessableEntity)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized);
+        // (8) POST /api/compose/edit-batch/validate RETIRED (task 064, owner decision 2026-08-25): it never
+        // had a client caller — a repo-wide grep for `edit-batch` returns zero .ts/.tsx hits, because AI
+        // edit placement happens client-side in `usePendingRedline`, which enforces the same anchor-first
+        // contract in TypeScript. Its apply half (ComposeEditBatch/ComposeEditTransaction) applied edits by
+        // character offset, and its span producer died with the text-search validator in task 052, so the
+        // surface could not have applied anything again either. ComposeEditAnchorPass survives (the
+        // ADR-043/041 assessment §7 C-7 designates it the home for closed-set validation) but now has no
+        // production caller; see notes/064-orphan-retirement-decisions.md.
 
         // (9)/(9b) push-annotations + push-preview RETIRED (task 036, §6.5 Path B): the text-anchored
         // push-to-Word WRITE surface (the last text-search byte-author, DocxAnnotationWriter) was retired
@@ -370,38 +368,10 @@ public static class ComposeEndpoints
     // Handlers
     // ─────────────────────────────────────────────────────────────────────────
 
-    // FR-C01/C02/C03/C04: deterministic ANCHOR-ONLY edit validation, delegated to
-    // ComposeEditAnchorPass (pure; ADR-013: no AI internals). An edit names its target paragraph by
-    // `target_para_id` or by legal citation (`target_ref`) and resolves through the request's reference
-    // map, or it is refused. 200 when every edit resolves; 422 with the structured refusal otherwise.
-    //
-    // Task 052 (FR-C04) DELETED the legacy leg: there is no IComposeEditValidator, no target_text, and no
-    // whole-document search behind this endpoint any more (ADR-049 I-7). An un-anchored edit now returns
-    // EditErrorKind.NoAnchor. `documentText` stays on the REQUEST contract (callers still send it, and the
-    // apply side speaks in offsets against that same projection) but is no longer read to place anything —
-    // ComposeEditAnchorPass does not even receive it, which is what makes "no placement path searches
-    // document text" a property of the signature rather than of a comment.
-    private static IResult ValidateEditBatch(
-        [FromBody] EditBatchValidateRequest? body,
-        ILoggerFactory loggerFactory,
-        HttpContext httpContext)
-    {
-        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
-        if (body is null) return Results.BadRequest("Request body is required.");
-        if (body.DocumentText is null) return Results.BadRequest("documentText is required.");
-        if (body.Edits is null || body.Edits.Count == 0) return Results.BadRequest("edits must contain at least one proposed edit.");
-
-        var result = ComposeEditAnchorPass.Validate(body.Edits, body.ReferenceMap);
-
-        var anchoredCount = result.Verdicts.Count(v => v.ResolvedParaId is not null);
-        logger.LogInformation(
-            "Compose edit-batch validate: edits={EditCount} anchored={AnchoredCount} referenceMap={MapSize} isValid={IsValid} TraceId={TraceId}",
-            body.Edits.Count, anchoredCount, body.ReferenceMap?.Count ?? 0, result.IsValid, httpContext.TraceIdentifier);
-
-        return result.IsValid
-            ? Results.Ok(result)
-            : Results.Json(result, statusCode: StatusCodes.Status422UnprocessableEntity);
-    }
+    // The ValidateEditBatch handler + its EditBatchValidateRequest body were RETIRED by task 064 with the
+    // route above. Nothing here is replaced: the anchor contract it enforced is enforced client-side by
+    // `usePendingRedline`, which is where placement actually happens, and server-side by
+    // ComposeEditAnchorPass, which the seam tests still drive directly.
 
     // FR-25 (task 051): download the current SPE bytes and parse them (DocxAnnotationReader) for
     // native w:comment/w:ins/w:del, returning the structured payload for re-anchoring. Read-only —

@@ -61,6 +61,19 @@
  * (`notes/052-text-search-demotion-decisions.md` §2). Ambiguity is REFUSED, never proposed — showing the
  * user one of three candidates and asking them to confirm it dresses a guess up as a decision.
  *
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────
+ * TWO ANCHORLESS LEGS LIVE HERE (task 053b, 2026-08-25)
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────
+ *
+ * Everything above describes the REPLAYED-PROSE leg. A second, disjoint anchorless shape is
+ * classified at the bottom of this file: an edit that WAS asked for an identifier, could not supply
+ * one (`target_para_id` present and null), and has no prose either. Both legs answer the same
+ * question — "this payload has no usable anchor; which kind of anchorless is it?" — which is why they
+ * share a module rather than duplicating BOUND 1's brand mechanism twice. See
+ * {@link classifyUnidentifiedTarget} for that leg's full rationale, and note that it neither weakens
+ * BOUND 1 (its mint refuses a usable anchor identically) nor BOUND 2 (it adds no `applied` outcome —
+ * it adds no outcome type at all, because there is nothing to resolve).
+ *
  * @see ./redlineTextSearch.ts — the tolerant matcher this module bounds (and its three surviving
  *      annotation/decoration consumers, which are NOT placements and are untouched).
  * @see ./usePendingRedline.ts — the ONLY caller. `planAndApplyTargeted` is the single call site.
@@ -185,4 +198,139 @@ export function resolveAnchorlessReplay(editor: Editor, target: AnchorlessReplay
   const span = resolved.spans[0];
   const matchedText = editor.state.doc.textBetween(span.from, span.to, ' ', ' ');
   return { kind: 'proposed', spans: resolved.spans, matchedText, quotedTarget };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// TASK 053b — THE SECOND ANCHORLESS SHAPE: AN EDIT THAT WAS ASKED FOR AN IDENTIFIER AND HAD NONE
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The four compose EDIT Actions declare `target_para_id` with the type union ["string","null"] AND
+// list it in `required` — Azure OpenAI Structured Outputs demands the KEY be present, so "I could not
+// identify the paragraph" arrives as an explicit `null`, never as an absent field. Task 052 retired
+// `target_text` from those Actions, so such a payload has NO anchor AND NO prose.
+//
+// Before this task that payload fell through {@link classifyAnchorlessReplay} (nothing to match),
+// `planAndApplyTargeted` returned `null`, and the caller ran its INSERTION-AT-CURSOR branch: a revised
+// indemnity clause could land in the recitals — wherever the caret happened to be — reported as
+// `applied`. Nothing was struck, so no text was destroyed; the damage was a stray insertion the user
+// was told not to look for. Meanwhile the catalog promises the model the opposite, verbatim: "An EDIT
+// with a null identifier is REFUSED rather than placed — there is no prose fallback."
+//
+// WHY KEY PRESENCE AND NOT TRUTHINESS. `payload?.target_para_id` is falsy for an absent key AND for an
+// explicit null, and the two mean opposite things:
+//
+//   - key PRESENT, value null/empty  => the model WAS asked for an identifier and could not supply
+//     one. This is an EDIT whose target is unknown; it must not silently land at the caret.
+//   - key ABSENT => the payload was never edit-shaped at all. `compose-draft-document` (whose output
+//     schema has no target field) and Flow-3 `compose_context_insert` (`{ new_text }`) are genuine
+//     insertion consumers, and they insert at the caret exactly as they always have.
+//
+// WHY THIS IS NOT A REFUSAL (owner, 2026-08-25 — "whatever ensures the document updates and saves").
+// A bare refusal satisfies the catalog's wording and FAILS the user: they asked for a change and would
+// get nothing. So this classifier feeds the SAME propose-then-confirm machinery FR-C06 built — the
+// user is shown the proposed text with an honest reason and places it themselves. Confirmed, it
+// applies and saves like any other pending redline; skipped, nothing happens.
+//
+// BOTH STRUCTURAL BOUNDS SURVIVE THE ADDITION, and neither is weakened by it:
+//
+//  - BOUND 1 — this mint refuses a payload carrying a USABLE anchor exactly as its sibling does, so an
+//    anchored edit still cannot be expressed as an argument to anything in this module. It also
+//    refuses a payload carrying replayable prose, which keeps the two legs disjoint: prose belongs to
+//    {@link classifyAnchorlessReplay}, which has something concrete to show the user.
+//  - BOUND 2 — nothing here returns, or can construct, an `applied` outcome. There is no resolver to
+//    add one to: there is nothing to resolve. The classifier states a FACT about the payload; the
+//    placement is chosen by the user and performed by the caller behind `usePendingRedline`'s
+//    `confirmed: 'unidentified-target'` gate, which only a click produces.
+//
+// ADR-049 I-7 is untouched: this leg reads no document text to LOCATE anything. The caller quotes the
+// range the user already selected so the confirmation can show what would be replaced — a description
+// of a position the user supplied, never a search for one.
+
+/** The two deterministic anchor vocabularies, in the order the audit reports them. */
+const ANCHOR_KEYS = ['target_para_id', 'target_ref'] as const;
+
+/** Which anchor key(s) arrived declared-but-empty. */
+export type AnchorKeyName = (typeof ANCHOR_KEYS)[number];
+
+/**
+ * The shape {@link classifyUnidentifiedTarget} inspects — the anchor keys, the legacy prose field, and
+ * the content itself (a proposal with nothing to place is not a proposal).
+ */
+export interface UnidentifiedTargetCandidatePayload extends AnchorlessReplayCandidatePayload {
+  new_text?: string | null;
+}
+
+/**
+ * Module-private brand — the twin of {@link AnchorlessReplayTarget}'s. NOT exported, so
+ * {@link classifyUnidentifiedTarget} is the only way to obtain one and BOUND 1 holds for this leg by
+ * the same mechanism rather than by a second convention.
+ */
+declare const UNIDENTIFIED_TARGET_BRAND: unique symbol;
+
+/** A payload PROVEN to be an EDIT that declared an anchor key, could not fill it, and has no prose. */
+export interface UnidentifiedTargetEdit {
+  /** @internal Brand — module-private; see {@link classifyUnidentifiedTarget}. */
+  readonly [UNIDENTIFIED_TARGET_BRAND]: true;
+  /** Which anchor key(s) the payload declared and left empty. Carried for the audit + tests. */
+  readonly declinedKeys: readonly AnchorKeyName[];
+  /** Tier 3 — the content the user is being asked to place. Non-empty by construction. */
+  readonly proposedText: string;
+}
+
+/** A value that can actually address a paragraph. Anything else is not an anchor, whatever its type. */
+function isUsableAnchor(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * THE DISCRIMINATOR: the key is on the object, and its value cannot address a paragraph.
+ *
+ * `undefined` is excluded deliberately. JSON cannot produce it — `JSON.parse` never yields a key whose
+ * value is `undefined` — so the only way to see one is a TypeScript caller spelling "absent" as
+ * `{ target_para_id: undefined }`. Treating that as a declined anchor would convert an insertion
+ * consumer's optional-field idiom into a confirmation prompt, which is the regression this task must
+ * not cause.
+ */
+function declaredButEmpty(payload: Record<string, unknown>, key: AnchorKeyName): boolean {
+  if (!Object.prototype.hasOwnProperty.call(payload, key)) return false;
+  const value = payload[key];
+  if (value === undefined) return false;
+  return !isUsableAnchor(value);
+}
+
+/**
+ * The ONLY mint of {@link UnidentifiedTargetEdit}.
+ *
+ * Returns `null` — "this leg is not applicable" — for:
+ *  - a payload with a USABLE anchor (BOUND 1: an anchored edit is refused upstream, never re-routed);
+ *  - a payload carrying replayable prose — {@link classifyAnchorlessReplay}'s population, which gets a
+ *    better proposal (it can show the user the wording it located);
+ *  - a payload where NO anchor key is present — a genuine insertion consumer, unchanged;
+ *  - a payload with nothing to place (`new_text` empty). That guard is load-bearing, not defensive: an
+ *    EMPTY superseding compose entry is the FR-17 RETRACTION, and turning a retraction into "where
+ *    should this go?" would ask the user to place nothing.
+ *
+ * An anchor key present with an EMPTY or whitespace-only string counts as declined, exactly like
+ * `null`: the model was asked for an identifier and returned something that cannot address a
+ * paragraph. The failure mode is identical, so the handling is.
+ */
+export function classifyUnidentifiedTarget(
+  payload: UnidentifiedTargetCandidatePayload | null | undefined
+): UnidentifiedTargetEdit | null {
+  if (payload === null || typeof payload !== 'object') return null;
+  const record = payload as unknown as Record<string, unknown>;
+
+  if (ANCHOR_KEYS.some(key => isUsableAnchor(record[key]))) return null;
+  if (typeof payload.target_text === 'string' && payload.target_text.trim().length > 0) return null;
+
+  // Typed `readonly` so the brand assertion below is a WIDENING of a matching shape rather than a
+  // cross-cast TypeScript has to be told to trust (`ANCHOR_KEYS.filter` yields a mutable array, which
+  // does not overlap the branded type's `readonly` member).
+  const declinedKeys: readonly AnchorKeyName[] = ANCHOR_KEYS.filter(key => declaredButEmpty(record, key));
+  if (declinedKeys.length === 0) return null;
+
+  const proposedText = typeof payload.new_text === 'string' ? payload.new_text : '';
+  if (proposedText.length === 0) return null;
+
+  return { declinedKeys, proposedText } as UnidentifiedTargetEdit;
 }

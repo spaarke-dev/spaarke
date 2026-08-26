@@ -127,7 +127,7 @@ non-empty — so deleting the sentence and replacing it with something vacuous f
 | `SAVE_DEGRADATION_COPY` (R7) | save-time fidelity codes | Different flow entirely. **Clear.** |
 | `composeResultFormat.ts` (Assistant confirmation line) | renders the rationale + proposed text | Never reports placement outcomes. **Clear.** |
 | `ComposeReanchorBanner` / `ComposeReanchorConflictPanel` | return-from-Word re-anchor | **The one place fuzzy matching legitimately speaks to the user.** Rewritten — §5. |
-| `POST /api/compose/edit-batch/validate` (server) | — | The validator was **deleted by task 052**, and the endpoint had **zero client callers** (task-052 notes F-1). Nothing server-side can produce this copy. **Clear.** |
+| `POST /api/compose/edit-batch/validate` (server) | — | The validator was **deleted by task 052**, and the endpoint had **zero client callers** (task-052 notes F-1). Nothing server-side can produce this copy. **Clear.** *(Task 064, 2026-08-25: the endpoint itself is now **deleted** — it cannot produce any copy at all. Row retained as the audit record of what was checked.)* |
 
 ---
 

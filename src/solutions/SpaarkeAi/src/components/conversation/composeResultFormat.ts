@@ -139,14 +139,27 @@ export function formatCompareToPlaybookResult(payload: unknown): string | null {
 // payload carries `new_text` alongside a target field.
 // ---------------------------------------------------------------------------
 
-/** Detects + renders a `compose-draft-alternative` result, or `null` if the shape doesn't match. */
+/**
+ * Detects + renders a `compose-draft-alternative` result, or `null` if the shape doesn't match.
+ *
+ * spaarkeai-compose-r8 task 053b — THE TARGET TEST IS KEY PRESENCE, NOT TRUTHINESS. The Action's
+ * output schema declares `target_para_id` as `["string","null"]` and REQUIRES the key, so an edit the
+ * model could not anchor arrives as `{ target_para_id: null, new_text: "…" }`. Under the previous
+ * `asNonEmptyString(...) !== null` test that payload matched NO formatter, fell through to the
+ * ```json``` fence, and the user was shown raw JSON for exactly the edit that most needed explaining.
+ * The shape test stays just as specific: `new_text` PLUS a DECLARED target field (of either vintage).
+ * No other compose payload carries `new_text` alongside one, and this formatter runs last, so the four
+ * ahead of it have already claimed their own shapes.
+ */
 export function formatDraftAlternativeResult(payload: unknown): string | null {
   const record = asRecord(payload);
   if (record === null) return null;
   const newText = asNonEmptyString(record.new_text);
-  const targetParaId = asNonEmptyString(record.target_para_id);
-  const targetText = asNonEmptyString(record.target_text);
-  if (newText === null || (targetParaId === null && targetText === null)) return null;
+  const declaresTarget =
+    Object.prototype.hasOwnProperty.call(record, "target_para_id") ||
+    Object.prototype.hasOwnProperty.call(record, "target_ref") ||
+    asNonEmptyString(record.target_text) !== null;
+  if (newText === null || !declaresTarget) return null;
 
   const rationale = asNonEmptyString(record.rationale);
   const parts: string[] = ['**Drafted an alternative clause.**'];

@@ -212,7 +212,10 @@ public sealed class ComposeEditActionAnchorContractSeamTests
         result.IsValid.Should().BeFalse();
         result.Verdicts[0].Error!.Kind.Should().Be(EditErrorKind.NoAnchor,
             "a null anchor is not an anchor — and there is no longer a text path for it to fall through to");
-        result.Verdicts[0].Matches.Should().BeEmpty("nothing was searched, so there is no span to report");
+
+        // "…and no span was reported" is no longer writable here: task 064 deleted EditVerdict.Matches with
+        // ResolvedMatch itself. Asserted structurally by
+        // ComposeEditAnchorPassSeamTests.VerdictAndRefusalShapes_CannotExpressATextSpan.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════

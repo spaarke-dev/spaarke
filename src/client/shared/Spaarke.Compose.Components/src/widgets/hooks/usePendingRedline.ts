@@ -51,6 +51,7 @@
  */
 import * as React from 'react';
 import type { Editor } from '@tiptap/core';
+import type { Transaction } from '@tiptap/pm/state';
 import type { Mapping } from '@tiptap/pm/transform';
 import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEditor';
 // Task 051 (FR-C01/C02/C03) — the deterministic anchor branch. `collectBlocks` is the SAME paraId→live-span
@@ -80,7 +81,15 @@ import { readProposalBaseline, recordProposalBaseline } from './redlineProposalB
 // Task 053 (FR-C06) — the BOUNDED confirmable fallback for replayed/legacy anchorless entries. Its
 // input type has no public constructor (an anchored payload cannot be classified into it) and its
 // outcome vocabulary has no `applied` member, so neither bound is a convention this file must keep.
-import { classifyAnchorlessReplay, resolveAnchorlessReplay } from './anchorlessReplayFallback';
+//
+// Task 053b — `classifyUnidentifiedTarget` is the SECOND anchorless classifier in that same module:
+// an edit that WAS asked for an identifier and returned an explicit null. It is a pure classifier
+// (nothing to resolve), so it adds no outcome type and therefore cannot add an `applied` path.
+import {
+  classifyAnchorlessReplay,
+  classifyUnidentifiedTarget,
+  resolveAnchorlessReplay,
+} from './anchorlessReplayFallback';
 
 export { resolveTargetSpans } from './redlineTextSearch';
 export type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineTextSearch';
@@ -144,6 +153,14 @@ export type MaterializeStatus =
    * carries the question. This status can only be produced by the bounded fallback
    * (`./anchorlessReplayFallback.ts`), which has no `applied` outcome of its own — a prose match can
    * propose, it can never place.
+   *
+   * FR-C05/C06 residual (task 053b) — the SECOND producer of this status: an edit whose
+   * `target_para_id` arrived explicitly NULL (the model was asked for an identifier and had none) and
+   * which carries no prose either. It used to fall through to the insertion-at-cursor branch and
+   * return `applied`, so a revised indemnity clause could land in the recitals and be reported as a
+   * success. It is now proposed at the passage the USER selected, with an honest reason, and placed
+   * only once they confirm — the owner's 2026-08-25 bar ("whatever ensures the document updates and
+   * saves") met without a silent mis-placement.
    */
   | 'proposed'
   | 'already_present'
@@ -268,15 +285,63 @@ export interface PendingRedlineLegacyProposal {
    */
   ledgerRef: string;
   bindingId: string;
-  /** Tier 3 — the document text the proposal would strike, as it reads NOW. Shown truncated; never logged. */
+  /**
+   * WHY the suggestion has no anchor, and therefore WHICH question the user is being asked. Required,
+   * not optional, for the same reason {@link PendingRedlineError.source} is: the host switches on it,
+   * and an absent value would silently pick one of two very different stories.
+   *
+   *  - `'legacy-replay'` (task 053) — a pre-anchor ledger entry whose quoted prose we LOCATED. The
+   *    question is "we found this wording; is that the clause you meant?" — we have a candidate.
+   *  - `'unidentified-target'` (task 053b) — a post-052 edit whose `target_para_id` arrived NULL. We
+   *    have no candidate at all: the question is "the assistant couldn't identify which paragraph to
+   *    change — place it here?", answered against the passage the USER selected.
+   */
+  reason: 'legacy-replay' | 'unidentified-target';
+  /**
+   * Tier 3 — the document text the proposal would strike, as it reads NOW. Shown truncated; never
+   * logged. EMPTY when {@link placement} is `'insert-at-cursor'`: nothing would be struck.
+   */
   matchedText: string;
-  /** Tier 3 — the prose the replayed suggestion quoted as its target. Shown truncated; never logged. */
+  /**
+   * Tier 3 — the prose the replayed suggestion quoted as its target. Shown truncated; never logged.
+   * EMPTY for `'unidentified-target'`: that payload quoted nothing, which is the whole problem.
+   */
   quotedTarget: string;
+  /**
+   * Tier 3 — the content the user is being asked to place. Shown truncated; never logged. The
+   * `'unidentified-target'` question is unanswerable without it: with no matched wording to show,
+   * the proposed text IS what the user judges.
+   */
+  proposedText: string;
+  /**
+   * WHERE confirming would put it — so the confirmation names a real position rather than implying one.
+   *
+   *  - `'matched-span'`       — over the wording the prose match located (task 053's leg).
+   *  - `'replace-selection'`  — over the passage the user has selected (they asked for THIS clause).
+   *  - `'insert-at-cursor'`   — at the caret, striking nothing, because there is no selection to
+   *                             replace. Honest but weak; the user sees {@link contextText} and decides.
+   */
+  placement: 'matched-span' | 'replace-selection' | 'insert-at-cursor';
+  /**
+   * Tier 3 — the paragraph the placement sits in, as it reads NOW, so the user can recognise WHERE
+   * before answering. Shown truncated; never logged. Empty when the position is not inside a block.
+   */
+  contextText: string;
   /** How many suggestions in this entry are awaiting confirmation (1 for a single-edit draft). */
   proposedCount: number;
   /** How many target-bearing suggestions the entry carried in total. */
   totalCount: number;
 }
+
+/**
+ * The reason-and-position half of {@link PendingRedlineLegacyProposal} — everything the confirmation
+ * copy needs, without the ledger identity or the counts. Named so `materializeMany` can carry ONE
+ * value for "what the first held-back suggestion looked like" instead of six parallel locals.
+ */
+type LegacyProposalCopy = Pick<
+  PendingRedlineLegacyProposal,
+  'reason' | 'matchedText' | 'quotedTarget' | 'proposedText' | 'placement' | 'contextText'
+>;
 
 export interface UsePendingRedlineResult {
   /** Pending redlines currently rendered (drives the accept/reject affordances). */
@@ -400,7 +465,12 @@ export type AnchorResolveResult =
  */
 export function resolveAnchoredSpans(
   editor: Editor,
-  anchor: { target_para_id?: string; target_ref?: string } | undefined,
+  // Task 053b — `string | null` is the WIRE shape, not defensiveness: the four compose EDIT Actions
+  // declare `target_para_id` as `["string","null"]` and REQUIRE the key, so an unidentified target
+  // arrives as an explicit null. `resolveAnchorParaIds` reads it with `?.trim()`, which treats null
+  // as "named nothing" — correct HERE (it answers "which paragraphs does this name"), and the reason
+  // the null case has to be discriminated by key PRESENCE further down rather than by truthiness.
+  anchor: { target_para_id?: string | null; target_ref?: string | null } | undefined,
   referenceMap: readonly ParaIdMapEntry[] | undefined
 ): AnchorResolveResult | null {
   const resolution = resolveAnchorParaIds(
@@ -439,9 +509,17 @@ export function resolveAnchoredSpans(
  * What to call the thing that couldn't be placed, in the user-facing banner. An anchored edit has no
  * `target_text` to quote, so quoting an empty string would make the banner say nothing was targeted when
  * something very specific was.
+ *
+ * TRUTHINESS IS CORRECT HERE (task 053b audit). This function asks "what did the suggestion NAME?",
+ * and a null identifier named nothing — there is no string to put in the sentence, so falling through
+ * to `''` (rendered as "no target given") is the right answer for a null exactly as it is for an
+ * absent key. Nothing downstream of this function distinguishes the two, and nothing should: by the
+ * time a label is needed the placement decision has already been made elsewhere. As of 053b a
+ * null-identifier edit no longer reaches this function at all — it becomes a PROPOSAL, not an error —
+ * so the `''` branch survives only for a payload that names nothing in any vocabulary.
  */
 function unplaceableLabel(
-  payload: { target_text?: string; target_ref?: string; target_para_id?: string } | undefined
+  payload: { target_text?: string; target_ref?: string | null; target_para_id?: string | null } | undefined
 ): string {
   const text = payload?.target_text ?? '';
   if (text.length > 0) return text;
@@ -674,24 +752,60 @@ function applyRedlineSpans(
   chain.run();
 }
 
+/**
+ * A PROPOSED placement — nothing is in the document, the user is being asked. Two shapes, because the
+ * two anchorless legs know different things: the replay leg LOCATED a candidate span and can show the
+ * wording it found; the unidentified leg has no candidate at all and can only offer the position the
+ * user themselves supplied. Collapsing them into one shape would force the second to fake a
+ * `matchedText` it never matched.
+ */
+type TargetedProposal =
+  | { status: 'proposed'; reason: 'legacy-replay'; matchedText: string; quotedTarget: string }
+  | {
+      status: 'proposed';
+      reason: 'unidentified-target';
+      /** The user's selected text — `''` when there is only a caret. */
+      matchedText: string;
+      /** The paragraph the placement sits in, so the confirmation can name a real position. */
+      contextText: string;
+      placement: 'replace-selection' | 'insert-at-cursor';
+      /** The range confirming would place into, already clamped to the live document. */
+      intendedRange: RedlineSpan;
+    };
+
 /** The outcome of {@link planAndApplyTargeted}; `null` means the payload named no target at all. */
 type TargetedPlacement =
   | { status: 'applied'; hasDeletion: boolean }
   | { status: 'stale'; paraId: string; currentText: string; proposedAgainst: string }
-  | { status: 'proposed'; matchedText: string; quotedTarget: string }
+  | TargetedProposal
   | { status: 'not_found' | 'ambiguous' | 'target_deleted'; matchCount: number; source: 'anchored' | 'legacy-replay' };
+
+/**
+ * Clamp a position into the live document's addressable interior. Positions handed to this hook come
+ * from a selection snapshot that may have been remapped across several transactions; a stale end-of-doc
+ * position would throw inside ProseMirror rather than mis-place, but an honest clamp keeps the
+ * confirmation's promise ("it goes where I showed you") true at the edges too.
+ */
+function clampToDoc(editor: Editor, pos: number): number {
+  const last = Math.max(1, editor.state.doc.content.size - 1);
+  return Math.min(Math.max(pos, 1), last);
+}
 
 /**
  * Which held-back question the user has ALREADY answered. Passing one is the only way past the
  * corresponding gate below, and each value has exactly one producer:
  *
  *  - `'stale-clause'` ← {@link UsePendingRedlineResult.applyStaleTargetAnyway} (FR-C05);
- *  - `'anchorless-replay'` ← {@link UsePendingRedlineResult.applyLegacyProposal} (FR-C06).
+ *  - `'anchorless-replay'` ← {@link UsePendingRedlineResult.applyLegacyProposal} (FR-C06);
+ *  - `'unidentified-target'` ← {@link UsePendingRedlineResult.applyLegacyProposal} (task 053b), for a
+ *    deferred edit whose identifier arrived null. It shares the FR-C06 confirmation MECHANISM (one
+ *    question surface, one answer path — root §11) but not its value: each deferred edit replays with
+ *    the question IT was held back by, so confirming one kind can never release the other.
  *
- * Both producers are reached only from the host's `ConfirmModal` confirm handler, so "the user said
+ * All producers are reached only from the host's `ConfirmModal` confirm handler, so "the user said
  * yes" is a value that has to travel from a click to here — it cannot be defaulted into existence.
  */
-type ConfirmedQuestion = 'stale-clause' | 'anchorless-replay';
+type ConfirmedQuestion = 'stale-clause' | 'anchorless-replay' | 'unidentified-target';
 
 /**
  * THE ONE targeted-placement path, shared by `materialize`, `materializeMany` and both confirmation
@@ -723,6 +837,13 @@ function planAndApplyTargeted(args: {
   proposalScope: string | undefined;
   /** The question the user already answered, if any. See {@link ConfirmedQuestion}. */
   confirmed?: ConfirmedQuestion;
+  /**
+   * Task 053b — where the USER is: the selection snapshot captured before this pass mutated anything,
+   * kept valid across intervening transactions by the hook's remapper. Used ONLY by the
+   * unidentified-target leg, and only to describe/complete a placement the user confirms. Omitted ⇒
+   * the live selection is read instead (the single-edit path always supplies it).
+   */
+  intendedRange?: RedlineSpan;
 }): TargetedPlacement | null {
   const { editor, payload, referenceMap, ledgerRef, bindingId, newText, proposalScope, confirmed } = args;
 
@@ -733,17 +854,60 @@ function planAndApplyTargeted(args: {
     // `resolveAnchorlessReplay` takes, and it refuses any payload carrying an anchor; reaching here
     // with an anchored payload is therefore not a branch to guard but a value that cannot be built.
     const replayTarget = classifyAnchorlessReplay(payload);
-    if (replayTarget === null) return null; // no anchor AND no prose → insertion-style draft.
-    const outcome = resolveAnchorlessReplay(editor, replayTarget);
-    if (outcome.kind === 'unresolved') {
-      return { status: outcome.reason, matchCount: outcome.matchCount, source: 'legacy-replay' };
+    if (replayTarget !== null) {
+      const outcome = resolveAnchorlessReplay(editor, replayTarget);
+      if (outcome.kind === 'unresolved') {
+        return { status: outcome.reason, matchCount: outcome.matchCount, source: 'legacy-replay' };
+      }
+      if (confirmed !== 'anchorless-replay') {
+        // NOTHING is placed. The user is shown what would be struck and decides.
+        return {
+          status: 'proposed',
+          reason: 'legacy-replay',
+          matchedText: outcome.matchedText,
+          quotedTarget: outcome.quotedTarget,
+        };
+      }
+      applyRedlineSpans(editor, outcome.spans, newText, bindingId, ledgerRef);
+      return { status: 'applied', hasDeletion: true };
     }
-    if (confirmed !== 'anchorless-replay') {
-      // NOTHING is placed. The user is shown what would be struck and decides.
-      return { status: 'proposed', matchedText: outcome.matchedText, quotedTarget: outcome.quotedTarget };
+
+    // Task 053b — no anchor, no prose. Two payloads look identical to `payload?.target_para_id`
+    // truthiness and mean opposite things, so the discriminator is key PRESENCE:
+    //
+    //   key ABSENT  ⇒ never edit-shaped (`compose-draft-document`, Flow-3 `compose_context_insert`)
+    //                 ⇒ `null` here ⇒ the caller's insertion-at-cursor branch, byte-for-byte as before.
+    //   key PRESENT ⇒ an EDIT that was asked for an identifier and had none. Before this task it took
+    //                 the SAME branch and returned `applied`, so a revised clause could land at
+    //                 whatever the caret happened to be and the status told the user it succeeded.
+    const unidentified = classifyUnidentifiedTarget(payload);
+    if (unidentified === null) return null;
+
+    // The user's own position is the only honest candidate: there is nothing to match on, and
+    // inventing something to match on is what ADR-049 I-7 forbids and task 052 retired.
+    const requested = args.intendedRange ?? { from: editor.state.selection.from, to: editor.state.selection.to };
+    const from = clampToDoc(editor, requested.from);
+    const to = clampToDoc(editor, Math.max(requested.to, requested.from));
+    const range: RedlineSpan = { from, to };
+
+    if (confirmed !== 'unidentified-target') {
+      // NOTHING is placed. Describe the position so the confirmation names somewhere real.
+      const hasSelection = to > from;
+      const block = collectBlocks(editor).find(b => b.from <= from && to <= b.to);
+      return {
+        status: 'proposed',
+        reason: 'unidentified-target',
+        matchedText: hasSelection ? editor.state.doc.textBetween(from, to, ' ', ' ') : '',
+        contextText: block ? block.text : '',
+        placement: hasSelection ? 'replace-selection' : 'insert-at-cursor',
+        intendedRange: range,
+      };
     }
-    applyRedlineSpans(editor, outcome.spans, newText, bindingId, ledgerRef);
-    return { status: 'applied', hasDeletion: true };
+    // Confirmed. `applyRedlineSpans` strikes a non-empty span and inserts after it, and for an EMPTY
+    // span (`to === from`, a caret) simply inserts at that point — one call covers both, so "replace
+    // what I selected" and "insert where I am" are the same mechanism, not two.
+    applyRedlineSpans(editor, [range], newText, bindingId, ledgerRef);
+    return { status: 'applied', hasDeletion: to > from };
   }
   if (!anchored.ok) return { status: anchored.kind, matchCount: anchored.matchCount, source: 'anchored' };
 
@@ -784,6 +948,18 @@ interface DeferredEdit {
   readonly ledgerRef: string;
   readonly bindingId: string;
   readonly turn: number;
+  /**
+   * Task 053b — the question THIS edit was held back by, carried per-item rather than inferred from
+   * the banner. A batch can in principle hold both anchorless kinds (a mixed-vintage ledger entry);
+   * replaying each with its own answer is what stops one confirmation releasing the other's edits.
+   */
+  readonly question: ConfirmedQuestion;
+  /**
+   * Task 053b — the range the proposal promised, for an `'unidentified-target'` edit only. Kept valid
+   * by the hook's transaction remapper: a batched pass places OTHER edits between the question and the
+   * answer, and an unremapped position would land the confirmed edit somewhere the user never saw.
+   */
+  readonly intendedRange?: RedlineSpan;
 }
 
 /**
@@ -812,7 +988,18 @@ export function usePendingRedline(
   // FR-C06 — the same holding pattern for the CURRENT anchorless-replay proposal. A SEPARATE ref, not
   // a shared queue with a discriminant: the two questions are answered by two different buttons, and a
   // shared queue would let one answer release the other's suggestions.
+  //
+  // Task 053b — the unidentified-target proposals share THIS queue, because they share the question
+  // surface and the answer button (root §11: one confirmation path, not two). What is NOT shared is
+  // the answer itself: each entry carries its own {@link DeferredEdit.question}.
   const deferredProposalRef = React.useRef<DeferredEdit[]>([]);
+  /**
+   * Task 053b — the user's intended position for THIS pass, captured before the pass mutates anything
+   * and kept valid by the transaction remapper below. `materializeMany` needs it because it places
+   * other edits between the capture and the deferral; reading the live selection at that later moment
+   * would report wherever the LAST placement left the caret, not where the user is.
+   */
+  const trackedIntentRef = React.useRef<RedlineSpan | null>(null);
 
   const clearError = React.useCallback(() => setError(null), []);
 
@@ -882,7 +1069,11 @@ export function usePendingRedline(
       }
 
       // Task 051/052/053 — FIXED ordering, never the reverse: (1) DETERMINISTIC anchor + local diff,
-      // (2) the BOUNDED anchorless-replay fallback, which can only PROPOSE. `null` ⇒ no target at all.
+      // (2) the BOUNDED anchorless-replay fallback, which can only PROPOSE, (3) task 053b's
+      // unidentified-target leg, which also only proposes. `null` ⇒ no target key at all.
+      // `intendedRange` is the PRE-supersession selection snapshot already remapped above — the same
+      // value the insertion branch below uses, so a proposal and an insertion agree about "where".
+      trackedIntentRef.current = { from: intendedFrom, to: intendedTo };
       const placement = planAndApplyTargeted({
         editor,
         payload,
@@ -891,7 +1082,9 @@ export function usePendingRedline(
         bindingId,
         newText,
         proposalScope,
+        intendedRange: trackedIntentRef.current,
       });
+      trackedIntentRef.current = null;
       let hasDeletion = false;
 
       if (placement !== null) {
@@ -899,14 +1092,36 @@ export function usePendingRedline(
           // FR-C06 — NOTHING is placed. A replayed/legacy suggestion located by prose is a PROPOSAL:
           // the match says where that wording occurs today, not that this is the clause the model was
           // looking at. Hold it and ask.
-          deferredProposalRef.current = [{ payload, ledgerRef, bindingId, turn }];
+          //
+          // Task 053b — the SAME hold for an edit whose identifier arrived null: there is nothing to
+          // match on at all, so the question becomes "place it over what you selected?" rather than
+          // "is this the clause?". One surface, one answer path, two honest reasons.
+          deferredProposalRef.current = [
+            placement.reason === 'unidentified-target'
+              ? { payload, ledgerRef, bindingId, turn, question: 'unidentified-target', intendedRange: placement.intendedRange }
+              : { payload, ledgerRef, bindingId, turn, question: 'anchorless-replay' },
+          ];
           setLegacyProposal({
             ledgerRef,
             bindingId,
-            matchedText: placement.matchedText,
-            quotedTarget: placement.quotedTarget,
+            proposedText: newText,
             proposedCount: 1,
             totalCount: 1,
+            ...(placement.reason === 'unidentified-target'
+              ? {
+                  reason: 'unidentified-target' as const,
+                  matchedText: placement.matchedText,
+                  quotedTarget: '',
+                  placement: placement.placement,
+                  contextText: placement.contextText,
+                }
+              : {
+                  reason: 'legacy-replay' as const,
+                  matchedText: placement.matchedText,
+                  quotedTarget: placement.quotedTarget,
+                  placement: 'matched-span' as const,
+                  contextText: '',
+                }),
           });
           if (superseded.length > 0) {
             setPending(prev => prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef)));
@@ -916,7 +1131,7 @@ export function usePendingRedline(
         if (placement.status === 'stale') {
           // FR-C05 outcome 2 — NOTHING is placed. Hold the suggestion and ask; the alternative is
           // silently overwriting the user's newer edit, which is the data loss this closes.
-          deferredStaleRef.current = [{ payload, ledgerRef, bindingId, turn }];
+          deferredStaleRef.current = [{ payload, ledgerRef, bindingId, turn, question: 'stale-clause' }];
           setStaleTarget({
             ledgerRef,
             bindingId,
@@ -1012,6 +1227,13 @@ export function usePendingRedline(
       const superseded = pending.filter(p => p.bindingId === bindingId && !ledgerRefMatches(p.ledgerRef, baseRef));
       for (const prior of superseded) stripRedlineMarks(editor, prior.ledgerRef);
 
+      // Task 053b — capture WHERE THE USER IS once, AFTER the strips and BEFORE the first placement.
+      // Read per-edit inside the loop instead and an unidentified edit at index 3 would be proposed at
+      // wherever `applyRedlineSpans` left the selection after edit 2 — i.e. inside the previous
+      // suggestion's paragraph. The transaction remapper keeps this value valid as the loop mutates
+      // the document, so a batched proposal still points at the passage the user actually had.
+      trackedIntentRef.current = { from: editor.state.selection.from, to: editor.state.selection.to };
+
       const statuses: MaterializeStatus[] = [];
       const newPending: PendingRedline[] = [];
       // Item 1 (UAT round-4): collect unplaceable target-bearing edits so the banner can surface a calm
@@ -1024,8 +1246,12 @@ export function usePendingRedline(
       let firstStale: { paraId: string; currentText: string; proposedAgainst: string } | null = null;
       // FR-C06 — replayed/legacy suggestions located by prose. Held back (NOT placed) until the user
       // confirms ONE batched proposal, for the same reason the stale set is batched.
-      const deferredProposals: DeferredEdit[] = [];
-      let firstProposal: { matchedText: string; quotedTarget: string } | null = null;
+      //
+      // Task 053b — accumulated THROUGH THE REF, not a plain local, so the transaction remapper below
+      // sees each deferred entry as soon as it is deferred and keeps its `intendedRange` valid across
+      // the placements that follow it in this same pass.
+      deferredProposalRef.current = [];
+      let firstProposal: LegacyProposalCopy | null = null;
       let targetedCount = 0;
 
       edits.forEach((payload, i) => {
@@ -1048,6 +1274,7 @@ export function usePendingRedline(
           bindingId,
           newText,
           proposalScope,
+          intendedRange: trackedIntentRef.current ?? undefined,
         });
 
         if (placement === null) {
@@ -1074,16 +1301,45 @@ export function usePendingRedline(
         targetedCount += 1;
 
         if (placement.status === 'proposed') {
-          deferredProposals.push({ payload, ledgerRef: subRef, bindingId, turn });
+          deferredProposalRef.current = [
+            ...deferredProposalRef.current,
+            placement.reason === 'unidentified-target'
+              ? {
+                  payload,
+                  ledgerRef: subRef,
+                  bindingId,
+                  turn,
+                  question: 'unidentified-target',
+                  intendedRange: placement.intendedRange,
+                }
+              : { payload, ledgerRef: subRef, bindingId, turn, question: 'anchorless-replay' },
+          ];
           if (firstProposal === null) {
-            firstProposal = { matchedText: placement.matchedText, quotedTarget: placement.quotedTarget };
+            firstProposal =
+              placement.reason === 'unidentified-target'
+                ? {
+                    reason: 'unidentified-target',
+                    matchedText: placement.matchedText,
+                    quotedTarget: '',
+                    proposedText: newText,
+                    placement: placement.placement,
+                    contextText: placement.contextText,
+                  }
+                : {
+                    reason: 'legacy-replay',
+                    matchedText: placement.matchedText,
+                    quotedTarget: placement.quotedTarget,
+                    proposedText: newText,
+                    placement: 'matched-span',
+                    contextText: '',
+                  };
           }
           statuses.push('proposed');
           return;
         }
 
         if (placement.status === 'stale') {
-          deferredStale.push({ payload, ledgerRef: subRef, bindingId, turn });
+          deferredStale.push({ payload, ledgerRef: subRef, bindingId, turn, question: 'stale-clause' });
           if (firstStale === null) {
             firstStale = {
               paraId: placement.paraId,
@@ -1139,20 +1395,27 @@ export function usePendingRedline(
       } else {
         setStaleTarget(null);
       }
-      deferredProposalRef.current = deferredProposals;
+      // Task 053b — `deferredProposalRef.current` was populated in the loop (see the remapper note
+      // above), so it is read here rather than assigned. A batch whose entries were held back by
+      // DIFFERENT questions renders the FIRST one's reason; each entry still replays with its own
+      // answer, so the copy can be imprecise about cause but the PLACEMENT never is.
+      const deferredProposals = deferredProposalRef.current;
       if (firstProposal !== null) {
-        const proposal: { matchedText: string; quotedTarget: string } = firstProposal;
+        // Explicitly annotated for the SAME reason `firstStale` is above: TypeScript resets the
+        // narrowing of a `let` assigned inside a callback, so the union collapses at this `if` and the
+        // annotation is what re-states the real type.
+        const proposal: LegacyProposalCopy = firstProposal;
         setLegacyProposal({
           ledgerRef: baseRef,
           bindingId,
-          matchedText: proposal.matchedText,
-          quotedTarget: proposal.quotedTarget,
+          ...proposal,
           proposedCount: deferredProposals.length,
           totalCount: targetedCount,
         });
       } else {
         setLegacyProposal(null);
       }
+      trackedIntentRef.current = null;
       setPending(prev => {
         const kept = prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef));
         return [...kept, ...newPending];
@@ -1188,7 +1451,7 @@ export function usePendingRedline(
         bindingId: item.bindingId,
         newText: item.payload?.new_text ?? '',
         proposalScope,
-        confirmed: 'stale-clause',
+        confirmed: item.question,
       });
       // Unreachable with `confirmed: 'stale-clause'` — the stale gate is the only producer of both,
       // and an anchored payload (the only kind that can be stale) never reaches the fallback.
@@ -1260,11 +1523,19 @@ export function usePendingRedline(
         bindingId: item.bindingId,
         newText: item.payload?.new_text ?? '',
         proposalScope,
-        confirmed: 'anchorless-replay',
+        // Task 053b — the answer is per-ITEM, never the button's own label. A batch can hold both
+        // anchorless kinds; passing one blanket value would replay the other kind un-confirmed, which
+        // would re-propose it forever (harmless) or, worse, invite someone to "fix" that by widening
+        // the gate. The item carries what it was held back by.
+        confirmed: item.question,
+        // Task 053b — the range the PROPOSAL promised, remapped across everything that happened since.
+        // Omitting it would fall back to the live selection, which by now sits wherever the last
+        // placement or the modal left it — the user would be shown one position and given another.
+        intendedRange: item.intendedRange,
       });
-      // Unreachable with `confirmed: 'anchorless-replay'`: a deferred proposal is anchorless by
-      // construction (it was minted by `classifyAnchorlessReplay`), so it can be neither `stale` (an
-      // anchored-only outcome) nor `proposed` again.
+      // Unreachable with either anchorless answer: a deferred proposal is anchorless by construction
+      // (minted by `classifyAnchorlessReplay` or `classifyUnidentifiedTarget`), so it can be neither
+      // `stale` (an anchored-only outcome) nor `proposed` again.
       if (placement === null || placement.status === 'stale' || placement.status === 'proposed') continue;
       if (placement.status !== 'applied') {
         // The document changed between the proposal and the answer (the quoted prose was edited or
@@ -1345,6 +1616,47 @@ export function usePendingRedline(
   // doc state; `pendingRef` lets the listener stay registered once per editor instance instead of
   // re-subscribing on every `pending` change (mirrors the FIX #9 scroll-measure effect's `editor.on`
   // pattern above). A no-op update (no band actually changed) skips the `setPending` call.
+  /**
+   * Task 053b — REBASE the positions a pending question promised, through every document change.
+   *
+   * The unidentified-target proposal is the first thing this hook holds that is addressed by POSITION
+   * rather than by paraId or by prose, and a raw position goes stale the moment anything shifts it:
+   * a batched pass places other edits between the question and the answer, and a host that lets the
+   * user keep typing would do the same. Confirming against a stale position is a silent mis-placement
+   * with a confirmation dialog in front of it — precisely the UAT-21 failure this task closes.
+   *
+   * The primitive is the editor's own transaction `Mapping` — the SAME one `stripRedlineMarks`,
+   * `RebasedOperationLog` and `useAiGenerateBookmark` rebase with (root §11: reuse the position system
+   * that exists, do not introduce a second one). Bias `from` left and `to` right so an insertion
+   * exactly at the boundary widens the promised range rather than escaping it.
+   *
+   * Cheap by construction: it returns immediately unless a question is actually open AND the document
+   * actually changed, so selection-only transactions (the overwhelming majority) cost one comparison.
+   */
+  React.useEffect(() => {
+    if (!editor) return undefined;
+    const rebaseHeldPositions = ({ transaction }: { transaction: Transaction }): void => {
+      if (!transaction.docChanged) return;
+      const held = deferredProposalRef.current;
+      const intent = trackedIntentRef.current;
+      if (held.length === 0 && intent === null) return;
+      const remap = (span: RedlineSpan): RedlineSpan => ({
+        from: transaction.mapping.map(span.from, -1),
+        to: transaction.mapping.map(span.to, 1),
+      });
+      if (intent !== null) trackedIntentRef.current = remap(intent);
+      if (held.length > 0) {
+        deferredProposalRef.current = held.map(item =>
+          item.intendedRange ? { ...item, intendedRange: remap(item.intendedRange) } : item
+        );
+      }
+    };
+    editor.on('transaction', rebaseHeldPositions);
+    return () => {
+      editor.off('transaction', rebaseHeldPositions);
+    };
+  }, [editor]);
+
   const pendingRef = React.useRef(pending);
   pendingRef.current = pending;
 

@@ -28,12 +28,15 @@ public static class ComposeModule
         // IComposeEditValidator/ComposeEditValidator RETIRED (task 052, FR-C04): the whole-document
         // target_text search was the last PLACEMENT path that located an edit by prose (ADR-049 I-7).
         // Placement is now anchor-only (ComposeEditAnchorPass -> ComposeAnchorResolver); an edit with no
-        // anchor is refused deterministically (EditErrorKind.NoAnchor), never searched for. The removed
-        // registration was UNCONDITIONAL (never inside an `if (flag)`), so its removal leaves no
-        // asymmetric registration (bff-extensions.md §F.1) — the sole consumer, the /edit-batch/validate
-        // endpoint, no longer takes the parameter.
-        services.AddSingleton<ComposeEditBatch>();                              // FR-20 (task 021)
-        services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
+        // anchor is refused deterministically (EditErrorKind.NoAnchor), never searched for.
+        // ComposeEditBatch (FR-20, task 021) + ComposeEditTransaction (FR-21, task 022) RETIRED (task 064,
+        // owner decision 2026-08-25): they applied edits by CHARACTER OFFSET into a plaintext projection,
+        // and their only span producer was the validator deleted above — so after task 052 they could
+        // never apply anything again. Both were injected NOWHERE (DI-registered and unconsumed), and the
+        // /edit-batch/validate endpoint they backed had zero client callers, so nothing observable changes.
+        // ALL THREE removed registrations were UNCONDITIONAL (never inside an `if (flag)`), so their
+        // removal leaves NO asymmetric registration behind (bff-extensions.md §F.1): there is no endpoint
+        // or service left that resolves any of them, and no feature gate that could make one reappear.
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
         // DocxAnnotationWriter RETIRED (task 036, §6.5 Path B): the text-anchored push-annotations WRITE

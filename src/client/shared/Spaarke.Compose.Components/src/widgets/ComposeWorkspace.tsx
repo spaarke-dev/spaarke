@@ -5235,14 +5235,62 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           `dismiss="alert"` means neither can be Esc'd past. They are answered one at a time.
 
           Canonical ConfirmModal shell (ADR-050), semantic tokens only (ADR-021), no bespoke chrome —
-          same contract as its FR-C05 sibling above. NOT an ADR-041 Gate (assessment §4.2 / O-1). */}
+          same contract as its FR-C05 sibling above. NOT an ADR-041 Gate (assessment §4.2 / O-1).
+
+          TASK 053b — THE SECOND REASON THIS CAN OPEN. `reason: 'unidentified-target'` is an edit the
+          model could not anchor at all (`target_para_id` arrived explicitly null, and task 052 left it
+          no prose to fall back on). Before 053b that edit was inserted silently at the caret and
+          reported as APPLIED — a revised indemnity clause could land in the recitals and the status
+          told the user it succeeded. It now asks, here, in THIS modal: same shell, same answer path,
+          same durable ledger write (root §11 — one confirmation surface, not two). The copy differs
+          because the two questions are genuinely different: the replay leg HAS a candidate to show
+          ("is this the clause?"), this one has none ("place it where you say"). Confirm places it as a
+          normal pending redline over the passage the user selected (or at their caret when there is no
+          selection), so it applies, stays accept/rejectable, and SAVES like any other edit — the
+          owner's 2026-08-25 bar. Cancel skips it. */}
       <ConfirmModal
         open={redlineStaleTarget === null && redlineLegacyProposal !== null}
         busy={proposalResolutionBusy}
-        title="Where should this suggestion go?"
+        title={
+          redlineLegacyProposal?.reason === 'unidentified-target'
+            ? 'Where should this change go?'
+            : 'Where should this suggestion go?'
+        }
         message={
           redlineLegacyProposal === null ? (
             ''
+          ) : redlineLegacyProposal.reason === 'unidentified-target' ? (
+            <>
+              {redlineLegacyProposal.proposedCount > 1
+                ? `The assistant couldn’t identify which paragraph to change for ${redlineLegacyProposal.proposedCount} of ${redlineLegacyProposal.totalCount} suggestions in this set. Nothing has been changed. Check the first one below before placing them.`
+                : 'The assistant couldn’t identify which paragraph to change. Nothing has been changed — you can place it yourself.'}
+              <br />
+              <br />
+              {'The change: “'}
+              {truncateClause(redlineLegacyProposal.proposedText)}
+              {'”'}
+              <br />
+              {redlineLegacyProposal.placement === 'replace-selection' ? (
+                <>
+                  {'It would replace what you have selected: “'}
+                  {truncateClause(redlineLegacyProposal.matchedText)}
+                  {'”'}
+                </>
+              ) : (
+                <>
+                  {'It would be inserted at your cursor'}
+                  {redlineLegacyProposal.contextText
+                    ? `, in “${truncateClause(redlineLegacyProposal.contextText)}”`
+                    : ''}
+                  {'. Nothing would be replaced.'}
+                </>
+              )}
+              <br />
+              <br />
+              {redlineLegacyProposal.placement === 'replace-selection'
+                ? 'Place the change there?'
+                : 'Insert it there? If that is the wrong place, skip it, select the passage you want, and ask again.'}
+            </>
           ) : (
             <>
               {redlineLegacyProposal.proposedCount > 1
@@ -5263,7 +5311,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             </>
           )
         }
-        confirmLabel="Place it here"
+        confirmLabel={
+          redlineLegacyProposal?.reason === 'unidentified-target'
+            ? redlineLegacyProposal.placement === 'replace-selection'
+              ? 'Replace my selection'
+              : 'Insert at my cursor'
+            : 'Place it here'
+        }
         cancelLabel="Skip this suggestion"
         onConfirm={() => {
           void resolveRedlineLegacyProposal('place');

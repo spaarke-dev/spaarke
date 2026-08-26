@@ -512,8 +512,14 @@ export interface ComposeDraftPayload {
    * this edit targets, captured from the user's selection at dispatch time or returned by the model
    * from the enumerated closed set. When present it OUTRANKS `target_text`, which is never read.
    * Mirrors the server envelope's `target_para_id` (`ProposedEdit`, `ComposeEditModels.cs`).
+   *
+   * NULLABLE ON THE WIRE (r8 task 053b): the Action output schemas declare this `["string","null"]`
+   * and list it in `required`, because Azure OpenAI Structured Outputs demands the KEY be present. So
+   * "I could not identify the paragraph" arrives as an explicit `null` — a state the type used to be
+   * unable to express, which is exactly why `payload?.target_para_id` truthiness conflated it with an
+   * ABSENT key (a genuine insertion consumer). See `usePendingRedline` / `classifyUnidentifiedTarget`.
    */
-  target_para_id?: string;
+  target_para_id?: string | null;
   /**
    * FR-C02 (task 051) — the target named as a legal citation ("clause 4.2", "4.2(b)(iii)"), resolved
    * through the numbering engine's `paraIdMap` by the same `CitationResolver` mirror the advisory-comment
@@ -551,8 +557,12 @@ export interface ComposeDraftEdit {
   new_text: string;
   /** LEGACY ONLY (r8 task 052) — retired; not read by any placement path. See ComposeDraftPayload. */
   match_mode?: string;
-  /** FR-C01/C03 (task 051) — the exact `w14:paraId` this change targets. Outranks `target_text`. */
-  target_para_id?: string;
+  /**
+   * FR-C01/C03 (task 051) — the exact `w14:paraId` this change targets. Outranks `target_text`.
+   * NULLABLE on the wire for the same Structured-Outputs reason as {@link ComposeDraftPayload.target_para_id}
+   * (r8 task 053b): `compose-revise-document`'s `edits[]` REQUIRES the key and permits a null value.
+   */
+  target_para_id?: string | null;
   /** FR-C02 (task 051) — this change's target named as a legal citation. Outranks `target_text`. */
   target_ref?: string;
   /** Optional per-change rationale. */
@@ -572,8 +582,13 @@ export interface ComposeDraftComment {
    * FR-C03 (r8 tasks 054/055) — the exact `w14:paraId` this flag targets, returned by the model from
    * the enumerated closed set. Outranks {@link target_text}, which is then only the fuzzy fallback
    * carried onto `AnchoredAnnotationAnchor.textPattern` for a Word-round-tripped document.
+   *
+   * NULLABLE on the wire (r8 task 053b). Unlike an EDIT, a null here is BENIGN and needs no
+   * discrimination: the schema itself says a null flag "hangs on target_text within the document (an
+   * ANNOTATION anchor, not an edit placement — the role ADR-049 I-7 leaves intact)", which is exactly
+   * what `registerAiReviewComments` already does with a falsy value.
    */
-  target_para_id?: string;
+  target_para_id?: string | null;
   /** FR-C03 (r8 tasks 054/055) — this flag's target named as a legal citation. Also outranks prose. */
   target_ref?: string;
   /** The reviewer flag / comment body. */
