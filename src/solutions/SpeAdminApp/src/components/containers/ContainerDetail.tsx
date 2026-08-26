@@ -151,26 +151,27 @@ function statusBadgeColor(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  /** Translucent backdrop covering the page behind the panel. */
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 200,
-    backgroundColor: tokens.colorBackgroundOverlay,
-  },
-
-  /** Panel container — fixed right-side overlay, 420px wide. */
+  /**
+   * Panel container — a docked BOTTOM pane, full width of the page.
+   *
+   * 🔴 Changed 2026-08-26 (UAT), matching `ContainerTypeDetail`. This was a 420px fixed overlay on
+   * the right with a modal backdrop. The same pattern is now used on both list screens so it is
+   * learned once: select a row, its detail docks beneath the list, the list stays live above it.
+   *
+   * Sized by the flex column in `ContainersPage` — hence `flex: 0 0 auto` rather than `position:
+   * fixed`. Renders null when no container is selected, so the list reclaims the height on close.
+   */
   panel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: "420px",
-    zIndex: 201,
-    boxShadow: tokens.shadow64,
+    flex: "0 0 auto",
+    height: "45%",
+    minHeight: "260px",
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow16,
   },
 
   /** Header rendered inside SidePaneShell's header slot. */
@@ -682,16 +683,9 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
 
   return (
     <>
-      {/* Translucent backdrop — click to close */}
-      <div
-        className={styles.backdrop}
-        onClick={onClose}
-        role="presentation"
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div className={styles.panel} role="dialog" aria-modal="true" aria-label="Container details">
+      {/* Panel — docked beneath the list. No backdrop, and no longer `aria-modal`: the grid above
+          stays both interactive and reachable by assistive tech while this is open. */}
+      <div className={styles.panel} role="complementary" aria-label="Container details">
         <SidePaneShell header={panelHeader} footer={panelFooter}>
           {/* Tab list */}
           <TabList

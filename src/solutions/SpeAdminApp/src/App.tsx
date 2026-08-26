@@ -233,13 +233,30 @@ const AppContent: React.FC<AppContentProps> = ({
           initialDetailContainerId={params.containerId}
         />
       ) : activePage === "container-types" ? (
-        <>
-          <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
+        /*
+         * Master-detail, stacked (UAT 2026-08-26). The detail pane used to be a fixed 440px
+         * overlay on the right with a modal backdrop; it is now a docked bottom pane. This flex
+         * column is what makes the list SHRINK when the pane opens instead of being covered by it
+         * — the inner wrapper gives ContainerTypesPage a correctly-sized box for its `height: 100%`
+         * to resolve against, and ContainerTypeDetail renders null when nothing is selected, so the
+         * list gets the full height back on close.
+         */
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
+            <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
+          </div>
           <ContainerTypeDetail
             containerTypeId={detailContainerTypeId}
             onClose={() => setDetailContainerTypeId(null)}
           />
-        </>
+        </div>
       ) : (
         // Placeholder for any remaining pages not yet implemented
         <div

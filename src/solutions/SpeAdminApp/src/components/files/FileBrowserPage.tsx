@@ -33,6 +33,7 @@ import {
   Field,
   Tooltip,
   Badge,
+  Link,
 } from "@fluentui/react-components";
 import {
   ArrowUploadRegular,
@@ -175,6 +176,10 @@ const useStyles = makeStyles({
     textAlign: "center",
   },
 
+  /**
+   * Rendered as a Fluent `Link as="button"` — the button chrome is reset here so it reads as a
+   * link, not a control. See the render site for why this became clickable (UAT 2026-08-26).
+   */
   folderNameCell: {
     display: "flex",
     flexDirection: "row",
@@ -182,6 +187,11 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: "transparent",
+    border: "none",
+    padding: 0,
+    textAlign: "left",
+    cursor: "pointer",
   },
 
   fileNameCell: {
@@ -878,10 +888,31 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
                           {/* Name column — folder/file icon + name */}
                           {columnId === "name" && (
                             itemIsFolder ? (
-                              <span className={styles.folderNameCell}>
+                              /*
+                               * 🔴 A folder name is a LINK, and opens on a single click.
+                               *
+                               * Until 2026-08-26 this was a plain <span> styled brand-coloured and
+                               * semibold — it LOOKED like a link but was inert, and the only way
+                               * into a folder was double-clicking the row, which nothing announced.
+                               * The operator reported the folders "do not open" during UAT; they
+                               * opened fine, but every affordance said single-click and only
+                               * double-click worked.
+                               *
+                               * stopPropagation keeps the row's own click (select) from also
+                               * firing. Row double-click still navigates, so both habits work.
+                               */
+                              <Link
+                                as="button"
+                                className={styles.folderNameCell}
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  handleFolderOpen(item);
+                                }}
+                                aria-label={`Open folder ${item.name}`}
+                              >
                                 <Folder20Regular />
                                 {item.name}
-                              </span>
+                              </Link>
                             ) : (
                               <span className={styles.fileNameCell}>
                                 <Document20Regular />

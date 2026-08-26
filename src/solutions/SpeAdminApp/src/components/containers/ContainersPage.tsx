@@ -430,6 +430,29 @@ function buildColumns(
       ),
     }),
     createTableColumn<Container>({
+      columnId: "id",
+      renderHeaderCell: () => "Container ID",
+      /*
+       * Operator-requested (UAT 2026-08-26). The container ID is what every Graph call, support
+       * ticket and log line identifies a container by, and until now the only place to read one was
+       * the detail panel. Monospace because these are opaque base64-ish strings that get compared
+       * character by character; the full value is on the title attribute since the cell truncates.
+       */
+      renderCell: (container) => (
+        <Text
+          truncate
+          title={container.id}
+          style={{
+            fontFamily: tokens.fontFamilyMonospace,
+            fontSize: tokens.fontSizeBase200,
+            color: tokens.colorNeutralForeground2,
+          }}
+        >
+          {container.id}
+        </Text>
+      ),
+    }),
+    createTableColumn<Container>({
       columnId: "status",
       renderHeaderCell: () => "Status",
       renderCell: (container) => {
@@ -737,10 +760,16 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   // ── Row Click Handler (opens detail panel) ───────────────────────────────────
 
   /**
-   * Opens the ContainerDetail side panel for the clicked container.
-   * This is triggered by clicking on the non-checkbox area of a row.
+   * Opens the ContainerDetail pane for the clicked container.
+   * This is triggered by clicking on the non-radio area of a row.
+   *
+   * Closes the browse pane first. Since 2026-08-26 both panes dock BELOW the list rather than
+   * overlaying it from the right, so two open at once would leave the grid a sliver between them.
+   * They are alternative views of one container — its metadata, or its files — so showing one at a
+   * time is also the honest model.
    */
   const handleRowClick = React.useCallback((containerId: string) => {
+    setBrowseContainer(null);
     setDetailContainerId(containerId);
   }, []);
 
@@ -965,12 +994,14 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
         >
           <ToolbarButton
             icon={<FolderOpen20Regular />}
-            onClick={() =>
+            onClick={() => {
+              // Mutually exclusive with the detail pane — see handleRowClick.
+              setDetailContainerId(null);
               setBrowseContainer({
                 id: selectedContainers[0].id,
                 name: selectedContainers[0].displayName,
-              })
-            }
+              });
+            }}
             disabled={selectedContainers.length !== 1 || actionInProgress || loading}
             aria-label="Browse files in the selected container"
           >
@@ -1226,8 +1257,15 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
  * Extracted to keep ContainersPage readable and allow future feature extension.
  *
  * Row interaction model:
- *   - Clicking the checkbox cell toggles multi-select (toolbar actions).
- *   - Clicking any non-checkbox cell opens the ContainerDetail side panel.
+ *   - Clicking the radio cell selects that container (toolbar actions act on it).
+ *   - Clicking any non-radio cell opens the ContainerDetail side panel.
+ *
+ * ⚠️ **Single-select, operator-directed (UAT 2026-08-26).** This grid was multi-select until then.
+ * The consequence is deliberate and worth knowing before "restoring" it: Activate / Lock / Unlock /
+ * Delete now act on exactly one container per invocation, and `BulkOperationService` — which those
+ * toolbar actions call, and which batches across many containers — no longer has a UI that can
+ * feed it more than one. The service is intact and still batches; only the reachable input narrowed.
+ * Reverting to `multiselect` here restores bulk behaviour with no other change.
  */
 interface ContainerDataGridProps {
   containers: Container[];
@@ -1250,8 +1288,6 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
   const {
     getRows,
     selection: {
-      allRowsSelected,
-      toggleAllRows,
       toggleRow,
       isRowSelected,
     },
@@ -1262,7 +1298,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     },
     [
       useTableSelection({
-        selectionMode: "multiselect",
+        selectionMode: "single",
         selectedItems: selectedIds,
         onSelectionChange,
       }),
@@ -1273,14 +1309,14 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     const isSelected = isRowSelected(row.rowId);
     return {
       ...row,
-      // Row click opens the detail panel — checkbox is handled separately
+      // Row click opens the detail panel — the radio cell is handled separately
       onClick: (e: React.MouseEvent) => {
-        // If the click target is the selection checkbox cell, toggle selection instead
+        // If the click target is the selection radio cell, toggle selection instead
         const target = e.target as HTMLElement;
-        const isCheckbox =
+        const isSelectionCell =
           target.tagName === "INPUT" ||
           target.closest("[data-selection-cell]") !== null;
-        if (isCheckbox) {
+        if (isSelectionCell) {
           toggleRow(e, row.rowId);
         } else {
           onRowClick(row.item.id);
@@ -1305,7 +1341,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       items={containers}
       columns={columns}
       sortable={false}
-      selectionMode="multiselect"
+      selectionMode="single"
       selectedItems={selectedIds}
       onSelectionChange={onSelectionChange}
       getRowId={(container) => container.id}
@@ -1313,21 +1349,9 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       aria-label="Containers"
     >
       <DataGridHeader>
-        <DataGridRow
-          selectionCell={{
-            checkboxIndicator: {
-              "aria-label": "Select all containers",
-            },
-          }}
-          aria-selected={allRowsSelected}
-          onClick={(e: React.MouseEvent<HTMLTableRowElement>) => toggleAllRows(e)}
-          onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              toggleAllRows(e as unknown as React.MouseEvent);
-            }
-          }}
-        >
+        {/* No select-all affordance under single-select — there is nothing to select all of.
+            Fluent renders an empty leading cell to keep the columns aligned with the rows. */}
+        <DataGridRow>
           {({ renderHeaderCell }) => (
             <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
           )}
@@ -1340,7 +1364,8 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
             <DataGridRow<Container>
               key={rowId}
               selectionCell={{
-                checkboxIndicator: {
+                type: "radio",
+                radioIndicator: {
                   "aria-label": `Select ${item.displayName}`,
                 },
               }}

@@ -160,26 +160,30 @@ function extractSettingsFromConfig(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  /** Translucent backdrop covering the page behind the panel. */
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 200,
-    backgroundColor: tokens.colorBackgroundOverlay,
-  },
-
-  /** Panel container — fixed right-side overlay, 440px wide. */
+  /**
+   * Panel container — a docked BOTTOM pane, full width of the page.
+   *
+   * 🔴 Changed 2026-08-26 (UAT). This was a 440px fixed overlay on the right with a translucent
+   * backdrop. Two things were wrong with that. The panel carries a settings form, a permissions
+   * grid and a consuming-tenants list — content that needs horizontal room, and 440px gave it a
+   * column so narrow that labels wrapped mid-phrase. And the backdrop made it MODAL: the list you
+   * were comparing rows against was greyed out and unclickable behind it, which is the opposite of
+   * what a detail pane is for.
+   *
+   * Now it is in-flow, sized by its flex parent in `App.tsx`, so the grid above shrinks rather than
+   * being covered — the list stays live while the detail is open. The backdrop is gone with it.
+   */
   panel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: "440px",
-    zIndex: 201,
-    boxShadow: tokens.shadow64,
+    flex: "0 0 auto",
+    height: "45%",
+    minHeight: "260px",
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow16,
   },
 
   /** Header rendered inside SidePaneShell's header slot. */
@@ -717,14 +721,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className={styles.backdrop}
-        onClick={handleCloseRequest}
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
+      {/* Panel — docked beneath the list. No backdrop: the grid above stays interactive. */}
       <div className={styles.panel} role="complementary" aria-label="Container type detail">
         <SidePaneShell
           header={
