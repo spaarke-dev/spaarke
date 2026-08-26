@@ -346,7 +346,20 @@ the POML contradicts itself: its constraint says "route every site through the r
 worked example says "consume `provisionResult.data.speContainerId`" — different mechanisms with
 different coverage.
 
-> ⚠️ **The 076 decision is wider than the 076 note describes.** The gate reviewer flagged that the
+> ✅ **RESOLVED — the escalation note is now complete at `dbc2a62`.** The two-hop gap had been recorded
+> in 075's notes but **not** in the 076 escalation note, which is the document the operator actually
+> reads to choose. It is now in §2 with the per-option consequence spelled out:
+>
+> | Option | Effect on the two-hop gap |
+> |---|---|
+> | **(A)** | Doesn't close it, but routes every path through **one** place where closing it later is a single change |
+> | **(B)** | **Cannot** fix it on the create path at all — that path takes its container from provisioning's return value and never asks the resolver, so closing it would need a *third* mechanism. **A second argument against (B), independent of the F-8 silent-skip one.** |
+> | **(C)** | Closes it server-side in one place; client untouched |
+>
+> It is **not a prerequisite** for 076 (closing it needs the Phase 3 ancestor stamp, 050–055). It is a
+> **constraint on the choice**: pick the option that leaves the gap closable in one place, not three.
+
+> ⚠️ Original framing, for the record — the gate reviewer flagged that the
 > **two-hop child gap** (`communication → sprk_invoice → secure matter`, currently landing in the shared
 > archive) is *substantively the same question* as 076's escalation: **"which record is the decision
 > about?"** So whichever resolution point is chosen for 076 should be checked against the two-hop case
