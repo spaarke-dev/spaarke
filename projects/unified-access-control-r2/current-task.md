@@ -6,52 +6,38 @@
 
 ---
 
-## 🔴 START HERE — the one decision that shapes the next task
+## 🔴 START HERE
 
-**081 is BLOCKED and the owner has chosen OPTION B (classify the caller), not C.** Rewriting 081's POML
-to option B is the next action. The reasoning, including what was wrong with the original C
-recommendation, is in [`notes/task-081-tenant-diagnostic-BLOCKED.md`](notes/task-081-tenant-diagnostic-BLOCKED.md)
-— that file still recommends C and **must be updated**; treat this block as authoritative over it.
+**081 is UNBLOCKED and rewritten to option B.** The POML, the decision record
+([`notes/task-081-tenant-diagnostic-BLOCKED.md`](notes/task-081-tenant-diagnostic-BLOCKED.md) — filename
+is historical, it is no longer blocked) and `TASK-INDEX.md` are all consistent as of 2026-08-26. **Next
+action is 072 or Wave 2 (075 → 076)**, not 081 bookkeeping.
 
-**Why C was withdrawn** (three things the first recommendation underweighted):
-1. C is not "reuse" — it moves the L2 probe from a Managed Identity to a **static shared key**, and the
-   probe's own comment says it uses the shared `TokenCredential` singleton *"parity with sibling
-   probes."* C makes it the odd one out in the L2 probe fleet. Reuse on the BFF side, fragmentation on
-   the L2 side. (Inbound named API keys ARE sanctioned, so C was not an ADR-028 violation — but it walks
-   against the secret-free direction the platform has been deliberately taking.)
-2. C destroys attribution: an API key says "a holder of the key"; MI says *which principal* made a
-   cross-tenant read. On this route that is the log line you most want.
-3. B's cost was overstated as "new security surface". It is: read a standard caller-kind claim, plus a
-   config allow-list of permitted `appid`s.
+**⚠️ Two "verified facts" recorded in the previous version of this block were WRONG.** Corrected in the
+decision record's §Corrections; do not carry them forward:
+- ❌ *"zero reads of `idtyp`/`appid` as claims in `src/server`"* — **false.**
+  `Infrastructure/Logging/AuditEnrichmentMiddleware.cs` reads `appid`/`azp` (:102-104) and `idtyp` (:132).
+- ❌ *"`Sprk.Bff.Api/CLAUDE.md` falsely claims `AuditEnrichmentMiddleware` enriches with `appid`"* —
+  **false, that doc is correct.** No doc fix needed there.
 
-**⚠️ THE BINDING DESIGN CONDITION — this is what stops 081 being thrown away by the evaluator work.**
-Two separable pieces with different lifespans:
-- **The classification primitive** (caller-kind from the token: user principal vs which service
-  principal) is **permanent** — the evaluator needs it too, since it cannot decide whether ADR-034
-  membership derivation applies without knowing the caller is a service.
-- **The policy** ("these appids may ask about another tenant, on this route") is route-specific and
-  small. Tenant-scope authority is **upstream of** the evaluator: the evaluator answers
-  `(recordId → rights)`, never "which tenant may you ask about." So it is a different axis, not
-  duplicated work.
+This **improved** 081: `IsOnBehalfOfFlow` (:129-145) already classifies caller kind — it is just a
+`private static` method in a logging middleware, so unreachable, answering a logging question rather than
+an authorization one, with no tests and no other consumers. So 081 is *promote and extend ONE classifier*
+(CLAUDE.md §11 reuse), not *write a new one*, and its acceptance criteria require exactly one classifier
+to exist afterwards.
 
-**Therefore: the primitive MUST be placed in `Spaarke.Core.Auth`, NOT in BFF `Infrastructure/Auth/`.**
-`Spaarke.Core` cannot reference BFF Infrastructure — that is exactly the trap that shrank task 032's
-scope when `CallerRecordAccessProbe` landed BFF-side. Inline `FindFirst("idtyp")` in the endpoint, or a
-BFF-only primitive, and the evaluator cannot consume it and someone rebuilds it. Placed in
-`Spaarke.Core.Auth`, 081 becomes the first consumer of a seam the evaluator needs anyway.
-
-**Also decided**: a diagnostics probe has **no end-user use case**, so B's user-principal branch should
-**DENY**, not "match your own `tid`". Stricter and simpler than the POML's prescribed fix, and it gets
-C's "no user reach" property without C's credential downgrade.
-
-**Design rule that makes B robust**: an **empty allow-list must DENY everyone**. "Empty means allow all"
-is the classic failure of this pattern.
-
-**Verified facts** (do not re-derive): there is **NO** inbound caller-kind discriminator anywhere in
-`src/server` — zero reads of `idtyp` or `appid` as claims. And
-`src/server/api/Sprk.Bff.Api/CLAUDE.md` **falsely claims** `AuditEnrichmentMiddleware` enriches each
-request with `appid`; it does not. Fix that doc as part of 081 — it is how someone concludes caller
-classification already exists.
+**The three things carried into the POML that must not be re-litigated:**
+1. **Placement is binding** — the primitive goes in `src/server/shared/Spaarke.Core/Auth/`.
+   `Spaarke.Core` cannot reference BFF `Infrastructure/**` (`LayerDependencyTests`), so a BFF-side
+   primitive is unreachable by the evaluator in `Spaarke.Core/Auth/AuthorizationService.cs` and gets
+   rebuilt — the trap that shrank task 032. Verified: no new package reference needed (`ClaimsPrincipal`
+   is BCL).
+2. **User principals DENY outright**, not `tid`-match. A provisioning diagnostic has no end-user use
+   case; this gets option C's "no user reach" without C's credential downgrade.
+3. **The trap**: `appid`/`azp` is present in *delegated* tokens too — it names the client app, not the
+   caller kind. `allowedAppIds.Contains(appId)` alone lets a human on the L2 app registration name any
+   tenant. Gate = positive app-only determination **∧** allow-list. Absence ⇒ indeterminate ⇒ deny.
+   Empty **or** absent allow-list ⇒ deny everyone.
 
 ---
 
@@ -59,8 +45,8 @@ classification already exists.
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **077 + 080 COMPLETE.** Phase 0c: **070 ✅ 071 ✅ 074 ✅ 077 ✅ 080 ✅** · **081 ⛔ BLOCKED** (decision now made — see START HERE) |
-| **Next Action** | **Rewrite 081's POML to option B** with the `Spaarke.Core.Auth` placement condition, and correct `notes/task-081-tenant-diagnostic-BLOCKED.md` (it still recommends C). Then **072** or **Wave 2 (075 → 076)** |
+| **Task** | ✅ **077 + 080 COMPLETE.** Phase 0c: **070 ✅ 071 ✅ 074 ✅ 077 ✅ 080 ✅** · **081 🔲 READY** (option B, rewritten 2026-08-26 — see START HERE) · 072 · 073 · 075 · 076 · 078 · 079 filed |
+| **Next Action** | **072** (gate `share-link` — Wave 1, `opus`/`high`, `∥-safe:false`) **or Wave 2 (075 → 076)**. 081 is ready but not urgent-first: it is `opus`/`xhigh` and its Step 0 is empirical token inspection |
 | **Commits** | `d6d156ac1` 080 · `4c51eed7e` CI fixes + census + 081 filed · `f857fdc07` 077 + 081 blocked. All pushed. Working tree clean |
 | **⚠️ PR head ≠ your SHA** | `ce7a88718` is a `github-actions[bot]` auto-format commit that landed on top. **Always check the PR head SHA, not the one you pushed** — bot commits move it, and their workflow runs park at `action_required` until approved (`gh api -X POST .../actions/runs/{id}/approve`) |
 | **Step** | Between tasks. Working tree clean. **PR #825 open as DRAFT** |
