@@ -4,7 +4,7 @@
     <title>RecordHeaderShell optional columns prop driving the loading skeleton</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 015 (fields barrel + contract tests) is complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared-library .tsx code consumed by the shipped MatterHeaderPcf and the new RecordHeader control</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -121,6 +121,32 @@
     Browser-visible verification (the 2-column skeleton with no 3-column flash, plus ADR-021 dark
     mode) is covered by task 033's ui-tests and the Phase 5 per-wave acceptance runs — this task's
     scope is the shared-lib change + unit tests.
+
+    COMPLETION SUMMARY (2026-08-25): Added `columns?: 2 | 3` (default 3) to
+    IRecordHeaderShellProps (types.ts) with JSDoc mirroring the borderless style. In
+    RecordHeaderShell.tsx added a second precompiled makeStyles class (`skeletonTwoColumn`,
+    gridTemplateColumns: repeat(2, 1fr)) alongside the existing `skeleton` class — selected by a
+    ternary at render time, per the no-runtime-interpolation constraint. Parameterized
+    LoadingSkeleton to accept `columns: 2 | 3` and render `columns * 2` SkeletonItems via
+    Array.from + map, preserving the exact pre-existing testid scheme
+    (record-header-shell-skeleton-cell-0..N). Default path (columns omitted) renders identically
+    to the original hard-coded 6-cell/3-column implementation — verified by test
+    render_LoadingTrueColumnsOmitted_RendersThreeColumnSkeletonWithSixCells plus the untouched
+    original tests, all still green. Added 4 new tests to RecordHeaderShell.test.tsx covering the
+    full acceptance matrix (columns omitted, columns=2, columns=3 explicit, loading=false
+    unaffected by columns). No deviations from the task's directional steps.
+
+    Verification: `tsc` (shared-lib build) exits 0. `npx jest RecordHeaderShell.test.tsx` — 12/12
+    green (8 original + 4 new). Full shared-lib suite: 212/221 suites pass; the 9 failing suites
+    (EntityCreationService.cascade, surfaceLaunchRegistry, todoScoreMappings,
+    buildDynamicWorkspaceConfig, ConversationView.forward, RichFilePreview,
+    TimelineComposeBox, recordHeader.integration [known-red, stale since v1.0.10],
+    ConversationView.emailInFlow) are the known-red baseline, unrelated to this change and outside
+    R2 scope. ESLint clean on all 3 modified files. Self-executed code-review + adr-check (Step
+    9.5): 0 Critical, 0 blocking Warnings, 0 ADR-021/022 violations, 0 hex/rgb/hsl literals
+    introduced, 0 AI code smells. MatterHeaderView.tsx (the canonical existing consumer) does not
+    pass `columns` and was not modified — confirms backward compatibility by construction (default
+    parameter resolves to the original 3-column behavior).
   </notes>
 
   <execution>

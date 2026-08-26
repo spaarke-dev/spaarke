@@ -4,7 +4,7 @@
     <title>RecordHeaderConfiguration v1.0 types + shallow non-throwing guard</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 015 (fields barrel + contract tests) is complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared-library .ts code; new type surface consumed by the resolver (031) and the RecordHeader PCF (033)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -134,6 +134,21 @@
     all defaults OPTIONAL in the types — resolution to concrete values is the resolver's job
     (031); this file only documents the defaults in JSDoc. Spec refs: FR-01, FR-03; design.md
     section 5.2 is the authoritative key table.
+
+    COMPLETION (2026-08-25): Implemented as specified, no deviations from the closed-set schema
+    or the shallow-guard contract. Created src/types/RecordHeaderConfiguration.ts
+    (RecordHeaderFieldRenderer union, RecordHeaderFieldConfig, RecordHeaderConfiguration, all
+    readonly, mirroring isValidDataGridConfiguration's JSDoc style) + 36-test
+    src/types/__tests__/RecordHeaderConfiguration.test.ts covering the full acceptance-criteria
+    matrix (minimal + design.md §5.2 Matter example + two staged realistic payloads valid;
+    6 top-level + 3 _version + 3 fields negative cases; shallow-by-design field [{}] pass-through;
+    17-input never-throws matrix + console-spy no-log assertion; static import-purity scan).
+    Added the barrel line to src/types/index.ts. `tsc --noEmit`, `npm run build`, and
+    `eslint` all clean; full jest run is 213/222 suites green — the 9 failures are the
+    pre-existing known-red suites (incl. the documented-stale
+    src/__tests__/recordHeader.integration.test.tsx), none touching this file.
+    Per the orchestrator's hard constraints for this sub-agent run, TASK-INDEX.md and
+    current-task.md were left untouched — the main session owns those updates.
   </notes>
 
   <execution>

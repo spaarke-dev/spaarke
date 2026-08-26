@@ -3,8 +3,8 @@
   <metadata>
     <title>useRecordHeaderFields — hoist form-buffer staging, pending buffer, and lookup projection; unify the throwing path</title>
     <phase>2 Metadata + Machinery</phase>
-    <gate>blocked (deps 021)</gate>
-    <status>not-started</status>
+    <gate>open (dep 021 complete @ 393fc78c3)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Creates/modifies .ts code files implementing shared save machinery — Step 3.5.5 code-implementation trigger</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,6 +107,77 @@
   </acceptance-criteria>
 
   <notes>Spec refs: FR-13, FR-14, FR-19; spec MUST rule "preserve R1's form-buffer dirty-state pattern exactly"; R1 v1.0.7 history in MatterHeaderView.tsx header comment (lines 8-22). The FR-19 companion component `RecordHeaderFields.tsx` (grid composition) is Phase 3 scope (task 033 wiring), not this task. Task 023 adds the OOB-picker staging on top of this hook's `saveLookup`.</notes>
+
+  <completion>
+    <status>completed</status>
+    <files-modified>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts (324 lines; 91 code + 233 JSDoc)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderFields.test.ts (26 tests)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts (+7 lines: 2 exports + comment)</file>
+    </files-modified>
+    <verification>
+      <item>26/26 hook tests pass; 100% stmt/branch/func/line coverage on the new module (ADR-012 requires 90%).</item>
+      <item>Shared-lib `npm run build` (tsc) clean; eslint exit 0 on all three files.</item>
+      <item>Full shared-lib suite: 213/222 suites pass. The 9 failures are ALL pre-existing — verified by temporarily reverting hooks/index.ts to HEAD and re-running them (8 failed identically at baseline; the 9th, ConversationView.emailInFlow, is a load-sensitive timeout flake that passes in a smaller batch). Zero new failures introduced.</item>
+      <item>`src/client/pcf/MatterHeader/` untouched — tree hash e56179d2dd8b29aadbe9209c1280949149dc606c before AND after; `git diff`/`git status` empty for that path. Task 040's RECORDSUMMARY_FIELD wiring verified intact at lines 74, 89, 267, 271, 274.</item>
+      <item>MatterHeader PCF tests 7/7 green against the rebuilt dist (confirms the barrel edit is safe for deep-import consumers).</item>
+      <item>package.json `"sideEffects": false` untouched; marginal dist cost of the new module is one 12 KB file (mostly JSDoc, minified away in prod) whose every runtime import was already in the barrel.</item>
+    </verification>
+    <form-buffer-semantics-preserved>
+      Every save stages via `getXrmPage().getAttribute(name).setValue(value)`. NO `Xrm.WebApi.updateRecord`
+      (grep-verified absent + guard-tested); NO refetch after staging (`retrieveRecord` call count pinned at 1
+      across multiple saves); NO loading toggle on save (`loading` sampled during and after a save, asserted
+      false throughout); `refresh` deliberately NOT re-exported from the result so a consumer cannot
+      reintroduce the round trip (guard-tested). Buffers reset on `recordId` change ONLY — proven both ways
+      (resets on change; does NOT reset on a same-recordId re-render with a new `fields` array reference).
+      The `'name' in pendingLookup` membership check is preserved verbatim, so a staged CLEAR displays empty
+      rather than falling back to the still-loaded Dataverse value.
+    </form-buffer-semantics-preserved>
+    <deviations>
+      <deviation kind="logging">R1's `console.warn`(before throw) / `console.info`(staged edit) replaced by the
+        shared `createLogger` (`utils/logger.ts`) at debug level — the shared-lib convention, cf.
+        `services/FieldMappingHandler.ts`. The warn-before-throw was redundant with the thrown message.
+        Logging is not a form-buffer semantic; staging behavior is byte-identical. Documented in the file header.</deviation>
+      <deviation kind="type-only">`displayText` returns `string | null | undefined` rather than R1's
+        `as string | undefined` cast. Zero runtime change — it is simply truthful about the `null` Dataverse
+        genuinely returns for empty fields, and is assignable to BOTH `TextField.value`
+        (`string|number|null|undefined`) and `TextareaField.value` (`string|null|undefined`).</deviation>
+      <deviation kind="additive">`error` added to the result — a pass-through of `useRecordFieldValues`'s
+        existing error, so task 033 can render a degraded state on read failure. Not new surface.</deviation>
+      <deviation kind="scope-held">Scope held to `saveText` + `saveLookup` per the closed acceptance set. The
+        Boolean/Date/Number/OptionSet renderers' `onSave` take `boolean` / `Date|null` / `number|null` — task 033
+        will need staging for those value types. A generic `saveValue` was deliberately NOT added: new surface
+        outside this task's criteria (CLAUDE.md §11). Routed to 033.</deviation>
+      <deviation kind="not-harmonised">`getXrmPage()`'s 2-frame walk vs `getXrm()`'s 3-frame walk was left AS-IS
+        (task 021's deliberate choice). Assessed and it does not matter for this hook: a form-embedded
+        RecordHeader PCF has Xrm on frame 1, a Code Page host on frame 2. Only a host nested deeper than one
+        iframe would read fine (3-frame `getXrm`) but fail to stage (2-frame `getXrmPage`) — no such consumer
+        exists. The asymmetry is documented in the hook's file header for whoever hits it first.</deviation>
+      <deviation kind="artifact">POML step 8 asked for a deviation note under `notes/`. Recorded here in the POML
+        plus in the hook's file-header JSDoc instead (durable, co-located with the code). No `notes/` acceptance
+        criterion exists, and the executing agent was directed not to create standalone report .md files.</deviation>
+    </deviations>
+    <quality-gates>
+      <gate name="adr-check">PASS — 0 violations. ADR-012 / ADR-021 / ADR-022 / ADR-028 / ADR-038 compliant.
+        One low-confidence finding surfaced for coverage, NOT suppressed: ADR-012's Service Portability tier
+        table marks direct `Xrm.*` access as consumer-side. Already resolved as a documented non-tension at
+        spec.md:226 ("components props-driven, Xrm access in hooks/ and services/ behind a window/parent walker
+        — exactly where FR-19 puts it"), with in-repo precedent. No new deviation; no §6.5 escalation.</gate>
+      <gate name="code-review">PASS — 0 Critical, 0 Warning, 4 Suggestions (2 routed out of scope: a stale-values
+        frame on recordId change that `RecordHeaderShell loading` already masks → task 033; unescaped
+        `$select` field-name join in the pre-existing `useRecordFieldValues` → task 030's config guard).
+        AI-smell sweep clean on all five smells. Code-only complexity 7 (threshold 15); longest function
+        13 lines; zero `as any` and zero `eslint-disable` (R1's source needed 2 of each).</gate>
+      <gate name="lint">PASS — eslint exit 0.</gate>
+    </quality-gates>
+    <escalation-trigger-status>NOT FIRED — form-buffer semantics were preserved exactly with no design pressure
+      toward refetch, loading toggles, out-of-band buffer resets, or loosened `in`-check semantics.</escalation-trigger-status>
+    <note-for-task-034>The hoist does not change what `src/__tests__/recordHeader.integration.test.tsx` asserts,
+      so it stays red for its existing reason. It does, however, make the intended coverage newly expressible at
+      the HOOK level: 034 can assert staging/pending/clear behavior against `useRecordHeaderFields` directly
+      (see `hooks/__tests__/useRecordHeaderFields.test.ts` for the mock harness) instead of driving it through
+      the removed `sparklePopoverOpen`/`sparklePopoverContent`/`aiSummary` component contract.</note-for-task-034>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
