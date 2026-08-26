@@ -34,10 +34,13 @@ run; a carried run has nothing to repair.* Scoped to nested spans only.
 Residual list: the nested half leaves §2; only the **unterminated** field (`TOC`/`INDEX`, which spans
 paragraph marks) remains. [`notes/058-nested-field-carry.md`](notes/058-nested-field-carry.md).
 
-⚠️ **Owner nod wanted**: a user who deletes a conditional chip is indistinguishable from a client that
-never sent it, so it is **restored**. Same trade already taken for bookmarks, SDT shells and objects —
-this makes it the **third** construct behaving that way. Also: no browser/UAT run and not opened in Word;
-fidelity is asserted through the SDK, the schema validator and the relationship gate.
+✅ **Owner-signed 2026-08-26**: *"follow the established pattern."* A user who deletes a conditional chip
+is indistinguishable from a client that never sent it, so the construct is **restored** — the same trade
+already taken for bookmarks, SDT shells and objects. This is now the **fourth** construct behaving that
+way and the pattern is explicitly sanctioned, so a future carry should adopt it without re-asking.
+
+Still true and NOT covered by that sign-off: no browser/UAT run, and the document was never opened in
+Word. Fidelity is asserted through the SDK, the schema validator and the relationship gate.
 
 ### 🔒 059 — what it actually turned out to be (read before signing off)
 
