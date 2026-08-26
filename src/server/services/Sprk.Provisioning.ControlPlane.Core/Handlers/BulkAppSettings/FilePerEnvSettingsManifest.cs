@@ -211,7 +211,31 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         public string? Key { get; set; }
         public string? PerEnvSource { get; set; }
         public string? LiteralValue { get; set; }
+
+        // BUG FIX (task 205c / punch row A39, discovered 2026-08-26): the
+        // manifest spells this key "iOptionsModule" (camelCase, matching the
+        // file header's documented schema) rather than the underscored
+        // "i_options_module" UnderscoredNamingConvention would derive from
+        // the property name by default. Without an explicit alias, EVERY
+        // per_env_settings entry failed IOptionsModule binding silently, so
+        // ReadAsync() against the REAL embedded manifest.yaml has returned
+        // Failure ("has empty iOptionsModule") for every entry since task
+        // 201 shipped this reader -- undetected because no prior test
+        // exercised the real embedded resource through this reader (only
+        // hand-rolled test fixtures, which set IOptionsModuleName directly).
+        //
+        // ApplyNamingConventions = false is REQUIRED alongside Alias: YamlDotNet
+        // 18.1.0 runs the configured INamingConvention over the alias string
+        // too (verified empirically -- Alias alone still produced
+        // "i_options_module" and mismatched), not just the bare property
+        // name. Without this flag the alias is silently neutered back to the
+        // same mismatched underscored form the bug started with.
+        //
+        // Verified via FilePerEnvSettingsManifestTests (added alongside this
+        // fix) exercising the real embedded manifest end-to-end.
+        [YamlMember(Alias = "iOptionsModule", ApplyNamingConventions = false)]
         public string? IOptionsModule { get; set; }
+
         public bool Required { get; set; } = true;
         public string? Notes { get; set; }
     }

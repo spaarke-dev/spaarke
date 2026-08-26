@@ -68,6 +68,19 @@
 //   HttpClient + DefaultAzureCredential surface belongs to task 143's H10
 //   smoke tests, not this probe's unit tests (ADR-038 path #1).
 //
+// BYTE-EQUALITY EXTENSION (task 205d / punch row A41, added 2026-08-26):
+//   auth-v4 §10.4 documents a silent-fail trap this probe's ORIGINAL count-
+//   only assertion could not catch: a UAMI systemuser row whose
+//   azureactivedirectoryobjectid holds the UAMI's clientId instead of its
+//   principalId still passes the count=1 check above — only the app-only
+//   Dataverse call's oid-claim match fails, 401ing at first real use. When
+//   request.UamiObjectId is supplied (H13's call site always supplies it as
+//   of this task), the probe additionally byte-compares the UAMI verifier
+//   result's AzureActiveDirectoryObjectId against it. Callers that have not
+//   been upgraded to supply UamiObjectId get the pre-A41 count-only verdict
+//   (logged as "DEGRADED" so a reader can tell the byte-equality assertion
+//   did not run) rather than an unexpected failure.
+//
 // PLACEMENT JUSTIFICATION (CLAUDE.md §11):
 //   Existing: <see cref="IDataverseAppUserVerifier"/> already exists (task 143 /
 //     r3 H10 seams) — this probe REUSES it verbatim.
@@ -205,11 +218,51 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
 
         if (bffOk && uamiOk)
         {
-            _logger.LogInformation(
-                "T2 probe PASSED: both BFF app-reg + UAMI resolve as Dataverse App Users on env={Env} " +
-                "(tenant={TenantId}, bffAppId={BffAppRegId}, uamiClientId={UamiClientId}).",
-                request.DataverseUrl, request.TenantId, request.BffAppRegId, request.UamiClientId);
-            return new TrapVerificationOutcome.Passed(Kind);
+            // (4a) auth-v4 §10.4 byte-equality extension (task 205d / punch row
+            // A41): a count=1 row is NOT sufficient proof the UAMI row is
+            // correct — the silent-fail trap is a row that EXISTS and passes
+            // this count check while its azureactivedirectoryobjectid holds
+            // the UAMI's clientId instead of its principalId. When the caller
+            // supplied an expected principalId (request.UamiObjectId), assert
+            // byte-equality against the verifier's observed value. When the
+            // caller did NOT supply one (empty/whitespace — a caller that has
+            // not yet been upgraded to pass it), degrade gracefully to the
+            // pre-A41 count-only verdict rather than failing, but log the
+            // DEGRADED marker so a reader can tell the difference.
+            var expectPrincipalCheck = !string.IsNullOrWhiteSpace(request.UamiObjectId);
+            if (!expectPrincipalCheck)
+            {
+                _logger.LogInformation(
+                    "T2 probe PASSED (count only — DEGRADED: UamiObjectId not supplied, byte-equality " +
+                    "NOT verified): both BFF app-reg + UAMI resolve as Dataverse App Users on env={Env} " +
+                    "(tenant={TenantId}, bffAppId={BffAppRegId}, uamiClientId={UamiClientId}).",
+                    request.DataverseUrl, request.TenantId, request.BffAppRegId, request.UamiClientId);
+                return new TrapVerificationOutcome.Passed(Kind);
+            }
+
+            var uamiVerified = (DataverseAppUserVerificationResult.Verified)uamiResult;
+            var observedObjectId = uamiVerified.AzureActiveDirectoryObjectId;
+            var byteEqual = !string.IsNullOrWhiteSpace(observedObjectId)
+                && string.Equals(observedObjectId, request.UamiObjectId, StringComparison.OrdinalIgnoreCase);
+
+            if (byteEqual)
+            {
+                _logger.LogInformation(
+                    "T2 probe PASSED (byte-equality verified): both BFF app-reg + UAMI resolve as Dataverse " +
+                    "App Users on env={Env} (tenant={TenantId}, bffAppId={BffAppRegId}, uamiClientId={UamiClientId}) " +
+                    "AND the UAMI row's azureactivedirectoryobjectid byte-equals the expected principalId.",
+                    request.DataverseUrl, request.TenantId, request.BffAppRegId, request.UamiClientId);
+                return new TrapVerificationOutcome.Passed(Kind);
+            }
+
+            // auth-v4 §10.4 trap FIRED: the row exists and passes the count
+            // check, but its azureactivedirectoryobjectid does not byte-equal
+            // the expected UAMI principalId — the exact "single most-missed
+            // item" shape (both halves LOOK registered; the app-only Dataverse
+            // call 401s at first real use because the oid claim never matches).
+            var byteEqualityDiagnostic = BuildByteEqualityMismatchDiagnostic(request, observedObjectId);
+            _logger.LogWarning("T2 probe FAILED (byte-equality mismatch — §10.4 trap): {Diagnostic}", byteEqualityDiagnostic);
+            return new TrapVerificationOutcome.Failed(Kind, byteEqualityDiagnostic);
         }
 
         // (5) At least one half missing/duplicated — Failed (QuarantineRequired per §4B).
@@ -218,6 +271,28 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
         var diagnostic = BuildPairMismatchDiagnostic(request, bffResult, uamiResult);
         _logger.LogWarning("T2 probe FAILED: {Diagnostic}", diagnostic);
         return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+    }
+
+    private static string BuildByteEqualityMismatchDiagnostic(
+        TrapVerificationRequest request, string? observedObjectId)
+    {
+        var observedPart = string.IsNullOrWhiteSpace(observedObjectId) ? "(null/empty)" : observedObjectId;
+        var looksLikeClientIdTrap = !string.IsNullOrWhiteSpace(observedObjectId)
+            && string.Equals(observedObjectId, request.UamiClientId, StringComparison.OrdinalIgnoreCase);
+        var trapHint = looksLikeClientIdTrap
+            ? " The observed value byte-equals the UAMI's CLIENT ID — this is auth-v4 §10.4's documented " +
+              "\"single most-missed item\": the row was created with azureactivedirectoryobjectid set to the " +
+              "UAMI's clientId instead of its principalId."
+            : string.Empty;
+
+        return
+            $"auth-v4 §10.4 byte-equality assertion VIOLATED on env={request.DataverseUrl} " +
+            $"(tenant={request.TenantId}): UAMI (appId={request.UamiClientId}) systemuser row EXISTS and " +
+            $"passes the T2 count check, but its azureactivedirectoryobjectid ({observedPart}) does NOT " +
+            $"byte-equal the expected UAMI principalId ({request.UamiObjectId})." + trapHint +
+            " Downstream: every app-only Dataverse call for this customer will 401 at first real use — the " +
+            "existence + count checks alone cannot detect this. Operator: repair via Web API PATCH per " +
+            "docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §12 (dual-row trap-recognition + recovery).";
     }
 
     private static string BuildPairMismatchDiagnostic(

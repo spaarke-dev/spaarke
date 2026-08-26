@@ -60,7 +60,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 - **MUST** produce a handoff report at `runs/{runId}.md` in the operator's working directory on completion (success OR failure)
 - **MUST** update `sprk_dataverseenvironment` registry via Dataverse MCP on run completion — fall back per §4.3a.5 if MCP is disconnected
 - **MUST** apply canonical KV secret naming per FR-35 pre-check protocol — check LIVE App Service + KV + Dataverse before removing any alias
-- **MUST NEVER delete** `Dataverse-ClientSecret` or `BFF-API-ClientSecret` (BINDING per root CLAUDE.md §10 + r3 handoff — these secrets are still consumed by OBO flow)
+- **MUST** follow the KV credential-lifecycle rule (rewritten 2026-08-25 per ADR-028 A4 / E-3 closure, §6.5 resolution — supersedes the r3-handoff "still consumed by OBO" rationale, which was empirically wrong per BFF `CLAUDE.md` correction 2026-08-20 + closed 2026-08-24): H4 **omits** `BFF-API-ClientSecret` in secret-free envs (no sentinel — §9.1 opaque `AADSTS7000215`); never purge the soft-deleted rollback copies or delete the live `Dataverse-ClientSecret` before 2026-11-23; original never-delete survives only for unmigrated envs. Full rule: [`.claude/constraints/provisioning.md`](../../constraints/provisioning.md) §KV credential lifecycle.
 
 ### NEVER:
 - **NEVER** skip Step 0 prereqs — they exist because operator machines drift and silent tool-version mismatches cause silent-fail traps
@@ -1065,7 +1065,7 @@ Dry-run is intended for pre-flight validation before a real customer deployment 
 - **MCP disconnect is common** (we experienced this 2026-08-14, 2026-08-15). The fallback matrix handles it. Do not treat MCP disconnect as an error — it's expected.
 - **The skill is idempotent at the intake level.** If the operator re-invokes with the same `customerId`, the skill detects the existing run + resumes rather than starting fresh. The state lives in Cosmos, not the skill session.
 - **BINDING pre-check protocol** (FR-35): before removing any KV alias / fallback spelling, pre-check the LIVE App Service + KV + Dataverse-persisted config. Root CLAUDE.md §10 canonical secret-catalog manifest is the source of truth.
-- **NEVER delete** `Dataverse-ClientSecret` or `BFF-API-ClientSecret` — they're still consumed by OBO. This is BINDING regardless of what the run appears to require.
+- **KV credential-lifecycle rule** (§6.5 resolution 2026-08-25, ADR-028 A4 / E-3 closure — the "still consumed by OBO" rationale was empirically wrong and closed 2026-08-24): H4 **omits** `BFF-API-ClientSecret` in secret-free envs (no sentinel — §9.1 opaque `AADSTS7000215`); do not purge soft-deleted rollback copies or delete live `Dataverse-ClientSecret` before 2026-11-23; original never-delete survives only for unmigrated envs. Full rule: `.claude/constraints/provisioning.md` §KV credential lifecycle.
 
 ---
 

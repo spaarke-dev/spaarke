@@ -388,7 +388,7 @@ Per FR-35 (BINDING, per r3 task 063):
 - **R4**: Dev exception `spaarke-spekvcert` **DO-NOT-RENAME** (codified in Bicep param)
 - **Reference syntax (single form)**: `@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=<Canonical-Name>)`
 
-**BINDING pre-check** (BEFORE removing any alias / fallback spelling): verify LIVE App Service + KV + Dataverse-persisted config first. **NEVER delete** `Dataverse-ClientSecret` or `BFF-API-ClientSecret` (OBO + shared-lib Dataverse still depend).
+**BINDING pre-check** (BEFORE removing any alias / fallback spelling): verify LIVE App Service + KV + Dataverse-persisted config first. **KV credential-lifecycle rule** (§6.5 resolution 2026-08-25 per ADR-028 A4 + E-3 closure — the "OBO + shared-lib Dataverse still depend" rationale was empirically wrong and closed 2026-08-24): H4 **omits** `BFF-API-ClientSecret` in secret-free envs (no sentinel — §9.1 opaque `AADSTS7000215`); do not purge soft-deleted rollback copies or delete live `Dataverse-ClientSecret` before 2026-11-23; original never-delete survives only for unmigrated envs. Full rule: `.claude/constraints/provisioning.md` §KV credential lifecycle.
 
 ### 6.2 Canonical secret-catalog manifest (Phase H)
 
@@ -817,6 +817,58 @@ If PATCH landed but startup still fails: RBAC hasn't propagated — check that t
 - **Any operator-initiated slot manipulation** — `az webapp deployment slot create`, `az webapp deployment slot swap` (safe for the property because swap is metadata-preserving), or portal-driven slot operations.
 
 **Enforcement**: task 186 (Phase F E2E acceptance) asserts `keyVaultReferenceIdentity == {UAMI RID}` on BOTH slots AFTER H9 deploys — see `projects/customer-provisioning-orchestration-r1/tasks/186-real-phase-f-e2e-acceptance-rerun-task-089-for-real-this-time.poml` acceptance-criterion added 2026-08-25. If that criterion fails for a real customer run, it means either H9 (or a rollback since) created a slot without re-asserting the property — apply §12.5 recovery THEN escalate per Human Escalation Triggers to determine which downstream ceremony broke the invariant.
+
+### 12.7 Dual Dataverse App-User contract + the `azureactivedirectoryobjectid` silent-fail trap (T2, §10.4)
+
+> Added 2026-08-26 by `customer-provisioning-orchestration-r1` task 205d (auth-v4 §10.1 Δ5 + §10.4). Documented by auth-v4 as its **"single most-missed item"** — three prior audits missed it. H10 (`H10DataverseAppUserGraphParityHandler`) creates both rows; the T2 probe (`DataverseAppUserPairT2Probe`, invoked by H13) re-verifies both, now including the byte-equality assertion this section describes.
+
+**The dual-row contract**: every provisioned environment needs **TWO** `systemuser` rows on the target Dataverse environment, not one:
+
+1. **App-reg row** (for OBO tokens) — `applicationid` = the BFF app-registration's client ID (Model 1: the single shared multitenant app-reg; Model 2: the per-customer app-reg). `azureactivedirectoryobjectid` is left to Dataverse's own AAD auto-resolution — reliable for a standard Entra app registration.
+2. **UAMI row** (for app-only calls) — `applicationid` = the UAMI's client ID **AND** `azureactivedirectoryobjectid` = the UAMI's **principalId (service principal object id) — NEVER its clientId**. Model 1: the shared `sprk-{env}-shared-bff-uami`. Model 2: the per-stamp `mi-spaarke-{customerId}-{env}`.
+
+**The trap**: both the UAMI's clientId and its principalId are valid-shaped GUIDs. A row created with `azureactivedirectoryobjectid` set to the clientId **still passes every existence + count check** — `pac admin application list`, the §12.3 T2 verification, and (pre-task-205d) H13's own T2 probe all reported the row as present and correct. The only symptom is that Dataverse rejects the token: the app-only Dataverse call's `oid` claim (the UAMI's real principalId) never matches a row registered under the wrong value.
+
+**Trap-recognition symptom**: an app-only Dataverse call 401s (or the BFF logs a Dataverse auth failure) for a customer whose provisioning run reported H10/T2 as fully green — the systemuser row **EXISTS** and **passes the count check**. This combination (401 despite a passing count-check) is the tell. Do not assume the row is missing; it is present with the wrong `azureactivedirectoryobjectid`.
+
+**Diagnose**:
+
+```powershell
+# 1. Confirm the row exists (this alone is NOT sufficient — it's the trap's own symptom)
+# GET /api/data/v9.2/systemusers?$filter=applicationid eq {uamiClientId}&$select=systemuserid,azureactivedirectoryobjectid
+
+# 2. Compare the returned azureactivedirectoryobjectid against the UAMI's REAL principalId
+az identity show --name <uami-name> --resource-group <rg> --query principalId -o tsv
+az identity show --name <uami-name> --resource-group <rg> --query clientId -o tsv
+
+# If azureactivedirectoryobjectid == clientId (NOT principalId) -> the trap has fired.
+```
+
+**Recovery** — repair the existing row via Web API PATCH (do NOT delete + recreate; the `systemuserid` and any role associations stay valid):
+
+```bash
+env="{dataverse-environment-url}"           # e.g. https://spaarke-acme.crm.dynamics.com
+rowId="{systemuserid-from-the-diagnose-step}"
+principalId="{uami-real-principalId-from-az-identity-show}"
+
+az rest --method patch \
+  --url "$env/api/data/v9.2/systemusers($rowId)" \
+  --headers "Content-Type=application/json" \
+  --body "{\"azureactivedirectoryobjectid\": \"$principalId\"}"
+
+# VERIFY (read-back)
+az rest --method get \
+  --url "$env/api/data/v9.2/systemusers($rowId)?\$select=azureactivedirectoryobjectid"
+# MUST print the UAMI's principalId verbatim, not its clientId.
+```
+
+If the repair PATCH itself 403s, the caller lacks the Dataverse privilege to update `systemusers` — use an existing System Administrator app user or an operator identity with that role, per §12.1 pre-work.
+
+**Code-level protection (task 205d)**: `H10DataverseAppUserGraphParityHandler` now writes `azureactivedirectoryobjectid` explicitly (in the same POST as `applicationid`) for the UAMI row — it does not rely on Dataverse's applicationid-only auto-resolution for a Managed Identity. `DataverseAppUserPairT2Probe`'s H13 re-verification now byte-compares the observed `azureactivedirectoryobjectid` against the expected UAMI principalId (`DataverseAppUserPairT2ProbeTests.ProbeAsync_ByteEqualityMismatch_ReturnsFailed_NamesTheTrap` pins the negative case) — a row that passes the count check but fails the byte-equality check now fails T2 loud, at H13, rather than surfacing as a silent 401 later at first customer use.
+
+> **Operator note (rollout of this check)**: if a run PROVISIONED BEFORE task 205d relied on Dataverse's applicationid-only auto-resolution and it happened to resolve the UAMI row's `azureactivedirectoryobjectid` incorrectly, that environment may fail T2 for the FIRST TIME on the next H13/task-186 run after this change deploys — even though it previously reported green. This is NOT a regression: it is this section's detection working as intended on a latent pre-existing misconfiguration. Apply the recovery recipe above; do not assume the provisioning pipeline itself broke.
+
+**Scope note**: this section is purely about the `azureactivedirectoryobjectid` identity-matching trap. It does not concern, and does not reintroduce, any never-delete rationale for `Dataverse-ClientSecret` / `BFF-API-ClientSecret` — that credential-retention question was superseded 2026-08-24 when ADR-028 exception E-3 closed (see root `CLAUDE.md` §9 + this guide's credential sections); do not conflate the two.
 
 ---
 

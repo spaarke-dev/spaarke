@@ -158,6 +158,15 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 # ---------------------------------------------------------------------------
+# Shared secret-free-marker detection (A38a canonical convention, reused by the
+# A38c operator-script gates) — dot-sourced so this row (A43) does not
+# reimplement marker-detection logic as a 4th independently-drifting copy
+# (root CLAUDE.md §11 — extend, don't duplicate). Defines
+# Test-SpaarkeSecretFreeMarker only; no top-level side effects.
+# ---------------------------------------------------------------------------
+. (Join-Path $PSScriptRoot '..' 'common' 'Assert-SpaarkeSecretFreeGate.ps1')
+
+# ---------------------------------------------------------------------------
 # NFR-05 prod/demo gate
 # ---------------------------------------------------------------------------
 if (($Environment -in @('prod', 'demo')) -and (-not $Force)) {
@@ -337,39 +346,178 @@ if ($planOnly) {
 }
 
 # ---------------------------------------------------------------------------
-# Resolve admin key (live source-of-truth from search service itself; or KV)
+# §10.5 trap 2 — silent admin-key re-mint gate (punch row A43)
+#
+# Precedent this extends: the -CutoverBffSettings switch further below already
+# refuses when AiSearch__ManagedIdentity__Enabled=true on the BFF App Service,
+# because cutting an App Setting over to an admin-key KV reference on a
+# migrated env silently undoes the auth-v4 MI migration (task 053) while the
+# run reports success. THIS gate applies that same shape to the GENERAL
+# admin-key resolution path below, which runs on every invocation (deploy AND
+# -VerifyOnly) — that resolution path, not the opt-in switch, is where the
+# trap actually lives: a fresh `az search admin-key show` mint on a
+# secret-free env silently re-introduces the key-based auth the migration
+# removed, on every single deploy.
+#
+# Three-branch decision (punch row A43 / §10.5 trap 2):
+#   Branch 1 — secret-free marker present (KV tag `spaarke-secret-free-identity`
+#              = "true", the canonical convention landed by punch row A38a —
+#              see `ISecretFreeMarkerApplier`/`ArmSecretFreeMarkerApplier`,
+#              reconciled against A38c 2026-08-26) AND KV secret
+#              'AiSearch--AdminKey' is missing -> FAIL LOUD, exit, and NEVER
+#              call `az search admin-key show` — that call IS the silent Δ2
+#              reversal this row exists to prevent.
+#   Branch 2 — AiSearch__ManagedIdentity__Enabled=true on the BFF App Service
+#              (same query shape as -CutoverBffSettings, for consistency) ->
+#              acquire an AAD token for https://search.azure.com/ via
+#              Get-AzAccessToken (Az.Accounts), falling back to
+#              `az account get-access-token` when Az.Accounts is not loaded
+#              in this pwsh session, and switch $restHeaders to a Bearer
+#              token. No admin key is resolved in this branch at all.
+#   Branch 3 — neither signal present (pre-migration env) -> current
+#              KV-then-live-admin-key fallback, UNCHANGED, for backwards
+#              compatibility.
+#
+# Model 1 (shared KV) vs Model 2 fleet consistency (§10.3): this gate checks
+# exactly the ONE Key Vault it is given via -KeyVaultName and makes no
+# assumption about vault topology — under Model 1 that is the single shared
+# vault, under Model 2 the caller passes the ONE per-customer
+# `kv-{customerId}-{secretsVer}` vault relevant to this invocation. It does
+# NOT iterate an N-vault fleet itself (a missed marker on one vault in an
+# N-vault Model 2 fleet is its own silent-skip failure per A38a's
+# fleet-consistency note); fleet-level enumeration is A38a's proposed
+# follow-up (SecretFreeMarkerConsistencyDetector, wired at the
+# T8-probe/H13-aggregation layer — not this script).
+#
+# A38 tag-scheme status: FINALIZED, not a placeholder. Punch row A38a landed
+# the canonical KV tag `spaarke-secret-free-identity=true`; this gate consumes
+# it via the shared Test-SpaarkeSecretFreeMarker function dot-sourced above
+# (scripts/common/Assert-SpaarkeSecretFreeGate.ps1) rather than inventing a
+# parallel check.
+#
+# Exit-code note (deviation from the punch-row draft's illustrative "exit 6"):
+# this script already uses exit code 6 for TWO distinct, pre-existing
+# meanings (verify-only invariant violations; post-deploy invariant
+# violations — see Invoke-PostDeployVerifier call sites below). Reusing 6 for
+# a credential-security refusal would make one exit code mean three unrelated
+# things, defeating this gate's own "FAIL LOUD, actionable" intent. Branch 1
+# uses exit 10 and branch 2's own token-acquisition failure uses exit 11 —
+# both otherwise unused in this script.
 # ---------------------------------------------------------------------------
-Write-Host "Resolving admin key for $SearchServiceName..." -ForegroundColor Gray
-if ($KeyVaultName) {
-    $adminKey = az keyvault secret show `
-        --vault-name $KeyVaultName `
-        --name 'AiSearch--AdminKey' `
-        --query value -o tsv 2>$null
+function Resolve-AiSearchAuthContext {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Environment,
+        [Parameter(Mandatory = $true)] [string]$SearchServiceName,
+        [Parameter(Mandatory = $true)] [string]$ResourceGroup,
+        [string]$KeyVaultName
+    )
+
+    $bffAppName = "spaarke-bff-$Environment"
+    $bffRg      = "rg-spaarke-$Environment"
+
+    # Branch 2 signal — mirrors the -CutoverBffSettings query shape exactly
+    # (same App Service, same setting name, same query) for consistency.
+    $miEnabled = az webapp config appsettings list --resource-group $bffRg --name $bffAppName `
+        --query "[?name=='AiSearch__ManagedIdentity__Enabled'].value | [0]" -o tsv 2>$null
+
+    if ($miEnabled -and "$miEnabled".Trim() -ieq 'true') {
+        Write-Host "  '$bffAppName' has AiSearch__ManagedIdentity__Enabled=true — using AAD-token auth (no admin key resolved)." -ForegroundColor Gray
+
+        $aadToken = $null
+        if (Get-Command Get-AzAccessToken -ErrorAction SilentlyContinue) {
+            try {
+                $tokenResult = Get-AzAccessToken -ResourceUrl 'https://search.azure.com/'
+                # Az.Accounts 3.0+ returns .Token as a SecureString by default (breaking change from
+                # the earlier plain-string behavior); handle both so this doesn't silently degrade to
+                # the literal string "System.Security.SecureString" as the Bearer token on newer
+                # Az.Accounts installs (this environment: Az.Accounts 5.3.0, verified 2026-08-26).
+                $aadToken = if ($tokenResult.Token -is [System.Security.SecureString]) {
+                    [System.Net.NetworkCredential]::new('', $tokenResult.Token).Password
+                } else {
+                    $tokenResult.Token
+                }
+            } catch {
+                Write-Host "  Get-AzAccessToken failed ($($_.Exception.Message)); falling back to 'az account get-access-token'." -ForegroundColor Yellow
+                $aadToken = az account get-access-token --resource 'https://search.azure.com/' --query accessToken -o tsv
+            }
+        } else {
+            $aadToken = az account get-access-token --resource 'https://search.azure.com/' --query accessToken -o tsv
+        }
+
+        if (-not $aadToken) {
+            Write-Error "Failed to acquire an AAD access token for https://search.azure.com/ (tried Get-AzAccessToken, then 'az account get-access-token'). AiSearch__ManagedIdentity__Enabled=true on '$bffAppName' means this script MUST use the AAD-token path — it will NOT fall back to minting an admin key. Verify Az.Accounts / az CLI login, and that the caller's identity holds 'Search Index Data Contributor' (or 'Search Service Contributor') on '$SearchServiceName'."
+            exit 11
+        }
+
+        return @{
+            Headers      = @{ 'Authorization' = "Bearer $aadToken"; 'Content-Type' = 'application/json' }
+            UsingAadAuth = $true
+        }
+    }
+
+    Write-Host "Resolving admin key for $SearchServiceName..." -ForegroundColor Gray
+    $adminKey = $null
+    if ($KeyVaultName) {
+        $adminKey = az keyvault secret show `
+            --vault-name $KeyVaultName `
+            --name 'AiSearch--AdminKey' `
+            --query value -o tsv 2>$null
+        if (-not $adminKey) {
+            Write-Host "  KV secret 'AiSearch--AdminKey' not found in $KeyVaultName." -ForegroundColor Yellow
+
+            # Branch 1 — refuse the silent re-mint on secret-free envs.
+            if (Test-SpaarkeSecretFreeMarker -KeyVaultName $KeyVaultName) {
+                Write-Error @"
+REFUSED: 'AiSearch--AdminKey' not found in Key Vault '$KeyVaultName', and this vault carries the
+auth-v4 secret-free migration marker (KV tag 'spaarke-secret-free-identity=true'). Minting a NEW
+admin key via 'az search admin-key show' here would silently reverse the ADR-028 Amendment A4 /
+Exception E-3 migration (closed 2026-08-24) while this run reports success — the exact §10.5
+trap 2 this gate exists to close.
+
+See the A38a omit contract:
+  .claude/constraints/auth.md  (section: Server hardening — Exception E-3 CLOSED)
+  projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-draft-punch-rows.md
+    (row A38a)
+
+If '$SearchServiceName' should authenticate with a managed identity instead, set
+AiSearch__ManagedIdentity__Enabled=true on '$bffAppName' and re-run (this script's branch 2).
+If this environment has NOT actually migrated, verify the KV tag before retrying — do not remove
+this gate to "fix" the refusal.
+"@
+                exit 10
+            }
+
+            Write-Host "  Falling back to live admin key from search service." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Admin key resolved from Key Vault." -ForegroundColor Gray
+        }
+    }
+
     if (-not $adminKey) {
-        Write-Host "  KV secret 'AiSearch--AdminKey' not found in $KeyVaultName — falling back to live admin key from search service." -ForegroundColor Yellow
-        $adminKey = $null
-    } else {
-        Write-Host "  Admin key resolved from Key Vault." -ForegroundColor Gray
+        # Branch 3 — no secret-free marker, no MI flag: unchanged pre-migration fallback.
+        $adminKey = az search admin-key show `
+            --service-name $SearchServiceName `
+            --resource-group $ResourceGroup `
+            --query primaryKey -o tsv
+        if (-not $adminKey) {
+            Write-Error "Failed to resolve admin key for $SearchServiceName. Ensure you have Search Service Contributor (or Owner) role on the search service."
+            exit 5
+        }
+        Write-Host "  Admin key resolved from live search service." -ForegroundColor Gray
+    }
+
+    return @{
+        Headers      = @{ 'api-key' = $adminKey; 'Content-Type' = 'application/json' }
+        UsingAadAuth = $false
     }
 }
 
-if (-not $adminKey) {
-    $adminKey = az search admin-key show `
-        --service-name $SearchServiceName `
-        --resource-group $ResourceGroup `
-        --query primaryKey -o tsv
-    if (-not $adminKey) {
-        Write-Error "Failed to resolve admin key for $SearchServiceName. Ensure you have Search Service Contributor (or Owner) role on the search service."
-        exit 5
-    }
-    Write-Host "  Admin key resolved from live search service." -ForegroundColor Gray
-}
+$authContext = Resolve-AiSearchAuthContext -Environment $Environment -SearchServiceName $SearchServiceName -ResourceGroup $ResourceGroup -KeyVaultName $KeyVaultName
 
 $endpoint = "https://$SearchServiceName.search.windows.net"
-$restHeaders = @{
-    'api-key'      = $adminKey
-    'Content-Type' = 'application/json'
-}
+$restHeaders = $authContext.Headers
+$script:UsingAadAuth = $authContext.UsingAadAuth
 
 # ---------------------------------------------------------------------------
 # Post-deploy verifier — asserts per-index invariants from catalog §4

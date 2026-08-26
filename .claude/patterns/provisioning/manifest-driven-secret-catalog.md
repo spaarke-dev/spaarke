@@ -24,7 +24,7 @@ Load this pattern when:
 
 ## Constraints
 
-- **BINDING** (root CLAUDE.md §10 + spec.md MUST): NEVER delete `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. `never_delete: true` entries stay in every deploy path — no exceptions, no "temporary cleanup", no test-only removal.
+- **BINDING** KV credential-lifecycle rule (§6.5 resolution 2026-08-25 per ADR-028 A4 / E-3 closure — supersedes the r3-handoff blanket never-delete): (1) H4 **omits** `BFF-API-ClientSecret` in secret-free envs (no sentinel — §9.1 opaque `AADSTS7000215`); (2) do not purge soft-deleted rollback copies or delete live `Dataverse-ClientSecret` before 2026-11-23 (auth-v4 owns retirement per obligation 051-E); (3) original never-delete survives only for unmigrated envs; (4) E-1 SpeAdmin per-customer secrets protected indefinitely. `never_delete: true` on manifest entries still governs against test-cleanup / sweep / "temporary" removal. Full rule: [`.claude/constraints/provisioning.md`](../../constraints/provisioning.md) §KV credential lifecycle.
 - **BINDING** (§7.9 pre-check gate): before any secret rename/delete, verify LIVE App Service + KV + Dataverse-persisted config. FR-35 pre-check is enforced by a script AND by code-review checklist — bypassing either is a HARD violation.
 - Every manifest entry MUST declare a `source: { type, ... }` field. Valid types: `kv-ref | per-env-input | literal | from-bicep-output | from-shared-service`. Missing `source` → generator rejects the manifest.
 - Adding a new secret: 1 manifest entry, 0 handler changes. The per-tenant H4 handler filters non-`FromSharedService` entries; the shared H4-shared handler filters `FromSharedService`; H4b filters `per_env_settings`. Cross-cutting entries (e.g., `AzureAd__TenantId`) may appear in both `secrets` and `per_env_settings` — last-write-wins is deterministic because H4b runs AFTER H4.
@@ -45,7 +45,8 @@ Load this pattern when:
 ## Anti-patterns this catches
 
 - ❌ Hardcoding a secret name in a handler (e.g., `"AzureOpenAI-ApiKey"` string literal). Must come from the manifest via `IPerEnvSettingsManifest` / `ISharedKvSecretAccessor`.
-- ❌ "Temporary" delete of `Dataverse-ClientSecret` for a test cycle. Violates the BINDING never-delete rule; no exceptions, ever.
+- ❌ "Temporary" delete of `Dataverse-ClientSecret` for a test cycle. Violates prong 2 of the KV credential-lifecycle rule (do not delete before 2026-11-23; it is auth-v4's live rollback copy through the soak window — §6.5 resolution 2026-08-25).
+- ❌ Seeding `BFF-API-ClientSecret` into a secret-free environment "to be safe" or as a sentinel/placeholder value. Violates prong 1 (H4 omits — no sentinel; the ordered selector fails opaquely with `AADSTS7000215` per §9.1). E-3 is closed; there is no fallback path.
 - ❌ Manifest entry with `source: { type: literal }` for a customer-provided value. `literal` is for INTERNAL constants (e.g., `AzureAd__Instance: https://login.microsoftonline.com/`). Customer values use `per-env-input`.
 - ❌ Rotating a `from-shared-service` secret via H4 (per-tenant handler). Ownership is H4-shared; H4 filtering excludes it.
 - ❌ Renaming a secret without pre-check gate (§7.9). Rename → all `@Microsoft.KeyVault(SecretUri=...)` refs silently resolve to null → BFF SIGABRT cascade.

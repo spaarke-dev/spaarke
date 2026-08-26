@@ -57,6 +57,9 @@ param(
     [string]$KvVaultUri,
 
     [Parameter(Mandatory = $true)]
+    [string]$ServiceBusFqns,
+
+    [Parameter(Mandatory = $true)]
     [string]$TenantId,
 
     [Parameter(Mandatory = $true)]
@@ -79,8 +82,10 @@ $settings = @(
     "AgentToken__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
     "AgentToken__TenantId=$(Format-KvRef 'TenantId')",
     "AiSafety__ContentSafety__ApiKey=$(Format-KvRef 'ContentSafety-ApiKey')",
+    "AiSafety__ContentSafety__ManagedIdentity__Enabled=true",
     "AiSearch__ApiKeySecretName=$(Format-KvRef 'AiSearch--AdminKey')",
     "AiSearch__Endpoint=$(Format-KvRef 'AiSearch-Endpoint')",
+    "AiSearch__ManagedIdentity__Enabled=true",
     "Analysis__PromptFlowEndpoint=$(Format-KvRef 'PromptFlow-Endpoint')",
     "Analysis__PromptFlowKey=$(Format-KvRef 'PromptFlow-Key')",
     "API_APP_ID=$(Format-KvRef 'BFF-API-ClientId')",
@@ -89,8 +94,8 @@ $settings = @(
     "AzureAd__Audience=$(Format-KvRef 'BFF-API-Audience')",
     "AzureAd__ClientId=$BffAppClientId",
     "AzureAd__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "AzureAd__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
     "AzureAd__ClientSecret=$(Format-KvRef 'BFF-API-ClientSecret')",
+    "AzureAd__ClientSecret=$(Format-KvRef 'Dataverse-ClientSecret')",
     "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
     "AzureAd__TenantId=$TenantId",
     "AzureOpenAI__ApiKey=$(Format-KvRef 'AzureOpenAI-ApiKey')",
@@ -124,14 +129,19 @@ $settings = @(
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
     "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Graph__ClientSecret=$(Format-KvRef 'BFF-API-ClientSecret')",
+    "Graph__Credentials__Order__0=ManagedIdentityFederated",
+    "Graph__Credentials__RequireSecretFreeIdentity=true",
     "Graph__ManagedIdentity__ClientId=$UamiClientId",
     "Graph__ManagedIdentity__Enabled=true",
     "Graph__TenantId=$(Format-KvRef 'TenantId')",
     "LlamaParse__ApiKeySecretName=$(Format-KvRef 'LlamaParse-ApiKey')",
     "ManagedIdentity__ClientId=$UamiClientId",
+    "Membership__EventPublisher__ServiceBusNamespace=$ServiceBusFqns",
+    "Membership__JunctionUpdater__ServiceBusNamespace=$ServiceBusFqns",
     "Redis__ConnectionString=$(Format-KvRef 'Redis-ConnectionString')",
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__ConnectionString=$(Format-KvRef 'ServiceBus-ConnectionString')",
+    "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"

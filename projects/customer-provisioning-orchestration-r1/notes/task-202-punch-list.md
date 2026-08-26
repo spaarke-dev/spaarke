@@ -392,6 +392,33 @@ Sub-phase by dependency + E2E-blocking status:
 
 ---
 
+## 205c EXECUTION RESULTS — 2026-08-26 (auth-v4 punch row A39, H4b per_env_settings)
+
+**Task**: 205c | **Rigor**: FULL | **Model/Effort**: Sonnet-5 @ xhigh | **Dependencies confirmed landed**: A36/A37 @ `1bc049e4c`, A38 @ `f280de764`/`cc6ecb6e4`, A42 @ `cc6ecb6e4` (verified via `git log` before any edit — ORDERING GUARD satisfied).
+
+| Row | Status | Evidence | Effort actual |
+|---|---|---|---|
+| **A39** | `applied` | 7 of 8 §10.2 live-contract entries added to `scripts/canonical-secret-catalog/manifest.yaml` per_env_settings (entry 3, `ManagedIdentity__ClientId`, already existed pre-A39 from task 201 — annotated with SF-2 guard note only). `Invoke-CatalogGenerator.ps1 -Verify` exit 0 (determinism proven). FIC-flap tolerance = **(b) H4b boot-retry allowance**, relying on the EXISTING `HttpHealthzProbe` 480s backoff budget — NOT new BFF-side retry code (rationale: `RequireSecretFreeIdentity=true`'s BFF-side startup guard is a pure config-shape assertion with no live token exchange, per `IdentityConfigurationValidator.cs` Rule 6's own doc comment; see full rationale in manifest.yaml + `H4bBulkAppSettingsHandler.cs` comments). | ~5h (incl. root-cause of a pre-existing manifest-reader bug, below) |
+
+**Escalation-worthy finding (not a POML-named trigger, but material)**: while adding the required `FilePerEnvSettingsManifestTests.cs` (exercising the REAL embedded manifest.yaml — no prior test did this), discovered that `FilePerEnvSettingsManifest.cs`'s YamlDotNet `UnderscoredNamingConvention` never actually bound the `iOptionsModule` YAML key (it derives `i_options_module`, which doesn't match the manifest's literal camelCase spelling) — `ReadAsync()` against the REAL manifest has returned `Failure` for **every** per_env_settings entry since task 201 shipped this reader, undetected because every existing test used a hand-rolled fixture. Root-caused + fixed via `[YamlMember(Alias = "iOptionsModule", ApplyNamingConventions = false)]` (YamlDotNet 18.1.0 applies the naming convention to explicit aliases too unless this flag is set — verified empirically). This means H4b's real-manifest per_env_settings path has never worked in any live deployment; A39's fix makes it work for the first time, for all 15 entries (8 pre-existing + 7 new), not just the new ones.
+
+**Deviation from POML step 12 (integration test)**: did NOT add a live-Azure "fresh Model 2 stamp boots + credential-level signal" test, and did NOT extend `IE2ETrapVerifier`/`IE2EInvariantVerifier` (the natural home for such a check, owned by H13's E2E acceptance gate). Rationale: (1) `IE2ETrapVerifier`'s `TrapKind` enum is a closed catalog requiring coordinated changes across 6 sibling probes — task-185-h13-aggregation and task 205d were concurrently modifying `H13E2EAcceptanceGateHandler.cs` / `IE2ETrapVerifier.cs` in this SAME shared worktree during this task's execution (confirmed via `git status`), so touching those files risked a real collision; (2) A36/A37's own precedent (commit `1bc049e4c`) explicitly deferred live-Azure runtime verification to task 186 for the same class of RBAC/settings change ("No unit tests to author per test-mock-boundary rules... Runtime verification Deferred to task 186 E2E"). Instead, added integration-style coverage at the L2 Core layer: `FilePerEnvSettingsManifestTests.cs` (real embedded manifest, no fixture) + `HttpHealthzProbeTests.cs` (real backoff-poll mechanics via a hand-rolled `HttpMessageHandler`, not `Mock<HttpMessageHandler>`) demonstrating the FIC-flap-tolerance mechanism concretely. Live-Azure credential-level verification remains task 186's obligation.
+
+**Files touched** (disjoint from 205d's `DataverseAppUserGraphParity`/`E2EAcceptance` surface and 205e's `Deploy-AllIndexes.ps1` surface — safe to commit independently):
+- `scripts/canonical-secret-catalog/manifest.yaml` (+7 entries, +1 note)
+- `scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1` (regenerated, verified deterministic)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/FilePerEnvSettingsManifest.cs` (bug fix: `iOptionsModule` alias binding)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs` (FIC-flap-tolerance rationale comment only — no logic change)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H4bBulkAppSettingsHandlerTests.cs` (+5 tests, AC-15..19)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/FilePerEnvSettingsManifestTests.cs` (NEW — 10 tests)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/HttpHealthzProbeTests.cs` (NEW — 3 tests)
+
+**Build/test/publish-size**: `dotnet build` 0/0 (Tests project + BFF API). `dotnet test` on `Sprk.Provisioning.ControlPlane.Tests`: 1668 passed / 0 failed / 1 skipped (pre-existing, unrelated). BFF publish-size (compressed zip): 45.07 MB incl. PDBs vs 44.96 MB baseline (2026-08-13) — delta **+0.11 MB**, well under the +5 MB justification threshold and the 60 MB HARD STOP (A39 touches zero BFF-referenced code; the L2 provisioning assembly is not part of the BFF build).
+
+**Not committed** — main session bundles 205c/d/e (+f) per the executor obligation.
+
+---
+
 ## Related project files (for task 203 executor context)
 
 - [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md) — codified prereqs (task 202 output)

@@ -360,6 +360,19 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             entries.Count(e => e.PerEnvSource == PerEnvSettingSource.Literal));
 
         // (7) Poll /healthz.
+        //
+        // FIC-PROPAGATION-FLAP TOLERANCE (task 205c / punch row A39, §5 item 4
+        // verifier addition): this backoff-poll (5 probes / ~8-min budget, see
+        // HttpHealthzProbe.DefaultBackoffSchedule) is the CHOSEN mechanism for
+        // tolerating Entra's measured ~130s AADSTS70025 federated-credential
+        // propagation flap after the auth-v4 §10.2 entries (Graph__Credentials__
+        // Order__0 / RequireSecretFreeIdentity, applied via per_env_settings
+        // above) are written. Full rationale + the rejected alternative (a
+        // pre-apply verified-exchange gate, infeasible because H13's post-
+        // App-Service verification runs AFTER H4b in the DAG) is documented in
+        // scripts/canonical-secret-catalog/manifest.yaml directly above the
+        // Graph__Credentials__Order__0 entry — read that comment before
+        // changing this probe's budget or the credential-selection entries.
         var healthzUrl = new Uri(_options.HealthzUrlTemplate.Replace("{appServiceName}", appServiceName, StringComparison.Ordinal));
         var healthResult = await _healthzProbe.ProbeWithBackoffAsync(healthzUrl, cancellationToken).ConfigureAwait(false);
 

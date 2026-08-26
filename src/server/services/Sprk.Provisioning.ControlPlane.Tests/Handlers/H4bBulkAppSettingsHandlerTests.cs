@@ -35,6 +35,27 @@
 //   AC-13 Optional per_env entry with missing source → skipped, no fail.
 //   AC-14 Empty manifest (0 per_env_settings entries) — happy path still works;
 //         script is still invoked (KV-refs alone might be needed).
+//
+//   Task 205c / punch row A39 (auth-v4 §10.2 live-contract 8-entry set):
+//   AC-15 All 8 §10.2 entries resolve + apply correctly in ONE HandleAsync
+//         pass — literal entries need no envelope lookup, FromHandlerOutput
+//         entries resolve via the shared service_bus_fqns / uami_client_id
+//         sources, and the 3 ServiceBus FQNS settings collapse to ONE
+//         -ServiceBusFqns argv pair (source-dedup convention).
+//   AC-16 Missing service_bus_fqns (entries 4/5/6's shared source) →
+//         Failure(Resumable, PerEnvInputMissing) BEFORE any script call.
+//   AC-17 Missing uami_client_id (entry 3's source — the POML's explicit
+//         load-bearing-key-omission case) → Failure(Resumable,
+//         PerEnvInputMissing) BEFORE any script call; does NOT silently skip.
+//   AC-18 SF-18 required=true sweep — the shipped A39 entry set (as
+//         constructed by BuildA39Entries) carries Required=true on all 7 new
+//         entries (metadata assertion; the real-manifest.yaml equivalent
+//         lives in FilePerEnvSettingsManifestTests).
+//   AC-19 FIC-flap tolerance budget guard — HttpHealthzProbe's shipped
+//         DefaultBackoffSchedule total budget must stay comfortably above
+//         the measured ~130s AADSTS70025 propagation-flap window (regression
+//         guard for the H4b boot-retry-allowance choice documented in
+//         manifest.yaml + H4bBulkAppSettingsHandler.cs).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -467,6 +488,122 @@ public sealed class H4bBulkAppSettingsHandlerTests
         args.Should().Contain("-ResourceGroupName");
     }
 
+    // ---------- AC-15 A39 8-entry happy path ----------
+
+    [Fact]
+    public async Task AC15_A39EightEntries_ResolveAndDedupServiceBusFqns_HappyPath()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-15");
+        var entries = BuildStandardEntries().Concat(BuildA39Entries()).ToList();
+        var manifest = FakePerEnvManifest.Success(entries);
+        var runner = FakeProcessRunner.Zero();
+        var probe = FakeHealthzProbe.Success();
+        var fetcher = new FakeContainerLogFetcher();
+        var handler = Build(repo, manifest, runner, probe, fetcher);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var args = runner.LastArgs!;
+        // Literal entries (Order__0, RequireSecretFreeIdentity, AiSearch/AiSafety
+        // MI flags) contribute NO -<PsVar> argv — they are emitted verbatim by
+        // the generator, not resolved by H4b.
+        args.Should().NotContain("-GraphCredentialsOrder0");
+        args.Should().NotContain("-GraphCredentialsRequireSecretFreeIdentity");
+        // The 3 ServiceBus FQNS settings share ONE source key → ONE argv pair.
+        args.Should().Contain("-ServiceBusFqns");
+        args.Count(a => a == "-ServiceBusFqns").Should().Be(1);
+        args.Should().Contain("spaarke-acme-prod-sbus.servicebus.windows.net");
+    }
+
+    // ---------- AC-16 missing service_bus_fqns (entries 4/5/6 shared source) ----------
+
+    [Fact]
+    public async Task AC16_MissingServiceBusFqns_ResumableFailure_BeforeAnyScriptCall()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove("service_bus_fqns");
+        var repo = new FakeRepository(run, "etag-16");
+        var manifest = FakePerEnvManifest.Success(BuildA39Entries());
+        var runner = FakeProcessRunner.Zero();
+        var probe = FakeHealthzProbe.Success();
+        var fetcher = new FakeContainerLogFetcher();
+        var handler = Build(repo, manifest, runner, probe, fetcher);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("service_bus_fqns");
+        runner.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    // ---------- AC-17 missing uami_client_id (entry 3 — POML's explicit load-bearing case) ----------
+
+    [Fact]
+    public async Task AC17_MissingUamiClientId_ResumableFailure_DoesNotSilentlySkip()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove("uami_client_id");
+        var repo = new FakeRepository(run, "etag-17");
+        var entry3Only = new List<PerEnvSettingEntry>
+        {
+            new("ManagedIdentity__ClientId", PerEnvSettingSource.FromHandlerOutput,
+                LiteralValue: null, ParameterKey: "uami_client_id", Required: true,
+                IOptionsModuleName: "GraphModule"),
+        };
+        var manifest = FakePerEnvManifest.Success(entry3Only);
+        var runner = FakeProcessRunner.Zero();
+        var probe = FakeHealthzProbe.Success();
+        var fetcher = new FakeContainerLogFetcher();
+        var handler = Build(repo, manifest, runner, probe, fetcher);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("uami_client_id");
+        failure.Diagnostic.Should().Contain("ManagedIdentity__ClientId");
+        // MUST fail hard, not silently skip — no script call reached.
+        runner.CallCount.Should().Be(0);
+    }
+
+    // ---------- AC-18 SF-18 required=true sweep over the A39 entry set ----------
+
+    [Fact]
+    public void AC18_A39Entries_AllCarryRequiredTrue_Sf18SilentSkipTrapAvoided()
+    {
+        var entries = BuildA39Entries();
+        entries.Should().HaveCount(7);
+        entries.Should().OnlyContain(e => e.Required,
+            "H4b:286 silently skips missing optional entries -- every auth-v4 " +
+            "§10.2 entry is load-bearing and MUST be required=true");
+    }
+
+    // ---------- AC-19 FIC-flap tolerance budget guard ----------
+
+    [Fact]
+    public void AC19_HealthzBackoffBudget_ExceedsMeasuredFicFlapWindowWithMargin()
+    {
+        // Auth-v4 §11 invariant 2 measured the FIC propagation flap at ~130s
+        // (~8 failures, AADSTS70025). H4b's own /healthz backoff-poll is the
+        // CHOSEN tolerance mechanism (see manifest.yaml + H4bBulkAppSettingsHandler.cs
+        // comments) -- this guards against a future shrink silently reopening
+        // the boot-loop risk on a fresh stamp.
+        var totalBudgetSeconds = HttpHealthzProbe.DefaultBackoffSchedule
+            .Aggregate(TimeSpan.Zero, (sum, delay) => sum + delay)
+            .TotalSeconds;
+
+        totalBudgetSeconds.Should().BeGreaterThanOrEqualTo(300,
+            "the healthz backoff budget must comfortably exceed the measured " +
+            "~130s FIC-propagation-flap window (>2x margin) for the boot-retry " +
+            "allowance choice to hold");
+    }
+
     // ---------- helpers ----------
 
     private static H4bBulkAppSettingsHandler Build(
@@ -517,8 +654,42 @@ public sealed class H4bBulkAppSettingsHandlerTests
         p["bff_app_client_id"] = "00000000-aaaa-bbbb-cccc-999999999999";
         p["container_type_id"] = "00000000-dead-beef-0000-000000000001";
         p["uami_client_id"] = "00000000-1111-2222-3333-555555555555";
+        // Source the task 205c / A39 §10.2 FromHandlerOutput entries.
+        p["service_bus_fqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net";
         return run;
     }
+
+    /// <summary>
+    /// The 7 NEW auth-v4 §10.2 live-contract entries added by task 205c / punch
+    /// row A39 (entry 3, ManagedIdentity__ClientId, already existed pre-A39 and
+    /// is covered by BuildStandardEntries' Graph__ManagedIdentity__ClientId
+    /// sibling — see manifest.yaml for the shipped shape both share). Mirrors
+    /// the shipped manifest.yaml per_env_settings A39 section verbatim.
+    /// </summary>
+    private static IReadOnlyList<PerEnvSettingEntry> BuildA39Entries() =>
+    [
+        new("Graph__Credentials__Order__0", PerEnvSettingSource.Literal,
+            LiteralValue: "ManagedIdentityFederated", ParameterKey: null, Required: true,
+            IOptionsModuleName: "CredentialSelectionOptions"),
+        new("Graph__Credentials__RequireSecretFreeIdentity", PerEnvSettingSource.Literal,
+            LiteralValue: "true", ParameterKey: null, Required: true,
+            IOptionsModuleName: "CredentialSelectionOptions"),
+        new("ServiceBus__FullyQualifiedNamespace", PerEnvSettingSource.FromHandlerOutput,
+            LiteralValue: null, ParameterKey: "service_bus_fqns", Required: true,
+            IOptionsModuleName: "ServiceBusOptions"),
+        new("Membership__EventPublisher__ServiceBusNamespace", PerEnvSettingSource.FromHandlerOutput,
+            LiteralValue: null, ParameterKey: "service_bus_fqns", Required: true,
+            IOptionsModuleName: "ServiceBusOptions"),
+        new("Membership__JunctionUpdater__ServiceBusNamespace", PerEnvSettingSource.FromHandlerOutput,
+            LiteralValue: null, ParameterKey: "service_bus_fqns", Required: true,
+            IOptionsModuleName: "ServiceBusOptions"),
+        new("AiSearch__ManagedIdentity__Enabled", PerEnvSettingSource.Literal,
+            LiteralValue: "true", ParameterKey: null, Required: true,
+            IOptionsModuleName: "AiSearchOptions"),
+        new("AiSafety__ContentSafety__ManagedIdentity__Enabled", PerEnvSettingSource.Literal,
+            LiteralValue: "true", ParameterKey: null, Required: true,
+            IOptionsModuleName: "AiSafetyOptions"),
+    ];
 
     /// <summary>
     /// Matches the shape of the shipped manifest.yaml per_env_settings entries

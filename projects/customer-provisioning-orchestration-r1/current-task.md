@@ -1,5 +1,9 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **IN PROGRESS (SESSION 11)**: Task 205c (A39 H4b per_env_settings — 8 §10.2 live-contract entries) dispatched under FULL rigor, Sonnet/xhigh. Ordering-guard verified: A36/A37 @ `1bc049e4c`, A38 @ `f280de764`/`cc6ecb6e4`, A42 @ `cc6ecb6e4` — all confirmed landed via `git log`. Proceeding per POML `tasks/205c-a39-h4b-per-env-settings.poml`.
+
+> **PARALLEL LANE COMPLETE (SESSION 11, 205d)**: Task 205d (A41 H10 dual DV app-user + Q8 extension) APPLIED — Sonnet/high, FULL rigor, run in parallel with 205c per the recommended sequencing above. Dedupe found task 053 landed the two-row structure but the §10.4 objectid trap was uncovered by both dedupe sources (053 + ds8 design study) — NO scope-collapse, H10 handler code changed. All 3 design.md edits (D3 wording, :153 figure, Naming Standards row) + runbook §12.7 + T2 probe byte-equality extension landed in the working tree. NOT committed (executor obligation — main session bundles the commit). Full record: `notes/auth-v4-integration-draft-punch-rows.md` § "A41 execution record"; `tasks/TASK-INDEX.md` row 205d updated to ✅. Working-tree files touched are DISJOINT from 205c's `H4bBulkAppSettingsHandler`/`FilePerEnvSettingsManifest` surface — safe to commit independently or bundle together, main session's call.
+
 > **Last Updated**: 2026-08-26 SESSION 10 END — **🎯 SESSION 10 accomplishments** (3 clean commits pushed to origin `f280de764` = branch HEAD): (1) **Initial 205 sub-phase authored** (`7b82f60eb`) — 6 POMLs (205a-f) via 6 parallel background agents covering auth-v4 §10 addendum Δ1-Δ5 + traps + DELIVERED consumption. (2) **Peer 205a A38 ESCALATED cleanly** (`partial-omit-set-discovered` trigger fired at Step-2 grep-verify — 5 upsert sites verified beyond `StaticKvSecretManifest`) → owner APPROVED full re-scope split → **4 revised/new POMLs authored** (205a=A38a + 205g=A38b + 205h=A38c + 205i=A44.5). (3) **S1∥ mini-wave landed** (`cc6ecb6e4`) — 205b (A42) COMPLETE path (b) contract-parity (Fable/xhigh; 26 parity tests; `AssertFicTenancy` ported; `FicExchangeOutcomeClassifier` + `CrossTenantFicRefusedException` + typed exit codes; task-130 I6 preserved). (4) **S2∥ execution wave complete** (`f280de764`) — 4 parallel agents landed A38a+A38b+A38c+A44.5 (~1.5M tokens, 78min wall-clock, ALL green: build 0/0/0/0, `dotnet test` 1646/0/1). (5) **Peer A38a fired site-inventory-drifted on 6th site** (`Setup-OfficeServiceBus.ps1:172`) → owner-directed live `az` diagnosis confirmed script is 80% dead (Step-5 App Service ResourceNotFound, Step-4 KV secret SecretNotFound, SB namespace LIVE via canonical Bicep + MI auth per auth-v4 task 051; 3 `office-*` queues hardcoded + actively polled by Workers/Office/*.cs) → owner chose retain + A38c gate + deprecation banner → **main-session fold-in landed** (helper dot-source + gate + ~50-line banner naming canonical replacements). All 5 executed sub-phases pass Step 9.5 code-review + adr-check UNCONDITIONAL (auth-tagged); 0 ADR violations across the wave.
 
 ## 🎯 SESSION 10 QUICK RECOVERY — 2026-08-26 END (READ THIS FIRST)
@@ -36,11 +40,11 @@
 - Deps: A36/A37 (landed 1bc049e4c), A38a (landed f280de764), A42 (landed cc6ecb6e4)
 - ~4h POML estimate; Sonnet/xhigh; single background agent
 
-**Sub-phase 205d A41** (Sonnet @ high, parallel-safe with 205e):
-- POML: `205d-a41-h10-uami-dual-app-user.poml` (140 lines)
-- H10 dual DV app-user + Q8 D3 wording fix + Naming Standards Model 1 UAMI row
-- Dedupe FIRST against Wave-3E-053-H10-AppUser + ds8-uami-dv-appuser output (may collapse to probe-only, -2h)
-- ~3.5h POML estimate
+**Sub-phase 205d A41** — ✅ **APPLIED 2026-08-26 (Sonnet @ high, FULL rigor)**:
+- POML: `205d-a41-h10-uami-dual-app-user.poml` (status flipped to `completed`)
+- H10 dual DV app-user + Q8 D3 wording fix + Naming Standards Model 1 UAMI row — ALL LANDED
+- Dedupe verdict: task 053 landed the two rows; §10.4 objectid trap uncovered by either dedupe source — NO scope-collapse
+- Actual effort ~3h vs 3.5h estimate; full record in `notes/auth-v4-integration-draft-punch-rows.md`
 
 **Sub-phase 205e A43** (Sonnet @ high, parallel-safe with 205d):
 - POML: `205e-a43-deploy-allindexes-gate.poml` (120 lines)

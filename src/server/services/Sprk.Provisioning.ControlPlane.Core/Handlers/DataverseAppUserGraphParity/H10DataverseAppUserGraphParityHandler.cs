@@ -90,6 +90,33 @@
 //   successors (H12c/H14 per the plan.md critical path). This handler mutates
 //   Cosmos state (advancing CurrentPhase + CompletedPhases + InterStepState +
 //   GateStates) and returns Success; it does not enqueue anything directly.
+//
+// MODEL 1 / MODEL 2 CODE PATH (task 205d / punch row A41 — auth-v4 §10.1 Δ5):
+//   H10 itself is DELIBERATELY tenancy-model-agnostic — it always registers
+//   exactly the two systemuser rows named by whatever bffAppRegId/miClientId/
+//   miObjectId InterStepState carries, without branching on run.TenancyModel.
+//   The Model 1 vs Model 2 SHAPE is established upstream, not here:
+//     - Model 1 (shared trial/SMB tier): H3 is a no-op for the BFF app-reg
+//       itself — the SAME shared multitenant app-reg + SAME shared UAMI
+//       (sprk-{env}-shared-bff-uami, model1-shared.bicep) are registered once
+//       per DV environment across every Model 1 customer sharing that
+//       platform tier. ZERO per-customer app-reg objects are ever created
+//       (§5.1 Reading 1, owner-decided 2026-08-25 per open question Q1) — so
+//       H10's per-customer dispatch for a Model 1 customer writes systemuser
+//       rows whose applicationid values are IDENTICAL to every other Model 1
+//       customer on the same DV env (that IS the "shared" contract; H10's own
+//       idempotent find-by-applicationid make this a safe no-op past the
+//       first Model 1 customer on a given env).
+//     - Model 2 (dedicated stamp): H3 provisions a per-customer BFF app-reg +
+//       federated identity credential per customer, and H2a's uami.bicep
+//       provisions a per-stamp UAMI (`sprk-{env}-{customerId}-uami`) — see
+//       GraphRegistrationProvisioner.cs:547-557 (task 130) for the per-profile
+//       issuer derivation that makes the Model 2 app-reg's identity genuinely
+//       per-customer. H10's dispatch for a Model 2 customer therefore writes
+//       systemuser rows unique to that customer's stamp.
+//   No `if (run.TenancyModel == ...)` branch belongs in this handler — adding
+//   one would duplicate a decision that upstream handlers already made and
+//   InterStepState already encodes.
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -285,8 +312,21 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         var bffSystemUserId = ((DataverseAppUserCreationOutcome.Success)bffOutcome).SystemUserId;
 
         // (10) Register the UAMI as a Dataverse System Administrator App User.
+        // auth-v4 §10.4 BINDING (punch row A41, the documented "single
+        // most-missed item"): azureactivedirectoryobjectid MUST be set
+        // EXPLICITLY to the UAMI's principalId (uamiObjectId — InterStepState
+        // .miObjectId, H2a's Bicep output) — NEVER the UAMI's clientId
+        // (uamiClientId, used for `applicationid` only). Both are valid-shaped
+        // GUIDs; a row created with the wrong one still passes the T2
+        // existence/count check below AND H13's independent re-verification
+        // count check — only the app-only Dataverse call's oid-claim match
+        // fails at first real use, 401ing every call for this customer. See
+        // DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+        // remarks + mi-proof-dataverse-side.md for the full trap shape.
         var uamiOutcome = await _appUserCreator.EnsureAppUserAsync(
-            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName),
+            new DataverseAppUserCreationRequest(
+                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName,
+                AzureActiveDirectoryObjectId: uamiObjectId),
             cancellationToken).ConfigureAwait(false);
         if (uamiOutcome is DataverseAppUserCreationOutcome.Failure uamiFailure)
         {

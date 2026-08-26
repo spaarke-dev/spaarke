@@ -25,9 +25,15 @@
 //       swallowed as InfraFault.
 //   T11 Both halves are independently invoked with the correct applicationId
 //       (regression guard: probe MUST not confuse BFF vs UAMI id).
+//   T12 auth-v4 §10.4 byte-equality extension (task 205d / punch row A41,
+//       2026-08-26): byte-equality match -> Passed + "byte-equality verified"
+//       log; byte-equality mismatch (observed == UAMI CLIENT ID, the exact
+//       trap) -> Failed naming the trap; observed null -> Failed; UamiObjectId
+//       not supplied -> degrades to pre-A41 count-only Passed + "DEGRADED" log.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
@@ -44,6 +50,7 @@ public sealed class DataverseAppUserPairT2ProbeTests
     private const string DataverseUrl = "https://sprk-acme.crm.dynamics.com";
     private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiClientId = "11111111-2222-3333-4444-555555555555";
+    private const string UamiObjectId = "66666666-7777-8888-9999-000000000000";
 
     // ---------- T1 happy path ----------
 
@@ -273,6 +280,82 @@ public sealed class DataverseAppUserPairT2ProbeTests
         verifier.InvokedAppIds.Should().BeEquivalentTo(new[] { BffAppRegId, UamiClientId });
     }
 
+    // ---------- T12 byte-equality extension (task 205d / punch row A41, auth-v4 §10.4) ----------
+
+    [Fact]
+    public async Task ProbeAsync_ByteEqualityMatches_ReturnsPassed_LogsByteEqualityVerified()
+    {
+        var verifier = new FakeVerifier(
+            bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
+            uami: new DataverseAppUserVerificationResult.Verified("sys-uami-1", UamiObjectId));
+        var logger = new CapturingLogger();
+        var probe = new DataverseAppUserPairT2Probe(verifier, logger);
+
+        var outcome = await probe.ProbeAsync(BuildRequestWithUamiObjectId(UamiObjectId), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>()
+            .Which.Kind.Should().Be(TrapKind.T2DataverseAppUser);
+        logger.Entries.Should().Contain(e => e.Message.Contains("byte-equality verified"));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ByteEqualityMismatch_ReturnsFailed_NamesTheTrap()
+    {
+        // The exact §10.4 trap: azureactivedirectoryobjectid holds the UAMI's
+        // CLIENT ID instead of its principalId. Both are valid-shaped GUIDs;
+        // the count check alone (T1-T11 above) would report this as PASSED.
+        var verifier = new FakeVerifier(
+            bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
+            uami: new DataverseAppUserVerificationResult.Verified("sys-uami-1", UamiClientId));
+        var probe = BuildProbe(verifier);
+
+        var outcome = await probe.ProbeAsync(BuildRequestWithUamiObjectId(UamiObjectId), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Kind.Should().Be(TrapKind.T2DataverseAppUser);
+        failed.Diagnostic.Should().Contain("§10.4")
+            .And.Contain("byte-equal")
+            .And.Contain(UamiObjectId)
+            .And.Contain(UamiClientId)
+            .And.Contain("single most-missed item",
+                "the diagnostic MUST name the exact trap shape so an operator recognizes it immediately");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ByteEqualityObservedNull_ReturnsFailed()
+    {
+        // Verifier returned no azureactivedirectoryobjectid at all (e.g. a
+        // pre-A41 row that was never explicitly set) — also a mismatch, not a
+        // pass, because the app-only call would still 401 for the same reason.
+        var verifier = new FakeVerifier(
+            bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
+            uami: new DataverseAppUserVerificationResult.Verified("sys-uami-1", AzureActiveDirectoryObjectId: null));
+        var probe = BuildProbe(verifier);
+
+        var outcome = await probe.ProbeAsync(BuildRequestWithUamiObjectId(UamiObjectId), CancellationToken.None);
+
+        var failed = outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain("(null/empty)");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UamiObjectIdNotSupplied_DegradesToCountOnly_LogsDegraded()
+    {
+        // Backward compatibility: a caller that has not been upgraded to pass
+        // UamiObjectId gets the pre-A41 count-only verdict, not a failure —
+        // but the log MUST distinguish this from a genuine byte-equality pass.
+        var verifier = new FakeVerifier(
+            bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
+            uami: new DataverseAppUserVerificationResult.Verified("sys-uami-1", UamiClientId)); // "wrong" value, irrelevant here
+        var logger = new CapturingLogger();
+        var probe = new DataverseAppUserPairT2Probe(verifier, logger);
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None); // BuildRequest() has UamiObjectId = ""
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+        logger.Entries.Should().Contain(e => e.Message.Contains("DEGRADED"));
+    }
+
     // ---------- helpers ----------
 
     private static DataverseAppUserPairT2Probe BuildProbe(IDataverseAppUserVerifier verifier) =>
@@ -289,6 +372,30 @@ public sealed class DataverseAppUserPairT2ProbeTests
         KeyVaultName: string.Empty,
         AppServiceName: string.Empty,
         ResourceGroupName: string.Empty);
+
+    private static TrapVerificationRequest BuildRequestWithUamiObjectId(string uamiObjectId) =>
+        BuildRequest() with { UamiObjectId = uamiObjectId };
+
+    /// <summary>
+    /// Minimal <see cref="ILogger{T}"/> capture — parity with H10SeamsSmokeTests.cs's
+    /// CapturingLogger pattern (plain in-memory recorder over the production
+    /// ILogger contract, not a mocking-framework double per ADR-038).
+    /// </summary>
+    private sealed class CapturingLogger : ILogger<DataverseAppUserPairT2Probe>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(state, exception)));
+        }
+    }
 
     /// <summary>
     /// Fake <see cref="IDataverseAppUserVerifier"/> — no HttpClient / no

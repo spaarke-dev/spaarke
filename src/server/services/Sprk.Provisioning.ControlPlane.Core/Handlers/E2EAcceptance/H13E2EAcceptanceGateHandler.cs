@@ -318,6 +318,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         var bffAppRegId = run.InterStepState.BffAppRegId ?? string.Empty;
         var uamiClientId = run.InterStepState.MiClientId ?? string.Empty;
+        // auth-v4 §10.4 (task 205d / punch row A41) — the UAMI principalId,
+        // threaded through so the T2 probe can byte-compare it against the
+        // observed azureactivedirectoryobjectid rather than trusting a
+        // count=1 row alone.
+        var uamiObjectId = run.InterStepState.MiObjectId ?? string.Empty;
         var aiSearchEndpoint = run.InterStepState.AiSearchEndpoint ?? string.Empty;
         var cosmosEndpoint = run.InterStepState.CosmosEndpoint ?? string.Empty;
 
@@ -361,7 +366,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     UamiClientId: uamiClientId,
                     KeyVaultName: keyVaultName,
                     AppServiceName: appServiceName,
-                    ResourceGroupName: resourceGroupName),
+                    ResourceGroupName: resourceGroupName,
+                    UamiObjectId: uamiObjectId),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

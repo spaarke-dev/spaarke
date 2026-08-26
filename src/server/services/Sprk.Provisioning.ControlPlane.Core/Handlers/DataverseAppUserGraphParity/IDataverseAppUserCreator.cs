@@ -23,11 +23,29 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 /// <param name="TenantId">Target Entra tenant id (§4D I1 — mandatory, no default).</param>
 /// <param name="ApplicationId">The Entra application (client) ID to register as the App User's <c>applicationid</c>.</param>
 /// <param name="SecurityRoleName">Security role name to ensure is associated (e.g. "System Administrator").</param>
+/// <param name="AzureActiveDirectoryObjectId">
+/// OPTIONAL explicit value for the App User row's <c>azureactivedirectoryobjectid</c> field.
+/// Null (default) leaves Dataverse to auto-resolve the field from <paramref name="ApplicationId"/> —
+/// the correct behavior for a standard Entra app registration (BFF app-reg OBO row), whose Dataverse
+/// AAD sync reliably finds the enterprise application's service principal object id.
+/// </param>
+/// <remarks>
+/// <b>auth-v4 §10.4 silent-fail trap (task 205d / punch row A41, BINDING)</b>: for the UAMI row, this
+/// value MUST be supplied explicitly and MUST be the UAMI's <b>principalId (service principal object
+/// id)</b> — NEVER the UAMI's clientId. Both are valid-shaped GUIDs; a row created with the wrong one
+/// still passes T2's existence + count check, but the app-only Dataverse token's <c>oid</c> claim
+/// (the UAMI's principalId) will never match a row whose <c>azureactivedirectoryobjectid</c> holds the
+/// clientId instead — every app-only Dataverse call for that customer 401s at first use. This is
+/// auth-v4's documented "single most-missed item" (see <c>mi-proof-dataverse-side.md</c>). Do NOT rely
+/// on Dataverse's applicationid-only auto-resolution for a Managed Identity row — set this field
+/// explicitly instead.
+/// </remarks>
 public sealed record DataverseAppUserCreationRequest(
     string EnvironmentUrl,
     string TenantId,
     string ApplicationId,
-    string SecurityRoleName);
+    string SecurityRoleName,
+    string? AzureActiveDirectoryObjectId = null);
 
 /// <summary>
 /// Ensures a Dataverse Application User exists (upsert semantics — creates if

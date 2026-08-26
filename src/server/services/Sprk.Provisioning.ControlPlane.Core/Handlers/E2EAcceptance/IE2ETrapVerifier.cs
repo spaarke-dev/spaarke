@@ -64,6 +64,18 @@ public interface IE2ETrapVerifier
 /// <param name="KeyVaultName">Customer KV name for T1 ref probe.</param>
 /// <param name="AppServiceName">BFF App Service name for T1/T5 ARM probe.</param>
 /// <param name="ResourceGroupName">App Service resource group for T1/T5 ARM probe.</param>
+/// <param name="UamiObjectId">
+/// UAMI principalId / service principal object id (H2a output, InterStepState.miObjectId) — expected
+/// T2 byte-equality principal. OPTIONAL TRAILING FIELD (task 205d / punch row A41, added 2026-08-26):
+/// unlike T3's UamiSpObjectId resolution (GraphAppRoleParityT3Probe's file header explains why adding
+/// a field to this shared record is normally a coordinating change across all 6 sibling probes), this
+/// value is ALREADY resolved by H13's own call site (the same InterStepState.MiObjectId every other
+/// handler reads — no additional lookup needed), so threading it through as an ADDITIVE optional
+/// field (default empty string) is zero-cost for the other 5 probes: their construction sites use
+/// named arguments and do not reference this field. Empty/whitespace = the T2 probe degrades to
+/// count-only verification (pre-A41 behavior, logged distinctly as "DEGRADED") rather than failing —
+/// see DataverseAppUserPairT2Probe for the byte-equality contract.
+/// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
     string RunId,
@@ -74,7 +86,8 @@ public sealed record TrapVerificationRequest(
     string UamiClientId,
     string KeyVaultName,
     string AppServiceName,
-    string ResourceGroupName);
+    string ResourceGroupName,
+    string UamiObjectId = "");
 
 /// <summary>
 /// The 6 §4B silent-fail traps, enumerated (matches design.md §4B verbatim).

@@ -4,7 +4,7 @@
     <title>Auth-v4 runtime-contract integration — row A41 (H10 dual DV app-user + Q8 extension (D3 wording + Naming Standards))</title>
     <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Row A41 tags include `auth`, `dataverse-app-user`, and touches `H10 handler` + `T2 probe` (`E2EAcceptance/T2*Probe.cs`) — an auth-tagged test-modifying change. Per project CLAUDE.md §8 rigor table `TEST-MODIFYING` override + root CLAUDE.md §8.5 Coverage-first review, code-review + adr-check at Step 9.5 are UNCONDITIONAL (not the STANDARD skip). The Δ5 dual-row objectid trap is auth-v4's "single most-missed item" per remediation plan §5 SF-9 — silent 401s on every app-only Dataverse call post-cutover is the failure mode this row exists to prevent; FULL rigor guards against re-introducing that silent-fail class.</rigor-reason>
     <model-tier>sonnet</model-tier>

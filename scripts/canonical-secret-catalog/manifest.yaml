@@ -105,8 +105,12 @@ secrets:
     rotation_cadence: "manual-on-incident"
     never_delete: true
     exception_note: >-
+      Rollback-window hold per §6.5 resolution 2026-08-25 (sunset 2026-11-23);
+      retirement owned by auth-v4 runbook (obligation 051-E). E-3 closure
+      removed the Dataverse__ClientSecret app setting 2026-08-24; the KV secret
+      is retained solely as auth-v4's rollback copy through the soak window.
       Grandfathered PascalCase per §7.9 R2 (never gain a second casing).
-      DO-NOT-RENAME + DO-NOT-DELETE until #3b credential migration retires it.
+      DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook.
     aliases: []
     value_source: "from-existing-kv"
     app_settings:
@@ -129,9 +133,13 @@ secrets:
     rotation_cadence: "90-days"
     never_delete: true
     exception_note: >-
-      Grandfathered PascalCase per §7.9 R2. Never gain a second casing
-      (e.g. bff-api-client-secret would be drift — rotation would break
-      one of the two paths).
+      DELETED from KV 2026-08-24 (auth-v4 task 033, ADR-028 E-3 CLOSED).
+      Entry retained to BLOCK re-creation — H4 omits in secret-free envs;
+      never seed a sentinel value (§9.1 opaque AADSTS7000215 — the ordered
+      selector cannot distinguish a sentinel from a real secret). Soft-deleted
+      copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to
+      2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per
+      §7.9 R2 (never gain a second casing).
     aliases: []
     value_source: "from-existing-kv"
     app_settings:
@@ -815,4 +823,145 @@ per_env_settings:
     notes: >-
       Parity fallback alias for Graph__ManagedIdentity__ClientId. Kept for
       compatibility with modules that read the flat key (documented in
-      SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7).
+      SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7). Also entry 3 of the auth-v4
+      §10.2 live-contract 8-entry set (task 205c / punch row A39) — this is
+      the ONLY entry that already existed pre-A39 (landed task 201); A39
+      added this note, not the entry. SF-2 identifier-swap trap: the source
+      MUST be uami_client_id (InterStepState.MiClientId, H2a UAMI clientId at
+      Models/InterStepState.cs:53) — NEVER uami_object_id
+      (InterStepState.MiObjectId, principalId at :48, used only for RBAC
+      assignments). Substituting the object id here creates successfully and
+      fails only at token exchange with AADSTS700213 wrong-subject.
+
+  # ==========================================================================
+  # Auth-v4 §10.2 live-contract entries (task 205c / punch row A39, 2026-08-26)
+  # ==========================================================================
+  # Verified 2026-08-24 against `spaarke-bff-dev` LIVE post-E-3 closure. This
+  # is the runtime application of the §6.5 conflict-resolution record's prong
+  # 1 (notes/decisions/adr-028-a4-integration-conflict-resolution.md,
+  # APPROVED 2026-08-25): Graph__Credentials__Order__0=ManagedIdentityFederated
+  # is the SOLE entry + RequireSecretFreeIdentity=true. ORDERING GUARD
+  # (BINDING): these entries are lawful ONLY because A38 (H4 KV manifest
+  # secret-free omit — no sentinel secret slots) AND A42 (FIC creation with
+  # tenancy guard) have BOTH landed (confirmed at A39 dispatch time via
+  # `git log`: A36/A37 @ 1bc049e4c, A38 @ f280de764/cc6ecb6e4, A42 @
+  # cc6ecb6e4). Applying entry 2 below before A38+A42 land would boot-loop a
+  # fresh stamp (exit-134 class) per §9.1 sentinel pathology.
+  #
+  # FIC-PROPAGATION-FLAP TOLERANCE (§5 item 4 verifier addition; SF-17 x SF-6
+  # interaction case). Auth-v4 §11 invariant 2 measured Entra federated-
+  # credential propagation to flap for ~130s (~8 failures, AADSTS70025) after
+  # a FIC is created/changed. CHOSEN mechanism: (b) H4b boot-retry allowance
+  # via the EXISTING /healthz backoff-poll in H4bBulkAppSettingsHandler.cs /
+  # HttpHealthzProbe.cs (5 probes, 30+60+90+120+180s = 480s ~= 8-min budget,
+  # task 201 -- unchanged by A39, >3x margin over the measured ~130s window) --
+  # NOT new BFF-side retry code. Two verified reasons (2026-08-26, against
+  # src/server/api/Sprk.Bff.Api/Configuration/{IdentityConfigurationValidator,
+  # CredentialSelectionOptions}.cs):
+  #   1. RequireSecretFreeIdentity=true's startup guard (Rule 6) is a PURE
+  #      config-SHAPE assertion (does Graph:Credentials:Order still contain
+  #      ClientSecret?) with NO live token exchange -- deliberately, per that
+  #      file's own Rule 6 comment ("avoids a startup token acquisition, which
+  #      would... refuse to boot during Entra's measured ~2-minute...
+  #      propagation flap"; "No SIGABRT-class risk is introduced"). Turning on
+  #      entries 1+2 below therefore cannot itself fail-fast during the flap.
+  #   2. If some OTHER startup path attempts a live MI-FIC exchange during
+  #      boot and hits the flap, H4b's own /healthz backoff-poll (480s budget)
+  #      already comfortably outlasts the measured ~130s window -- an
+  #      EXISTING, already-shipped mechanism.
+  # REJECTED: "wait for A42's post-App-Service verified-exchange marker
+  # before settings-apply" -- infeasible as literally specified. Per
+  # Handlers/HandlerIds.cs, H4b runs BEFORE H9/H10/H13 in the DAG, and H13
+  # (E2E acceptance gate) -- the post-App-Service verification owner per
+  # InterStepState.FicPendingPostAppServiceVerification's doc comment -- is
+  # the FINAL handler. H4b cannot block on a signal produced only after H4b
+  # itself (and H9) have already run. Revisit at Phase-F once Q11 (BFF
+  # warmup credential self-proof) ships a real warmup endpoint.
+  #
+  # Sourcing notes:
+  #   - Entries 1/2/7/8 are LITERAL -- no handler-output dependency.
+  #   - Entries 4/5/6 (Service Bus FQNS) share ONE source key
+  #     (service_bus_fqns) per the existing dedup convention (see
+  #     ManagedIdentity__ClientId / Graph__ManagedIdentity__ClientId above,
+  #     both sharing uami_client_id). The value an upstream handler-output
+  #     promotion step supplies for service_bus_fqns MUST be the FULL FQNS
+  #     (<namespace>.servicebus.windows.net) -- H4b's per_env_settings DSL is
+  #     verbatim substitution only; it performs no string formatting, so the
+  #     ".servicebus.windows.net" suffix cannot be appended here. A36 (BFF
+  #     runtime UAMI granted Service Bus Data Sender + Data Receiver,
+  #     1bc049e4c) is the RBAC prerequisite this app-setting activates.
+
+  - key: "Graph__Credentials__Order__0"
+    per_env_source: "literal"
+    literal_value: "ManagedIdentityFederated"
+    iOptionsModule: "CredentialSelectionOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 1. MUST be the ONLY Credentials__Order__* entry --
+      the ordered credential selector fails opaquely if a second provider
+      (e.g. ClientSecret) is listed alongside RequireSecretFreeIdentity=true.
+      Do NOT add Graph__Credentials__Order__1 or higher.
+
+  - key: "Graph__Credentials__RequireSecretFreeIdentity"
+    per_env_source: "literal"
+    literal_value: "true"
+    iOptionsModule: "CredentialSelectionOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 2. Fail-fast: BFF startup validator
+      (IdentityConfigurationValidator Rule 6) refuses to boot outside
+      Development if ClientSecret is still listed in Graph:Credentials:Order
+      alongside this flag. Pure config-shape assertion -- no live token
+      exchange, so it is immune to the FIC-propagation-flap window (see the
+      section header above). LAWFUL ONLY once A38 (H4 secret-slot omit) AND
+      A42 (FIC creation) have landed -- see ORDERING GUARD above.
+
+  - key: "ServiceBus__FullyQualifiedNamespace"
+    per_env_source: "from-h2a-output:service_bus_fqns"
+    iOptionsModule: "ServiceBusOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 4 (Delta 1). FQNS format only
+      (<namespace>.servicebus.windows.net) -- NEVER a connection string, NEVER
+      a Key Vault reference. Enables BFF to authenticate to Service Bus via
+      its runtime UAMI (A36 RBAC: Data Sender + Data Receiver) instead of the
+      SAS connection string H4 previously wrote to KV.
+
+  - key: "Membership__EventPublisher__ServiceBusNamespace"
+    per_env_source: "from-h2a-output:service_bus_fqns"
+    iOptionsModule: "ServiceBusOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 5. Shares the service_bus_fqns source with entry 4
+      (same namespace, different consumer module) per the manifest's existing
+      source-dedup convention.
+
+  - key: "Membership__JunctionUpdater__ServiceBusNamespace"
+    per_env_source: "from-h2a-output:service_bus_fqns"
+    iOptionsModule: "ServiceBusOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 6. Shares the service_bus_fqns source with entries
+      4 and 5.
+
+  - key: "AiSearch__ManagedIdentity__Enabled"
+    per_env_source: "literal"
+    literal_value: "true"
+    iOptionsModule: "AiSearchOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 7 (Delta 2). Enables MI-authenticated AI Search
+      data-plane calls; pairs with A37 RBAC (Search Index Data Contributor +
+      Search Service Contributor) already granted to the BFF runtime UAMI.
+      Global literal -- every deployed env sets this to true.
+
+  - key: "AiSafety__ContentSafety__ManagedIdentity__Enabled"
+    per_env_source: "literal"
+    literal_value: "true"
+    iOptionsModule: "AiSafetyOptions"
+    required: true
+    notes: >-
+      Auth-v4 §10.2 entry 8. Enables MI-authenticated Azure AI Content Safety
+      calls (PromptShieldService / GroundednessCheckService), preferring MI
+      over the ContentSafety-ApiKey secret per that secret's own exception
+      note above. Global literal.

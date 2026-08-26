@@ -4,7 +4,7 @@
     <title>Auth-v4 runtime-contract integration — row A44 (appsettings.template.json guard + Section 6.5 EDIT package + doc sweep)</title>
     <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Row A44 touches (a) BFF-consumed shared server code paths (H4b + H9 consumer path for `appsettings.template.json` `ServiceBus-ConnectionString` KV ref) → tag `bff-api` → FULL per project CLAUDE.md §Rigor level defaults; and (b) `.claude/constraints/provisioning.md` + root `CLAUDE.md` §17 + `spec.md` (Section 6.5 EDIT package) → auth-adjacent doc mutation → auth-tagged. Under project CLAUDE.md §8 TEST-MODIFYING override AND root §Rigor level tag `auth` → code-review + adr-check unconditional at Step 9.5. Non-negotiable given the security-sensitive nature of the credential-lifecycle rewrite and the silent-fail history of the template `ServiceBus-ConnectionString` KV ref (auth-v4 obligation 051-E).</rigor-reason>
     <model-tier>sonnet</model-tier>

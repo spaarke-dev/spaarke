@@ -24,16 +24,53 @@ Any code path in the L2 control-plane, handlers, BFF-provisioning surface, or op
 
 Violations of I1-I5 surface via ArchTests (planned in task 204e) + are Critical findings in code-review Step 6.
 
-## KV secret never-delete list — BINDING per root CLAUDE.md §10 + spec.md MUST
+## KV credential lifecycle — BINDING per ADR-028 Amendment A4 + E-3 closure (§6.5 resolution 2026-08-25; supersedes the r3-handoff never-delete list)
 
-**NEVER delete these KV secrets** from any KV in any code path, script, or handler:
+> **History**: the r3-handoff blanket rule "NEVER delete `Dataverse-ClientSecret` / `BFF-API-ClientSecret`" was
+> superseded on 2026-08-24 when auth-v4 task 033 closed ADR-028 Exception E-3 — exactly the supersession
+> pre-authorized by this project's spec.md FR-39. E-3 closure facts: app settings `API_CLIENT_SECRET` /
+> `AzureAd__ClientSecret` / `Dataverse__ClientSecret` / `AgentToken__ClientSecret` removed 2026-08-24 16:50:25Z;
+> KV `BFF-API-ClientSecret` + `bff-api-client-secret` deleted 17:14:40Z (**soft-deleted, recoverable to
+> 2026-11-22 — not purged**). `Dataverse-ClientSecret` was deliberately NOT deleted. Resolution record:
+> `projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md`
+> (owner-approved 2026-08-25; Q7 owner narrowing recorded therein).
 
-- `Dataverse-ClientSecret` — legacy but still referenced; deletion breaks BFF auth path.
-- `BFF-API-ClientSecret` — active BFF client-cred.
+**1. NEVER create, seed, restore, or re-introduce `BFF-API-ClientSecret` (either casing — `bff-api-client-secret`
+included) in any secret-free environment.** Secret-free = `spaarke-bff-dev` (flipped 2026-08-24) and EVERY
+newly-provisioned environment on the secret-free contract (`Graph__Credentials__Order__0=ManagedIdentityFederated`
+as the ONLY entry + `Graph__Credentials__RequireSecretFreeIdentity=true`). H4 **omits** the secret entirely —
+**no sentinel value** (the ordered selector cannot distinguish a sentinel from a real secret and fails opaquely
+with `AADSTS7000215`; positive migration markers go in a provisioning-state field or KV tag, never the credential
+slot — auth-v4 §9.1). A `.WithClientSecret(...)` site on the BFF identity is a plain ADR-028 A4 violation — E-3
+is closed; there is no exception to cite. The FR-39 credential-type seam in H3/H4 stays in code (pluggability),
+but the secret path may only be selected for a prong-3 unmigrated environment — never for new provisioning.
 
-Additionally, any secret with `never_delete: true` in `scripts/canonical-secret-catalog/manifest.yaml` MUST NOT be deleted regardless of context (test cleanup, sweep, "temporary" removal).
+**2. NEVER purge or delete the rollback copies before 2026-11-23** (Path A, time-boxed): do not purge the
+soft-deleted `BFF-API-ClientSecret` / `bff-api-client-secret` KV entries, and do not delete the still-live
+`Dataverse-ClientSecret` KV secret. Its old rationale is stale (the shared-lib consumer is migrated on master),
+but it is auth-v4's live rollback copy during the soak window (obligation 051-E; rollback proven config-only,
+decisions/031 §5.6 — NOTE: proven on a slot pair already carrying `keyVaultReferenceIdentity`; a fresh slot
+needs that site property re-asserted first). Retirement belongs to auth-v4's runbook — never a provisioning
+sweep, test cleanup, or "temporary" removal. **Sunset 2026-11-23**: auth-v4 retires it or the owner re-reviews;
+do not silently extend.
 
-`§7.9 pre-check gate` — BINDING per spec.md FR-35: BEFORE any secret rename/delete, verify LIVE App Service + KV + Dataverse-persisted config for references. Skipping the pre-check is a HARD violation.
+**3. Unmigrated environments — the original rule survives unchanged**: for any environment whose LIVE credential
+order still contains `ClientSecret`, the original never-delete for BOTH secrets + the FR-35 pre-check gate
+remain fully in force until auth-v4's retirement runbook executes there. **Q7 owner narrowing (2026-08-25)**:
+prong 3 applies to `spaarkedev1` and any as-yet-unprovisioned Model 2 stamp; H4 executor MUST NOT provision
+new Model 2 stamps under this prong until A36-A42 land per Q6 (per-customer stamps under prong 3 are barred
+during the transition window).
+
+**4. E-1 secrets are OUT OF SCOPE and stay protected indefinitely**: per-customer SpeAdmin container-type secrets
+(ADR-028 E-1 — open, architectural, unaffected by A4/E-3) authenticate OTHER applications, not the BFF identity.
+`sprk_specontainertypeconfig` rows + their KV secret names keep `never_delete: true` with no sunset.
+
+Additionally, any secret with `never_delete: true` in `scripts/canonical-secret-catalog/manifest.yaml` MUST NOT
+be deleted regardless of context. The manifest's two BFF-identity entries are re-annotated per this resolution;
+until re-annotation lands, read their `never_delete: true` as prongs 1-3 above, not the retired blanket rule.
+
+`§7.9 pre-check gate` — BINDING per spec.md FR-35, UNCHANGED: BEFORE any secret rename/delete, verify LIVE
+App Service + KV + Dataverse-persisted config for references. Skipping the pre-check is a HARD violation.
 
 ## Publish-size ≤60 MB — BINDING per CLAUDE.md §10 NFR-01
 
@@ -109,7 +146,7 @@ Provisioning tasks touching auth (H3, H4, H10, `/provision-environment` skill St
 
 - UAMI-outbound preference (not System-Assigned) for shared platform → source services.
 - `keyVaultReferenceIdentity` on App Service MUST be set to the UAMI resource ID when `identity.type='UserAssigned'`.
-- Client-cred rotation cadence: no more than once per 90 days SCHEDULED (drift-recovery is a different failure mode, escalate per §6.5).
+- Client-cred rotation cadence: **retired for the BFF identity** (secret-free per ADR-028 A4 + E-3 CLOSED 2026-08-24; §6.5 resolution 2026-08-25 — no client secret to rotate on that identity). **Retained for E-1** (per-customer SpeAdmin container-type secrets): no more than once per 90 days SCHEDULED (drift-recovery is a different failure mode, escalate per §6.5).
 - Operator's own AAD identity per NFR-11 (never a service principal).
 
 Full pattern: `.claude/patterns/provisioning/keyvault-reference-identity-invariant.md` (T1) + `.claude/patterns/provisioning/operator-rbac-bootstrap.md` (F15/F18).

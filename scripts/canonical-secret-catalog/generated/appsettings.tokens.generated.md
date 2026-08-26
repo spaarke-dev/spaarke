@@ -181,7 +181,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, bff, binding-never-delete
-- **Exception note**: Grandfathered PascalCase per §7.9 R2. Never gain a second casing (e.g. bff-api-client-secret would be drift — rotation would break one of the two paths).
+- **Exception note**: DELETED from KV 2026-08-24 (auth-v4 task 033, ADR-028 E-3 CLOSED). Entry retained to BLOCK re-creation — H4 omits in secret-free envs; never seed a sentinel value (§9.1 opaque AADSTS7000215 — the ordered selector cannot distinguish a sentinel from a real secret). Soft-deleted copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to 2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per §7.9 R2 (never gain a second casing).
 - **Consumers**:
   - BFF: AzureAd:ClientSecret (backing)
   - BFF: Graph:ClientSecret (local-dev fallback per ADR-028)
@@ -310,7 +310,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, binding-never-delete, dataverse
-- **Exception note**: Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-RENAME + DO-NOT-DELETE until #3b credential migration retires it.
+- **Exception note**: Rollback-window hold per §6.5 resolution 2026-08-25 (sunset 2026-11-23); retirement owned by auth-v4 runbook (obligation 051-E). E-3 closure removed the Dataverse__ClientSecret app setting 2026-08-24; the KV secret is retained solely as auth-v4's rollback copy through the soak window. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook.
 - **Consumers**:
   - BFF: AgentToken:ClientSecret
   - BFF: AzureAd:ClientSecret

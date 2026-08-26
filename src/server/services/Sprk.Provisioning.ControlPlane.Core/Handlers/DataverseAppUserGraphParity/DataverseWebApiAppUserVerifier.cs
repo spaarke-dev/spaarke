@@ -11,6 +11,11 @@
 //
 // NOT under test in the CI unit suite (real Dataverse Web API call). Handler
 // unit tests substitute a fake IDataverseAppUserVerifier.
+//
+// auth-v4 §10.4 EXTENSION (task 205d / punch row A41): also returns the row's
+// observed azureactivedirectoryobjectid so DataverseAppUserPairT2Probe (H13's
+// independent re-verification) can byte-compare it against the expected UAMI
+// principalId — a count=1 row alone does not prove the row is correct.
 // -----------------------------------------------------------------------------
 
 using System.Net.Http.Headers;
@@ -82,7 +87,12 @@ public sealed class DataverseWebApiAppUserVerifier : IDataverseAppUserVerifier
             return new DataverseAppUserVerificationResult.CountMismatch(0);
         }
 
-        var uri = new Uri(envUri, $"/api/data/v9.2/systemusers?$filter=applicationid eq {applicationId}&$select=systemuserid");
+        // $select includes azureactivedirectoryobjectid (task 205d / punch row
+        // A41) so callers (DataverseAppUserPairT2Probe) can byte-compare the
+        // observed value against the expected UAMI principalId per the
+        // auth-v4 §10.4 silent-fail trap — a count=1 row is NOT sufficient
+        // proof the row is correct.
+        var uri = new Uri(envUri, $"/api/data/v9.2/systemusers?$filter=applicationid eq {applicationId}&$select=systemuserid,azureactivedirectoryobjectid");
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -106,7 +116,11 @@ public sealed class DataverseWebApiAppUserVerifier : IDataverseAppUserVerifier
         if (count == 1)
         {
             var systemUserId = values[0].GetProperty("systemuserid").GetString() ?? string.Empty;
-            return new DataverseAppUserVerificationResult.Verified(systemUserId);
+            var azureActiveDirectoryObjectId = values[0].TryGetProperty("azureactivedirectoryobjectid", out var aadObjIdProp)
+                && aadObjIdProp.ValueKind == JsonValueKind.String
+                ? aadObjIdProp.GetString()
+                : null;
+            return new DataverseAppUserVerificationResult.Verified(systemUserId, azureActiveDirectoryObjectId);
         }
 
         return new DataverseAppUserVerificationResult.CountMismatch(count);
