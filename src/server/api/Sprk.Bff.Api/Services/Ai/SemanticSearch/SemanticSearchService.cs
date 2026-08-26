@@ -710,7 +710,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         var pageResults = sortedAll
             .Skip(offset)
             .Take(limit)
-            .Select(d => MapDocumentEntityToSearchResult(d, request.EntityType!))
+            .Select(d => MapDocumentEntityToSearchResult(d, request.EntityType!, parentGuid))
             .ToList();
 
         queryStopwatch.Stop();
@@ -750,15 +750,34 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// Maps a Dataverse <see cref="DocumentEntity"/> to a <see cref="SearchResult"/>
     /// shaped like an AI Search response, so the client can treat both paths uniformly.
     /// </summary>
-    private static SearchResult MapDocumentEntityToSearchResult(DocumentEntity doc, string parentEntityType)
+    /// <param name="parentId">
+    /// The parent record this query was keyed by. Passed in rather than re-derived from the document's
+    /// own lookup fields.
+    /// </param>
+    /// <remarks>
+    /// <b>Why <paramref name="parentId"/> is a parameter (unified-access-control-r2 task 070).</b>
+    /// This method used to recover the parent from a switch over <paramref name="parentEntityType"/>
+    /// covering only <c>matter</c> / <c>project</c> / <c>invoice</c>, falling to <c>(null, null)</c>
+    /// otherwise — while the caller's dispatch also accepts <c>workassignment</c> and every
+    /// <c>sprk_</c>-prefixed logical name ("both occur in the wild"). Those rows came back with a null
+    /// parent id. That was invisible until task 070 began authorizing results by parent, at which point
+    /// a null parent correctly fails closed and the whole result set silently vanished.
+    ///
+    /// <para>Re-deriving was never necessary: <c>SearchAssociatedOnlyAsync</c> queries BY the parent FK,
+    /// so every row it returns is a child of that parent by construction. Passing the id it already has
+    /// makes the invariant true for all entity types instead of for three of them.</para>
+    /// </remarks>
+    private static SearchResult MapDocumentEntityToSearchResult(
+        DocumentEntity doc, string parentEntityType, Guid parentId)
     {
-        // Parent lookup — the entity type dictates which property holds the FK.
-        var (parentId, parentName) = parentEntityType.ToLowerInvariant() switch
+        // Only the display NAME still depends on which lookup holds it; the id is now authoritative
+        // from the query itself. An unmapped type loses the friendly name, not the row.
+        var parentName = parentEntityType.ToLowerInvariant() switch
         {
-            "matter" => (doc.MatterId, doc.MatterName),
-            "project" => (doc.ProjectId, doc.ProjectName),
-            "invoice" => (doc.InvoiceId, doc.InvoiceName),
-            _ => (null, null)
+            "matter" or "sprk_matter" => doc.MatterName,
+            "project" or "sprk_project" => doc.ProjectName,
+            "invoice" or "sprk_invoice" => doc.InvoiceName,
+            _ => null
         };
 
         var fileExt = doc.FileName is not null
@@ -777,7 +796,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // any "relevance" UI when ExecutedMode == "associatedOnly".
             CombinedScore = 0.0,
             ParentEntityType = parentEntityType,
-            ParentEntityId = parentId,
+            ParentEntityId = parentId.ToString(),
             ParentEntityName = parentName,
             CreatedAt = doc.CreatedOn,
             UpdatedAt = doc.ModifiedOn,

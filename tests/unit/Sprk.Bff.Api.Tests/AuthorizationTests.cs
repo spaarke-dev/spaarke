@@ -123,6 +123,29 @@ public class AuthorizationTests
 
             return Task.FromResult(snapshot);
         }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070). Keeps the SAME "userId:resourceId" key shape — keyed on <paramref name="recordId"/>'s
+        /// string form — so existing <see cref="SetUserAccess"/> arrange calls apply unchanged;
+        /// entitySetName is not folded into the key because no test here needs to distinguish entity types.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+        {
+            var key = $"{userId}:{recordId}";
+            var rights = _userAccess.TryGetValue(key, out var value) ? value : AccessRights.None;
+
+            var snapshot = new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = rights,
+                TeamMemberships = Array.Empty<string>(),
+                Roles = Array.Empty<string>()
+            };
+
+            return Task.FromResult(snapshot);
+        }
     }
 
     private class TestLogger<T> : ILogger<T>

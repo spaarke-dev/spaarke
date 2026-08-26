@@ -3,7 +3,7 @@
   <metadata>
     <title>Retire the drive-keyed OBO file routes (delete preferred, gate as fallback) — under broker-only they are a bypass by construction</title>
     <phase>0c Secure Documents — Wave 1</phase>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes or gates public API surface including a DELETE route that currently carries no per-document authorization. Breaking a live caller is a real risk that must be checked, not assumed.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -102,5 +102,53 @@ KNOWN CALLERS TO CHECK BEFORE DELETING: `Api/DocumentVersionEndpoints.cs` (versi
     <criterion>`GrantMembershipAsync` still has zero callers.</criterion>
   </acceptance-criteria>
 
-  <notes>Deleting is better than gating here. A gated drive-keyed route still invites the question "why not just grant the user container access?" — which is the decision broker-only exists to foreclose.</notes>
+  <notes>Deleting is better than gating here. A gated drive-keyed route still invites the question "why not just grant the user container access?" — which is the decision broker-only exists to foreclose.
+
+── EXECUTED 2026-08-26. Full report: `notes/task-071-obo-route-retirement.md` ──
+
+GROUND-TRUTH CORRECTION: `Api/OBOEndpoints.cs` maps SEVEN routes, not the five this POML's background
+table enumerates. The two omitted are the chunked-upload pair (`POST .../upload-session`,
+`PUT /api/obo/upload-session/chunk`).
+
+DELETED (4) — zero production callers, gated document-id-keyed equivalents already ship:
+  GET    /api/obo/containers/{id}/children               (also error-OPEN: Graph 404 -> 200 empty list)
+  PATCH  /api/obo/drives/{driveId}/items/{itemId}
+  GET    /api/obo/drives/{driveId}/items/{itemId}/content
+  DELETE /api/obo/drives/{driveId}/items/{itemId}
+
+ESCALATION TRIGGER FIRED (3) — kept unchanged, NOT gated:
+  PUT  /api/obo/containers/{id}/files/{*path}      -- 11 LIVE call sites
+  POST /api/obo/drives/{driveId}/upload-session
+  PUT  /api/obo/upload-session/chunk
+These CREATE content. The wizard ordering is `uploadFilesToSpe` THEN `createDocumentRecords`, so no
+`sprk_document` row exists at authorization time and their authorization object is the owning
+record/container, not a document. Adding DocumentAuthorizationFilter would resolve `{id}` to a
+container id, return None, and deny 100% of uploads across 7 Create*Wizard surfaces + EmailComposer +
+DocumentUploadWizard. This is exactly the modelling gap the escalation trigger names. RECOMMENDED
+SPLIT: tasks 075 + 076 (record-aware container resolver — the build plan's "7 client sites" ARE these
+call sites), landing with task 073 which gates the app-only twin, so both container-upload routes end
+up behind ONE decision.
+
+CORRECTION TO THIS POML's PREMISE: Compose does NOT call these routes. `ComposeService.cs:1483` calls
+the in-process facade `_spe.UploadSmallAsUserAsync(...)`, not the HTTP route — as do
+ProjectPreFillService, MatterPreFillService, ChatWordExportEndpoints, ChatDocumentEndpoints. Compose is
+unaffected by every deletion. `DocumentVersionEndpoints.cs` is likewise a sibling route file, not a
+caller.
+
+FLAGGED, OUT OF WRITE SCOPE: `Api/DocumentVersionEndpoints.cs` maps TWO MORE ungated drive-keyed OBO
+routes (`:44`, `:84`) in the same bypass class, with a live caller
+(`src/solutions/AllDocuments/src/versionHistory.ts:81`). Unlike the upload trio these read EXISTING
+content, so a per-document gate IS well-defined — they should be gated, not deleted. Needs a new owner.
+
+CROSS-TASK BREAKAGE: task 074's `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:898` asserts
+`ScanFile("Api/OBOEndpoints.cs").Count == 7`; it is now 3, so that one assertion fails (9/10 pass).
+`tests/Spaarke.ArchTests/**` is outside this task's write scope and was NOT edited. Four required 074
+edits are enumerated in notes §6a.
+
+NOT DONE, deliberately: dead client methods in `@spaarke/sdap-client`
+(`DownloadOperation.ts`, `DeleteOperation.ts`, `SdapApiClient.downloadFile/deleteFile/getFileMetadata`)
+and `@spaarke/ui-components` (`document-upload/SdapApiClient.downloadFile/deleteFile/replaceFile`,
+exported via `pcf-safe.ts`) still target the deleted routes. Grep proves ZERO production invocations,
+so nothing breaks at runtime; removing them is a breaking change to two shared-library public barrels
+consumed by ~16 Vite solutions + PCFs that could not be validated inside this task. Follow-up.</notes>
 </task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="unified-access-control-r2">
+  <metadata>
+    <title>Gate the two drive-keyed OBO version routes in DocumentVersionEndpoints — unlike task 071's four, these have a live caller and must be gated, not deleted</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Ungated byte-read of prior document versions on the BFF authorization surface, with a shipped client depending on it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires resolving the owning document from a (driveId, itemId) pair — the same resolution problem task 071 escalated — without breaking the live version-history UI.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small surface, but the owning-document resolution is the crux and it must not break a shipped caller.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to DocumentVersionEndpoints.cs and its one client caller.</parallel-reason>
+    <deps>071</deps>
+    <tags>bff-api, api, auth, security</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>Found 2026-08-25 by task 071's caller inventory. `Api/DocumentVersionEndpoints.cs:44` and `:84` are two MORE drive-keyed OBO routes with the finding-#2 shape, in a file the original Wave 1 sweep did not cover. Independently waived by task 074's rule.</origin>
+  </metadata>
+
+  <prompt>Two routes read document version metadata and PRIOR-VERSION BYTES keyed by (driveId, itemId), carrying only rate limiting and `RequireAuthorization()`. Task 071 deleted its four equivalents because they had zero callers; these have a live one, so they must be gated instead.</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>Neither version route serves metadata or bytes without a per-document authorization decision, and the version-history UI still works.</goal>
+
+  <context>
+    <background>THE ROUTES — `src/server/api/Sprk.Bff.Api/Api/DocumentVersionEndpoints.cs`:
+
+| Line | Route | Effect |
+|---|---|---|
+| ~44 | `GET /api/obo/drives/{driveId}/items/{itemId}/versions` | version history for an arbitrary item |
+| ~84 | `GET /api/obo/drives/{driveId}/items/{itemId}/versions/{versionId}/content` | **prior-version BYTES** for an arbitrary item |
+
+WHY THESE ARE DIFFERENT FROM TASK 071's FOUR. Task 071 deleted `children`, `PATCH`, `content` and `DELETE` from `OBOEndpoints.cs` because each had **zero callers** and a gated document-id-keyed equivalent already shipped. These two have a **live caller** — `versionHistory.ts:81` — and no id-keyed equivalent exists. Deleting them breaks version history; that is why 071 handed them on rather than absorbing them.
+
+WHY THEY ALSO DIFFER FROM 071's ESCALATED UPLOAD TRIO. The upload routes CREATE content, so no `sprk_document` row exists at authorization time — which is what made them unfixable without tasks 075/076. These routes READ **existing** content, so the owning document row DOES exist and the per-document decision is well-defined. There is no dependency on Wave 2.
+
+PRIOR-VERSION BYTES ARE EXACTLY AS DISCLOSING AS CURRENT BYTES. Easy to under-rate because "it's only history" — but a prior version of a secure matter's document is the same confidential content, and often contains material later redacted from the current version.
+
+THE RESOLUTION PROBLEM. `DocumentAuthorizationFilter` cannot be simply attached: its `ExtractResourceId` falls back to `driveId`/`itemId`, and a driveId is not an `sprk_documents` GUID, so `RetrievePrincipalAccess` returns None and the request denies. That is fail-closed but it is not authorization — it denies everything, including legitimate callers. The gate must first resolve the owning `sprk_document` from `(driveId, itemId)`, then apply the standard per-document decision.
+
+Note task 070 added `AuthorizationService.GetCallerRecordAccessAsync` (entity-agnostic, OBO, fail-closed) — reuse the existing document path here rather than that one, since the subject IS a document.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentVersionEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">If the owning document cannot be resolved from the drive/item pair, DENY. Never fall back to container permission.</constraint>
+    <constraint source="project">GATE, do not delete — a live caller exists. Prove it still works.</constraint>
+    <constraint source="project">Cover BOTH routes. The version-content route is the one that leaks bytes and is the easier of the two to overlook.</constraint>
+    <constraint source="build-plan">Do NOT grant SPE container permissions to make this work. `GrantMembershipAsync` stays at zero callers.</constraint>
+    <constraint source="project">Delete this task's two waivers from `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` when done — do not merely re-word them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm both routes still carry no per-document filter, and re-verify the `versionHistory.ts:81` caller.</step>
+    <step order="1">Implement owning-document resolution from `(driveId, itemId)`, then the standard per-document decision. Fail closed on unresolvable pairs.</step>
+    <step order="2">Consider whether a document-id-keyed version route is the better long-term shape and, if so, migrate the client and delete the drive-keyed pair.</step>
+    <step order="3">Tests: a caller without Read on the owning document is denied on BOTH routes, including version content. Verify version history still works for an authorized caller.</step>
+    <step order="4">Build, tests, publish size, CVE. Delete the two waivers in task 074's rule and confirm it stays green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a version item legitimately has no owning `sprk_document` row, STOP — that is the same modelling gap task 071 escalated, and inventing an authorization answer for unmodelled content is how bypasses get built.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`DocumentAuthorizationFilter` + `AuthorizationService` already implement the per-document decision; `FileAccessEndpoints` shows the gated id-keyed shape.</existing>
+    <extension>Adds the missing resolution + check to two existing routes. No new component.</extension>
+    <cost-of-doing-nothing>Prior-version bytes of any document — including a secure matter's — are readable by any caller holding a container ACL, with no per-document check. Task 071 closed the four routes beside these and these two would silently remain.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentVersionEndpoints.cs</output>
+    <output type="test">tests/ — per-document denial on both routes, incl. version content</output>
+    <output type="doc">notes — resolution approach; confirmation the live caller still works</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller without Read on the owning document is denied on BOTH version routes — proven by tests that fail without the change.</criterion>
+    <criterion>Unresolvable (driveId, itemId) pairs DENY; no fallback to container permission.</criterion>
+    <criterion>Version history still works for an authorized caller (`versionHistory.ts` verified).</criterion>
+    <criterion>Task 074's two waivers for these routes are DELETED and its suite stays green.</criterion>
+    <criterion>`GrantMembershipAsync` still has zero callers.</criterion>
+  </acceptance-criteria>
+
+  <notes>These were missed by every prior enumeration of the document surface because they live in a version-specific file rather than in `OBOEndpoints.cs` or `FileAccessEndpoints.cs`. Task 071 found them by doing a caller inventory rather than a route inventory — worth remembering as a technique.</notes>
+</task>

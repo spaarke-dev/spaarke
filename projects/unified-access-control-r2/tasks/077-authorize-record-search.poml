@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="unified-access-control-r2">
+  <metadata>
+    <title>Authorize POST /api/ai/search/records — the twin of the /api/ai/search defect, on the same route group, still allow-by-default</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A live tenant-wide record disclosure on the BFF authorization surface. Same class as task 070, different data plane.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The authorization subject is a set of arbitrary record types, not one parent — deciding what "may this caller see this record in search results" means across those types is the work, and getting it wrong creates the third access policy this project exists to remove.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield, and the entity-type generality is genuinely harder than task 070's single-parent case.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the same `/api/ai/search` route group and the shared access-evaluation surface as task 070.</parallel-reason>
+    <deps>070</deps>
+    <tags>bff-api, api, auth, ai, security</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Found 2026-08-25 by task 074's route-authorization ArchTest on its FIRST RUN, after task 070 was already in flight. Neither the workflow review, task 022's sweep, nor the Fable security review found it — it is the seventh miss on a surface that has been enumerated by hand four times.</origin>
+  </metadata>
+
+  <prompt>`POST /api/ai/search/records` carries an authorization filter that checks the tenant claim, writes an audit log, and calls `next()`. It authorizes nothing. It is the same defect as task 070's, on the same route group, and it was invisible to the ArchTest's first rule precisely BECAUSE a filter is attached.</prompt>
+
+  <role>SPAARKE BFF security engineer. You are closing the twin of a defect that was just closed next door — reuse that answer rather than inventing a parallel one.</role>
+
+  <goal>No caller receives a record in search results that they could not read directly. The decision reuses task 070's seam. `RecordSearchAuthorizationFilter` either authorizes or stops existing.</goal>
+
+  <context>
+    <background>WHAT IS WRONG, verified in code 2026-08-25:
+
+`Api/Filters/RecordSearchAuthorizationFilter.cs` — `InvokeAsync` does exactly three things: reads the `tid` claim (401 if absent), extracts the request, writes `LogInformation("Record search authorization granted: ...")`, and returns `await next(context)`. There is no authorization decision anywhere in the file. Its only constructor dependency is `ILogger`. The class remarks assert that "tenant isolation is now enforced at the search index level" and that the filter "remains as the authentication + audit gate" — which is an accurate description of what it does, and a description of a filter that is not an authorization filter.
+
+Registered at `Api/Ai/RecordSearchEndpoints.cs:36` via `.AddRecordSearchAuthorizationFilter()` on `app.MapGroup("/api/ai/search")` — the SAME route prefix task 070's document search uses (a separate `MapGroup` instance, so the filters do not cross-apply).
+
+WHY IT MATTERS, and why it may be WORSE than task 070's finding. This route returns RECORDS — `RecordSearchRequest.RecordTypes` spans matters, projects and other core entities — filtered only by `tenantId`. So any authenticated caller can enumerate record names across the tenant. For a secure project, the NAME is often the sensitive part; a matter named for a counterparty or a transaction discloses the engagement's existence to someone who has no access to it. Task 070's finding leaked document metadata; this one leaks the existence and naming of the records themselves.
+
+WHY THE ARCHTEST ALMOST MISSED IT. Task 074's Rule A asks "does this route carry an authorization filter?" — and this route does, so Rule A calls it GATED. Only Rule B (does the filter actually consult an authorization service?) catches it. This route is the reason Rule B must exist, and it should be cited as such in that test's rationale.
+
+THE HARD PART, and it is genuinely harder than task 070. Task 070 authorized ONE parent record named in the request. Here the caller asks across a SET of record types with no single parent. Options to weigh honestly:
+  (a) Constrain results to the caller's accessible-record set per type, then authorize surviving rows.
+  (b) Require a parent scope, as document search now does, and refuse unscoped record search.
+  (c) Authorize each returned row before it leaves, accepting the round-trip cost.
+Whichever you choose, it must be the SAME evaluation task 070 used, not a third one.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</file>
+      <file role="reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="build-plan">Reuse task 070's seam — `AuthorizationService.GetCallerRecordAccessAsync` plus its entity-set allow-list. Do NOT add a third access policy, and do NOT copy the allow-list into a second place.</constraint>
+    <constraint source="ADR-003">Fail closed. Unknown record type, unresolved caller, errored lookup: DENY.</constraint>
+    <constraint source="project">A tenant filter is not an authorization decision. Neither is an audit log. If the filter cannot make a decision, it should not be called an authorization filter — rename or delete it.</constraint>
+    <constraint source="performance">Record search is interactive. State the round-trip count; if per-row authorization is required, measure it before shipping.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm the filter still authorizes nothing at HEAD, and inventory what `RecordSearchService` returns and on whose authority.</step>
+    <step order="1">Decide the authorization model (a/b/c above) and write down why, including the round-trip cost.</step>
+    <step order="2">Implement using task 070's seam. If task 070's entity-set allow-list needs to grow, grow the single shared one.</step>
+    <step order="3">Tests that FAIL without the fix: a caller who cannot read a record does not see it in record-search results.</step>
+    <step order="4">Build, tests, publish size, CVE. Confirm task 074's Rule B now passes for this filter.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If authorizing record search per row makes the feature unusably slow, STOP and report the measurement. Option (b) — requiring a parent scope — is a product decision, not an implementation detail, and it is the owner's call.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 070 built the record-aware authorization seam (`GetCallerRecordAccessAsync` + the parent entity-set allow-list) for exactly this shape of question.</existing>
+    <extension>This applies that existing seam to a route that was built without one. No new component.</extension>
+    <cost-of-doing-nothing>Any authenticated caller can enumerate record names tenant-wide, including secure matters and projects, where the name itself is frequently the sensitive fact.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs (authorizing, or removed)</output>
+    <output type="test">tests/ — a caller who cannot read a record does not see it in results</output>
+    <output type="doc">notes — authorization model chosen, round-trip count</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller who cannot read a record does not receive it from `POST /api/ai/search/records` — proven by a test that fails without the change.</criterion>
+    <criterion>The decision comes from task 070's seam; exactly one entity-set allow-list exists in the codebase.</criterion>
+    <criterion>Unknown record types and error paths DENY.</criterion>
+    <criterion>Task 074's Rule B passes for this filter, and the route is not waived.</criterion>
+    <criterion>Round-trip count recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>This route is the strongest argument for task 074's Rule B: a filter WAS attached, the route looked gated, and four separate human enumerations of this surface missed it. When 074's rationale is written up, cite this route by name.</notes>
+</task>

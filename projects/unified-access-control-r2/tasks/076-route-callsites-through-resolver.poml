@@ -41,6 +41,27 @@ Canonical client resolver: `xrmProvider.getSpeContainerIdFromBusinessUnit`.
 Server:
 - `IncomingCommunicationProcessor` — the global `ArchiveContainerId` used by email/communication ingest. **This is the one easiest to forget**: no client, no wizard, no UI. If it is missed, secure attachments land in the shared archive.
 
+⭐ **THE CREATE-PROJECT WIZARD DEFECT, traced end-to-end 2026-08-25 — read this before touching the wizard.** The ordering is already correct and does NOT need changing; the bug is a discarded return value, and it is roughly two lines.
+
+Verified sequence inside `CreateProjectWizard.tsx` `onFinish`:
+
+| # | Action | Line |
+|---|---|---|
+| 1 | Resolve BU cascade defaults | 542-544 |
+| 2 | `createProject(...)` — record created, `sprk_issecure` written | 561 |
+| 3 | Work assignment / Event / Association | 575, 626, 665 |
+| 4 | **Secure provisioning** (`provisionSecureProject`) | 688-698 |
+| 5 | **File upload to SPE** | 708-712 |
+| 6 | `createDocumentRecords` + RAG indexing | 721, 739 |
+
+Two facts that together make this cheap to fix:
+- **The "Add file(s)" step transfers ZERO bytes.** `FileUploadZone` validates and stages `File` objects in React state (`ADD_FILES` reducer); there is no fetch/XHR in it. The first byte moves on **Finish**.
+- **Provisioning already runs BEFORE the upload** — step 4 precedes step 5 above.
+
+So moving the Secure toggle earlier in the step order fixes nothing. **The actual defect**: `provisionSecureProject` RETURNS the new container id (`provisioningService.ts:46`), but `CreateProjectWizard.tsx:700-704` consumes only `success` and `errorMessage` — **the container id is discarded**, and `speContainerIdRef` is never refreshed. The upload at `:712` therefore uses `context.speContainerId`, resolved ONCE when the wizard opened (`CreateRecordWizard.tsx:221-227`) from `systemuser._businessunitid_value` → `businessunit.sprk_containerid`. Net effect: **a secure project's files are PUT into the shared BU container while the project row points at its own isolated one**, and `createDocumentRecords` (`:726`) stamps the BU container id onto the `sprk_document` rows.
+
+The fix is to consume `provisionResult.data.speContainerId` at `:712` and `:726`. Two further notes: the wizard's own inline BU resolver at `src/solutions/CreateProjectWizard/src/main.tsx:88-98` is an **8th client call site** not in the list below; and a provisioning failure is non-fatal by design (`:700-704` only adds a success-screen warning), while an absent `authFetch`/`bffBaseUrl` skips provisioning with **no warning at all** — yet the success screen still claims (`:816-817`) the container was provisioned.
+
 THE WIZARD WRITE-BACK, two related problems:
 1. `EntityCreationService.applyUserBuDefaults` (`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts`) applies `sprk_containerid` to secure projects. It must not.
 2. `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form. This defeats a correct resolver *after the fact* — a stamped project silently reverts to shared storage.

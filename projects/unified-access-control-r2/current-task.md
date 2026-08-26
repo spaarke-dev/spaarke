@@ -10,11 +10,50 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **046 COMPLETE + committed** (`959e9dfee`, `75b588ba8`). **Phase 0c created: tasks 070–076** |
-| **Step** | Between tasks. Nothing in flight |
-| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR. BFF **deployed to dev 2026-08-25** (45.05 MB, hash-verified, healthy) |
-| **Phase** | **Phase 0 — 14 of 20** (remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023–029) · **Phase 0c — 0 of 7 (070–076)** |
-| **Next Action** | **▶ START PHASE 0c.** Read [`SECURE-DOCUMENTS-BUILD-PLAN.md`](SECURE-DOCUMENTS-BUILD-PLAN.md) FIRST, then execute Wave 1 (**070–074**, parallel-capable) and Wave 2 (**075 → 076**) via `task-execute` |
+| **Task** | 🔄 **070 — server side COMPLETE**. ✅ **074 done**. In flight: **071**, PCF-rewiring, Step-9.5 review |
+| **Step** | 070 Step 5 of 5. Implementation + all tests + publish + CVE done. **Remaining: Step 9.5 verdict, the client half, then commit** |
+| **070 gates** | Unit **11,075 pass / 0 fail** · Integration **450 / 0** · ArchTests **79/79** · publish **45.06 MB compressed** vs 45.05 baseline (+0.01, ceiling 60) · CVE **clean** |
+| **NOT YET COMMITTED** | Everything below is working-tree only. Commit after Step 9.5 + the client half land |
+| **New findings** | ⚠️ **077** (`POST /api/ai/search/records`) and **078** (`GET /api/v1/containers/{id}/documents`) — both **exploitable at HEAD**, both found by 074's ArchTest on its FIRST run. POMLs written, in TASK-INDEX |
+| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR. BFF **deployed to dev 2026-08-25** (45.05 MB, hash-verified, healthy). Branch is ~20 commits behind master — rebase at commit time |
+| **Phase** | **Phase 0 — 14 of 20** (remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023–029) · **Phase 0c — 0 of 7** (070 🔄 071 🔄 074 🔄) |
+| **Next Action** | Finish 070: (a) additive record-access seam, (b) rewrite `SemanticSearchAuthorizationFilter`, (c) result-level parent check in `SemanticSearchService`, (d) drop `driveId`/`speFileId` + route PCF through a document-id-keyed path, (e) tests + build + publish size + CVE |
+
+### Task 070 — decisions made this session (do not re-derive)
+
+**1. `scope=all` is REFUSED, not reduced.** Simpler, safer, and no legitimate caller was found. `default:`
+(empty/unknown scope) DENIES. Both were `return new AuthorizationResult(true, null)` at HEAD.
+
+**2. The canonical authorization seam could NOT be used as-is.**
+`DataverseAccessDataSource.TryRetrievePrincipalAccessAsync:509` hard-codes the RPA target as
+`sprk_documents({resourceId})`, so `AuthorizationService` can only authorize `sprk_document`. It cannot
+answer "may this caller read this **matter**?", which is exactly what `scope=entity` needs.
+
+**3. Chosen fix: an ADDITIVE record-access method, not a threaded entity-type parameter.**
+Threading an entity type through `IAccessDataSource.GetUserAccessAsync` would touch ~10
+`AuthorizationContext` construction sites, both `IAccessDataSource` implementations, AND
+`CachedAccessDataSource`'s `(userId, resourceId)` cache key (which would otherwise let a document's
+snapshot answer for a record of another type). That is a shared-authorization-surface refactor and does
+not belong inside "gate one route". Instead: a new method alongside the existing one — existing call
+sites UNCHANGED — using the SAME authority (`RetrievePrincipalAccess`, as the caller, over OBO).
+This is the seam **072** and **Wave 3's parent-inheritance** will also need.
+
+**4. `AccessibleRecordSetService` was NOT used for the workforce plane, deliberately.** The POML named it
+as the extension point, but `ComposeForSystemUserAsync` resolves **ADR-034 membership**
+(`sprk_assigned*` participation) — NOT Dataverse's real answer. Gating the MDA Matter form on that
+would deny the document list to any user who can read the matter but is not an assigned participant,
+on the flagship form. It would be reverted, which reopens the hole. Substituting Dataverse's real
+answer for workforce is task **031**'s ADR-028 A2 amendment and has not landed. Contacts still route
+through the accessible-record-set path.
+
+**5. Parent-type allow-list, not string pluralization.** The entity-set name is resolved from an explicit
+allow-list; an unrecognised `entityType` DENIES rather than being guessed at.
+
+**6. Result-level authorization for the index path = parent-id equality check on each result.** Costs zero
+extra round trips (the value is already on the result) and defends against AI-Search index staleness —
+a document reparented in Dataverse but stale in the index. Satisfies the POML's "a filter expression is
+not an authorization decision" constraint without a per-result Dataverse call. Hot-path round-trip
+count: **1** (the parent check).
 
 ### ▶ START HERE — Phase 0c, Secure Documents
 

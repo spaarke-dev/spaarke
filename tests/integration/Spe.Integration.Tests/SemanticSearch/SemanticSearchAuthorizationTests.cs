@@ -34,6 +34,8 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     private const string TenantB = "tenant-B-456";
     private const string TestEntityType = "matter";
     private const string TestEntityId = "00000000-0000-0000-0000-000000000001";
+    private const string DocumentA = "00000000-0000-0000-0000-0000000000aa";
+    private const string DocumentB = "00000000-0000-0000-0000-0000000000bb";
 
     public SemanticSearchAuthorizationTests(SemanticSearchAuthorizationTestFixture fixture)
     {
@@ -44,20 +46,16 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     #region Tenant Isolation Tests
 
     [Fact]
-    public async Task Search_WithValidTenantToken_Returns_Ok()
+    public async Task Search_WithValidTenantTokenAndParentAccess_Returns_Ok()
     {
-        // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
-        var request = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = "entity",
-            EntityType = TestEntityType,
-            EntityId = TestEntityId
-        };
+        // Arrange — a tenant claim alone is no longer sufficient; the caller must hold Read on the
+        // parent. That is the whole point of task 070, so this test now grants it explicitly.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
 
         // Act
-        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -67,17 +65,12 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     public async Task Search_TenantIdFromToken_IsEnforced()
     {
         // Arrange - User from Tenant A makes request
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
-        var request = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = "entity",
-            EntityType = TestEntityType,
-            EntityId = TestEntityId
-        };
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
 
         // Act
-        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
 
         // Assert - Request succeeds, tenant isolation enforced at query time
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -110,62 +103,265 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
 
     #region Scope Authorization Tests
 
+    // unified-access-control-r2 task 070.
+    //
+    // The three tests this region replaced asserted that entity, documentIds AND `all` scopes were
+    // each "IsAllowed" and returned 200 for any authenticated caller. That was an accurate description
+    // of the code — every branch of the filter returned allow — which is precisely why they passed
+    // while the route disclosed every document in the tenant. They were the vulnerability, written
+    // down as an expectation. The tests below assert the caller's access decides the outcome.
+
     [Fact]
-    public async Task Search_EntityScope_IsAllowed()
+    public async Task Search_EntityScope_WhenCallerHasReadOnParent_ReturnsOk()
     {
-        // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Search_EntityScope_WhenCallerHasNoAccessToParent_Returns403()
+    {
+        // The core regression. A caller with no rights on the parent matter must not receive its
+        // documents — this is the disclosure proven end-to-end on 2026-08-25, where a non-admin denied
+        // Read on all 442 documents by Dataverse still listed, opened and downloaded a matter's files.
+        var callerId = Guid.NewGuid().ToString();
+        // Deliberately no grant.
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Search_EntityScope_WhenParentTypeIsNotAuthorizable_Returns403()
+    {
+        var callerId = Guid.NewGuid().ToString();
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
         var request = new SemanticSearchRequest
         {
             Query = "test query",
             Scope = "entity",
-            EntityType = TestEntityType,
+            EntityType = "systemuser",
             EntityId = TestEntityId
         };
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
-    public async Task Search_DocumentIdsScope_IsAllowed()
+    public async Task Search_DocumentIdsScope_WhenCallerCanReadNone_Returns403()
     {
-        // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        var callerId = Guid.NewGuid().ToString();
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
         var request = new SemanticSearchRequest
         {
             Query = "test query",
             Scope = "documentIds",
-            DocumentIds = new List<string> { "doc-1", "doc-2" }
+            DocumentIds = new List<string> { DocumentA, DocumentB }
         };
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
-    public async Task Search_ScopeAll_IsAllowed()
+    public async Task Search_DocumentIdsScope_WhenCallerCanReadSome_ReturnsOnlyReadableDocuments()
     {
-        // Arrange - scope=all is allowed in R3 for system-wide document search
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantDocument(callerId, DocumentA, AccessRights.Read);
+        // DocumentB deliberately not granted.
+        _fixture.Search.Results =
+        [
+            ResultFor(DocumentA),
+            ResultFor(DocumentB)
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
         var request = new SemanticSearchRequest
         {
             Query = "test query",
-            Scope = "all"
+            Scope = "documentIds",
+            DocumentIds = new List<string> { DocumentA, DocumentB }
         };
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - scope=all is now authorized (R3)
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+
+        content!.Results.Select(r => r.DocumentId).Should().BeEquivalentTo([DocumentA]);
+        content.Metadata.ReturnedResults.Should().Be(1);
+        // The count must not report the document the caller cannot read.
+        content.Metadata.TotalResults.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_Returns403()
+    {
+        // Refused outright rather than reduced to the caller's accessible set. At HEAD this branch
+        // carried the comment "R3: scope=all is now supported for system-wide document search" and
+        // returned allow, which handed any authenticated non-admin every document in the tenant.
+        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        var request = new SemanticSearchRequest { Query = "test query", Scope = "all" };
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-scope")]
+    public async Task Search_WhenScopeIsEmptyOrUnknown_IsRefusedAndNeverExecutesTheSearch(string? scope)
+    {
+        // The `default:` branch previously returned ALLOW with "let endpoint handle validation", so an
+        // absent or unrecognised scope was an unauthorized read whose only remaining gate was shape
+        // validation. It is now refused in the filter.
+        //
+        // The status is 400 (malformed request), not 403 — only three scopes exist and all three are
+        // handled explicitly, so reaching the default branch means the scope was not a scope. What
+        // matters for security is asserted separately below: the search never runs.
+        _fixture.Search.Results = [ResultFor(DocumentA)];
+        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        var request = new SemanticSearchRequest { Query = "test query", Scope = scope! };
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // The refusal must happen BEFORE the search executes — a 400 that still ran the query and
+        // discarded the rows would be a different bug wearing the same status code.
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(DocumentA);
+    }
+
+    [Fact]
+    public async Task Search_EntityScope_WhenResultBelongsToADifferentParent_DropsIt()
+    {
+        // Result-level authorization. The Azure AI Search index is a separate data plane with no ACL
+        // data and no freshness guarantee: if a document is reparented in Dataverse and the index still
+        // carries the old parent, a parent-scoped query returns a row outside the authorized scope. A
+        // filter expression is a query predicate, not an authorization decision.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        _fixture.Search.Results =
+        [
+            ResultFor(DocumentA, parentId: TestEntityId),
+            ResultFor(DocumentB, parentId: Guid.NewGuid().ToString())
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+
+        content!.Results.Select(r => r.DocumentId).Should().BeEquivalentTo([DocumentA]);
+    }
+
+    [Fact]
+    public async Task Search_WhenAuthorized_DoesNotReturnSpePointers()
+    {
+        // Broker-only: no client receives raw SPE pointers. File access goes through document-id-keyed
+        // BFF routes that carry the standard gate; returning driveId/speFileId invites clients to
+        // address SPE directly, which is how the ungated drive-keyed routes came to exist.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        _fixture.Search.Results =
+        [
+            ResultFor(DocumentA, parentId: TestEntityId, driveId: "drive-1", speFileId: "item-1")
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content!.Results.Should().ContainSingle();
+        content.Results[0].DriveId.Should().BeNull();
+        content.Results[0].SpeFileId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Count_EntityScope_WhenCallerHasNoAccessToParent_Returns403()
+    {
+        // The count endpoint carries the same filter and must reach the same decision — a count is a
+        // disclosure about content the caller cannot see.
+        var callerId = Guid.NewGuid().ToString();
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync("/api/ai/search/count", EntityScopeRequest(), _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Theory]
+    [InlineData("documentIds")]
+    [InlineData("documentids")]
+    [InlineData("DOCUMENTIDS")]
+    [InlineData("DocumentIds")]
+    public async Task Search_DocumentIdsScope_IsMatchedCaseInsensitively(string scope)
+    {
+        // Regression for a defect the allow-by-default `default:` branch was hiding. The filter
+        // lower-cased the incoming scope and switched over the SearchScope constants — but
+        // SearchScope.DocumentIds is the camel-cased literal "documentIds", so a lower-cased value
+        // could never match that label. Every scope=documentIds request fell into `default:`, which
+        // returned allow, so nothing looked wrong. With `default:` denying, a match failure would
+        // instead lock legitimate callers out. This pins the comparison as case-insensitive.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantDocument(callerId, DocumentA, AccessRights.Read);
+        _fixture.Search.Results = [ResultFor(DocumentA)];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = scope,
+            DocumentIds = new List<string> { DocumentA }
+        };
+
+        var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
+
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
+
+    private static SemanticSearchRequest EntityScopeRequest() => new()
+    {
+        Query = "test query",
+        Scope = "entity",
+        EntityType = TestEntityType,
+        EntityId = TestEntityId
+    };
+
+    private static SearchResult ResultFor(
+        string documentId,
+        string? parentId = null,
+        string? driveId = null,
+        string? speFileId = null) => new()
+        {
+            DocumentId = documentId,
+            Name = $"{documentId}.pdf",
+            CombinedScore = 0.5,
+            ParentEntityType = TestEntityType,
+            ParentEntityId = parentId ?? TestEntityId,
+            DriveId = driveId,
+            SpeFileId = speFileId
+        };
 
     #endregion
 
@@ -174,29 +370,18 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     [Fact]
     public async Task Search_DifferentTenants_AreIsolated()
     {
-        // Arrange
-        var clientTenantA = _fixture.CreateAuthenticatedClient(TenantA);
-        var clientTenantB = _fixture.CreateAuthenticatedClient(TenantB);
+        // Arrange — both callers hold Read on the parent, so the only variable left is the tenant.
+        var callerA = Guid.NewGuid().ToString();
+        var callerB = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerA, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        _fixture.Access.GrantRecord(callerB, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
 
-        var requestA = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = "entity",
-            EntityType = TestEntityType,
-            EntityId = TestEntityId
-        };
-
-        var requestB = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = "entity",
-            EntityType = TestEntityType,
-            EntityId = TestEntityId
-        };
+        var clientTenantA = _fixture.CreateAuthenticatedClient(TenantA, callerA);
+        var clientTenantB = _fixture.CreateAuthenticatedClient(TenantB, callerB);
 
         // Act
-        var responseA = await clientTenantA.PostAsJsonAsync("/api/ai/search", requestA, _jsonOptions);
-        var responseB = await clientTenantB.PostAsJsonAsync("/api/ai/search", requestB, _jsonOptions);
+        var responseA = await clientTenantA.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
+        var responseB = await clientTenantB.PostAsJsonAsync("/api/ai/search", EntityScopeRequest(), _jsonOptions);
 
         // Assert - Both succeed but are isolated by tenant
         responseA.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -281,19 +466,15 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     #region Count Endpoint Authorization Tests
 
     [Fact]
-    public async Task Count_WithValidAuth_Returns_Ok()
+    public async Task Count_WithValidAuthAndParentAccess_Returns_Ok()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
-        var request = new SemanticSearchRequest
-        {
-            Scope = "entity",
-            EntityType = TestEntityType,
-            EntityId = TestEntityId
-        };
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse(TestEntityId), AccessRights.Read);
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
 
         // Act
-        var response = await client.PostAsJsonAsync("/api/ai/search/count", request, _jsonOptions);
+        var response = await client.PostAsJsonAsync("/api/ai/search/count", EntityScopeRequest(), _jsonOptions);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -320,12 +501,14 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
 
     #endregion
 
-    #region Audit Logging Tests (Verification via Response)
+    #region Malformed-input Tests
 
     [Fact]
-    public async Task Search_EntityScope_AuthorizationGranted()
+    public async Task Search_EntityScope_WhenEntityIdIsNotAGuid_Returns400()
     {
-        // Arrange - Valid entity scope request
+        // Was `Search_EntityScope_AuthorizationGranted`, which passed `EntityId = "test-entity-id"` and
+        // asserted 200 — a non-GUID entity id could not have identified any record, so the 200 it
+        // asserted was evidence that nothing was being resolved or checked.
         var client = _fixture.CreateAuthenticatedClient(TenantA);
         var request = new SemanticSearchRequest
         {
@@ -335,30 +518,26 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
             EntityId = "test-entity-id"
         };
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - Authorization was granted (200 OK)
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
-    public async Task Search_DocumentIdsScope_AuthorizationGranted()
+    public async Task Search_EntityScope_WhenEntityIdIsEmptyGuid_Returns400()
     {
-        // Arrange - Valid documentIds scope request
         var client = _fixture.CreateAuthenticatedClient(TenantA);
         var request = new SemanticSearchRequest
         {
             Query = "test query",
-            Scope = "documentIds",
-            DocumentIds = new List<string> { "doc-1", "doc-2", "doc-3" }
+            Scope = "entity",
+            EntityType = "matter",
+            EntityId = Guid.Empty.ToString()
         };
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - Authorization was granted (200 OK)
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     #endregion
@@ -369,6 +548,16 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
 /// </summary>
 public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// The programmable access source. Tests grant rights explicitly; anything not granted is denied,
+    /// so a test that forgets to grant sees a denial rather than an accidental allow. That default is
+    /// the point — the bug this fixture now covers was an allow-by-default.
+    /// </summary>
+    public StubAccessDataSource Access { get; } = new();
+
+    /// <summary>The search stub, so tests can control the rows the authorization layer must filter.</summary>
+    public MockAuthTestSearchService Search { get; } = new();
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         TestHostConfiguration.ConfigureTestHost(builder);
@@ -401,7 +590,13 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
 
             // Replace the real semantic search service with mock
             services.RemoveAll<ISemanticSearchService>();
-            services.AddSingleton<ISemanticSearchService>(new MockAuthTestSearchService());
+            services.AddSingleton<ISemanticSearchService>(Search);
+
+            // Replace the access data source so tests can state, per caller and per record, exactly
+            // what Dataverse would answer. Mocked at the module boundary (ADR-038 permits this; the
+            // banned shape is transport-level mocking such as Mock<HttpMessageHandler>).
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Access);
         });
 
         builder.UseEnvironment("Testing");
@@ -507,10 +702,65 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
 }
 
 /// <summary>
-/// Mock search service for authorization tests.
+/// A programmable <see cref="IAccessDataSource"/>: tests state what Dataverse would answer for a given
+/// caller and record. Anything not granted is <see cref="AccessRights.None"/>.
 /// </summary>
-internal class MockAuthTestSearchService : ISemanticSearchService
+/// <remarks>
+/// Deny-by-default is deliberate. The defect this fixture exists to cover was an allow-by-default
+/// authorization filter, so a stub that allowed unstated cases would reproduce the bug inside the test
+/// harness and every negative test would pass for the wrong reason.
+/// </remarks>
+public sealed class StubAccessDataSource : IAccessDataSource
 {
+    private readonly Dictionary<string, AccessRights> _recordRights = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AccessRights> _documentRights = new(StringComparer.OrdinalIgnoreCase);
+
+    public void GrantRecord(string userId, string entitySetName, Guid recordId, AccessRights rights) =>
+        _recordRights[$"{userId}|{entitySetName}|{recordId}"] = rights;
+
+    public void GrantDocument(string userId, string documentId, AccessRights rights) =>
+        _documentRights[$"{userId}|{documentId}"] = rights;
+
+    public Task<AccessSnapshot> GetUserAccessAsync(
+        string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
+    {
+        var rights = _documentRights.TryGetValue($"{userId}|{resourceId}", out var r)
+            ? r
+            : AccessRights.None;
+
+        return Task.FromResult(new AccessSnapshot
+        {
+            UserId = userId,
+            ResourceId = resourceId,
+            AccessRights = rights
+        });
+    }
+
+    public Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId, string entitySetName, Guid recordId, string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        var rights = _recordRights.TryGetValue($"{userId}|{entitySetName}|{recordId}", out var r)
+            ? r
+            : AccessRights.None;
+
+        return Task.FromResult(new AccessSnapshot
+        {
+            UserId = userId,
+            ResourceId = recordId.ToString(),
+            AccessRights = rights
+        });
+    }
+}
+
+/// <summary>
+/// Mock search service for authorization tests. <see cref="Results"/> lets a test supply the rows the
+/// authorization layer is then expected to filter, so result-level enforcement is observable.
+/// </summary>
+public class MockAuthTestSearchService : ISemanticSearchService
+{
+    public IReadOnlyList<SearchResult> Results { get; set; } = [];
+
     public Task<SemanticSearchResponse> SearchAsync(
         SemanticSearchRequest request,
         string tenantId,
@@ -518,11 +768,11 @@ internal class MockAuthTestSearchService : ISemanticSearchService
     {
         return Task.FromResult(new SemanticSearchResponse
         {
-            Results = new List<SearchResult>(),
+            Results = Results,
             Metadata = new SearchMetadata
             {
-                TotalResults = 0,
-                ReturnedResults = 0,
+                TotalResults = Results.Count,
+                ReturnedResults = Results.Count,
                 SearchDurationMs = 5,
                 ExecutedMode = request.Options?.HybridMode ?? "rrf",
                 AppliedFilters = new AppliedFilters

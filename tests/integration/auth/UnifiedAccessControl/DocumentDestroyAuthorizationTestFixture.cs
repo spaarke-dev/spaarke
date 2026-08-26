@@ -246,6 +246,33 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 AccessRights = DataverseAccessRightsMapper.FromAccessRightsString(rights)
             });
         }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070): the same "rights=" bearer-token convention via
+        /// <see cref="DataverseAccessRightsMapper"/>, and the same <see cref="ThrowingDocumentId"/>
+        /// sentinel so the fail-closed catch (ADR-003) is reachable from a record-scoped check too.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+        {
+            if (string.Equals(recordId.ToString(), ThrowingDocumentId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Simulated access-check failure for the fail-closed test.");
+            }
+
+            var rights = userAccessToken?.StartsWith("rights=", StringComparison.Ordinal) == true
+                ? userAccessToken["rights=".Length..]
+                : null;
+
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = DataverseAccessRightsMapper.FromAccessRightsString(rights)
+            });
+        }
     }
 
     private sealed class RecordingCheckoutService : DocumentCheckoutService
