@@ -10,10 +10,34 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **059 code-complete, awaiting human sign-off** (security-sensitive, CLAUDE.md §6). **058** dispatched to an agent in worktree `C:\code_files\spaarke-wt-058` (branch `work/compose-r8-058`) — **unmerged**. |
-| **Status** | Builds clean · BFF **11,344 passed / 0 failed / 97 skipped** · ArchTests **62/62** · integration **96 P / 6 S**. No client code changed by 059, so the jest suites were not re-run. |
-| **Progress** | **44 of 56 complete**, 5 open, 1 blocked |
-| **Next Action** | **Sign off 059** (§8 of `notes/059-tenant-header-decisions.md` — two questions), then collect **058** from its worktree. Then Track D (**070–073**), then **090** wrap-up. |
+| **Task** | **058 merged and verified.** **059 code-complete, awaiting human sign-off** (security-sensitive, CLAUDE.md §6). |
+| **Status** | Builds clean · BFF **11,391 passed / 0 failed / 97 skipped** · ArchTests **62/62** · integration **96 P / 6 S**. No client code changed by either task, so the jest suites were not re-run. |
+| **Progress** | **45 of 56 complete**, 4 open, 1 blocked |
+| **Next Action** | **Sign off 059** (§8 of `notes/059-tenant-header-decisions.md` — two questions). Then Track D (**070–073**), then **090** wrap-up. |
+
+### 058 — nested/conditional merge fields now carry (merged 2026-08-26)
+
+Task 049 flattened these for a real structural reason, and that reasoning **survives intact**: a nested
+field's recoverable instruction is a *concatenation* of both code phases, so re-emitting it authors a
+different field. What 049 established is that a nested field cannot be **reconstructed** — not that it
+cannot be **carried**. The third mechanism was never on the table: **carry the span's OOXML and never
+parse it.** The tree survives because nothing reads it. Headline test asserts the saved span
+**character-for-character** against the source — the one assertion a reconstruction cannot pass.
+
+**It surfaced a second defect, which is the more valuable half**: `ComposeBlockMerge.InheritRunProperties`
+donates the base paragraph's *dominant* run properties to every rendered run. In a conditional the
+dominant run is the outer `IF` result — **bold** — so all 17 carried runs came back bold, silently bolding
+both inner `MERGEFIELD` values. A fidelity loss introduced by the fix for a fidelity loss, and one that
+would have shipped looking correct. Rule now stated where it lives: *inheritance repairs a re-authored
+run; a carried run has nothing to repair.* Scoped to nested spans only.
+
+Residual list: the nested half leaves §2; only the **unterminated** field (`TOC`/`INDEX`, which spans
+paragraph marks) remains. [`notes/058-nested-field-carry.md`](notes/058-nested-field-carry.md).
+
+⚠️ **Owner nod wanted**: a user who deletes a conditional chip is indistinguishable from a client that
+never sent it, so it is **restored**. Same trade already taken for bookmarks, SDT shells and objects —
+this makes it the **third** construct behaving that way. Also: no browser/UAT run and not opened in Word;
+fidelity is asserted through the SDK, the schema validator and the relationship gate.
 
 ### 🔒 059 — what it actually turned out to be (read before signing off)
 
@@ -284,6 +308,14 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
   went stale and only main-session verification caught it.
 - **Don't `dotnet build` while a `dotnet test` run is live** — the test host holds the output assembly and
   the build reports a phantom error. Same family as the mid-edit hazard. Re-run after it finishes.
+- **The mid-run hazard includes FIXTURES, not just code.** Re-running a corpus generator
+  (`tests/fixtures/compose-corpus/generators/*.py`) rewrites its `.docx` **in place**. Doing that during a
+  live suite produced **2 corpus-theory failures at `< 1 ms`** that looked like real 058 regressions and were
+  purely self-inflicted; a clean re-run gave **11,391 / 0**, exactly the predicted count. The `< 1 ms`
+  duration is the tell — that is a file-read failure, not a logic failure.
+- **A regenerated corpus `.docx` is NOT a no-op diff.** `zipfile.ZipFile(path, 'w')` stamps the current
+  mtime into every entry, so the bytes differ on every run while the content is identical. `git status`
+  cannot tell that apart from a real content change — unzip and `diff -r` before committing one.
 - **Run the two client suites SEQUENTIALLY, not concurrently.** 052b saw 2 and 12 spurious failures
   running `Spaarke.Compose.Components` and `SpaarkeAi` at the same time; both green run one after the other.
 - **Verify every agent report.** This session that caught: a wrong publish number already committed to a

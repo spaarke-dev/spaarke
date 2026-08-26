@@ -333,3 +333,11 @@ files into `tests/fixtures/compose-corpus/`. Asserted by
 
 Generator: `generators/make-nested-merge-fields.py`. Picked up by every harness with no `.cs` edit
 (`ComposeCorpusFixtureLocator` globs `*.docx`) — the FR-G08 property above, exercised again.
+
+> ⚠️ **Re-running the generator produces identical CONTENT but different BYTES**, so `git status` will show
+> the `.docx` as modified. Verified 2026-08-26 by regenerating and diffing the unzipped parts: every part is
+> identical; only the ZIP entry timestamps differ, because `zipfile.ZipFile(path, 'w')` stamps the current
+> mtime into each entry. Task 058's report claimed byte-identical regeneration — that is wrong, and this
+> note is the correction. **Do not commit a regenerated fixture on the assumption it is a no-op diff**: unzip
+> and `diff -r` first, because a real content change looks exactly the same in `git status`. Making it
+> genuinely reproducible would mean writing each entry through a `ZipInfo` with a fixed `date_time`.
