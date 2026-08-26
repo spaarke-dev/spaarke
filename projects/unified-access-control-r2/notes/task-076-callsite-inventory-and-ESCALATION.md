@@ -125,8 +125,19 @@ what options A/B/C are choosing between. The connection matters because:
 - **Under (A)**, the resolver is asked at upload time about a record the caller names. If that record
   is a child, the same gap appears on the client paths too, not just on ingest. (A) does not close the
   gap, but it puts every path through **one** place where closing it later is a single change.
-- **Under (B)**, the create path takes its container from provisioning's return value and never asks
-  the resolver — so the two-hop case cannot be fixed there at all without adding a third mechanism.
+- **Under (B)**, the resolver is never consulted on the create path, so the two-hop case cannot be
+  fixed there without a third mechanism. **Two independent reasons, verified from source** — an
+  earlier draft of this note gave only the second and stated it as current behaviour, which was
+  wrong:
+  1. **Scope**: the container is decided **client-side at create, before anything server-side runs.**
+     `CreateProjectWizard/projectService.ts:283-285` sets `sprk_issecure`, then `:291-292` applies
+     `EntityCreationService.applyUserBuDefaults` **unconditionally** — there is no secure-project
+     suppression — so the row is stamped with the acting user's BU container either way. That is
+     write **W1** in §3b, and removing it is in 076's scope under any option; but (B) leaves the
+     *decision* client-side, so there is no point at which a resolver could be asked.
+  2. **Architecture**: for the *bytes*, (B)'s fix routes the container from **provisioning's return
+     value** — a different subsystem from the resolver. So even after (B) lands, nothing on the create
+     path consults the seam.
 - **Under (C)** (record-keyed upload), the server resolves from the record it is authorizing, so
   closing the gap is a server-side change in one place and the client is unaffected.
 
@@ -183,6 +194,24 @@ Consumers of `EntityCreationService.resolveUserBuDefaults` (the shared cascade):
 |---|---|---|---|
 | W1 | `Spaarke.UI.Components/src/services/EntityCreationService.ts:327` (`applyDefaultContainerId`, via `applyUserBuDefaults:374`) | stamps the acting user's BU container onto the new row — **including secure projects** | ✅ |
 | W2 | `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` | overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form — **defeats a correct resolver after the fact** | ✅ |
+
+**Verified current-state sequence for a SECURE project** (traced from source 2026-08-26, because the
+option-B argument above depends on getting this right and an earlier draft did not):
+
+| # | What | Where | Result |
+|---|---|---|---|
+| 1 | `sprk_issecure = true` set on the create payload | `projectService.ts:283-285` | flag written |
+| 2 | BU cascade applied **unconditionally** — no secure suppression | `projectService.ts:291-292` | row stamped with the **acting user's BU container** (W1) |
+| 3 | Provisioning creates the project's own container and **overwrites** the stamp | `ProvisionProjectEndpoint.cs:690-704` | row now correct |
+| 4 | Upload uses `context.speContainerId` from wizard-open; the provisioning return value is **discarded** | `CreateProjectWizard.tsx:700-704`, `:712` | **bytes land in the BU container** |
+
+So the row ends up *correct* and the bytes end up *wrong* — which is why "a container id is set on the
+project" is precisely the false positive task 047 must not accept.
+
+Corroborating evidence from the server side: provisioning's overwrite path already logs a **Warning**
+stating that the previous value *"was cascaded from the creating user's business unit and is shared
+storage, not this project's container"* (`ProvisionProjectEndpoint.cs:691-694`). The system has been
+telling us W1 is harmful in its own logs.
 
 ### 3c. Client — form-context container read (1 site, different shape)
 
