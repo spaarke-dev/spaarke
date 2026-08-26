@@ -12,10 +12,55 @@
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
 | **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
-| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` + `7db13de` (Step 9.5 critical fixes) | ✅ shipped · gates ran, **3 CRITICALs found and fixed** |
+| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` + `7db13de` | ⛔ **DO NOT MERGE — gate 2nd pass found 3 NEW CRITICALs in the fix** |
 | **076** route call sites | same worktree | `792c38a` (inventory + escalation only) | 🔔 **ESCALATED — not implemented. Needs owner decision.** |
 
-### ✅ CENSUS IS NOW DETERMINED: **110**
+## ⛔⛔ 075 IS BLOCKED FROM MERGE — read before touching that worktree
+
+The Step 9.5 gate agent ran a **second pass against source** rather than trusting `7db13de`'s
+"all fixed" claim. All 3 original CRITICALs and all 6 WARNINGs genuinely were fixed — **but the C-1/C-2
+restructure introduced three new CRITICALs**, two of them fail-open on the exact condition this wave
+exists to detect. Defects sent back to the implementing agent; a fix round may be in flight.
+
+| # | Severity | Defect (`Infrastructure/Dataverse/RecordContainerResolver.cs`) |
+|---|---|---|
+| **N-1** | CRITICAL | **Guaranteed outage at 25 secure records — and a test now asserts it.** `:238-247`: the secure probe lost its container-value filter, so it returns *any* 25 secure records having a container, not claimants of the requested one, and `secureRowCount` (`:258`) counts rows the trim-match later discards. At 25 secure records org-wide — **the intended steady state** — the bound fires on every call and `ResolveOwningRecordAsync` throws `container_ownership_indeterminate` for every container **including the correct owner's**, killing tasks 073 and 078. `Reverse_ProbeTruncation_Refuses` constructs exactly that shape and asserts the refusal, so it reads as intent. |
+| **N-2** | CRITICAL | **The C-1 bug survives, mirrored onto the co-mingling probe.** `:313` filters `ConditionOperator.Equal` on the trimmed input with `ColumnSet(false)` (`:307`), so it cannot self-check — verbatim the defect C-1 fixed. A non-secure record stamped `"  b!x  "` sharing a secure record's `b!x` is invisible, the refusal never fires, and the secure record is named sole owner of a co-mingled container. |
+| **N-3** | CRITICAL | **`NotEqual true` excludes NULL rows their own W-5 fix documents as legitimate.** `:314-315`: `NULL <> 1` is UNKNOWN under SQL three-valued logic, so a NULL-flagged non-secure claimant is invisible too. Second independent blind spot in the same detector. |
+| **N-4** | WARNING | `IsRecordNotFound` matches **localized exception message substrings** — a non-English org silently reverts to W-6 behaviour, and `"Attribute sprk_issecure was not found"` (a real FLS/schema error) is misreported as "record does not exist", misdiagnosing the one condition W-5 exists to surface. Use `FaultException<OrganizationServiceFault>` + `Detail.ErrorCode == -2147220969`. |
+
+**Knock-on to apply in the same commit as the N-2 fix:** it breaks the test double's query discriminator
+(`ColumnSet.Columns.Contains("sprk_containerid")`), which must be re-keyed or the suite mis-reports.
+
+**Also resolved:** trim-tolerance and query selectivity are *not* in tension — Dataverse `Like` supports
+bracket escaping (`_` → `[_]`), which answers the wildcard objection without an unfiltered scan. (The
+gate's earlier `LIKE '%…%'` suggestion was wrong — `_` is a T-SQL single-char wildcard and SPE drive ids
+routinely contain them — and it withdrew it. The implementing agent was right to reject it.)
+
+### 🔴 THE TRANSFERABLE LESSON — why my own verification could not have caught this
+
+> *"11,199 passed / ArchTests zero delta / publish unchanged is all true and all consistent with a
+> guaranteed 25-record outage, because the new test **asserts** the faulty behaviour. Perturbation
+> testing confirms a branch is load-bearing; it cannot tell you the branch encodes the **wrong rule**."*
+
+Every verification standard used across this batch — mine included — is a **consistency** check:
+tests green, failure-count parity, perturbation bites. **None of them can detect a test that encodes the
+wrong requirement.** That is a reviewer-reading-source job, and it is the second time in this batch that
+"the numbers are green" concealed a defect (the first was 075's own consumed ADR-010 ratchet). Treat a
+green suite plus a passing perturbation as evidence the code does what its tests say — never as evidence
+the tests say the right thing.
+
+## Merge in TWO TRANCHES
+
+**073 + 079 do not depend on 075** (073 deleted its routes rather than consuming the seam; 079 re-keyed
+to document ids). And the census is **110 either way**, because 075 adds no endpoint file. So:
+
+- **Tranche 1 — NOW:** merge 073 + 079, apply all §2 ArchTest edits with `ExpectedEndpointFileCount = 110`,
+  apply §3 / §3b / §4, run §6 verification, re-run both gates for 079 (which never had them).
+- **Tranche 2 — after N-1..N-4 are fixed and the gate's third pass is clean:** merge 075.
+  **Take that third pass.** Two of three passes on this file found criticals the previous pass created.
+
+### ✅ CENSUS IS **110** in either tranche
 
 `111 − 1 (073 deleted UploadEndpoints.cs) + 0 (079 re-keyed in place) + 0 (075 added no endpoint file) = 110`.
 All three deltas are in. Apply `ExpectedEndpointFileCount = 110` at `:337`.
