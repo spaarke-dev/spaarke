@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
 | **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
-| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` + `7db13de` | ⛔ **DO NOT MERGE — gate 2nd pass found 3 NEW CRITICALs in the fix** |
+| **075** record-aware container resolver | `worktree-agent-acee1a32adb1a9a0f` | `6153049` → `7db13de` → **`ff45847`** | ⏳ N-1..N-4 fixed; **3rd gate pass requested — 075 merges on its verdict** |
 | **076** route call sites | same worktree | `792c38a` (inventory + escalation only) | 🔔 **ESCALATED — not implemented. Needs owner decision.** |
 
 ## ⛔⛔ 075 IS BLOCKED FROM MERGE — read before touching that worktree
@@ -36,6 +36,34 @@ exists to detect. Defects sent back to the implementing agent; a fix round may b
 bracket escaping (`_` → `[_]`), which answers the wildcard objection without an unfiltered scan. (The
 gate's earlier `LIKE '%…%'` suggestion was wrong — `_` is a T-SQL single-char wildcard and SPE drive ids
 routinely contain them — and it withdrew it. The implementing agent was right to reject it.)
+
+### Round 3 (`ff45847`) — all four fixed, plus a structural fix and a worse finding
+
+N-1..N-4 accepted and fixed. The agent was explicit that it had been **wrong twice on N-1**: it used the
+`_`-is-a-LIKE-wildcard objection to justify dropping the container filter *entirely* — worse than what it
+was avoiding — and then wrote a test that enshrined that shape as intended. Bracket escaping
+(`_`→`[_]`, `%`→`[%]`, `[`→`[[]` first) plus a code-side exact-after-trim compare restores selectivity
+**and** trim tolerance.
+
+**Structural fix beyond the four:** pass 2 now runs only when a secure claimant exists. Probing a shared
+BU container — legitimately hundreds of non-secure claimants — would fill the page and turn the ordinary
+case into a refusal, **killing task 078 for every normal container**. Same cliff as N-1, different door.
+
+### 🔴🔴 THE FINDING THAT OUTRANKS THE DEFECTS — vacuous tests that look real
+
+**Two of the four new regression tests passed VACUOUSLY on first run.** The test double:
+- routed rows by `Flag == true`, so reverting the nested `Or` changed the query but **not the double**;
+- looked only for a `Like` condition and **fell back to match-everything when it found none**, so
+  reverting to `Equal` made the fallback match every row.
+
+Both green, fast, correctly named — **indistinguishable from real passes.** Caught only by perturbing
+each guard individually.
+
+> **The rule: a test double that encodes what a query is *for* cannot detect a change in what it *does*.**
+
+Note the double's failure mode was a **permissive default** — the same shape as task 070's closing
+`default:`, now recurring inside test infrastructure. Both helpers now evaluate the query's real
+conditions and **throw** on an unmodelled operator or a condition-less probe.
 
 ### 🔴 THE TRANSFERABLE LESSON — why my own verification could not have caught this
 
