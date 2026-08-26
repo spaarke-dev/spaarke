@@ -13,10 +13,37 @@
 | **Task** | ✅ **Phase 0c Wave 1 COMPLETE + committed + pushed** — `8ce4b7cac`. Tasks **070 ✅ 071 ✅ 074 ✅** |
 | **Step** | Between tasks. Nothing in flight. Working tree clean |
 | **Gates** | Unit **11,084 / 0** · Integration **385 / 0** · ArchTests **79/79** · publish **45.05 MB compressed, 0 delta**, ceiling 60 · CVE **clean** |
-| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR. Not opened — see the two owner decisions below; a PR carrying a known breaking change to shipped UI with the decision unresolved is not review-ready. A **draft** PR would be fine for CI visibility |
-| **Next Action** | **Owner decides the two questions below.** Then: **072** (`share-link`, serializes with the auth surface) or **Wave 2 (075 → 076)**. 073/077/078/079 are all filed and ready |
+| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR — not yet opened. Nothing blocks it now; just say the word (draft or ready) |
+| **Next Action** | **080** (restore cross-record search — the owner-confirmed capability, and the code page is broken until it lands) then **072**, or start **Wave 2 (075 → 076)** in parallel. 073/077/078/079 all filed and ready |
 
-### 🔔 TWO OWNER DECISIONS BLOCKING THE PR
+### ✅ ALL THREE OWNER DECISIONS RESOLVED 2026-08-26
+
+1. **Spaarke DOES offer cross-record search.** → `scope=all` must be *filtered*, not refused. Filed as
+   **task 080** (authorize the PAGE, not the corpus — no dependency on task 031). Task 070's refusal was
+   a correct stop-gap on a **false premise**; 080 is the real answer. **080 also fixes the pre-existing
+   missing-`entityId` defect**, without which the code page stays broken in every dropdown state.
+2. **079 has no shipping dependency** — schedule it whenever.
+3. **074's CI gate: FIXED.** ✅ See below. `ci-cd-unit-test-remediation-r1` is not active, so the
+   ownership block is gone.
+
+### ✅ 074 is now BLOCKING, not advisory
+
+Four facts added to `.github/workflows/ci-tier1-blocking.yml`'s `arch-tests` filter:
+`EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver` · `NoAuthorizationFilterIsDecorative` ·
+`ScannerAccountsForEveryRegistrationInTheGovernedFiles` · `TheEndpointFileCensusIsPinned`.
+Verified with the exact filter string: **4 selected, 4 pass, 440 ms** (budget <30 s).
+
+- **`sdap-ci.yml` deliberately NOT touched** — it has `continue-on-error` at both job and step level so
+  it can never fail a build, AND it is open in **PR #806**. The blocking tier was the right home anyway.
+- Rule B (`NoAuthorizationFilterIsDecorative`) is **not redundant** with the main gate: the route that
+  leaked the tenant's documents *had* a filter, so the main rule called it gated and four human sweeps
+  agreed. Only Rule B catches that shape. Do not "simplify" the set down to one rule.
+- `TheEndpointFileCensusIsPinned` is included on purpose despite being a drifting count — without it the
+  other three simply would not govern a newly-added endpoint file. The drift IS the forcing function.
+- Also discovered: the `auth-smoke` job **already blocks** on `SemanticSearchAuthorizationTests`
+  (`ci-tier1-blocking.yml:428`), so task 070's negative tests were gating CI from the moment they landed.
+
+### Prior owner-decision detail (kept for context)
 
 **1. `scope=all` refusal breaks shipped UI — and the underlying question is bigger.**
 The SemanticSearch **code page** is an enterprise search screen. Its dropdown (from `sprk_aisearchindex`
