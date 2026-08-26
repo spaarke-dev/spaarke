@@ -4,7 +4,7 @@
     <title>FR-B06 — Session deletion and GDPR erasure delete the durable bytes; tenant-isolation verification across every store path</title>
     <phase>6 Track B — Durable Session Files</phase>
     <gate>blocked-on-060</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Compliance-bearing: an erasure that misses the durable copy leaves user data after a deletion request.</rigor-reason>
     <model-tier>opus</model-tier>

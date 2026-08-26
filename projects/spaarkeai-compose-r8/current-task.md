@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none in progress** — **062 + 047b** landed (047b built in an isolated worktree, cherry-picked back) |
-| **Status** | Builds clean · BFF **11,321 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **102 / 1,298** · SpaarkeAi **121 / 1,121** |
-| **Progress** | **41 of 56 complete**, 8 open, 1 blocked |
-| **Next Action** | **063** — Track B erasure, the LAST gate before the durable store may be armed. 062 already built the primitives (`ListAsync` / `ListAllForRetentionAsync` / `DeleteAsync`), so **063 adds a CALLER, not store surface**: erase-a-session = list its prefix + delete each. Do NOT weaken `SessionFilesCleanupScopeTests` — now that a delete surface exists it is load-bearing, not belt-and-braces. |
+| **Task** | **none in progress** — **063 + 052b** landed. **Track B and Track C are both COMPLETE.** |
+| **Status** | Builds clean · BFF **11,335 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **103 / 1,317** · SpaarkeAi **121 / 1,121** |
+| **Progress** | **43 of 56 complete**, 6 open, 1 blocked |
+| **Next Action** | **059** (SECURITY — `X-Tenant-Id` spoofable fallback; human sign-off required). It has been re-prioritised ahead of arming the store — see the ARMING WARNING below. Then **058** (nested/conditional merge fields), then Track D (**070–073**), then **090** wrap-up. |
 
 ### Files modified this session
 All committed. Nothing uncommitted, nothing at risk.
@@ -69,27 +69,40 @@ invariant is exactly what made this diagnosable.
 | **Q5** Silent-loss hole? | **Fix in R8** → task **047b**. |
 | **052** `match_mode: 'all'` | **Retired in full.** Asymmetric failure modes; document-wide sweeps route to user-invoked find/replace. Reasoning: `notes/052-…-decisions.md` §2. |
 
-### ⚠️ Track B is blocked in dev — and NOT for the reason the task assumed
-Measured against the live dev subscription 2026-08-25: dev is **not deployed from any bicep stack**; there
-is **no storage account in `rg-spaarke-dev`**; `spaarke-bff-dev` has **NO system-assigned identity** (so
-`model2-full.bicep`'s role assignment targets an identity that does not exist); and its UAMI
-**`mi-bff-api-dev`** (`5967251e-171c-46fe-a6c2-ef843c90309d`) holds **no storage role of any kind**.
+### 🚨 ARMING WARNING — the code gate is closed, but do NOT set `BlobEndpoint` yet
 
-**Four operator steps** (in `notes/track-b-placement-justification.md`): provision/pick a storage account →
-create the container → grant `mi-bff-api-dev` *Storage Blob Data Contributor* → set
-`SessionFileStore:BlobEndpoint`. **Do NOT do the last one until 062 + 063 merge** — ADR-015 requires
-retention and erasure for a persisted store, and the empty endpoint is the only thing holding that line.
+Tasks 060–063 are done: durable store, lazy re-index, retention, erasure. ADR-015's precondition
+(retention AND erasure before a persisted store is armed) is **satisfied in code**.
+
+**Two pre-existing AUTHORIZATION defects sit on the same DELETE route. Both verified directly, 2026-08-26:**
+
+1. **No owner check.** `ChatSessionManager.DeleteSessionAsync(tenantId, sessionId, …)` is keyed on tenant
+   + session only. Within a tenant, knowing a `sessionId` is enough to erase **another user's** files.
+2. **The spoofable `X-Tenant-Id` fallback** (task **059**) is live on that route
+   (`ChatEndpoints.cs:414`, `:474` — "Tenant ID not found in token claims (tid) or X-Tenant-Id header").
+
+Neither is new. What changes is **blast radius**: today they can delete a 24-hour AI-Search index entry;
+armed, they delete **90-day durable bytes**, and 063 confirms Azure soft-delete and versioning are OFF,
+so a completed delete is final. A store that is armed and later disarmed also cannot be erased from.
+
+**Recommendation: do 059 (and decide the cross-user question) BEFORE arming.** This inverts the task
+index's ordering, deliberately.
+
+### The four operator steps (all still required, and still not done)
+Provision/pick a storage account → create the container → grant **`mi-bff-api-dev`**
+(the UAMI — **not** the system-assigned identity `model2-full.bicep` currently targets, which does not
+exist on `spaarke-bff-dev`) *Storage Blob Data Contributor* → set `SessionFileStore:BlobEndpoint`.
+063 also notes the role assignment is missing from `customer.bicep` and `model1-shared.bicep`.
+Dev has **no storage account**, and the UAMI holds **no storage role of any kind**.
 
 ---
 
-## Remaining queue (8 open, 1 blocked)
+## Remaining queue (6 open, 1 blocked)
 
 | # | Task | Gate |
 |---|---|---|
-| **063** | Track B **erasure** — the last gate before `BlobEndpoint` may be set | 062 ✅ — **dispatch next** |
-| **052b** | Stale-target DETECTION durability (052's answer is ledger-durable; the question is `sessionStorage`) | 052 ✅ |
 | **058** | Nested / conditional merge fields | 049 ✅ 057 ✅ |
-| **059** | SECURITY — `X-Tenant-Id` spoofable fallback; human sign-off required | 060 ✅ |
+| **059** | SECURITY — `X-Tenant-Id` spoofable fallback + the cross-user DELETE gap; human sign-off required | 060 ✅ — **dispatch next; gates arming** |
 | **070–073** | Track D decomposition | ready; same files as Track A/C — sequence carefully |
 | **074** ⛔ | Retire `ComposeShadowPatchEngine` | gate-confirm before deleting 3,000 lines |
 | **090** | Wrap-up (incl. `/test-diet`) | all |
