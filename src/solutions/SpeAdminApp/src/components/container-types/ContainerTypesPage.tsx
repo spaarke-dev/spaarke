@@ -37,6 +37,12 @@ import {
   createTableColumn,
   type TableColumnDefinition,
   Button,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   shorthands,
 } from "@fluentui/react-components";
 import {
@@ -44,6 +50,7 @@ import {
   ArrowClockwise20Regular,
   CloudLink20Regular,
   DocumentBulletList20Regular,
+  Settings20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
 import {
@@ -56,6 +63,8 @@ import type { ContainerType } from "../../types/spe";
 import { assessBilling, assessTrialExpiry } from "./containerTypeLifecycle";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
+import { ContainerTypeConfig } from "../settings/ContainerTypeConfig";
+import { useGridStyles } from "../layout/gridStyles";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -165,7 +174,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /**
+   * `display: block` so the scope line sits BELOW the title. Fluent's `Text` is inline by
+   * default, so "Container Types" and "Spaarke PAYGO 1 · Spaarke Dev · 4 types" rendered on one
+   * line with no space between them — "Container TypesSpaarke PAYGO 1" (UAT round 6 screenshot).
+   */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
   },
 
@@ -274,6 +289,22 @@ const useStyles = makeStyles({
     ...shorthands.gap(tokens.spacingVerticalXS),
     marginTop: tokens.spacingVerticalXS,
   },
+
+  /**
+   * The configurations dialog hosts a full CRUD grid, so it needs far more room than Fluent's
+   * 600px DialogSurface default. Capped in viewport units so it still fits a laptop screen.
+   */
+  configsDialogSurface: {
+    maxWidth: "min(1200px, 95vw)",
+    width: "min(1200px, 95vw)",
+  },
+
+  /** Gives the embedded config grid a workable height inside the dialog. */
+  configsDialogContent: {
+    minHeight: "60vh",
+    maxHeight: "70vh",
+    overflow: "auto",
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -292,7 +323,7 @@ function buildColumns(now: Date): TableColumnDefinition<ContainerType>[] {
       columnId: "displayName",
       renderHeaderCell: () => "Name",
       renderCell: (ct) => (
-        <Text weight="semibold" truncate>
+        <Text weight="semibold" truncate wrap={false}>
           {ct.displayName}
         </Text>
       ),
@@ -407,7 +438,7 @@ function buildColumns(now: Date): TableColumnDefinition<ContainerType>[] {
       renderHeaderCell: () => "Owning App",
       // An absent owning app is unknown, not absent — a blank cell would claim there isn't one.
       renderCell: (ct) => (
-        <Text truncate style={{ color: tokens.colorNeutralForeground2 }}>
+        <Text truncate wrap={false} style={{ color: tokens.colorNeutralForeground2 }}>
           {ct.owningAppId ?? "—"}
         </Text>
       ),
@@ -516,6 +547,18 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
 
   /** Whether the RegisterWizard is open. */
   const [registerOpen, setRegisterOpen] = React.useState(false);
+
+  // ── Configurations Dialog State ─────────────────────────────────────────────
+
+  /**
+   * Whether the container-type CONFIGURATIONS dialog is open.
+   *
+   * A "config" (`sprk_specontainertypeconfig`) binds a container type to a business unit, an
+   * environment, an owning app registration and its Key Vault secret name. It lived under
+   * Settings until 2026-08-26, which put it two clicks from the container types it configures and
+   * one click from Environments, which it is not.
+   */
+  const [configsOpen, setConfigsOpen] = React.useState(false);
 
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
@@ -645,6 +688,35 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
     [selectedConfig, loadContainerTypes]
   );
 
+  // ── Configurations Dialog (shared by both render branches) ──────────────────
+
+  /*
+   * Rendered in BOTH branches on purpose. `ContainerTypeConfig` is the only surface that can
+   * CREATE a config, and the branch below runs precisely when none is selected — which on a fresh
+   * environment means none exists. Reachable only from the configured branch, this would be a
+   * bootstrap deadlock: you would need a config to reach the screen that makes the first config.
+   */
+  const configsDialog = (
+    <Dialog
+      open={configsOpen}
+      onOpenChange={(_e, data) => setConfigsOpen(data.open)}
+    >
+      <DialogSurface className={styles.configsDialogSurface}>
+        <DialogBody>
+          <DialogTitle>Container Type Configurations</DialogTitle>
+          <DialogContent className={styles.configsDialogContent}>
+            <ContainerTypeConfig />
+          </DialogContent>
+          <DialogActions>
+            <Button appearance="secondary" onClick={() => setConfigsOpen(false)}>
+              Close
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  );
+
   // ── Render: No Config Selected ──────────────────────────────────────────────
 
   if (!selectedConfig) {
@@ -667,7 +739,16 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
             Select a Business Unit and Container Type Configuration in the top
             navigation bar to view and manage container types.
           </Text>
+          {/* The escape hatch from an empty environment — see configsDialog above. */}
+          <Button
+            appearance="secondary"
+            icon={<Settings20Regular />}
+            onClick={() => setConfigsOpen(true)}
+          >
+            Manage configurations
+          </Button>
         </div>
+        {configsDialog}
       </div>
     );
   }
@@ -737,6 +818,25 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
             aria-label="Register container type"
           >
             <span className={styles.buttonLabel}>Register</span>
+          </ToolbarButton>
+        </Tooltip>
+
+        <ToolbarDivider />
+
+        {/* Configurations — moved here from Settings (UAT 2026-08-26).
+            A config binds THIS page's subject (a container type) to a business unit, an
+            environment and an owning app registration, so it belongs beside the types rather
+            than under a Settings tab shared with Environments. */}
+        <Tooltip
+          content="Add, edit or delete the container type configurations that bind a container type to a business unit, environment and owning app"
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<Settings20Regular />}
+            onClick={() => setConfigsOpen(true)}
+            aria-label="Manage container type configurations"
+          >
+            <span className={styles.buttonLabel}>Configurations</span>
           </ToolbarButton>
         </Tooltip>
 
@@ -941,6 +1041,9 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
         onRegistered={() => { void loadContainerTypes(); }}
         initialTypeId={selectedTypeId}
       />
+
+      {/* ── Container Type Configurations (moved from Settings) ── */}
+      {configsDialog}
     </div>
   );
 };
@@ -972,6 +1075,7 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
   onRowClick,
   className,
 }) => {
+  const grid = useGridStyles();
   return (
     <DataGrid
       items={containerTypes}
@@ -982,11 +1086,25 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
       getRowId={(ct) => ct.containerTypeId}
       className={className}
       aria-label="Container types"
+      /* Drag a header edge to resize (UAT round 6). The Owning App column holds a GUID and the
+         Name column a free-text label — no single default fits both across tenants. */
+      resizableColumns
+      columnSizingOptions={{
+        displayName: { minWidth: 140, defaultWidth: 200, idealWidth: 200 },
+        billingClassification: { minWidth: 110, defaultWidth: 160, idealWidth: 160 },
+        billingStatus: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        trialExpiry: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        owningAppId: { minWidth: 140, defaultWidth: 260, idealWidth: 260 },
+        isRegistered: { minWidth: 90, defaultWidth: 120, idealWidth: 120 },
+        createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+      }}
     >
       <DataGridHeader>
         <DataGridRow>
           {({ renderHeaderCell }) => (
-            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+            <DataGridHeaderCell className={grid.headerCell}>
+              {renderHeaderCell()}
+            </DataGridHeaderCell>
           )}
         </DataGridRow>
       </DataGridHeader>
@@ -1008,7 +1126,9 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
               }}
               tabIndex={0}
             >
-              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+              {({ renderCell }) => (
+                <DataGridCell className={grid.cell}>{renderCell(item)}</DataGridCell>
+              )}
             </DataGridRow>
           );
         }}

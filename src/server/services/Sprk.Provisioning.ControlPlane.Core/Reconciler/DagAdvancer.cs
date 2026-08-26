@@ -126,25 +126,25 @@ public sealed class DagAdvancer : IDagAdvancer
     internal static readonly IReadOnlyDictionary<string, string[]> HandlerDependencies =
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            [HandlerH0]   = Array.Empty<string>(),                            // Entry point (POST /api/runs).
-            [HandlerH05]  = Array.Empty<string>(),                            // Model 2 entry (BFF consent-callback).
-            [HandlerH1]   = new[] { HandlerH0 },
-            [HandlerH2a]  = new[] { HandlerH1 },
-            [HandlerH2b]  = new[] { HandlerH2a },
-            [HandlerH4]   = new[] { HandlerH2a },
-            [HandlerH5]   = new[] { HandlerH2a },
-            [HandlerH3]   = new[] { HandlerH4 },                              // Needs KV for secret storage.
-            [HandlerH6]   = new[] { HandlerH5 },
-            [HandlerH7]   = new[] { HandlerH6 },
-            [HandlerH8]   = new[] { HandlerH3 },
-            [HandlerH9]   = new[] { HandlerH3 },                              // Also needs H4 KV transitively via H3.
-            [HandlerH10]  = new[] { HandlerH7 },
-            [HandlerH11]  = new[] { HandlerH10 },
+            [HandlerH0] = Array.Empty<string>(),                            // Entry point (POST /api/runs).
+            [HandlerH05] = Array.Empty<string>(),                            // Model 2 entry (BFF consent-callback).
+            [HandlerH1] = new[] { HandlerH0 },
+            [HandlerH2a] = new[] { HandlerH1 },
+            [HandlerH2b] = new[] { HandlerH2a },
+            [HandlerH4] = new[] { HandlerH2a },
+            [HandlerH5] = new[] { HandlerH2a },
+            [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
+            [HandlerH6] = new[] { HandlerH5 },
+            [HandlerH7] = new[] { HandlerH6 },
+            [HandlerH8] = new[] { HandlerH3 },
+            [HandlerH9] = new[] { HandlerH3 },                              // Also needs H4 KV transitively via H3.
+            [HandlerH10] = new[] { HandlerH7 },
+            [HandlerH11] = new[] { HandlerH10 },
             [HandlerH12a] = new[] { HandlerH11 },
             [HandlerH12b] = new[] { HandlerH11 },                             // Parallel with H12a.
             [HandlerH12c] = new[] { HandlerH12a, HandlerH12b, HandlerH2a },   // Join per task 072 + H14 handler code.
-            [HandlerH14]  = new[] { HandlerH12c },
-            [HandlerH13]  = new[] { HandlerH14 },
+            [HandlerH14] = new[] { HandlerH12c },
+            [HandlerH13] = new[] { HandlerH14 },
         };
 
     /// <summary>

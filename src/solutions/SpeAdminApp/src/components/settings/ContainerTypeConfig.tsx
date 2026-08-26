@@ -1001,8 +1001,16 @@ const ConfigDataGrid: React.FC<ConfigDataGridProps> = ({
 
 /**
  * ContainerTypeConfig — manages container type configuration records (Business
- * Unit to Container Type mapping, authentication parameters). Renders within
- * the Settings page Container Type Configs tab.
+ * Unit to Container Type mapping, authentication parameters).
+ *
+ * Rendered inside the **Container Types** page, in the dialog behind its
+ * "Configurations" toolbar button (moved there 2026-08-26; it previously lived in a
+ * "Container Type Configs" tab on the Settings page, which no longer exists). The file still
+ * sits under `components/settings/` — moving it is a rename with no behavioural effect and was
+ * left for a quieter change.
+ *
+ * This component is the ONLY surface that can create a config, which is why the host renders it
+ * from both of that page's branches — see the `configsDialog` comment in `ContainerTypesPage`.
  *
  * Key security constraint: the component displays and accepts only Key Vault
  * secret *names*, never actual secret values. The BFF retrieves credentials
