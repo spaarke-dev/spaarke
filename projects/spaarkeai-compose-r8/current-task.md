@@ -271,6 +271,24 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
 
 ## Standing constraints (unchanged)
 
+### ✅ DEPLOYED TO DEV — 2026-08-26 (BFF + `sprk_spaarkeai` together, NFR-05 satisfied)
+
+First deploy of Tracks A / B / C. Commit `cfc118fe4` (merged with `origin/master`, 0 behind).
+
+| | |
+|---|---|
+| **BFF** | `spaarke-bff-dev` · package **45.14 MB** · SHA-256 hash-verified on 4 critical files · `/healthz` 200 · 2/2 CORS origins present |
+| **SpaarkeAi** | web resource `sprk_spaarkeai` (`5206a442-…`) updated + customizations published · bundle **5,725 KB**, rebuilt today (the previous `dist` was **Aug 21** — five days stale) |
+| **Route-surface proof** | **All 17 authenticated Compose routes return 401, zero 404s** — task 073's decomposition verified against the DEPLOYED app, which is stronger than the two local oracles. |
+
+⚠️ **Still NOT observable: Track C.** `Deploy-AnalysisAction.ps1` has **not** been run. Task 052 changed
+the four compose Action output schemas, so until those `sprk_analysisaction` rows are upserted, dev still
+asks the model for `target_text` and the anchored-placement work cannot be exercised. **This is the next
+deploy step, and it was not part of the requested deploy.**
+
+⚠️ **Track B remains DISARMED** — `SessionFileStore:BlobEndpoint` empty; dev has no storage account and the
+UAMI holds no storage role. Unchanged by this deploy.
+
 - **Deploy prerequisite**: `Deploy-AnalysisAction.ps1` MUST run before ANY of Track C is observable.
   **052 raises the stakes** — it changed the four compose Action output schemas, so until that script runs,
   dev still asks the model for `target_text`. Deploy BFF + `sprk_spaarkeai` together (NFR-05).
