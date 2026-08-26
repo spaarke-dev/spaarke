@@ -164,7 +164,11 @@ public class I5_GraphPerTenantTokenTests
         foreach (var file in scannedFiles)
         {
             var rel = RelPath(file);
-            var text = File.ReadAllText(file);
+
+            // Comments are MASKED before scanning — see MaskComments. Without this the regexes
+            // match prose, and this invariant reported a false CATASTROPHIC violation against a
+            // doc comment whose entire purpose was to warn against the pattern it was flagged for.
+            var text = MaskComments(File.ReadAllText(file));
 
             // 1. ClientSecretCredential — first positional arg must be a non-trivial tenant expression.
             foreach (Match m in NewClientSecretCredential.Matches(text))
@@ -340,6 +344,134 @@ public class I5_GraphPerTenantTokenTests
         return null;
     }
 
+    /// <summary>
+    /// Blanks out comments so the credential regexes match CODE, not prose.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> On 2026-08-26 this invariant failed CI with a CATASTROPHIC-severity
+    /// offender: <c>ServiceBusClientFactory.cs:52 — new DefaultAzureCredential(...) constructed
+    /// with no 'TenantId = ...' assignment</c>. That file constructs no credential at all. Line 52
+    /// is an XML doc comment reading <i>"MembershipJunctionUpdaterHost.cs:120 constructs
+    /// `new DefaultAzureCredential()` inline, and that is a deviation not to propagate"</i> — a
+    /// warning AGAINST the very pattern it was reported for.
+    /// </para>
+    /// <para>
+    /// The scan read raw file text, so any prose quoting a banned construct became a violation.
+    /// That is worse than a nuisance: a merge-blocking invariant that cries wolf gets routed
+    /// around, and the next real offender arrives in a job everyone has learned to ignore.
+    /// </para>
+    /// <para>
+    /// <b>This narrows the detector, it does not weaken it.</b> A comment cannot construct a
+    /// credential, so nothing real is lost. It is in fact slightly STRICTER: a
+    /// <c>TenantId = ...</c> assignment that appears only inside a comment no longer satisfies the
+    /// options-bag check, because a commented-out assignment does not scope anything.
+    /// </para>
+    /// <para>
+    /// Offsets are preserved — every masked character is replaced 1:1 with a space and newlines are
+    /// kept — so <see cref="LineNumberFor"/> still reports the true line of a real offender.
+    /// </para>
+    /// </remarks>
+    internal static string MaskComments(string source)
+    {
+        var buffer = source.ToCharArray();
+        var i = 0;
+        var n = source.Length;
+
+        static bool IsVerbatimStart(string s, int idx) =>
+            s[idx] == '@' && idx + 1 < s.Length && s[idx + 1] == '"';
+
+        while (i < n)
+        {
+            var c = source[i];
+
+            // ── Raw string literal (C# 11): """ … """ ──
+            if (c == '"' && i + 2 < n && source[i + 1] == '"' && source[i + 2] == '"')
+            {
+                var end = source.IndexOf("\"\"\"", i + 3, StringComparison.Ordinal);
+                i = end < 0 ? n : end + 3;
+                continue;
+            }
+
+            // ── Verbatim string: @"…" where "" is an escaped quote ──
+            if (IsVerbatimStart(source, i))
+            {
+                i += 2;
+                while (i < n)
+                {
+                    if (source[i] == '"')
+                    {
+                        if (i + 1 < n && source[i + 1] == '"') { i += 2; continue; }
+                        i++; break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+
+            // ── Regular string: "…" with backslash escapes ──
+            if (c == '"')
+            {
+                i++;
+                while (i < n)
+                {
+                    if (source[i] == '\\') { i += 2; continue; }
+                    if (source[i] == '"') { i++; break; }
+                    if (source[i] == '\n') break;   // unterminated — bail rather than run away
+                    i++;
+                }
+                continue;
+            }
+
+            // ── Char literal: 'c' / '\'' ──
+            if (c == '\'')
+            {
+                i++;
+                while (i < n)
+                {
+                    if (source[i] == '\\') { i += 2; continue; }
+                    if (source[i] == '\'') { i++; break; }
+                    if (source[i] == '\n') break;
+                    i++;
+                }
+                continue;
+            }
+
+            // ── Line comment: // and /// ──
+            if (c == '/' && i + 1 < n && source[i + 1] == '/')
+            {
+                while (i < n && source[i] != '\n') { buffer[i] = ' '; i++; }
+                continue;
+            }
+
+            // ── Block comment: /* … */ ──
+            if (c == '/' && i + 1 < n && source[i + 1] == '*')
+            {
+                buffer[i] = ' ';
+                buffer[i + 1] = ' ';
+                i += 2;
+                while (i < n)
+                {
+                    if (source[i] == '*' && i + 1 < n && source[i + 1] == '/')
+                    {
+                        buffer[i] = ' ';
+                        buffer[i + 1] = ' ';
+                        i += 2;
+                        break;
+                    }
+                    // Newlines survive so line numbers stay correct.
+                    if (source[i] != '\n' && source[i] != '\r') buffer[i] = ' ';
+                    i++;
+                }
+                continue;
+            }
+
+            i++;
+        }
+
+        return new string(buffer);
+    }
+
     private static IEnumerable<string> EnumerateProductionCsFiles(string root)
         => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
@@ -377,4 +509,81 @@ public class I5_GraphPerTenantTokenTests
         }
         return AppContext.BaseDirectory;
     }
+
+    // -------------------------------------------------------------------------
+    // Controls for MaskComments.
+    //
+    // tests/CLAUDE.md, "Authoring rules for this path": every rule carries a NEGATIVE control
+    // proving the detector fires on a seeded violation, and a POSITIVE control proving it does
+    // NOT fire on the sanctioned shape. Both matter here -- "mask everything" would satisfy the
+    // false-positive control while silently disabling a CATASTROPHIC invariant.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// POSITIVE CONTROL -- the scan must NOT see a credential named only in prose. This is the
+    /// exact shape that produced the false offender against ServiceBusClientFactory.cs:52.
+    /// </summary>
+    [Fact(DisplayName = "MaskComments: a credential named only in a doc comment is not scannable")]
+    public void MaskComments_CredentialNamedOnlyInADocComment_IsNotScannable()
+    {
+        var source =
+            "/// Never write new DefaultAzureCredential() inline here -- use the DI singleton." + Environment.NewLine +
+            "public static class Factory { }";
+
+        Assert.DoesNotContain("DefaultAzureCredential", MaskComments(source));
+    }
+
+    /// <summary>
+    /// NEGATIVE CONTROL -- a real construction must survive masking and stay visible to the scan.
+    /// </summary>
+    [Fact(DisplayName = "MaskComments: a real credential construction remains scannable")]
+    public void MaskComments_RealCredentialConstruction_RemainsScannable()
+    {
+        var source =
+            "// a comment mentioning DefaultAzureCredential" + Environment.NewLine +
+            "var cred = new DefaultAzureCredential(options);";
+
+        var masked = MaskComments(source);
+
+        Assert.Contains("new DefaultAzureCredential(options)", masked);
+
+        var firstLine = masked.Split(NEWLINE_CHAR)[0];
+        Assert.DoesNotContain("DefaultAzureCredential", firstLine);
+    }
+
+    /// <summary>
+    /// A <c>//</c> inside a string literal is not a comment. Masking it would corrupt the very
+    /// authority literals the WithAuthority rule inspects.
+    /// </summary>
+    [Fact(DisplayName = "MaskComments: '//' inside a string literal is preserved")]
+    public void MaskComments_DoubleSlashInsideStringLiteral_IsPreserved()
+    {
+        var source = "var uri = QUOTEhttps://login.microsoftonline.com/commonQUOTE; var x = 1;"
+            .Replace("QUOTE", DOUBLE_QUOTE);
+
+        Assert.Contains("https://login.microsoftonline.com/common", MaskComments(source));
+    }
+
+    /// <summary>
+    /// Masking preserves offsets and line count, so a reported line number still points at the
+    /// real offender rather than drifting.
+    /// </summary>
+    [Fact(DisplayName = "MaskComments: preserves length and line count")]
+    public void MaskComments_PreservesLengthAndLineCount()
+    {
+        var source =
+            "/* block" + Environment.NewLine +
+            "   comment */" + Environment.NewLine +
+            "var x = 1;";
+
+        var masked = MaskComments(source);
+
+        Assert.Equal(source.Length, masked.Length);
+        Assert.Equal(
+            source.Count(c => c == NEWLINE_CHAR),
+            masked.Count(c => c == NEWLINE_CHAR));
+    }
+
+    private const char NEWLINE_CHAR = '\n';
+    private const string DOUBLE_QUOTE = "\"";
 }
