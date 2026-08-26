@@ -232,6 +232,39 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 ## Phase 7 — Track D: God-class removal *(interleave with Phases 4–6; each task deletes its own waiver)*
 
+> ### ⚠️ Track D's acceptance criteria MOVED — reframed 2026-08-26 (owner-approved, CLAUDE.md §6.5 Path C)
+>
+> Every 070–074 POML requires *"under 2,000 lines"* and *"DELETE its waiver entry from
+> `GodClassGuardTests.cs`"*. **Both criteria are obsolete.** That file **no longer exists** — the
+> God-class LOC ratchet was **retired 2026-08-20** (root CLAUDE.md §11.5,
+> [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md))
+> *because it gated on line count, the wrong instrument*, and blocked normal feature work on active
+> files. There are **no waivers left to delete**.
+>
+> Compounding it: the targets have **grown** under Tracks A/C/059, so the old target now means
+> extracting over half of each file — which is precisely the pressure to split by line count rather
+> than by reason-to-change that the retirement was meant to remove.
+>
+> | File | POML said | Actual (2026-08-26) |
+> |---|---|---|
+> | `ComposeService.cs` | 3,573 | **4,385** |
+> | `ComposeDocxProjectionBuilder.cs` | 3,085 | **3,583** |
+> | `ComposeDocumentRenderer.cs` | 2,304 | **2,968** |
+> | `Api/ComposeEndpoints.cs` | 2,651 | **2,932** |
+> | `ComposeShadowPatchEngine.cs` | 2,999 | **3,049** |
+>
+> **Restated criterion (binding for 070–074):** decompose where **responsibilities have diverged** —
+> extract each cluster with its **own reason to change** — and state that reason per extracted unit.
+> **Line count is an observation, not a target.** A large *cohesive* file is a legitimate outcome;
+> manufacturing thin components to hit a number is a §11 violation. Everything else in each POML
+> still binds — for 073 especially the **enumerated route/verb diff** and per-endpoint filter
+> verification, which are the properties that actually protect behaviour.
+>
+> **074 is unchanged in substance**: task 031 recorded subsumption **NOT-CONFIRMED**, and its POML
+> forbids deleting on that basis. The owner funded the confirmation work on 2026-08-26, so 074 now
+> runs as *prove reachability empirically, then delete only if CONFIRMED* — a NOT-CONFIRMED result
+> remains a legitimate, successful outcome.
+
 | # | Task | File (LOC) | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 070 | Decompose `ComposeService.cs` + delete its waiver | 3,573 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
