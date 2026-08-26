@@ -45,9 +45,10 @@ to exist afterwards.
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **077 + 080 COMPLETE.** Phase 0c: **070 ✅ 071 ✅ 074 ✅ 077 ✅ 080 ✅** · **081 🔲 READY** (option B, rewritten 2026-08-26 — see START HERE) · 072 · 073 · 075 · 076 · 078 · 079 filed |
-| **Next Action** | **072** (gate `share-link` — Wave 1, `opus`/`high`, `∥-safe:false`) **or Wave 2 (075 → 076)**. 081 is ready but not urgent-first: it is `opus`/`xhigh` and its Step 0 is empirical token inspection |
-| **Commits** | `d6d156ac1` 080 · `4c51eed7e` CI fixes + census + 081 filed · `f857fdc07` 077 + 081 blocked. All pushed. Working tree clean |
+| **Task** | ✅ **072 COMPLETE.** Phase 0c: **070 ✅ 071 ✅ 072 ✅ 074 ✅ 077 ✅ 080 ✅** · **081 🔲 READY** (option B — see START HERE) · 073 · 075 · 076 · 078 · 079 filed |
+| **Next Action** | **073** (authorize container upload — Wave 1, `opus`/`high`, `∥-safe:true`) **or Wave 2 (075 → 076)**. Note 078 depends on 075, so Wave 2 unblocks it |
+| **⚠️ 072 deploy ordering** | **BFF + client must ship together.** An older client posts `{}` → binds to organization scope → emailed links silently stop opening for **external** recipients, no error signal. See `notes/task-072-gate-share-link.md` §7 |
+| **Commits** | `d6d156ac1` 080 · `4c51eed7e` CI + census · `f857fdc07` 077 · `9a0823996` handoff · `7b8ac54e2` 081→option B · `bb1e442ea` 072. Push 7b8ac54e2 + bb1e442ea |
 | **⚠️ PR head ≠ your SHA** | `ce7a88718` is a `github-actions[bot]` auto-format commit that landed on top. **Always check the PR head SHA, not the one you pushed** — bot commits move it, and their workflow runs park at `action_required` until approved (`gh api -X POST .../actions/runs/{id}/approve`) |
 | **Step** | Between tasks. Working tree clean. **PR #825 open as DRAFT** |
 | **CI on #825** | ✅ **ASSESSED + RESOLVED.** 51 check-runs. `Changed-Surface Integration Smoke` **PASSED** (first run ever on this branch). Two failures, **neither ours** — see the CI block below. Master merged (285 commits, 0 conflicts) |

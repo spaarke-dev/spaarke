@@ -3,7 +3,7 @@
   <metadata>
     <title>Gate POST /api/documents/{id}/share-link, bound its expiry, and stop minting anonymous-scope links</title>
     <phase>0c Secure Documents — Wave 1</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The route mints a credential that outlives every other control in the system. Touches OperationAccessPolicy, which is shared authorization surface.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -94,5 +94,31 @@ TENANT POLICY NOTE (Microsoft, verified 2026-08-25): SPE sharing follows the con
     <criterion>Client callers still function or are migrated.</criterion>
   </acceptance-criteria>
 
-  <notes>The header of `FileAccessEndpoints.cs` already documents that minted URLs outlive revocation as unsolved. This task does not solve that generally — it removes the worst instance (permanent + anonymous + ungated) and bounds the rest.</notes>
+  <notes>The header of `FileAccessEndpoints.cs` already documents that minted URLs outlive revocation as unsolved. This task does not solve that generally — it removes the worst instance (permanent + anonymous + ungated) and bounds the rest.
+
+COMPLETED 2026-08-26 · commit `bb1e442ea` · full record in `notes/task-072-gate-share-link.md`.
+
+Four things the POML did not anticipate:
+
+1. **The right was already decided by precedent.** `OperationAccessPolicy` already maps
+   `driveitem.createlink` AND `share_document` to `AccessRights.Share`. Chose a bare `["share"]` key per
+   task 003's record-scoped convention (the filter authorizes an `sprk_document` ROW, not an SPE item).
+   Consumer audit: the two enumeration APIs have ZERO call sites, so adding a key is behaviourally inert.
+
+2. **The escalation trigger was investigated and did NOT fire.** The live caller (email composer) depends
+   on external *reach*, not on permanence — so the trigger's conjunction ("non-expiring anonymous") is not
+   satisfied, and the POML's own constraint sanctions opt-in + higher right + harder cap. Anonymous links
+   still exist by design; the residual is documented.
+
+3. **A pre-existing defect had to be fixed for this task's own 403 to work.**
+   `DocumentAuthorizationFilter` wrapped `next()` in its own try/catch, so every handler exception on all
+   nine routes became `500 "Authorization Error"`. Narrowed the try. 1,085 auth/document tests confirm no
+   regression.
+
+4. **DEPLOY ORDERING (not in the POML, matters at release).** BFF + client must ship together — an older
+   client posting `{}` gets organization scope, so emailed links silently stop opening for external
+   recipients with no error signal.
+
+Also: task 074's Pending waiver for this route is deleted (stale once gated). The ArchTest waiver
+requirement was not in the POML's acceptance criteria but is implied by 074's design.
 </task>
