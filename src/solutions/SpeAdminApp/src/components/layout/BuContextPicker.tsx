@@ -220,6 +220,32 @@ const useStyles = makeStyles({
     whiteSpace: "nowrap",
     paddingLeft: tokens.spacingHorizontalSNudge,
     paddingRight: tokens.spacingHorizontalSNudge,
+    display: "inline-flex",
+    alignItems: "center",
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+  },
+
+  /**
+   * The field name. Muted and regular-weight so it reads as a label rather than as the value —
+   * "Business Unit Spaarke" has to parse at a glance as label-then-value, not as one long phrase.
+   */
+  pickerLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightRegular,
+  },
+
+  /**
+   * The current selection, shown beside the label (operator-directed, UAT round 7). Semibold and
+   * full-contrast: this is the fact an administrator is scanning for, since it scopes every page
+   * in the app.
+   */
+  pickerValue: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    maxWidth: "180px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   /** Each compact item (a labelled Field, or the environment badge) in the header row. */
@@ -508,7 +534,14 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
               title={busError ?? selectedBu?.name ?? undefined}
               className={styles.compactMenuButton}
             >
-              {busLoading ? "Loading…" : busError ? "⚠ Business Unit" : "Business Unit"}
+              <span className={styles.pickerLabel}>
+                {busError ? "⚠ Business Unit" : "Business Unit"}
+              </span>
+              {busLoading ? (
+                <span className={styles.pickerValue}>Loading…</span>
+              ) : selectedBu ? (
+                <span className={styles.pickerValue}>{selectedBu.name}</span>
+              ) : null}
             </MenuButton>
           </MenuTrigger>
           <MenuPopover>
@@ -548,7 +581,12 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
               }
               className={styles.compactMenuButton}
             >
-              {configsLoading ? "Loading…" : "Container Type"}
+              <span className={styles.pickerLabel}>Container Type</span>
+              {configsLoading ? (
+                <span className={styles.pickerValue}>Loading…</span>
+              ) : selectedConfig ? (
+                <span className={styles.pickerValue}>{selectedConfig.name}</span>
+              ) : null}
             </MenuButton>
           </MenuTrigger>
           <MenuPopover>

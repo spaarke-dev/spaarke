@@ -64,6 +64,7 @@ import { assessBilling, assessTrialExpiry } from "./containerTypeLifecycle";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
 import { RegisterWizard } from "./RegisterWizard";
 import { ContainerTypeConfig } from "../settings/ContainerTypeConfig";
+import { useGridStyles } from "../layout/gridStyles";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -322,7 +323,7 @@ function buildColumns(now: Date): TableColumnDefinition<ContainerType>[] {
       columnId: "displayName",
       renderHeaderCell: () => "Name",
       renderCell: (ct) => (
-        <Text weight="semibold" truncate>
+        <Text weight="semibold" truncate wrap={false}>
           {ct.displayName}
         </Text>
       ),
@@ -437,7 +438,7 @@ function buildColumns(now: Date): TableColumnDefinition<ContainerType>[] {
       renderHeaderCell: () => "Owning App",
       // An absent owning app is unknown, not absent — a blank cell would claim there isn't one.
       renderCell: (ct) => (
-        <Text truncate style={{ color: tokens.colorNeutralForeground2 }}>
+        <Text truncate wrap={false} style={{ color: tokens.colorNeutralForeground2 }}>
           {ct.owningAppId ?? "—"}
         </Text>
       ),
@@ -1074,6 +1075,7 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
   onRowClick,
   className,
 }) => {
+  const grid = useGridStyles();
   return (
     <DataGrid
       items={containerTypes}
@@ -1100,7 +1102,9 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
       <DataGridHeader>
         <DataGridRow>
           {({ renderHeaderCell }) => (
-            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+            <DataGridHeaderCell className={grid.headerCell}>
+              {renderHeaderCell()}
+            </DataGridHeaderCell>
           )}
         </DataGridRow>
       </DataGridHeader>
@@ -1122,7 +1126,9 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
               }}
               tabIndex={0}
             >
-              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+              {({ renderCell }) => (
+                <DataGridCell className={grid.cell}>{renderCell(item)}</DataGridCell>
+              )}
             </DataGridRow>
           );
         }}

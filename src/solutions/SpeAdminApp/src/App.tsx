@@ -9,6 +9,7 @@ import { BuProvider, useBuContext } from "./contexts/BuContext";
 import { AppShell, type SpeAdminPage } from "./components/layout/AppShell";
 import { PageErrorBoundary } from "./components/layout/PageErrorBoundary";
 import { useResizablePane, PaneSplitter } from "./components/layout/ResizablePane";
+import { useThinScrollbars } from "./components/layout/scrollbarStyles";
 import { DashboardPage } from "./components/dashboard/DashboardPage";
 import { FileBrowserPage } from "./components/files/FileBrowserPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -305,6 +306,10 @@ const AppContent: React.FC<AppContentProps> = ({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const App: React.FC = () => {
+  // Global thin-scrollbar styling — see scrollbarStyles.ts for the two-mechanism rationale
+  // and why this is app-local rather than in @spaarke/ui-components.
+  useThinScrollbars();
+
   const [theme, setTheme] = React.useState(resolveTheme);
 
   // Parse URL parameters once on mount (stable across renders)

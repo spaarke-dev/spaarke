@@ -81,6 +81,7 @@ import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
 import { FileBrowserPage } from "../files/FileBrowserPage";
 import { useResizablePane, PaneSplitter } from "../layout/ResizablePane";
+import { useGridStyles } from "../layout/gridStyles";
 import {
   CONTAINER_URL_LABEL,
   CONTAINER_URL_ABSENT_LABEL,
@@ -427,7 +428,7 @@ function buildColumns(
       columnId: "displayName",
       renderHeaderCell: () => "Name",
       renderCell: (container) => (
-        <Text weight="semibold" truncate>
+        <Text weight="semibold" truncate wrap={false}>
           {container.displayName}
         </Text>
       ),
@@ -444,6 +445,7 @@ function buildColumns(
       renderCell: (container) => (
         <Text
           truncate
+          wrap={false}
           title={container.id}
           style={{
             fontFamily: tokens.fontFamilyMonospace,
@@ -1317,6 +1319,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
   onRowClick,
   className,
 }) => {
+  const grid = useGridStyles();
   const {
     getRows,
     selection: {
@@ -1397,7 +1400,9 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
             Fluent renders an empty leading cell to keep the columns aligned with the rows. */}
         <DataGridRow>
           {({ renderHeaderCell }) => (
-            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+            <DataGridHeaderCell className={grid.headerCell}>
+              {renderHeaderCell()}
+            </DataGridHeaderCell>
           )}
         </DataGridRow>
       </DataGridHeader>
@@ -1419,7 +1424,9 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
               appearance={row?.appearance}
               tabIndex={0}
             >
-              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+              {({ renderCell }) => (
+                <DataGridCell className={grid.cell}>{renderCell(item)}</DataGridCell>
+              )}
             </DataGridRow>
           );
         }}

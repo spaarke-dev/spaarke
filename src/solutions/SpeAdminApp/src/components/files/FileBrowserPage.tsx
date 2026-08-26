@@ -50,6 +50,7 @@ import {
 // cannot afford. `IFileValidationError` is still the shape used for per-file upload errors.
 import type { IFileValidationError } from "@spaarke/ui-components";
 import { speApiClient } from "../../services/speApiClient";
+import { useGridStyles } from "../layout/gridStyles";
 import type { DriveItem } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +195,9 @@ const useStyles = makeStyles({
     padding: 0,
     textAlign: "left",
     cursor: "pointer",
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
   },
 
   fileNameCell: {
@@ -202,6 +206,21 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground1,
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
+  },
+
+  /**
+   * The filename itself. The icon beside it is fixed-width, so the ellipsis has to live on this
+   * span rather than on the flex row — otherwise a long name (`2026-01-12_Test_Email_#10.eml`)
+   * breaks at its hyphens and wraps into the Type column (UAT round 7).
+   */
+  nameText: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   selectedRow: {
@@ -361,6 +380,7 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
   containerName,
 }) => {
   const styles = useStyles();
+  const grid = useGridStyles();
 
   // ── Navigation state ──────────────────────────────────────────────────────
 
@@ -623,16 +643,42 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
     setDeleting(true);
 
     try {
-      await Promise.all(
+      // Argument order is (containerId, ITEM id, CONFIG id) — the last two were swapped here
+      // too, exactly as in handleDownload below. Found by auditing every call site with this
+      // three-string shape after the download bug (UAT round 7), not by it being reported:
+      // Delete failed silently for the same two reasons, and nobody had tried it yet.
+      const results = await Promise.allSettled(
         Array.from(selectedIds).map((id) =>
-          speApiClient.items.delete(containerId, configId, id)
+          speApiClient.items.delete(containerId, id, configId)
         )
       );
+
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected"
+      );
+
+      if (rejected.length > 0) {
+        setUploadErrors((prev) => [
+          ...prev,
+          ...rejected.map((r) => ({
+            fileName: "Delete",
+            reason:
+              r.reason instanceof Error ? r.reason.message : "Delete failed.",
+          })),
+        ]);
+      }
+
       setDeleteOpen(false);
       setSelectedIds(new Set());
       await loadItems();
     } catch (err) {
-      console.error("Delete failed:", err);
+      setUploadErrors((prev) => [
+        ...prev,
+        {
+          fileName: "Delete",
+          reason: err instanceof Error ? err.message : "Delete failed.",
+        },
+      ]);
     } finally {
       setDeleting(false);
     }
@@ -647,13 +693,36 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
       (item) => selectedIds.has(item.id) && !isFolder(item)
     );
 
+    const failures: IFileValidationError[] = [];
+
     for (const item of filesToDownload) {
       try {
+        /*
+         * 🔴 The signature is (containerId, ITEM id, CONFIG id). This call passed
+         * (containerId, configId, item.id) — the last two swapped. All three parameters are
+         * `string`, so TypeScript could not see it, and the request went to
+         * `/items/{configId}/content?configId={itemId}`: a container item that does not exist.
+         *
+         * It failed silently on two levels. `authenticatedFetch` resolves for a 404 rather than
+         * throwing, so nothing reached the catch; and the catch only wrote to `console.error`, a
+         * place no operator looks. Download appeared to do nothing at all (UAT round 7).
+         */
         const response = await speApiClient.items.download(
           containerId,
-          configId,
-          item.id
+          item.id,
+          configId
         );
+
+        // A non-2xx here would otherwise be saved to disk AS the file — an error page or JSON
+        // body carrying the document's name. Worse than failing, because it looks like it worked.
+        if (!response.ok) {
+          failures.push({
+            fileName: item.name,
+            reason: `Download failed (HTTP ${response.status}).`,
+          });
+          continue;
+        }
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -662,11 +731,19 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
+        // Deferred: revoking synchronously after click races the browser's read of the blob and
+        // cancels the save in Chromium.
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } catch (err) {
-        console.error(`Download failed for ${item.name}:`, err);
+        failures.push({
+          fileName: item.name,
+          reason: err instanceof Error ? err.message : "Download failed.",
+        });
       }
     }
+
+    // Reported in the same banner the uploads use, rather than to the console.
+    if (failures.length > 0) setUploadErrors((prev) => [...prev, ...failures]);
   }, [containerId, configId, selectedIds, items]);
 
   // ── Guard: no container selected ──────────────────────────────────────────
@@ -883,7 +960,7 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
               <DataGridHeader>
                 <DataGridRow>
                   {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell>
+                    <DataGridHeaderCell className={grid.headerCell}>
                       {renderHeaderCell()}
                     </DataGridHeaderCell>
                   )}
@@ -911,7 +988,7 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
                       onDoubleClick={() => handleRowDoubleClick(item)}
                     >
                       {({ columnId }) => (
-                        <DataGridCell>
+                        <DataGridCell className={grid.cell}>
                           {/* Name column — folder/file icon + name */}
                           {columnId === "name" && (
                             itemIsFolder ? (
@@ -938,12 +1015,12 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
                                 aria-label={`Open folder ${item.name}`}
                               >
                                 <Folder20Regular />
-                                {item.name}
+                                <span className={styles.nameText}>{item.name}</span>
                               </Link>
                             ) : (
                               <span className={styles.fileNameCell}>
                                 <Document20Regular />
-                                {item.name}
+                                <span className={styles.nameText}>{item.name}</span>
                               </span>
                             )
                           )}
