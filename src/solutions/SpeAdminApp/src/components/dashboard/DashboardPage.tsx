@@ -703,7 +703,8 @@ export const DashboardPage: React.FC = () => {
             </MessageBar>
           )}
 
-          <Divider />
+          {/* flexGrow:0 is load-bearing. Fluent v9 Divider defaults to flex-grow:1 so it can fill its track; inside these column layouts that made it grow VERTICALLY, and because the rule is centred in the divider box it rendered as space-line-space — the "big space gap" reported on Dashboard, Search, Security and Audit Log (UAT 2026-08-26). The pages without a Divider had no gap. flexShrink:0 alone never addressed it. */}
+          <Divider style={{ flexGrow: 0, flexShrink: 0 }} />
 
           {/* ── Per-Config Container Counts ── */}
           <section className={styles.section}>
