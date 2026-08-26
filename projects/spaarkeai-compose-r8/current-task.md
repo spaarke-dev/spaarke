@@ -289,7 +289,14 @@ deploy step, and it was not part of the requested deploy.**
 ⚠️ **Track B remains DISARMED** — `SessionFileStore:BlobEndpoint` empty; dev has no storage account and the
 UAMI holds no storage role. Unchanged by this deploy.
 
-- **Deploy prerequisite**: `Deploy-AnalysisAction.ps1` MUST run before ANY of Track C is observable.
+- **Deploy prerequisite (CORRECTED 2026-08-26 — the old instruction was NOT EXECUTABLE)**: Track C needs
+  the Action mirrors in `infra/dataverse/actions/` deployed to `sprk_analysisaction`, via the NEW
+  `scripts/Deploy-ActionMirrors.ps1`. The previously recorded instruction — *run `Deploy-AnalysisAction.ps1`* —
+  **could never have worked**: that script reads a `{actions:[...]}` wrapper (mirrors are bare objects),
+  hard-requires `actionTypeName` (all 17 mirrors omit it), and writes `sprk_ActionTypeId@odata.bind` — a
+  lookup that **does not exist** on the entity. The ActionType axis was retired ON PURPOSE by R7 task 028 /
+  FR-07; `seed-data/manifest.yaml` already recorded `deployer: null` for this source. **DONE 2026-08-26** —
+  the four Track C actions now carry `target_para_id` in both schema and prompt.
   **052 raises the stakes** — it changed the four compose Action output schemas, so until that script runs,
   dev still asks the model for `target_text`. Deploy BFF + `sprk_spaarkeai` together (NFR-05).
   **Nothing from Phase 3 onward is deployed.**
