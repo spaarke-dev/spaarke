@@ -10,10 +10,68 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 🔄 **070 — server side COMPLETE**. ✅ **074 done**. In flight: **071**, PCF-rewiring, Step-9.5 review |
-| **Step** | 070 Step 5 of 5. Implementation + all tests + publish + CVE done. **Remaining: Step 9.5 verdict, the client half, then commit** |
-| **070 gates** | Unit **11,075 pass / 0 fail** · Integration **450 / 0** · ArchTests **79/79** · publish **45.06 MB compressed** vs 45.05 baseline (+0.01, ceiling 60) · CVE **clean** |
-| **NOT YET COMMITTED** | Everything below is working-tree only. Commit after Step 9.5 + the client half land |
+| **Task** | ✅ **Phase 0c Wave 1 COMPLETE + committed + pushed** — `8ce4b7cac`. Tasks **070 ✅ 071 ✅ 074 ✅** |
+| **Step** | Between tasks. Nothing in flight. Working tree clean |
+| **Gates** | Unit **11,084 / 0** · Integration **385 / 0** · ArchTests **79/79** · publish **45.05 MB compressed, 0 delta**, ceiling 60 · CVE **clean** |
+| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR. Not opened — see the two owner decisions below; a PR carrying a known breaking change to shipped UI with the decision unresolved is not review-ready. A **draft** PR would be fine for CI visibility |
+| **Next Action** | **Owner decides the two questions below.** Then: **072** (`share-link`, serializes with the auth surface) or **Wave 2 (075 → 076)**. 073/077/078/079 are all filed and ready |
+
+### 🔔 TWO OWNER DECISIONS BLOCKING THE PR
+
+**1. `scope=all` refusal breaks shipped UI — and the underlying question is bigger.**
+The SemanticSearch **code page** is an enterprise search screen. Its dropdown (from `sprk_aisearchindex`
+rows) maps to scope in [`targetEntityNormalize.ts:103-123`](../../src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts):
+"All" row → `scope:'all'` (**now 403**); any other row → `scope:'entity'` + `entityType` but **no
+`entityId`** (**now 400** — `entityId` only arrives as a URL param and [`App.tsx:270-272`](../../src/client/code-pages/SemanticSearch/src/App.tsx) has a TODO saying it isn't plumbed through). A blank
+config label also falls back to `all` → 403. **So the whole page is broken, not one dropdown row.**
+
+The real question: **does Spaarke offer cross-record search at all?** If yes — and a legal-ops product
+surely does — then refusing outright is the wrong shape. **Recommended: authorize the PAGE of results,
+not the corpus** — let `scope=all` through, run the search, authorize the 20–50 rows about to be
+returned. O(page) not O(tenant), checks are cached, needs no dependency on task 031, and it reuses the
+result-level mechanism 070 already built. ⚠️ **This retracts the earlier "remove the All affordance"
+recommendation**, which was reasoning about a checkbox rather than a product capability.
+
+**2. Does 079 go in this wave or the next?** It is independent of Wave 2 (reads existing content, so the
+document exists) and has a live caller.
+
+### Phase 0c status after Wave 1
+
+| Done | Escalated into | Filed mid-wave | Not started |
+|---|---|---|---|
+| 070 071 074 | 071's upload trio → **073/075/076** | **077 078 079** | 072 073 075 076 |
+
+Three of the six new tasks came from 074's forcing function or 071's caller inventory — **none** from a
+human re-reading the route table. That is 074 earning its place, demonstrated not asserted.
+
+### Corrections carried forward — do NOT re-derive the old versions
+
+- **074 runs in CI but CANNOT FAIL it.** `sdap-ci.yml`'s `code-quality` job has `continue-on-error` at
+  BOTH job and step level; the only blocking arch job selects 7 named facts by `--filter`. A one-line
+  append fixes it, but `.github/workflows/**` belongs to `ci-cd-unit-test-remediation-r1`. **Advisory
+  until they take it.** Do not claim the gate is binding.
+- **Compose never called the OBO routes.** `ComposeService` uses the in-process `SpeFileStore` facade.
+  The original POML's "do not break Compose" warning was aimed at a risk that did not exist.
+- **OBOEndpoints had 7 routes, not 5.** Now 3 (the upload trio). 074's census asserts 3.
+- **The upload trio's escalation is CORRECT, not unfinished.** Uploads CREATE content — no
+  `sprk_document` exists at authorization time, so `ExtractResourceId` yields a container id and the
+  document filter would deny **100% of uploads** across 9 wizards. Subject is the owning RECORD → 075/076.
+- **`AccessibleRecordSetService` is NOT the workforce answer today.** It resolves ADR-034 membership, not
+  Dataverse's real answer; that substitution is task **031**. Use `GetCallerRecordAccessAsync` (added by 070).
+- **`CallerRecordAccessProbe` already existed** (task 008) and answers the same question — couldn't be
+  extended (BFF-layer; `Spaarke.Core` can't reference it). Consequence: **task 032's scope shrinks.**
+- **The Create Project wizard defect is a discarded return value, NOT step ordering.** Files stage in
+  React state and move only on Finish; provisioning already runs first. `provisionSecureProject` returns
+  the container id and [`CreateProjectWizard.tsx:700-704`](../../src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx) throws it away, so secure files land in the shared BU
+  container. **~2 lines. Fully written up in task 076's POML** — read it before touching the wizard.
+
+### Known follow-ups recorded, not fixed (detail in `notes/task-070-gate-semantic-search.md`)
+
+New auth tests sit outside the ADR-038 KEEP paths (move to `tests/integration/auth/**`) · error-path
+denials cached for the full 60s TTL · two `LookupDataverseUserIdAsync` overloads whose first `string` is
+a **token** in one and an **oid** in the other (and the 2-arg one logs it) · `useAiSummary.ts:114-126`
+has required `driveId`/`itemId` never sent to the server · dead client methods in two shared-lib barrels
+still target deleted routes (zero invocations) · `NoWaiverIsStale` doesn't catch waivers for DELETED routes.
 | **New findings** | ⚠️ **077** (`POST /api/ai/search/records`) and **078** (`GET /api/v1/containers/{id}/documents`) — both **exploitable at HEAD**, both found by 074's ArchTest on its FIRST run. POMLs written, in TASK-INDEX |
 | **Status** | **PR #812 is MERGED** — continued work needs a NEW PR. BFF **deployed to dev 2026-08-25** (45.05 MB, hash-verified, healthy). Branch is ~20 commits behind master — rebase at commit time |
 | **Phase** | **Phase 0 — 14 of 20** (remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023–029) · **Phase 0c — 0 of 7** (070 🔄 071 🔄 074 🔄) |
