@@ -28,6 +28,18 @@ writes, not git conflicts** — and 073 + 079 BOTH need waivers deleted from
 `Infrastructure/Graph/SpeFileStore.cs` · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` ·
 `current-task.md` · `tasks/TASK-INDEX.md`. Same boundary pattern as the `.claude/` rule (root §3).
 
+### ⛔ READ THE MERGE PLAN FIRST: [`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)
+
+That file is the complete integration checklist — worktree inventory, the 12 ArchTest edits, a
+must-fix false-PASS vector in a new guard, 7 follow-ups to file, and the verification sequence.
+**Nothing is merged yet.** Status as of the last update: **073 ✅ shipped, both gates returned** ·
+**079 ✅ shipped, gates unconfirmed** · **Wave 2 (075→076) 🔄 still running**.
+
+The single hard blocker: task 074's guard is **+5 red** and 3 of those 5 are on
+`ci-tier1-blocking.yml`'s filter, so it cannot merge red. Cause is known to the line (a `GovernedFile`
+entry for the deleted `Api/UploadEndpoints.cs`, whose `ScanFile` does an unguarded `File.ReadAllText`
+— that one entry accounts for 4 of the 5).
+
 **Merge-back obligations when they report:**
 1. Apply each reported `OperationAccessPolicy` key centrally (073 and 079 may both want one).
 2. Delete the now-stale Pending waivers: 073 owns **4** (`PUT /api/containers/{id}/files/{*path}`,
