@@ -366,7 +366,12 @@ export const TextareaField: React.FC<ITextareaFieldProps> = ({
         <div className={styles.editRow}>
           <Textarea
             appearance="filled-lighter"
-            size="small"
+            // v1.1.6: `medium`, NOT `small`. Fluent sizes the small variant at
+            // `fontSizeBase200` (12px) while the read-mode cell above uses
+            // `fontSizeBase300` (14px), so text visibly shrank the moment a
+            // field was clicked. Medium matches both the read state and the OOB
+            // Dataverse inputs beside the header.
+            size="medium"
             resize="vertical"
             rows={Math.max(3, maxLines)}
             value={draft}

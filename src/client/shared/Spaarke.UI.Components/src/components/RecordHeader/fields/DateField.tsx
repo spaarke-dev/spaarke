@@ -63,7 +63,7 @@
  *    commits; tiny `Spinner` + disabled input while saving; on save
  *    rejection the draft reverts to the prior value and edit mode is NOT
  *    exited (mirrors TextField.tsx:150-153)
- *  - `filled-lighter` appearance, `size="small"` — matching every sibling
+ *  - `filled-lighter` appearance, `size="medium"` — matching every sibling
  *  - Per D-10 / FR-11: `required` is accepted for prop-shape parity with
  *    TextField but renders NOTHING — the `*` marker is deliberately
  *    TextField-only. `required` is intentionally never read below.
@@ -396,7 +396,12 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
             className={styles.editInput}
             type={format === 'datetime' ? 'datetime-local' : 'date'}
             appearance="filled-lighter"
-            size="small"
+            // v1.1.6: `medium`, NOT `small`. Fluent sizes the small variant at
+            // `fontSizeBase200` (12px) while the read-mode cell above uses
+            // `fontSizeBase300` (14px), so text visibly shrank the moment a
+            // field was clicked. Medium matches both the read state and the OOB
+            // Dataverse inputs beside the header.
+            size="medium"
             aria-label={label}
             value={toInputValue(draft, format)}
             onChange={handleChange}

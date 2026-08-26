@@ -117,5 +117,34 @@
  *       (toggle stages, Enter/blur commits, Escape reverts) - only the reveal
  *       is gone. The FR-10 contract suite gains an explicit `alwaysEditing`
  *       carve-out relaxing exactly three assertions; the other 88 still apply.
+ *
+ * 1.1.6 (2026-08-26) - third-UAT fixes. v1.1.5's remedy was right and its
+ *   MECHANISM was wrong, so neither hint actually arrived.
+ *     Correction to the v1.1.5 note above: `Format` is not "returned as a
+ *     NUMBER" by the Client API - it is not returned AT ALL. `@types/xrm`
+ *     declares `Metadata.AttributeMetadata` as exactly six members
+ *     (DefaultFormValue, LogicalName, DisplayName, AttributeType,
+ *     EntityLogicalName, OptionSet). No `Format`, no `Targets`. Reading the
+ *     shipped type definitions would have settled this two rounds earlier.
+ *     DEF-6 v1.1.5 hung both hints off the `page.ui.controls` COLLECTION WALK,
+ *       which did not deliver on the live form - so the DateOnly column still
+ *       rendered a datetime picker and the lookup was still inert. They are now
+ *       read per attribute through `Xrm.Page.getAttribute(name).getFormat()`
+ *       and `Xrm.Page.getControl(name).getEntityTypes()`, the accessor R1
+ *       proved in production (form-buffer staging writes every edit through
+ *       it). The walk is kept only for FORM ORDER, which cannot be obtained one
+ *       name at a time. `DateAttributeFormat` is confirmed "date" / "datetime",
+ *       so the v1.1.5 string mapping was already correct.
+ *     DEF-7 edit-mode text was 12px against 14px in read mode - every editor
+ *       passed `size="small"` (Fluent `fontSizeBase200`) while the read cell
+ *       uses `fontSizeBase300`. All five now pass `size="medium"`, matching
+ *       both the read state and the OOB inputs beside the header.
+ *   Added a grouped `console.info` diagnostic at metadata resolve reporting
+ *   what the control actually sees - Xrm.Page availability, walk count, hints
+ *   resolved, and which attributes are NOT on the form. Three rounds of
+ *   defects here were all "a platform surface did not return what we assumed",
+ *   each costing a full build/import/UAT cycle to disprove. `notOnForm` is the
+ *   one to read first: form-buffer staging needs `getAttribute`, so anything
+ *   listed there cannot be edited and will throw "Field not on form" on save.
  */
-export const CONTROL_VERSION = '1.1.5';
+export const CONTROL_VERSION = '1.1.6';

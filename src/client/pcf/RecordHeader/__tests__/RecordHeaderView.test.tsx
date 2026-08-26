@@ -55,6 +55,7 @@ import {
   buildRequestedAttributeNames,
   normalizeFormFormat,
   readFormControlOrder,
+  readFormHintsByName,
 } from '../control/useHeaderFormMetadata';
 import { CONTROL_VERSION } from '../control/version';
 
@@ -128,9 +129,19 @@ function installXrm(
     return Promise.resolve({ ...RECORD });
   });
 
-  const attributes: Record<string, { setValue: jest.Mock; getIsDirty: () => boolean }> = {};
+  const attributes: Record<
+    string,
+    { setValue: jest.Mock; getIsDirty: () => boolean; getFormat: () => string | undefined }
+  > = {};
   for (const name of formControlNames) {
-    attributes[name] = { setValue: jest.fn(), getIsDirty: () => true };
+    attributes[name] = {
+      setValue: jest.fn(),
+      getIsDirty: () => true,
+      // Present on the BY-NAME accessor too, not just on the walked control —
+      // `Xrm.Page.getAttribute(name)` is the surface R1 proved in production
+      // and the one v1.1.6 reads the hints through.
+      getFormat: () => hints.formats?.[name],
+    };
   }
 
   const controls = formControlNames.map(name => ({
@@ -150,6 +161,7 @@ function installXrm(
     Navigation: { navigateTo: jest.fn(() => Promise.resolve()) },
     Page: {
       getAttribute: (n: string) => attributes[n] ?? null,
+      getControl: (n: string) => (formControlNames.includes(n) ? controls.find(c => c.getName() === n) : null),
       ui: { controls: { forEach: (cb: (c: unknown, i: number) => void) => controls.forEach(cb) } },
     },
   };
@@ -1134,6 +1146,152 @@ describe('RecordHeaderView — a lookup is editable once targets resolve', () =>
     mockRetrieveEntityMetadata.mockResolvedValue(META_NO_TARGETS);
     installXrm(['sprk_projecttype'], { entityTypes: { sprk_projecttype: ['sprk_projecttype_ref'] } });
 
+    renderView(LAYOUT);
+
+    const cell = await screen.findByTestId('record-header-lookup-field');
+    await waitFor(() => expect(cell.getAttribute('data-editable')).toBe('true'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UAT round 3 — the hints must come from the BY-NAME accessor
+//
+// v1.1.5 read `format` and `entityTypes` off the `page.ui.controls` collection
+// walk. UAT showed NEITHER hint arriving: the DateOnly column still rendered a
+// datetime picker and the lookup was still inert.
+//
+// `Xrm.Page.getAttribute(name)` is the accessor this codebase has actually
+// proven in production — R1's form-buffer staging writes every edit through it
+// — so the hints are now read per attribute through that surface, with the
+// collection walk kept only for FORM ORDER, which cannot be obtained by name.
+//
+// The load-bearing case is a page where the WALK RETURNS NOTHING but the
+// by-name accessors work. That is the scenario these tests pin.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A form exposing ONLY the by-name accessors — no `ui.controls` collection. */
+function installXrmWithoutControlWalk(config: {
+  formats?: Record<string, string>;
+  entityTypes?: Record<string, string[]>;
+  attributeNames?: string[];
+}): void {
+  const { formats = {}, entityTypes = {}, attributeNames = [] } = config;
+
+  (window as unknown as { Xrm: unknown }).Xrm = {
+    WebApi: {
+      retrieveRecord: jest.fn((_e: string, _i: string, options?: string) => {
+        lastSelect = options;
+        return Promise.resolve({ ...RECORD });
+      }),
+      retrieveMultipleRecords: jest.fn(() => Promise.resolve({ entities: [] })),
+    },
+    Navigation: { navigateTo: jest.fn(() => Promise.resolve()) },
+    Page: {
+      getAttribute: (n: string) =>
+        attributeNames.includes(n)
+          ? { setValue: jest.fn(), getIsDirty: () => true, getFormat: () => formats[n] }
+          : null,
+      getControl: (n: string) =>
+        attributeNames.includes(n) ? { getName: () => n, getEntityTypes: () => entityTypes[n] } : null,
+      // `ui` deliberately ABSENT — this is the shape that broke v1.1.5.
+    },
+  };
+}
+
+describe('readFormHintsByName', () => {
+  it('reads the format through getAttribute(name), with no control collection present', () => {
+    installXrmWithoutControlWalk({
+      attributeNames: ['sprk_openeddate'],
+      formats: { sprk_openeddate: 'date' },
+    });
+
+    expect(readFormHintsByName(['sprk_openeddate'])).toEqual([
+      { name: 'sprk_openeddate', format: 'DateOnly', entityTypes: undefined },
+    ]);
+  });
+
+  it('reads lookup targets through getControl(name)', () => {
+    installXrmWithoutControlWalk({
+      attributeNames: ['sprk_projecttype_ref'],
+      entityTypes: { sprk_projecttype_ref: ['sprk_projecttype_ref'] },
+    });
+
+    expect(readFormHintsByName(['sprk_projecttype_ref'])).toEqual([
+      { name: 'sprk_projecttype_ref', format: undefined, entityTypes: ['sprk_projecttype_ref'] },
+    ]);
+  });
+
+  it('omits attributes the form does not carry — nothing to hint with', () => {
+    installXrmWithoutControlWalk({ attributeNames: [] });
+    expect(readFormHintsByName(['sprk_openeddate', 'sprk_projecttype_ref'])).toEqual([]);
+  });
+
+  it('returns an empty list rather than throwing when Xrm.Page is absent', () => {
+    delete (window as unknown as { Xrm?: unknown }).Xrm;
+    expect(readFormHintsByName(['sprk_openeddate'])).toEqual([]);
+  });
+
+  it('survives a host that throws from getAttribute or getControl (NFR-10)', () => {
+    (window as unknown as { Xrm: unknown }).Xrm = {
+      Page: {
+        getAttribute: () => {
+          throw new Error('host exploded');
+        },
+        getControl: () => {
+          throw new Error('host exploded');
+        },
+      },
+    };
+    expect(() => readFormHintsByName(['sprk_openeddate'])).not.toThrow();
+    expect(readFormHintsByName(['sprk_openeddate'])).toEqual([]);
+  });
+
+  it('skips blank names without probing', () => {
+    installXrmWithoutControlWalk({ attributeNames: ['a'], formats: { a: 'date' } });
+    expect(readFormHintsByName(['', 'a'])).toEqual([{ name: 'a', format: 'DateOnly', entityTypes: undefined }]);
+  });
+});
+
+describe('RecordHeaderView — hints survive a page with no control collection', () => {
+  const META = {
+    primaryIdAttribute: 'sprk_projectid',
+    primaryNameAttribute: 'sprk_projectnumber',
+    // Exactly what `Xrm.Utility.getEntityMetadata` returns: NO `Format`, NO
+    // `Targets`. Verified against @types/xrm `Metadata.AttributeMetadata`,
+    // which declares only DefaultFormValue, LogicalName, DisplayName,
+    // AttributeType, EntityLogicalName and OptionSet.
+    attributes: {
+      sprk_openeddate: { attributeType: 'DateTime', displayName: 'Opened Date' },
+      sprk_projecttype_ref: { attributeType: 'Lookup', displayName: 'Project Type' },
+    },
+  };
+
+  const LAYOUT = JSON.stringify({
+    _version: '1.0',
+    fields: [{ name: 'sprk_openeddate' }, { name: 'sprk_projecttype_ref' }],
+  });
+
+  beforeEach(() => {
+    mockRetrieveEntityMetadata.mockResolvedValue(META);
+    installXrmWithoutControlWalk({
+      attributeNames: ['sprk_openeddate', 'sprk_projecttype_ref'],
+      formats: { sprk_openeddate: 'date' },
+      entityTypes: { sprk_projecttype_ref: ['sprk_projecttype_ref'] },
+    });
+  });
+
+  it('renders a DATE input — the v1.1.5 regression, now driven by the by-name probe', async () => {
+    const { container } = renderView(LAYOUT);
+
+    const cell = await screen.findByTestId('record-header-date-field-value');
+    fireEvent.click(cell);
+    await screen.findByTestId('record-header-date-field-input');
+
+    expect(container.querySelector('input[type="date"]')).toBeInTheDocument();
+    expect(container.querySelector('input[type="datetime-local"]')).toBeNull();
+  });
+
+  it('makes the lookup editable — the other half of the same regression', async () => {
     renderView(LAYOUT);
 
     const cell = await screen.findByTestId('record-header-lookup-field');

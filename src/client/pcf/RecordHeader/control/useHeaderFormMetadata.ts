@@ -86,6 +86,7 @@ interface IFormControlCollectionLike {
 interface IFormPageLike {
   ui?: { controls?: IFormControlCollectionLike };
   getAttribute?(name: string): IFormAttributeLike | null | undefined;
+  getControl?(name: string): IFormControlLike | null | undefined;
 }
 
 /** One control as read off the live form, in form order. */
@@ -97,6 +98,63 @@ export interface IFormControlProjection {
   format?: string;
   /** Lookup targets read from the form control (`getEntityTypes()`). */
   entityTypes?: string[];
+}
+
+/**
+ * Probe the form for `format` + `entityTypes` ONE ATTRIBUTE AT A TIME, by name.
+ *
+ * ══════════════════════════════════════════════════════════════════════════
+ * WHY BY NAME, AND NOT FROM THE `ui.controls` WALK
+ * ══════════════════════════════════════════════════════════════════════════
+ * v1.1.5 hung both hints off {@link readFormControlOrder}'s collection walk and
+ * shipped — and the second UAT round showed the DateOnly column still rendering
+ * a datetime picker and the lookup still inert, i.e. NEITHER hint arrived.
+ *
+ * `Xrm.Page.getAttribute(name)` is the accessor this codebase has actually
+ * proven in production: R1's form-buffer staging (v1.0.7) writes every edit
+ * through it. `page.ui.controls.forEach` is a different surface with different
+ * availability, and it is the one that did not deliver. So the hints are now
+ * read through the accessor that demonstrably works, per attribute, and the
+ * collection walk is kept only for what it is genuinely needed for — FORM ORDER
+ * (which by definition cannot be obtained one name at a time).
+ *
+ * Every probe is individually guarded. A host that throws from `getControl`
+ * must degrade to "no hint", never take the header down (NFR-10).
+ *
+ * @param names Attribute names the header might bind — the layout's fields plus
+ *              whatever metadata returned.
+ */
+export function readFormHintsByName(names: ReadonlyArray<string>): IFormControlProjection[] {
+  const page = getXrmPage() as unknown as IFormPageLike | null;
+  if (!page) return [];
+
+  const hints: IFormControlProjection[] = [];
+
+  for (const name of names) {
+    if (typeof name !== 'string' || name.length === 0) continue;
+
+    let format: string | undefined;
+    let entityTypes: string[] | undefined;
+
+    try {
+      const attribute = typeof page.getAttribute === 'function' ? page.getAttribute(name) : undefined;
+      format = typeof attribute?.getFormat === 'function' ? normalizeFormFormat(attribute.getFormat()) : undefined;
+    } catch {
+      format = undefined;
+    }
+
+    try {
+      const control = typeof page.getControl === 'function' ? page.getControl(name) : undefined;
+      const types = typeof control?.getEntityTypes === 'function' ? control.getEntityTypes() : undefined;
+      entityTypes = Array.isArray(types) && types.length > 0 ? types : undefined;
+    } catch {
+      entityTypes = undefined;
+    }
+
+    if (format || entityTypes) hints.push({ name, format, entityTypes });
+  }
+
+  return hints;
 }
 
 /**
@@ -481,11 +539,48 @@ export function useHeaderFormMetadata(
         metadata => {
           if (cancelled) return;
           setFormControls(controls);
+
           // Fill the Client-API payload's two gaps (DateTime `format`, lookup
           // `targets`) from the live form BEFORE anything downstream sees it,
           // so both the resolver and the view read one already-complete object.
-          setEntityMetadata(applyFormControlHints(metadata, controls));
+          //
+          // Two sources, in precedence order. The by-name probe goes FIRST
+          // because it is the accessor R1 proved in production; the collection
+          // walk is the fallback. `applyFormControlHints` fills blanks only, so
+          // whichever source answers first wins and the other tops up the rest.
+          const attributeNames = Object.keys(metadata.attributes ?? {});
+          const byName = readFormHintsByName(attributeNames);
+          setEntityMetadata(applyFormControlHints(metadata, [...byName, ...controls]));
           setLoading(false);
+
+          // ── Diagnostic (task 033 UAT round 3) ───────────────────────────
+          // Three rounds of defects here were all "a platform surface did not
+          // return what we assumed", and each cost a full build/import/UAT
+          // cycle to disprove. This prints what the control ACTUALLY sees, so
+          // the next report carries evidence instead of a hypothesis. Cheap:
+          // one grouped log per metadata resolve, which is page-session cached.
+          try {
+            const page = getXrmPage() as unknown as IFormPageLike | null;
+            const missingOnForm = attributeNames.filter(
+              n => !(typeof page?.getAttribute === 'function' && page.getAttribute(n))
+            );
+            console.info('[RecordHeader] form/metadata diagnostic', {
+              entity: entityLogicalName,
+              xrmPageAvailable: !!page,
+              // If this is 0 the collection walk is unavailable on this host —
+              // labels and form ORDER silently fall back to metadata.
+              controlsFromWalk: controls.length,
+              hintsFromByNameProbe: byName.length,
+              formatsResolved: byName.filter(h => h.format).map(h => `${h.name}=${h.format}`),
+              targetsResolved: byName.filter(h => h.entityTypes).map(h => h.name),
+              // Anything listed here CANNOT be edited: form-buffer staging needs
+              // `getAttribute`, so a save will throw "Field not on form". Move
+              // the field onto the form (MOVE, do not delete) to fix.
+              notOnForm: missingOnForm,
+            });
+          } catch {
+            /* diagnostics must never affect rendering */
+          }
         },
         (err: unknown) => {
           if (cancelled) return;

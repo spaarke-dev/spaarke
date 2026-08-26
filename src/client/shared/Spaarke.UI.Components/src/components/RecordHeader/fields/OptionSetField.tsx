@@ -352,7 +352,12 @@ export const OptionSetField: React.FC<IOptionSetFieldProps> = ({
         <div className={styles.editRow}>
           <Dropdown
             appearance="filled-lighter"
-            size="small"
+            // v1.1.6: `medium`, NOT `small`. Fluent sizes the small variant at
+            // `fontSizeBase200` (12px) while the read-mode cell above uses
+            // `fontSizeBase300` (14px), so text visibly shrank the moment a
+            // field was clicked. Medium matches both the read state and the OOB
+            // Dataverse inputs beside the header.
+            size="medium"
             value={selectedLabel}
             selectedOptions={draft !== null ? [String(draft)] : []}
             onOptionSelect={handleOptionSelect}
